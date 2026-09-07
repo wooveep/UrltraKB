@@ -27,6 +27,17 @@ def repair_marker(kb_dir: Path) -> Path:
     return kb_dir / ".openkb" / "needs-repair.json"
 
 
+def mark_needs_repair(kb_dir: Path, journal_path: Path, error: BaseException | None = None) -> None:
+    """Retain a durable repair gate without masking the fatal recovery category."""
+    details = {"journal": journal_path.name}
+    if error is not None:
+        details["error_type"] = type(error).__name__
+    try:
+        atomic_write_json(repair_marker(kb_dir), details)
+    except Exception:
+        logger.error("Could not persist repair marker; active journal retained")
+
+
 def _apply_mode(path: Path, mode: int) -> None:
     """Set ``path``'s permission bits (no-op where ``os.chmod`` is absent)."""
     if hasattr(os, "chmod"):
@@ -208,6 +219,9 @@ class MutationSnapshot:
             self.write_journal("active")
 
     def rollback(self) -> None:
+        # Persist BEFORE touching live data. If restoration or its later repair
+        # marker fails, a future normal acquisition must not retry it implicitly.
+        self.write_journal("recovering")
         # Restore children before parents so directory deletes cannot remove
         # paths that still need to be restored from a more specific backup.
         for target, backup in sorted(
@@ -222,11 +236,11 @@ class MutationSnapshot:
                 if backup is not None and backup.is_dir():
                     _restore_hardlinked_dir(backup, target)
                 else:
-                    shutil.rmtree(target, ignore_errors=True)  # new dir, no backup
+                    shutil.rmtree(target)  # A failed removal is a failed rollback.
                 continue
             # Non-hardlinked (file, or copied dir): unconditional remove + restore.
             if target.is_dir():
-                shutil.rmtree(target, ignore_errors=True)
+                shutil.rmtree(target)
             else:
                 target.unlink(missing_ok=True)
             if backup is None:
@@ -412,13 +426,7 @@ def mutation_scope(
         snapshot.mark_committed()
     except BaseException:
         if snapshot.rollback_best_effort() is not None:
-            try:
-                atomic_write_json(repair_marker(kb_dir), {"journal": snapshot.journal_path.name})
-            except Exception:
-                # Disk failure may also prevent this extra marker. Retain the
-                # active journal and the fatal error category: SDK wrappers
-                # must not mistake a failed rollback for an ordinary tool error.
-                logger.error("Could not persist repair marker; active journal retained")
+            mark_needs_repair(kb_dir, snapshot.journal_path)
             raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
         snapshot.discard_best_effort()
         raise
@@ -453,7 +461,7 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
     staging = root / ".openkb" / "staging"
     if not backup_dir.is_relative_to(staging) or backup_dir == staging:
         raise ValueError("Invalid mutation backup directory")
-    if data.get("status") not in {"active", "committed", "rolled_back"}:
+    if data.get("status") not in {"active", "recovering", "committed", "rolled_back"}:
         raise ValueError("Unknown mutation journal status")
     entries = data.get("entries")
     if not isinstance(entries, list):
@@ -467,7 +475,7 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
             source = Path(backup).resolve()
             if not source.is_relative_to(backup_dir) or source == backup_dir:
                 raise ValueError("Mutation backup is outside its staging directory")
-            if data["status"] == "active" and not source.exists():
+            if data["status"] in {"active", "recovering"} and not source.exists():
                 raise ValueError("Mutation backup is missing; live content was not removed")
 
 
@@ -497,6 +505,10 @@ def recover_pending_journals(
                 snapshot.discard()
                 messages.append(f"Cleaned terminal mutation journal {journal_path.name}.")
                 continue
+            if status == "recovering" and not repairing:
+                raise RecoveryRequired(
+                    "Previous restoration did not finish; explicit repair required"
+                )
             snapshot.rollback()
             snapshot.discard()
             messages.append(
@@ -505,16 +517,7 @@ def recover_pending_journals(
         except Exception as exc:
             # Never discard evidence or repeatedly retry partial recovery during
             # ordinary operations. All adapters see this durable repair barrier.
-            try:
-                atomic_write_json(
-                    repair_marker(kb_dir),
-                    {
-                        "journal": journal_path.name,
-                        "error_type": type(exc).__name__,
-                    },
-                )
-            except OSError:
-                logger.exception("Could not persist knowledge-base repair status")
+            mark_needs_repair(kb_dir, journal_path, exc)
             raise RecoveryRequired(
                 f"Knowledge base needs repair: {kb_dir}; "
                 f"journal and backups retained ({journal_path.name})"

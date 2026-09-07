@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from openkb.locks import kb_ingest_lock_held
-from openkb.mutation import MutationSnapshot, snapshot_paths
+from openkb.mutation import MutationSnapshot, RecoveryRequired, mark_needs_repair, snapshot_paths
 
 logger = logging.getLogger(__name__)
 
@@ -17,23 +17,23 @@ MutationBody = Callable[[MutationSnapshot], None]
 PostCommitHook = Callable[[], None]
 
 
-class DirtyRollbackError(RuntimeError):
+class DirtyRollbackError(RecoveryRequired):
     """A mutation's rollback failed, leaving an active journal on disk.
 
-    The KB may be in a partially-applied state that the retained journal will
-    attempt to roll back on the next exclusive-lock acquisition. Batch owners
+    The KB may be in a partially-applied state requiring controlled repair.
+    The retained journal and repair gate block ordinary acquisitions. Batch owners
     (the parallel/serial ``add`` loops) MUST stop committing further mutations
     on top of this dirty state instead of continuing — otherwise the next
     recovery rolls this journal back over the shared paths it recorded
     (``hashes.json``, ``index.md``, ``concepts/``, ``entities/``) and silently
     clobbers the later commits. Single-mutation callers should let it propagate
-    so the command fails loudly; rerunning recovers via the drain.
+    so the command fails loudly; rerunning alone cannot clear the repair gate.
     """
 
     def __init__(self, operation: str, journal_path: Path) -> None:
         super().__init__(
             f"Dirty rollback for {operation}; journal retained at {journal_path}. "
-            f"Rerun the command to recover."
+            f"Diagnose and repair the knowledge base before retrying."
         )
         self.operation = operation
         self.journal_path = journal_path
@@ -72,6 +72,7 @@ def _rollback_snapshot(plan: AddMutationPlan, snapshot) -> Path | None:
     if rollback_error is None:
         snapshot.discard_best_effort()
     else:
+        mark_needs_repair(snapshot.kb_dir, snapshot.journal_path, rollback_error)
         click.echo(
             "  [ERROR] Rollback failed; mutation journal retained for recovery: "
             f"{snapshot.journal_path}"
@@ -109,6 +110,8 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
             # than committing more docs on top of dirty state that the next
             # recovery would roll back over.
             raise DirtyRollbackError(plan.operation, dirty_journal)
+        if isinstance(exc, RecoveryRequired):
+            raise
         click.echo(f"  [ERROR] {plan.operation} failed{_failure_target(plan.details)}: {exc}")
         logger.debug("%s mutation failed:", plan.operation, exc_info=True)
         return False

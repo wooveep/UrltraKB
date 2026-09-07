@@ -20,6 +20,12 @@ from pathlib import Path
 from typing import Callable, Generator
 
 from openkb.inputs import SUPPORTED_EXTENSIONS
+from openkb.lifecycle import (
+    KnowledgeBaseRemoved,
+    current_generation,
+    expected_generation,
+    read_lifecycle,
+)
 from openkb.locks import LockCancelled, kb_read_lock
 from openkb.mutation import RecoveryRequired
 from openkb.runtime.records import TERMINAL
@@ -99,6 +105,7 @@ class NativeWatch:
         verify_interval: float = 30,
     ) -> None:
         self.root = kb_dir.expanduser().resolve()
+        self._generation = current_generation(self.root)
         if not (self.root / ".openkb/config.yaml").is_file():
             raise ValueError("Open a knowledge base before watching")
         if not 1 <= capacity <= 10000 or not 1 <= max_submitted <= 256:
@@ -262,6 +269,8 @@ class NativeWatch:
                     next_scan = 0.0
                     self._overflow = False
                     while not self._stop.is_set():
+                        if current_generation(self.root) != self._generation:
+                            raise KnowledgeBaseRemoved("Watched knowledge base was replaced")
                         if raw.is_symlink() or raw.resolve() != self.root / "raw":
                             raise ValueError("Watched raw directory changed location")
                         now = time.monotonic()
@@ -300,8 +309,16 @@ class NativeWatch:
                             if self._stop.is_set() or self._halted:
                                 break
                             try:
-                                if self._accept(db, path, candidate, now):
-                                    del self._candidates[path]
+                                with (
+                                    expected_generation(self.root, self._generation),
+                                    read_lifecycle(
+                                        self.root, cancelled=self._stop.is_set, on_wait=_busy
+                                    ),
+                                ):
+                                    if self._accept(db, path, candidate, now):
+                                        del self._candidates[path]
+                            except KnowledgeBaseRemoved:
+                                raise
                             except FileNotFoundError:
                                 del self._candidates[path]
                             except _Busy:

@@ -602,7 +602,7 @@ def test_snapshot_add_paths_excludes_blob_store(tmp_path):
     """The blob store is registered lazily via track_new(), so it must NOT be
     in the eager add snapshot path list (that was the O(total blobs)-per-add
     cost this change removes)."""
-    from openkb.cli import _snapshot_add_paths
+    from openkb.application.documents import _snapshot_add_paths
 
     paths = _snapshot_add_paths(tmp_path, "doc", None, None)
     assert (tmp_path / ".openkb" / "files") not in paths

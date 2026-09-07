@@ -250,15 +250,29 @@ _SHORT_DOC_TYPES = {
 
 def _find_kb_dir(override: Path | None = None) -> Path | None:
     """Find the KB root: explicit override → walk up from cwd → global default_kb."""
+    from openkb.config import _is_kb_dir
+
+    def located(path: Path) -> bool:
+        metadata = path / ".openkb"
+        # Keep damaged KBs attached to their original location so recovery
+        # blocks the operation instead of silently selecting another default.
+        return (
+            _is_kb_dir(path)
+            or (metadata / "config.yaml").exists()
+            or (metadata / "needs-repair.json").exists()
+            or (metadata / "initializing.json").exists()
+            or any((metadata / "journal").glob("*.json"))
+        )
+
     # 0. Explicit override (--kb-dir or OPENKB_DIR)
     if override is not None:
-        if (override / ".openkb").is_dir():
+        if located(override):
             return override
         return None
     # 1. Walk up from cwd
     current = Path.cwd().resolve()
     while True:
-        if (current / ".openkb").is_dir():
+        if located(current):
             return current
         parent = current.parent
         if parent == current:
@@ -269,7 +283,7 @@ def _find_kb_dir(override: Path | None = None) -> Path | None:
     default = gc.get("default_kb")
     if default:
         p = Path(default)
-        if (p / ".openkb").is_dir():
+        if located(p):
             return p
     return None
 

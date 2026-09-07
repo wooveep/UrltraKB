@@ -52,7 +52,7 @@ def _events_from_sse(text: str) -> list[dict[str, Any]]:
 def _mock_add(monkeypatch, status: str = "added"):
     monkeypatch.setattr(
         "openkb.watch_service._add_for_api",
-        lambda path, kb, bundle=None: AddFileResult(path.name, str(path), status, "msg"),
+        lambda path, kb, bundle=None, **kwargs: AddFileResult(path.name, str(path), status, "msg"),
     )
 
 
