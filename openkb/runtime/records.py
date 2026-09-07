@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from openkb.application.pages import Page
 from openkb.locks import atomic_write_json
 from openkb.runtime.requests import UnitRequest
 
@@ -27,6 +28,8 @@ class UnitResult:
     quality: tuple[str, ...] = ()
     halt: bool = False
     output_state: str = "none"
+    revision: str | None = None
+    page: Page | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "skipped", "failed", "stopped", "blocked"}:
@@ -43,15 +46,18 @@ class UnitResult:
             raise ValueError("Invalid unit counts or halt flag")
         if any(
             value is not None and not isinstance(value, str)
-            for value in (self.error, self.session_id)
+            for value in (self.error, self.session_id, self.revision)
         ):
             raise ValueError("Invalid unit details")
         if not isinstance(self.output, str):
             raise ValueError("Invalid temporary output")
+        if self.page is not None and not isinstance(self.page, Page):
+            raise ValueError("Invalid saved page")
 
     def summary(self) -> dict[str, Any]:
         value = asdict(self)
         value.pop("output")
+        value.pop("page")
         if self.output_state == "available":
             value["output_state"] = "unavailable"
         return value
@@ -71,6 +77,7 @@ class UnitResult:
             quality=tuple(value.get("quality", ())),
             halt=value.get("halt", False),
             output_state=value.get("output_state", "none"),
+            revision=value.get("revision"),
         )
 
 

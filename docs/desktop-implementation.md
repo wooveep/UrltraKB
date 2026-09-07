@@ -123,3 +123,56 @@ Essentials/shiboken 6.11.2 are isolated in the `desktop` extra. Full rendering
 coverage, first product freezing, Windows GUI/package evidence, remaining
 management/generator/watch/settings workflows, browser retirement and matching
 source/licence distributions remain pending.
+
+## P2 checkpoint — first product builds (2026-09-08)
+
+The actual workbench now freezes into native Windows and Debian program
+directories with separate desktop, CLI, REST and explicit acceptance entry
+points. These are internal builds, not release archives. Instructions and
+limitations are in `packaging/desktop/README.md`.
+
+The second parallel review found stale answer attribution, stale asynchronous
+rendering, Markdown rewriting inside code/link targets, unsafe save-version
+refresh, stale conversation reads, encoded wikilink paths and stale conflict
+drafts. Fixes use token boundaries, explicit view generations and the exact
+committed Page carried by the save receipt. Page contents are omitted from
+durable task summaries. Saving also updates the reader from that receipt.
+Conflict handling offers current-content comparison, explicit reconfirmation
+and draft export. Waiting local reads release their thread slot; they never
+retry an operation that already began. Concurrent renderers publish complete
+images atomically instead of exposing in-progress helper output.
+
+| Check | Actual result |
+| --- | --- |
+| Full pytest checkpoint | 1273 passed, 2 existing warnings, 25.27 seconds |
+| Ruff check / format check | Passed / 166 files formatted |
+| mypy | Passed, 88 source files |
+| Source workbench | Continued editing during save; external write before save observation; conflict draft retention; saved reader content; independent-KB navigation under read contention; clean exit |
+| Debian frozen application | Seven document formats converted, compiled, registered and read; query saved; two chat turns persisted; actual SDK with controlled local HTTP fixture |
+| Windows frozen application in interactive session 1 | The same seven-format import/query/chat flow passed; explicit exit completed |
+| Product renderer corpus, source and both frozen platforms | 32 samples × 2 themes × 4 scales; 240 rendered outputs and 16 expected errors per run |
+| Concurrent renderer output | 16 simultaneous same-formula renders produced complete readable images |
+
+The document fixtures cover Markdown, HTML, PDF, DOCX, PPTX, XLSX and XLS.
+They are reused inputs from the earlier dependency probe; all reported product
+operations were newly executed through the actual task workers. The renderer
+corpus is committed under `tests/fixtures/native-render-corpus.json` and was
+newly executed through the product Markdown parser and QTextDocument display.
+Debian visual inspection covered all formula examples and the nine diagram
+families in light/dark presentation; larger-scale output and Windows images
+still need their complete visual verdict recorded. Parse/output checks alone
+are not semantic approval.
+
+Local logs include `/tmp/openkb-frozen-import-1.log`,
+`/tmp/openkb-frozen-corpus-1.log` and `/tmp/openkb-p2-full.log`.
+Windows evidence is isolated under `OpenKB-native-20260907/interactive-model-1`
+and `interactive-corpus-1`; both commands exited 0 on 2026-09-08 in the logged-in
+desktop session. The temporary acceptance scheduled task was removed after
+completion. The last local read-contention/image-publication fixes postdate
+these first frozen runs and require rebuilding at the next package checkpoint.
+
+P2 is not declared complete: final package revisions, long-document indexing,
+render-helper parent-loss behavior and the remaining platform acceptance
+details need completion. Full settings, maintenance, generators and watching
+in the workbench, browser-product retirement, clean-system replacement tests
+and matching source/licence distributions remain P3–P5 work.

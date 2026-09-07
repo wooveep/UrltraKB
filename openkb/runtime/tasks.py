@@ -311,6 +311,7 @@ class TaskManager:
         self._update(
             task,
             results=results,
+            error=result.error or task.view.error,
             text=result.output or task.view.text,
             text_truncated=task.view.text_truncated
             or (

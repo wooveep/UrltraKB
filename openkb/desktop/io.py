@@ -6,9 +6,17 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from openkb.locks import kb_lock
+
+
+class _WaitingForKB(Exception):
+    """No operation began; release the thread while another process owns the KB."""
+
+
+def _defer_wait():
+    raise _WaitingForKB()
 
 
 class LocalIO(QObject):
@@ -20,22 +28,51 @@ class LocalIO(QObject):
         self._stop = threading.Event()
         self._sequence = 0
         self._callbacks = {}
+        self._operations = {}
         self._futures = []
         self.completed.connect(self._deliver)
 
-    def submit(self, operation, callback, *, kb: Path | None = None, exclusive=False):
+    def submit(
+        self,
+        operation,
+        callback,
+        *,
+        kb: Path | None = None,
+        exclusive=False,
+        obsolete=lambda: False,
+    ):
+        if self._stop.is_set():
+            return
         self._sequence += 1
         sequence = self._sequence
         self._callbacks[sequence] = callback
 
         def run():
+            if self._stop.is_set() or obsolete():
+                return None
             if kb is not None:
                 if not (kb / ".openkb/config.yaml").is_file():
                     raise ValueError("请选择已有的知识库目录")
-                with kb_lock(kb / ".openkb", exclusive=exclusive, cancelled=self._stop.is_set):
+                with kb_lock(
+                    kb / ".openkb",
+                    exclusive=exclusive,
+                    cancelled=lambda: self._stop.is_set() or obsolete(),
+                    on_wait=_defer_wait,
+                ):
                     return operation()
             return operation()
 
+        self._operations[sequence] = (run, obsolete)
+        self._attempt(sequence)
+
+    def _attempt(self, sequence):
+        if sequence not in self._operations or self._stop.is_set():
+            return
+        run, obsolete = self._operations[sequence]
+        if obsolete():
+            self._operations.pop(sequence, None)
+            self._callbacks.pop(sequence, None)
+            return
         future = self._pool.submit(run)
         self._futures = [f for f in self._futures if not f.done()]
         self._futures.append(future)
@@ -51,13 +88,18 @@ class LocalIO(QObject):
         future.add_done_callback(done)
 
     def _deliver(self, sequence, value, error):
+        if isinstance(error, _WaitingForKB) and not self._stop.is_set():
+            QTimer.singleShot(200, lambda: self._attempt(sequence))
+            return
+        operation = self._operations.pop(sequence, None)
         callback = self._callbacks.pop(sequence, None)
-        if callback and not self._stop.is_set():
+        if callback and operation and not operation[1]() and not self._stop.is_set():
             callback(value, error)
 
     def stop(self):
         self._stop.set()
         self._callbacks.clear()
+        self._operations.clear()
         self._pool.shutdown(wait=False, cancel_futures=True)
 
     def stopped(self):
