@@ -725,24 +725,32 @@ def add(ctx, path, from_pageindex_cloud):
         click.echo("Provide a PATH or use --from-pageindex-cloud <DOC_ID>.")
         return
 
-    # URL ingest: download into raw/ first, then call add_single_file explicitly.
-    # Keep staged conversion enabled so converted source artifacts do not touch
-    # the live KB before the mutation snapshot exists. The tri-state outcome
-    # still lets us clean up the just-downloaded raw file on dedup.
-    from openkb.url_ingest import looks_like_url, fetch_url_to_raw
+    from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path
 
     if looks_like_url(path):
-        with kb_ingest_lock(kb_dir / ".openkb"):
-            fetched = fetch_url_to_raw(path, kb_dir)
+        from tempfile import TemporaryDirectory
+
+        from openkb.application.uploads import published_input
+
+        # Acquisition owns private bytes outside the KB lease. Publish only a
+        # complete input, then retain ownership through compile/skip cleanup.
+        with TemporaryDirectory(prefix="openkb-url-") as temporary:
+            fetched = fetch_url_to_raw(path, Path(temporary), announce_saved=False)
             if fetched is None:
                 return
-            outcome = add_single_file(fetched, kb_dir)
-            # Only clean up on dedup-skip. On "failed" we keep the file so
-            # the user can retry (e.g. transient LLM error during compile)
-            # without re-downloading — and so they don't lose data when
-            # indexing has already succeeded but compilation didn't.
-            if outcome == "skipped":
-                fetched.unlink(missing_ok=True)
+            with kb_ingest_lock(kb_dir / ".openkb"):
+                name = _unique_path(kb_dir / "raw" / fetched.name).name
+                with published_input(kb_dir, fetched, filename=name) as published:
+                    if published.path.suffix.lower() == ".pdf":
+                        size = published.path.stat().st_size / (1024 * 1024)
+                        description = f"{size:.1f} MB PDF"
+                    else:
+                        length = len(published.path.read_text(encoding="utf-8"))
+                        description = f"{length // 1024 or 1} KB clean markdown"
+                    click.echo(f"  Saved: raw/{published.path.name} ({description})")
+                    outcome = add_single_file(published.path, kb_dir)
+                    if outcome == "skipped":
+                        published.discard_if_unregistered()
             return
 
     target = Path(path)

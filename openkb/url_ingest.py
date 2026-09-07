@@ -135,14 +135,14 @@ def _unique_path(target: Path) -> Path:
     sanitize to the same filename (e.g. two blog posts both titled
     "Introduction" → both ``Introduction.md``).
     """
-    if not target.exists():
+    if not target.exists() and not target.is_symlink():
         return target
     stem = target.stem
     suffix = target.suffix
     parent = target.parent
     for i in range(2, 10_000):
         candidate = parent / f"{stem}_{i}{suffix}"
-        if not candidate.exists():
+        if not candidate.exists() and not candidate.is_symlink():
             return candidate
     raise RuntimeError(f"Could not find a free filename for {target} after 10k attempts")
 
@@ -170,7 +170,13 @@ def _download_pdf_chunked(response, head_bytes: bytes, target: Path, *, cancelle
 
 
 def _extract_html(
-    url: str, raw_dir: Path, *, report=click.echo, cancelled=None, on_quality=None
+    url: str,
+    raw_dir: Path,
+    *,
+    report=click.echo,
+    cancelled=None,
+    on_quality=None,
+    announce_saved=True,
 ) -> Path | None:
     """Fetch the URL through trafilatura, extract the main content as
     Markdown, and write it to ``raw/<title-slug>.md``.
@@ -219,15 +225,20 @@ def _extract_html(
     # registry pointing at stale bytes.
     target = _unique_path(raw_dir / filename)
     target.write_text(markdown, encoding="utf-8")
-    report(
-        f"  Extracted: {title!r}\n"
-        f"  Saved: raw/{target.name} ({len(markdown) // 1024 or 1} KB clean markdown)"
-    )
+    report(f"  Extracted: {title!r}")
+    if announce_saved:
+        report(f"  Saved: raw/{target.name} ({len(markdown) // 1024 or 1} KB clean markdown)")
     return target
 
 
 def fetch_url_to_raw(
-    url: str, kb_dir: Path, *, report=click.echo, cancelled=None, on_quality=None
+    url: str,
+    kb_dir: Path,
+    *,
+    report=click.echo,
+    cancelled=None,
+    on_quality=None,
+    announce_saved=True,
 ) -> Path | None:
     """Fetch ``url`` into ``<kb>/raw/`` and return the local path.
 
@@ -284,12 +295,18 @@ def fetch_url_to_raw(
             target = _unique_path(raw_dir / filename)
             _download_pdf_chunked(response, head_bytes, target, cancelled=cancelled)
             size_mb = target.stat().st_size / (1024 * 1024)
-            report(f"  Saved: raw/{target.name} ({size_mb:.1f} MB PDF)")
+            if announce_saved:
+                report(f"  Saved: raw/{target.name} ({size_mb:.1f} MB PDF)")
             return target
 
     if actual == "html":
         return _extract_html(
-            url, raw_dir, report=report, cancelled=cancelled, on_quality=on_quality
+            url,
+            raw_dir,
+            report=report,
+            cancelled=cancelled,
+            on_quality=on_quality,
+            announce_saved=announce_saved,
         )
 
     report(

@@ -568,11 +568,21 @@ def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
     with (
         patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("openkb.cli.time.sleep"),
+        patch("openkb.application.documents.time.sleep"),
     ):
         outcome = add_single_file(doc, tmp_path)
 
     assert outcome == "failed"
+
+
+def _prepared_fetch(filename, content):
+    def fetch(url, root, **kwargs):
+        target = root / "raw" / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return target
+
+    return fetch
 
 
 def test_url_ingest_cleans_up_orphan_on_dedup_skip(tmp_path, monkeypatch):
@@ -592,14 +602,16 @@ def test_url_ingest_cleans_up_orphan_on_dedup_skip(tmp_path, monkeypatch):
 
     # Fake the URL fetch — write directly to where url_ingest would
     fetched_path = tmp_path / "raw" / "paper.pdf"
-    fetched_path.write_bytes(b"%PDF-fake")
 
     runner = CliRunner()
     # fetch_url_to_raw is lazy-imported inside `add`, so patch it at the
     # source module — that's where the `from ... import` resolves.
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
+        patch(
+            "openkb.url_ingest.fetch_url_to_raw",
+            side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
+        ),
         patch(
             "openkb.application.documents.convert_document",
             return_value=ConvertResult(skipped=True),
@@ -630,12 +642,14 @@ def test_url_ingest_uses_staged_add_for_crash_safe_conversion(tmp_path):
     (tmp_path / "raw").mkdir()
 
     fetched_path = tmp_path / "raw" / "paper.md"
-    fetched_path.write_text("# Paper", encoding="utf-8")
 
     runner = CliRunner()
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
+        patch(
+            "openkb.url_ingest.fetch_url_to_raw",
+            side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
+        ),
         patch("openkb.cli.add_single_file", return_value="added") as mock_add,
     ):
         result = runner.invoke(cli, ["add", "https://example.com/paper"])
@@ -663,7 +677,6 @@ def test_url_ingest_keeps_raw_file_on_pipeline_failure(tmp_path):
     (tmp_path / "wiki" / "log.md").write_text("")
 
     fetched_path = tmp_path / "raw" / "paper.pdf"
-    fetched_path.write_bytes(b"%PDF-fake")
     source_path = tmp_path / "wiki" / "sources" / "paper.md"
     source_path.write_text("# fake")
 
@@ -680,10 +693,13 @@ def test_url_ingest_keeps_raw_file_on_pipeline_failure(tmp_path):
     runner = CliRunner()
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
+        patch(
+            "openkb.url_ingest.fetch_url_to_raw",
+            side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
+        ),
         patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("openkb.cli.time.sleep"),
+        patch("openkb.application.documents.time.sleep"),
     ):
         result = runner.invoke(cli, ["add", "https://example.com/paper.pdf"])
 
@@ -714,7 +730,6 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
     (tmp_path / "wiki" / "log.md").write_text("", encoding="utf-8")
 
     fetched_path = tmp_path / "raw" / "paper.md"
-    fetched_path.write_text("# Paper\n\nBody", encoding="utf-8")
 
     async def fail_compile(*args, **kwargs):
         raise RuntimeError("LLM 503")
@@ -722,9 +737,12 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
     runner = CliRunner()
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
+        patch(
+            "openkb.url_ingest.fetch_url_to_raw",
+            side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
+        ),
         patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("openkb.cli.time.sleep"),
+        patch("openkb.application.documents.time.sleep"),
         patch("openkb.cli._setup_llm_key"),
     ):
         result = runner.invoke(cli, ["add", "https://example.com/paper"])
@@ -733,3 +751,60 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
     assert "[ERROR] Compilation failed" in result.output
     assert fetched_path.exists()
     assert not (tmp_path / "wiki" / "sources" / "paper.md").exists()
+
+
+def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
+    from click.testing import CliRunner
+
+    from openkb.cli import cli
+    from openkb.locks import kb_ingest_lock_held
+
+    (tmp_path / ".openkb").mkdir()
+    (tmp_path / ".openkb/config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".openkb/hashes.json").write_text("{}")
+    (tmp_path / "raw").mkdir()
+    acquired = []
+
+    def fetch(url, preparation_root, **kwargs):
+        assert not kb_ingest_lock_held(tmp_path / ".openkb")
+        assert not preparation_root.is_relative_to(tmp_path)
+        source = preparation_root / "raw/paper.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("Complete downloaded input")
+        acquired.append(source)
+        return source
+
+    with (
+        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
+        patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch),
+        patch("openkb.cli.add_single_file", return_value="failed"),
+    ):
+        result = CliRunner().invoke(cli, ["add", "https://example.com/paper"])
+    assert result.exit_code == 0, result.output
+    assert acquired and not acquired[0].exists()
+    assert (tmp_path / "raw/paper.md").read_text() == "Complete downloaded input"
+
+
+def test_cli_url_reports_final_collision_name_with_original_size_format(tmp_path):
+    from click.testing import CliRunner
+
+    from openkb.cli import cli
+
+    (tmp_path / ".openkb").mkdir()
+    (tmp_path / ".openkb/config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw/paper.pdf").write_bytes(b"Existing download")
+    body = b"%PDF-1.4\n" + b"a" * 100_000
+    response = _fake_response(body=body, headers={"Content-Type": "application/pdf"})
+    response.geturl = lambda: "https://example.com/paper.pdf"
+    with (
+        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
+        patch("urllib.request.urlopen", return_value=response),
+        patch("openkb.cli.add_single_file", return_value="added"),
+    ):
+        result = CliRunner().invoke(cli, ["add", "https://example.com/paper.pdf"])
+    assert result.exit_code == 0, result.output
+    assert "  Saved: raw/paper_2.pdf (0.1 MB PDF)\n" in result.output
+    assert result.output.count("Saved:") == 1
+    assert (tmp_path / "raw/paper_2.pdf").read_bytes() == body
+    assert (tmp_path / "raw/paper.pdf").read_bytes() == b"Existing download"
