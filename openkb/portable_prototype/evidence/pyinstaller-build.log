@@ -1,0 +1,190 @@
+/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/wheels/openkb-0.0.0+portable.prototype-py3-none-any.whl
+Using Python 3.12.13 environment at: /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv
+Resolved 1 package in 0.95ms
+Prepared 1 package in 4ms
+Uninstalled 1 package in 1ms
+Installed 1 package in 10ms
+ ~ openkb==0.0.0+portable.prototype (from file:///home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/wheels/openkb-0.0.0+portable.prototype-py3-none-any.whl)
+20 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+20 INFO: Python: 3.12.13
+21 INFO: Platform: Linux-6.12.96+deb13-amd64-x86_64-with-glibc2.41
+21 INFO: Python environment: /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv
+21 INFO: Removing temporary files and cleaning cache in /home/cloudyi/.cache/pyinstaller
+856 WARNING: Failed to collect submodules for 'litellm.proxy.ui_crud_endpoints' because importing 'litellm.proxy.ui_crud_endpoints' raised: ModuleNotFoundError: No module named 'fastapi'
+4024 INFO: Module search paths (PYTHONPATH):
+['/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build',
+ '/home/cloudyi/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python312.zip',
+ '/home/cloudyi/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12',
+ '/home/cloudyi/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/lib-dynload',
+ '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages',
+ '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype']
+4156 INFO: Appending 'datas' from .spec
+4235 INFO: checking Analysis
+4235 INFO: Building Analysis because Analysis-00.toc is non existent
+4235 INFO: Looking for Python shared library...
+4238 INFO: Using Python shared library: /home/cloudyi/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/libpython3.12.so.1.0
+4238 INFO: Running Analysis Analysis-00.toc
+4238 INFO: Target bytecode optimization level: 0
+4238 INFO: Initializing module dependency graph...
+4238 INFO: Initializing module graph hook caches...
+4241 INFO: Analyzing modules for base_library.zip ...
+4602 INFO: Processing standard module hook 'hook-encodings.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+4707 INFO: Processing standard module hook 'hook-math.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+5183 INFO: Processing standard module hook 'hook-pickle.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+5729 INFO: Processing standard module hook 'hook-heapq.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+5860 INFO: Caching module dependency graph...
+5879 INFO: Analyzing /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/entry.py
+5893 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+5964 INFO: Processing standard module hook 'hook-xml.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6058 INFO: Processing standard module hook 'hook-_ctypes.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6091 INFO: Processing standard module hook 'hook-platform.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6093 INFO: Processing standard module hook 'hook-PySide6.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6156 INFO: Processing standard module hook 'hook-shiboken6.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6221 INFO: Processing standard module hook 'hook-PySide6.QtNetwork.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+6646 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+7036 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+7572 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+7788 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+7788 INFO: SetuptoolsInfo: initializing cached setuptools info...
+8402 INFO: Processing standard module hook 'hook-pydantic.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8602 INFO: Processing standard module hook 'hook-rich.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8795 INFO: Processing standard module hook 'hook-pygments.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+9384 INFO: Processing standard module hook 'hook-sysconfig.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+9421 INFO: Processing standard module hook 'hook-webbrowser.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+9561 INFO: Processing standard module hook 'hook-zoneinfo.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10128 INFO: Processing standard module hook 'hook-certifi.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10188 INFO: Processing standard module hook 'hook-anyio.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10576 INFO: Processing standard module hook 'hook-difflib.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+11109 INFO: Processing standard module hook 'hook-websockets.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+11648 INFO: Processing standard module hook 'hook-numpy.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+12584 INFO: Processing standard module hook 'hook-charset_normalizer.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+12785 INFO: Processing standard module hook 'hook-pandas.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+13751 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+14799 INFO: Processing standard module hook 'hook-pandas.plotting.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+15005 INFO: Processing standard module hook 'hook-dateutil.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15057 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+15347 INFO: Processing standard module hook 'hook-openpyxl.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15364 INFO: Processing standard module hook 'hook-lxml.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15435 INFO: Processing standard module hook 'hook-lxml.etree.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15438 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+15490 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+15945 INFO: Processing standard module hook 'hook-PIL.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+15983 INFO: Processing standard module hook 'hook-PIL.Image.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+16126 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17100 INFO: Processing standard module hook 'hook-sqlite3.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17179 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17211 INFO: Processing standard module hook 'hook-fsspec.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+17324 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17333 INFO: Processing standard module hook 'hook-importlib_metadata.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17340 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17348 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17432 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17432 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+17434 INFO: Processing standard module hook 'hook-setuptools.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17438 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17448 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17449 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+17453 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17453 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+17508 INFO: Processing standard module hook 'hook-_osx_support.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17514 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17591 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+17920 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+17920 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+18123 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+18123 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+19124 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_safe_import_module'
+19124 INFO: Setuptools: 'platformdirs' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.platformdirs'!
+19600 INFO: Processing standard module hook 'hook-jsonschema.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+19654 INFO: Processing standard module hook 'hook-jsonschema_specifications.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+19676 INFO: Processing standard module hook 'hook-urllib3.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+19866 INFO: Processing standard module hook 'hook-cryptography.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+20055 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+20523 INFO: Processing standard module hook 'hook-uvicorn.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+21302 INFO: Processing standard module hook 'hook-regex.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+22609 INFO: Processing standard module hook 'hook-jinja2.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+30548 INFO: Processing standard module hook 'hook-onnxruntime.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+30684 INFO: Processing standard module hook 'hook-pptx.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+31617 INFO: Processing standard module hook 'hook-babel.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+31747 INFO: Processing standard module hook 'hook-dateparser.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+31777 INFO: Processing standard module hook 'hook-pytz.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+31842 INFO: Processing standard module hook 'hook-dateparser.utils.strptime.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+32309 INFO: Processing standard module hook 'hook-wcwidth.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+32906 INFO: Analyzing hidden import 'tiktoken_ext.openai_public'
+32910 INFO: Analyzing hidden import 'litellm.anthropic_interface.exceptions'
+32912 INFO: Analyzing hidden import 'litellm.caching._internal_lru_cache'
+32912 INFO: Analyzing hidden import 'litellm.integrations.custom_sso_handler'
+32913 INFO: Analyzing hidden import 'litellm.integrations.generic_prompt_management'
+32918 INFO: Analyzing hidden import 'litellm.integrations.rubrik'
+32924 INFO: Analyzing hidden import 'litellm.integrations.test_httpx'
+32924 INFO: Analyzing hidden import 'litellm.llms.a2a.chat.guardrail_translation'
+32929 INFO: Analyzing hidden import 'litellm.llms.pass_through'
+32929 INFO: Analyzing hidden import 'litellm.llms.pass_through.guardrail_translation'
+32931 INFO: Analyzing hidden import 'litellm.llms.watsonx.completion.handler'
+32932 INFO: Analyzing hidden import 'litellm.proxy._logging'
+32932 INFO: Analyzing hidden import 'litellm.proxy.client'
+32946 INFO: Analyzing hidden import 'litellm.proxy.client.cli'
+32983 INFO: Analyzing hidden import 'litellm.proxy.compliance_checks'
+32986 INFO: Analyzing hidden import 'litellm.proxy.custom_auth_auto'
+32986 INFO: Analyzing hidden import 'litellm.proxy.custom_prompt_management'
+32987 INFO: Analyzing hidden import 'litellm.proxy.custom_sso'
+32987 INFO: Analyzing hidden import 'litellm.proxy.custom_validate'
+32988 INFO: Analyzing hidden import 'litellm.proxy.lambda'
+32988 INFO: Analyzing hidden import 'litellm.proxy.mcp_tools'
+32988 INFO: Analyzing hidden import 'litellm.proxy.post_call_rules'
+32988 INFO: Analyzing hidden import 'litellm.proxy.prisma_migration'
+32989 INFO: Analyzing hidden import 'litellm.proxy.realtime_endpoints'
+32989 INFO: Analyzing hidden import 'litellm.proxy.realtime_endpoints.endpoints'
+32992 INFO: Analyzing hidden import 'litellm.proxy.vector_store_files_endpoints'
+32992 INFO: Analyzing hidden import 'litellm.proxy.vector_store_files_endpoints.endpoints'
+32999 INFO: Analyzing hidden import 'litellm.proxy_auth'
+33001 INFO: Analyzing hidden import 'litellm.rag.utils'
+33005 INFO: Analyzing hidden import 'litellm.timeout'
+33007 INFO: Analyzing hidden import 'pageindex.page_index'
+33007 INFO: Analyzing hidden import 'pageindex.page_index_md'
+33007 INFO: Analyzing hidden import 'pageindex.utils'
+33008 INFO: Analyzing hidden import 'trafilatura.cli'
+33028 INFO: Analyzing hidden import 'markitdown.__main__'
+33030 INFO: Processing module hooks (post-graph stage)...
+33520 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+33741 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+33772 INFO: Processing standard module hook 'hook-PySide6.QtDBus.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+34777 INFO: Processing standard module hook 'hook-lxml.objectify.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+34855 INFO: Performing binary vs. data reclassification (10487 entries)
+34974 INFO: Looking for ctypes DLLs
+34996 WARNING: Library user32 required via ctypes not found
+35004 WARNING: Library msvcrt required via ctypes not found
+35049 INFO: Analyzing run-time hooks ...
+35071 INFO: Including run-time hook 'pyi_rth_inspect.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/rthooks'
+35072 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/rthooks'
+35073 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/_pyinstaller_hooks_contrib/rthooks'
+35073 INFO: Including run-time hook 'pyi_rth_setuptools.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/rthooks'
+35075 INFO: Including run-time hook 'pyi_rth_pyside6.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/rthooks'
+35075 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/pre_find_module_path'
+35076 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks'
+35077 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from '/home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/hooks/rthooks'
+35361 INFO: Creating base_library.zip...
+35374 INFO: Looking for dynamic libraries
+36260 INFO: Warnings written to /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/freeze/portable/warn-portable.txt
+36418 INFO: Graph cross-reference written to /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/freeze/portable/xref-portable.html
+36638 INFO: checking PYZ
+36638 INFO: Building PYZ because PYZ-00.toc is non existent
+36638 INFO: Building PYZ (ZlibArchive) /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/freeze/portable/PYZ-00.pyz
+38673 INFO: Building PYZ (ZlibArchive) /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/freeze/portable/PYZ-00.pyz completed successfully.
+38724 INFO: checking PKG
+38724 INFO: Building PKG because PKG-00.toc is non existent
+38724 INFO: Building PKG (CArchive) OpenKBProbe.pkg
+38737 INFO: Building PKG (CArchive) OpenKBProbe.pkg completed successfully.
+38738 INFO: Bootloader /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.venv/lib/python3.12/site-packages/PyInstaller/bootloader/Linux-64bit-intel/run
+38738 INFO: checking EXE
+38738 INFO: Building EXE because EXE-00.toc is non existent
+38738 INFO: Building EXE from EXE-00.toc
+38738 INFO: Copying bootloader EXE to /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/.build/freeze/portable/OpenKBProbe
+38738 INFO: Appending PKG archive to custom ELF section in EXE
+38797 INFO: Building EXE from EXE-00.toc completed successfully.
+38844 INFO: checking COLLECT
+38844 INFO: Building COLLECT because COLLECT-00.toc is non existent
+38844 INFO: Removing dir /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/dist/OpenKBProbe
+39004 INFO: Building COLLECT COLLECT-00.toc
+39510 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+39600 INFO: Build complete! The results are available in: /home/cloudyi/CodeWorkspace/UrltraKB-portable-prototype/openkb/portable_prototype/dist

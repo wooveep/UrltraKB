@@ -1,0 +1,56 @@
+[
+  {
+    "file": "OpenKBProbe",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f03caade000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f03caad0000)\n\tlibz.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libz.so.1 (0x00007f03caab0000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f03caaab000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f03ca8b7000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f03caae0000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/libpython3.12.so.1.0",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f4d0b85b000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f4d0b84d000)\n\tlibrt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f4d0b848000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4d0a310000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f4d0b843000)\n\tlibutil.so.1 => /lib/x86_64-linux-gnu/libutil.so.1 (0x00007f4d0b83c000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4d0a11c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f4d0b85d000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/PySide6/Qt/plugins/platforms/libqxcb.so",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f53fe395000)\n\tlibQt6XcbQpa.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libQt6XcbQpa.so.6 (0x00007f53fe2c9000)\n\tlibQt6Gui.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libQt6Gui.so.6 (0x00007f53fd600000)\n\tlibGL.so.1 => /lib/x86_64-linux-gnu/libGL.so.1 (0x00007f53fe23f000)\n\tlibQt6Core.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libQt6Core.so.6 (0x00007f53fce00000)\n\tlibxkbcommon.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxkbcommon.so.0 (0x00007f53fe1f2000)\n\tlibxkbcommon-x11.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxkbcommon-x11.so.0 (0x00007f53fe1e7000)\n\tlibxcb-cursor.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-cursor.so.0 (0x00007f53fe1e0000)\n\tlibxcb-icccm.so.4 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-icccm.so.4 (0x00007f53fe1d9000)\n\tlibxcb-util.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-util.so.1 (0x00007f53fe1d1000)\n\tlibxcb-image.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-image.so.0 (0x00007f53fe1c9000)\n\tlibxcb-keysyms.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-keysyms.so.1 (0x00007f53fe1c4000)\n\tlibxcb-randr.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-randr.so.0 (0x00007f53fe1b2000)\n\tlibxcb-render-util.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-render-util.so.0 (0x00007f53fe1ab000)\n\tlibxcb-shm.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-shm.so.0 (0x00007f53fe1a6000)\n\tlibxcb-sync.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-sync.so.1 (0x00007f53fe19b000)\n\tlibxcb-xfixes.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-xfixes.so.0 (0x00007f53fe192000)\n\tlibxcb-render.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-render.so.0 (0x00007f53fe183000)\n\tlibxcb-shape.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-shape.so.0 (0x00007f53fe17e000)\n\tlibxcb-xkb.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libxcb-xkb.so.1 (0x00007f53fe15f000)\n\tlibxcb.so.1 => /lib/x86_64-linux-gnu/libxcb.so.1 (0x00007f53fe132000)\n\tlibX11-xcb.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libX11-xcb.so.1 (0x00007f53fe12d000)\n\tlibX11.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libX11.so.6 (0x00007f53fccb8000)\n\tlibstdc++.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libstdc++.so.6 (0x00007f53fca00000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f53fc910000)\n\tlibgcc_s.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libgcc_s.so.1 (0x00007f53fe0fe000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f53fc71c000)\n\tlibglib-2.0.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libglib-2.0.so.0 (0x00007f53fc5c3000)\n\tlibgthread-2.0.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libgthread-2.0.so.0 (0x00007f53fe0f9000)\n\tlibEGL.so.1 => /lib/x86_64-linux-gnu/libEGL.so.1 (0x00007f53fd5ea000)\n\tlibfontconfig.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libfontconfig.so.1 (0x00007f53fd59c000)\n\tlibQt6DBus.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libQt6DBus.so.6 (0x00007f53fc4e8000)\n\tlibz.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libz.so.1 (0x00007f53fd57c000)\n\tlibfreetype.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libfreetype.so.6 (0x00007f53fc418000)\n\tlibGLdispatch.so.0 => /lib/x86_64-linux-gnu/libGLdispatch.so.0 (0x00007f53fc35f000)\n\tlibGLX.so.0 => /lib/x86_64-linux-gnu/libGLX.so.0 (0x00007f53fd548000)\n\tlibicui18n.so.73 => /opt/便携 应用/OpenKBProbe/_internal/libicui18n.so.73 (0x00007f53fc000000)\n\tlibicuuc.so.73 => /opt/便携 应用/OpenKBProbe/_internal/libicuuc.so.73 (0x00007f53fbc00000)\n\tlibicudata.so.73 => /opt/便携 应用/OpenKBProbe/_internal/libicudata.so.73 (0x00007f53f9c00000)\n\tlibzstd.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libzstd.so.1 (0x00007f53fbf36000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f53fe397000)\n\tlibXau.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libXau.so.6 (0x00007f53fd541000)\n\tlibXdmcp.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libXdmcp.so.6 (0x00007f53fd537000)\n\tlibatomic.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libatomic.so.1 (0x00007f53fccae000)\n\tlibpcre2-8.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libpcre2-8.so.0 (0x00007f53fbe87000)\n\tlibexpat.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libexpat.so.1 (0x00007f53fcc80000)\n\tlibdbus-1.so.3 => /opt/便携 应用/OpenKBProbe/_internal/libdbus-1.so.3 (0x00007f53fbe30000)\n\tlibbz2.so.1.0 => /opt/便携 应用/OpenKBProbe/_internal/libbz2.so.1.0 (0x00007f53fcc6d000)\n\tlibpng16.so.16 => /opt/便携 应用/OpenKBProbe/_internal/libpng16.so.16 (0x00007f53fbbc7000)\n\tlibbrotlidec.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libbrotlidec.so.1 (0x00007f53fc351000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f53fcc68000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f53fbe2b000)\n\tlibsystemd.so.0 => /opt/便携 应用/OpenKBProbe/_internal/libsystemd.so.0 (0x00007f53fbab1000)\n\tlibbrotlicommon.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libbrotlicommon.so.1 (0x00007f53fba8e000)\n\tlibcap.so.2 => /opt/便携 应用/OpenKBProbe/_internal/libcap.so.2 (0x00007f53fbe1f000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/probe_assets/renderers/node",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007fea373ee000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007fea373e0000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007fea3717a000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fea3708a000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fea3705d000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007fea37056000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fea36e62000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fea373f0000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/probe_assets/renderers/renderer",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f6f1476a000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f6f1240c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f6f1476c000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f6f14671000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f6f14644000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/onnxruntime/capi/onnxruntime_pybind11_state.cpython-312-x86_64-linux-gnu.so",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007fcfb6a6b000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007fcfb6a5d000)\n\tlibrt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007fcfb6a58000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007fcfb6a53000)\n\tlibstdc++.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libstdc++.so.6 (0x00007fcfb5400000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fcfb6961000)\n\tlibgcc_s.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libgcc_s.so.1 (0x00007fcfb6934000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fcfb520c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fcfb6a6d000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/pymupdf/_extra.so",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f4af3a8e000)\n\tlibmupdf.so.27.2 => /opt/便携 应用/OpenKBProbe/_internal/libmupdf.so.27.2 (0x00007f4af1800000)\n\tlibmupdfcpp.so.27.2 => /opt/便携 应用/OpenKBProbe/_internal/libmupdfcpp.so.27.2 (0x00007f4af1400000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f4af3a4d000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f4af3a48000)\n\tlibutil.so.1 => /lib/x86_64-linux-gnu/libutil.so.1 (0x00007f4af3a41000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4af1710000)\n\tlibstdc++.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libstdc++.so.6 (0x00007f4af1000000)\n\tlibgcc_s.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libgcc_s.so.1 (0x00007f4af3a14000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4af0e0c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f4af3a90000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/libmupdf.so.27.2",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007f7361ed2000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f7361ec4000)\n\tlibstdc++.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libstdc++.so.6 (0x00007f735f800000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f7361dd4000)\n\tlibgcc_s.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libgcc_s.so.1 (0x00007f7361da7000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f735f60c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f7361ed4000)\n",
+    "stderr": ""
+  },
+  {
+    "file": "_internal/pymupdf/libmupdf.so.27.2",
+    "exit": 0,
+    "stdout": "\tlinux-vdso.so.1 (0x00007effb9eac000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007effb9e9e000)\n\tlibstdc++.so.6 => /opt/便携 应用/OpenKBProbe/_internal/libstdc++.so.6 (0x00007effb7800000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007effb9dae000)\n\tlibgcc_s.so.1 => /opt/便携 应用/OpenKBProbe/_internal/libgcc_s.so.1 (0x00007effb9d81000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007effb760c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007effb9eae000)\n",
+    "stderr": ""
+  }
+]

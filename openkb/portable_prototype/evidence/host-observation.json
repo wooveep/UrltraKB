@@ -1,0 +1,22 @@
+{
+  "python": "3.12.13",
+  "platform": "Linux-6.12.96+deb13-amd64-x86_64-with-glibc2.41",
+  "qt": "6.11.2",
+  "qt_platform": "xcb",
+  "frozen": true,
+  "profile_mode": "scratch",
+  "tray_available": false,
+  "close_during_work": {
+    "running": [
+      "core-A",
+      "core-B"
+    ],
+    "visible_after_close": true,
+    "tray_created": false
+  },
+  "elapsed_seconds": 22.98,
+  "active_workers": 0,
+  "all_expected": true,
+  "no_tray_close_kept_visible": true,
+  "scope": "Host GUI observation only; clean-runtime proof is in debian-clean-summary.json."
+}

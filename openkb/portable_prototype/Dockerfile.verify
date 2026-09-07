@@ -1,0 +1,11 @@
+# Throwaway clean runtime root; display/session services are supplied by the host.
+FROM debian:13.6-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libglib2.0-0t64 libgl1 libegl1 libopengl0 libdbus-1-3 \
+    libfontconfig1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+    libxcb-keysyms1 libxcb-render-util0 libx11-xcb1 libxrender1 libxext6 \
+    libsm6 libice6 && rm -rf /var/lib/apt/lists/*
+RUN useradd --create-home --uid 1000 probe
+USER probe
+ENV HOME=/home/probe LANG=C.UTF-8 DISPLAY=:0 XAUTHORITY=/tmp/probe-xauth
+WORKDIR /tmp

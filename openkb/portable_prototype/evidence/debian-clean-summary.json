@@ -1,0 +1,2243 @@
+{
+  "python": "3.12.13",
+  "platform": "Linux-6.12.96+deb13-amd64-x86_64-with-glibc2.41",
+  "os_release": {
+    "NAME": "Debian GNU/Linux",
+    "ID": "debian",
+    "PRETTY_NAME": "Debian GNU/Linux 13 (trixie)",
+    "VERSION_ID": "13",
+    "VERSION": "13 (trixie)",
+    "VERSION_CODENAME": "trixie",
+    "DEBIAN_VERSION_FULL": "13.6",
+    "HOME_URL": "https://www.debian.org/",
+    "SUPPORT_URL": "https://www.debian.org/support",
+    "BUG_REPORT_URL": "https://bugs.debian.org/"
+  },
+  "qt": "6.11.2",
+  "qt_platform": "xcb",
+  "pid": 1,
+  "frozen": true,
+  "executable": "/opt/便携 应用/OpenKBProbe/OpenKBProbe",
+  "assets": "/opt/便携 应用/OpenKBProbe/_internal/probe_assets",
+  "cwd": "/tmp",
+  "home": "/home/probe",
+  "profile_mode": "system",
+  "external_tools": {
+    "python": null,
+    "python3": null,
+    "node": null,
+    "cargo": null,
+    "gcc": null
+  },
+  "tray_available": false,
+  "force_no_tray": true,
+  "close_during_work": {
+    "running": [
+      "core-A",
+      "core-B"
+    ],
+    "visible_after_close": true,
+    "tray_created": false
+  },
+  "results": {
+    "core-B": {
+      "ok": true,
+      "elapsed_ms": 1689,
+      "kb": "/data/测试结果/core-B/知识库 B",
+      "model": "probe-model-B",
+      "global_config_path": "/home/probe/.config/openkb/global.yaml",
+      "conversions": [
+        {
+          "name": "中文 笔记.md",
+          "branch": "converted",
+          "bytes": 102,
+          "deduplicated": true
+        }
+      ],
+      "inventory_count": 1
+    },
+    "core-A": {
+      "ok": true,
+      "elapsed_ms": 3306,
+      "kb": "/data/测试结果/core-A/知识库 A",
+      "model": "probe-model-A",
+      "global_config_path": "/home/probe/.config/openkb/global.yaml",
+      "conversions": [
+        {
+          "name": "中文 文档.docx",
+          "branch": "converted",
+          "bytes": 26,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 旧表格.xls",
+          "branch": "converted",
+          "bytes": 58,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 演示.pptx",
+          "branch": "converted",
+          "bytes": 80,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 短文.pdf",
+          "branch": "converted",
+          "bytes": 175,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 笔记.md",
+          "branch": "converted",
+          "bytes": 102,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 表格.xlsx",
+          "branch": "converted",
+          "bytes": 66,
+          "deduplicated": true
+        },
+        {
+          "name": "中文 页面.html",
+          "branch": "converted",
+          "bytes": 952,
+          "deduplicated": true
+        },
+        {
+          "name": "长文.pdf",
+          "branch": "long-document",
+          "pages": 20
+        }
+      ],
+      "inventory_count": 7,
+      "watcher": {
+        "observed": [
+          "/data/测试结果/core-A/知识库 A/raw/监听 样本.md"
+        ],
+        "stopped": true,
+        "atomic_rename_observed": false
+      },
+      "resources": {
+        "graph_nodes": 2,
+        "graph_edges": 1,
+        "builtin_skills": [
+          "openkb-deck-editorial",
+          "openkb-deck-neon",
+          "openkb-html-critic"
+        ]
+      },
+      "native_dependencies": {
+        "onnxruntime": "1.20.1",
+        "magika_inference": "pptx",
+        "tiktoken_count": 3
+      },
+      "html_extraction": {
+        "characters": 944,
+        "network_fetch_evaluated": false
+      }
+    },
+    "transport": {
+      "ok": true,
+      "elapsed_ms": 2368,
+      "fixture_only": true,
+      "live_model_evaluated": false,
+      "litellm_stream": "PortableProbe stream",
+      "agents_response": "PortableProbe SDK",
+      "requests": [
+        {
+          "path": "/v1/chat/completions",
+          "stream": true
+        },
+        {
+          "path": "/v1/chat/completions",
+          "stream": false
+        }
+      ]
+    },
+    "renderers": {
+      "ok": true,
+      "elapsed_ms": 16552,
+      "attempts": 64,
+      "expected_errors": 4,
+      "node_path": "/opt/便携 应用/OpenKBProbe/_internal/probe_assets/renderers/node",
+      "helper_path": "/opt/便携 应用/OpenKBProbe/_internal/probe_assets/renderers/renderer",
+      "records": [
+        {
+          "id": "flow-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/flow-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "flow-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/flow-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "flow-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/flow-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "flow-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/flow-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "sequence-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/sequence-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "sequence-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/sequence-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "sequence-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/sequence-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "sequence-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/sequence-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "class-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/class-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "class-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/class-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "class-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/class-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "class-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/class-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "state-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/state-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "state-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/state-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "state-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/state-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "state-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/state-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "er-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/er-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "er-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/er-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "er-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/er-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "er-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/er-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "mindmap-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/mindmap-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "mindmap-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/mindmap-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "mindmap-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/mindmap-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "mindmap-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/mindmap-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "pie-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/pie-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "pie-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/pie-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "pie-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/pie-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "pie-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/pie-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "gantt-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/gantt-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "gantt-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/gantt-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "gantt-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/gantt-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "gantt-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/gantt-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "c4-basic",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/c4-basic-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "c4-basic",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/c4-basic-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "c4-cn",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/c4-cn-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "c4-cn",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/c4-cn-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-fraction",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-fraction-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-fraction",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-fraction-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-root",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-root-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-root",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-root-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-integral",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-integral-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-integral",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-integral-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-matrix",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-matrix-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-matrix",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-matrix-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-cases",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-cases-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-cases",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-cases-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-aligned",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-aligned-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-aligned",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-aligned-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-chinese",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-chinese-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-chinese",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-chinese-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-chinese-frac",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-chinese-frac-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-chinese-frac",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-chinese-frac-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-accents",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-accents-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-accents",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-accents-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-delimiters",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-delimiters-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-delimiters",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-delimiters-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-inline",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-inline-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-inline",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-inline-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-macro",
+          "dark": false,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-macro-light/image.png",
+          "expected": true
+        },
+        {
+          "id": "math-macro",
+          "dark": true,
+          "ok": true,
+          "png": "/data/测试结果/renderers/math-macro-dark/image.png",
+          "expected": true
+        },
+        {
+          "id": "error-macro",
+          "dark": false,
+          "ok": false,
+          "error": "Undefined control sequence \\notARealMacro",
+          "expected": true
+        },
+        {
+          "id": "error-macro",
+          "dark": true,
+          "ok": false,
+          "error": "Undefined control sequence \\notARealMacro",
+          "expected": true
+        },
+        {
+          "id": "error-diagram",
+          "dark": false,
+          "ok": false,
+          "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+          "expected": true
+        },
+        {
+          "id": "error-diagram",
+          "dark": true,
+          "ok": false,
+          "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+          "expected": true
+        }
+      ]
+    },
+    "crash": {
+      "ok": true,
+      "intentional_exitcode": 23
+    },
+    "recover": {
+      "ok": true,
+      "elapsed_ms": 15,
+      "recovered_after_exit_23": true,
+      "text": "PortableProbe committed"
+    },
+    "stop": {
+      "ok": true,
+      "elapsed_ms": 52,
+      "completed": [
+        0
+      ],
+      "safe_stop": true
+    }
+  },
+  "events": [
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "core-B",
+      "pid": 16,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "core-B",
+      "pid": 16,
+      "event": "converted",
+      "data": {
+        "tag": "B",
+        "name": "中文 笔记.md",
+        "branch": "converted",
+        "bytes": 102,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-B",
+      "pid": 16,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 1689,
+        "kb": "/data/测试结果/core-B/知识库 B",
+        "model": "probe-model-B",
+        "global_config_path": "/home/probe/.config/openkb/global.yaml",
+        "conversions": [
+          {
+            "name": "中文 笔记.md",
+            "branch": "converted",
+            "bytes": 102,
+            "deduplicated": true
+          }
+        ],
+        "inventory_count": 1
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 文档.docx",
+        "branch": "converted",
+        "bytes": 26,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 旧表格.xls",
+        "branch": "converted",
+        "bytes": 58,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 演示.pptx",
+        "branch": "converted",
+        "bytes": 80,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-B",
+      "event": "reaped",
+      "pid": 16,
+      "exitcode": 0
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 短文.pdf",
+        "branch": "converted",
+        "bytes": 175,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 笔记.md",
+        "branch": "converted",
+        "bytes": 102,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 表格.xlsx",
+        "branch": "converted",
+        "bytes": 66,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "中文 页面.html",
+        "branch": "converted",
+        "bytes": 952,
+        "deduplicated": true
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "converted",
+      "data": {
+        "tag": "A",
+        "name": "长文.pdf",
+        "branch": "long-document",
+        "pages": 20
+      }
+    },
+    {
+      "job": "core-A",
+      "pid": 15,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 3306,
+        "kb": "/data/测试结果/core-A/知识库 A",
+        "model": "probe-model-A",
+        "global_config_path": "/home/probe/.config/openkb/global.yaml",
+        "conversions": [
+          {
+            "name": "中文 文档.docx",
+            "branch": "converted",
+            "bytes": 26,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 旧表格.xls",
+            "branch": "converted",
+            "bytes": 58,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 演示.pptx",
+            "branch": "converted",
+            "bytes": 80,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 短文.pdf",
+            "branch": "converted",
+            "bytes": 175,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 笔记.md",
+            "branch": "converted",
+            "bytes": 102,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 表格.xlsx",
+            "branch": "converted",
+            "bytes": 66,
+            "deduplicated": true
+          },
+          {
+            "name": "中文 页面.html",
+            "branch": "converted",
+            "bytes": 952,
+            "deduplicated": true
+          },
+          {
+            "name": "长文.pdf",
+            "branch": "long-document",
+            "pages": 20
+          }
+        ],
+        "inventory_count": 7,
+        "watcher": {
+          "observed": [
+            "/data/测试结果/core-A/知识库 A/raw/监听 样本.md"
+          ],
+          "stopped": true,
+          "atomic_rename_observed": false
+        },
+        "resources": {
+          "graph_nodes": 2,
+          "graph_edges": 1,
+          "builtin_skills": [
+            "openkb-deck-editorial",
+            "openkb-deck-neon",
+            "openkb-html-critic"
+          ]
+        },
+        "native_dependencies": {
+          "onnxruntime": "1.20.1",
+          "magika_inference": "pptx",
+          "tiktoken_count": 3
+        },
+        "html_extraction": {
+          "characters": 944,
+          "network_fetch_evaluated": false
+        }
+      }
+    },
+    {
+      "job": "core-A",
+      "event": "reaped",
+      "pid": 15,
+      "exitcode": 0
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "transport",
+      "pid": 131,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "flow-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/flow-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "flow-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/flow-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "flow-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/flow-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "flow-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/flow-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "sequence-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/sequence-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "sequence-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/sequence-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "sequence-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/sequence-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "sequence-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/sequence-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "transport",
+      "pid": 131,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 2368,
+        "fixture_only": true,
+        "live_model_evaluated": false,
+        "litellm_stream": "PortableProbe stream",
+        "agents_response": "PortableProbe SDK",
+        "requests": [
+          {
+            "path": "/v1/chat/completions",
+            "stream": true
+          },
+          {
+            "path": "/v1/chat/completions",
+            "stream": false
+          }
+        ]
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "class-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/class-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "class-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/class-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "transport",
+      "event": "reaped",
+      "pid": 131,
+      "exitcode": 0
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "class-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/class-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "class-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/class-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "state-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/state-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "state-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/state-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "state-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/state-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "state-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/state-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "er-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/er-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "er-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/er-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "er-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/er-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "er-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/er-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "mindmap-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/mindmap-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "mindmap-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/mindmap-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "mindmap-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/mindmap-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "mindmap-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/mindmap-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "pie-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/pie-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "pie-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/pie-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "pie-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/pie-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "pie-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/pie-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "gantt-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/gantt-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "gantt-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/gantt-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "gantt-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/gantt-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "gantt-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/gantt-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "c4-basic",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/c4-basic-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "c4-basic",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/c4-basic-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "c4-cn",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/c4-cn-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "c4-cn",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/c4-cn-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-fraction",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-fraction-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-fraction",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-fraction-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-root",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-root-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-root",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-root-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-integral",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-integral-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-integral",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-integral-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-matrix",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-matrix-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-matrix",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-matrix-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-cases",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-cases-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-cases",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-cases-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-aligned",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-aligned-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-aligned",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-aligned-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-chinese",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-chinese-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-chinese",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-chinese-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-chinese-frac",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-chinese-frac-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-chinese-frac",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-chinese-frac-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-accents",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-accents-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-accents",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-accents-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-delimiters",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-delimiters-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-delimiters",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-delimiters-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-inline",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-inline-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-inline",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-inline-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-macro",
+        "dark": false,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-macro-light/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "math-macro",
+        "dark": true,
+        "ok": true,
+        "png": "/data/测试结果/renderers/math-macro-dark/image.png",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "error-macro",
+        "dark": false,
+        "ok": false,
+        "error": "Undefined control sequence \\notARealMacro",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "error-macro",
+        "dark": true,
+        "ok": false,
+        "error": "Undefined control sequence \\notARealMacro",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "error-diagram",
+        "dark": false,
+        "ok": false,
+        "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "render",
+      "data": {
+        "id": "error-diagram",
+        "dark": true,
+        "ok": false,
+        "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+        "expected": true
+      }
+    },
+    {
+      "job": "renderers",
+      "pid": 130,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 16552,
+        "attempts": 64,
+        "expected_errors": 4,
+        "node_path": "/opt/便携 应用/OpenKBProbe/_internal/probe_assets/renderers/node",
+        "helper_path": "/opt/便携 应用/OpenKBProbe/_internal/probe_assets/renderers/renderer",
+        "records": [
+          {
+            "id": "flow-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/flow-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "flow-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/flow-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "flow-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/flow-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "flow-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/flow-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "sequence-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/sequence-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "sequence-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/sequence-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "sequence-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/sequence-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "sequence-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/sequence-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "class-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/class-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "class-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/class-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "class-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/class-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "class-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/class-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "state-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/state-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "state-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/state-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "state-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/state-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "state-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/state-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "er-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/er-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "er-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/er-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "er-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/er-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "er-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/er-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "mindmap-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/mindmap-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "mindmap-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/mindmap-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "mindmap-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/mindmap-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "mindmap-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/mindmap-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "pie-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/pie-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "pie-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/pie-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "pie-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/pie-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "pie-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/pie-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "gantt-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/gantt-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "gantt-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/gantt-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "gantt-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/gantt-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "gantt-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/gantt-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "c4-basic",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/c4-basic-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "c4-basic",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/c4-basic-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "c4-cn",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/c4-cn-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "c4-cn",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/c4-cn-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-fraction",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-fraction-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-fraction",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-fraction-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-root",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-root-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-root",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-root-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-integral",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-integral-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-integral",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-integral-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-matrix",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-matrix-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-matrix",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-matrix-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-cases",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-cases-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-cases",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-cases-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-aligned",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-aligned-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-aligned",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-aligned-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-chinese",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-chinese-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-chinese",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-chinese-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-chinese-frac",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-chinese-frac-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-chinese-frac",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-chinese-frac-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-accents",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-accents-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-accents",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-accents-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-delimiters",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-delimiters-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-delimiters",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-delimiters-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-inline",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-inline-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-inline",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-inline-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-macro",
+            "dark": false,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-macro-light/image.png",
+            "expected": true
+          },
+          {
+            "id": "math-macro",
+            "dark": true,
+            "ok": true,
+            "png": "/data/测试结果/renderers/math-macro-dark/image.png",
+            "expected": true
+          },
+          {
+            "id": "error-macro",
+            "dark": false,
+            "ok": false,
+            "error": "Undefined control sequence \\notARealMacro",
+            "expected": true
+          },
+          {
+            "id": "error-macro",
+            "dark": true,
+            "ok": false,
+            "error": "Undefined control sequence \\notARealMacro",
+            "expected": true
+          },
+          {
+            "id": "error-diagram",
+            "dark": false,
+            "ok": false,
+            "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+            "expected": true
+          },
+          {
+            "id": "error-diagram",
+            "dark": true,
+            "ok": false,
+            "error": "No diagram type detected matching given configuration for text: thisIsNotADiagram",
+            "expected": true
+          }
+        ]
+      }
+    },
+    {
+      "job": "renderers",
+      "event": "reaped",
+      "pid": 130,
+      "exitcode": 0
+    },
+    {
+      "job": "crash",
+      "pid": 421,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "crash",
+      "event": "reaped",
+      "pid": 421,
+      "exitcode": 23
+    },
+    {
+      "job": "recover",
+      "pid": 422,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "recover",
+      "pid": 422,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 15,
+        "recovered_after_exit_23": true,
+        "text": "PortableProbe committed"
+      }
+    },
+    {
+      "job": "recover",
+      "event": "reaped",
+      "pid": 422,
+      "exitcode": 0
+    },
+    {
+      "job": "stop",
+      "pid": 423,
+      "event": "started",
+      "data": {
+        "cwd": "/tmp"
+      }
+    },
+    {
+      "job": "stop",
+      "pid": 423,
+      "event": "boundary",
+      "data": {
+        "completed": [
+          0
+        ]
+      }
+    },
+    {
+      "job": "stop",
+      "pid": 423,
+      "event": "result",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 52,
+        "completed": [
+          0
+        ],
+        "safe_stop": true
+      }
+    },
+    {
+      "job": "stop",
+      "event": "reaped",
+      "pid": 423,
+      "exitcode": 0
+    }
+  ],
+  "elapsed_seconds": 21.44,
+  "active_workers": 0,
+  "all_expected": true,
+  "no_tray_close_kept_visible": true
+}

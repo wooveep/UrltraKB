@@ -1,0 +1,9 @@
+{
+  "archive": "OpenKBProbe-Linux-x86_64.tar.gz",
+  "bytes": 342032335,
+  "sha256": "bd258385dbe6831df136398e09612157f24483e70325140654d13e15638d3b31",
+  "file_count": 10755,
+  "symlinks": 40,
+  "uncompressed_regular_bytes": 833163748,
+  "python": "3.12.13"
+}
