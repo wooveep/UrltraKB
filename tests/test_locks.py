@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import stat
 import threading
 
@@ -138,6 +139,7 @@ def test_atomic_write_text_replaces_file(tmp_path):
     assert list(target.parent.glob("*.tmp")) == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not implement POSIX permission bits")
 def test_atomic_write_text_preserves_existing_mode(tmp_path):
     target = tmp_path / "file.txt"
     target.write_text("first", encoding="utf-8")

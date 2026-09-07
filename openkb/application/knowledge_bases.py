@@ -96,6 +96,9 @@ def _creation(kb_dir: Path, *, require_empty: bool) -> Iterator[None]:
             ):
                 continue
             raise FileExistsError(f"Knowledge base already initialized: {kb_dir}")
+        from openkb.lifecycle import begin_creation
+
+        begin_creation(kb_dir)
         directories = [
             kb_dir / name
             for name in (
@@ -185,84 +188,87 @@ def initialize_kb(
     ``FileExistsError`` if the KB is already initialized.
     """
     kb_dir = kb_dir.expanduser().resolve()
-    openkb_dir = kb_dir / ".openkb"
-    with _creation(kb_dir, require_empty=require_empty):
-        kb_dir.mkdir(parents=True, exist_ok=True)
-        (kb_dir / "raw").mkdir(exist_ok=True)
-        (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True, exist_ok=True)
-        (kb_dir / "wiki" / "summaries").mkdir(parents=True, exist_ok=True)
-        (kb_dir / "wiki" / "concepts").mkdir(parents=True, exist_ok=True)
-        (kb_dir / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
+    from openkb.lifecycle import creation_lifecycle
 
-        atomic_write_text(kb_dir / "wiki" / "AGENTS.md", AGENTS_MD)
-        atomic_write_text(kb_dir / "wiki" / "index.md", INDEX_SEED)
-        atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
+    with creation_lifecycle(kb_dir):
+        openkb_dir = kb_dir / ".openkb"
+        with _creation(kb_dir, require_empty=require_empty):
+            kb_dir.mkdir(parents=True, exist_ok=True)
+            (kb_dir / "raw").mkdir(exist_ok=True)
+            (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True, exist_ok=True)
+            (kb_dir / "wiki" / "summaries").mkdir(parents=True, exist_ok=True)
+            (kb_dir / "wiki" / "concepts").mkdir(parents=True, exist_ok=True)
+            (kb_dir / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
 
-        openkb_dir.mkdir(exist_ok=True)
-        # Seed config.yaml: an explicit model wins; otherwise inherit the
-        # operator's project-root config.yaml (model/language/optional blocks)
-        # so a KB created via the REST UI matches the deployed setup instead of
-        # the hardcoded DEFAULT_CONFIG (gpt-5.4 / en). Defaults are the last resort.
-        template_config = template_dir / "config.yaml" if template_dir else None
-        if model is not None:
-            config = {
-                "model": model,
-                "language": language or DEFAULT_CONFIG["language"],
-                "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-            }
-            save_config(openkb_dir / "config.yaml", config)
-        elif template_config is not None and template_config.exists():
-            shutil.copy2(template_config, openkb_dir / "config.yaml")
-        else:
-            config = {
-                "model": DEFAULT_CONFIG["model"],
-                "language": language or DEFAULT_CONFIG["language"],
-                "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-            }
-            save_config(openkb_dir / "config.yaml", config)
-        atomic_write_json(openkb_dir / "hashes.json", {})
+            atomic_write_text(kb_dir / "wiki" / "AGENTS.md", AGENTS_MD)
+            atomic_write_text(kb_dir / "wiki" / "index.md", INDEX_SEED)
+            atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
 
-        # Seed KB-local .env: inherit LLM credentials from the project-root .env so
-        # a new KB can run queries/compiles out of the box. REST-server variables
-        # (OPENKB_API_TOKEN, OPENKB_KB_ROOT, ...) are filtered out — they scope to
-        # the server, not a single KB. Explicit api_key/openai_api_base params
-        # override anything inherited. Precedence: default -> template -> explicit.
-        env_path = kb_dir / ".env"
-        can_write_env = not env_path.exists()
-        env_pairs: dict[str, str] = {}
-        if can_write_env:
-            if seed_environment:
-                env_pairs["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
-            template_env = template_dir / ".env" if template_dir else None
-            if template_env is not None and template_env.exists():
-                for raw in template_env.read_text(encoding="utf-8").splitlines():
-                    line = raw.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    key, _, val = line.partition("=")
-                    key = key.strip()
-                    # Skip REST-server variables; keep LLM/provider config.
-                    if key.startswith("OPENKB_"):
-                        continue
-                    env_pairs[key] = val.strip()
-            if api_key:
-                env_pairs["LLM_API_KEY"] = api_key
-            if openai_api_base:
-                env_pairs["OPENAI_API_BASE"] = openai_api_base
-            if env_pairs:
-                env_path.touch(mode=0o600, exist_ok=False)
-                atomic_write_text(env_path, "".join(f"{k}={v}\n" for k, v in env_pairs.items()))
+            openkb_dir.mkdir(exist_ok=True)
+            # Seed config.yaml: an explicit model wins; otherwise inherit the
+            # operator's project-root config.yaml (model/language/optional blocks)
+            # so a KB created via the REST UI matches the deployed setup instead of
+            # the hardcoded DEFAULT_CONFIG (gpt-5.4 / en). Defaults are the last resort.
+            template_config = template_dir / "config.yaml" if template_dir else None
+            if model is not None:
+                config = {
+                    "model": model,
+                    "language": language or DEFAULT_CONFIG["language"],
+                    "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
+                }
+                save_config(openkb_dir / "config.yaml", config)
+            elif template_config is not None and template_config.exists():
+                shutil.copy2(template_config, openkb_dir / "config.yaml")
+            else:
+                config = {
+                    "model": DEFAULT_CONFIG["model"],
+                    "language": language or DEFAULT_CONFIG["language"],
+                    "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
+                }
+                save_config(openkb_dir / "config.yaml", config)
+            atomic_write_json(openkb_dir / "hashes.json", {})
 
-    register_kb(kb_dir)
-    return {
-        "kb_dir": str(kb_dir),
-        "created": True,
-        "env_written": {
-            "api_key": "LLM_API_KEY" in env_pairs,
-            "openai_api_base": "OPENAI_API_BASE" in env_pairs,
-        },
-        "message": "Knowledge base initialized.",
-    }
+            # Seed KB-local .env: inherit LLM credentials from the project-root .env so
+            # a new KB can run queries/compiles out of the box. REST-server variables
+            # (OPENKB_API_TOKEN, OPENKB_KB_ROOT, ...) are filtered out — they scope to
+            # the server, not a single KB. Explicit api_key/openai_api_base params
+            # override anything inherited. Precedence: default -> template -> explicit.
+            env_path = kb_dir / ".env"
+            can_write_env = not env_path.exists()
+            env_pairs: dict[str, str] = {}
+            if can_write_env:
+                if seed_environment:
+                    env_pairs["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+                template_env = template_dir / ".env" if template_dir else None
+                if template_env is not None and template_env.exists():
+                    for raw in template_env.read_text(encoding="utf-8").splitlines():
+                        line = raw.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, _, val = line.partition("=")
+                        key = key.strip()
+                        # Skip REST-server variables; keep LLM/provider config.
+                        if key.startswith("OPENKB_"):
+                            continue
+                        env_pairs[key] = val.strip()
+                if api_key:
+                    env_pairs["LLM_API_KEY"] = api_key
+                if openai_api_base:
+                    env_pairs["OPENAI_API_BASE"] = openai_api_base
+                if env_pairs:
+                    env_path.touch(mode=0o600, exist_ok=False)
+                    atomic_write_text(env_path, "".join(f"{k}={v}\n" for k, v in env_pairs.items()))
+
+        register_kb(kb_dir)
+        return {
+            "kb_dir": str(kb_dir),
+            "created": True,
+            "env_written": {
+                "api_key": "LLM_API_KEY" in env_pairs,
+                "openai_api_base": "OPENAI_API_BASE" in env_pairs,
+            },
+            "message": "Knowledge base initialized.",
+        }
 
 
 def get_kb_list(kb_dir: Path) -> dict[str, Any]:

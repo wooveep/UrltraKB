@@ -50,16 +50,34 @@ class LocalIO(QObject):
         self._sequence += 1
         sequence = self._sequence
         self._callbacks[sequence] = callback
+        generation, binding_error = None, None
+        if kb is not None and not creating:
+            from openkb.lifecycle import current_generation
+
+            kb = kb.expanduser().resolve()
+            try:
+                generation = current_generation(kb)
+            except Exception as exc:
+                binding_error = exc
 
         def run():
             if self._stop.is_set() or obsolete():
                 return None
+            if binding_error is not None:
+                raise binding_error
             with ExitStack() as scope:
                 wait_options = {
                     "cancelled": lambda: self._stop.is_set() or obsolete(),
                     "on_wait": _defer_wait,
                 }
                 if kb is not None:
+                    from openkb.lifecycle import expected_generation
+
+                    scope.enter_context(expected_generation(kb, generation))
+                    if creating:
+                        from openkb.lifecycle import creation_lifecycle
+
+                        scope.enter_context(creation_lifecycle(kb, **wait_options))
                     if not creating and not (
                         (kb / ".openkb").is_dir()
                         if repair

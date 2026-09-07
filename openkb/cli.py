@@ -984,11 +984,13 @@ def delete_kb_cmd(name, yes):
     entire KB directory (raw docs + wiki) and unregisters it from the global
     config. There is no undo.
     """
-    from openkb.config import _is_kb_dir, registered_kbs, resolve_kb_alias
-    from openkb.kb_admin import delete_kb
+    from openkb.config import _is_kb_dir, registered_kbs
+    from openkb.kb_admin import delete_kb, resolve_deletion_alias
+    from openkb.lifecycle import deletion_binding
 
     try:
-        kb_dir = resolve_kb_alias(name)
+        kb_dir = resolve_deletion_alias(name)
+        generation = deletion_binding(kb_dir)
     except ValueError as exc:
         click.echo(f"Invalid KB name: {exc}")
         return
@@ -1006,7 +1008,10 @@ def delete_kb_cmd(name, yes):
         if typed.strip() != name:
             click.echo("Name did not match — aborted.")
             return
-    delete_kb(kb_dir)
+    try:
+        delete_kb(kb_dir, generation=generation)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"Deleted knowledge base '{name}'.")
 
 

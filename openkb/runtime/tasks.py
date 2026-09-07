@@ -126,7 +126,10 @@ class TaskManager:
     def submit(
         self, kb_dir: Path, requests: Sequence[UnitRequest], *, retry_of: str | None = None
     ) -> str:
+        from openkb.lifecycle import current_generation
+
         root = kb_dir.expanduser().resolve()
+        generation = current_generation(root)
         units = tuple(requests)
         if not units or len(units) > 10000 or not all(isinstance(r, REQUEST_TYPES) for r in units):
             raise ValueError("Submit 1–10000 supported execution requests")
@@ -151,7 +154,10 @@ class TaskManager:
             task = _Task(
                 view,
                 units,
-                tuple(UnitIdentity.create(task_id, i, str(root), r) for i, r in enumerate(units)),
+                tuple(
+                    UnitIdentity.create(task_id, i, str(root), r, generation=generation)
+                    for i, r in enumerate(units)
+                ),
             )
             self._persist(task)  # A failed initial record means nothing was accepted.
             self._tasks[task_id] = task

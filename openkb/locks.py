@@ -216,45 +216,51 @@ def kb_lock(
     Async entry points use async_kb_lock so contention never blocks their loop.
     A deadline, if supplied, is an absolute time.monotonic() value.
     """
-    lease = _Lease(openkb_dir / "ingest.lock", exclusive)
-    notified = False
-    try:
-        while True:
+    from openkb.lifecycle import read_lifecycle
+
+    with read_lifecycle(openkb_dir.parent, cancelled=cancelled, on_wait=on_wait, deadline=deadline):
+        lease = _Lease(openkb_dir / "ingest.lock", exclusive)
+        notified = False
+        try:
+            while True:
+                _check_wait(cancelled, deadline)
+                if lease.try_acquire():
+                    break
+                if on_wait and not notified:
+                    on_wait()
+                    notified = True
+                time.sleep(0.05)
+            if lease.first:
+                if exclusive:
+                    _drain_pending_journals(openkb_dir)
+                elif _pending_recovery(openkb_dir):
+                    # Release the read lease before independent exclusive recovery;
+                    # never upgrade a held shared lock in place.
+                    lease.release()
+                    with kb_lock(
+                        openkb_dir,
+                        exclusive=True,
+                        cancelled=cancelled,
+                        on_wait=on_wait,
+                        deadline=deadline,
+                    ):
+                        pass
+                    with kb_lock(
+                        openkb_dir,
+                        exclusive=False,
+                        cancelled=cancelled,
+                        on_wait=on_wait,
+                        deadline=deadline,
+                    ):
+                        yield
+                    return
+            from openkb.lifecycle import validate_execution
+
+            validate_execution(openkb_dir.parent)
             _check_wait(cancelled, deadline)
-            if lease.try_acquire():
-                break
-            if on_wait and not notified:
-                on_wait()
-                notified = True
-            time.sleep(0.05)
-        if lease.first:
-            if exclusive:
-                _drain_pending_journals(openkb_dir)
-            elif _pending_recovery(openkb_dir):
-                # Release the read lease before independent exclusive recovery;
-                # never upgrade a held shared lock in place.
-                lease.release()
-                with kb_lock(
-                    openkb_dir,
-                    exclusive=True,
-                    cancelled=cancelled,
-                    on_wait=on_wait,
-                    deadline=deadline,
-                ):
-                    pass
-                with kb_lock(
-                    openkb_dir,
-                    exclusive=False,
-                    cancelled=cancelled,
-                    on_wait=on_wait,
-                    deadline=deadline,
-                ):
-                    yield
-                return
-        _check_wait(cancelled, deadline)
-        yield
-    finally:
-        lease.release()
+            yield
+        finally:
+            lease.release()
 
 
 @contextlib.asynccontextmanager
@@ -267,43 +273,51 @@ async def async_kb_lock(
     deadline: float | None = None,
 ) -> AsyncIterator[None]:
     """Keep acquisition, protected execution and release in the owning task."""
-    lease = _Lease(openkb_dir / "ingest.lock", exclusive)
-    notified = False
-    try:
-        while True:
+    from openkb.lifecycle import async_read_lifecycle
+
+    async with async_read_lifecycle(
+        openkb_dir.parent, cancelled=cancelled, on_wait=on_wait, deadline=deadline
+    ):
+        lease = _Lease(openkb_dir / "ingest.lock", exclusive)
+        notified = False
+        try:
+            while True:
+                _check_wait(cancelled, deadline)
+                if lease.try_acquire():
+                    break
+                if on_wait and not notified:
+                    on_wait()
+                    notified = True
+                await asyncio.sleep(0.05)
+            if lease.first:
+                if exclusive:
+                    _drain_pending_journals(openkb_dir)
+                elif _pending_recovery(openkb_dir):
+                    lease.release()
+                    async with async_kb_lock(
+                        openkb_dir,
+                        exclusive=True,
+                        cancelled=cancelled,
+                        on_wait=on_wait,
+                        deadline=deadline,
+                    ):
+                        pass
+                    async with async_kb_lock(
+                        openkb_dir,
+                        exclusive=False,
+                        cancelled=cancelled,
+                        on_wait=on_wait,
+                        deadline=deadline,
+                    ):
+                        yield
+                    return
+            from openkb.lifecycle import validate_execution
+
+            validate_execution(openkb_dir.parent)
             _check_wait(cancelled, deadline)
-            if lease.try_acquire():
-                break
-            if on_wait and not notified:
-                on_wait()
-                notified = True
-            await asyncio.sleep(0.05)
-        if lease.first:
-            if exclusive:
-                _drain_pending_journals(openkb_dir)
-            elif _pending_recovery(openkb_dir):
-                lease.release()
-                async with async_kb_lock(
-                    openkb_dir,
-                    exclusive=True,
-                    cancelled=cancelled,
-                    on_wait=on_wait,
-                    deadline=deadline,
-                ):
-                    pass
-                async with async_kb_lock(
-                    openkb_dir,
-                    exclusive=False,
-                    cancelled=cancelled,
-                    on_wait=on_wait,
-                    deadline=deadline,
-                ):
-                    yield
-                return
-        _check_wait(cancelled, deadline)
-        yield
-    finally:
-        lease.release()
+            yield
+        finally:
+            lease.release()
 
 
 def kb_ingest_lock(openkb_dir: Path, **kwargs):
@@ -329,10 +343,13 @@ def kb_repair_lock(openkb_dir: Path, **wait_options) -> Iterator[None]:
     evidence while the durable marker is still present, then explicitly verify
     recovery before it clears that marker.
     """
-    if not openkb_dir.is_dir():
-        raise FileNotFoundError(f"Knowledge base not found: {openkb_dir.parent}")
-    with file_write_lock(openkb_dir / "ingest.lock", **wait_options):
-        yield
+    from openkb.lifecycle import read_lifecycle
+
+    with read_lifecycle(openkb_dir.parent, **wait_options):
+        if not openkb_dir.is_dir():
+            raise FileNotFoundError(f"Knowledge base not found: {openkb_dir.parent}")
+        with file_write_lock(openkb_dir / "ingest.lock", **wait_options):
+            yield
 
 
 def _session_lease(kb_dir: Path, session_id: str) -> _Lease:
@@ -354,21 +371,24 @@ def session_lock(
     on_wait: Callable[[], None] | None = None,
 ) -> Iterator[None]:
     """Conversation identity survives deletion; acquire this before the KB lock."""
-    lease = _session_lease(kb_dir, session_id)
-    notified = False
-    try:
-        while True:
+    from openkb.lifecycle import read_lifecycle
+
+    with read_lifecycle(kb_dir, cancelled=cancelled, on_wait=on_wait):
+        lease = _session_lease(kb_dir, session_id)
+        notified = False
+        try:
+            while True:
+                _check_wait(cancelled, None)
+                if lease.try_acquire():
+                    break
+                if on_wait and not notified:
+                    on_wait()
+                    notified = True
+                time.sleep(0.05)
             _check_wait(cancelled, None)
-            if lease.try_acquire():
-                break
-            if on_wait and not notified:
-                on_wait()
-                notified = True
-            time.sleep(0.05)
-        _check_wait(cancelled, None)
-        yield
-    finally:
-        lease.release()
+            yield
+        finally:
+            lease.release()
 
 
 @contextlib.asynccontextmanager
@@ -379,21 +399,24 @@ async def async_session_lock(
     cancelled: Callable[[], bool] | None = None,
     on_wait: Callable[[], None] | None = None,
 ) -> AsyncIterator[None]:
-    lease = _session_lease(kb_dir, session_id)
-    notified = False
-    try:
-        while True:
+    from openkb.lifecycle import async_read_lifecycle
+
+    async with async_read_lifecycle(kb_dir, cancelled=cancelled, on_wait=on_wait):
+        lease = _session_lease(kb_dir, session_id)
+        notified = False
+        try:
+            while True:
+                _check_wait(cancelled, None)
+                if lease.try_acquire():
+                    break
+                if on_wait and not notified:
+                    on_wait()
+                    notified = True
+                await asyncio.sleep(0.05)
             _check_wait(cancelled, None)
-            if lease.try_acquire():
-                break
-            if on_wait and not notified:
-                on_wait()
-                notified = True
-            await asyncio.sleep(0.05)
-        _check_wait(cancelled, None)
-        yield
-    finally:
-        lease.release()
+            yield
+        finally:
+            lease.release()
 
 
 def _fsync_directory(path: Path) -> None:

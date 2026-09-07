@@ -317,6 +317,7 @@ def run_unit(
     from openkb.add_coordinator import DirtyRollbackError
     from openkb.application.execution import ExecutionContext
     from openkb.inputs import InputChanged
+    from openkb.lifecycle import KnowledgeBaseIncomplete, KnowledgeBaseRemoved, expected_generation
     from openkb.locks import LockCancelled
     from openkb.mutation import RecoveryRequired
 
@@ -329,7 +330,8 @@ def run_unit(
     )
     try:
         try:
-            result = _execute(request, identity, context, prepared_dir)
+            with expected_generation(Path(identity.kb_dir), identity.generation):
+                result = _execute(request, identity, context, prepared_dir)
         except WaitingForLease:
             channel.send("deferred")
             return
@@ -342,6 +344,10 @@ def run_unit(
             result = UnitResult("failed", error="Input changed during preparation")
         except LockCancelled:
             result = UnitResult("stopped")
+        except (KnowledgeBaseRemoved, KnowledgeBaseIncomplete):
+            result = UnitResult(
+                "blocked", error="Knowledge base is unavailable; reopen or diagnose it", halt=True
+            )
         except (RecoveryRequired, DirtyRollbackError):
             result = UnitResult("blocked", error="Knowledge base needs repair", halt=True)
         except Exception as exc:
