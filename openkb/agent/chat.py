@@ -13,8 +13,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, PathCompleter
@@ -377,9 +379,10 @@ async def _run_turn(
         return lv
 
     live = _start_live()
+    stream = result.stream_events()
 
     try:
-        async for event in result.stream_events():
+        async for event in stream:
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
@@ -426,6 +429,9 @@ async def _run_turn(
                     _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
                     need_blank_before_text = True
     finally:
+        if not result.is_complete:
+            result.cancel(mode="after_turn")
+        await stream.aclose()
         if live:
             if segment:
                 live.update(_make_markdown("".join(segment)))
@@ -788,26 +794,26 @@ async def _handle_slash(
         if not session.user_turns:
             _fmt(style, ("class:error", "Nothing to save yet.\n"))
             return None
-        from openkb.locks import kb_ingest_lock
+        from openkb.locks import async_kb_lock
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             path = _save_transcript(kb_dir, session, arg or None)
         _fmt(style, ("class:slash.ok", f"Saved to {path}\n"))
         return None
 
     if head == "/status":
         from openkb.cli import print_status
-        from openkb.locks import kb_read_lock
+        from openkb.locks import async_kb_lock
 
-        with kb_read_lock(kb_dir / ".openkb"):
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
             print_status(kb_dir)
         return None
 
     if head == "/list":
         from openkb.cli import print_list
-        from openkb.locks import kb_read_lock
+        from openkb.locks import async_kb_lock
 
-        with kb_read_lock(kb_dir / ".openkb"):
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
             print_list(kb_dir)
         return None
 
@@ -929,7 +935,7 @@ async def iter_chat_turn_events(
     user_input: str,
     *,
     run_config: Any = None,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for one chat turn and persist the final turn.
 
     Used by the REST ``/chat`` SSE stream: forwards delta/tool_call events from
@@ -943,6 +949,7 @@ async def iter_chat_turn_events(
     async with async_session_lock(kb_dir, session.id):
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             session.reload()
+            append_log(kb_dir / "wiki", "query", user_input)
             new_input = session.history + [{"role": "user", "content": user_input}]
 
             # Accumulate the ordered, interleaved trace (narration text + tool reads) in
@@ -956,55 +963,61 @@ async def iter_chat_turn_events(
             # the `final` frame already avoids by stripping history.
             trace: list[dict[str, Any]] = []
 
-            async for event in iter_agent_response_events(
+            stream = iter_agent_response_events(
                 agent, new_input, max_turns=MAX_TURNS, run_config=run_config
-            ):
-                kind = event["event"]
-                if kind == "delta":
-                    text = event["data"].get("text", "")
-                    if text:
-                        if trace and trace[-1].get("kind") == "text":
-                            trace[-1]["text"] += text
-                        else:
-                            trace.append({"kind": "text", "text": text})
-                    yield event
-                    continue
-                if kind == "tool_call":
-                    d = event["data"]
-                    # Record only read-tool calls (the frontend renders nothing else);
-                    # this keeps write_file's large `content` argument out of the
-                    # persisted trace and off the restore wire.
-                    if d.get("name") in _TRACE_READ_TOOLS:
-                        trace.append(
-                            {"kind": "tool", "name": d.get("name"), "arguments": d.get("arguments")}
-                        )
-                    yield event
-                    continue
-                if kind != "final":
-                    yield event
-                    continue
+            )
+            async with aclosing(stream):
+                async for event in stream:
+                    kind = event["event"]
+                    if kind == "delta":
+                        text = event["data"].get("text", "")
+                        if text:
+                            if trace and trace[-1].get("kind") == "text":
+                                trace[-1]["text"] += text
+                            else:
+                                trace.append({"kind": "text", "text": text})
+                        yield event
+                        continue
+                    if kind == "tool_call":
+                        d = event["data"]
+                        # Record only read-tool calls (the frontend renders nothing else);
+                        # this keeps write_file's large `content` argument out of the
+                        # persisted trace and off the restore wire.
+                        if d.get("name") in _TRACE_READ_TOOLS:
+                            trace.append(
+                                {
+                                    "kind": "tool",
+                                    "name": d.get("name"),
+                                    "arguments": d.get("arguments"),
+                                }
+                            )
+                        yield event
+                        continue
+                    if kind != "final":
+                        yield event
+                        continue
 
-                data = event["data"]
-                answer = data["answer"]
-                # If the model streamed no *substantive* text (answer came from
-                # final_output, or the only streamed deltas were whitespace like " " /
-                # "\n"), ensure the answer still lands in the trace so the restored turn
-                # is not empty. A whitespace-only delta creates a text step, so guarding
-                # on mere presence of a text step would wrongly treat that empty step as
-                # the answer; require a text step with non-whitespace content instead.
-                if answer and not any(
-                    s.get("kind") == "text" and s.get("text", "").strip() for s in trace
-                ):
-                    trace.append({"kind": "text", "text": answer})
-                session.record_turn(user_input, answer, data["history"], trace=trace)
-                yield {
-                    "event": "final",
-                    "data": {
-                        "answer": answer,
-                        "session_id": session.id,
-                        "turn_count": session.turn_count,
-                    },
-                }
+                    data = event["data"]
+                    answer = data["answer"]
+                    # If the model streamed no *substantive* text (answer came from
+                    # final_output, or the only streamed deltas were whitespace like " " /
+                    # "\n"), ensure the answer still lands in the trace so the restored turn
+                    # is not empty. A whitespace-only delta creates a text step, so guarding
+                    # on mere presence of a text step would wrongly treat that empty step as
+                    # the answer; require a text step with non-whitespace content instead.
+                    if answer and not any(
+                        s.get("kind") == "text" and s.get("text", "").strip() for s in trace
+                    ):
+                        trace.append({"kind": "text", "text": answer})
+                    session.record_turn(user_input, answer, data["history"], trace=trace)
+                    yield {
+                        "event": "final",
+                        "data": {
+                            "answer": answer,
+                            "session_id": session.id,
+                            "turn_count": session.turn_count,
+                        },
+                    }
 
 
 async def run_chat(

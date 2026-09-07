@@ -138,11 +138,23 @@ def get_pdf_page_count(path: Path) -> int:
         return doc.page_count
 
 
-def convert_document(
+def convert_document(src: Path, kb_dir: Path, *, staging_dir: Path | None = None) -> ConvertResult:
+    """Convert a fixed input version while retaining its original identity."""
+    from openkb.inputs import prepared_input
+
+    with prepared_input(src) as (prepared, digest):
+        return _convert_prepared_document(
+            src, kb_dir, staging_dir=staging_dir, prepared=prepared, file_hash=digest
+        )
+
+
+def _convert_prepared_document(
     src: Path,
     kb_dir: Path,
     *,
     staging_dir: Path | None = None,
+    prepared: Path,
+    file_hash: str,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -167,7 +179,6 @@ def convert_document(
         # ------------------------------------------------------------------
         # 1. Hash check + identity resolution
         # ------------------------------------------------------------------
-        file_hash = HashRegistry.hash_file(src)
         if registry.is_known(file_hash):
             logger.info("Skipping already-known file: %s", src.name)
             stored = registry.get(file_hash) or {}
@@ -193,13 +204,13 @@ def convert_document(
             raw_dest = src
         else:
             raw_dest = raw_dir / f"{doc_name}{src.suffix.lower()}"
-            shutil.copy2(src, raw_dest)
+            shutil.copy2(prepared, raw_dest)
 
         # ------------------------------------------------------------------
         # 3. PDF long-doc detection
         # ------------------------------------------------------------------
         if src.suffix.lower() == ".pdf":
-            page_count = get_pdf_page_count(src)
+            page_count = get_pdf_page_count(prepared)
             if page_count >= threshold:
                 logger.info(
                     "Long PDF detected (%d pages >= %d threshold): %s",
@@ -223,11 +234,11 @@ def convert_document(
         images_dir.mkdir(parents=True, exist_ok=True)
 
         if src.suffix.lower() == ".md":
-            markdown = src.read_text(encoding="utf-8")
+            markdown = prepared.read_text(encoding="utf-8")
             markdown = copy_relative_images(markdown, src.parent, doc_name, images_dir)
         elif src.suffix.lower() == ".pdf":
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
-            markdown = convert_pdf_with_images(src, doc_name, images_dir)
+            markdown = convert_pdf_with_images(prepared, doc_name, images_dir)
         else:
             # Non-PDF, non-MD: use markitdown (docx, pptx, html, etc.).
             # Imported lazily: markitdown pulls in magika → onnxruntime (tens
@@ -239,7 +250,7 @@ def convert_document(
             from markitdown import MarkItDown
 
             mid = MarkItDown()
-            result = mid.convert(str(src), keep_data_uris=True)
+            result = mid.convert(str(prepared), keep_data_uris=True)
             markdown = result.text_content
             markdown = extract_base64_images(markdown, doc_name, images_dir)
 

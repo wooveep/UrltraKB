@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import logging
 import re
-import shutil
 from pathlib import Path
 
 import pymupdf
@@ -271,7 +270,9 @@ def copy_relative_images(markdown: str, source_dir: Path, doc_name: str, images_
             assigned[src] = filename
             taken.add(filename)
             images_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, images_dir / filename)
+            from openkb.inputs import copy_stable
+
+            copy_stable(src, images_dir / filename)
 
         new_ref = md_image_ref(alt, doc_name, filename)
         result = result.replace(match.group(0), new_ref, 1)

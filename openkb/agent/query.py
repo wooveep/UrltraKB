@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 
@@ -146,7 +147,7 @@ async def iter_agent_response_events(
     *,
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
     The CLI renders these events to stdout; the REST API serializes the same
@@ -167,34 +168,43 @@ async def iter_agent_response_events(
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
 
-    async for event in result.stream_events():
-        if isinstance(event, RawResponsesStreamEvent):
-            if isinstance(event.data, ResponseTextDeltaEvent):
-                text = event.data.delta
-                if text:
-                    collected.append(text)
-                    yield {"event": "delta", "data": {"text": text}}
-        elif isinstance(event, RunItemStreamEvent):
-            item = event.item
-            if item.type == "tool_call_item":
-                raw_item = item.raw_item
-                name = getattr(raw_item, "name", "?")
-                arguments = getattr(raw_item, "arguments", "") or ""
-                call_id = _resolve_tool_call_id(raw_item)
-                if call_id:
-                    pending_calls[call_id] = (name, arguments)
-                yield {"event": "tool_call", "data": {"name": name, "arguments": arguments}}
-            elif item.type == "tool_call_output_item":
-                raw_item = item.raw_item
-                call_id = _resolve_tool_call_id(raw_item)
-                name, arguments = (
-                    pending_calls.pop(call_id, ("", "")) if isinstance(call_id, str) else ("", "")
-                )
-                payload = artifact_event_from_write(
-                    name, arguments, str(getattr(item, "output", "") or "")
-                )
-                if payload is not None:
-                    yield {"event": "artifact", "data": payload}
+    stream = result.stream_events()
+    try:
+        async for event in stream:
+            if isinstance(event, RawResponsesStreamEvent):
+                if isinstance(event.data, ResponseTextDeltaEvent):
+                    text = event.data.delta
+                    if text:
+                        collected.append(text)
+                        yield {"event": "delta", "data": {"text": text}}
+            elif isinstance(event, RunItemStreamEvent):
+                item = event.item
+                if item.type == "tool_call_item":
+                    raw_item = item.raw_item
+                    name = getattr(raw_item, "name", "?")
+                    arguments = getattr(raw_item, "arguments", "") or ""
+                    call_id = _resolve_tool_call_id(raw_item)
+                    if call_id:
+                        pending_calls[call_id] = (name, arguments)
+                    yield {"event": "tool_call", "data": {"name": name, "arguments": arguments}}
+                elif item.type == "tool_call_output_item":
+                    raw_item = item.raw_item
+                    call_id = _resolve_tool_call_id(raw_item)
+                    name, arguments = (
+                        pending_calls.pop(call_id, ("", ""))
+                        if isinstance(call_id, str)
+                        else ("", "")
+                    )
+                    payload = artifact_event_from_write(
+                        name, arguments, str(getattr(item, "output", "") or "")
+                    )
+                    if payload is not None:
+                        yield {"event": "artifact", "data": payload}
+
+    finally:
+        if not result.is_complete:
+            result.cancel(mode="after_turn")
+        await stream.aclose()
 
     answer = "".join(collected).strip()
     if not answer:
@@ -432,9 +442,10 @@ async def run_query(
     )
     collected: list[str] = []
     segment: list[str] = []
+    stream_events = result.stream_events()
     try:
         live = _start_live()
-        async for event in result.stream_events():
+        async for event in stream_events:
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
@@ -483,6 +494,9 @@ async def run_query(
                 elif item.type == "tool_call_output_item":
                     pass
     finally:
+        if not result.is_complete:
+            result.cancel(mode="after_turn")
+        await stream_events.aclose()
         if live:
             if segment:
                 live.update(_make_markdown("".join(segment)))

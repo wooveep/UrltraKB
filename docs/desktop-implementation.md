@@ -35,3 +35,45 @@ isolated workers and native rendering; P3 completes the daily workflow; P4
 retires the browser product only after that workflow passes; P5 validates the
 actual Debian and Windows packages and matching source/licence materials.
 Unexecuted checks and missing platform evidence remain pending.
+
+## P1 checkpoint — shared operations and coordination (2026-09-07)
+
+This is an implementation checkpoint, not completion of issue #1 or the P1 gate.
+Creation/opening, document import, page read/save, settings and answer/chat
+operations now have shared application entry points. Legacy CLI/REST adapters
+retain their response and save-name policies. Settings patches preserve omitted,
+set and clear states and roll back both config and credentials on failure.
+Optional execution contexts capture complete settings and environment in memory;
+core readers use copies of the captured values throughout that execution.
+
+Document conversion reads a verified private copy while preserving the original
+registry identity and relative-image directory. Source and copied-image versions
+are checked during preparation. API upload ownership and the full watcher input
+protocol still need migration before those paths are connected to the GUI.
+
+The first parallel review found an API event-loop deadlock, a URL fetch/cleanup
+race, and stream teardown that could release write protection before the SDK
+settled. Fixes offload synchronous read locks, restore the whole URL item lease,
+and explicitly close nested stream generators before releasing chat leases.
+It also found duplicate display-type mapping and missing config parsing on open;
+these have been corrected. The sync/async lock-flow duplication remains a review
+judgment call, and the full feature remains incomplete.
+
+| Check | Actual result |
+| --- | --- |
+| Full `pytest -q` | 1261 passed, 2 existing mocked-coroutine warnings, 12.28 seconds |
+| `ruff check .` / `ruff format --check .` | Passed / 135 files formatted |
+| `mypy openkb` | Passed, 67 source files |
+| Real Debian spawn/OS lock probe, Python 3.12.13 | 16.03 s same-KB contention; cancellable waiter, independent KB, process reaping passed |
+| Real Windows 11 x86_64 spawn/OS lock probe, Python 3.12.13 | 16.02 s same-KB contention; cancellable waiter, independent KB, process reaping passed |
+
+The Windows host reports Windows 11 build 26100.9168. Its probe uses an isolated
+Python installation and venv in `OpenKB-native-20260907`; existing installations
+were not replaced. The portable desktop package, graphical interaction and real
+model/generator distribution acceptance have **not** been run there yet.
+
+Remaining P1/P2 work includes the controlled repair path, structured per-item
+outcomes, actual worker isolation/configuration tests and reliable task results.
+Other management/generator writers must receive full-operation protection before
+being exposed to concurrent desktop tasks. P3–P5 and browser-product retirement
+remain pending; prototype evidence is not substituted for product acceptance.

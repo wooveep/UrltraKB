@@ -150,7 +150,7 @@ def _fake_event_stream(events: list[dict[str, Any]]):
 
 
 @pytest.mark.asyncio
-async def test_whitespace_only_delta_then_final_answer_lands_in_trace(tmp_path, monkeypatch):
+async def test_whitespace_only_delta_then_final_answer_lands_in_trace(kb_dir, monkeypatch):
     """A whitespace-only streamed delta must not swallow the final answer.
 
     Regression: a `" "` / `"\\n"` delta creates a text step, so a
@@ -158,7 +158,7 @@ async def test_whitespace_only_delta_then_final_answer_lands_in_trace(tmp_path, 
     trace" and never records the real answer -> a restored turn renders empty.
     The guard now requires a text step with non-whitespace content.
     """
-    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+    session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
 
     events = [
         {"event": "delta", "data": {"text": " "}},
@@ -184,9 +184,9 @@ async def test_whitespace_only_delta_then_final_answer_lands_in_trace(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_substantive_streamed_text_is_not_duplicated_by_final(tmp_path, monkeypatch):
+async def test_substantive_streamed_text_is_not_duplicated_by_final(kb_dir, monkeypatch):
     """When real text was streamed, the final answer must not be appended again."""
-    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+    session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
 
     events = [
         {"event": "delta", "data": {"text": "The real "}},
@@ -218,3 +218,50 @@ def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
     assert delete_session(kb_dir, session.id)
     with pytest.raises(FileNotFoundError):
         session.record_turn("Three", "Must not resurrect", [])
+
+
+@pytest.mark.asyncio
+async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb_dir, monkeypatch):
+    import asyncio
+
+    from agents import RawResponsesStreamEvent, Runner
+    from openai.types.responses import ResponseTextDeltaEvent
+
+    from openkb.locks import kb_ingest_lock_held
+
+    settled = asyncio.Event()
+    stop_requested = asyncio.Event()
+
+    class ModelRun:
+        is_complete = False
+
+        def cancel(self, mode="immediate"):
+            assert mode == "after_turn"
+            stop_requested.set()
+
+        async def stream_events(self):
+            try:
+                yield RawResponsesStreamEvent(
+                    data=ResponseTextDeltaEvent(
+                        type="response.output_text.delta",
+                        delta="Partial",
+                        content_index=0,
+                        item_id="message",
+                        output_index=0,
+                        sequence_number=0,
+                        logprobs=[],
+                    )
+                )
+                await stop_requested.wait()
+            finally:
+                await stop_requested.wait()
+                assert kb_ingest_lock_held(kb_dir / ".openkb")
+                settled.set()
+
+    monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: ModelRun())
+    session = ChatSession.new(kb_dir, "test", "en")
+    stream = iter_chat_turn_events(object(), session, "Question")
+    assert (await anext(stream))["event"] == "delta"
+    await stream.aclose()
+    assert settled.is_set()
+    assert not session.path.exists()

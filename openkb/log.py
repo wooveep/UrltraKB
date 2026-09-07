@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from openkb.locks import atomic_write_text
+
 
 def append_log(wiki_dir: Path, operation: str, description: str) -> None:
     """Append an entry to wiki/log.md.
@@ -15,8 +17,5 @@ def append_log(wiki_dir: Path, operation: str, description: str) -> None:
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     entry = f"## [{date_str}] {operation} | {description}\n\n"
 
-    if not log_path.exists():
-        log_path.write_text("# Operations Log\n\n" + entry, encoding="utf-8")
-    else:
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(entry)
+    content = log_path.read_text(encoding="utf-8") if log_path.exists() else "# Operations Log\n\n"
+    atomic_write_text(log_path, content + entry)

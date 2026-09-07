@@ -90,7 +90,7 @@ async def edit_page_endpoint(
         raise HTTPException(status_code=404, detail=f"Page not found: {request.path}")
     return PageEditResponse(
         status=result.status,
-        target=request.path,
+        target=result.page.path,
         ghosts_stripped=list(result.ghosts_stripped),
         content=result.page.content,
     )

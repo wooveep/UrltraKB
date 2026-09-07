@@ -13,6 +13,7 @@ from typing import Literal
 
 from openkb.add_coordinator import _cleanup_staging_dirs
 from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
+from openkb.application.execution import ExecutionContext
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
 from openkb.locks import kb_ingest_lock
@@ -347,7 +348,12 @@ class DocumentResult:
 
 
 def import_document(
-    kb_dir: Path, source: Path, *, bundle=None, on_event: Callable[[dict], None] | None = None
+    kb_dir: Path,
+    source: Path,
+    *,
+    bundle=None,
+    on_event: Callable[[dict], None] | None = None,
+    context: ExecutionContext | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
     from openkb.state import HashRegistry
@@ -358,8 +364,20 @@ def import_document(
         raise ValueError(f"Not a knowledge base: {root}")
     if not source.is_file():
         raise FileNotFoundError(source)
-    with kb_ingest_lock(root / ".openkb"):
-        outcome = add_single_file(source, root, bundle=bundle, on_event=on_event)
+    from contextlib import nullcontext
+
+    with kb_ingest_lock(
+        root / ".openkb",
+        cancelled=context.cancelled if context else None,
+        on_wait=context.waiting if context else None,
+    ):
+        with context.begin(root) if context else nullcontext(bundle) as credentials:
+            outcome = add_single_file(
+                source,
+                root,
+                bundle=credentials,
+                on_event=on_event or (context.on_event if context else None),
+            )
         entries = HashRegistry(root / ".openkb/hashes.json")
         meta = entries.get_by_path(_registry_path(source, root))
         resources = []

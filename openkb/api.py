@@ -188,7 +188,7 @@ def create_app() -> FastAPI:
         kb: str = Query(...),
         _: None = Depends(require_bearer_token),
     ) -> KbConfigResponse:
-        return read_kb_config(_resolve_kb(kb))
+        return await run_in_threadpool(read_kb_config, _resolve_kb(kb))
 
     @app.patch("/api/v1/kb/config", response_model=KbConfigResponse)
     async def kb_config_patch_endpoint(
@@ -199,8 +199,8 @@ def create_app() -> FastAPI:
         # the per-KB mutation lock so two concurrent patches cannot drop fields.
         kb_dir = _resolve_kb(request.kb)
         async with _kb_mutation_lock(request.kb):
-            apply_kb_config_patch(kb_dir, request)
-        return read_kb_config(kb_dir)
+            await run_in_threadpool(apply_kb_config_patch, kb_dir, request)
+        return await run_in_threadpool(read_kb_config, kb_dir)
 
     @app.post("/api/v1/init", response_model=InitResponse)
     async def init_endpoint(
@@ -258,7 +258,7 @@ def create_app() -> FastAPI:
         # then stream the bodies outside it so a large or slow upload does not
         # block other same-KB mutations (lint/recompile/other adds).
         async with _kb_mutation_lock(kb):
-            reserved = _reserve_add_uploads(resolved_kb_dir, files)
+            reserved = await run_in_threadpool(_reserve_add_uploads, resolved_kb_dir, files)
         saved_uploads = await _write_add_uploads(reserved, files)
         if _parse_stream_form(stream):
             return StreamingResponse(
@@ -286,18 +286,21 @@ def create_app() -> FastAPI:
             )
 
         try:
-            answer = await run_query(
-                request.question,
-                kb_dir,
-                model,
-                stream=False,
-                run_config=run_config,
-                bundle=bundle,
-            )
-            append_log(kb_dir / "wiki", "query", request.question)
-            saved_path = (
-                _save_query_answer(kb_dir, request.question, answer) if request.save else None
-            )
+            from openkb.locks import async_kb_lock
+
+            async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+                answer = await run_query(
+                    request.question,
+                    kb_dir,
+                    model,
+                    stream=False,
+                    run_config=run_config,
+                    bundle=bundle,
+                )
+                append_log(kb_dir / "wiki", "query", request.question)
+                saved_path = (
+                    _save_query_answer(kb_dir, request.question, answer) if request.save else None
+                )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -327,7 +330,6 @@ def create_app() -> FastAPI:
 
         try:
             answer = ""
-            append_log(kb_dir / "wiki", "query", request.message)
             agent = build_chat_session_agent(kb_dir, session, bundle=bundle)
             async for event in iter_chat_turn_events(
                 agent, session, request.message, run_config=run_config
@@ -414,7 +416,7 @@ def create_app() -> FastAPI:
     ) -> ListResponse:
         kb_dir = _resolve_kb(request.kb)
         try:
-            return ListResponse(**get_kb_list(kb_dir))
+            return ListResponse(**await run_in_threadpool(get_kb_list, kb_dir))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -428,7 +430,7 @@ def create_app() -> FastAPI:
     ) -> StatusResponse:
         kb_dir = _resolve_kb(request.kb)
         try:
-            return StatusResponse(**get_kb_status(kb_dir))
+            return StatusResponse(**await run_in_threadpool(get_kb_status, kb_dir))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

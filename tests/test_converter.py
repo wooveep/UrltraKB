@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from openkb.converter import convert_document, get_pdf_page_count
+from openkb.state import HashRegistry
 
 # ---------------------------------------------------------------------------
 # get_pdf_page_count
@@ -153,17 +155,25 @@ class TestConvertDocumentMarkItDown:
                 return_value="converted markdown",
             ) as mock_extract,
         ):
-            mock_markitdown.return_value.convert.return_value = mock_result
+
+            def convert(path, *, keep_data_uris):
+                src.write_bytes(b"changed during conversion")
+                assert Path(path).read_bytes() == b"fake docx"
+                assert keep_data_uris is True
+                return mock_result
+
+            mock_markitdown.return_value.convert.side_effect = convert
 
             result = convert_document(src, kb_dir)
 
         mock_markitdown.assert_called_once_with()
-        mock_markitdown.return_value.convert.assert_called_once_with(str(src), keep_data_uris=True)
         mock_extract.assert_called_once()
         assert result.skipped is False
         assert result.is_long_doc is False
         assert result.source_path is not None
         assert result.source_path.read_text(encoding="utf-8") == "converted markdown"
+        assert result.raw_path.read_bytes() == b"fake docx"
+        assert result.file_hash == HashRegistry.hash_file(result.raw_path)
 
 
 # ---------------------------------------------------------------------------
