@@ -142,19 +142,26 @@ def delete_wiki_page(kb_dir: Path, path: str, *, dry_run: bool = False) -> dict:
         # the ACTUAL on-disk stem so the exact-match cleanup works on a
         # case-insensitive FS where the ref may differ in case.
         real_stem = _on_disk_stem(wiki / section, stem)
-        page.unlink(missing_ok=True)
-        remove_doc_from_index(
-            wiki,
-            "",
-            concept_slugs_deleted=[real_stem] if section == "concepts" else [],
-            entity_slugs_deleted=[real_stem] if section == "entities" else [],
-        )
         # Demote now-dangling inbound [[links]] to plain text — in the backlink
         # pages AND in index.md (a [[target]] embedded in another entry's brief;
         # the page's own entry line was already removed above). Surgical restrict
         # leaves pre-existing dangling links elsewhere untouched (like remove).
         restrict = [wiki / f"{ref}.md" for ref in backlinks] + [wiki / "index.md"]
-        files_changed, ghosts_stripped = fix_broken_links(wiki, restrict_to=restrict)
+        from openkb.mutation import mutation_scope
+
+        with mutation_scope(
+            kb_dir,
+            [page, *restrict],
+            operation="delete-page",
+        ):
+            page.unlink(missing_ok=True)
+            remove_doc_from_index(
+                wiki,
+                "",
+                concept_slugs_deleted=[real_stem] if section == "concepts" else [],
+                entity_slugs_deleted=[real_stem] if section == "entities" else [],
+            )
+            files_changed, ghosts_stripped = fix_broken_links(wiki, restrict_to=restrict)
 
     return {
         "status": "deleted",
@@ -222,7 +229,10 @@ def edit_wiki_page(kb_dir: Path, path: str, content: str) -> dict:
         # legitimately opens with a '---' block must not be mistaken for
         # frontmatter and silently dropped. The existing block is re-attached.
         cleaned_body, ghosts = strip_ghost_wikilinks(content, list_existing_wiki_targets(wiki))
-        atomic_write_text(page, fm_block + cleaned_body)
+        from openkb.mutation import mutation_scope
+
+        with mutation_scope(kb_dir, [page], operation="edit-page"):
+            atomic_write_text(page, fm_block + cleaned_body)
 
     return {
         "status": "saved",
