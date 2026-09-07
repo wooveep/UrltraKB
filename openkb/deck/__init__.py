@@ -32,3 +32,6 @@ def deck_dir(kb_dir: Path, deck_name: str) -> Path:
 def deck_workspace_dir(kb_dir: Path, deck_name: str) -> Path:
     """``<kb>/output/decks/<name>-workspace`` — iteration history for a deck."""
     return decks_root(kb_dir) / f"{deck_name}-workspace"
+
+
+DEFAULT_DECK_SKILL = "openkb-deck-neon"

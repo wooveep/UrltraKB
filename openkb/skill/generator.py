@@ -26,6 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Union
 
+from openkb.agent.skills import PreparedSkill
 from openkb.config import LlmCredentialBundle
 from openkb.deck import deck_dir
 from openkb.deck.creator import DEFAULT_DECK_SKILL, run_deck_create
@@ -69,6 +70,7 @@ class Generator:
         critique: bool = False,
         skill_name: str | None = None,
         bundle: LlmCredentialBundle | None = None,
+        prepared: PreparedSkill | None = None,
     ) -> None:
         """Args:
         skill_name: For ``target_type="deck"``, which deck skill to use.
@@ -91,10 +93,12 @@ class Generator:
         self.critique = critique
         self.skill_name = skill_name or DEFAULT_DECK_SKILL
         self.bundle = bundle
+        self.prepared = prepared
         self.output_dir = (
             deck_dir(kb_dir, name) if target_type == "deck" else skill_dir(kb_dir, name)
         )
         self.validation: AnyValidationResult | None = None
+        self.stage = "generation"
 
     async def run(self) -> Path:
         """Execute the generator. Returns the path to the produced artifact.
@@ -113,8 +117,11 @@ class Generator:
                 model=self.model,
                 bundle=self.bundle,
             )
+            self.stage = "validation"
             self.validation = validate_skill(self.output_dir)
+            self.stage = "marketplace"
             regenerate_marketplace(self.kb_dir)
+            self.stage = "completed"
             return self.output_dir
 
         # target_type == "deck"
@@ -125,10 +132,12 @@ class Generator:
             model=self.model,
             critique=self.critique,
             skill_name=self.skill_name,
+            **({"prepared": self.prepared} if self.prepared is not None else {}),
             bundle=self.bundle,
         )
         # run_deck_create returns a SkillRunResult-like (or Path) — use its
         # validation if present; otherwise fall back to None (skill didn't
         # declare a grammar to validate against).
         self.validation = deck_result.validation
+        self.stage = "completed"
         return self.output_dir

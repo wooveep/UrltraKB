@@ -609,35 +609,37 @@ async def _iter_deck(
     this directly. Mirrors ``iter_recompile``'s split so the SSE formatting
     lives only in the thin ``_stream_deck`` wrapper, never here.
     """
-    from openkb.cli import _preflight_skill_new
-    from openkb.skill.generator import Generator
+    from openkb.application.generators import (
+        GenerationOptions,
+        generate_artifact,
+        preflight_generation,
+    )
 
     yield {"event": "start", "endpoint": "deck"}
-    err = _preflight_skill_new(kb_dir, request.name)
+    err = preflight_generation(kb_dir, request.name)
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
-    gen = Generator(
-        target_type="deck",
-        name=request.name,
-        intent=request.intent,
-        kb_dir=kb_dir,
-        model=model,
-        bundle=bundle,
-    )
     try:
-        await gen.run()
+        result = await generate_artifact(
+            kb_dir,
+            GenerationOptions("deck", request.name, request.intent, overwrite="overlay"),
+            model=model,
+            bundle=bundle,
+        )
     except Exception as exc:
         yield {"event": "error", "code": 500, "message": f"Deck generation failed: {exc}"}
         return
-    yield {
-        "event": "final",
-        "name": request.name,
-        "status": "done",
-        "path": str(gen.output_dir),
-    }
+    if result.status != "completed":
+        yield {
+            "event": "error",
+            "code": 400 if result.status == "invalid" and result.error_type is None else 500,
+            "message": f"Deck generation failed: {result.message}",
+        }
+        return
+    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
 
 
 async def _stream_deck(
@@ -671,35 +673,37 @@ async def _iter_skill(
     bundle=None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Raw event generator for skill generation — same shape as ``_iter_deck``."""
-    from openkb.cli import _preflight_skill_new
-    from openkb.skill.generator import Generator
+    from openkb.application.generators import (
+        GenerationOptions,
+        generate_artifact,
+        preflight_generation,
+    )
 
     yield {"event": "start", "endpoint": "skill"}
-    err = _preflight_skill_new(kb_dir, request.name)
+    err = preflight_generation(kb_dir, request.name)
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
-    gen = Generator(
-        target_type="skill",
-        name=request.name,
-        intent=request.intent,
-        kb_dir=kb_dir,
-        model=model,
-        bundle=bundle,
-    )
     try:
-        await gen.run()
+        result = await generate_artifact(
+            kb_dir,
+            GenerationOptions("skill", request.name, request.intent, overwrite="overlay"),
+            model=model,
+            bundle=bundle,
+        )
     except Exception as exc:
         yield {"event": "error", "code": 500, "message": f"Skill generation failed: {exc}"}
         return
-    yield {
-        "event": "final",
-        "name": request.name,
-        "status": "done",
-        "path": str(gen.output_dir),
-    }
+    if result.status != "completed":
+        yield {
+            "event": "error",
+            "code": 400 if result.status == "invalid" and result.error_type is None else 500,
+            "message": f"Skill generation failed: {result.message}",
+        }
+        return
+    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
 
 
 async def _stream_skill(

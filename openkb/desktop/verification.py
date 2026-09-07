@@ -327,6 +327,14 @@ print("OpenKB")
             checks.append(
                 "real SDK query/save and two persisted chat turns against local HTTP fixture"
             )
+        from openkb.desktop.verification_artifacts import verify_artifacts
+
+        verify_artifacts(
+            window, other if args.model_base else first, wait_until, model=bool(args.model_base)
+        )
+        checks.append(
+            "native artifacts: graph, SDK generation, archive consent, supporting-file exports"
+        )
         if args.corpus:
             from openkb.desktop.verification_rendering import verify_corpus
 

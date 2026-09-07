@@ -99,6 +99,66 @@ class Fixture(BaseHTTPRequestHandler):
             self.wfile.write(b"data: [DONE]\n\n")
         else:
             content = completion(body)
+            message = {"role": "assistant", "content": content}
+            reason = "stop"
+            available = {tool.get("function", {}).get("name") for tool in body.get("tools", [])}
+            prompt = "\n".join(str(message.get("content", "")) for message in body["messages"])
+            calls = []
+            if not any(message.get("role") == "tool" for message in body["messages"]):
+                if "write_skill_file" in available:
+                    name = re.search(r"Compile the skill '([^']+)'", prompt).group(1)
+                    calls = [
+                        (
+                            "write_skill_file",
+                            "SKILL.md",
+                            f"---\nname: {name}\n"
+                            "description: Explain knowledge clearly for native verification.\n"
+                            "---\n# 原生产物\n\nRead references/support.md before answering.",
+                        ),
+                        (
+                            "write_skill_file",
+                            "references/support.md",
+                            "# 支持材料\n\n来自已导入知识的参考内容。",
+                        ),
+                    ]
+                elif (
+                    "write_file" in available
+                    and "# Skill instructions (you are this skill)" in prompt
+                ):
+                    path = re.search(r"write_file call\): (\S+)", prompt).group(1)
+                    html = '<!doctype html><html><head><meta charset="utf-8"></head><body>'
+                    html += "".join(
+                        f'<section class="slide" data-type="{kind}">'
+                        f"<h1>原生生成 · {kind}</h1></section>"
+                        for kind in (
+                            "cover",
+                            "thesis",
+                            "quote",
+                            "data",
+                            "thesis",
+                            "compare",
+                            "chapter",
+                            "closing",
+                        )
+                    )
+                    calls = [("write_file", path, html + "</body></html>")]
+            if calls:
+                message = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"verification-{index}",
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps({"path": path, "content": text}),
+                            },
+                        }
+                        for index, (name, path, text) in enumerate(calls)
+                    ],
+                }
+                reason = "tool_calls"
             event = {
                 "id": "native-verification",
                 "object": "chat.completion",
@@ -107,8 +167,8 @@ class Fixture(BaseHTTPRequestHandler):
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": content},
-                        "finish_reason": "stop",
+                        "message": message,
+                        "finish_reason": reason,
                     }
                 ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},

@@ -37,6 +37,7 @@ from openkb.agent.tools import (
 from openkb.agent.tools import (
     read_wiki_image as _read_wiki_image,
 )
+from openkb.locks import atomic_write_text
 
 
 def list_wiki_dir(directory: str, wiki_root: str) -> str:
@@ -99,5 +100,5 @@ def write_skill_file(path: str, content: str, skill_root: str) -> str:
     if not full.is_relative_to(root):
         return "Access denied: path escapes skill root."
     full.parent.mkdir(parents=True, exist_ok=True)
-    full.write_text(content, encoding="utf-8")
+    atomic_write_text(full, content)
     return f"Written: {path}"

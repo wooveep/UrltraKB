@@ -19,6 +19,7 @@ This module exists only to:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from openkb.agent.skill_runner import (
     MAX_TURNS,
@@ -27,11 +28,10 @@ from openkb.agent.skill_runner import (
     SkillRunResult,
     run_skill,
 )
+from openkb.agent.skills import PreparedSkill
 from openkb.config import LlmCredentialBundle
+from openkb.deck import DEFAULT_DECK_SKILL as DEFAULT_DECK_SKILL
 from openkb.deck import deck_dir
-
-DEFAULT_DECK_SKILL = "openkb-deck-neon"
-"""Skill name routed to when the CLI / chat doesn't pass ``--skill``."""
 
 CRITIC_SKILL = "openkb-html-critic"
 """Skill chained after the producer when ``--critique`` is set."""
@@ -49,6 +49,7 @@ async def run_deck_create(
     critique: bool,
     skill_name: str = DEFAULT_DECK_SKILL,
     bundle: LlmCredentialBundle | None = None,
+    prepared: PreparedSkill | None = None,
 ) -> SkillRunResult:
     """Compile a single deck from the KB's wiki via the chosen skill.
 
@@ -72,9 +73,14 @@ async def run_deck_create(
     # Ensure the conventional deck dir exists. Skills that use
     # output_path_template = "output/decks/{slug}/index.html" need this;
     # skills that pick their own location won't be hindered.
-    deck_root = deck_dir(kb_dir, deck_name)
+    deck_root = (
+        prepared.output_path.parent
+        if prepared and prepared.output_path
+        else deck_dir(kb_dir, deck_name)
+    )
     deck_root.mkdir(parents=True, exist_ok=True)
 
+    preparation: dict[str, Any] = {"prepared": prepared} if prepared is not None else {}
     try:
         result = await run_skill(
             skill_name=skill_name,
@@ -82,6 +88,7 @@ async def run_deck_create(
             kb_dir=kb_dir,
             model=model,
             slug=deck_name,
+            **preparation,
             max_turns=MAX_TURNS_WITH_CRITIQUE if critique else MAX_TURNS,
             bundle=bundle,
         )

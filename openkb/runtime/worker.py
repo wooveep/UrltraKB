@@ -16,6 +16,8 @@ from openkb.runtime.requests import (
     ContinueConversation,
     DeleteConversation,
     ExportConversation,
+    GenerateArtifact,
+    GenerateGraph,
     ImportFile,
     ImportUrl,
     RecompileDocument,
@@ -125,7 +127,47 @@ def _execute(
             if session_result.status == "missing"
             else None,
         )
+    if isinstance(request, GenerateGraph):
+        from openkb.application.artifacts import generate_graph
+
+        graph = generate_graph(root, context=context)
+        return UnitResult(
+            "completed" if graph.path else "skipped",
+            resources=(str(graph.path),) if graph.path else (),
+            changes=("updated: output/visualize/graph.html",) if graph.path else (),
+            error=None if graph.path else "No wiki pages to visualize",
+        )
     context.install_process_settings = True
+    if isinstance(request, GenerateArtifact):
+        import asyncio
+
+        from openkb.application.generators import GenerationOptions, generate_artifact
+
+        generated = asyncio.run(
+            generate_artifact(
+                root,
+                GenerationOptions(
+                    request.target_type,
+                    request.name,
+                    request.intent,
+                    overwrite="archive" if request.replace else "refuse",
+                    version=request.version,
+                ),
+                context=context,
+            )
+        )
+        return UnitResult(
+            generated.status if generated.status in {"completed", "blocked"} else "failed",
+            resources=generated.resources,
+            changes=generated.changes,
+            quality=generated.quality,
+            unfinished=generated.unfinished,
+            error=generated.message,
+            halt=generated.status == "blocked",
+            output="\n".join([*generated.validation.errors, *generated.validation.warnings])
+            if generated.validation
+            else "",
+        )
     if isinstance(request, CheckKnowledge):
         import asyncio
 

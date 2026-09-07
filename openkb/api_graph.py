@@ -26,9 +26,9 @@ async def graph_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> GraphResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-    from openkb.visualize import build_graph
+    from openkb.application.artifacts import read_graph
 
-    graph = await run_in_threadpool(build_graph, kb_dir / "wiki")
+    graph = await run_in_threadpool(read_graph, kb_dir)
     return GraphResponse(**graph)
 
 
@@ -41,7 +41,7 @@ async def graph_html_endpoint(
     # writes to disk) for the Workbench's sandboxed iframe / new tab. The POST
     # JSON variant above feeds the in-chat card's node/edge counts.
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    from openkb.visualize import build_graph, render_html
+    from openkb.application.artifacts import graph_html
 
-    html = await run_in_threadpool(lambda: render_html(build_graph(kb_dir / "wiki")))
+    html = await run_in_threadpool(graph_html, kb_dir)
     return HTMLResponse(content=html)

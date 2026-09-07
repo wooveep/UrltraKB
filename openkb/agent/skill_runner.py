@@ -33,16 +33,16 @@ from typing import Any, Optional
 from agents import Runner, function_tool
 
 from openkb.agent.query import build_query_agent, build_run_config_from_bundle
-from openkb.agent.skills import _parse_frontmatter, scan_local_skills
+from openkb.agent.skills import (
+    PreparedSkill,
+    prepare_skill,
+)
+from openkb.agent.skills import SkillNotFoundError as SkillNotFoundError
 from openkb.agent.tools import read_kb_file, write_kb_file
 from openkb.config import LlmCredentialBundle
 
 MAX_TURNS = 80
 MAX_TURNS_WITH_CRITIQUE = 120
-
-
-class SkillNotFoundError(RuntimeError):
-    """Raised when the requested skill can't be located in any skill root."""
 
 
 @dataclass
@@ -74,6 +74,7 @@ async def run_skill(
     slug: Optional[str] = None,
     extra_skill_roots: tuple[str | Path, ...] = (),
     bundle: LlmCredentialBundle | None = None,
+    prepared: PreparedSkill | None = None,
 ) -> SkillRunResult:
     """Load ``skill_name`` and run it as an agent with ``intent``.
 
@@ -117,26 +118,14 @@ async def run_skill(
         RuntimeError: on turn-cap, model error, or missing
             output file after a templated-path run.
     """
-    skills = scan_local_skills(kb_dir, extra_roots=extra_skill_roots)
-    match = next((s for s in skills if s["name"] == skill_name), None)
-    if match is None:
-        available = ", ".join(sorted(s["name"] for s in skills)) or "(none)"
-        raise SkillNotFoundError(
-            f"Skill {skill_name!r} not found. Available: {available}. "
-            f"Drop a SKILL.md into ~/.openkb/skills/<name>/ or "
-            f"<kb>/skills/<name>/ and re-run."
-        )
-
-    skill_md = Path(match["path"]) / "SKILL.md"
-    meta, body = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-    od_meta: dict = (meta.get("od") or {}) if isinstance(meta, dict) else {}
-
-    # Resolve output path if the skill templated one.
-    output_path: Optional[Path] = None
-    template = od_meta.get("output_path_template")
-    if template and slug:
-        rel = template.format(slug=slug)
-        output_path = (kb_dir / rel).resolve()
+    definition = prepared or prepare_skill(
+        kb_dir, skill_name, slug=slug, extra_roots=extra_skill_roots
+    )
+    if definition.name != skill_name:
+        raise ValueError("Prepared skill does not match the requested skill")
+    od_meta, body, output_path = definition.metadata, definition.body, definition.output_path
+    if output_path is not None:
+        rel = output_path.relative_to(kb_dir.resolve()).as_posix()
         intent = (
             f"Output file (write the artifact here, full file in one "
             f"write_file call): {rel}\n\n{intent}"

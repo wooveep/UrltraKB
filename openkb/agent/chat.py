@@ -513,7 +513,7 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
     # Use the same safety gates as the CLI (name validation, wiki dir,
     # wiki content). Chat doesn't have a -y flag, so existing skills
     # block with a clear instruction to delete first.
-    from openkb.cli import _preflight_skill_new
+    from openkb.application.generators import preflight_generation as _preflight_skill_new
 
     err = _preflight_skill_new(kb_dir, name)
     if err:
@@ -540,20 +540,16 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
-    from openkb.skill.generator import Generator
+    from openkb.application.generators import GenerationOptions, generate_artifact
 
     _fmt(style, ("class:slash.help", f"Compiling skill '{name}'...\n"))
-    gen = Generator(
-        target_type="skill",
-        name=name,
-        intent=intent,
-        kb_dir=kb_dir,
+    gen = await generate_artifact(
+        kb_dir,
+        GenerationOptions("skill", name, intent),
         model=model,
     )
-    try:
-        await gen.run()
-    except RuntimeError as exc:
-        _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
+    if gen.status != "completed":
+        _fmt(style, ("class:error", f"[ERROR] {gen.message}\n"))
         return
 
     # Surface validation issues from Generator.run. Unlike the CLI
@@ -642,7 +638,7 @@ async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
     # Reuse the shared safety gates from the CLI (name validation,
     # wiki dir, wiki content). Chat has no -y flag, so existing decks
     # block with a clear instruction to delete first.
-    from openkb.cli import _preflight_skill_new
+    from openkb.application.generators import preflight_generation as _preflight_skill_new
 
     err = _preflight_skill_new(kb_dir, name)
     if err:
@@ -671,27 +667,21 @@ async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
+    from openkb.application.generators import GenerationOptions, generate_artifact
     from openkb.deck.creator import DEFAULT_DECK_SKILL
-    from openkb.skill.generator import Generator
 
     skill_label = skill_name if skill_name else f"{DEFAULT_DECK_SKILL} (default)"
     _fmt(
         style,
         ("class:slash.help", f"Generating deck '{name}' via skill {skill_label}...\n"),
     )
-    gen = Generator(
-        target_type="deck",
-        name=name,
-        intent=intent,
-        kb_dir=kb_dir,
+    gen = await generate_artifact(
+        kb_dir,
+        GenerationOptions("deck", name, intent, critique=critique, skill_name=skill_name),
         model=model,
-        critique=critique,
-        skill_name=skill_name,
     )
-    try:
-        await gen.run()
-    except RuntimeError as exc:
-        _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
+    if gen.status != "completed":
+        _fmt(style, ("class:error", f"[ERROR] {gen.message}\n"))
         return
 
     # Surface validation issues from Generator.run. Unlike the CLI
