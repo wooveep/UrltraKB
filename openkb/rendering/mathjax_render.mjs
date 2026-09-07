@@ -1,4 +1,6 @@
 // Local rendering protocol: one JSON request from stdin -> one standalone SVG result. No browser.
+import { startParentGuard } from './process_guard.mjs';
+startParentGuard();
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
 const request = JSON.parse(input);

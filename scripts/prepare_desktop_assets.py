@@ -77,7 +77,7 @@ def main() -> None:
     assets.mkdir(exist_ok=True)
     shutil.copy2(node, assets / node.name)
     shutil.copy2(node_root / "LICENSE", assets / "NODE-LICENSE")
-    for name in ("package.json", "package-lock.json", "mathjax_render.mjs"):
+    for name in ("package.json", "package-lock.json", "mathjax_render.mjs", "process_guard.mjs"):
         shutil.copy2(SOURCE / name, assets / name)
     subprocess.run(
         [str(node), str(npm), "ci", "--ignore-scripts", "--no-audit", "--no-fund"],

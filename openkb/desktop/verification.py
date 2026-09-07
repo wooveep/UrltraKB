@@ -189,6 +189,22 @@ print("OpenKB")
                 assert len(get_kb_list(other)["documents"]) == len(inputs)
                 for resource in (r for unit in result.results for r in unit.resources):
                     assert Path(resource).exists(), resource
+                from openkb.converter import get_pdf_page_count
+
+                long_pdfs = [
+                    p for p in inputs if p.suffix.lower() == ".pdf" and get_pdf_page_count(p) >= 20
+                ]
+                if long_pdfs:
+                    from openkb.desktop.verification_documents import verify_long_pdf
+
+                    for pdf in long_pdfs:
+                        summary_path = verify_long_pdf(other, pdf)
+                        window.open_page(summary_path)
+                        wait_until(
+                            lambda: window.page is not None and window.page.path == summary_path
+                        )
+                        wait_until(lambda: "Native compiled" in window.reader.toPlainText())
+                    checks.append("real long-PDF PageIndex tree, database and all page content")
                 summary = next((other / "wiki/summaries").glob("*.md"))
                 window.open_page(str(summary.relative_to(other / "wiki")))
                 wait_until(lambda: "Native compiled" in window.reader.toPlainText())

@@ -50,6 +50,11 @@ class Renderer:
     def _invoke(self, command: list[str], request: dict) -> dict:
         environment = dict(os.environ)
         environment["TZ"] = "UTC"
+        environment["OPENKB_RENDER_PARENT_PID"] = str(os.getpid())
+        environment["OPENKB_RENDER_TIMEOUT_MS"] = "60000"
+        if os.name != "nt":
+            stat = Path("/proc/self/stat").read_text()
+            environment["OPENKB_RENDER_PARENT_START"] = stat[stat.rfind(")") + 2 :].split()[19]
         if "LD_LIBRARY_PATH_ORIG" in environment:
             environment["LD_LIBRARY_PATH"] = environment["LD_LIBRARY_PATH_ORIG"]
         else:
@@ -82,9 +87,20 @@ class Renderer:
                     break
                 except subprocess.TimeoutExpired:
                     payload = None
-            value = json.loads(stdout)
-            if process.returncode or not value.get("ok"):
+            try:
+                value = json.loads(stdout)
+            except ValueError:
+                if process.returncode:
+                    raise RuntimeError(
+                        "Content renderer stopped before returning a result"
+                    ) from None
+                raise ValueError("Invalid renderer response") from None
+            if not isinstance(value, dict):
+                raise ValueError("Invalid renderer response")
+            if not value.get("ok"):
                 raise ValueError(value.get("error", "Content rendering failed"))
+            if process.returncode:
+                raise RuntimeError("Content renderer exited abnormally after returning a result")
             return value
         finally:
             if process.poll() is None:
