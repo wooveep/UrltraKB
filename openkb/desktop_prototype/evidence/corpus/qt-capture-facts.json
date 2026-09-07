@@ -1,0 +1,1154 @@
+[
+  {
+    "id": "flow-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-basic",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-basic",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-cn",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-cn",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-fraction",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-fraction",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-root",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-root",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-integral",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-integral",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-matrix",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-matrix",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-cases",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-cases",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-aligned",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-aligned",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese-frac",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese-frac",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-accents",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-accents",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-delimiters",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-delimiters",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-inline",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-inline",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-macro",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-macro",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-macro",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-macro",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-diagram",
+    "dark": false,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-diagram",
+    "dark": false,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "flow-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "sequence-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "class-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "state-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "er-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "mindmap-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "pie-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "gantt-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-basic",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-basic",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-cn",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "c4-cn",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-fraction",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-fraction",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-root",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-root",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-integral",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-integral",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-matrix",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-matrix",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-cases",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-cases",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-aligned",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-aligned",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese-frac",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-chinese-frac",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-accents",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-accents",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-delimiters",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-delimiters",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-inline",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-inline",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-macro",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "math-macro",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": true,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-macro",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-macro",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-diagram",
+    "dark": true,
+    "mode": "SVG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  },
+  {
+    "id": "error-diagram",
+    "dark": true,
+    "mode": "PNG",
+    "qt": "6.11.2",
+    "platform": "xcb",
+    "svg_valid": null,
+    "semantic_review": "pending"
+  }
+]

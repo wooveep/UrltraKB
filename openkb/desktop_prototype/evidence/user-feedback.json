@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-07",
+  "environment": "Debian 13.6 x86_64, GNOME/X11, native Qt 6.11.2 window",
+  "channel": "resvg PNG displayed in Qt (right pane)",
+  "question": "请查看已打开的原生渲染原型，重点核对右侧 PNG：公式、中文和九类图是否有缺字、错位或含义错误？也请补充必须验证的真实内容。",
+  "user_reply_verbatim": "右侧无异常",
+  "additional_samples_submitted": [],
+  "individual_sample_ratings": "not separately supplied",
+  "windows_11_verdict": "user reports verified without problems; run details requested",
+  "windows_11_reply_verbatim": "已验证无问题"
+}
