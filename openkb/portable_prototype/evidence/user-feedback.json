@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-07",
+  "verbatim": "没有问题",
+  "context": "User response after the Debian portable prototype was opened for viewing and its seven successful probes were reported.",
+  "recorded_scope": "Current Debian portable prototype viewing accepted.",
+  "prototype_source_commit": "0ba2b5281bc908c8baeff99509e9791171fa438a",
+  "archive_sha256": "bd258385dbe6831df136398e09612157f24483e70325140654d13e15638d3b31",
+  "windows_full_bundle": "Not built or run in this session; this response is not treated as Windows execution evidence.",
+  "tray_available_path": "Not exercised; current GNOME reports no available system tray."
+}
