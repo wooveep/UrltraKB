@@ -4,10 +4,46 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def completion(body):
+    """Replace only the model HTTP boundary, including PageIndex's model calls."""
+    prompt = "\n".join(str(message.get("content", "")) for message in body["messages"])
+    if "detect if there is a table of content" in prompt:
+        return json.dumps({"toc_detected": "no"})
+    if "expert in extracting hierarchical tree structure" in prompt:
+        pages = sorted({int(page) for page in re.findall(r"<physical_index_(\d+)>", prompt)})
+        return json.dumps(
+            [
+                {
+                    "structure": str(page),
+                    "title": f"PortableProbe 中文 PDF 第 {page} 页",
+                    "physical_index": f"<physical_index_{page}>",
+                }
+                for page in pages
+            ]
+        )
+    if "check if the given section appears or starts" in prompt:
+        return json.dumps({"answer": "yes"})
+    if "current section starts in the beginning" in prompt:
+        return json.dumps({"start_begin": "yes"})
+    if "generate a description of the partial document" in prompt:
+        return "Native compiled PDF page summary"
+    if "expert in generating descriptions for a document" in prompt:
+        return "Native compiled long PDF with twenty sections"
+    return json.dumps(
+        {
+            "description": "Native compiled fixture",
+            "content": "# Native compiled\n\nDocument conversion and compilation fixture.",
+            "concepts": {"create": [], "update": [], "related": []},
+            "entities": {"create": [], "update": [], "related": []},
+        }
+    )
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -34,14 +70,7 @@ class Fixture(BaseHTTPRequestHandler):
                 self.wfile.flush()
             self.wfile.write(b"data: [DONE]\n\n")
         else:
-            content = json.dumps(
-                {
-                    "description": "Native compiled fixture",
-                    "content": "# Native compiled\n\nDocument conversion and compilation fixture.",
-                    "concepts": {"create": [], "update": [], "related": []},
-                    "entities": {"create": [], "update": [], "related": []},
-                }
-            )
+            content = completion(body)
             event = {
                 "id": "native-verification",
                 "object": "chat.completion",

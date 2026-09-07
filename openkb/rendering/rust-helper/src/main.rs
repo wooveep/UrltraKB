@@ -1,4 +1,4 @@
-//! THROWAWAY native renderer probe: explicit bundled font database, no browser or system fonts.
+//! Native rendering with explicit bundled fonts and no browser engine.
 use merman::{
     MermaidConfig,
     render::{HeadlessRenderer, HostThemeProfile},
@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
 };
 mod fonts;
+mod guard;
 
 fn run(request: &Value) -> Result<Value, Box<dyn std::error::Error>> {
     let source = request["source"].as_str().ok_or("source missing")?;
@@ -101,6 +102,7 @@ fn run(request: &Value) -> Result<Value, Box<dyn std::error::Error>> {
 }
 
 fn main() {
+    guard::install();
     let mut input = String::new();
     let result = io::stdin()
         .read_to_string(&mut input)
