@@ -51,6 +51,9 @@ class ConfigSnapshot:
         values = self.values()
         os.environ.clear()
         os.environ.update(values["environment"])
+        from openkb.runtime.assets import configure_sdk_resources
+
+        configure_sdk_resources()
         # Import after installing environment: SDK modules may read settings
         # at import time. This process is never reused for another unit.
         import litellm

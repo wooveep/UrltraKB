@@ -91,6 +91,8 @@ def _execute(request: UnitRequest, identity: UnitIdentity, context: Any) -> Unit
                     resources=(str(root / "wiki" / f"{saved.page.path}.md"),) if saved.page else (),
                     error=None if saved.status == "saved" else saved.status,
                     output=saved.draft or "",
+                    revision=saved.page.version if saved.page else None,
+                    page=saved.page if saved.status == "saved" else None,
                 )
     context.install_process_settings = True
     if isinstance(request, ImportFile):

@@ -6,12 +6,14 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+from openkb.locks import atomic_write_bytes
 from openkb.rendering.svg_adapter import adapt_diagram
 
 # Bump when the renderer, adapters, fonts, or output protocol changes.
@@ -103,6 +105,8 @@ class Renderer:
         ).hexdigest()
         target = self.cache_dir / digest
         target.mkdir(parents=True, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(prefix=".render-", dir=target)
+        prepared = Path(scratch.name)
         extension = ".exe" if os.name == "nt" else ""
         helper = str(self.assets / f"renderer{extension}")
         fonts = [str(self.assets / "fonts" / f"NotoSansCJKsc-{w}.otf") for w in ("Regular", "Bold")]
@@ -143,12 +147,16 @@ class Renderer:
                     "dark": dark,
                     "scale": scale,
                     "fonts": fonts,
-                    "svg_path": str(target / "image.svg"),
-                    "png_path": str(target / "image.png"),
+                    "svg_path": str(prepared / "image.svg"),
+                    "png_path": str(prepared / "image.png"),
                 },
             )
             if native["font_faces"] != 2:
                 raise ValueError("Bundled fonts could not be loaded")
+            # Readers may share a cached formula. Never expose a helper's
+            # partially written file to another reader or a Qt image loader.
+            for name in ("image.svg", "image.png"):
+                atomic_write_bytes(target / name, (prepared / name).read_bytes())
             return RenderedBlock(
                 source,
                 kind,
@@ -160,3 +168,5 @@ class Renderer:
             )
         except (OSError, ValueError, RuntimeError, ET.ParseError, KeyError) as exc:
             return RenderedBlock(source, kind, display, error=str(exc))
+        finally:
+            scratch.cleanup()

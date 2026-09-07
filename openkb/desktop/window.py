@@ -36,8 +36,9 @@ from PySide6.QtWidgets import (
 from openkb.agent.chat_session import list_sessions
 from openkb.application.conversations import read_conversation
 from openkb.application.knowledge_bases import get_kb_list, initialize_kb, open_kb
-from openkb.application.pages import read_page
+from openkb.application.pages import Page, read_page
 from openkb.config import GLOBAL_CONFIG_DIR, registered_kbs
+from openkb.desktop.editor import DraftDialog, PageDraft
 from openkb.desktop.io import LocalIO
 from openkb.desktop.reader import MarkdownView
 from openkb.inputs import SUPPORTED_EXTENSIONS
@@ -72,13 +73,14 @@ class Workbench(QMainWindow):
         self.setWindowTitle("OpenKB")
         self.resize(1320, 900)
         self.kb: Path | None = None
-        self.page = None
-        self._drafts: dict[tuple[str, str], tuple[str, str]] = {}
+        self.page: Page | None = None
+        self._drafts: dict[tuple[str, str], PageDraft] = {}
         self._task_questions: dict[str, str] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
         self._seen_terminal: set[str] = set()
         self._page_request_id = 0
         self._open_request_id = 0
+        self._conversation_request_id = 0
         self._chat_task: str | None = None
         self._last_chat_text = None
         self._quitting = False
@@ -116,8 +118,21 @@ class Workbench(QMainWindow):
         toolbar.addWidget(self.kbs)
         self._action(toolbar, "导入文件", self._import_files)
         self._action(toolbar, "导入目录", self._import_directory)
-        self._action(toolbar, "刷新", self._refresh)
+        self._action(toolbar, "刷新", self._refresh_current)
         self._action(toolbar, "退出", self.request_quit)
+        self.addToolBarBreak()
+        reading_toolbar = QToolBar("阅读显示", self)
+        self.addToolBar(reading_toolbar)
+        self.theme = QComboBox()
+        self.theme.addItems(["浅色阅读", "深色阅读"])
+        self.zoom = QComboBox()
+        for scale in (0.75, 1, 1.5, 2, 4):
+            self.zoom.addItem(f"{scale:.0%}", scale)
+        self.zoom.setCurrentIndex(1)
+        self.theme.activated.connect(self._presentation_changed)
+        self.zoom.activated.connect(self._presentation_changed)
+        reading_toolbar.addWidget(self.theme)
+        reading_toolbar.addWidget(self.zoom)
 
         self.pages = QTreeWidget()
         self.pages.setHeaderLabel("知识页面")
@@ -136,6 +151,12 @@ class Workbench(QMainWindow):
         self.save_button = QPushButton("保存正文")
         self.save_button.clicked.connect(self._save_page)
         editor_layout.addWidget(self.save_button)
+        review = QPushButton("查看最新版本 / 处理冲突")
+        review.clicked.connect(self._review_draft)
+        editor_layout.addWidget(review)
+        export = QPushButton("导出草稿…")
+        export.clicked.connect(self._export_draft)
+        editor_layout.addWidget(export)
         self.tabs.addTab(editor_panel, "编辑")
         self.chat = MarkdownView()
         self.chat.anchorClicked.connect(self._follow_link)
@@ -214,6 +235,12 @@ class Workbench(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def _presentation_changed(self):
+        for view in (self.reader, self.chat):
+            view.set_presentation(
+                dark=bool(self.theme.currentIndex()), scale=self.zoom.currentData()
+            )
+
     def _error(self, error):
         if error:
             QMessageBox.warning(self, "操作未完成", str(error))
@@ -257,6 +284,7 @@ class Workbench(QMainWindow):
             else None,
             kb=path,
             exclusive=True,
+            obsolete=lambda: request_id != self._open_request_id,
         )
 
     def _opened(self, root, error):
@@ -264,6 +292,15 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         self.kb, self.page = root, None
+        self._page_request_id += 1
+        self._chat_task = None
+        self._conversation_request_id += 1
+        self._last_chat_text = None
+        self.reader.show_temporary("正在读取当前知识库…")
+        self.chat.show_temporary("在当前知识库开始问答，或选择已有对话。")
+        self.sessions.clear()
+        self.sessions.addItem("新对话", None)
+        self.question.clear()
         self.editor.blockSignals(True)
         self.editor.clear()
         self.editor.blockSignals(False)
@@ -283,7 +320,9 @@ class Workbench(QMainWindow):
 
         def read():
             return (
-                sorted(str(p.relative_to(root / "wiki")) for p in (root / "wiki").rglob("*.md")),
+                sorted(
+                    p.relative_to(root / "wiki").as_posix() for p in (root / "wiki").rglob("*.md")
+                ),
                 list_sessions(root),
                 get_kb_list(root),
             )
@@ -314,12 +353,17 @@ class Workbench(QMainWindow):
 
         self.io.submit(read, loaded, kb=root)
 
+    def _refresh_current(self):
+        self._refresh()
+        if self.page:
+            self.open_page(self.page.path)
+
     def _activate_page(self, item, column):
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if path:
             self.open_page(path)
 
-    def open_page(self, path: str):
+    def open_page(self, path: str, anchor: str = ""):
         if self.kb is None:
             return
         root = self.kb
@@ -336,13 +380,18 @@ class Workbench(QMainWindow):
             self.editor.setReadOnly(not editable)
             draft = self._drafts.get((str(root), page.path))
             self.editor.blockSignals(True)
-            self.editor.setPlainText(draft[0] if draft else page.body)
+            self.editor.setPlainText(draft.body if draft else page.body)
             self.editor.blockSignals(False)
             self.location.setText(f"{root}  /  {page.path}.md")
-            self.reader.show_markdown(page.body, (root / "wiki" / page.path).parent)
+            self.reader.show_markdown(page.body, (root / "wiki" / page.path).parent, anchor=anchor)
             self.tabs.setCurrentIndex(0)
 
-        self.io.submit(lambda: read_page(root, path), loaded, kb=root)
+        self.io.submit(
+            lambda: read_page(root, path),
+            loaded,
+            kb=root,
+            obsolete=lambda: root != self.kb or request_id != self._page_request_id,
+        )
 
     def _keep_draft(self):
         if self.kb and self.page:
@@ -351,9 +400,9 @@ class Workbench(QMainWindow):
             if self.editor.toPlainText() == self.page.body:
                 self._drafts.pop(key, None)
                 return
-            self._drafts[key] = (
+            self._drafts[key] = PageDraft(
                 self.editor.toPlainText(),
-                previous[1] if previous else self.page.version,
+                previous.version if previous else self.page.version,
             )
 
     def _save_page(self):
@@ -361,10 +410,52 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         key = (str(self.kb), self.page.path)
-        body, version = self._drafts.get(key, (self.page.body, self.page.version))
+        draft = self._drafts.get(key, PageDraft(self.page.body, self.page.version))
+        body, version = draft.body, draft.version
         task_id = self.manager.submit(self.kb, [SavePage(self.page.path, body, version)])
         self._save_tasks[task_id] = (key, body)
         self.statusBar().showMessage("保存任务已提交；出现版本冲突时草稿会保留。")
+
+    def _review_draft(self):
+        if not self.kb or not self.page:
+            return
+        root, path = self.kb, self.page.path
+        self._keep_draft()
+
+        def loaded(latest, error):
+            if self.kb != root or not self.page or self.page.path != path or self._error(error):
+                return
+            self._keep_draft()
+            draft = self._drafts.get(
+                (str(root), path), PageDraft(self.page.body, self.page.version)
+            )
+            dialog = DraftDialog(latest, draft, self)
+            if dialog.exec():
+                self.page = latest
+                self._drafts[(str(root), path)] = PageDraft(
+                    dialog.draft.toPlainText(), latest.version
+                )
+                self.editor.setPlainText(dialog.draft.toPlainText())
+                self._save_page()
+
+        self.io.submit(lambda: read_page(root, path), loaded, kb=root)
+
+    def _export_draft(self):
+        if not self.page:
+            return
+        from openkb.locks import atomic_write_text
+
+        path, _ = QFileDialog.getSaveFileName(self, "导出草稿", "draft.md", "Markdown (*.md)")
+        if path:
+            destination = Path(path).expanduser().resolve()
+            if any((parent / ".openkb/config.yaml").is_file() for parent in destination.parents):
+                self._error(ValueError("请导出到知识库之外；知识库页面请通过保存操作更新。"))
+                return
+            body = self.editor.toPlainText()
+            self.io.submit(
+                lambda: atomic_write_text(destination, body),
+                lambda result, error: self._error(error),
+            )
 
     def _import_files(self):
         if self.kb:
@@ -404,20 +495,32 @@ class Workbench(QMainWindow):
             else ContinueConversation(question, self.sessions.currentData())
         )
         task_id = self.manager.submit(self.kb, [request])
+        self._conversation_request_id += 1
         self._task_questions[task_id] = question
         self._chat_task = task_id
         self._last_chat_text = None
-        self.chat.setPlainText("已排队，等待执行…")
+        self.chat.show_temporary("已排队，等待执行…")
         self.tabs.setCurrentIndex(2)
         self.question.clear()
 
     def _load_conversation(self):
+        self._conversation_request_id += 1
+        request_id = self._conversation_request_id
         if not self.kb or not self.sessions.currentData():
+            self._chat_task = None
+            self.chat.show_temporary("开始新对话。")
             return
         root, session_id = self.kb, self.sessions.currentData()
+        self._chat_task = None
+        self.chat.show_temporary("正在读取对话…")
 
         def loaded(session, error):
-            if self.kb != root or self._error(error):
+            if (
+                self.kb != root
+                or request_id != self._conversation_request_id
+                or self.sessions.currentData() != session_id
+                or self._error(error)
+            ):
                 return
             self._chat_task = None
             text = "\n\n".join(
@@ -427,17 +530,28 @@ class Workbench(QMainWindow):
             self.tabs.setCurrentIndex(2)
             self.mode.setCurrentIndex(1)
 
-        self.io.submit(lambda: read_conversation(root, session_id), loaded, kb=root)
+        self.io.submit(
+            lambda: read_conversation(root, session_id),
+            loaded,
+            kb=root,
+            obsolete=lambda: root != self.kb or request_id != self._conversation_request_id,
+        )
 
     def _follow_link(self, url: QUrl):
         if not self.kb:
             return
         if url.scheme() == "openkb":
-            self.open_page(url.toString()[7:])
+            self.open_page(url.path(QUrl.ComponentFormattingOption.FullyDecoded), url.fragment())
         elif url.isLocalFile():
             path = Path(url.toLocalFile()).resolve()
             if path.is_relative_to(self.kb / "wiki") and path.suffix == ".md":
-                self.open_page(str(path.relative_to(self.kb / "wiki")))
+                self.open_page(str(path.relative_to(self.kb / "wiki")), url.fragment())
+        elif not url.scheme() and url.fragment():
+            from openkb.rendering.markdown import heading_anchor
+
+            current = self.tabs.currentWidget()
+            if isinstance(current, MarkdownView):
+                current.scrollToAnchor(heading_anchor(url.fragment()))
         elif url.scheme() in {"http", "https"}:
             QDesktopServices.openUrl(url)
 
@@ -481,7 +595,7 @@ class Workbench(QMainWindow):
             if task.id == self._chat_task and self.kb and str(self.kb) == task.kb_dir:
                 if task.text != self._last_chat_text:
                     self._last_chat_text = task.text
-                    self.chat.setPlainText(
+                    self.chat.show_temporary(
                         task.text or task.error or _STATES.get(task.state, task.state)
                     )
             if task.state in TERMINAL and task.id not in self._seen_terminal:
@@ -501,17 +615,28 @@ class Workbench(QMainWindow):
     def _task_finished(self, task):
         if task.id in self._save_tasks and task.succeeded:
             key, body = self._save_tasks.pop(task.id)
-            if self._drafts.get(key, (None,))[0] == body:
+            draft = self._drafts.get(key)
+            version = task.results[-1].revision
+            active = self.kb and str(self.kb) == key[0] and self.page and self.page.path == key[1]
+            current_body = self.editor.toPlainText() if active else draft.body if draft else body
+            confirmed = task.results[-1].page
+            if version and (current_body != body or confirmed is None):
+                self._drafts[key] = PageDraft(current_body, version)
+            else:
                 self._drafts.pop(key, None)
-                if (
-                    not self._quitting
-                    and self.kb
-                    and str(self.kb) == key[0]
-                    and self.page
-                    and self.page.path == key[1]
-                ):
-                    self.page = None
-                    self.open_page(key[1])
+            if active and confirmed:
+                # The receipt carries exactly the page this save committed.
+                # A later filesystem read could silently adopt another writer's
+                # unseen version and authorize overwriting it on the next save.
+                self.page = confirmed
+                if not self._quitting:
+                    self.reader.show_markdown(
+                        confirmed.body, (Path(key[0]) / "wiki" / key[1]).parent
+                    )
+                if current_body == body:
+                    self.editor.blockSignals(True)
+                    self.editor.setPlainText(confirmed.body)
+                    self.editor.blockSignals(False)
         if task.id == self._chat_task and self.kb and str(self.kb) == task.kb_dir:
             message = task.text or task.error or "未保存回答正文；可从已保存的对话或产物查看。"
             if task.state != "completed":
