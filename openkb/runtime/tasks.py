@@ -173,6 +173,15 @@ class TaskManager:
         with self._condition:
             return tuple(task.view for task in self._tasks.values())
 
+    def has_work(self, kb_dir: Path) -> bool:
+        """This instance's queued execution or live handles, excluding old summaries."""
+        root = str(kb_dir.expanduser().resolve())
+        with self._condition:
+            return any(attempt.identity.kb_dir == root for attempt in self._active.values()) or any(
+                task.view.kb_dir == root and task.view.state not in TERMINAL
+                for task in self._tasks.values()
+            )
+
     def retry_inputs(
         self, task_id: str
     ) -> tuple[TaskView, tuple[UnitRequest, ...], tuple[UnitIdentity, ...]]:

@@ -38,6 +38,7 @@ def build_workbench(window):
     window.addToolBar(toolbar)
     _action(window, toolbar, "新建知识库", window._create_kb)
     _action(window, toolbar, "打开知识库", window._choose_kb)
+    _action(window, toolbar, "知识库管理", window._knowledge_bases)
     toolbar.addSeparator()
     window.kbs = QComboBox()
     window.kbs.setMinimumWidth(270)
@@ -169,3 +170,9 @@ def build_workbench(window):
     artifacts_dock = QDockWidget("任务产物 · 双击打开", window)
     artifacts_dock.setWidget(window.artifacts)
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, artifacts_dock)
+    from openkb.desktop.page_context import PageContextView
+
+    window.page_context = PageContextView(window)
+    context_dock = QDockWidget("当前页面 · 来源与链接", window)
+    context_dock.setWidget(window.page_context)
+    window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, context_dock)

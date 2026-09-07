@@ -274,3 +274,20 @@ def deletion_binding(kb_dir: Path) -> str:
     """Bind a confirmed removal, including an explicit partial-removal retry."""
     root = deletion_target(kb_dir)
     return _binding(root, read_state(root))
+
+
+def has_pending_deletion(kb_dir: Path) -> bool:
+    """Check the original path as well as its current canonical target."""
+    requested = kb_dir.expanduser().absolute()
+    return _read_state(requested).status == "deleting" or read_state(requested).status == "deleting"
+
+
+def registered_path(kb_dir: Path) -> Path:
+    """Keep unfinished removal entries attached to the directory originally named."""
+    requested = kb_dir.expanduser().absolute()
+    try:
+        if _read_state(requested).status == "deleting":
+            return requested
+    except RecoveryRequired:
+        return requested  # Keep the entry available for diagnosis of its own record.
+    return requested.resolve()

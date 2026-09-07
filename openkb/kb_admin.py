@@ -50,7 +50,7 @@ def resolve_deletion_alias(name: str) -> Path:
     """Use the existing name policy, validating its original registered path."""
     import os
 
-    from openkb.lifecycle import deletion_target
+    from openkb.lifecycle import deletion_target, has_pending_deletion
 
     name = config.validate_kb_name(name)
     with config._with_global_config_lock():
@@ -73,12 +73,29 @@ def resolve_deletion_alias(name: str) -> Path:
         candidate = Path(raw_root).expanduser() / name
         if candidate.resolve() == target:
             return validated(candidate)
+        if has_pending_deletion(candidate):
+            raise ValueError(
+                f"Unfinished deletion at {candidate}; the name now identifies another KB. "
+                "Select the original full path in desktop knowledge-base management."
+            )
         known = values.get("known_kbs", [])
         if isinstance(known, list):
             for raw in known:
                 if isinstance(raw, str) and Path(raw).expanduser().resolve() == target:
                     return validated(Path(raw))
         return validated(target)
+
+
+def _remember_pending_deletion(kb_dir: Path, **wait_options) -> None:
+    """A root-discovered KB must stay discoverable if removal loses its wiki tree."""
+    with config._with_global_config_lock(**wait_options):
+        values = config._load_global_config_unlocked()
+        known = values.get("known_kbs", [])
+        if not isinstance(known, list):
+            raise ValueError("Invalid knowledge-base registry; repair global settings first")
+        if str(kb_dir) not in known:
+            values["known_kbs"] = [*known, str(kb_dir)]
+            config._atomic_yaml_dump(config.GLOBAL_CONFIG_PATH, values)
 
 
 def delete_kb(kb_dir: Path, *, generation: str | None = None, cancelled=None, on_wait=None) -> None:
@@ -121,6 +138,8 @@ def delete_kb(kb_dir: Path, *, generation: str | None = None, cancelled=None, on
                 raise ValueError(f"Refusing to delete: not a knowledge base directory: {kb_dir}")
             with kb_ingest_lock(kb_dir / ".openkb"):
                 pass  # Recover while the internal handle can still be opened.
+        if exists or previous.status == "deleting":
+            _remember_pending_deletion(kb_dir, cancelled=cancelled, on_wait=on_wait)
         state = LifecycleState(uuid.uuid4().hex, "deleting", directory_identity(kb_dir))
         write_state(kb_dir, state)  # Invalidate queued work BEFORE removing any files.
         if exists:

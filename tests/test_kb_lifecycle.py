@@ -282,4 +282,6 @@ def test_deletion_alias_preserves_parent_segments_after_a_symlink(tmp_path, monk
         (root / "wiki").mkdir()
     monkeypatch.setenv("OPENKB_KB_ROOT", str(shortcut / "../kbs"))
     assert resolve_deletion_alias("demo") == resolve_kb_alias("demo")
-    assert resolve_deletion_alias("demo") == tmp_path / "remote/kbs/demo"
+    # Windows normalizes parent segments differently; both must identify the
+    # directory the operating system opens through this original path.
+    assert resolve_deletion_alias("demo").samefile(shortcut / "../kbs/demo")

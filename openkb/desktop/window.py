@@ -20,10 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.agent.chat_session import list_sessions
+from openkb.application.catalog import knowledge_bases
 from openkb.application.conversations import read_conversation
 from openkb.application.knowledge_bases import get_kb_list, initialize_kb, open_kb
 from openkb.application.pages import Page, read_page
-from openkb.config import GLOBAL_CONFIG_DIR, registered_kbs
+from openkb.application.reading import read_page_context
+from openkb.config import GLOBAL_CONFIG_DIR
 from openkb.desktop.editor import DraftDialog, PageDraft
 from openkb.desktop.io import LocalIO
 from openkb.desktop.reader import MarkdownView
@@ -98,7 +100,7 @@ class Workbench(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_tasks)
         self.timer.start(150)
-        self.io.submit(registered_kbs, self._recent_loaded, global_settings=True)
+        self.io.submit(knowledge_bases, self._recent_loaded, global_settings=True)
         self.reader.show_markdown(
             "# OpenKB\n\n打开已有知识库，或在您选择的位置创建一个。\n\n"
             "资料、页面、对话和任务始终归属于各自的知识库。",
@@ -123,6 +125,30 @@ class Workbench(QMainWindow):
             from openkb.desktop.documents import DocumentsDialog
 
             DocumentsDialog(self, self.kb).exec()
+
+    def _knowledge_bases(self):
+        from openkb.desktop.knowledge_bases import KnowledgeBasesDialog
+
+        KnowledgeBasesDialog(self).exec()
+
+    def _removed_knowledge_base(self, root):
+        self._drafts = {key: draft for key, draft in self._drafts.items() if key[0] != str(root)}
+        if self.kb != root:
+            return
+        self.kb = self.page = None
+        self._open_request_id += 1
+        self._page_request_id += 1
+        self._conversation_request_id += 1
+        self._chat_task = None
+        self.pages.clear()
+        self.page_context.clear()
+        self.sessions.clear()
+        self.editor.clear()
+        self.save_button.setEnabled(False)
+        self.reader.show_temporary("知识库已删除。请选择或创建另一个知识库。")
+        self.chat.show_temporary("")
+        self.location.setText("尚未打开知识库")
+        self.setWindowTitle("OpenKB")
 
     def _task_details(self):
         task_id = self._selected_task()
@@ -195,9 +221,12 @@ class Workbench(QMainWindow):
 
     def _recent_loaded(self, values, error):
         if not error:
+            self.kbs.blockSignals(True)
+            self.kbs.clear()
             for label, path in values:
                 self.kbs.addItem(f"{label} · {path}", str(path))
-            self.kbs.setCurrentIndex(-1)
+            self.kbs.setCurrentIndex(self.kbs.findData(str(self.kb)) if self.kb else -1)
+            self.kbs.blockSignals(False)
 
     def _choose_kb(self):
         path = QFileDialog.getExistingDirectory(self, "打开知识库")
@@ -245,6 +274,7 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         self.kb, self.page = root, None
+        self.page_context.clear()
         self._page_request_id += 1
         self._chat_task = None
         self._conversation_request_id += 1
@@ -324,10 +354,12 @@ class Workbench(QMainWindow):
         request_id = self._page_request_id
         self._keep_draft()
 
-        def loaded(page, error):
+        def loaded(context, error):
             if self.kb != root or request_id != self._page_request_id or self._error(error):
                 return
+            page = context.page
             self.page = page
+            self.page_context.show_context(root, context)
             editable = page.path.split("/")[0] in EDITABLE_SECTIONS
             self.save_button.setEnabled(editable)
             self.editor.setReadOnly(not editable)
@@ -340,7 +372,7 @@ class Workbench(QMainWindow):
             self.tabs.setCurrentIndex(0)
 
         self.io.submit(
-            lambda: read_page(root, path),
+            lambda: read_page_context(root, path),
             loaded,
             kb=root,
             obsolete=lambda: root != self.kb or request_id != self._page_request_id,
@@ -624,6 +656,7 @@ class Workbench(QMainWindow):
                 # A later filesystem read could silently adopt another writer's
                 # unseen version and authorize overwriting it on the next save.
                 self.page = confirmed
+                self.page_context.invalidate()
                 if not self._quitting:
                     self.reader.show_markdown(
                         confirmed.body, (Path(key[0]) / "wiki" / key[1]).parent

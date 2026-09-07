@@ -42,7 +42,9 @@ class LocalIO(QObject):
         exclusive=False,
         global_settings=False,
         creating=False,
+        deleting=False,
         repair=False,
+        cancelled=lambda: False,
         obsolete=lambda: False,
     ):
         if self._stop.is_set():
@@ -52,11 +54,11 @@ class LocalIO(QObject):
         self._callbacks[sequence] = callback
         generation, binding_error = None, None
         if kb is not None and not creating:
-            from openkb.lifecycle import current_generation
+            from openkb.lifecycle import current_generation, deletion_binding
 
-            kb = kb.expanduser().resolve()
             try:
-                generation = current_generation(kb)
+                generation = deletion_binding(kb) if deleting else current_generation(kb)
+                kb = kb.expanduser().resolve()
             except Exception as exc:
                 binding_error = exc
 
@@ -67,29 +69,43 @@ class LocalIO(QObject):
                 raise binding_error
             with ExitStack() as scope:
                 wait_options = {
-                    "cancelled": lambda: self._stop.is_set() or obsolete(),
+                    "cancelled": lambda: self._stop.is_set() or obsolete() or cancelled(),
                     "on_wait": _defer_wait,
                 }
                 if kb is not None:
-                    from openkb.lifecycle import expected_generation
+                    from openkb.lifecycle import (
+                        deletion_binding,
+                        exclusive_lifecycle,
+                        expected_generation,
+                    )
 
-                    scope.enter_context(expected_generation(kb, generation))
+                    if deleting:
+                        scope.enter_context(exclusive_lifecycle(kb, **wait_options))
+                        if deletion_binding(kb) != generation:
+                            raise ValueError("知识库目录已变更，请重新确认删除。")
+                    else:
+                        scope.enter_context(expected_generation(kb, generation))
                     if creating:
                         from openkb.lifecycle import creation_lifecycle
 
                         scope.enter_context(creation_lifecycle(kb, **wait_options))
-                    if not creating and not (
-                        (kb / ".openkb").is_dir()
-                        if repair
-                        else (kb / ".openkb/config.yaml").is_file()
+                    if (
+                        not creating
+                        and not deleting
+                        and not (
+                            (kb / ".openkb").is_dir()
+                            if repair
+                            else (kb / ".openkb/config.yaml").is_file()
+                        )
                     ):
                         raise ValueError("请选择已有的知识库目录")
-                    lease = (
-                        kb_repair_lock(kb / ".openkb", **wait_options)
-                        if repair
-                        else kb_lock(kb / ".openkb", exclusive=exclusive, **wait_options)
-                    )
-                    scope.enter_context(lease)
+                    if not deleting:
+                        lease = (
+                            kb_repair_lock(kb / ".openkb", **wait_options)
+                            if repair
+                            else kb_lock(kb / ".openkb", exclusive=exclusive, **wait_options)
+                        )
+                        scope.enter_context(lease)
                 if global_settings:
                     from openkb.config import _with_global_config_lock
 
