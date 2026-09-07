@@ -290,7 +290,11 @@ def _execute(
             )
         return UnitResult(
             answer.status,
-            resources=(answer.saved_path,) if answer.saved_path else (),
+            resources=answer.resources,
+            changes=answer.changes,
+            error=answer.error,
+            unfinished=answer.unfinished,
+            halt=answer.status == "blocked",
             session_id=answer.session_id,
             turn_count=answer.turn_count,
             output=answer.answer,

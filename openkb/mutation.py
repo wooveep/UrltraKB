@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from openkb.locks import _fsync_directory, _target_mode, atomic_write_json
+from openkb.locks import DelegatedWriteLease, _fsync_directory, _target_mode, atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +383,12 @@ def snapshot_paths(
 
 @contextmanager
 def mutation_scope(
-    kb_dir: Path, paths: list[Path], *, operation: str, lock_path: Path | None = None
+    kb_dir: Path,
+    paths: list[Path],
+    *,
+    operation: str,
+    lock_path: Path | None = None,
+    delegated_lease: DelegatedWriteLease | None = None,
 ):
     """Commit a protected multi-file change, retaining evidence if rollback fails.
 
@@ -391,10 +396,15 @@ def mutation_scope(
     shared-state lock when transacting global settings. Journal paths and
     recovery targets remain contained within the supplied root. Post-commit
     cleanup is best effort; it can never undo a committed result.
+    SDK child tasks may receive an explicit revocable lease from that owner;
+    copied contexts alone never confer general lock reentrancy.
     """
     from openkb.locks import file_write_lock_held
 
-    if not file_write_lock_held(lock_path or kb_dir / ".openkb/ingest.lock"):
+    required_lock = lock_path or kb_dir / ".openkb/ingest.lock"
+    if not file_write_lock_held(required_lock) and not (
+        delegated_lease is not None and delegated_lease.authorizes(required_lock)
+    ):
         raise RuntimeError("Mutation requires the knowledge-base write lease")
     snapshot = snapshot_paths(kb_dir, paths, operation=operation)
     try:
@@ -402,7 +412,13 @@ def mutation_scope(
         snapshot.mark_committed()
     except BaseException:
         if snapshot.rollback_best_effort() is not None:
-            atomic_write_json(repair_marker(kb_dir), {"journal": snapshot.journal_path.name})
+            try:
+                atomic_write_json(repair_marker(kb_dir), {"journal": snapshot.journal_path.name})
+            except Exception:
+                # Disk failure may also prevent this extra marker. Retain the
+                # active journal and the fatal error category: SDK wrappers
+                # must not mistake a failed rollback for an ordinary tool error.
+                logger.error("Could not persist repair marker; active journal retained")
             raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
         snapshot.discard_best_effort()
         raise

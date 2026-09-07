@@ -67,7 +67,7 @@ from openkb.indexer import (
     _write_long_doc_artifacts,
     prepare_cloud_import,
 )
-from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
+from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.log import append_log
 from openkb.application.documents import (
     _run_compile_with_retry,
@@ -833,20 +833,7 @@ def query(ctx, question, save, raw):
     append_log(kb_dir / "wiki", "query", question)
 
     if save and answer:
-        import re
-        from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
-
-        slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]
-        explore_dir = kb_dir / "wiki" / "explorations"
-        explore_dir.mkdir(parents=True, exist_ok=True)
-        explore_path = explore_dir / f"{slug}.md"
-        # Strip ghost wikilinks the agent may have emitted to non-existent
-        # concept/summary pages — the schema_md in the agent's instructions
-        # encourages [[wikilinks]] but the agent's view of "which pages
-        # exist" can drift from disk reality.
-        known = list_existing_wiki_targets(kb_dir / "wiki")
-        cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
-        atomic_write_text(explore_path, f'---\nquery: "{question}"\n---\n\n{cleaned_answer}\n')
+        explore_path = save_exploration(kb_dir, question, answer, unique=False)
         click.echo(f"\nSaved to {explore_path}")
 
 

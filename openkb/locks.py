@@ -157,6 +157,38 @@ def file_write_lock_held(path: Path) -> bool:
         return bool(held and held[1])
 
 
+class DelegatedWriteLease:
+    """Explicit, revocable permission for SDK tool mutations within one lease.
+
+    This never makes lock acquisition reentrant in another task. Only mutation
+    code receiving this object can use it; it expires before its owner releases
+    the OS lock and cannot authorize a later acquisition of the same pathname.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.key = (path.resolve(), *_owner())
+        with _LOCKS_GUARD:
+            held = _HELD_LOCKS.get(self.key)
+            if not held or not held[1]:
+                raise RuntimeError("Only the write lease owner can delegate tool writes")
+            self.handle = held[2]
+        self.active = True
+
+    def authorizes(self, path: Path) -> bool:
+        with _LOCKS_GUARD:
+            held = _HELD_LOCKS.get(self.key)
+            return bool(
+                self.active
+                and self.key[0] == path.resolve()
+                and held
+                and held[1]
+                and held[2] is self.handle
+            )
+
+    def revoke(self) -> None:
+        self.active = False
+
+
 def _drain_pending_journals(openkb_dir: Path) -> None:
     from openkb.mutation import recover_pending_journals
 

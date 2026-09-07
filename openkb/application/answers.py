@@ -5,15 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from openkb.locks import atomic_write_text, kb_ingest_lock
+from openkb.mutation import mutation_scope
 
 
-def save_exploration(kb_dir: Path, question: str, answer: str) -> Path | None:
+def save_exploration(
+    kb_dir: Path, question: str, answer: str, *, unique: bool = True
+) -> Path | None:
     """Save a query answer to ``wiki/explorations/`` as a markdown page.
 
     Shared by the CLI ``query --save`` path and the REST ``/query?save`` path
     so both behave identically. Strips ghost wikilinks, generates a unique
     slug (with a CJK-safe fallback), and escapes the question for YAML
-    frontmatter.
+    frontmatter. ``unique=False`` retains the CLI's original slug/overwrite
+    policy, including its empty CJK slug.
     """
     import hashlib
     import re
@@ -37,14 +41,14 @@ def save_exploration(kb_dir: Path, question: str, answer: str) -> Path | None:
         cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
 
         slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]
-        if not slug:
+        if not slug and unique:
             # CJK / punctuation-only questions collapse to an empty slug.
             # Fall back to a short hash so each question gets its own file.
             slug = hashlib.sha256(question.encode("utf-8")).hexdigest()[:12]
         explore_path = explore_dir / f"{slug}.md"
         # Uniquify to avoid clobbering an existing exploration with a colliding slug.
         counter = 1
-        while explore_path.exists():
+        while unique and (explore_path.exists() or explore_path.is_symlink()):
             explore_path = explore_dir / f"{slug}-{counter}.md"
             counter += 1
 
@@ -52,8 +56,9 @@ def save_exploration(kb_dir: Path, question: str, answer: str) -> Path | None:
         # escape backslashes and double quotes so questions containing `"` don't
         # produce invalid YAML.
         escaped = question.replace("\\", "\\\\").replace('"', '\\"')
-        atomic_write_text(
-            explore_path,
-            f'---\nquery: "{escaped}"\n---\n\n{cleaned_answer}\n',
-        )
+        with mutation_scope(kb_dir, [explore_path], operation="save-answer"):
+            atomic_write_text(
+                explore_path,
+                f'---\nquery: "{escaped}"\n---\n\n{cleaned_answer}\n',
+            )
     return explore_path
