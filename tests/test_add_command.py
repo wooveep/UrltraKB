@@ -30,6 +30,7 @@ class TestSupportedExtensions:
 class TestFindKbDir:
     def test_finds_openkb_dir(self, tmp_path, monkeypatch):
         (tmp_path / ".openkb").mkdir()
+        (tmp_path / ".openkb/config.yaml").write_text("{}")
         monkeypatch.chdir(tmp_path)
         result = _find_kb_dir()
         assert result is not None
@@ -39,6 +40,30 @@ class TestFindKbDir:
         with patch("openkb.cli.load_global_config", return_value={}):
             result = _find_kb_dir()
             assert result is None
+
+    def test_lifecycle_metadata_is_not_an_initialized_knowledge_base(self, tmp_path, monkeypatch):
+        (tmp_path / ".openkb/kb-lifecycle").mkdir(parents=True)
+        nested = tmp_path / "project"
+        nested.mkdir()
+        monkeypatch.chdir(nested)
+        with patch("openkb.cli.load_global_config", return_value={}):
+            result = CliRunner().invoke(cli, ["status"])
+        assert "No knowledge base found" in result.output
+
+    def test_damaged_current_kb_does_not_fall_back_to_another_default(self, tmp_path, monkeypatch):
+        from openkb.mutation import RecoveryRequired
+
+        damaged, other = tmp_path / "damaged", tmp_path / "other"
+        for root in (damaged, other):
+            (root / ".openkb").mkdir(parents=True)
+            (root / "wiki").mkdir()
+        (damaged / ".openkb/needs-repair.json").write_text("{}")
+        (other / ".openkb/config.yaml").write_text("{}")
+        monkeypatch.chdir(damaged)
+        with patch("openkb.cli.load_global_config", return_value={"default_kb": str(other)}):
+            result = CliRunner().invoke(cli, ["status"])
+        assert isinstance(result.exception, RecoveryRequired)
+        assert str(damaged) in str(result.exception)
 
 
 class TestAddCommand:

@@ -19,7 +19,7 @@ from openkb.converter import _registry_path, _sanitize_stem, convert_document
 from openkb.inputs import PreparedInput, prepared_input, validate_source_root
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
-from openkb.mutation import publish_staged_tree
+from openkb.mutation import RecoveryRequired, publish_staged_tree
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,8 @@ def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info) -> 
         try:
             asyncio.run(coro_factory())
             return
+        except RecoveryRequired:
+            raise
         except Exception as exc:
             if attempt == 0:
                 report("  Retrying compilation in 2s...")
@@ -337,7 +339,9 @@ class AddFileResult:
     message: str
 
 
-def _add_for_api(file_path: Path, kb_dir: Path, *, bundle=None) -> AddFileResult:
+def _add_for_api(
+    file_path: Path, kb_dir: Path, *, bundle=None, source_root: Path | None = None
+) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
 
     Reuses the upstream ``add_single_file`` (which already holds the ingest
@@ -346,7 +350,11 @@ def _add_for_api(file_path: Path, kb_dir: Path, *, bundle=None) -> AddFileResult
     ``AddFileResult``; on ``skipped`` the caller (api._add_saved_file) deletes
     the freshly uploaded raw copy to avoid orphaning it.
     """
-    status_str = add_single_file(file_path, kb_dir, bundle=bundle)
+    status_str = (
+        import_document(kb_dir, file_path, bundle=bundle, source_root=source_root).status
+        if source_root is not None
+        else add_single_file(file_path, kb_dir, bundle=bundle)
+    )
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
     elif status_str == "failed":

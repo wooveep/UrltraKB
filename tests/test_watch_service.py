@@ -22,7 +22,7 @@ from openkb.watch_service import (
 )
 
 
-def _fake_add_ok(path: Path, kb_dir: Path, bundle=None) -> AddFileResult:
+def _fake_add_ok(path: Path, kb_dir: Path, bundle=None, **kwargs) -> AddFileResult:
     return AddFileResult("x", str(path), "added", "ok")
 
 
@@ -107,7 +107,9 @@ def test_worker_added_records_file_start_done_and_counter(kb_dir, monkeypatch):
     state.queue.put([str(kb_dir / "raw" / "paper.md")])
     monkeypatch.setattr(
         "openkb.watch_service._add_for_api",
-        lambda path, kb, bundle=None: AddFileResult(path.name, str(path), "added", "Added."),
+        lambda path, kb, bundle=None, **kwargs: AddFileResult(
+            path.name, str(path), "added", "Added."
+        ),
     )
     _drain_worker(state)
     assert _events_of(state, "file_start")[0]["original_name"] == "paper.md"
@@ -121,7 +123,7 @@ def test_worker_skipped_and_failed_branches(kb_dir, monkeypatch):
     state = _make_state(kb_dir)
     state.queue.put([str(kb_dir / "raw" / "dup.md"), str(kb_dir / "raw" / "boom.md")])
 
-    def fake_add(path, target_kb, bundle=None):
+    def fake_add(path, target_kb, bundle=None, **kwargs):
         if path.name == "dup.md":
             return AddFileResult(path.name, None, "skipped", "Already in KB.")
         raise RuntimeError("explode")
@@ -143,7 +145,8 @@ def test_worker_unsupported_suffix_is_skipped_without_ingest(kb_dir, monkeypatch
     called = []
     monkeypatch.setattr(
         "openkb.watch_service._add_for_api",
-        lambda path, kb, bundle=None: called.append(path) or AddFileResult("x", None, "added", "x"),
+        lambda path, kb, bundle=None, **kwargs: called.append(path)
+        or AddFileResult("x", None, "added", "x"),
     )
     _drain_worker(state)
     assert called == []
@@ -157,7 +160,7 @@ def test_worker_does_not_die_on_exception(kb_dir, monkeypatch):
     state = _make_state(kb_dir)
     state.queue.put([str(kb_dir / "raw" / "bad.md"), str(kb_dir / "raw" / "good.md")])
 
-    def fake_add(path, target_kb, bundle=None):
+    def fake_add(path, target_kb, bundle=None, **kwargs):
         if path.name == "bad.md":
             raise RuntimeError("nope")
         return AddFileResult(path.name, str(path), "added", "ok")
@@ -180,7 +183,7 @@ def test_end_to_end_debounce_processes_real_file(kb_dir, monkeypatch):
     seen = []
     monkeypatch.setattr(
         "openkb.watch_service._add_for_api",
-        lambda path, kb, bundle=None: seen.append(path.name)
+        lambda path, kb, bundle=None, **kwargs: seen.append(path.name)
         or AddFileResult(path.name, str(path), "added", "ok"),
     )
     reg = WatchRegistry()
@@ -239,7 +242,7 @@ def test_worker_exception_clears_running(kb_dir, monkeypatch):
 
     monkeypatch.setattr(
         "openkb.watch_service._add_for_api",
-        lambda path, kb_dir, bundle=None: AddFileResult("x", str(path), "added", "ok"),
+        lambda path, kb_dir, bundle=None, **kwargs: AddFileResult("x", str(path), "added", "ok"),
     )
     reg = WatchRegistry()
     state = reg.start("t", kb_dir, debounce=0.1)

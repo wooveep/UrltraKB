@@ -24,6 +24,7 @@ import queue
 import threading
 import time
 from collections import deque
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,8 +32,16 @@ from typing import Any
 from watchdog.observers import Observer
 
 from openkb.application.documents import _add_for_api
-from openkb.cli import SUPPORTED_EXTENSIONS
 from openkb.config import LlmCredentialBundle, resolve_credential_bundle
+from openkb.inputs import SUPPORTED_EXTENSIONS
+from openkb.lifecycle import (
+    KnowledgeBaseIncomplete,
+    KnowledgeBaseRemoved,
+    current_generation,
+    expected_generation,
+)
+from openkb.locks import LockCancelled, kb_ingest_lock
+from openkb.mutation import RecoveryRequired
 from openkb.watcher import start_watch
 
 # How many recent events to retain per KB for status() and SSE replay.
@@ -57,10 +66,15 @@ class WatcherState:
         default_factory=lambda: {"added": 0, "skipped": 0, "failed": 0}
     )
     bundle: LlmCredentialBundle | None = None
+    generation: str | None = None
+    receiving: bool = True
     _seq: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _gate: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
+        if self.kb_dir is not None:
+            self.generation = current_generation(self.kb_dir)
         self.running.set()
 
 
@@ -98,8 +112,26 @@ def _run_worker(state: WatcherState) -> None:
             if paths is None:
                 return
             for raw_path in paths:
-                _process_file(state, raw_path)
+                with expected_generation(state.kb_dir, state.generation):
+                    _process_file(state, raw_path)
+    except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete):
+        _record_event(
+            state,
+            "error",
+            {
+                "path": str(state.kb_dir),
+                "original_name": "",
+                "message": (
+                    "Watching stopped: knowledge base unavailable or needs repair; "
+                    "remaining files were not processed."
+                ),
+            },
+        )
+        _record_event(state, "watcher_stopped", {"kb": state.kb})
     finally:
+        with state._gate:
+            state.receiving = False
+        _stop_observer(state)
         # Ensure `running` reflects reality even on unexpected exit, so
         # status() reports inactive and start() can spawn a fresh worker.
         state.running.clear()
@@ -131,7 +163,12 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
         },
     )
     try:
-        result = _add_for_api(path, state.kb_dir, bundle=state.bundle)
+        with kb_ingest_lock(state.kb_dir / ".openkb"):
+            if state.raw_dir.resolve() != state.kb_dir / "raw":
+                raise ValueError("Watched input moved outside the knowledge-base raw directory")
+            result = _add_for_api(
+                path, state.kb_dir, bundle=state.bundle, source_root=state.kb_dir / "raw"
+            )
     except Exception as exc:  # worker must never die
         _record_event(
             state,
@@ -143,6 +180,8 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
             },
         )
         _inc(state, "failed")
+        if isinstance(exc, (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete)):
+            raise
         return
     status = result.status if result.status in ("added", "skipped", "failed") else "failed"
     _record_event(
@@ -158,60 +197,119 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
     _inc(state, status)
 
 
+def _stop_observer(state: WatcherState) -> None:
+    try:
+        if state.observer is not None:
+            state.observer.stop()
+            state.observer.join(timeout=5.0)
+    except Exception:
+        pass  # Closing the receiving gate still prevents late callbacks from queuing work.
+
+
+@dataclass
+class _Starting:
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    result: Future[WatcherState] = field(default_factory=Future)
+
+
 class WatchRegistry:
     """Thread-safe registry of per-KB watchers (one app instance owns one)."""
 
     def __init__(self, max_events: int = _MAX_EVENTS) -> None:
         self._watchers: dict[str, WatcherState] = {}
+        self._starting: dict[str, _Starting] = {}
         self._lock = threading.Lock()
         self._max_events = max_events
 
+    def _live(self, kb: str) -> WatcherState | None:
+        state = self._watchers.get(kb)
+        if (
+            state
+            and state.running.is_set()
+            and state.worker_thread
+            and state.worker_thread.is_alive()
+        ):
+            return state
+        return None
+
     def start(self, kb: str, kb_dir: Path, debounce: float = 2.0) -> WatcherState:
-        """Start a watcher for *kb*, or return the existing one (idempotent).
-
-        If a prior watcher state exists but its worker thread is no longer
-        alive (the daemon died), it is purged and a fresh watcher starts.
-        A still-running worker for *kb* is returned as-is.
-        """
+        """Start one subscription, retaining the REST credential timing and drain policy."""
         with self._lock:
-            existing = self._watchers.get(kb)
-            if existing is not None:
-                worker_alive = (
-                    existing.worker_thread is not None and existing.worker_thread.is_alive()
-                )
-                if existing.running.is_set() and worker_alive:
-                    return existing
-                # Stale state from a dead worker: purge before starting fresh.
-                self._watchers.pop(kb, None)
-            raw_dir = kb_dir / "raw"
+            if existing := self._live(kb):
+                return existing
+            pending = self._starting.get(kb)
+            owner = pending is None
+            if pending is None:
+                pending = _Starting()
+                self._starting[kb] = pending
+        if not owner:
+            return pending.result.result()
+        try:
+            state = self._start(kb, kb_dir, debounce, pending.cancelled)
+        except BaseException as exc:
+            pending.result.set_exception(exc)
+            raise
+        else:
+            pending.result.set_result(state)
+            return state
+        finally:
+            with self._lock:
+                if self._starting.get(kb) is pending:
+                    del self._starting[kb]
+
+    def _start(
+        self, kb: str, kb_dir: Path, debounce: float, cancelled: threading.Event
+    ) -> WatcherState:
+        root = kb_dir.expanduser().resolve()
+        generation = current_generation(root)
+        if not (root / ".openkb/config.yaml").is_file():
+            raise ValueError("Open a knowledge base before watching")
+        bundle = resolve_credential_bundle(root)
+        # No registry mutex is held while waiting for another KB operation.
+        with (
+            expected_generation(root, generation),
+            kb_ingest_lock(root / ".openkb", cancelled=cancelled.is_set),
+        ):
+            if not (root / ".openkb/config.yaml").is_file():
+                raise ValueError("Knowledge base is no longer initialized")
+            raw_dir = root / "raw"
+            if raw_dir.is_symlink():
+                raise ValueError("Watch requires a local raw directory")
             raw_dir.mkdir(parents=True, exist_ok=True)
-            # Resolve the KB's credentials once at watcher start so background
-            # ingests use the same per-KB bundle as REST endpoints instead of
-            # mutating process-wide env state.
-            bundle = resolve_credential_bundle(kb_dir)
-            state = WatcherState(
-                kb=kb,
-                kb_dir=kb_dir,
-                raw_dir=raw_dir,
-                debounce=debounce,
-                bundle=bundle,
-                started_at=time.time(),
-                events=deque(maxlen=self._max_events),
-            )
+            with self._lock:
+                if cancelled.is_set():
+                    raise LockCancelled("Watcher start cancelled")
+                state = WatcherState(
+                    kb=kb,
+                    kb_dir=root,
+                    raw_dir=raw_dir,
+                    debounce=debounce,
+                    bundle=bundle,
+                    started_at=time.time(),
+                    events=deque(maxlen=self._max_events),
+                )
 
-            def on_new_files(paths: list[str]) -> None:
-                state.queue.put(paths)
+                def on_new_files(paths: list[str]) -> None:
+                    with state._gate:
+                        if state.receiving:
+                            state.queue.put(paths)
 
-            state.observer = start_watch(raw_dir, on_new_files, debounce=debounce)
-            state.worker_thread = threading.Thread(
-                target=_run_worker,
-                args=(state,),
-                daemon=True,
-                name=f"openkb-watch-{kb}",
-            )
-            self._watchers[kb] = state
-        state.worker_thread.start()
-        return state
+                state.observer = start_watch(raw_dir, on_new_files, debounce=debounce)
+                state.worker_thread = threading.Thread(
+                    target=_run_worker,
+                    args=(state,),
+                    daemon=True,
+                    name=f"openkb-watch-{kb}",
+                )
+                try:
+                    state.worker_thread.start()
+                except BaseException:
+                    with state._gate:
+                        state.receiving = False
+                    _stop_observer(state)
+                    raise
+                self._watchers[kb] = state
+                return state
 
     def get(self, kb: str) -> WatcherState | None:
         with self._lock:
@@ -256,16 +354,17 @@ class WatchRegistry:
         ``start()`` knows not to spawn a second worker.
         """
         with self._lock:
+            pending = self._starting.get(kb)
+            if pending:
+                pending.cancelled.set()
             state = self._watchers.get(kb)
         if state is None:
-            return False
-        # Signal the worker and observer to stop, then wait for them.
-        try:
-            if state.observer is not None:
-                state.observer.stop()
-                state.observer.join(timeout=5.0)
-        except Exception:
-            pass
+            return pending is not None
+        # Close reception before withdrawing the OS subscription. Already queued
+        # REST work retains the legacy drain-on-stop behavior.
+        with state._gate:
+            state.receiving = False
+        _stop_observer(state)
         state.queue.put(None)
         if state.worker_thread is not None:
             state.worker_thread.join(timeout=5.0)
@@ -287,5 +386,7 @@ class WatchRegistry:
         return True
 
     def stop_all(self) -> None:
-        for kb in self.list_active():
+        with self._lock:
+            names = set(self._watchers) | set(self._starting)
+        for kb in names:
             self.stop(kb)
