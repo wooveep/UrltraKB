@@ -143,6 +143,7 @@ class ConversationView:
     model: str
     language: str
     turns: tuple[tuple[str, str], ...]
+    version: str
 
 
 def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
@@ -156,4 +157,5 @@ def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
             session.model,
             session.language,
             tuple(zip(session.user_turns, session.assistant_texts)),
+            session._version or "",
         )

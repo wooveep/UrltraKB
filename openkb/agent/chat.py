@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import sys
 import time
 from collections.abc import AsyncGenerator
@@ -444,51 +443,12 @@ async def _run_turn(
 
 
 def _save_transcript(kb_dir: Path, session: ChatSession, name: str | None) -> Path:
-    from openkb.lint import (
-        build_norm_index,
-        list_existing_wiki_targets,
-        strip_ghost_wikilinks,
-    )
+    from openkb.application.sessions import export_conversation
 
-    explore_dir = kb_dir / "wiki" / "explorations"
-    explore_dir.mkdir(parents=True, exist_ok=True)
-
-    base = name or session.title or (session.user_turns[0] if session.user_turns else session.id)
-    slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:60] or session.id
-    date = session.created_at[:10].replace("-", "")
-    path = explore_dir / f"{slug}-{date}.md"
-
-    # Strip ghost wikilinks from assistant responses (the agent's
-    # instructions encourage [[wikilinks]] but it can reference pages
-    # that don't exist on disk). User turns are written verbatim — they
-    # represent intentional user input, not LLM hallucination.
-    # Build the normalized index once and reuse for every turn — the
-    # whitelist is the same across the whole session.
-    known = list_existing_wiki_targets(kb_dir / "wiki")
-    norm_index = build_norm_index(known)
-
-    lines: list[str] = [
-        "---",
-        f'session: "{session.id}"',
-        f'model: "{session.model}"',
-        f'created: "{session.created_at}"',
-        "---",
-        "",
-        f"# Chat transcript  {session.title or session.id}",
-        "",
-    ]
-    for i, (u, a) in enumerate(zip(session.user_turns, session.assistant_texts), 1):
-        lines.append(f"## [{i}] {u}")
-        lines.append("")
-        if a:
-            cleaned_a, _ = strip_ghost_wikilinks(a, known, norm_index=norm_index)
-            lines.append(cleaned_a)
-        else:
-            lines.append("_(no response recorded)_")
-        lines.append("")
-
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+    result = export_conversation(kb_dir, session, name)
+    if result.status != "exported":
+        raise FileNotFoundError("Conversation was deleted before export")
+    return Path(result.resources[0])
 
 
 async def _run_add(arg: str, kb_dir: Path, style: Style) -> None:
@@ -793,10 +753,13 @@ async def _handle_slash(
         if not session.user_turns:
             _fmt(style, ("class:error", "Nothing to save yet.\n"))
             return None
-        from openkb.locks import async_kb_lock
+        from openkb.locks import async_kb_lock, async_session_lock
 
-        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-            path = _save_transcript(kb_dir, session, arg or None)
+        # Wait cooperatively in the REPL task. Cancelling a to_thread waiter
+        # would leave its thread free to export later, after the user stopped.
+        async with async_session_lock(kb_dir, session.id):
+            async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+                path = _save_transcript(kb_dir, session, arg or None)
         _fmt(style, ("class:slash.ok", f"Saved to {path}\n"))
         return None
 

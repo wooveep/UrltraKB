@@ -74,6 +74,8 @@ _OPERATIONS = {
     "RemoveDocument": "删除资料",
     "RecompileDocument": "重编译资料",
     "ImportUrl": "导入网址",
+    "DeleteConversation": "删除对话",
+    "ExportConversation": "导出对话",
 }
 
 
@@ -128,6 +130,12 @@ class Workbench(QMainWindow):
             from openkb.desktop.task_details import show_task_details
 
             show_task_details(self.manager.get(task_id), self)
+
+    def _manage_sessions(self):
+        if self.kb is not None:
+            from openkb.desktop.sessions import SessionsDialog
+
+            SessionsDialog(self, self.kb).exec()
 
     def _action(self, toolbar, label, callback):
         action = QAction(label, self)
@@ -213,6 +221,9 @@ class Workbench(QMainWindow):
         ask_options.addWidget(self.mode)
         ask_options.addWidget(self.sessions, 1)
         ask_options.addWidget(self.save_answer)
+        manage_sessions = QPushButton("管理对话…")
+        manage_sessions.clicked.connect(self._manage_sessions)
+        ask_options.addWidget(manage_sessions)
         center_layout.addLayout(ask_options)
         self.question = QPlainTextEdit()
         self.question.setPlaceholderText("向当前知识库提问…")

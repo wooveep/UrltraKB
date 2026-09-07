@@ -181,6 +181,12 @@ print("OpenKB")
         checks.append(
             "native removal preview, stale confirmation, spawned cleanup and kept resources"
         )
+        from openkb.desktop.verification_sessions import verify_sessions
+
+        verify_sessions(window, first, wait_until)
+        checks.append(
+            "native conversation wait/stop, unique transcript copies and version-bound deletion"
+        )
         if args.model_base:
             from openkb.application.settings import apply_kb_config_patch
             from openkb.application.settings_data import KbConfigPatchRequest

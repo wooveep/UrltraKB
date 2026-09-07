@@ -62,6 +62,8 @@ def _extract_get_image_path(item: dict[str, Any]) -> str | None:
         payload = json.loads(arguments)
     except json.JSONDecodeError:
         return None
+    if not isinstance(payload, dict):
+        return None
     image_path = payload.get("image_path")
     if isinstance(image_path, str) and image_path:
         return image_path
@@ -164,8 +166,8 @@ class ChatSession:
         with session_lock(kb_dir, self.id), kb_ingest_lock(kb_dir / ".openkb"):
             if self._version is not None:
                 # Missing is deletion, not permission to recreate this identity.
-                current = self.path.read_text(encoding="utf-8")
-                if hashlib.sha256(current.encode("utf-8")).hexdigest() != self._version:
+                current = self.path.read_bytes()
+                if hashlib.sha256(current).hexdigest() != self._version:
                     raise RuntimeError("Conversation changed; reload its latest completed history")
             elif self.path.exists():
                 raise RuntimeError("Conversation changed; session identity already exists")
@@ -206,8 +208,23 @@ class ChatSession:
 
 def load_session(kb_dir: Path, session_id: str) -> ChatSession:
     path = _session_path(kb_dir, session_id)
-    text = path.read_text(encoding="utf-8")
-    data = json.loads(text)
+    content = path.read_bytes()
+    data = json.loads(content.decode("utf-8"))
+    if not isinstance(data, dict) or data.get("id") != session_id:
+        raise ValueError("Conversation identity does not match its file")
+    if any(not isinstance(data.get(key), str) for key in ("created_at", "updated_at", "model")):
+        raise ValueError("Invalid conversation metadata")
+    if any(not isinstance(data.get(key, ""), str) for key in ("title", "language")):
+        raise ValueError("Invalid conversation display metadata")
+    for key in ("user_turns", "assistant_texts"):
+        value = data.get(key, [])
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError("Invalid completed conversation text")
+    for key in ("history", "assistant_traces"):
+        if not isinstance(data.get(key, []), list):
+            raise ValueError("Invalid conversation history")
+    if type(data.get("turn_count", 0)) is not int or data.get("turn_count", 0) < 0:
+        raise ValueError("Invalid completed conversation count")
     return ChatSession(
         id=data["id"],
         created_at=data["created_at"],
@@ -221,7 +238,7 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         assistant_texts=data.get("assistant_texts", []),
         assistant_traces=data.get("assistant_traces", []),
         path=path,
-        _version=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        _version=hashlib.sha256(content).hexdigest(),
     )
 
 
@@ -233,16 +250,16 @@ def list_sessions(kb_dir: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for p in d.glob("*.json"):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            session = load_session(kb_dir, p.stem)
+        except (ValueError, OSError):
             continue
         out.append(
             {
-                "id": data.get("id", p.stem),
-                "title": data.get("title", ""),
-                "turn_count": data.get("turn_count", 0),
-                "updated_at": data.get("updated_at", ""),
-                "model": data.get("model", ""),
+                "id": session.id,
+                "title": session.title,
+                "turn_count": session.turn_count,
+                "updated_at": session.updated_at,
+                "model": session.model,
             }
         )
     out.sort(key=lambda s: (s["updated_at"], s["id"]), reverse=True)
@@ -277,12 +294,9 @@ def resolve_session_id(kb_dir: Path, query: str) -> str | None:
 
 
 def delete_session(kb_dir: Path, session_id: str) -> bool:
-    path = _session_path(kb_dir, session_id)
-    with session_lock(kb_dir, session_id), kb_ingest_lock(kb_dir / ".openkb"):
-        if path.exists():
-            path.unlink()
-            return True
-        return False
+    from openkb.application.sessions import delete_conversation
+
+    return delete_conversation(kb_dir, session_id).status == "deleted"
 
 
 def relative_time(iso_str: str) -> str:
@@ -305,6 +319,14 @@ def relative_time(iso_str: str) -> str:
 
 
 def _session_path(kb_dir: Path, session_id: str) -> Path:
-    if not session_id or any(c in session_id for c in "/\\") or session_id.startswith("."):
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or any(c in session_id for c in "/\\")
+        or session_id.startswith(".")
+    ):
         raise ValueError("Invalid conversation ID")
-    return chats_dir(kb_dir) / f"{session_id}.json"
+    path = chats_dir(kb_dir) / f"{session_id}.json"
+    if not path.resolve().is_relative_to(kb_dir.resolve()):
+        raise ValueError("Conversation path escapes the knowledge base")
+    return path

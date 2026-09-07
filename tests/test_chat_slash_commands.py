@@ -220,6 +220,56 @@ async def test_slash_clear(tmp_path):
     assert result == "new_session"
 
 
+@pytest.mark.asyncio
+async def test_slash_save_exports_completed_history_with_existing_name_policy(tmp_path):
+    kb_dir = _setup_kb(tmp_path)
+    session = _make_session(kb_dir)
+    session.record_turn("Question", "Completed answer", [])
+    p, _collected = _collect_fmt()
+    with p:
+        await _handle_slash("/save named-copy", kb_dir, session, _STYLE)
+        session.record_turn("Next question", "Next completed answer", [])
+        await _handle_slash("/save named-copy", kb_dir, session, _STYLE)
+    paths = list((kb_dir / "wiki/explorations").glob("named-copy-*.md"))
+    assert len(paths) == 1
+    assert "Next completed answer" in paths[0].read_text()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_slash_save_never_starts_after_its_lock_is_released(tmp_path):
+    import asyncio
+    import threading
+
+    from openkb.locks import session_lock
+
+    kb_dir = _setup_kb(tmp_path)
+    session = _make_session(kb_dir)
+    session.record_turn("Question", "Completed answer", [])
+    ready, release = threading.Event(), threading.Event()
+
+    def hold():
+        with session_lock(kb_dir, session.id):
+            ready.set()
+            release.wait(5)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert ready.wait(2)
+        saving = asyncio.create_task(
+            _handle_slash("/save cancelled-export", kb_dir, session, _STYLE)
+        )
+        await asyncio.sleep(0.15)
+        saving.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await saving
+    finally:
+        release.set()
+        await asyncio.to_thread(holder.join, 2)
+    await asyncio.sleep(0.15)
+    assert not list((kb_dir / "wiki/explorations").glob("cancelled-export-*.md"))
+
+
 def test_save_transcript_strips_ghost_wikilinks(tmp_path):
     """`/save` writes the chat transcript to wiki/explorations/. Assistant
     responses may contain [[wikilinks]] to pages that don't exist on disk
