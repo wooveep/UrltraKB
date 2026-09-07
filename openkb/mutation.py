@@ -198,6 +198,8 @@ class MutationSnapshot:
         """
         changed = False
         for path in paths:
+            if path.is_symlink():
+                raise ValueError("Mutation targets cannot be symbolic links")
             target = path.resolve()
             if target not in self.entries:
                 self.entries[target] = None
@@ -342,13 +344,17 @@ def snapshot_paths(
     )
     try:
         for path in paths:
+            if path.is_symlink():
+                raise ValueError("Mutation targets cannot be symbolic links")
             target = path.resolve()
+            rel = target.relative_to(kb_dir)
+            if target == kb_dir:
+                raise ValueError("A mutation cannot replace its knowledge-base root")
             if target in snapshot.entries:
                 continue
             if not target.exists():
                 snapshot.entries[target] = None
                 continue
-            rel = target.relative_to(kb_dir)
             backup = backup_dir / rel
             backup.parent.mkdir(parents=True, exist_ok=True)
             if target.is_dir():
