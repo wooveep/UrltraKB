@@ -11,6 +11,30 @@ from typing import Any, Iterator
 
 import yaml
 
+from openkb.llm_runtime import (
+    get_extra_headers as get_extra_headers,
+)
+from openkb.llm_runtime import (
+    get_parallel_tool_calls as get_parallel_tool_calls,
+)
+from openkb.llm_runtime import (
+    get_timeout as get_timeout,
+)
+from openkb.llm_runtime import (
+    get_timeout_extra_args as get_timeout_extra_args,
+)
+from openkb.llm_runtime import (
+    resolve_model_settings as resolve_model_settings,
+)
+from openkb.llm_runtime import (
+    set_extra_headers as set_extra_headers,
+)
+from openkb.llm_runtime import (
+    set_parallel_tool_calls as set_parallel_tool_calls,
+)
+from openkb.llm_runtime import (
+    set_timeout as set_timeout,
+)
 from openkb.locks import atomic_write_text, flock, funlock
 
 logger = logging.getLogger(__name__)
@@ -318,79 +342,6 @@ def resolve_per_request_overrides(
     return extra_headers, timeout, litellm_settings
 
 
-_runtime_extra_headers: dict[str, str] = {}
-
-
-def set_extra_headers(headers: dict[str, str]) -> None:
-    """Set the process-wide extra headers for LLM requests."""
-    global _runtime_extra_headers
-    _runtime_extra_headers = dict(headers)
-
-
-def get_extra_headers() -> dict[str, str]:
-    """Return a copy of the process-wide extra headers for LLM requests."""
-    return dict(_runtime_extra_headers)
-
-
-# Process-wide LLM request timeout (seconds), set from config by the CLI and
-# read at the call sites via get_timeout(). None = use LiteLLM's default.
-_runtime_timeout: float | None = None
-
-
-def set_timeout(timeout: float | None) -> None:
-    """Set the process-wide LLM request timeout in seconds; ``None`` clears it."""
-    global _runtime_timeout
-    _runtime_timeout = timeout
-
-
-def get_timeout() -> float | None:
-    """Return the process-wide LLM request timeout in seconds, or ``None``."""
-    return _runtime_timeout
-
-
-def get_timeout_extra_args() -> dict[str, float] | None:
-    """Timeout as Agents-SDK ``ModelSettings.extra_args`` (it has no ``timeout``
-    field), or ``None``. The LiteLLM provider forwards it to the completion call.
-    """
-    return {"timeout": _runtime_timeout} if _runtime_timeout is not None else None
-
-
-# Process-wide agent ``parallel_tool_calls`` as ``(value, was_explicit)``, set
-# from config by the CLI and read when building agents. ``(None, False)`` = not
-# configured, so each agent falls back to its own default (resolve_model_settings).
-_runtime_parallel_tool_calls: tuple[bool | None, bool] = (None, False)
-
-
-def set_parallel_tool_calls(value: bool | None, was_explicit: bool) -> None:
-    """Set the process-wide ``parallel_tool_calls`` — see :func:`resolve_parallel_tool_calls`."""
-    global _runtime_parallel_tool_calls
-    _runtime_parallel_tool_calls = (value, was_explicit)
-
-
-def get_parallel_tool_calls() -> tuple[bool | None, bool]:
-    """Return the process-wide ``parallel_tool_calls`` as ``(value, was_explicit)``."""
-    return _runtime_parallel_tool_calls
-
-
-def resolve_model_settings(*, default_parallel_tool_calls: bool | None = False) -> dict[str, Any]:
-    """Assemble the agents-SDK ``ModelSettings`` kwargs from the process-wide LLM
-    runtime settings — the single place tool-using agent builders wire them in.
-
-    ``default_parallel_tool_calls`` (the caller's own historical default) is used
-    only when config didn't set ``parallel_tool_calls``; an explicit value always
-    wins. Tool-less agents (skill-eval graders) skip this and omit the setting —
-    the SDK forwards an explicit ``False`` even without tools, which strict
-    OpenAI-compatible endpoints reject.
-    """
-    value, was_explicit = get_parallel_tool_calls()
-    parallel_tool_calls = value if was_explicit else default_parallel_tool_calls
-    return {
-        "extra_headers": get_extra_headers() or None,
-        "extra_args": get_timeout_extra_args(),
-        "parallel_tool_calls": parallel_tool_calls,
-    }
-
-
 @dataclass(frozen=True)
 class LlmCredentialBundle:
     """Immutable per-request LLM credential + config bundle.
@@ -495,6 +446,27 @@ def load_config(config_path: Path) -> dict[str, Any]:
 def save_config(config_path: Path, config: dict) -> None:
     """Persist config dict to YAML, creating parent directories as needed."""
     _atomic_yaml_dump(config_path, config)
+
+
+def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = False) -> None:
+    """Validate fields used directly by a local execution before it can start.
+
+    Keep unknown provider options intact and leave the existing tolerant
+    resolvers in charge of optional overrides. Errors name fields, never
+    credential-bearing values from user configuration.
+    """
+    for key in ("model", "language"):
+        value = config.get(key)
+        if allow_inherited and value is None:
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"Configuration field '{key}' must be a string")
+    threshold = config.get("pageindex_threshold")
+    if threshold is None and allow_inherited:
+        return
+    # Legacy zero/negative thresholds route every PDF through PageIndex.
+    if isinstance(threshold, bool) or not isinstance(threshold, int):
+        raise ValueError("Configuration field 'pageindex_threshold' must be an integer")
 
 
 def load_global_config() -> dict[str, Any]:

@@ -49,3 +49,29 @@ def test_create_and_reopen_existing_knowledge_base_without_changing_cwd(tmp_path
     assert get_kb_list(kb)["document_count"] == 0
     assert config.resolve_effective_config(kb)[0]["language"] == "zh"
     assert not (kb / ".env").exists()
+
+
+def test_open_rejects_invalid_runtime_fields_before_registering(kb_dir, tmp_path, monkeypatch):
+    from openkb import config
+    from openkb.application.knowledge_bases import open_kb
+
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
+    (kb_dir / ".openkb/config.yaml").write_text("model: []\nlanguage: {}\n")
+    with pytest.raises(ValueError, match="model.*string"):
+        open_kb(kb_dir)
+    assert not config.GLOBAL_CONFIG_PATH.exists()
+
+
+def test_open_accepts_legacy_zero_threshold_after_settings_save(kb_dir, tmp_path, monkeypatch):
+    from openkb import config
+    from openkb.application.knowledge_bases import open_kb
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
+    apply_kb_config_patch(
+        kb_dir, KbConfigPatchRequest(kb="test", config={"pageindex_threshold": 0, "model": ""})
+    )
+    assert open_kb(kb_dir) == kb_dir.resolve()

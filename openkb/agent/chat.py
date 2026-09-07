@@ -31,6 +31,7 @@ from openkb.agent.query import (
     build_chat_agent,
     iter_agent_response_events,
 )
+from openkb.agent.streaming import settled_stream
 from openkb.config import LlmCredentialBundle
 from openkb.log import append_log
 
@@ -379,7 +380,7 @@ async def _run_turn(
         return lv
 
     live = _start_live()
-    stream = result.stream_events()
+    stream = settled_stream(result)
 
     try:
         async for event in stream:
@@ -429,8 +430,6 @@ async def _run_turn(
                     _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
                     need_blank_before_text = True
     finally:
-        if not result.is_complete:
-            result.cancel(mode="after_turn")
         await stream.aclose()
         if live:
             if segment:

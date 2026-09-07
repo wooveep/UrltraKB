@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Literal
 
 from openkb.add_coordinator import _cleanup_staging_dirs
-from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
 from openkb.application.execution import ExecutionContext
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
@@ -97,11 +96,18 @@ def add_single_file(
     bundle=None,
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
+    prepared: tuple[Path, str] | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document under the KB mutation lock."""
     with kb_ingest_lock(kb_dir / ".openkb"):
         return _add_single_file_locked(
-            file_path, kb_dir, stage=stage, bundle=bundle, report=report, on_event=on_event
+            file_path,
+            kb_dir,
+            stage=stage,
+            bundle=bundle,
+            report=report,
+            on_event=on_event,
+            prepared=prepared,
         )
 
 
@@ -113,6 +119,7 @@ def _add_single_file_locked(
     bundle=None,
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
+    prepared: tuple[Path, str] | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document into the knowledge base.
 
@@ -130,7 +137,11 @@ def _add_single_file_locked(
         be an orphan) while preserving it on failure so the user can
         retry without re-downloading.
     """
-    from openkb.agent.compiler import compile_long_doc, compile_short_doc
+    from openkb.agent.compiler import (
+        DEFAULT_COMPILE_CONCURRENCY,
+        compile_long_doc,
+        compile_short_doc,
+    )
     from openkb.state import HashRegistry
 
     openkb_dir = kb_dir / ".openkb"
@@ -146,7 +157,10 @@ def _add_single_file_locked(
         on_event({"stage": "converting", "source": str(file_path)})
     report(f"Adding: {file_path.name}")
     try:
-        result = convert_document(file_path, kb_dir, staging_dir=staging_dir)
+        if prepared is None:
+            result = convert_document(file_path, kb_dir, staging_dir=staging_dir)
+        else:
+            result = convert_document(file_path, kb_dir, staging_dir=staging_dir, prepared=prepared)
     except Exception as exc:
         report(f"  [ERROR] Conversion failed: {exc}")
         logger.debug("Conversion traceback:", exc_info=True)
@@ -366,31 +380,40 @@ def import_document(
         raise FileNotFoundError(source)
     from contextlib import nullcontext
 
-    with kb_ingest_lock(
-        root / ".openkb",
-        cancelled=context.cancelled if context else None,
-        on_wait=context.waiting if context else None,
-    ):
-        with context.begin(root) if context else nullcontext(bundle) as credentials:
-            outcome = add_single_file(
-                source,
-                root,
-                bundle=credentials,
-                on_event=on_event or (context.on_event if context else None),
-            )
-        entries = HashRegistry(root / ".openkb/hashes.json")
-        meta = entries.get_by_path(_registry_path(source, root))
-        resources = []
-        if meta:
-            for key in ("raw_path", "source_path"):
-                if meta.get(key):
-                    target = root / meta[key]
-                    if target.is_file():
-                        resources.append(str(target))
-            if meta.get("doc_name"):
-                summary = root / "wiki/summaries" / f"{meta['doc_name']}.md"
-                if summary.is_file():
-                    resources.append(str(summary))
-        elif source.is_relative_to(root / "raw"):
-            resources.append(str(source))
-        return DocumentResult(str(source), outcome, tuple(resources))
+    from openkb.inputs import copy_stable, prepared_input
+
+    if context:
+        context.on_event({"stage": "preparing", "source": str(source)})
+        context.check_stop()
+    with prepared_input(source) as ready:
+        with kb_ingest_lock(
+            root / ".openkb",
+            cancelled=context.cancelled if context else None,
+            on_wait=context.waiting if context else None,
+        ):
+            if HashRegistry.hash_file(source) != ready[1]:
+                ready = (ready[0], copy_stable(source, ready[0]))
+            with context.begin(root) if context else nullcontext(bundle) as credentials:
+                outcome = add_single_file(
+                    source,
+                    root,
+                    bundle=credentials,
+                    prepared=ready,
+                    on_event=on_event or (context.on_event if context else None),
+                )
+            entries = HashRegistry(root / ".openkb/hashes.json")
+            meta = entries.get(ready[1])
+            resources = []
+            if meta:
+                for key in ("raw_path", "source_path"):
+                    if meta.get(key):
+                        target = root / meta[key]
+                        if target.is_file():
+                            resources.append(str(target))
+                if meta.get("doc_name"):
+                    summary = root / "wiki/summaries" / f"{meta['doc_name']}.md"
+                    if summary.is_file():
+                        resources.append(str(summary))
+            elif source.is_relative_to(root / "raw"):
+                resources.append(str(source))
+            return DocumentResult(str(source), outcome, tuple(resources))

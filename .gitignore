@@ -30,3 +30,7 @@ examples/docs/
 # Shipped inside the wheel via hatchling `artifacts`, never committed to git.
 /openkb/web/
 web/
+
+# Locally assembled native rendering runtimes (included by desktop packaging).
+/openkb/rendering/assets/
+/openkb/rendering/rust-helper/target/

@@ -38,7 +38,10 @@ def open_kb(kb_dir: Path) -> Path:
     if not (root / ".openkb/config.yaml").is_file() or not (root / "wiki").is_dir():
         raise ValueError(f"Not a knowledge base: {root}")
     with kb_ingest_lock(root / ".openkb"):
-        load_config(root / ".openkb/config.yaml")
+        from openkb.config import resolve_effective_config, validate_runtime_config
+
+        validate_runtime_config(load_config(root / ".openkb/config.yaml"), allow_inherited=True)
+        validate_runtime_config(resolve_effective_config(root)[0])
         register_kb(root)
     return root
 

@@ -227,8 +227,6 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
     from agents import RawResponsesStreamEvent, Runner
     from openai.types.responses import ResponseTextDeltaEvent
 
-    from openkb.locks import kb_ingest_lock_held
-
     settled = asyncio.Event()
     stop_requested = asyncio.Event()
 
@@ -255,7 +253,6 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
                 await stop_requested.wait()
             finally:
                 await stop_requested.wait()
-                assert kb_ingest_lock_held(kb_dir / ".openkb")
                 settled.set()
 
     monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: ModelRun())
@@ -264,4 +261,66 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
     assert (await anext(stream))["event"] == "delta"
     await stream.aclose()
     assert settled.is_set()
+    assert not session.path.exists()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_consumer_keeps_lease_until_real_sdk_work_settles(kb_dir, monkeypatch):
+    import asyncio
+
+    from agents import Agent, RunContextWrapper, Runner
+    from agents.result import QueueCompleteSentinel, RunResultStreaming
+
+    from openkb.locks import async_kb_lock
+
+    started, finish, settled, competing = (asyncio.Event() for _ in range(4))
+
+    async def model_work():
+        started.set()
+        await finish.wait()
+        settled.set()
+        result.is_complete = True
+        result._event_queue.put_nowait(QueueCompleteSentinel())
+
+    result = RunResultStreaming(
+        input="x",
+        new_items=[],
+        raw_responses=[],
+        final_output=None,
+        input_guardrail_results=[],
+        output_guardrail_results=[],
+        tool_input_guardrail_results=[],
+        tool_output_guardrail_results=[],
+        context_wrapper=RunContextWrapper(None),
+        current_agent=Agent(name="test"),
+        current_turn=1,
+        max_turns=2,
+        _current_agent_output_schema=None,
+        trace=None,
+        run_loop_task=asyncio.create_task(model_work()),
+    )
+    monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: result)
+    session = ChatSession.new(kb_dir, "test", "en")
+
+    async def consume():
+        return [event async for event in iter_chat_turn_events(object(), session, "x")]
+
+    async def next_writer():
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=True, on_wait=competing.set):
+            assert settled.is_set()
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), 5)
+    while not result._waiting_on_event_queue:
+        await asyncio.sleep(0)
+    consumer.cancel()
+    contender = asyncio.create_task(next_writer())
+    await asyncio.wait_for(competing.wait(), 5)
+    assert not consumer.done()
+    consumer.cancel()  # A second cancellation must not cut short cleanup.
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(consumer, 5)
+    await asyncio.wait_for(contender, 5)
+    assert result.run_loop_task.done()
     assert not session.path.exists()

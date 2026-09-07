@@ -227,20 +227,7 @@ def _setup_llm_key(kb_dir: Path | None = None) -> None:
                 os.environ[env_var] = api_key
 
 
-# Supported document extensions for the `add` command
-SUPPORTED_EXTENSIONS = {
-    ".pdf",
-    ".md",
-    ".markdown",
-    ".docx",
-    ".pptx",
-    ".xlsx",
-    ".xls",
-    ".html",
-    ".htm",
-    ".txt",
-    ".csv",
-}
+from openkb.inputs import SUPPORTED_EXTENSIONS
 
 # Map raw doc types to display types
 _TYPE_DISPLAY_MAP = {
@@ -2117,7 +2104,7 @@ async def run_lint(kb_dir: Path) -> Path | None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         report_path = reports_dir / f"lint_{timestamp}.md"
         report_content = f"# Lint Report — {timestamp}\n\n## Structural\n\n{structural_report}\n\n## Semantic\n\n{knowledge_report}\n"
-        report_path.write_text(report_content, encoding="utf-8")
+        atomic_write_text(report_path, report_content)
         append_log(kb_dir / "wiki", "lint", f"report → {report_path.name}")
     click.echo(f"\nReport written to {report_path}")
     return report_path
@@ -3176,89 +3163,90 @@ async def run_lint_report(
     from openkb.agent.linter import run_knowledge_lint
     from openkb.agent.query import build_run_config_from_bundle
 
-    # Optional fix pass runs first (matching `openkb lint --fix`), before any
-    # skip/report logic, so the report and message reflect the post-fix state.
-    lint_files_changed: int | None = None
-    lint_ghosts_removed: int | None = None
-    if fix:
-        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-            files_changed, ghosts = fix_broken_links(kb_dir / "wiki")
-        lint_files_changed = files_changed
-        lint_ghosts_removed = ghosts
+    async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+        # Optional fix pass runs first (matching `openkb lint --fix`), before any
+        # skip/report logic, so the report and message reflect the post-fix state.
+        lint_files_changed: int | None = None
+        lint_ghosts_removed: int | None = None
+        if fix:
+            async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+                files_changed, ghosts = fix_broken_links(kb_dir / "wiki")
+            lint_files_changed = files_changed
+            lint_ghosts_removed = ghosts
 
-    openkb_dir = kb_dir / ".openkb"
-    hashes_file = openkb_dir / "hashes.json"
-    hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
+        openkb_dir = kb_dir / ".openkb"
+        hashes_file = openkb_dir / "hashes.json"
+        hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
 
-    if not hashes:
-        message = "Nothing to lint - no documents indexed yet. Run `openkb add` first."
+        if not hashes:
+            message = "Nothing to lint - no documents indexed yet. Run `openkb add` first."
+            if fix:
+                message = f"{_fix_summary(lint_files_changed, lint_ghosts_removed)} {message}"
+            if echo:
+                click.echo(message)
+            return {
+                "skipped": True,
+                "reason": "no_documents_indexed",
+                "message": message,
+                "structural_report": None,
+                "knowledge_report": None,
+                "report_path": None,
+                "lint_files_changed": lint_files_changed,
+                "lint_ghosts_removed": lint_ghosts_removed,
+            }
+
+        config = resolve_effective_config(kb_dir)[0]
+        if bundle is None:
+            _setup_llm_key(kb_dir)
+        model: str = config.get("model", DEFAULT_CONFIG["model"])
+        run_config = build_run_config_from_bundle(model, bundle)
+
+        if echo:
+            click.echo("Running structural lint...")
+        structural_report = run_structural_lint(kb_dir)
+        if echo:
+            click.echo(structural_report)
+            click.echo("Running knowledge lint...")
+
+        try:
+            knowledge_report = await run_knowledge_lint(
+                kb_dir, model, bundle=bundle, run_config=run_config
+            )
+        except Exception as exc:
+            knowledge_report = f"Knowledge lint failed: {exc}"
+        if echo:
+            click.echo(knowledge_report)
+
+        reports_dir = kb_dir / "wiki" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = reports_dir / f"lint_{timestamp}.md"
+        counter = 1
+        while report_path.exists():
+            report_path = reports_dir / f"lint_{timestamp}_{counter}.md"
+            counter += 1
+        report_content = (
+            f"# Lint Report — {timestamp}\n\n"
+            f"## Structural\n\n{structural_report}\n\n"
+            f"## Semantic\n\n{knowledge_report}\n"
+        )
+        atomic_write_text(report_path, report_content)
+        append_log(kb_dir / "wiki", "lint", f"report → {report_path.name}")
+        if echo:
+            click.echo(f"\nReport written to {report_path}")
+
+        message = "Lint report written."
         if fix:
             message = f"{_fix_summary(lint_files_changed, lint_ghosts_removed)} {message}"
-        if echo:
-            click.echo(message)
         return {
-            "skipped": True,
-            "reason": "no_documents_indexed",
+            "skipped": False,
+            "reason": None,
             "message": message,
-            "structural_report": None,
-            "knowledge_report": None,
-            "report_path": None,
+            "structural_report": structural_report,
+            "knowledge_report": knowledge_report,
+            "report_path": str(report_path),
             "lint_files_changed": lint_files_changed,
             "lint_ghosts_removed": lint_ghosts_removed,
         }
-
-    config = resolve_effective_config(kb_dir)[0]
-    if bundle is None:
-        _setup_llm_key(kb_dir)
-    model: str = config.get("model", DEFAULT_CONFIG["model"])
-    run_config = build_run_config_from_bundle(model, bundle)
-
-    if echo:
-        click.echo("Running structural lint...")
-    structural_report = run_structural_lint(kb_dir)
-    if echo:
-        click.echo(structural_report)
-        click.echo("Running knowledge lint...")
-
-    try:
-        knowledge_report = await run_knowledge_lint(
-            kb_dir, model, bundle=bundle, run_config=run_config
-        )
-    except Exception as exc:
-        knowledge_report = f"Knowledge lint failed: {exc}"
-    if echo:
-        click.echo(knowledge_report)
-
-    reports_dir = kb_dir / "wiki" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    import datetime
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = reports_dir / f"lint_{timestamp}.md"
-    counter = 1
-    while report_path.exists():
-        report_path = reports_dir / f"lint_{timestamp}_{counter}.md"
-        counter += 1
-    report_content = (
-        f"# Lint Report — {timestamp}\n\n"
-        f"## Structural\n\n{structural_report}\n\n"
-        f"## Semantic\n\n{knowledge_report}\n"
-    )
-    report_path.write_text(report_content, encoding="utf-8")
-    append_log(kb_dir / "wiki", "lint", f"report → {report_path.name}")
-    if echo:
-        click.echo(f"\nReport written to {report_path}")
-
-    message = "Lint report written."
-    if fix:
-        message = f"{_fix_summary(lint_files_changed, lint_ghosts_removed)} {message}"
-    return {
-        "skipped": False,
-        "reason": None,
-        "message": message,
-        "structural_report": structural_report,
-        "knowledge_report": knowledge_report,
-        "report_path": str(report_path),
-        "lint_files_changed": lint_files_changed,
-        "lint_ghosts_removed": lint_ghosts_removed,
-    }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from openkb.locks import atomic_write_text
+from openkb.locks import atomic_write_text, kb_ingest_lock
 
 
 def append_log(wiki_dir: Path, operation: str, description: str) -> None:
@@ -17,5 +17,8 @@ def append_log(wiki_dir: Path, operation: str, description: str) -> None:
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     entry = f"## [{date_str}] {operation} | {description}\n\n"
 
-    content = log_path.read_text(encoding="utf-8") if log_path.exists() else "# Operations Log\n\n"
-    atomic_write_text(log_path, content + entry)
+    with kb_ingest_lock(wiki_dir.parent / ".openkb"):
+        content = (
+            log_path.read_text(encoding="utf-8") if log_path.exists() else "# Operations Log\n\n"
+        )
+        atomic_write_text(log_path, content + entry)
