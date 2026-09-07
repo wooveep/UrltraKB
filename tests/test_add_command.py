@@ -495,8 +495,8 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data()
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.cli.compile_long_doc", return_value=None) as mock_compile,
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.compile_long_doc", return_value=None) as mock_compile,
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = import_from_pageindex_cloud("cloud-1", kb_dir)
@@ -520,8 +520,10 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data()
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud) as mock_prepare,
-            patch("openkb.cli.compile_long_doc", return_value=None),
+            patch(
+                "openkb.application.cloud.prepare_cloud_import", return_value=cloud
+            ) as mock_prepare,
+            patch("openkb.application.cloud.compile_long_doc", return_value=None),
             patch("openkb.cli._setup_llm_key"),
         ):
             import_from_pageindex_cloud("cloud-1", kb_dir)
@@ -536,7 +538,9 @@ class TestImportFromPageindexCloud:
 
         kb_dir = self._setup_kb(tmp_path)
         with (
-            patch("openkb.cli.prepare_cloud_import", side_effect=RuntimeError("boom")),
+            patch(
+                "openkb.application.cloud.prepare_cloud_import", side_effect=RuntimeError("boom")
+            ),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = import_from_pageindex_cloud("cloud-9", kb_dir)
@@ -552,8 +556,8 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data(doc_name="Cloud-Paper")
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.add_coordinator.run_add_mutation", return_value=True) as mock_run,
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.run_add_mutation", return_value=True) as mock_run,
             patch("openkb.cli._setup_llm_key"),
         ):
             assert import_from_pageindex_cloud("cloud-1", kb_dir) == "added"
@@ -577,7 +581,7 @@ class TestImportFromPageindexCloud:
         injected = {"done": False}
 
         @contextmanager
-        def race_before_lock(openkb_dir):
+        def race_before_lock(openkb_dir, **wait_options):
             if not injected["done"]:
                 registry = HashRegistry(openkb_dir / "hashes.json")
                 registry.add(
@@ -597,9 +601,9 @@ class TestImportFromPageindexCloud:
                 yield
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.cli.kb_ingest_lock", side_effect=race_before_lock),
-            patch("openkb.cli.compile_long_doc", return_value=None),
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.kb_ingest_lock", side_effect=race_before_lock),
+            patch("openkb.application.cloud.compile_long_doc", return_value=None),
             patch("openkb.cli._setup_llm_key"),
         ):
             assert import_from_pageindex_cloud("cloud-1", kb_dir) == "added"
@@ -611,53 +615,46 @@ class TestImportFromPageindexCloud:
         assert registry.get(synthetic)["doc_name"] == expected_doc_name
         assert (kb_dir / "wiki" / "sources" / f"{expected_doc_name}.json").exists()
 
-    def test_cloud_import_skips_if_same_doc_id_registered_after_fetch(self, tmp_path):
+    def test_cloud_import_skips_a_document_committed_while_waiting(self, tmp_path):
         import hashlib
-        from contextlib import contextmanager
+        import threading
 
-        from openkb.cli import import_from_pageindex_cloud
-        from openkb.locks import kb_ingest_lock as real_kb_ingest_lock
+        from openkb.application.cloud import import_cloud
+        from openkb.application.execution import ExecutionContext
+        from openkb.locks import kb_ingest_lock
         from openkb.state import HashRegistry
 
-        kb_dir = self._setup_kb(tmp_path)
-        cloud = self._cloud_data(doc_name="Cloud-Paper")
-        path_key = "pageindex-cloud:cloud-1"
-        synthetic = hashlib.sha256(path_key.encode("utf-8")).hexdigest()
-        lock_calls = {"count": 0}
-
-        @contextmanager
-        def register_same_doc_before_second_lock(openkb_dir):
-            lock_calls["count"] += 1
-            if lock_calls["count"] == 2:
-                HashRegistry(openkb_dir / "hashes.json").add(
-                    synthetic,
+        root = self._setup_kb(tmp_path)
+        source = "pageindex-cloud:cloud-1"
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        waiting = threading.Event()
+        results = []
+        context = ExecutionContext(on_event=lambda event: waiting.set())
+        with patch("openkb.application.cloud.prepare_cloud_import") as prepare:
+            with kb_ingest_lock(root / ".openkb"):
+                worker = threading.Thread(
+                    target=lambda: results.append(import_cloud(root, "cloud-1", context=context))
+                )
+                worker.start()
+                assert waiting.wait(5)
+                assert context.snapshot is None
+                HashRegistry(root / ".openkb/hashes.json").add(
+                    digest,
                     {
                         "name": "Cloud Paper.pdf",
                         "doc_name": "Cloud-Paper",
                         "type": "pageindex_cloud",
                         "origin": "cloud",
-                        "path": path_key,
+                        "path": source,
                         "source_path": "wiki/sources/Cloud-Paper.json",
                         "doc_id": "cloud-1",
                     },
                 )
-            with real_kb_ingest_lock(openkb_dir):
-                yield
-
-        with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud) as mock_prepare,
-            patch("openkb.cli.kb_ingest_lock", side_effect=register_same_doc_before_second_lock),
-            patch("openkb.cli.compile_long_doc") as mock_compile,
-            patch("openkb.add_coordinator.run_add_mutation") as mock_run,
-            patch("openkb.cli._setup_llm_key"),
-        ):
-            assert import_from_pageindex_cloud("cloud-1", kb_dir) == "skipped"
-
-        assert lock_calls["count"] == 2
-        mock_prepare.assert_called_once()
-        mock_compile.assert_not_called()
-        mock_run.assert_not_called()
-        assert HashRegistry(kb_dir / ".openkb" / "hashes.json").is_known(synthetic)
+            worker.join(5)
+            assert not worker.is_alive()
+            prepare.assert_not_called()
+        assert results[0].status == "skipped"
+        assert context.snapshot is None
 
     def test_cloud_import_propagates_dirty_rollback(self, tmp_path):
         import pytest
@@ -673,8 +670,8 @@ class TestImportFromPageindexCloud:
         )
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.add_coordinator.run_add_mutation", side_effect=dirty_error),
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.run_add_mutation", side_effect=dirty_error),
             patch("openkb.cli._setup_llm_key"),
         ):
             with pytest.raises(DirtyRollbackError) as exc_info:
@@ -694,9 +691,9 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data(doc_name="Cloud-Paper")
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
             patch(
-                "openkb.cli.resolve_doc_name_from_key",
+                "openkb.application.cloud.resolve_doc_name_from_key",
                 side_effect=RuntimeError("name resolution blew up"),
             ),
             patch("openkb.cli._setup_llm_key"),
@@ -718,8 +715,8 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data(doc_name=doc_name)
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.cli.compile_long_doc", side_effect=KeyboardInterrupt()),
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.compile_long_doc", side_effect=KeyboardInterrupt()),
             patch("openkb.cli._setup_llm_key"),
         ):
             with pytest.raises(KeyboardInterrupt):
@@ -745,8 +742,8 @@ class TestImportFromPageindexCloud:
         cloud = self._cloud_data(doc_name=doc_name)
 
         with (
-            patch("openkb.cli.prepare_cloud_import", return_value=cloud),
-            patch("openkb.cli.compile_long_doc", side_effect=RuntimeError("boom")),
+            patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
+            patch("openkb.application.cloud.compile_long_doc", side_effect=RuntimeError("boom")),
             patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):

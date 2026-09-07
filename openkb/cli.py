@@ -16,7 +16,6 @@ import shutil
 import sys
 from functools import wraps
 from pathlib import Path
-from typing import Literal
 
 import os
 
@@ -45,7 +44,7 @@ import litellm
 litellm.suppress_debug_info = True
 from dotenv import load_dotenv
 
-from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY, compile_long_doc
+from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
 from openkb.config import (
     DEFAULT_CONFIG,
     resolve_effective_config,
@@ -58,21 +57,8 @@ from openkb.config import (
     set_timeout,
     resolve_per_request_overrides,
 )
-from openkb.converter import (
-    _registry_path,
-    resolve_doc_name_from_key,
-)
-from openkb.indexer import (
-    _cloud_display_stem,
-    _write_long_doc_artifacts,
-    prepare_cloud_import,
-)
 from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.log import append_log
-from openkb.application.documents import (
-    _run_compile_with_retry,
-    _snapshot_add_paths,
-)
 from openkb.application import documents as document_use_cases
 from openkb.application.knowledge_bases import display_document_type as _display_type
 from openkb.schema import PAGE_CONTENT_DIRS
@@ -316,153 +302,13 @@ def add_single_file(file_path: Path, kb_dir: Path, *, stage: bool = True, bundle
     )
 
 
-def _cleanup_failed_cloud_import(kb_dir: Path, doc_name: str) -> None:
-    """Best-effort wiki cleanup after a cloud import whose compilation failed.
+def import_from_pageindex_cloud(doc_id: str, kb_dir: Path) -> str:
+    """CLI output and credential precedence for the shared cloud import."""
+    from openkb.application.cloud import import_cloud
 
-    import_cloud_document writes the summary + per-page JSON source before
-    compile, and compile_long_doc writes concept/entity pages incrementally — so
-    a compile failure (which happens before the registry entry is added) would
-    otherwise strand wiki artifacts that ``openkb remove`` cannot reach. Mirror
-    remove's wiki cleanup (by doc_name, idempotent) but touch neither the
-    registry (no entry was added) nor PageIndex (the cloud doc is the user's).
-    """
-    from openkb.agent.compiler import (
-        remove_doc_from_concept_pages,
-        remove_doc_from_entity_pages,
-        remove_doc_from_index,
-    )
-
-    wiki_dir = kb_dir / "wiki"
-    (wiki_dir / "summaries" / f"{doc_name}.md").unlink(missing_ok=True)
-    (wiki_dir / "sources" / f"{doc_name}.json").unlink(missing_ok=True)
-    images_dir = wiki_dir / "sources" / "images" / doc_name
-    if images_dir.is_dir():
-        shutil.rmtree(images_dir, ignore_errors=True)
-    concept_result = remove_doc_from_concept_pages(wiki_dir, doc_name, keep_empty=False)
-    entity_result = remove_doc_from_entity_pages(wiki_dir, doc_name, keep_empty=False)
-    remove_doc_from_index(
-        wiki_dir,
-        doc_name,
-        concept_result["deleted"],
-        entity_slugs_deleted=entity_result["deleted"],
-    )
-
-
-def import_from_pageindex_cloud(doc_id: str, kb_dir: Path) -> Literal["added", "skipped", "failed"]:
-    """Import an existing PageIndex Cloud document into the KB by ``doc_id``.
-
-    Fetches structure + page content from the cloud (no local PDF), compiles
-    concepts, and registers a raw-less ``pageindex_cloud`` entry. Idempotent:
-    re-importing the same ``doc_id`` is skipped. The user's cloud corpus is
-    never modified.
-    """
-    import hashlib
-    from openkb.state import HashRegistry
-
-    logger = logging.getLogger(__name__)
-    openkb_dir = kb_dir / ".openkb"
-    config = resolve_effective_config(kb_dir)[0]
+    settings = resolve_effective_config(kb_dir)[0]
     _setup_llm_key(kb_dir)
-    model: str = config.get("model", DEFAULT_CONFIG["model"])
-
-    path_key = f"pageindex-cloud:{doc_id}"
-    synthetic_hash = hashlib.sha256(path_key.encode("utf-8")).hexdigest()
-
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        registry = HashRegistry(openkb_dir / "hashes.json")
-        if registry.is_known(synthetic_hash):
-            click.echo(f"  [SKIP] Already imported from PageIndex Cloud: {doc_id}")
-            return "skipped"
-
-    click.echo(f"Importing from PageIndex Cloud: {doc_id}")
-    doc_name = ""
-    from openkb.add_coordinator import AddMutationPlan, DirtyRollbackError, run_add_mutation
-
-    try:
-        try:
-            cloud = prepare_cloud_import(doc_id, kb_dir, path_key)
-        except Exception as exc:
-            click.echo(f"  [ERROR] Import failed: {exc}")
-            logger.debug("Cloud import traceback:", exc_info=True)
-            return "failed"
-
-        with kb_ingest_lock(kb_dir / ".openkb"):
-            registry = HashRegistry(openkb_dir / "hashes.json")
-            if registry.is_known(synthetic_hash):
-                click.echo(f"  [SKIP] Already imported from PageIndex Cloud: {doc_id}")
-                return "skipped"
-
-            stem = _cloud_display_stem(cloud.cloud_name, doc_id)
-            doc_name = resolve_doc_name_from_key(stem, path_key, registry)
-
-            def commit_body(_snapshot) -> None:
-                summary_path = _write_long_doc_artifacts(
-                    cloud.tree,
-                    cloud.all_pages,
-                    doc_name,
-                    doc_id,
-                    kb_dir,
-                    description=cloud.description,
-                )
-                _run_compile_with_retry(
-                    lambda: compile_long_doc(
-                        doc_name,
-                        summary_path,
-                        doc_id,
-                        kb_dir,
-                        model,
-                        doc_description=cloud.description,
-                        max_concurrency=resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY,
-                    ),
-                    label=f"Compiling imported doc (doc_id={doc_id})",
-                )
-
-                # Register the raw-less cloud entry only after successful compilation.
-                registry = HashRegistry(openkb_dir / "hashes.json")
-                meta = {
-                    "name": cloud.cloud_name,
-                    "doc_name": doc_name,
-                    "type": "pageindex_cloud",
-                    "origin": "cloud",
-                    "path": path_key,
-                    "source_path": _registry_path(
-                        kb_dir / "wiki" / "sources" / f"{doc_name}.json", kb_dir
-                    ),
-                    "doc_id": doc_id,
-                }
-                registry.remove_by_doc_name(doc_name)
-                registry.add(synthetic_hash, meta)
-
-            def append_cloud_log() -> None:
-                append_log(kb_dir / "wiki", "ingest", doc_name)
-
-            plan = AddMutationPlan(
-                operation="cloud_import",
-                details={"doc_id": doc_id, "doc_name": doc_name},
-                touched_paths=_snapshot_add_paths(kb_dir, doc_name, None, None),
-                body=commit_body,
-                post_commit_hooks=[append_cloud_log],
-                # Cloud import reads from PageIndex Cloud and writes no local blob,
-                # so .openkb/files is never touched — nothing to snapshot there.
-                hardlink_dirs={
-                    kb_dir / "wiki" / "concepts",
-                    kb_dir / "wiki" / "entities",
-                },
-            )
-            if not run_add_mutation(kb_dir, plan):
-                return "failed"
-    except DirtyRollbackError:
-        raise
-    except Exception as exc:
-        # run_add_mutation handles snapshot/body failures itself (returns False),
-        # so this except only catches pre-mutation errors — surface the real cause
-        # instead of the old misleading "Failed to prepare mutation snapshot" label.
-        click.echo(f"  [ERROR] Cloud import failed for {doc_id}: {exc}")
-        logger.debug("Cloud import mutation traceback:", exc_info=True)
-        return "failed"
-
-    click.echo(f"  [OK] {doc_name} imported from PageIndex Cloud.")
-    return "added"
+    return import_cloud(kb_dir, doc_id, settings=settings, report=click.echo).status
 
 
 # ---------------------------------------------------------------------------

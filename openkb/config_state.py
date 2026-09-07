@@ -85,6 +85,12 @@ def active_values(kb_dir: Path) -> dict[str, Any] | None:
     return snapshot.values()
 
 
+def execution_environment(kb_dir: Path) -> dict[str, str]:
+    """Read captured SDK settings without mutating the caller's process."""
+    captured = active_values(kb_dir)
+    return captured["environment"] if captured else dict(os.environ)
+
+
 def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
     """Capture settings after KB recovery while holding execution permission.
 
