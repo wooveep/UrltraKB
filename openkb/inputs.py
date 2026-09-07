@@ -56,10 +56,13 @@ class PreparedInput:
     path: Path
     digest: str
     images: dict[str, PreparedImage]
+    identity: Path
 
     def is_current(self) -> bool:
         from openkb.images import relative_image_paths
 
+        if self.source.resolve() != self.identity:
+            return False
         if HashRegistry.hash_file(self.source) != self.digest:
             return False
         if self.source.suffix.lower() not in {".md", ".markdown"}:
@@ -81,6 +84,9 @@ class PreparedInput:
 def _prepare(source: Path, directory: Path) -> PreparedInput:
     from openkb.images import relative_image_paths
 
+    # Freeze identity with the bytes. Later conversion/registration must not
+    # follow a replacement symlink at this pathname to another document.
+    identity = source.resolve()
     frozen = directory / "document" / source.name
     frozen.parent.mkdir(exist_ok=True)
     digest = copy_stable(source, frozen)
@@ -99,7 +105,7 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
                 target.parent.mkdir(parents=True)
                 image_digest = copy_stable(original, target)
             images[reference] = PreparedImage(original, target, image_digest)
-    ready = PreparedInput(source, frozen, digest, images)
+    ready = PreparedInput(source, frozen, digest, images, identity)
     if not ready.is_current():
         raise InputChanged(f"Input or related images changed while preparing: {source.name}")
     return ready

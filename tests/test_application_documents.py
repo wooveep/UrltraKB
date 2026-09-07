@@ -220,3 +220,53 @@ def test_watched_source_replaced_with_external_symlink_while_waiting_never_start
     assert context.snapshot is None
     assert outside.read_text() == "outside raw"
     assert not list((kb_dir / "wiki/summaries").iterdir())
+
+
+def test_import_keeps_frozen_identity_when_original_path_changes_after_start(kb_dir, monkeypatch):
+    import os
+
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.execution import ExecutionContext
+    from openkb.state import HashRegistry
+
+    if os.name == "nt":
+        pytest.skip("POSIX symlink fixture")
+    source = kb_dir / "notes.md"
+    source.write_text("# Original prepared input")
+    digest = HashRegistry.hash_file(source)
+    other = kb_dir / "other.md"
+    other.write_text("# Another document")
+    registry = HashRegistry(kb_dir / ".openkb/hashes.json")
+    registry.add(
+        HashRegistry.hash_file(other), {"name": "other.md", "doc_name": "other", "path": "other.md"}
+    )
+    summary = kb_dir / "wiki/summaries/other.md"
+    summary.write_text("# Keep this unrelated page")
+
+    def after_start(snapshot):
+        source.unlink()
+        source.symlink_to(other)
+
+    values = iter(
+        [
+            {"description": "Notes", "content": "# Notes"},
+            {"create": [], "update": [], "related": []},
+        ]
+    )
+    monkeypatch.setattr(
+        litellm,
+        "completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(values))))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
+        ),
+    )
+    result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
+    assert result.status == "added"
+    saved = HashRegistry(kb_dir / ".openkb/hashes.json").get(digest)
+    assert saved["path"] == "notes.md"
+    assert saved["doc_name"] == "notes"
+    assert (kb_dir / "raw/notes.md").read_text() == "# Original prepared input"
+    assert summary.read_text() == "# Keep this unrelated page"
