@@ -105,10 +105,13 @@ class TaskView:
     error: str | None = None
     text: str = field(default="", repr=False)
     text_truncated: bool = False
+    retry_of: str | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):
             raise ValueError("Invalid task identity")
+        if self.retry_of is not None and not re.fullmatch(r"[0-9a-f]{32}", self.retry_of):
+            raise ValueError("Invalid retry task identity")
         if not all(isinstance(v, str) for v in (self.kb_dir, self.operation, self.stage)):
             raise ValueError("Invalid task description")
         if self.state not in TERMINAL | {"queued", "waiting", "running", "stopping"}:

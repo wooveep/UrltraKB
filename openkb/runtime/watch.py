@@ -123,10 +123,17 @@ class NativeWatch:
         with self._gate:
             view = self._view
             active = self._active.copy()
-        return replace(
-            view,
-            active=sum(self.manager.get(task).state not in TERMINAL for task in active.values()),
-        )
+        count = 0
+        for task in active.values():
+            try:
+                count += self.manager.get(task).state not in TERMINAL
+            except KeyError:
+                pass  # A stopped subscription can outlive cleared terminal history.
+        return replace(view, active=count)
+
+    def referenced_task_ids(self) -> frozenset[str]:
+        with self._gate:
+            return frozenset(self._active.values()) if self._thread.is_alive() else frozenset()
 
     def _update(self, **values) -> None:
         with self._gate:
@@ -154,7 +161,12 @@ class NativeWatch:
 
     def _reap(self, db) -> None:
         for path, task_id in list(self._active.items()):
-            task = self.manager.get(task_id)
+            try:
+                task = self.manager.get(task_id)
+            except KeyError:
+                self._halted = "监听正在确认的任务记录已被清理；请检查成果后重新启用监听。"
+                del self._active[path]
+                continue
             if task.state not in TERMINAL or not task.processes_reaped:
                 continue
             if task.results and task.results[-1].revision:

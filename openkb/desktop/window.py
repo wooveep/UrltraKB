@@ -129,7 +129,11 @@ class Workbench(QMainWindow):
         if task_id:
             from openkb.desktop.task_details import show_task_details
 
-            show_task_details(self.manager.get(task_id), self)
+            try:
+                task = self.manager.get(task_id)
+            except KeyError:
+                return
+            show_task_details(task, self)
 
     def _maintenance(self):
         if self.kb is not None:
@@ -522,19 +526,43 @@ class Workbench(QMainWindow):
 
     def _selected_task(self):
         row = self.task_table.currentRow()
-        return self.task_table.item(row, 0).data(Qt.ItemDataRole.UserRole) if row >= 0 else None
+        item = self.task_table.item(row, 0) if row >= 0 else None
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def _selected_tasks(self):
+        return tuple(
+            self.task_table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
+            for row in self.task_table.selectionModel().selectedRows()
+        )
+
+    def _retry_selected(self):
+        from openkb.desktop.task_actions import RetryDialog
+
+        if task_id := self._selected_task():
+            RetryDialog(self, task_id).exec()
+
+    def _clear_selected_history(self):
+        from openkb.desktop.task_actions import clear_selected_history
+
+        clear_selected_history(self, self._selected_tasks())
 
     def _select_task(self):
         task_id = self._selected_task()
         self.artifacts.clear()
         if task_id:
-            for result in self.manager.get(task_id).results:
+            try:
+                task = self.manager.get(task_id)
+            except KeyError:
+                return
+            for result in task.results:
                 self.artifacts.addItems(list(result.resources))
 
     def _stop_selected(self):
-        task_id = self._selected_task()
-        if task_id:
-            self.manager.stop(task_id)
+        for task_id in self._selected_tasks():
+            try:
+                self.manager.stop(task_id)
+            except KeyError:
+                pass  # A concurrent summary cleanup can remove selected rows.
 
     def _poll_tasks(self):
         tasks = self.manager.tasks()

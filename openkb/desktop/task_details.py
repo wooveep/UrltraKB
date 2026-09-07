@@ -10,7 +10,14 @@ def show_task_details(task, parent):
     layout = QVBoxLayout(dialog)
     text = QPlainTextEdit()
     text.setReadOnly(True)
-    lines = [task.kb_dir, f"状态：{task.state}", f"进程已回收：{task.processes_reaped}"]
+    lines = [
+        task.kb_dir,
+        f"任务：{task.id}",
+        f"状态：{task.state}",
+        f"进程已回收：{task.processes_reaped}",
+    ]
+    if task.retry_of:
+        lines.append(f"重试来源：{task.retry_of}（独立的新任务）")
     for number, result in enumerate(task.results, 1):
         lines.extend(["", f"第 {number} 项：{result.status}"])
         if result.error:

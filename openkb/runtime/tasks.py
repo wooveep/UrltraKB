@@ -71,6 +71,7 @@ class TaskManager:
         self._tasks: dict[str, _Task] = {}
         self._pending: deque[str] = deque()
         self._active: dict[str, _Attempt] = {}
+        self._clearing: set[str] = set()
         self._accepting = True
         self._closing = False
         self._load_history()
@@ -122,7 +123,9 @@ class TaskManager:
                 )
         self._condition.notify_all()
 
-    def submit(self, kb_dir: Path, requests: Sequence[UnitRequest]) -> str:
+    def submit(
+        self, kb_dir: Path, requests: Sequence[UnitRequest], *, retry_of: str | None = None
+    ) -> str:
         root = kb_dir.expanduser().resolve()
         units = tuple(requests)
         if not units or len(units) > 10000 or not all(isinstance(r, REQUEST_TYPES) for r in units):
@@ -143,6 +146,7 @@ class TaskManager:
                 (),
                 False,
                 True,
+                retry_of=retry_of,
             )
             task = _Task(
                 view,
@@ -163,9 +167,55 @@ class TaskManager:
         with self._condition:
             return tuple(task.view for task in self._tasks.values())
 
+    def retry_inputs(
+        self, task_id: str
+    ) -> tuple[TaskView, tuple[UnitRequest, ...], tuple[UnitIdentity, ...]]:
+        """Copy terminal task facts for read-only review outside the scheduler lock."""
+        with self._condition:
+            if task_id in self._clearing:
+                raise ValueError("所选任务正在清理历史，请稍后再试")
+            task = self._tasks[task_id]
+            # Historical process cleanup may remain unverified forever. Only
+            # handles owned by this manager block inspection/explicit cleanup;
+            # this does not claim that a previous instance reaped its children.
+            if task_id in self._active or task.view.state not in TERMINAL:
+                raise ValueError("请等待任务结束并完成进程回收")
+            return task.view, task.requests, task.identities
+
+    def clear_history(self, task_ids: Sequence[str]) -> None:
+        """Remove selected closed summaries/receipts; never touch KB artifacts."""
+        ids = set(task_ids)
+        with self._condition:
+            for task_id in ids:
+                self.retry_inputs(task_id)
+            self._clearing.update(ids)
+        removed = set()
+        try:
+            for task_id in ids:
+                receipts = self.receipt_dir / task_id
+                if receipts.is_symlink():
+                    receipts.unlink()
+                elif receipts.exists():
+                    shutil.rmtree(receipts)
+                # Keep the summary if deleting receipts fails. After a crash,
+                # missing receipts prevent retry; summaries never replay work.
+                (self.history_dir / f"{task_id}.json").unlink(missing_ok=True)
+                removed.add(task_id)
+        finally:
+            with self._condition:
+                for task_id in removed:
+                    del self._tasks[task_id]
+                self._clearing.difference_update(ids)
+                self._pending = deque(
+                    task_id for task_id in self._pending if task_id in self._tasks
+                )
+                self._condition.notify_all()
+
     def stop(self, task_id: str) -> None:
         with self._condition:
             task = self._tasks[task_id]
+            if task.view.state in TERMINAL:
+                return
             self._update(task, stop_requested=True)
             if task_id not in self._active and task.view.state not in TERMINAL:
                 self._update(task, state="stopped", stage="stopped")
