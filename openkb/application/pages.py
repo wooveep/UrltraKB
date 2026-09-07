@@ -29,14 +29,15 @@ class PageSave:
 
 
 def read_page(kb_dir: Path, path: str) -> Page:
-    wiki = (kb_dir / "wiki").resolve()
-    rel = path if path.endswith(".md") else f"{path}.md"
-    target = (wiki / rel).resolve()
-    if not target.is_relative_to(wiki):
-        raise ValueError("Invalid page path.")
+    kb_dir = kb_dir.expanduser().resolve()
     if not (kb_dir / ".openkb").is_dir():
         raise FileNotFoundError(f"Knowledge base not found: {kb_dir}")
     with kb_read_lock(kb_dir / ".openkb"):
+        wiki = (kb_dir / "wiki").resolve()
+        rel = path if path.endswith(".md") else f"{path}.md"
+        target = (wiki / rel).resolve()
+        if not wiki.is_relative_to(kb_dir) or not target.is_relative_to(wiki):
+            raise ValueError("Invalid page path.")
         content = target.read_text(encoding="utf-8")
     parts = frontmatter.split(content)
     return Page(

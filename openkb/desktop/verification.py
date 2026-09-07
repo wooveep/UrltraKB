@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--corpus", type=Path, help="Render corpus through the actual Qt reader")
     parser.add_argument("--url", help="Controlled HTTP article fixture")
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
+    parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     args = parser.parse_args()
     root = args.output.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -101,6 +102,15 @@ print("OpenKB")
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.catalog_only:
+            from openkb.desktop.verification_catalog import verify_catalog
+
+            verify_catalog(window, root, wait_until)
+            checks.append(
+                "native page references, KB discovery/statistics, cancelled/confirmed deletion"
+            )
+            assert os.environ == environment and os.getcwd() == cwd
+            return 0
         window.open_knowledge_base(first)
         wait_until(lambda: window.page is not None)
         window.open_page("concepts/原生阅读")
@@ -354,6 +364,12 @@ print("OpenKB")
         checks.append(
             "native manual retry: verified failed units in a new task; cleanup retains artifacts"
         )
+        from openkb.desktop.verification_catalog import verify_catalog
+
+        verify_catalog(window, root, wait_until)
+        checks.append(
+            "native page references, KB discovery/statistics, cancelled/confirmed deletion"
+        )
         if args.corpus:
             from openkb.desktop.verification_rendering import verify_corpus
 
@@ -361,6 +377,11 @@ print("OpenKB")
             checks.append("complete rendering corpus through Qt; visual verdict separate")
         assert os.environ == environment and os.getcwd() == cwd
         checks.append("desktop environment and cwd remain unchanged")
+    except BaseException:
+        import traceback
+
+        evidence["failure"] = traceback.format_exc()
+        raise
     finally:
         window.request_quit()
         wait_until(
