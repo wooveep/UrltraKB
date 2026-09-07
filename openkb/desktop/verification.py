@@ -187,6 +187,13 @@ print("OpenKB")
         checks.append(
             "native conversation wait/stop, unique transcript copies and version-bound deletion"
         )
+        from openkb.desktop.verification_maintenance import verify_diagnostics, verify_maintenance
+
+        verify_maintenance(window, first, wait_until)
+        verify_diagnostics(window, root / "待修复知识库", wait_until)
+        checks.append(
+            "native structural report, link repair confirmation, restricted inspection and recovery"
+        )
         if args.model_base:
             from openkb.application.settings import apply_kb_config_patch
             from openkb.application.settings_data import KbConfigPatchRequest
@@ -209,6 +216,10 @@ print("OpenKB")
             checks.append(
                 "native selected/all recompile, skipped missing source, existing long index reused"
             )
+            from openkb.desktop.verification_maintenance import verify_semantic_maintenance
+
+            verify_semantic_maintenance(window, first, wait_until)
+            checks.append("native semantic audit with real SDK requests and saved report")
             from openkb.application.conversations import read_conversation
             from openkb.application.knowledge_bases import get_kb_list
             from openkb.inputs import SUPPORTED_EXTENSIONS

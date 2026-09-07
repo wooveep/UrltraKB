@@ -105,6 +105,17 @@ class ExportConversation:
             raise ValueError("Select a completed conversation to export")
 
 
+@dataclass(frozen=True)
+class CheckKnowledge:
+    semantic: bool = True
+    fix: bool = False
+    version: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.fix and (not isinstance(self.version, str) or not self.version):
+            raise ValueError("Link repair requires confirmation of the latest wiki")
+
+
 UnitRequest = (
     SavePage
     | AskQuestion
@@ -115,6 +126,7 @@ UnitRequest = (
     | RecompileDocument
     | DeleteConversation
     | ExportConversation
+    | CheckKnowledge
 )
 REQUEST_TYPES = (
     SavePage,
@@ -126,4 +138,5 @@ REQUEST_TYPES = (
     RecompileDocument,
     DeleteConversation,
     ExportConversation,
+    CheckKnowledge,
 )

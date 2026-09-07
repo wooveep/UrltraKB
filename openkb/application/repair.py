@@ -22,6 +22,48 @@ class RepairResult:
     structural_report: str | None = None
 
 
+@dataclass(frozen=True)
+class KnowledgeDiagnostic:
+    needs_repair: bool
+    journals: tuple[str, ...]
+    pages: tuple[str, ...]
+    structural_report: str | None
+    issues: tuple[str, ...]
+
+
+def inspect_knowledge_base(kb_dir: Path) -> KnowledgeDiagnostic:
+    """Inspect retained content without replaying or discarding recovery evidence."""
+    from openkb.application.file_state import contained_paths
+
+    root = kb_dir.resolve()
+    with kb_repair_lock(root / ".openkb"):
+        pages = contained_paths(root, sorted((root / "wiki").rglob("*.md")))
+        journals = sorted((root / ".openkb/journal").glob("*.json"))
+        issues: tuple[str, ...] = ()
+        report = None
+        try:
+            report = run_structural_lint(root)
+        except Exception as exc:
+            issues = (f"Structural inspection unavailable ({type(exc).__name__})",)
+        return KnowledgeDiagnostic(
+            repair_marker(root).exists() or bool(journals),
+            tuple(path.name for path in journals),
+            tuple(path.relative_to(root / "wiki").as_posix() for path in pages),
+            report,
+            issues,
+        )
+
+
+def read_diagnostic_page(kb_dir: Path, path: str) -> str:
+    """Read a contained wiki page while ordinary operations are repair-blocked."""
+    root = kb_dir.resolve()
+    target = (root / "wiki" / path).resolve()
+    if not target.is_relative_to(root / "wiki") or target.suffix != ".md":
+        raise ValueError("Invalid diagnostic page path")
+    with kb_repair_lock(root / ".openkb"):
+        return target.read_text(encoding="utf-8")
+
+
 def repair_global_settings() -> RepairResult:
     """Recover the global settings pair using its own lock and shape checks."""
     from dotenv.parser import parse_stream

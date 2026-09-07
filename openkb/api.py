@@ -58,6 +58,7 @@ from openkb.api_helpers import (
 )
 from openkb.api_kbs import _list_knowledge_bases
 from openkb.api_kbs_router import kbs_router
+from openkb.api_lint import run_lint_report
 from openkb.api_models import (
     AddResponse,
     ChatRequest,
@@ -99,9 +100,6 @@ from openkb.api_pages_router import pages_router
 from openkb.api_recompile import iter_recompile
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.application.removal import run_remove_for_api
-from openkb.cli import (
-    run_lint_report,
-)
 from openkb.config import (
     DEFAULT_CONFIG,
     resolve_credential_bundle,

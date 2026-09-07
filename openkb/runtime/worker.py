@@ -12,6 +12,7 @@ from openkb.config_state import ConfigSnapshot
 from openkb.runtime.records import UnitIdentity, UnitResult, save_receipt
 from openkb.runtime.requests import (
     AskQuestion,
+    CheckKnowledge,
     ContinueConversation,
     DeleteConversation,
     ExportConversation,
@@ -125,6 +126,34 @@ def _execute(
             else None,
         )
     context.install_process_settings = True
+    if isinstance(request, CheckKnowledge):
+        import asyncio
+
+        from openkb.application.maintenance import LintOptions, check_knowledge
+
+        context.install_process_settings = request.semantic
+        checked = asyncio.run(
+            check_knowledge(
+                root,
+                LintOptions(fix=request.fix, semantic=request.semantic, version=request.version),
+                context=context,
+            )
+        )
+        return UnitResult(
+            "failed" if checked.status == "conflict" else checked.status,
+            resources=checked.resources,
+            changes=checked.changes,
+            quality=checked.quality,
+            unfinished=checked.unfinished,
+            halt=checked.status == "blocked",
+            error="Wiki changed; review the latest link repair plan"
+            if checked.status == "conflict"
+            else "No documents indexed; semantic checks skipped"
+            if checked.status == "skipped"
+            else f"Knowledge check failed ({checked.error_type})"
+            if checked.error_type
+            else None,
+        )
     if isinstance(request, RecompileDocument):
         import asyncio
 

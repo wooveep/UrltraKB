@@ -5,33 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QComboBox,
-    QDockWidget,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
-    QLabel,
-    QListWidget,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QSplitter,
     QStyle,
     QSystemTrayIcon,
-    QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
-    QToolBar,
-    QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
 )
 
 from openkb.agent.chat_session import list_sessions
@@ -76,6 +61,7 @@ _OPERATIONS = {
     "ImportUrl": "导入网址",
     "DeleteConversation": "删除对话",
     "ExportConversation": "导出对话",
+    "CheckKnowledge": "知识检查与修复",
 }
 
 
@@ -98,7 +84,9 @@ class Workbench(QMainWindow):
         self._quitting = False
         self.io = LocalIO(self)
         self.manager = TaskManager(history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks")
-        self._build_window()
+        from openkb.desktop.layout import build_workbench
+
+        build_workbench(self)
         self._build_tray()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_tasks)
@@ -131,141 +119,27 @@ class Workbench(QMainWindow):
 
             show_task_details(self.manager.get(task_id), self)
 
+    def _maintenance(self):
+        if self.kb is not None:
+            from openkb.desktop.maintenance import MaintenanceDialog
+
+            MaintenanceDialog(self, self.kb).exec()
+
+    def _diagnose(self, path=None):
+        from openkb.desktop.diagnostics import DiagnosticsDialog
+
+        if path is None:
+            selected = QFileDialog.getExistingDirectory(self, "选择要诊断的知识库")
+            if not selected:
+                return
+            path = Path(selected)
+        DiagnosticsDialog(self, path).exec()
+
     def _manage_sessions(self):
         if self.kb is not None:
             from openkb.desktop.sessions import SessionsDialog
 
             SessionsDialog(self, self.kb).exec()
-
-    def _action(self, toolbar, label, callback):
-        action = QAction(label, self)
-        action.triggered.connect(callback)
-        toolbar.addAction(action)
-        return action
-
-    def _build_window(self):
-        toolbar = QToolBar("知识库与资料", self)
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-        self._action(toolbar, "新建知识库", self._create_kb)
-        self._action(toolbar, "打开知识库", self._choose_kb)
-        toolbar.addSeparator()
-        self.kbs = QComboBox()
-        self.kbs.setMinimumWidth(270)
-        self.kbs.setPlaceholderText("选择知识库")
-        self.kbs.activated.connect(lambda: self.open_knowledge_base(Path(self.kbs.currentData())))
-        toolbar.addWidget(self.kbs)
-        self._action(toolbar, "导入文件", self._import_files)
-        self._action(toolbar, "导入目录", self._import_directory)
-        self._action(toolbar, "导入网址", self._import_urls)
-        self._action(toolbar, "资料管理", self._documents)
-        self._action(toolbar, "刷新", self._refresh_current)
-        settings = self.menuBar().addMenu("设置")
-        settings.addAction("当前知识库…", lambda: self._settings(global_defaults=False))
-        settings.addAction("全局默认…", lambda: self._settings(global_defaults=True))
-        self._action(toolbar, "退出", self.request_quit)
-        self.addToolBarBreak()
-        reading_toolbar = QToolBar("阅读显示", self)
-        self.addToolBar(reading_toolbar)
-        self.theme = QComboBox()
-        self.theme.addItems(["浅色阅读", "深色阅读"])
-        self.zoom = QComboBox()
-        for scale in (0.75, 1, 1.5, 2, 4):
-            self.zoom.addItem(f"{scale:.0%}", scale)
-        self.zoom.setCurrentIndex(1)
-        self.theme.activated.connect(self._presentation_changed)
-        self.zoom.activated.connect(self._presentation_changed)
-        reading_toolbar.addWidget(self.theme)
-        reading_toolbar.addWidget(self.zoom)
-
-        self.pages = QTreeWidget()
-        self.pages.setHeaderLabel("知识页面")
-        self.pages.itemActivated.connect(self._activate_page)
-        self.pages.setMinimumWidth(210)
-        self.tabs = QTabWidget()
-        self.reader = MarkdownView()
-        self.reader.anchorClicked.connect(self._follow_link)
-        self.tabs.addTab(self.reader, "阅读")
-        editor_panel = QWidget()
-        editor_layout = QVBoxLayout(editor_panel)
-        self.editor = QPlainTextEdit()
-        self.editor.setPlaceholderText("选择页面后编辑正文；原有元数据会保留。")
-        self.editor.textChanged.connect(self._keep_draft)
-        editor_layout.addWidget(self.editor)
-        self.save_button = QPushButton("保存正文")
-        self.save_button.clicked.connect(self._save_page)
-        editor_layout.addWidget(self.save_button)
-        review = QPushButton("查看最新版本 / 处理冲突")
-        review.clicked.connect(self._review_draft)
-        editor_layout.addWidget(review)
-        export = QPushButton("导出草稿…")
-        export.clicked.connect(self._export_draft)
-        editor_layout.addWidget(export)
-        self.tabs.addTab(editor_panel, "编辑")
-        self.chat = MarkdownView()
-        self.chat.anchorClicked.connect(self._follow_link)
-        self.tabs.addTab(self.chat, "问答与对话")
-        center = QWidget()
-        center_layout = QVBoxLayout(center)
-        self.location = QLabel("尚未打开知识库")
-        self.location.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        center_layout.addWidget(self.location)
-        center_layout.addWidget(self.tabs, 1)
-        ask_options = QHBoxLayout()
-        self.mode = QComboBox()
-        self.mode.addItems(["一次问答", "对话"])
-        self.sessions = QComboBox()
-        self.sessions.addItem("新对话", None)
-        self.sessions.activated.connect(self._load_conversation)
-        self.save_answer = QCheckBox("保存回答")
-        ask_options.addWidget(self.mode)
-        ask_options.addWidget(self.sessions, 1)
-        ask_options.addWidget(self.save_answer)
-        manage_sessions = QPushButton("管理对话…")
-        manage_sessions.clicked.connect(self._manage_sessions)
-        ask_options.addWidget(manage_sessions)
-        center_layout.addLayout(ask_options)
-        self.question = QPlainTextEdit()
-        self.question.setPlaceholderText("向当前知识库提问…")
-        self.question.setMaximumHeight(85)
-        center_layout.addWidget(self.question)
-        self.ask_button = QPushButton("发送")
-        self.ask_button.clicked.connect(self._ask)
-        center_layout.addWidget(self.ask_button)
-        splitter = QSplitter()
-        splitter.addWidget(self.pages)
-        splitter.addWidget(center)
-        splitter.setStretchFactor(1, 1)
-        self.setCentralWidget(splitter)
-
-        tasks_panel = QWidget()
-        tasks_layout = QVBoxLayout(tasks_panel)
-        self.task_table = QTableWidget(0, 5)
-        self.task_table.setHorizontalHeaderLabels(
-            ["知识库", "操作", "状态", "逐项结果", "阶段 / 错误"]
-        )
-        self.task_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.task_table.horizontalHeader().setStretchLastSection(True)
-        self.task_table.itemSelectionChanged.connect(self._select_task)
-        tasks_layout.addWidget(self.task_table)
-        stop = QPushButton("安全停止所选任务")
-        stop.clicked.connect(self._stop_selected)
-        tasks_layout.addWidget(stop)
-        details = QPushButton("查看所选任务结果")
-        details.clicked.connect(self._task_details)
-        tasks_layout.addWidget(details)
-        dock = QDockWidget("任务 · 所有知识库", self)
-        dock.setWidget(tasks_panel)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [170], Qt.Orientation.Vertical)
-        self.artifacts = QListWidget()
-        self.artifacts.itemDoubleClicked.connect(
-            lambda item: QDesktopServices.openUrl(QUrl.fromLocalFile(item.text()))
-        )
-        artifacts_dock = QDockWidget("任务产物 · 双击打开", self)
-        artifacts_dock.setWidget(self.artifacts)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, artifacts_dock)
 
     def _build_tray(self):
         icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon)
@@ -333,7 +207,7 @@ class Workbench(QMainWindow):
         self.statusBar().showMessage(f"正在打开 {path}；若有写入任务，将等待其安全完成。")
         self.io.submit(
             lambda: open_kb(path),
-            lambda value, error: self._opened(value, error)
+            lambda value, error: self._opened(value, error, attempted=path)
             if request_id == self._open_request_id
             else None,
             kb=path,
@@ -342,7 +216,12 @@ class Workbench(QMainWindow):
             obsolete=lambda: request_id != self._open_request_id,
         )
 
-    def _opened(self, root, error):
+    def _opened(self, root, error, *, attempted=None):
+        from openkb.mutation import RecoveryRequired
+
+        if isinstance(error, RecoveryRequired) and attempted is not None:
+            self._diagnose(attempted)
+            return
         if self._error(error):
             return
         self._keep_draft()
