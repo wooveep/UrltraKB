@@ -175,12 +175,13 @@ print("OpenKB")
 
         verify_settings(window, first, wait_until)
         checks.append("native KB/global settings save, inheritance, credential rotation and clear")
-        from openkb.desktop.verification_removal import verify_removal
+        if args.model_base:
+            from openkb.desktop.verification_removal import verify_removal
 
-        verify_removal(window, first, wait_until)
-        checks.append(
-            "native removal preview, stale confirmation, spawned cleanup and kept resources"
-        )
+            verify_removal(window, first, wait_until)
+            checks.append(
+                "native removal preview, stale confirmation, spawned cleanup and kept resources"
+            )
         from openkb.desktop.verification_sessions import verify_sessions
 
         verify_sessions(window, first, wait_until)
@@ -334,6 +335,8 @@ print("OpenKB")
         )
         checks.append(
             "native artifacts: graph, SDK generation, archive consent, supporting-file exports"
+            if args.model_base
+            else "native artifacts: graph and folder export"
         )
         from openkb.desktop.verification_watch import verify_watch
 
@@ -342,6 +345,14 @@ print("OpenKB")
         )
         checks.append(
             "native watch: startup scan, recursive atomic moves, independent workers and stop"
+            if args.model_base
+            else "native watch: start and stop without submitted work"
+        )
+        from openkb.desktop.verification_task_actions import verify_task_actions
+
+        verify_task_actions(window, other, wait_until)
+        checks.append(
+            "native manual retry: verified failed units in a new task; cleanup retains artifacts"
         )
         if args.corpus:
             from openkb.desktop.verification_rendering import verify_corpus
