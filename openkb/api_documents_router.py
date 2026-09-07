@@ -8,6 +8,8 @@ on ``/api/v1/remove``).
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -23,7 +25,7 @@ async def document_source_endpoint(
     request: DocumentSourceRequest,
     _: None = Depends(require_bearer_token),
 ) -> DocumentSourceResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
         result = await run_in_threadpool(read_document_source, kb_dir, request.hash)
     except (OSError, ValueError) as exc:

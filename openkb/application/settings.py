@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,7 @@ from openkb.application.settings_data import (
     GlobalConfigValues,
     KbConfigPatchRequest,
     KbConfigResponse,
+    SettingsView,
     _KbConfigWritable,
 )
 from openkb.config import (
@@ -230,7 +232,7 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
         )
 
 
-def read_global_config() -> GlobalConfigResponse:
+def _read_global_config() -> GlobalConfigResponse:
     """The global default scalars, DEFAULT_CONFIG-filled where global.yaml is
     silent, plus the global-default credentials read from the global ``.env``.
 
@@ -264,37 +266,13 @@ def read_global_config() -> GlobalConfigResponse:
 
 
 def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
-    """Apply an RFC 7386 merge-patch to the whitelisted scalar keys of
-    global.yaml. Reuses _KbConfigWritable for VALUE-type validation (a wrong
-    type is a 400, never persisted) and MUST preserve the non-scalar global keys
-    (known_kbs / kb_aliases / default_kb) by merging into the loaded dict.
+    """Merge validated global settings and credentials as one recoverable change.
 
-    The read-modify-write is done under config._with_global_config_lock() held
-    across the ENTIRE section — not just the write — mirroring exactly how
-    config.register_kb/register_kb_alias mutate global.yaml: load via the
-    UNLOCKED _load_global_config_unlocked() and write DIRECTLY with
-    _atomic_yaml_dump while still holding the lock. Without this, a concurrent
-    registry mutation (e.g. ``openkb kb add`` -> register_kb, or another PATCH)
-    landing between an unlocked read and a separately-locked save would be
-    silently clobbered by this endpoint's stale in-memory dict, wiping the KB
-    registry. This deliberately does NOT call load_global_config()/
-    save_global_config() here: save_global_config() re-acquires the same
-    (non-reentrant, flock-based) lock internally, which would deadlock if
-    invoked from inside a lock we're already holding.
-
-    The optional top-level ``kb_root`` field is merged into the SAME global.yaml
-    write (it is a plain registry-style key, not a scalar in ``config`` and not a
-    credential): a string sets it, an explicit null removes it (revert to the
-    default root), an absent field leaves it unchanged.
-
-    Credentials (``api_key`` / ``openai_api_base``) are written to the global
-    ``.env`` (``GLOBAL_CONFIG_DIR / ".env"``) with the SAME secure, atomic,
-    0o600 read-modify-write ``apply_kb_config_patch`` uses for a KB's ``.env``,
-    also under the global lock so a concurrent registry mutation cannot race.
-    The api_key value is never returned or logged.
-
-    Validation happens BEFORE the lock is touched, so a bad request still
-    returns 400 without acquiring the lock or reading/writing disk.
+    The global lock covers reading, both writes and the durable commit marker.
+    Other registry keys are preserved; omitted values stay unchanged and null
+    removes an override. Failed rollback retains its journal and blocks later
+    global reads/writes until controlled recovery succeeds. Secret values are
+    never returned or logged.
     """
     fields_set = request.model_fields_set
     write_env = "api_key" in fields_set or "openai_api_base" in fields_set
@@ -331,7 +309,15 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
     if dumped is None and not write_env and not write_kb_root:
         return
 
-    with _with_global_config_lock():
+    with (
+        _with_global_config_lock(),
+        mutation_scope(
+            _config_module.GLOBAL_CONFIG_DIR,
+            [_config_module.GLOBAL_CONFIG_PATH, _config_module.GLOBAL_CONFIG_DIR / ".env"],
+            operation="global-settings",
+            lock_path=_config_module.GLOBAL_CONFIG_DIR / "global.lock",
+        ),
+    ):
         if dumped is not None or write_kb_root:
             gc = _load_global_config_unlocked()
             if dumped is not None:
@@ -386,6 +372,11 @@ def _write_global_env(request: GlobalConfigPatchRequest, fields_set: set[str]) -
     )
 
 
+def read_global_config() -> GlobalConfigResponse:
+    with _with_global_config_lock():
+        return _read_global_config()
+
+
 def read_kb_config(kb_dir: Path) -> KbConfigResponse:
     """Read one consistent settings version without returning a secret value."""
     with kb_read_lock(kb_dir / ".openkb"):
@@ -402,3 +393,30 @@ def apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
             kb_dir, [kb_dir / ".openkb/config.yaml", kb_dir / ".env"], operation="settings"
         ):
             _apply_kb_config_patch(kb_dir, request)
+
+
+def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
+    """Read native settings with field origins, retaining existing API responses."""
+    from dotenv import dotenv_values
+
+    with (
+        kb_read_lock(kb_dir / ".openkb") if kb_dir else nullcontext(),
+        _with_global_config_lock(),
+    ):
+        values = _read_kb_config(kb_dir) if kb_dir else _read_global_config()
+        global_config = _load_global_config_unlocked()
+        sources: dict[str, str] = (
+            dict(values.sources)
+            if isinstance(values, KbConfigResponse)
+            else {
+                key: "global" if global_config.get(key) is not None else "default"
+                for key in _KB_CONFIG_WRITABLE_KEYS
+            }
+        )
+        layers = []
+        if kb_dir:
+            layers.extend([("kb", dotenv_values(kb_dir / ".env")), ("environment", os.environ)])
+        layers.append(("global", dotenv_values(_config_module.GLOBAL_CONFIG_DIR / ".env")))
+        for field, key in (("api_key", "LLM_API_KEY"), ("openai_api_base", "OPENAI_API_BASE")):
+            sources[field] = next((name for name, data in layers if data.get(key)), "unset")
+        return SettingsView(values=values, sources=sources)

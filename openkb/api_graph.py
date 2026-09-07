@@ -8,6 +8,8 @@ read-only and depend only on module-level helpers (``_resolve_kb``,
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
@@ -23,7 +25,7 @@ async def graph_endpoint(
     request: GraphRequest,
     _: None = Depends(require_bearer_token),
 ) -> GraphResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     from openkb.visualize import build_graph
 
     graph = await run_in_threadpool(build_graph, kb_dir / "wiki")
@@ -38,7 +40,7 @@ async def graph_html_endpoint(
     # Self-contained graph HTML (the same renderer the ``openkb visualize`` CLI
     # writes to disk) for the Workbench's sandboxed iframe / new tab. The POST
     # JSON variant above feeds the in-chat card's node/edge counts.
-    kb_dir = _resolve_kb(kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, kb)
     from openkb.visualize import build_graph, render_html
 
     html = await run_in_threadpool(lambda: render_html(build_graph(kb_dir / "wiki")))

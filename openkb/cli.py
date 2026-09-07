@@ -1791,7 +1791,7 @@ async def iter_recompile(
 
         if bundle is None:
             _setup_llm_key(kb_dir)
-        config = resolve_effective_config(kb_dir)[0]
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         model: str = config.get("model", DEFAULT_CONFIG["model"])
 
         from openkb.agent import compiler
@@ -2080,7 +2080,7 @@ async def run_lint(kb_dir: Path) -> Path | None:
             click.echo("Nothing to lint — no documents indexed yet. Run `openkb add` first.")
             return
 
-        config = resolve_effective_config(kb_dir)[0]
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         _setup_llm_key(kb_dir)
         model: str = config.get("model", DEFAULT_CONFIG["model"])
 
@@ -3195,7 +3195,7 @@ async def run_lint_report(
                 "lint_ghosts_removed": lint_ghosts_removed,
             }
 
-        config = resolve_effective_config(kb_dir)[0]
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         if bundle is None:
             _setup_llm_key(kb_dir)
         model: str = config.get("model", DEFAULT_CONFIG["model"])

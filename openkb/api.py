@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            registry.stop_all()
+            await asyncio.to_thread(registry.stop_all)
 
     app = FastAPI(title="OpenKB API", lifespan=lifespan)
 
@@ -173,7 +173,7 @@ def create_app() -> FastAPI:
     async def list_kbs_endpoint(
         _: None = Depends(require_bearer_token),
     ) -> KbListResponse:
-        return KbListResponse(**_list_knowledge_bases())
+        return KbListResponse(**(await asyncio.to_thread(_list_knowledge_bases)))
 
     @app.get("/api/v1/meta", response_model=MetaResponse)
     async def meta_endpoint(
@@ -188,7 +188,7 @@ def create_app() -> FastAPI:
         kb: str = Query(...),
         _: None = Depends(require_bearer_token),
     ) -> KbConfigResponse:
-        return await run_in_threadpool(read_kb_config, _resolve_kb(kb))
+        return await run_in_threadpool(read_kb_config, (await asyncio.to_thread(_resolve_kb, kb)))
 
     @app.patch("/api/v1/kb/config", response_model=KbConfigResponse)
     async def kb_config_patch_endpoint(
@@ -197,7 +197,7 @@ def create_app() -> FastAPI:
     ) -> KbConfigResponse:
         # The merge-PATCH is a read-modify-write over config.yaml + .env; hold
         # the per-KB mutation lock so two concurrent patches cannot drop fields.
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         async with _kb_mutation_lock(request.kb):
             await run_in_threadpool(apply_kb_config_patch, kb_dir, request)
         return await run_in_threadpool(read_kb_config, kb_dir)
@@ -209,7 +209,7 @@ def create_app() -> FastAPI:
     ) -> InitResponse:
         try:
             kb_name = validate_kb_name(request.kb)
-            kb_dir = resolve_init_kb_dir(kb_name, request.path)
+            kb_dir = await asyncio.to_thread(resolve_init_kb_dir, kb_name, request.path)
             # Run lock-holding work in a threadpool so each request gets its
             # own threading.local (kb_ingest_lock reentrancy is per-thread)
             # and the event loop is not blocked by file I/O / flock.
@@ -246,8 +246,8 @@ def create_app() -> FastAPI:
         files: list[UploadFile] = File(default=[]),
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        resolved_kb_dir = _resolve_kb(kb)
-        bundle = resolve_credential_bundle(resolved_kb_dir)
+        resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, resolved_kb_dir)
         if not files:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -273,9 +273,9 @@ def create_app() -> FastAPI:
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
-        config = resolve_effective_config(kb_dir)[0]
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         model = config.get("model", DEFAULT_CONFIG["model"])
         run_config = build_run_config_from_bundle(model, bundle)
 
@@ -317,9 +317,9 @@ def create_app() -> FastAPI:
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
-        session = _load_or_create_session(kb_dir, request.session_id)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
+        session = await asyncio.to_thread(_load_or_create_session, kb_dir, request.session_id)
         run_config = build_run_config_from_bundle(session.model, bundle)
 
         if request.stream:
@@ -330,7 +330,9 @@ def create_app() -> FastAPI:
 
         try:
             answer = ""
-            agent = build_chat_session_agent(kb_dir, session, bundle=bundle)
+            agent = await asyncio.to_thread(
+                build_chat_session_agent, kb_dir, session, bundle=bundle
+            )
             async for event in iter_chat_turn_events(
                 agent, session, request.message, run_config=run_config
             ):
@@ -352,7 +354,7 @@ def create_app() -> FastAPI:
         request: KbRequest,
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionListResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
             sessions = list_sessions(kb_dir)
         except Exception as exc:
@@ -367,7 +369,7 @@ def create_app() -> FastAPI:
         request: ChatSessionLoadRequest,
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionLoadResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
             session = load_session(kb_dir, request.session_id)
         except FileNotFoundError as exc:
@@ -394,7 +396,7 @@ def create_app() -> FastAPI:
         request: ChatSessionDeleteRequest,
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionDeleteResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
             deleted = await run_in_threadpool(delete_session, kb_dir, request.session_id)
         except Exception as exc:
@@ -414,7 +416,7 @@ def create_app() -> FastAPI:
         request: KbRequest,
         _: None = Depends(require_bearer_token),
     ) -> ListResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
             return ListResponse(**await run_in_threadpool(get_kb_list, kb_dir))
         except Exception as exc:
@@ -428,7 +430,7 @@ def create_app() -> FastAPI:
         request: KbRequest,
         _: None = Depends(require_bearer_token),
     ) -> StatusResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
             return StatusResponse(**await run_in_threadpool(get_kb_status, kb_dir))
         except Exception as exc:
@@ -442,8 +444,8 @@ def create_app() -> FastAPI:
         request: LintRequest,
         _: None = Depends(require_bearer_token),
     ) -> LintResponse:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         try:
             # Only fix=True mutations need serialization; read-only lint
             # (fix=False) is a report and may run concurrently.
@@ -462,7 +464,7 @@ def create_app() -> FastAPI:
         request: RemoveRequest,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         if request.stream:
             return StreamingResponse(
                 _stream_remove(request, kb_dir),
@@ -497,8 +499,8 @@ def create_app() -> FastAPI:
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
@@ -552,23 +554,23 @@ def create_app() -> FastAPI:
         request: WatchStartRequest,
         _: None = Depends(require_bearer_token),
     ) -> WatchStatusResponse:
-        kb_dir = _resolve_kb(request.kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
-            registry.start(request.kb, kb_dir, debounce=request.debounce)
+            (await asyncio.to_thread(registry.start, request.kb, kb_dir, debounce=request.debounce))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Watch start failed: {exc}",
             ) from exc
-        return WatchStatusResponse(**registry.status(request.kb))
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
 
     @app.post("/api/v1/watch/stop", response_model=WatchStatusResponse)
     async def watch_stop_endpoint(
         request: KbRequest,
         _: None = Depends(require_bearer_token),
     ) -> WatchStatusResponse:
-        _resolve_kb(request.kb)
-        if not registry.stop(request.kb):
+        (await asyncio.to_thread(_resolve_kb, request.kb))
+        if not (await asyncio.to_thread(registry.stop, request.kb)):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No active watcher for KB: {request.kb}",
@@ -576,15 +578,15 @@ def create_app() -> FastAPI:
         # Return the real post-stop status. If the worker was mid-compile and
         # entered draining mode, status() reports active=True; otherwise it
         # reports active=False after the watcher has been removed.
-        return WatchStatusResponse(**registry.status(request.kb))
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
 
     @app.post("/api/v1/watch/status", response_model=WatchStatusResponse)
     async def watch_status_endpoint(
         request: KbRequest,
         _: None = Depends(require_bearer_token),
     ) -> WatchStatusResponse:
-        _resolve_kb(request.kb)
-        return WatchStatusResponse(**registry.status(request.kb))
+        (await asyncio.to_thread(_resolve_kb, request.kb))
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
 
     @app.get("/api/v1/watch/events")
     async def watch_events_endpoint(
@@ -594,7 +596,7 @@ def create_app() -> FastAPI:
         timeout_seconds: float | None = Query(default=None, ge=0),
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        _resolve_kb(kb)
+        (await asyncio.to_thread(_resolve_kb, kb))
         return StreamingResponse(
             _stream_watch_events(registry, kb, max_events, timeout_seconds, request),
             media_type="text/event-stream",
@@ -606,8 +608,8 @@ def create_app() -> FastAPI:
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
@@ -636,7 +638,7 @@ def create_app() -> FastAPI:
     ) -> DeckListResponse:
         from openkb.deck import decks_root
 
-        kb_dir = _resolve_kb(kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
         root = decks_root(kb_dir)
         decks = (
             sorted(
@@ -658,7 +660,7 @@ def create_app() -> FastAPI:
 
         if _validate_skill_name(name):
             raise HTTPException(status_code=400, detail="Invalid deck name.")
-        kb_dir = _resolve_kb(kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
         root = decks_root(kb_dir).resolve()
         target = deck_dir(kb_dir, name).resolve()
         if not target.is_relative_to(root):
@@ -674,8 +676,8 @@ def create_app() -> FastAPI:
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        kb_dir = _resolve_kb(request.kb)
-        bundle = resolve_credential_bundle(kb_dir)
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
@@ -704,7 +706,7 @@ def create_app() -> FastAPI:
     ) -> SkillListResponse:
         from openkb.skill import skills_root
 
-        kb_dir = _resolve_kb(kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
         root = skills_root(kb_dir)
         skills = (
             sorted(
@@ -729,7 +731,7 @@ def create_app() -> FastAPI:
 
         if _validate_skill_name(name):
             raise HTTPException(status_code=400, detail="Invalid skill name.")
-        kb_dir = _resolve_kb(kb)
+        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
         root = skills_root(kb_dir).resolve()
         target = skill_dir(kb_dir, name).resolve()
         if not target.is_relative_to(root):

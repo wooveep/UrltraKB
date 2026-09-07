@@ -35,7 +35,7 @@ from openkb.llm_runtime import (
 from openkb.llm_runtime import (
     set_timeout as set_timeout,
 )
-from openkb.locks import atomic_write_text, flock, funlock
+from openkb.locks import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +75,18 @@ KB_NAME_RE = re.compile(r"[\w-]+")
 
 
 @contextlib.contextmanager
-def _with_global_config_lock() -> Iterator[None]:
-    GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    # Derive the lock path from GLOBAL_CONFIG_DIR (rather than the import-time
-    # GLOBAL_CONFIG_LOCK_PATH constant) so it always co-locates with the dir we
-    # just created — including when tests monkeypatch GLOBAL_CONFIG_DIR to a
-    # throwaway path. Otherwise the lock would open the real ~/.config/openkb,
-    # which fails on a fresh machine where that dir doesn't exist.
-    lock_path = GLOBAL_CONFIG_DIR / "global.lock"
-    with lock_path.open("a+", encoding="utf-8") as fh:
-        flock(fh, exclusive=True)
-        try:
-            yield
-        finally:
-            funlock(fh)
+def _with_global_config_lock(*, recover=True, **wait_options) -> Iterator[None]:
+    from openkb.locks import LockCancelled, file_write_lock
+    from openkb.mutation import recover_pending_journals
+
+    with file_write_lock(GLOBAL_CONFIG_DIR / "global.lock", **wait_options) as first:
+        if first and recover:
+            for message in recover_pending_journals(GLOBAL_CONFIG_DIR):
+                logger.warning(message)
+        cancelled = wait_options.get("cancelled")
+        if cancelled and cancelled():
+            raise LockCancelled("Stopped after recovering shared settings")
+        yield
 
 
 def _atomic_yaml_dump(path: Path, config: dict[str, Any]) -> None:
@@ -387,10 +385,11 @@ def resolve_credential_bundle(kb_dir: Path) -> LlmCredentialBundle:
 
     global_values: dict[str, str | None] = {}
     global_env = GLOBAL_CONFIG_DIR / ".env"
-    if global_env.exists():
-        from dotenv import dotenv_values
+    with _with_global_config_lock():
+        if global_env.exists():
+            from dotenv import dotenv_values
 
-        global_values = dict(dotenv_values(str(global_env)))
+            global_values = dict(dotenv_values(str(global_env)))
 
     def _resolve_env(key: str) -> str | None:
         # KB-local .env wins, then the process environment, then the global
@@ -471,7 +470,8 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
 
 def load_global_config() -> dict[str, Any]:
     """Load the global config from ~/.config/openkb/global.yaml."""
-    return _load_global_config_unlocked()
+    with _with_global_config_lock():
+        return _load_global_config_unlocked()
 
 
 # Whitelisted scalar keys that global.yaml may provide as shared defaults for
@@ -579,7 +579,7 @@ def kb_root_dir() -> Path:
     configured_root = os.environ.get("OPENKB_KB_ROOT")
     if configured_root:
         return Path(configured_root).expanduser().resolve()
-    global_root = _load_global_config_unlocked().get("kb_root")
+    global_root = load_global_config().get("kb_root")
     if isinstance(global_root, str) and global_root.strip():
         return Path(global_root).expanduser().resolve()
     return (GLOBAL_CONFIG_DIR / "kbs").resolve()
@@ -720,7 +720,7 @@ def registered_kbs() -> list[tuple[str, Path]]:
     A malformed global.yaml (coerced to ``{}`` by the loader) or a non-string
     entry is tolerated rather than raising.
     """
-    global_config = _load_global_config_unlocked()
+    global_config = load_global_config()
     seen_paths: set[str] = set()
     # Root-child names are reserved up front so a colliding bare known_kbs entry
     # is hidden rather than shadowing/duplicating the same-named root-level KB.

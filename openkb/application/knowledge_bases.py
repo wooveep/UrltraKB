@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -79,7 +78,17 @@ def initialize_kb(
     """
     kb_dir = kb_dir.expanduser().resolve()
     openkb_dir = kb_dir / ".openkb"
-    if openkb_dir.exists():
+    from openkb.locks import kb_ingest_lock_held
+
+    # A caller may pre-acquire execution before waiting for global settings.
+    # Its lock file is not an initialization marker. Only that exact, owned
+    # directory shape is accepted; arbitrary partial/existing KBs are rejected.
+    prepared_lock = (
+        kb_ingest_lock_held(openkb_dir)
+        and openkb_dir.is_dir()
+        and {path.name for path in openkb_dir.iterdir()} == {"ingest.lock"}
+    )
+    if openkb_dir.exists() and not prepared_lock:
         raise FileExistsError(f"Knowledge base already initialized: {kb_dir}")
 
     kb_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +102,7 @@ def initialize_kb(
     atomic_write_text(kb_dir / "wiki" / "index.md", INDEX_SEED)
     atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
 
-    openkb_dir.mkdir()
+    openkb_dir.mkdir(exist_ok=prepared_lock)
     # Seed config.yaml: an explicit model wins; otherwise inherit the
     # operator's project-root config.yaml (model/language/optional blocks)
     # so a KB created via the REST UI matches the deployed setup instead of
@@ -145,8 +154,8 @@ def initialize_kb(
         if openai_api_base:
             env_pairs["OPENAI_API_BASE"] = openai_api_base
         if env_pairs:
+            env_path.touch(mode=0o600, exist_ok=False)
             atomic_write_text(env_path, "".join(f"{k}={v}\n" for k, v in env_pairs.items()))
-            os.chmod(env_path, 0o600)
 
     register_kb(kb_dir)
     return {

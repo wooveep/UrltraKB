@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from contextlib import contextmanager
@@ -70,7 +71,7 @@ def _hardlink_or_copy(src: str, dst: str) -> None:
         shutil.copy2(src_path, dst_path)
 
 
-def _copy_file_atomic(src: Path, dest: Path) -> None:
+def _copy_file_atomic(src: Path, dest: Path, *, preserve_mode: bool = False) -> None:
     """Stream ``src`` to ``dest`` through a temp file, then atomically replace.
 
     Streams (never buffers the whole file) so copying a large raw PDF does
@@ -79,13 +80,14 @@ def _copy_file_atomic(src: Path, dest: Path) -> None:
     backup creation, rollback restore, and the cross-filesystem fallback of
     :func:`_publish_staged_file` — so every byte copy in this module shares
     one atomic, streaming, durable semantic: the parent directory is fsynced
-    and the result carries the umask mode (not ``mkstemp``'s 0600).
+    and publication carries the destination's mode. Snapshot/restore callers
+    preserve the source mode so a private credential never becomes public.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Capture the destination mode before the temp file shadows it: a brand-
     # new file gets the process umask mode (0o666 & ~umask), an existing file
     # keeps its current mode — the same rule ``atomic_write_bytes`` applies.
-    mode = _target_mode(dest)
+    mode = stat.S_IMODE(src.stat().st_mode) if preserve_mode else _target_mode(dest)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{dest.name}.", suffix=".tmp", dir=dest.parent)
     tmp_path = Path(tmp_name)
     try:
@@ -93,8 +95,8 @@ def _copy_file_atomic(src: Path, dest: Path) -> None:
             shutil.copyfileobj(inp, out)
             out.flush()
             os.fsync(out.fileno())
+        _apply_mode(tmp_path, mode)
         os.replace(tmp_path, dest)
-        _apply_mode(dest, mode)
         _fsync_directory(dest.parent)
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -231,7 +233,7 @@ class MutationSnapshot:
             if backup.is_dir():
                 shutil.copytree(backup, target)
             else:
-                _copy_file_atomic(backup, target)
+                _copy_file_atomic(backup, target, preserve_mode=True)
         self.write_journal("rolled_back")
 
     def rollback_best_effort(self) -> Exception | None:
@@ -330,7 +332,7 @@ def snapshot_paths(
     hardlink_resolved = {p.resolve() for p in (hardlink_dirs or ())}
     journal_id = uuid.uuid4().hex
     backup_dir = kb_dir / ".openkb" / "staging" / f"rollback-{journal_id}"
-    backup_dir.mkdir(parents=True, exist_ok=False)
+    backup_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
     snapshot = MutationSnapshot(
         kb_dir=kb_dir,
         backup_dir=backup_dir,
@@ -356,7 +358,7 @@ def snapshot_paths(
                 else:
                     shutil.copytree(target, backup)
             else:
-                _copy_file_atomic(target, backup)
+                _copy_file_atomic(target, backup, preserve_mode=True)
             snapshot.entries[target] = backup
         # The active journal is the recovery signal: once this exists, a future
         # process can restore every recorded target even if the current one exits.
@@ -372,15 +374,19 @@ def snapshot_paths(
 
 
 @contextmanager
-def mutation_scope(kb_dir: Path, paths: list[Path], *, operation: str):
+def mutation_scope(
+    kb_dir: Path, paths: list[Path], *, operation: str, lock_path: Path | None = None
+):
     """Commit a protected multi-file change, retaining evidence if rollback fails.
 
-    The caller holds the KB write lease for the entire scope. Post-commit
+    The caller holds the KB write lease for the entire scope, or the explicit
+    shared-state lock when transacting global settings. Journal paths and
+    recovery targets remain contained within the supplied root. Post-commit
     cleanup is best effort; it can never undo a committed result.
     """
-    from openkb.locks import kb_ingest_lock_held
+    from openkb.locks import file_write_lock_held
 
-    if not kb_ingest_lock_held(kb_dir / ".openkb"):
+    if not file_write_lock_held(lock_path or kb_dir / ".openkb/ingest.lock"):
         raise RuntimeError("Mutation requires the knowledge-base write lease")
     snapshot = snapshot_paths(kb_dir, paths, operation=operation)
     try:
@@ -441,12 +447,14 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
                 raise ValueError("Mutation backup is missing; live content was not removed")
 
 
-def recover_pending_journals(kb_dir: Path, *, repairing: bool = False) -> list[str]:
+def recover_pending_journals(
+    kb_dir: Path, *, repairing: bool = False, lock_path: Path | None = None
+) -> list[str]:
     """Rollback active journals left by an interrupted process."""
     if repairing:
-        from openkb.locks import kb_ingest_lock_held
+        from openkb.locks import file_write_lock_held
 
-        if not kb_ingest_lock_held(kb_dir / ".openkb"):
+        if not file_write_lock_held(lock_path or kb_dir / ".openkb/ingest.lock"):
             raise RuntimeError("Controlled recovery requires the KB write lease")
     if repair_marker(kb_dir).exists() and not repairing:
         raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")

@@ -14,6 +14,8 @@ get a browser-executable HTML sink.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
@@ -30,7 +32,7 @@ async def output_file_endpoint(
     path: str = Query(..., min_length=1),
     _: None = Depends(require_bearer_token),
 ) -> FileResponse:
-    kb_dir = _resolve_kb(kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, kb)
     root = kb_dir.resolve()
     full = (root / path).resolve()
     if not full.is_relative_to(root):

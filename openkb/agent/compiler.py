@@ -2217,7 +2217,7 @@ async def compile_short_doc(
     """
     from openkb.config import resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 
@@ -2305,7 +2305,7 @@ async def compile_long_doc(
     """
     from openkb.config import resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 

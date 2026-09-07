@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from agents import Agent, Runner, function_tool
@@ -116,7 +117,7 @@ async def run_knowledge_lint(
     """
     from openkb.config import resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
 
     wiki_root = str(kb_dir / "wiki")

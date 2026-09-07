@@ -98,3 +98,10 @@ class KbConfigPatchRequest(BaseModel):
     config: dict[str, Any] | None = None
     api_key: SecretStr | None = None
     openai_api_base: str | None = None
+
+
+class SettingsView(BaseModel):
+    """Display values and provenance; no credential plaintext crosses this seam."""
+
+    values: GlobalConfigResponse | KbConfigResponse
+    sources: dict[str, str]

@@ -85,7 +85,7 @@ def active_values(kb_dir: Path) -> dict[str, Any] | None:
     return snapshot.values()
 
 
-def capture_config(kb_dir: Path) -> ConfigSnapshot:
+def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
     """Capture settings after KB recovery while holding execution permission.
 
     Global saves use their existing lock. Before/after byte comparisons also
@@ -109,7 +109,7 @@ def capture_config(kb_dir: Path) -> ConfigSnapshot:
     def read_versions() -> list[bytes | None]:
         return [path.read_bytes() if path.exists() else None for path in paths]
 
-    with config._with_global_config_lock():
+    with config._with_global_config_lock(**wait_options):
         for _ in range(3):
             before = read_versions()
             effective, sources = config.resolve_effective_config(kb_dir)
