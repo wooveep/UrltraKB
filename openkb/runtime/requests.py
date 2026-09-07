@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,27 @@ class CheckKnowledge:
             raise ValueError("Link repair requires confirmation of the latest wiki")
 
 
+@dataclass(frozen=True)
+class GenerateArtifact:
+    target_type: Literal["skill", "deck"]
+    name: str
+    intent: str = field(repr=False)
+    version: str
+    replace: bool = False
+
+    def __post_init__(self) -> None:
+        from openkb.application.generators import GenerationOptions
+
+        GenerationOptions(self.target_type, self.name, self.intent)
+        if not isinstance(self.version, str) or not self.version:
+            raise ValueError("Artifact generation requires the latest target version")
+
+
+@dataclass(frozen=True)
+class GenerateGraph:
+    pass
+
+
 UnitRequest = (
     SavePage
     | AskQuestion
@@ -127,6 +149,8 @@ UnitRequest = (
     | DeleteConversation
     | ExportConversation
     | CheckKnowledge
+    | GenerateArtifact
+    | GenerateGraph
 )
 REQUEST_TYPES = (
     SavePage,
@@ -139,4 +163,6 @@ REQUEST_TYPES = (
     DeleteConversation,
     ExportConversation,
     CheckKnowledge,
+    GenerateArtifact,
+    GenerateGraph,
 )

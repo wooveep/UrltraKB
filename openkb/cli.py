@@ -288,61 +288,11 @@ def _find_kb_dir(override: Path | None = None) -> Path | None:
     return None
 
 
-def _validate_skill_name(name: str) -> str | None:
-    """Validate a skill slug. Returns None if OK, an error message if not.
-
-    Rules: lowercase ``[a-z0-9-]``, no leading/trailing dash, no consecutive
-    dashes, 1-64 characters. This matches the directory name we'll create
-    under ``<kb>/output/skills/`` and the ``name:`` frontmatter field.
-    """
-    if not name:
-        return "Skill name must not be empty."
-    if len(name) > 64:
-        return "Skill name must be at most 64 characters."
-    if not all(("a" <= c <= "z") or ("0" <= c <= "9") or c == "-" for c in name):
-        return "Skill name must contain only lowercase letters, digits, and dashes."
-    if name.startswith("-"):
-        return "Skill name must not have a leading dash."
-    if name.endswith("-"):
-        return "Skill name must not have a trailing dash."
-    if "--" in name:
-        return "Skill name must not contain consecutive dashes."
-    return None
-
-
-def _preflight_skill_new(kb_dir: Path, name: str) -> str | None:
-    """Run shared safety gates for ``openkb skill new`` / ``/skill new``.
-
-    Checks (in order):
-      * skill name is a valid kebab-case slug
-      * ``<kb>/wiki`` exists
-      * any of ``<kb>/wiki/{summaries,concepts,entities}`` has at least
-        one file (i.e. some document has been ingested + compiled)
-
-    Returns ``None`` if all gates pass, else a single-line error message
-    suitable to print to the user.
-
-    Overwrite handling is NOT done here — the CLI handles it with
-    ``-y`` + ``click.confirm``; chat refuses overwrite outright.
-    """
-    err = _validate_skill_name(name)
-    if err:
-        return err
-
-    wiki = kb_dir / "wiki"
-    if not wiki.is_dir():
-        return "No wiki found in this KB. Run `openkb add <source>` to ingest documents first."
-
-    has_content = any(
-        (wiki / sub).is_dir() and any((wiki / sub).iterdir()) for sub in PAGE_CONTENT_DIRS
-    )
-    if not has_content:
-        return (
-            "Wiki has no compiled content yet. Ingest at least one "
-            "document with `openkb add` first."
-        )
-
-    return None
+# Compatibility exports for existing integrations; behavior lives in the application layer.
+from openkb.application.generators import (
+    preflight_generation as _preflight_skill_new,
+    validate_name as _validate_skill_name,
+)
 
 
 def _clear_existing_skill_dir(kb_dir: Path, name: str) -> None:
@@ -1372,22 +1322,19 @@ def lint(ctx, fix):
     help="Open the graph in your browser after generating (default: on; --no-open for headless).",
 )
 @click.pass_context
-@_with_kb_lock(exclusive=False)
 def visualize(ctx, open_browser):
     """Render the wiki's [[wikilink]] graph as a self-contained interactive HTML page."""
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    from openkb import visualize as viz
+    from openkb.application.artifacts import generate_graph
 
-    graph = viz.build_graph(kb_dir / "wiki")
-    if not graph["nodes"]:
+    result = generate_graph(kb_dir)
+    graph, out = result.graph, result.path
+    if out is None:
         click.echo("No wiki pages to visualize yet. Run `openkb add` first.")
         return
-    out = kb_dir / "output" / "visualize" / "graph.html"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(viz.render_html(graph), encoding="utf-8")
     click.echo(
         f"Graph written to {out}  ({len(graph['nodes'])} nodes, {len(graph['edges'])} edges)"
     )
@@ -1767,64 +1714,35 @@ def skill_new(ctx, name, intent, yes_flag):
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
-    # Overwrite handling (CLI-specific). Done AFTER key/config so a
-    # missing key doesn't wipe the user's existing skill output.
-    #
-    # When overwriting, we don't destroy the old skill — we copy it
-    # into <kb>/output/skills/<name>-workspace/iteration-N/ first, so
-    # the user can roll back via `openkb skill rollback`. See
-    # ``openkb/skill/workspace.py``.
-    from openkb.skill import skill_dir
-    from openkb.skill.workspace import save_iteration, write_diff
+    from openkb.application.generators import (
+        GenerationOptions,
+        generate_artifact,
+        preview_generation,
+    )
 
-    target = skill_dir(kb_dir, name)
-    saved_iteration: Path | None = None
-    if target.exists():
-        if yes_flag:
-            saved_iteration = save_iteration(kb_dir, name)
-            _clear_existing_skill_dir(kb_dir, name)
-        elif sys.stdin.isatty():
-            if not click.confirm(
-                f"output/skills/{name}/ already exists. Overwrite?",
-                default=False,
-            ):
-                click.echo("Aborted.")
-                ctx.exit(1)
-            saved_iteration = save_iteration(kb_dir, name)
-            _clear_existing_skill_dir(kb_dir, name)
-        else:
+    preview = preview_generation(kb_dir, "skill", name)
+    if preview.exists and not yes_flag:
+        if not sys.stdin.isatty():
             click.echo(
-                f"[ERROR] output/skills/{name}/ exists. Pass -y to overwrite "
-                f"in non-interactive contexts.",
+                f"[ERROR] output/skills/{name}/ exists. Pass -y to overwrite in non-interactive contexts.",
                 err=True,
             )
             ctx.exit(1)
-
-    # Run the generator. Generator.run handles compile -> validate ->
-    # marketplace publish, so both CLI and chat get the same quality gate.
-    from openkb.skill.generator import Generator
-
+        if not click.confirm(f"output/skills/{name}/ already exists. Overwrite?", default=False):
+            click.echo("Aborted.")
+            ctx.exit(1)
     click.echo(f"Compiling skill '{name}'...")
-    gen = Generator(
-        target_type="skill",
-        name=name,
-        intent=intent,
-        kb_dir=kb_dir,
-        model=model,
+    gen = asyncio.run(
+        generate_artifact(
+            kb_dir,
+            GenerationOptions("skill", name, intent, overwrite="archive", version=preview.version),
+            model=model,
+        )
     )
-    try:
-        asyncio.run(gen.run())
-    except RuntimeError as exc:
-        click.echo(f"[ERROR] {exc}", err=True)
+    if gen.status != "completed":
+        click.echo(f"[ERROR] {gen.message}", err=True)
         ctx.exit(1)
-
-    # Drop a structural diff inside the saved iteration so the user
-    # can see what changed since the previous compile.
-    if saved_iteration is not None:
-        try:
-            write_diff(saved_iteration, target, saved_iteration / "diff.md")
-        except Exception as exc:  # diff is best-effort; never block success
-            logging.getLogger(__name__).debug("diff generation failed: %s", exc, exc_info=True)
+    saved_iteration = gen.archive_path
 
     # Surface validation issues. Don't block — files are on disk and
     # the user can fix or rollback.
@@ -2256,54 +2174,50 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
-    # Overwrite handling — inline because openkb.skill.workspace.save_iteration
-    # is hard-wired to skill paths (uses skill_dir / skill_workspace_dir from
-    # openkb.skill). Mirror its iteration-N copy-then-rmtree behavior here
-    # using deck_workspace_dir so users keep rollback safety without coupling
-    # deck CLI to skill internals.
-    from openkb.deck import deck_dir as _deck_dir
+    from openkb.application.generators import (
+        GenerationOptions,
+        generate_artifact,
+        preview_generation,
+    )
+    from openkb.deck.creator import DEFAULT_DECK_SKILL
 
-    target = _deck_dir(kb_dir, name)
-    if target.exists():
-        if yes_flag:
-            _save_deck_iteration(kb_dir, name)
-            shutil.rmtree(target)
-        elif sys.stdin.isatty():
-            if not click.confirm(
-                f"output/decks/{name}/ already exists. Overwrite?",
-                default=False,
-            ):
-                click.echo("Aborted.")
-                ctx.exit(1)
-            _save_deck_iteration(kb_dir, name)
-            shutil.rmtree(target)
-        else:
+    try:
+        preview = preview_generation(kb_dir, "deck", name, skill_name=skill_name)
+    except (RuntimeError, ValueError, OSError) as exc:
+        click.echo(f"[ERROR] {exc}", err=True)
+        ctx.exit(1)
+    target_label = preview.target.relative_to(kb_dir.resolve()).as_posix()
+    if preview.target.is_dir():
+        target_label += "/"
+    if preview.exists and not yes_flag:
+        if not sys.stdin.isatty():
             click.echo(
-                f"[ERROR] output/decks/{name}/ exists. Pass -y to overwrite "
-                f"in non-interactive contexts.",
+                f"[ERROR] {target_label} exists. Pass -y to overwrite in non-interactive contexts.",
                 err=True,
             )
             ctx.exit(1)
-
-    # Run the generator.
-    from openkb.skill.generator import Generator
-    from openkb.deck.creator import DEFAULT_DECK_SKILL
-
+        if not click.confirm(f"{target_label} already exists. Overwrite?", default=False):
+            click.echo("Aborted.")
+            ctx.exit(1)
     skill_label = skill_name if skill_name else f"{DEFAULT_DECK_SKILL} (default)"
     click.echo(f"Generating deck '{name}' via skill {skill_label}...")
-    gen = Generator(
-        target_type="deck",
-        name=name,
-        intent=intent,
-        kb_dir=kb_dir,
-        model=model,
-        critique=critique_flag,
-        skill_name=skill_name,
+    gen = asyncio.run(
+        generate_artifact(
+            kb_dir,
+            GenerationOptions(
+                "deck",
+                name,
+                intent,
+                overwrite="archive",
+                version=preview.version,
+                critique=critique_flag,
+                skill_name=skill_name,
+            ),
+            model=model,
+        )
     )
-    try:
-        asyncio.run(gen.run())
-    except RuntimeError as exc:
-        click.echo(f"[ERROR] {exc}", err=True)
+    if gen.status != "completed":
+        click.echo(f"[ERROR] {gen.message}", err=True)
         ctx.exit(1)
 
     # Surface validation result.
@@ -2314,13 +2228,13 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
             click.echo(f"[ERROR] {e}", err=True)
         if gen.validation.errors:
             click.echo(
-                f"Deck written to {gen.output_dir / 'index.html'} but failed validation. "
+                f"Deck written to {gen.artifact_path or gen.output_dir / 'index.html'} but failed validation. "
                 f"Inspect and re-run.",
                 err=True,
             )
             ctx.exit(1)
 
-    click.echo(f"Deck written to {gen.output_dir / 'index.html'}")
+    click.echo(f"Deck written to {gen.artifact_path or gen.output_dir / 'index.html'}")
 
 
 def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:

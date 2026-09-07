@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.config import load_config
+from openkb.locks import atomic_write_text
 from openkb.skill import skills_root
 
 
@@ -114,5 +115,5 @@ def regenerate_marketplace(kb_dir: Path) -> Path:
     out_dir = kb_dir / ".claude-plugin"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "marketplace.json"
-    out_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(manifest, indent=2) + "\n")
     return out_path

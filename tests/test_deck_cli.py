@@ -34,6 +34,43 @@ def test_deck_new_help(tmp_path: Path):
     assert "kebab-case" in result.output.lower() or "name" in result.output.lower()
 
 
+def test_deck_new_missing_skill_prints_an_error_and_preserves_the_old_deck(tmp_path, monkeypatch):
+    _init_kb(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    target = tmp_path / "output/decks/demo"
+    target.mkdir(parents=True)
+    (target / "index.html").write_text("Original deck")
+    result = CliRunner().invoke(
+        cli, ["deck", "new", "demo", "Intent", "--skill", "missing-native-test", "-y"]
+    )
+    assert result.exit_code == 1
+    assert "[ERROR]" in result.output
+    assert "missing-native-test" in result.output
+    assert (target / "index.html").read_text() == "Original deck"
+
+
+def test_deck_new_reports_the_custom_target_in_overwrite_errors(tmp_path, monkeypatch):
+    _init_kb(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    skill = tmp_path / "skills/custom/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: custom\ndescription: Custom output\nod:\n"
+        "  output_path_template: output/shared/index.html\n---\nDeck"
+    )
+    target = tmp_path / "output/shared"
+    target.mkdir(parents=True)
+    (target / "index.html").write_text("Original deck")
+    result = CliRunner().invoke(
+        cli, ["deck", "new", "different-slug", "Intent", "--skill", "custom"]
+    )
+    assert result.exit_code == 1
+    assert "output/shared/ exists" in result.output
+    assert "output/decks/different-slug" not in result.output
+
+
 def test_deck_new_rejects_no_kb(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # no .openkb here
     runner = CliRunner()

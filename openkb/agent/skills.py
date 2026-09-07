@@ -31,6 +31,7 @@ Frontmatter::
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Tuple
 
@@ -122,3 +123,51 @@ def scan_local_skills(
                 "path": str(skill_dir.resolve()),
             }
     return list(seen.values())
+
+
+class SkillNotFoundError(RuntimeError):
+    """A requested skill cannot be located in any skill root."""
+
+
+@dataclass(frozen=True)
+class PreparedSkill:
+    name: str
+    body: str
+    metadata: dict
+    output_path: Path | None
+
+
+def prepare_skill(
+    kb_dir: Path,
+    name: str,
+    *,
+    slug: str | None = None,
+    extra_roots: Iterable[str | Path] = (),
+) -> PreparedSkill:
+    """Resolve a skill and validate its declared output before beginning work."""
+    skills = scan_local_skills(kb_dir, extra_roots=extra_roots)
+    match = next((skill for skill in skills if skill["name"] == name), None)
+    if match is None:
+        available = ", ".join(sorted(skill["name"] for skill in skills)) or "(none)"
+        raise SkillNotFoundError(
+            f"Skill {name!r} not found. Available: {available}. "
+            f"Drop a SKILL.md into ~/.openkb/skills/<name>/ or <kb>/skills/<name>/ and re-run."
+        )
+    meta, body = _parse_frontmatter((Path(match["path"]) / "SKILL.md").read_text(encoding="utf-8"))
+    metadata = meta.get("od") or {}
+    if not isinstance(metadata, dict):
+        raise ValueError("Skill od metadata must be a mapping")
+    template = metadata.get("output_path_template")
+    if template is not None and not isinstance(template, str):
+        raise ValueError("Skill output_path_template must be a string")
+    output = None
+    if template and slug:
+        relative = template.format(slug=slug)
+        output = (kb_dir / relative).resolve()
+        root = kb_dir.resolve()
+        if not any(
+            output != zone and output.is_relative_to(zone)
+            for zone in (root / "output", root / "wiki/explorations")
+        ):
+            raise ValueError("Skill output path must be a file in output/ or wiki/explorations/")
+    return PreparedSkill(name, body, metadata, output)

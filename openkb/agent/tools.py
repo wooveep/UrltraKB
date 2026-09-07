@@ -246,6 +246,10 @@ def write_kb_file(path: str, content: str, kb_root: str) -> str:
     )
     if not allowed:
         return "Access denied: path must be a file under wiki/explorations/ or output/."
+    from openkb.artifact_history import history_write_allowed
+
+    if not history_write_allowed(full_path):
+        return "Access denied: archived artifact versions are read-only."
     full_path.parent.mkdir(parents=True, exist_ok=True)
     # Atomic temp-file + os.replace rename (openkb.locks): a crash/interleave
     # mid-write can never leave a truncated page for a concurrent lint/recompile

@@ -125,6 +125,12 @@ class Workbench(QMainWindow):
 
             MaintenanceDialog(self, self.kb).exec()
 
+    def _manage_artifacts(self):
+        if self.kb is not None:
+            from openkb.desktop.artifacts import ArtifactsDialog
+
+            ArtifactsDialog(self, self.kb).exec()
+
     def _diagnose(self, path=None):
         from openkb.desktop.diagnostics import DiagnosticsDialog
 
