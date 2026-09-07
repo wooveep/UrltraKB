@@ -10,7 +10,7 @@ import yaml
 
 from openkb.config import resolve_effective_config, validate_runtime_config
 from openkb.lint import find_invalid_frontmatter, run_structural_lint
-from openkb.locks import atomic_write_json, kb_repair_lock
+from openkb.locks import atomic_write_json, file_write_lock, kb_repair_lock
 from openkb.mutation import RecoveryRequired, recover_pending_journals, repair_marker
 
 
@@ -20,6 +20,40 @@ class RepairResult:
     recovery: tuple[str, ...]
     issues: tuple[str, ...]
     structural_report: str | None = None
+
+
+def repair_global_settings() -> RepairResult:
+    """Recover the global settings pair using its own lock and shape checks."""
+    from dotenv.parser import parse_stream
+
+    from openkb import config
+    from openkb.application.settings import read_global_config
+
+    root = config.GLOBAL_CONFIG_DIR
+    lock_path = root / "global.lock"
+    messages: list[str] = []
+    with file_write_lock(lock_path):
+        try:
+            messages = recover_pending_journals(root, repairing=True, lock_path=lock_path)
+            if config.GLOBAL_CONFIG_PATH.exists():
+                value = yaml.safe_load(config.GLOBAL_CONFIG_PATH.read_text("utf-8"))
+                if value is not None and not isinstance(value, dict):
+                    raise ValueError("Global configuration must be a mapping")
+                validate_runtime_config(value or {}, allow_inherited=True)
+            if (root / ".env").exists():
+                with (root / ".env").open(encoding="utf-8") as stream:
+                    if any(binding.error for binding in parse_stream(stream)):
+                        raise ValueError("Global credential file is invalid")
+            read_global_config()
+        except (RecoveryRequired, OSError, ValueError, yaml.YAMLError) as exc:
+            atomic_write_json(repair_marker(root), {"error_type": type(exc).__name__})
+            return RepairResult(
+                False,
+                tuple(messages),
+                (f"Global settings check failed: {type(exc).__name__}; evidence retained.",),
+            )
+        repair_marker(root).unlink(missing_ok=True)
+        return RepairResult(True, tuple(messages), ())
 
 
 def repair_knowledge_base(kb_dir: Path) -> RepairResult:

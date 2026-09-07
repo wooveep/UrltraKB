@@ -91,12 +91,20 @@ class Workbench(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_tasks)
         self.timer.start(150)
-        self.io.submit(registered_kbs, self._recent_loaded)
+        self.io.submit(registered_kbs, self._recent_loaded, global_settings=True)
         self.reader.show_markdown(
             "# OpenKB\n\n打开已有知识库，或在您选择的位置创建一个。\n\n"
             "资料、页面、对话和任务始终归属于各自的知识库。",
             Path.cwd(),
         )
+
+    def _settings(self, *, global_defaults=False):
+        from openkb.desktop.settings import SettingsDialog
+
+        if not global_defaults and self.kb is None:
+            return
+        dialog = SettingsDialog(self.io, None if global_defaults else self.kb, self)
+        dialog.exec()
 
     def _action(self, toolbar, label, callback):
         action = QAction(label, self)
@@ -119,6 +127,9 @@ class Workbench(QMainWindow):
         self._action(toolbar, "导入文件", self._import_files)
         self._action(toolbar, "导入目录", self._import_directory)
         self._action(toolbar, "刷新", self._refresh_current)
+        settings = self.menuBar().addMenu("设置")
+        settings.addAction("当前知识库…", lambda: self._settings(global_defaults=False))
+        settings.addAction("全局默认…", lambda: self._settings(global_defaults=True))
         self._action(toolbar, "退出", self.request_quit)
         self.addToolBarBreak()
         reading_toolbar = QToolBar("阅读显示", self)
@@ -269,6 +280,10 @@ class Workbench(QMainWindow):
                 lambda result, error: None
                 if self._error(error)
                 else self.open_knowledge_base(Path(path)),
+                kb=Path(path),
+                exclusive=True,
+                creating=True,
+                global_settings=True,
             )
 
     def open_knowledge_base(self, path: Path):
@@ -284,6 +299,7 @@ class Workbench(QMainWindow):
             else None,
             kb=path,
             exclusive=True,
+            global_settings=True,
             obsolete=lambda: request_id != self._open_request_id,
         )
 
@@ -351,7 +367,7 @@ class Workbench(QMainWindow):
             if self.page is None and (root / "wiki/index.md").exists():
                 self.open_page("index.md")
 
-        self.io.submit(read, loaded, kb=root)
+        self.io.submit(read, loaded, kb=root, global_settings=True)
 
     def _refresh_current(self):
         self._refresh()

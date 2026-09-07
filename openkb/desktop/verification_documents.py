@@ -14,7 +14,7 @@ def verify_long_pdf(kb: Path, pdf: Path) -> str:
     from openkb.state import HashRegistry
 
     registry = HashRegistry(kb / ".openkb/hashes.json")
-    entry = registry.get_by_path(str(pdf.resolve()))
+    entry = registry.get_by_path(pdf.resolve().as_posix())
     assert entry is not None and entry["type"] == "long_pdf"
     with sqlite3.connect(kb / ".openkb/pageindex.db") as database:
         assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)

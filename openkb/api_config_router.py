@@ -22,7 +22,7 @@ config_router = APIRouter()
 async def global_config_get(
     _: None = Depends(require_bearer_token),
 ) -> GlobalConfigResponse:
-    return read_global_config()
+    return await run_in_threadpool(read_global_config)
 
 
 @config_router.patch("/api/v1/config", response_model=GlobalConfigResponse)
@@ -30,9 +30,6 @@ async def global_config_patch(
     request: GlobalConfigPatchRequest,
     _: None = Depends(require_bearer_token),
 ) -> GlobalConfigResponse:
-    # apply_global_config_patch acquires a blocking portalocker flock; run it in
-    # a threadpool so the async event loop is not frozen under lock contention
-    # (matches the /init endpoint's run_in_threadpool offload in api.py). The
-    # read path below holds no lock, so it stays on the event loop.
+    # Both operations can wait for global-state recovery or another writer.
     await run_in_threadpool(apply_global_config_patch, request)
-    return read_global_config()
+    return await run_in_threadpool(read_global_config)

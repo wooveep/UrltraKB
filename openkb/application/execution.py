@@ -31,7 +31,7 @@ class ExecutionContext:
     def begin(self, kb_dir: Path) -> Iterator[LlmCredentialBundle]:
         self.check_stop()
         if self.snapshot is None:
-            self.snapshot = capture_config(kb_dir)
+            self.snapshot = capture_config(kb_dir, cancelled=self.cancelled, on_wait=self.waiting)
             # The worker's control channel acknowledges this before any
             # business work, so later batch units cannot silently re-resolve.
             self.on_snapshot(self.snapshot)

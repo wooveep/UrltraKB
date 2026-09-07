@@ -8,6 +8,8 @@ unregister, so this endpoint needs no create_app closure and extracts cleanly.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -30,12 +32,12 @@ async def delete_kb_endpoint(
     if request.confirm_name != request.kb:
         raise HTTPException(status_code=400, detail="confirm_name does not match the KB name.")
     try:
-        kb_dir = resolve_kb_alias(request.kb)
+        kb_dir = await asyncio.to_thread(resolve_kb_alias, request.kb)
     except ValueError as exc:  # malformed name
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Accept a live KB dir OR a registered name whose directory is already gone
     # (a ghost entry) — delete_kb cleans up both; reject anything else with 404.
-    registered = any(p == kb_dir for _, p in registered_kbs())
+    registered = any(p == kb_dir for _, p in (await asyncio.to_thread(registered_kbs)))
     if not _is_kb_dir(kb_dir) and not registered:
         raise HTTPException(status_code=404, detail=f"No knowledge base named {request.kb!r}.")
     try:

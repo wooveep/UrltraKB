@@ -9,6 +9,8 @@ serialize via page_ops' own KB ingest lock, not the app's per-KB asyncio lock.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -34,7 +36,7 @@ async def page_endpoint(
     request: PageRequest,
     _: None = Depends(require_bearer_token),
 ) -> PageResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
         page = await run_in_threadpool(read_page, kb_dir, request.path)
     except ValueError as exc:
@@ -49,7 +51,7 @@ async def delete_page_endpoint(
     request: PageDeleteRequest,
     _: None = Depends(require_bearer_token),
 ) -> PageDeleteResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
         result = await run_in_threadpool(
             delete_wiki_page, kb_dir, request.path, dry_run=request.dry_run
@@ -66,7 +68,7 @@ async def page_links_endpoint(
     request: PageLinksRequest,
     _: None = Depends(require_bearer_token),
 ) -> PageLinksResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
         result = await run_in_threadpool(page_link_context, kb_dir, request.path)
     except ValueError as exc:
@@ -81,7 +83,7 @@ async def edit_page_endpoint(
     request: PageEditRequest,
     _: None = Depends(require_bearer_token),
 ) -> PageEditResponse:
-    kb_dir = _resolve_kb(request.kb)
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
         result = await run_in_threadpool(save_page, kb_dir, request.path, request.content)
     except ValueError as exc:  # invalid/traversal-unsafe page ref

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from openkb.locks import kb_lock
+from openkb.locks import kb_lock, kb_repair_lock
 
 
 class _WaitingForKB(Exception):
@@ -39,6 +40,9 @@ class LocalIO(QObject):
         *,
         kb: Path | None = None,
         exclusive=False,
+        global_settings=False,
+        creating=False,
+        repair=False,
         obsolete=lambda: False,
     ):
         if self._stop.is_set():
@@ -50,17 +54,33 @@ class LocalIO(QObject):
         def run():
             if self._stop.is_set() or obsolete():
                 return None
-            if kb is not None:
-                if not (kb / ".openkb/config.yaml").is_file():
-                    raise ValueError("请选择已有的知识库目录")
-                with kb_lock(
-                    kb / ".openkb",
-                    exclusive=exclusive,
-                    cancelled=lambda: self._stop.is_set() or obsolete(),
-                    on_wait=_defer_wait,
-                ):
-                    return operation()
-            return operation()
+            with ExitStack() as scope:
+                wait_options = {
+                    "cancelled": lambda: self._stop.is_set() or obsolete(),
+                    "on_wait": _defer_wait,
+                }
+                if kb is not None:
+                    if not creating and not (
+                        (kb / ".openkb").is_dir()
+                        if repair
+                        else (kb / ".openkb/config.yaml").is_file()
+                    ):
+                        raise ValueError("请选择已有的知识库目录")
+                    lease = (
+                        kb_repair_lock(kb / ".openkb", **wait_options)
+                        if repair
+                        else kb_lock(kb / ".openkb", exclusive=exclusive, **wait_options)
+                    )
+                    scope.enter_context(lease)
+                if global_settings:
+                    from openkb.config import _with_global_config_lock
+
+                    scope.enter_context(
+                        _with_global_config_lock(
+                            recover=not repair or kb is not None, **wait_options
+                        )
+                    )
+                return operation()
 
         self._operations[sequence] = (run, obsolete)
         self._attempt(sequence)

@@ -577,7 +577,7 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
     # Load model from KB config
     from openkb.config import DEFAULT_CONFIG, resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
     from openkb.skill.generator import Generator
@@ -708,7 +708,7 @@ async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
     # Load model from KB config
     from openkb.config import DEFAULT_CONFIG, resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
     from openkb.deck.creator import DEFAULT_DECK_SKILL
@@ -874,7 +874,7 @@ async def _handle_slash_critique(arg: str, kb_dir: Path, style: Style) -> None:
     )
     from openkb.config import DEFAULT_CONFIG, resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
 
     # Path passed to the skill is relative to kb_dir (the agent's cwd
@@ -1032,7 +1032,7 @@ async def run_chat(
     use_color = _use_color(force_off=no_color)
     style = _build_style(use_color)
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language = session.language or config.get("language", "en")
     agent = build_chat_agent(kb_dir, session.model, language=language)
 

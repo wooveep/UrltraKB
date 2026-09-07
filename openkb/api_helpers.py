@@ -427,7 +427,7 @@ async def _stream_query(
         from openkb.locks import async_kb_lock
 
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-            config = resolve_effective_config(kb_dir)[0]
+            config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
             language = config.get("language", "en")
             agent = build_query_agent(str(kb_dir / "wiki"), model, language=language, bundle=bundle)
             final_answer = ""
@@ -476,7 +476,7 @@ async def _stream_chat(
     yield _sse("start", {"endpoint": "chat", "session_id": session.id})
     run_config = build_run_config_from_bundle(session.model, bundle)
     try:
-        agent = build_chat_session_agent(kb_dir, session, bundle=bundle)
+        agent = await asyncio.to_thread(build_chat_session_agent, kb_dir, session, bundle=bundle)
         stream = iter_chat_turn_events(agent, session, request.message, run_config=run_config)
         async with aclosing(stream):
             async for event in stream:
@@ -617,7 +617,7 @@ async def _iter_deck(
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     gen = Generator(
         target_type="deck",
@@ -679,7 +679,7 @@ async def _iter_skill(
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     gen = Generator(
         target_type="skill",
@@ -744,7 +744,7 @@ async def _stream_watch_events(
     bounded clients and tests can drain without hanging). With both unset the
     stream is capped by a default timeout when none is given.
     """
-    state = registry.get(kb)
+    state = await asyncio.to_thread(registry.get, kb)
     yield _sse("start", {"endpoint": "watch", "kb": kb, "active": state is not None})
     if state is None:
         yield _sse("error", {"message": f"No active watcher for KB: {kb}"})

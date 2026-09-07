@@ -123,6 +123,40 @@ def _check_wait(cancelled: Callable[[], bool] | None, deadline: float | None) ->
         raise TimeoutError("Timed out waiting for knowledge-base execution")
 
 
+@contextlib.contextmanager
+def file_write_lock(
+    path: Path,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    on_wait: Callable[[], None] | None = None,
+) -> Iterator[bool]:
+    """Protect shared non-KB state, with the same owner and OS lock protocol.
+
+    Yield whether this is the outer acquisition so recovery runs once, before
+    a mutation starts. The lock pathname remains compatible with older writers.
+    """
+    lease = _Lease(path, True)
+    try:
+        while True:
+            _check_wait(cancelled, None)
+            if lease.try_acquire():
+                break
+            if on_wait:
+                on_wait()
+            time.sleep(0.05)
+        _check_wait(cancelled, None)
+        yield lease.first
+    finally:
+        lease.release()
+
+
+def file_write_lock_held(path: Path) -> bool:
+    key = (path.resolve(), *_owner())
+    with _LOCKS_GUARD:
+        held = _HELD_LOCKS.get(key)
+        return bool(held and held[1])
+
+
 def _drain_pending_journals(openkb_dir: Path) -> None:
     from openkb.mutation import recover_pending_journals
 
@@ -252,14 +286,11 @@ def kb_read_lock(openkb_dir: Path, **kwargs):
 
 def kb_ingest_lock_held(openkb_dir: Path) -> bool:
     """Whether this thread AND asyncio task owns exclusive execution."""
-    key = ((openkb_dir / "ingest.lock").resolve(), *_owner())
-    with _LOCKS_GUARD:
-        held = _HELD_LOCKS.get(key)
-        return bool(held and held[1])
+    return file_write_lock_held(openkb_dir / "ingest.lock")
 
 
 @contextlib.contextmanager
-def kb_repair_lock(openkb_dir: Path) -> Iterator[None]:
+def kb_repair_lock(openkb_dir: Path, **wait_options) -> Iterator[None]:
     """Exclusive access for controlled diagnostics/repair, without auto-recovery.
 
     Normal business operations always use kb_lock. Repair must inspect failed
@@ -268,13 +299,8 @@ def kb_repair_lock(openkb_dir: Path) -> Iterator[None]:
     """
     if not openkb_dir.is_dir():
         raise FileNotFoundError(f"Knowledge base not found: {openkb_dir.parent}")
-    lease = _Lease(openkb_dir / "ingest.lock", True)
-    try:
-        while not lease.try_acquire():
-            time.sleep(0.05)
+    with file_write_lock(openkb_dir / "ingest.lock", **wait_options):
         yield
-    finally:
-        lease.release()
 
 
 def _session_lease(kb_dir: Path, session_id: str) -> _Lease:

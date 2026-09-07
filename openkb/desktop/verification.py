@@ -169,6 +169,10 @@ print("OpenKB")
         checks.append(
             "superseded rendering cannot replace new text; switching KB clears old content"
         )
+        from openkb.desktop.verification_settings import verify_settings
+
+        verify_settings(window, first, wait_until)
+        checks.append("native KB/global settings save, inheritance, credential rotation and clear")
         if args.model_base:
             from openkb.application.conversations import read_conversation
             from openkb.application.knowledge_bases import get_kb_list

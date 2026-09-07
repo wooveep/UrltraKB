@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -388,7 +389,7 @@ async def run_query(
 
     from openkb.config import resolve_effective_config
 
-    config = resolve_effective_config(kb_dir)[0]
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
 
     wiki_root = str(kb_dir / "wiki")

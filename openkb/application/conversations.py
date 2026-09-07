@@ -6,6 +6,7 @@ CLI and REST. Temporary deltas are separate from a committed complete turn.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,7 +57,7 @@ async def ask_question(
                 iter_agent_response_events,
             )
 
-            config = resolve_effective_config(root)[0]
+            config = (await asyncio.to_thread(resolve_effective_config, root))[0]
             model = config["model"]
             agent = build_query_agent(str(root / "wiki"), model, config["language"], bundle)
             context.on_event({"stage": "answering"})
@@ -105,9 +106,9 @@ async def continue_conversation(
                 from openkb.agent.query import build_run_config_from_bundle
 
                 if not session_id:
-                    config = resolve_effective_config(root)[0]
+                    config = (await asyncio.to_thread(resolve_effective_config, root))[0]
                     session.model, session.language = config["model"], config["language"]
-                agent = build_chat_session_agent(root, session, bundle)
+                agent = await asyncio.to_thread(build_chat_session_agent, root, session, bundle)
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(
                     agent,
