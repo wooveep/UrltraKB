@@ -33,6 +33,7 @@ from openkb.agent.query import (
 from openkb.agent.streaming import settled_stream
 from openkb.config import LlmCredentialBundle
 from openkb.log import append_log
+from openkb.model_outputs import ModelOutputs, model_output_scope
 
 _STYLE_DICT: dict[str, str] = {
     "prompt": "bold #5fa0e0",
@@ -347,6 +348,27 @@ async def _run_turn(
     raw: bool = False,
 ) -> None:
     """Run one agent turn with streaming output and persist the new history."""
+    from openkb.locks import async_kb_lock, async_session_lock
+
+    root = session.path.parent.parent.parent
+    async with async_session_lock(root, session.id):
+        async with async_kb_lock(root / ".openkb", exclusive=True):
+            with model_output_scope(root):
+                answer, history = await _stream_tty_turn(
+                    agent, session, user_input, style, use_color=use_color, raw=raw
+                )
+            session.record_turn(user_input, answer, history)
+
+
+async def _stream_tty_turn(
+    agent: Any,
+    session: ChatSession,
+    user_input: str,
+    style: Style,
+    *,
+    use_color: bool = True,
+    raw: bool = False,
+) -> tuple[str, list[dict[str, Any]]]:
     from agents import (
         RawResponsesStreamEvent,
         RunItemStreamEvent,
@@ -439,7 +461,7 @@ async def _run_turn(
     answer = "".join(collected).strip()
     if not answer:
         answer = (result.final_output or "").strip()
-    session.record_turn(user_input, answer, result.to_input_list())
+    return answer, result.to_input_list()
 
 
 def _save_transcript(kb_dir: Path, session: ChatSession, name: str | None) -> Path:
@@ -821,41 +843,13 @@ async def _handle_slash_critique(arg: str, kb_dir: Path, style: Style) -> None:
         _fmt(style, ("class:error", f"[ERROR] File not found: {path}\n"))
         return
 
-    from openkb.agent.skill_runner import (
-        SkillNotFoundError,
-        run_skill,
-    )
-    from openkb.config import DEFAULT_CONFIG, resolve_effective_config
+    from openkb.application.skill_maintenance import critique_artifact
 
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-
-    # Path passed to the skill is relative to kb_dir (the agent's cwd
-    # conceptually). The skill's read_file/write_file tools operate
-    # under wiki/ and output/ scopes — give it the relative form so
-    # write_kb_file resolves correctly.
-    try:
-        rel = target.relative_to(kb_dir)
-        rel_str = str(rel)
-    except ValueError:
-        # Outside KB — pass absolute, write tool will reject, but read
-        # may still work for a critique-only diagnostic.
-        rel_str = str(target)
-
+    rel_str = str(target.relative_to(kb_dir)) if target.is_relative_to(kb_dir) else str(target)
     _fmt(style, ("class:slash.ok", f"Critiquing {rel_str}...\n"))
-
     try:
-        await run_skill(
-            skill_name="openkb-html-critic",
-            intent=f"Critique and patch the HTML file at: {rel_str}",
-            kb_dir=kb_dir,
-            model=model,
-            max_turns=40,
-        )
-    except SkillNotFoundError as exc:
-        _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
-        return
-    except RuntimeError as exc:
+        await critique_artifact(kb_dir, path)
+    except (RuntimeError, ValueError, OSError) as exc:
         _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
         return
 
@@ -887,6 +881,7 @@ async def iter_chat_turn_events(
     user_input: str,
     *,
     run_config: Any = None,
+    outputs: ModelOutputs | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for one chat turn and persist the final turn.
 
@@ -915,61 +910,65 @@ async def iter_chat_turn_events(
             # the `final` frame already avoids by stripping history.
             trace: list[dict[str, Any]] = []
 
-            stream = iter_agent_response_events(
-                agent, new_input, max_turns=MAX_TURNS, run_config=run_config
-            )
-            async with aclosing(stream):
-                async for event in stream:
-                    kind = event["event"]
-                    if kind == "delta":
-                        text = event["data"].get("text", "")
-                        if text:
-                            if trace and trace[-1].get("kind") == "text":
-                                trace[-1]["text"] += text
-                            else:
-                                trace.append({"kind": "text", "text": text})
-                        yield event
-                        continue
-                    if kind == "tool_call":
-                        d = event["data"]
-                        # Record only read-tool calls (the frontend renders nothing else);
-                        # this keeps write_file's large `content` argument out of the
-                        # persisted trace and off the restore wire.
-                        if d.get("name") in _TRACE_READ_TOOLS:
-                            trace.append(
-                                {
-                                    "kind": "tool",
-                                    "name": d.get("name"),
-                                    "arguments": d.get("arguments"),
-                                }
-                            )
-                        yield event
-                        continue
-                    if kind != "final":
-                        yield event
-                        continue
+            data = None
+            with model_output_scope(kb_dir, outputs):
+                stream = iter_agent_response_events(
+                    agent, new_input, max_turns=MAX_TURNS, run_config=run_config
+                )
+                async with aclosing(stream):
+                    async for event in stream:
+                        kind = event["event"]
+                        if kind == "delta":
+                            text = event["data"].get("text", "")
+                            if text:
+                                if trace and trace[-1].get("kind") == "text":
+                                    trace[-1]["text"] += text
+                                else:
+                                    trace.append({"kind": "text", "text": text})
+                            yield event
+                            continue
+                        if kind == "tool_call":
+                            d = event["data"]
+                            # Record only read-tool calls (the frontend renders nothing else);
+                            # this keeps write_file's large `content` argument out of the
+                            # persisted trace and off the restore wire.
+                            if d.get("name") in _TRACE_READ_TOOLS:
+                                trace.append(
+                                    {
+                                        "kind": "tool",
+                                        "name": d.get("name"),
+                                        "arguments": d.get("arguments"),
+                                    }
+                                )
+                            yield event
+                            continue
+                        if kind != "final":
+                            yield event
+                            continue
 
-                    data = event["data"]
-                    answer = data["answer"]
-                    # If the model streamed no *substantive* text (answer came from
-                    # final_output, or the only streamed deltas were whitespace like " " /
-                    # "\n"), ensure the answer still lands in the trace so the restored turn
-                    # is not empty. A whitespace-only delta creates a text step, so guarding
-                    # on mere presence of a text step would wrongly treat that empty step as
-                    # the answer; require a text step with non-whitespace content instead.
-                    if answer and not any(
-                        s.get("kind") == "text" and s.get("text", "").strip() for s in trace
-                    ):
-                        trace.append({"kind": "text", "text": answer})
-                    session.record_turn(user_input, answer, data["history"], trace=trace)
-                    yield {
-                        "event": "final",
-                        "data": {
-                            "answer": answer,
-                            "session_id": session.id,
-                            "turn_count": session.turn_count,
-                        },
-                    }
+                        data = event["data"]
+                        answer = data["answer"]
+                        # If the model streamed no *substantive* text (answer came from
+                        # final_output, or the only streamed deltas were whitespace like " " /
+                        # "\n"), ensure the answer still lands in the trace so the restored turn
+                        # is not empty. A whitespace-only delta creates a text step, so guarding
+                        # on mere presence of a text step would wrongly treat that empty step as
+                        # the answer; require a text step with non-whitespace content instead.
+                        if answer and not any(
+                            s.get("kind") == "text" and s.get("text", "").strip() for s in trace
+                        ):
+                            trace.append({"kind": "text", "text": answer})
+                        break
+            if data is not None and "answer" in data:
+                session.record_turn(user_input, answer, data["history"], trace=trace)
+                yield {
+                    "event": "final",
+                    "data": {
+                        "answer": answer,
+                        "session_id": session.id,
+                        "turn_count": session.turn_count,
+                    },
+                }
 
 
 async def run_chat(

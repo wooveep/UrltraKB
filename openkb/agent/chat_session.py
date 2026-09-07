@@ -13,12 +13,14 @@ import hashlib
 import json
 import random
 import string
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
+from openkb.mutation import mutation_scope
 
 _IMAGE_HISTORY_NOTE = "Image output omitted from chat history to avoid persisting raw data URLs."
 
@@ -169,10 +171,11 @@ class ChatSession:
                 current = self.path.read_bytes()
                 if hashlib.sha256(current).hexdigest() != self._version:
                     raise RuntimeError("Conversation changed; reload its latest completed history")
-            elif self.path.exists():
+            elif self.path.exists() or self.path.is_symlink():
                 raise RuntimeError("Conversation changed; session identity already exists")
             text = json.dumps(self.to_dict(), ensure_ascii=False, indent=2, default=str)
-            atomic_write_text(self.path, text)
+            with mutation_scope(kb_dir, [self.path], operation="save-chat-turn"):
+                atomic_write_text(self.path, text)
             self._version = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def reload(self) -> None:
@@ -187,6 +190,20 @@ class ChatSession:
         assistant_text: str,
         new_history: list[dict[str, Any]],
         trace: list[dict[str, Any]] | None = None,
+    ) -> None:
+        previous = deepcopy(self.__dict__)
+        try:
+            self._record_turn(user_message, assistant_text, new_history, trace)
+        except BaseException:
+            self.__dict__.update(previous)
+            raise
+
+    def _record_turn(
+        self,
+        user_message: str,
+        assistant_text: str,
+        new_history: list[dict[str, Any]],
+        trace: list[dict[str, Any]] | None,
     ) -> None:
         self.history = sanitize_history(new_history)
         self.user_turns.append(user_message)

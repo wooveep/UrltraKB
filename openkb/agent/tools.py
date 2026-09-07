@@ -233,6 +233,8 @@ def write_kb_file(path: str, content: str, kb_root: str) -> str:
     if not path:
         return "Access denied: path must be a file under wiki/explorations/ or output/."
     root = Path(kb_root).resolve()
+    if (root / path).is_symlink():
+        return "Access denied: output target is a symbolic link."
     full_path = (root / path).resolve()
     if not full_path.is_relative_to(root):
         return "Access denied: path escapes KB root."
@@ -250,13 +252,13 @@ def write_kb_file(path: str, content: str, kb_root: str) -> str:
 
     if not history_write_allowed(full_path):
         return "Access denied: archived artifact versions are read-only."
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic temp-file + os.replace rename (openkb.locks): a crash/interleave
-    # mid-write can never leave a truncated page for a concurrent lint/recompile
-    # scan to read, and this satisfies the AGENTS.md "wiki writes go through
-    # locks.py" invariant. (No per-turn KB mutation lock — that would serialize
-    # every chat turn; atomic rename alone resolves the torn-file hazard.)
-    atomic_write_text(full_path, content)
+    from openkb.model_outputs import write_model_output
+
+    if not write_model_output(root, full_path, content):
+        # Generators own a transaction spanning all of their output files.
+        # Chat/review instead commit each tool write before reporting Written.
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(full_path, content)
     return f"Written: {path}"
 
 

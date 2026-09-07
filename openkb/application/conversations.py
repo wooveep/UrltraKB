@@ -18,15 +18,21 @@ from openkb.application.execution import ExecutionContext
 from openkb.config import resolve_effective_config
 from openkb.locks import async_kb_lock, async_session_lock
 from openkb.log import append_log
+from openkb.model_outputs import ModelOutputs
+from openkb.mutation import RecoveryRequired
 
 
 @dataclass(frozen=True)
 class AnswerResult:
-    status: Literal["completed", "stopped"]
+    status: Literal["completed", "stopped", "failed", "blocked"]
     answer: str
     saved_path: str | None = None
     session_id: str | None = None
     turn_count: int = 0
+    resources: tuple[str, ...] = ()
+    changes: tuple[str, ...] = ()
+    error: str | None = None
+    unfinished: tuple[str, ...] = ()
 
 
 def _validate_question(kb_dir: Path, question: str) -> Path:
@@ -65,18 +71,42 @@ async def ask_question(
                 agent, question, run_config=build_run_config_from_bundle(model, bundle)
             )
             parts = []
-            async with aclosing(stream):
-                async for event in stream:
-                    if event["event"] == "final":
-                        answer = event["data"]["answer"]
-                        path = save_exploration(root, question, answer) if save else None
-                        append_log(root / "wiki", "query", question)
-                        return AnswerResult("completed", answer, str(path) if path else None)
-                    if context.cancelled():
-                        break
-                    if event["event"] == "delta":
-                        parts.append(event["data"]["text"])
-                    context.on_event(event)
+            path = None
+            answer = ""
+            unfinished_stage = "answer question"
+            try:
+                async with aclosing(stream):
+                    async for event in stream:
+                        if event["event"] == "final":
+                            answer = event["data"]["answer"]
+                            unfinished_stage = "save answer"
+                            path = save_exploration(root, question, answer) if save else None
+                            unfinished_stage = "record question log"
+                            append_log(root / "wiki", "query", question)
+                            return AnswerResult(
+                                "completed",
+                                answer,
+                                str(path) if path else None,
+                                resources=(str(path),) if path else (),
+                                changes=(f"created: {path.relative_to(root).as_posix()}",)
+                                if path
+                                else (),
+                            )
+                        if context.cancelled():
+                            break
+                        if event["event"] == "delta":
+                            parts.append(event["data"]["text"])
+                        context.on_event(event)
+            except Exception as exc:
+                return AnswerResult(
+                    "blocked" if isinstance(exc, RecoveryRequired) else "failed",
+                    answer or "".join(parts),
+                    str(path) if path else None,
+                    resources=(str(path),) if path else (),
+                    changes=(f"created: {path.relative_to(root).as_posix()}",) if path else (),
+                    error=f"Question did not complete ({type(exc).__name__})",
+                    unfinished=(unfinished_stage,),
+                )
             return AnswerResult("stopped", "".join(parts))
 
 
@@ -115,24 +145,45 @@ async def continue_conversation(
                     session,
                     message,
                     run_config=build_run_config_from_bundle(session.model, bundle),
+                    outputs=(outputs := ModelOutputs()),
                 )
                 parts = []
-                async with aclosing(stream):
-                    async for event in stream:
-                        if event["event"] == "final":
-                            return AnswerResult(
-                                "completed",
-                                event["data"]["answer"],
-                                session_id=session.id,
-                                turn_count=session.turn_count,
-                            )
-                        if context.cancelled():
-                            break
-                        if event["event"] == "delta":
-                            parts.append(event["data"]["text"])
-                        context.on_event(event)
+                try:
+                    async with aclosing(stream):
+                        async for event in stream:
+                            if event["event"] == "final":
+                                return AnswerResult(
+                                    "completed",
+                                    event["data"]["answer"],
+                                    session_id=session.id,
+                                    turn_count=session.turn_count,
+                                    resources=(*outputs.resources, str(session.path)),
+                                    changes=(*outputs.changes, f"saved turn: {session.id}"),
+                                )
+                            if context.cancelled():
+                                break
+                            if event["event"] == "delta":
+                                parts.append(event["data"]["text"])
+                            context.on_event(event)
+                except Exception as exc:
+                    return AnswerResult(
+                        "blocked" if isinstance(exc, RecoveryRequired) else "failed",
+                        "".join(parts),
+                        session_id=session.id,
+                        turn_count=session.turn_count,
+                        resources=outputs.resources,
+                        changes=outputs.changes,
+                        error=f"Conversation did not complete ({type(exc).__name__})",
+                        unfinished=("complete conversation turn",),
+                    )
                 return AnswerResult(
-                    "stopped", "".join(parts), session_id=session.id, turn_count=session.turn_count
+                    "stopped",
+                    "".join(parts),
+                    session_id=session.id,
+                    turn_count=session.turn_count,
+                    resources=outputs.resources,
+                    changes=outputs.changes,
+                    unfinished=("complete conversation turn",),
                 )
 
 
