@@ -31,6 +31,7 @@ class ConvertResult:
     skipped: bool = False
     file_hash: str | None = None  # For deferred hash registration
     doc_name: str | None = None  # Stable wiki name (collision-resistant)
+    source_identity: str | None = None  # Frozen alongside the prepared bytes
 
 
 def _registry_path(path: Path, kb_dir: Path) -> str:
@@ -40,8 +41,11 @@ def _registry_path(path: Path, kb_dir: Path) -> str:
     machines/checkouts), absolute posix otherwise. Both paths are fully
     resolved (symlinks followed) before comparison.
     """
-    resolved_path = path.resolve()
-    resolved_kb = kb_dir.resolve()
+    return _portable_path(path.resolve(), kb_dir.resolve())
+
+
+def _portable_path(resolved_path: Path, resolved_kb: Path) -> str:
+    """Format already resolved identities without consulting live symlinks."""
     if resolved_path.is_relative_to(resolved_kb):
         return resolved_path.relative_to(resolved_kb).as_posix()
     return resolved_path.as_posix()
@@ -78,6 +82,7 @@ def resolve_doc_name(
     registry: HashRegistry,
     *,
     persist_legacy: bool = True,
+    path_key: str | None = None,
 ) -> str:
     """Resolve the stable wiki name for ``src`` (Scheme A).
 
@@ -88,7 +93,7 @@ def resolve_doc_name(
     sanitized stem unless another document already owns that name, in which
     case it gets a deterministic ``-{sha256(path)[:8]}`` suffix.
     """
-    path_key = _registry_path(src, kb_dir)
+    path_key = path_key if path_key is not None else _registry_path(src, kb_dir)
 
     known = registry.get_by_path(path_key)
     if known is not None:
@@ -173,6 +178,7 @@ def _convert_prepared_document(
     6. Register hash in the registry.
     """
     prepared, file_hash = ready.path, ready.digest
+    source_identity = _portable_path(ready.identity, kb_dir.resolve())
     with kb_ingest_lock(kb_dir / ".openkb"):
         # ------------------------------------------------------------------
         # Load config & state
@@ -199,6 +205,7 @@ def _convert_prepared_document(
             kb_dir,
             registry,
             persist_legacy=staging_dir is None,
+            path_key=source_identity,
         )
 
         # ------------------------------------------------------------------
@@ -206,9 +213,9 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         raw_dir = artifact_root / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
-        if staging_dir is None and src.resolve().is_relative_to(raw_dir.resolve()):
+        if staging_dir is None and ready.identity.is_relative_to(raw_dir.resolve()):
             # Watch mode: the file already lives in raw/ — don't copy/rename.
-            raw_dest = src
+            raw_dest = ready.source
         else:
             raw_dest = raw_dir / f"{doc_name}{src.suffix.lower()}"
             shutil.copy2(prepared, raw_dest)
@@ -230,6 +237,7 @@ def _convert_prepared_document(
                     is_long_doc=True,
                     file_hash=file_hash,
                     doc_name=doc_name,
+                    source_identity=source_identity,
                 )
 
         # ------------------------------------------------------------------
@@ -271,4 +279,5 @@ def _convert_prepared_document(
             source_path=dest_md,
             file_hash=file_hash,
             doc_name=doc_name,
+            source_identity=source_identity,
         )

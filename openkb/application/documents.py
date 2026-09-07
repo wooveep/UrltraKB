@@ -273,7 +273,7 @@ def _add_single_file_locked(
                 "name": file_path.name,
                 "doc_name": doc_name,
                 "type": doc_type,
-                "path": origin_url or _registry_path(file_path, kb_dir),
+                "path": origin_url or result.source_identity or _registry_path(file_path, kb_dir),
             }
             if origin_url:
                 meta["origin"] = "url"
