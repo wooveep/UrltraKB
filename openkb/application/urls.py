@@ -90,6 +90,6 @@ def import_url(
         return replace(
             result,
             source=url,
-            quality=tuple(quality),
-            unfinished=("ingest",) if result.status == "failed" else (),
+            quality=tuple(quality) + result.quality,
+            unfinished=result.unfinished + (("ingest",) if result.status == "failed" else ()),
         )

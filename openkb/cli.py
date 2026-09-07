@@ -14,7 +14,6 @@ import json
 import logging
 import shutil
 import sys
-import time
 from functools import wraps
 from pathlib import Path
 from typing import Any, Literal
@@ -77,7 +76,7 @@ from openkb.application.documents import (
 )
 from openkb.application import documents as document_use_cases
 from openkb.application.knowledge_bases import display_document_type as _display_type
-from openkb.schema import AGENTS_MD, PAGE_CONTENT_DIRS
+from openkb.schema import PAGE_CONTENT_DIRS
 from openkb.application.knowledge_bases import initialize_kb
 
 # Suppress warnings after all imports — markitdown overrides filters at import time
@@ -238,11 +237,10 @@ _TYPE_DISPLAY_MAP = {
 # JSON source), as opposed to short docs (markdown source). Both the local
 # long-PDF type and cloud imports belong here — they share the long-doc
 # summary/source layout and recompile path.
-_LONG_DOC_TYPES = {"long_pdf", "pageindex_cloud"}
+from openkb.application import recompilation as recompilation_use_cases
 
-
-def _is_long_doc(meta: dict) -> bool:
-    return meta.get("type") in _LONG_DOC_TYPES
+_is_long_doc = recompilation_use_cases.is_long_doc
+_LONG_DOC_TYPES = recompilation_use_cases.LONG_DOC_TYPES
 
 
 _SHORT_DOC_TYPES = {
@@ -1021,26 +1019,13 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
 
 
 def _refresh_schema(wiki_dir: Path) -> bool:
-    """Back up + overwrite ``wiki/AGENTS.md`` with the current ``AGENTS_MD``.
+    from openkb.application.recompilation import refresh_schema
 
-    If the on-disk schema differs from the bundled default, copy it to
-    ``wiki/AGENTS.md.bak`` then overwrite with ``AGENTS_MD``. No-op when the
-    file is missing or already identical. Returns True if it overwrote.
-    """
-    agents_file = wiki_dir / "AGENTS.md"
-    if not agents_file.exists():
-        # No-op when missing: get_agents_md() already falls back to the
-        # bundled AGENTS_MD default at runtime, so there is nothing to refresh.
-        return False
-    current = agents_file.read_text(encoding="utf-8")
-    if current == AGENTS_MD:
-        return False
-    backup = wiki_dir / "AGENTS.md.bak"
-    backup.write_text(current, encoding="utf-8")
-    click.echo(f"  Backed up existing schema to {backup.relative_to(wiki_dir.parent)}")
-    agents_file.write_text(AGENTS_MD, encoding="utf-8")
-    click.echo("  Refreshed wiki/AGENTS.md to the current schema.")
-    return True
+    changed = refresh_schema(wiki_dir.parent)
+    if changed:
+        click.echo("  Backed up existing schema to wiki/AGENTS.md.bak")
+        click.echo("  Refreshed wiki/AGENTS.md to the current schema.")
+    return changed
 
 
 @cli.command(name="delete-kb")
@@ -1104,7 +1089,6 @@ def delete_kb_cmd(name, yes):
     "the old one to AGENTS.md.bak) if it differs.",
 )
 @click.pass_context
-@_with_kb_lock(exclusive=True)
 def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     """Re-run the current compile pipeline on already-indexed documents.
 
@@ -1121,62 +1105,42 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     Side effect: this regenerates summaries (short docs) and rewrites concept
     pages with the current logic — manual edits to those pages are overwritten.
     """
-    from openkb.state import HashRegistry
+    from openkb.application.recompilation import recompile_document, select_recompilation
 
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-
-    if all_docs and doc_name:
-        click.echo("Specify either a DOC_NAME or --all, not both.")
-        return
-    if not all_docs and not doc_name:
-        click.echo("Specify a document name or pass --all to recompile every doc.")
-        return
-
-    openkb_dir = kb_dir / ".openkb"
-    wiki_dir = kb_dir / "wiki"
-    registry = HashRegistry(openkb_dir / "hashes.json")
-
-    # Resolve the set of docs to recompile.
-    if all_docs:
-        entries = list(registry.all_entries().values())
-        if not entries:
+    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs)
+    targets = selection.targets
+    if selection.status != "ready":
+        if selection.status == "invalid":
+            click.echo(
+                "Specify either a DOC_NAME or --all, not both."
+                if all_docs
+                else "Specify a document name or pass --all to recompile every doc."
+            )
+        elif selection.status == "empty":
             click.echo("No documents indexed yet. Run `openkb add` first.")
-            return
-        targets = entries
-    else:
-        matches = _resolve_doc_identifier(registry, doc_name)
-        if not matches:
+        elif selection.status == "not_found":
             click.echo(f"No document matching '{doc_name}' found in the KB.")
             click.echo("Try `openkb list` to see indexed documents.")
-            return
-        if len(matches) > 1:
+        else:
             click.echo(f"'{doc_name}' matches multiple documents:")
-            for _, m in matches:
-                click.echo(f"  - {m.get('name', '?')}  (doc_name: {m.get('doc_name', '?')})")
+            for target in targets:
+                click.echo(f"  - {target.name}  (doc_name: {target.doc_name})")
             click.echo("Use a more specific name or the exact doc_name slug.")
-            return
-        targets = [matches[0][1]]
-
-    def _classify(meta: dict) -> str:
-        return "long" if _is_long_doc(meta) else "short"
-
-    # --dry-run: enumerate only, no LLM calls, no writes.
+        return
     if dry_run:
         click.echo(f"Would recompile {len(targets)} document(s):")
-        for meta in targets:
-            name = meta.get("doc_name") or meta.get("name", "?")
-            click.echo(f"  - {name}  ({_classify(meta)})")
+        for target in targets:
+            click.echo(f"  - {target.doc_name}  ({target.kind})")
         click.echo(
             "\nNote: recompiling regenerates summaries (short docs) and rewrites "
             "concept pages — manual edits would be overwritten."
         )
         click.echo("(dry-run — nothing modified)")
         return
-
-    # --all confirmation (the summary/concept-regeneration side effect).
     if all_docs and not yes:
         click.echo(
             f"This will recompile {len(targets)} document(s), regenerating "
@@ -1186,332 +1150,32 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         if not click.confirm("Proceed?", default=False):
             click.echo("Aborted.")
             return
-
     if refresh_schema:
-        _refresh_schema(wiki_dir)
-
+        _refresh_schema(kb_dir / "wiki")
     _setup_llm_key(kb_dir)
     config = resolve_effective_config(kb_dir)[0]
-    model: str = config.get("model", DEFAULT_CONFIG["model"])
-    max_concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
-
-    # Import lazily and reference via the module so tests can patch
-    # ``openkb.agent.compiler.compile_*`` and see the call.
-    from openkb.agent import compiler
-
-    recompiled = 0
-    skipped = 0
-    total = len(targets)
-    for i, meta in enumerate(targets, 1):
-        name = meta.get("doc_name") or Path(meta.get("name", "")).stem
-        if not name:
-            click.echo(f"[{i}/{total}] [SKIP] registry entry has no doc_name.")
+    model = config.get("model", DEFAULT_CONFIG["model"])
+    concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
+    recompiled = skipped = 0
+    for i, target in enumerate(targets, 1):
+        click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
+        result = asyncio.run(
+            recompile_document(kb_dir, target.file_hash, model=model, max_concurrency=concurrency)
+        )
+        if result.status == "compiled":
+            recompiled += 1
+            click.echo(f"  [OK] {result.name} ({result.elapsed:.1f}s)")
+        else:
             skipped += 1
-            continue
-
-        if _is_long_doc(meta):
-            summary_path = wiki_dir / "summaries" / f"{name}.md"
-            doc_id = meta.get("doc_id")
-            if not doc_id:
-                click.echo(
-                    f"[{i}/{total}] [SKIP] {name}: legacy long-doc entry without a "
-                    "doc_id — re-add to refresh."
-                )
-                skipped += 1
-                continue
-            if not summary_path.exists():
-                click.echo(
-                    f"[{i}/{total}] [SKIP] {name}: missing summary at "
-                    f"{summary_path.relative_to(kb_dir)}."
-                )
-                skipped += 1
-                continue
-            click.echo(f"[{i}/{total}] Recompiling long doc {name}...")
-            start = time.time()
-            try:
-                asyncio.run(
-                    compiler.compile_long_doc(
-                        name,
-                        summary_path,
-                        doc_id,
-                        kb_dir,
-                        model,
-                        max_concurrency=max_concurrency,
-                    )
-                )
-            except Exception as exc:
-                click.echo(f"  [ERROR] Compilation failed: {exc}")
-                logging.getLogger(__name__).debug("Recompile traceback:", exc_info=True)
-                skipped += 1
-                continue
-            click.echo(f"  [OK] {name} ({time.time() - start:.1f}s)")
-            recompiled += 1
-        else:
-            source_path = wiki_dir / "sources" / f"{name}.md"
-            if not source_path.exists():
-                click.echo(
-                    f"[{i}/{total}] [SKIP] {name}: missing source at "
-                    f"{source_path.relative_to(kb_dir)}."
-                )
-                skipped += 1
-                continue
-            click.echo(f"[{i}/{total}] Recompiling short doc {name}...")
-            start = time.time()
-            try:
-                asyncio.run(
-                    compiler.compile_short_doc(
-                        name,
-                        source_path,
-                        kb_dir,
-                        model,
-                        max_concurrency=max_concurrency,
-                    )
-                )
-            except Exception as exc:
-                click.echo(f"  [ERROR] Compilation failed: {exc}")
-                logging.getLogger(__name__).debug("Recompile traceback:", exc_info=True)
-                skipped += 1
-                continue
-            click.echo(f"  [OK] {name} ({time.time() - start:.1f}s)")
-            recompiled += 1
-
+            label = "ERROR" if result.status == "failed" else "SKIP"
+            detail = f" ({result.error_type})" if result.error_type else ""
+            click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
     click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}.")
-    append_log(wiki_dir, "recompile", f"recompiled {recompiled}, skipped {skipped}")
+    append_log(kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}")
 
 
-async def iter_recompile(
-    kb_dir: Path,
-    doc_name: str | None = None,
-    *,
-    all_docs: bool = False,
-    dry_run: bool = False,
-    refresh_schema: bool = False,
-    bundle=None,
-):
-    """Async generator view of ``recompile`` for the REST ``/api/v1/recompile``.
-
-    Shared entry point for both the non-streaming JSON path and the SSE
-    streaming path. Yields ``{"event": ..., ...}`` dicts (see the endpoint):
-    ``start`` -> optional ``plan`` -> one ``doc`` per document -> ``final``.
-    Terminal errors yield an ``error`` event carrying an HTTP-mapped ``code``:
-    400 (bad args), 404 (not found / empty registry), 409 (multiple).
-
-    The whole resolve + compile span runs under ``kb_ingest_lock`` (matching
-    the CLI's ``@_with_kb_lock(exclusive=True)``). Compile calls are awaited on
-    the caller's event loop instead of ``asyncio.run``, so this is safe inside
-    an async FastAPI endpoint. Reference ``compiler`` via the module so tests
-    can patch ``openkb.agent.compiler.compile_*`` and see the call.
-    """
-    from openkb.state import HashRegistry
-
-    openkb_dir = kb_dir / ".openkb"
-    wiki_dir = kb_dir / "wiki"
-
-    def _classify(meta: dict) -> str:
-        return "long" if _is_long_doc(meta) else "short"
-
-    async with async_kb_lock(openkb_dir, exclusive=True):
-        registry = HashRegistry(openkb_dir / "hashes.json")
-        # --- validate args ---
-        if all_docs and doc_name:
-            yield {
-                "event": "error",
-                "code": 400,
-                "message": "Specify either a doc_name or all_docs, not both.",
-            }
-            return
-        if not all_docs and not doc_name:
-            yield {
-                "event": "error",
-                "code": 400,
-                "message": "Specify a document name or set all_docs to recompile every doc.",
-            }
-            return
-
-        # --- resolve targets ---
-        if all_docs:
-            entries = list(registry.all_entries().values())
-            if not entries:
-                yield {"event": "error", "code": 404, "message": "No documents indexed yet."}
-                return
-            targets = entries
-        else:
-            # Guarded above: not all_docs implies a non-empty doc_name.
-            assert doc_name is not None
-            matches = _resolve_doc_identifier(registry, doc_name)
-            if not matches:
-                yield {
-                    "event": "error",
-                    "code": 404,
-                    "message": f"No document matching '{doc_name}' found in the KB.",
-                }
-                return
-            if len(matches) > 1:
-                yield {
-                    "event": "error",
-                    "code": 409,
-                    "message": "doc_name matches multiple documents.",
-                    "candidates": [
-                        {"name": m.get("name", "?"), "doc_name": m.get("doc_name", "?")}
-                        for _, m in matches
-                    ],
-                }
-                return
-            targets = [matches[0][1]]
-
-        total = len(targets)
-        yield {"event": "start", "total": total, "all_docs": all_docs}
-
-        # --- dry-run: enumerate only, no LLM calls, no writes ---
-        if dry_run:
-            yield {
-                "event": "plan",
-                "targets": [
-                    {
-                        "name": meta.get("doc_name") or meta.get("name", "?"),
-                        "doc_name": meta.get("doc_name") or meta.get("name", "?"),
-                        "type": _classify(meta),
-                    }
-                    for meta in targets
-                ],
-                "total": total,
-            }
-            yield {
-                "event": "final",
-                "status": "dry_run",
-                "total": total,
-                "recompiled": 0,
-                "skipped": 0,
-                "docs": [],
-            }
-            return
-
-        if refresh_schema:
-            _refresh_schema(wiki_dir)
-
-        if bundle is None:
-            _setup_llm_key(kb_dir)
-        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-        model: str = config.get("model", DEFAULT_CONFIG["model"])
-
-        from openkb.agent import compiler
-
-        recompiled = 0
-        skipped = 0
-        docs: list[dict] = []
-        for meta in targets:
-            name = meta.get("doc_name") or Path(meta.get("name", "")).stem
-            doc_type = _classify(meta)
-            ok = False
-
-            if not name:
-                doc: dict[str, Any] = {
-                    "name": None,
-                    "doc_name": None,
-                    "type": doc_type,
-                    "status": "skipped",
-                    "elapsed": None,
-                    "message": "registry entry has no doc_name.",
-                }
-            elif _is_long_doc(meta):
-                summary_path = wiki_dir / "summaries" / f"{name}.md"
-                doc_id = meta.get("doc_id")
-                if not doc_id:
-                    doc = {
-                        "name": name,
-                        "doc_name": name,
-                        "type": "long",
-                        "status": "skipped",
-                        "elapsed": None,
-                        "message": "legacy long-doc entry without a doc_id; re-add to refresh.",
-                    }
-                elif not summary_path.exists():
-                    doc = {
-                        "name": name,
-                        "doc_name": name,
-                        "type": "long",
-                        "status": "skipped",
-                        "elapsed": None,
-                        "message": f"missing summary at wiki/summaries/{name}.md.",
-                    }
-                else:
-                    start = time.time()
-                    try:
-                        await compiler.compile_long_doc(
-                            name, summary_path, doc_id, kb_dir, model, bundle=bundle
-                        )
-                    except Exception as exc:
-                        doc = {
-                            "name": name,
-                            "doc_name": name,
-                            "type": "long",
-                            "status": "error",
-                            "elapsed": round(time.time() - start, 1),
-                            "message": f"Compilation failed: {exc}",
-                        }
-                    else:
-                        doc = {
-                            "name": name,
-                            "doc_name": name,
-                            "type": "long",
-                            "status": "ok",
-                            "elapsed": round(time.time() - start, 1),
-                            "message": None,
-                        }
-                        ok = True
-            else:
-                source_path = wiki_dir / "sources" / f"{name}.md"
-                if not source_path.exists():
-                    doc = {
-                        "name": name,
-                        "doc_name": name,
-                        "type": "short",
-                        "status": "skipped",
-                        "elapsed": None,
-                        "message": f"missing source at wiki/sources/{name}.md.",
-                    }
-                else:
-                    start = time.time()
-                    try:
-                        await compiler.compile_short_doc(
-                            name, source_path, kb_dir, model, bundle=bundle
-                        )
-                    except Exception as exc:
-                        doc = {
-                            "name": name,
-                            "doc_name": name,
-                            "type": "short",
-                            "status": "error",
-                            "elapsed": round(time.time() - start, 1),
-                            "message": f"Compilation failed: {exc}",
-                        }
-                    else:
-                        doc = {
-                            "name": name,
-                            "doc_name": name,
-                            "type": "short",
-                            "status": "ok",
-                            "elapsed": round(time.time() - start, 1),
-                            "message": None,
-                        }
-                        ok = True
-
-            docs.append(doc)
-            yield {"event": "doc", **doc}
-            if ok:
-                recompiled += 1
-            else:
-                skipped += 1
-
-        append_log(wiki_dir, "recompile", f"recompiled {recompiled}, skipped {skipped}")
-        yield {
-            "event": "final",
-            "status": "done",
-            "total": total,
-            "recompiled": recompiled,
-            "skipped": skipped,
-            "docs": docs,
-        }
+# Temporary import compatibility for callers migrating to the REST adapter.
+from openkb.api_recompile import iter_recompile as iter_recompile
 
 
 @cli.command()

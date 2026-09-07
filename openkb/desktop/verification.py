@@ -182,6 +182,27 @@ print("OpenKB")
             "native removal preview, stale confirmation, spawned cleanup and kept resources"
         )
         if args.model_base:
+            from openkb.application.settings import apply_kb_config_patch
+            from openkb.application.settings_data import KbConfigPatchRequest
+            from openkb.desktop.verification_recompilation import verify_recompilation
+
+            # Settings acceptance deliberately cleared the first KB credential;
+            # restore only the controlled fixture for subsequent model checks.
+            apply_kb_config_patch(
+                first,
+                KbConfigPatchRequest.model_validate(
+                    {
+                        "kb": str(first),
+                        "api_key": "verification-only",
+                        "openai_api_base": args.model_base,
+                    }
+                ),
+            )
+
+            verify_recompilation(window, first, wait_until)
+            checks.append(
+                "native selected/all recompile, skipped missing source, existing long index reused"
+            )
             from openkb.application.conversations import read_conversation
             from openkb.application.knowledge_bases import get_kb_list
             from openkb.inputs import SUPPORTED_EXTENSIONS

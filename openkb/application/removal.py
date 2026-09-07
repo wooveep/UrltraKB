@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Literal
 
 from openkb.application.execution import ExecutionContext
+from openkb.application.file_state import changed_files as _changes
+from openkb.application.file_state import contained_paths as _contained
+from openkb.application.file_state import file_versions as _file_versions
 from openkb.locks import kb_ingest_lock, kb_ingest_lock_held, kb_read_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, mutation_scope
@@ -455,14 +458,6 @@ def run_remove_for_api(
         }
 
 
-def _contained(kb_dir: Path, paths: list[Path]) -> list[Path]:
-    root = kb_dir.resolve()
-    for path in paths:
-        if not path.resolve().is_relative_to(root) or path.resolve() == root:
-            raise ValueError("Removal path escapes the knowledge base")
-    return paths
-
-
 def _wiki_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
     return _contained(
         kb_dir,
@@ -514,29 +509,6 @@ def _plan_version(kb_dir: Path, plan: RemovePlan) -> str:
             else:
                 digest.update(b"directory" if path.is_dir() else b"missing")
     return digest.hexdigest()
-
-
-def _file_versions(kb_dir: Path, roots: list[Path]) -> dict[str, str]:
-    versions = {}
-    for root in roots:
-        for path in sorted(root.rglob("*")) if root.is_dir() else [root]:
-            _contained(kb_dir, [path])
-            if path.is_file():
-                digest = hashlib.sha256()
-                with path.open("rb") as file:
-                    for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                        digest.update(chunk)
-                versions[path.relative_to(kb_dir).as_posix()] = digest.hexdigest()
-    return versions
-
-
-def _changes(kb_dir: Path, roots: list[Path], before: dict[str, str]) -> tuple[str, ...]:
-    after = _file_versions(kb_dir, roots)
-    return tuple(
-        f"{'deleted' if path not in after else 'updated'}: {path}"
-        for path in sorted(before.keys() | after.keys())
-        if before.get(path) != after.get(path)
-    )
 
 
 @dataclass(frozen=True)

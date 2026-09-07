@@ -96,10 +96,10 @@ from openkb.api_models import (
 )
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
+from openkb.api_recompile import iter_recompile
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.application.removal import run_remove_for_api
 from openkb.cli import (
-    iter_recompile,
     run_lint_report,
 )
 from openkb.config import (

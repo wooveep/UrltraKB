@@ -13,6 +13,7 @@ from typing import Literal
 
 from openkb.add_coordinator import _cleanup_staging_dirs
 from openkb.application.execution import ExecutionContext
+from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
 from openkb.locks import kb_ingest_lock
@@ -401,7 +402,10 @@ def import_document(
         ):
             if HashRegistry.hash_file(source) != ready[1]:
                 ready = (ready[0], copy_stable(source, ready[0]))
-            with context.begin(root) if context else nullcontext(bundle) as credentials:
+            with (
+                context.begin(root) if context else nullcontext(bundle) as credentials,
+                collect_compile_report() as compilation,
+            ):
                 outcome = add_single_file(
                     source,
                     root,
@@ -425,4 +429,10 @@ def import_document(
                         resources.append(str(summary))
             elif source.is_relative_to(root / "raw"):
                 resources.append(str(source))
-            return DocumentResult(str(source), outcome, tuple(resources))
+            return DocumentResult(
+                str(source),
+                outcome,
+                tuple(resources),
+                tuple(compilation.quality),
+                tuple(compilation.unfinished),
+            )
