@@ -35,22 +35,29 @@ class PublishedInput:
 
 @contextmanager
 def published_input(
-    kb_dir: Path, source: Path, *, cancelled: Callable[[], bool] | None = None
+    kb_dir: Path,
+    source: Path,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    filename: str | None = None,
 ) -> Iterator[PublishedInput]:
     """Reserve, publish and consume one ready upload without a watch race.
 
     Keep the published raw on business failure for an explicit later retry.
     The caller owns its private source's lifetime separately.
     """
+    name = filename if filename is not None else source.name
+    if not name or Path(name).name != name or "\\" in name or name in {".", ".."}:
+        raise ValueError("Input filename must be a basename")
     with kb_ingest_lock(kb_dir / ".openkb", cancelled=cancelled):
         raw = kb_dir / "raw"
         if not raw.resolve().is_relative_to(kb_dir.resolve()):
             raise ValueError("Raw directory is outside the knowledge base")
         raw.mkdir(exist_ok=True)
-        target = raw / source.name
+        target = raw / name
         number = 1
         while target.exists() or target.is_symlink():
-            target = raw / f"{source.stem}-{number}{source.suffix}"
+            target = raw / f"{Path(name).stem}-{number}{Path(name).suffix}"
             number += 1
         if not target.resolve().is_relative_to(raw.resolve()):
             raise ValueError("Upload target is outside the raw directory")
