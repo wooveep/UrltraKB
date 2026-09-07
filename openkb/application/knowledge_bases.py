@@ -8,12 +8,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from openkb.config import DEFAULT_CONFIG, register_kb, save_config
+from openkb.config import DEFAULT_CONFIG, load_config, register_kb, save_config
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.schema import AGENTS_MD, INDEX_SEED
 
 
-def _display_type(raw_type: str) -> str:
+def display_document_type(raw_type: str) -> str:
     if raw_type in {"long_pdf", "pageindex_cloud"}:
         return "pageindex"
     if raw_type in {
@@ -38,6 +38,7 @@ def open_kb(kb_dir: Path) -> Path:
     if not (root / ".openkb/config.yaml").is_file() or not (root / "wiki").is_dir():
         raise ValueError(f"Not a knowledge base: {root}")
     with kb_ingest_lock(root / ".openkb"):
+        load_config(root / ".openkb/config.yaml")
         register_kb(root)
     return root
 
@@ -172,7 +173,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                     "hash": file_hash,
                     "name": meta.get("name", "unknown"),
                     "type": raw_type,
-                    "display_type": _display_type(raw_type),
+                    "display_type": display_document_type(raw_type),
                     "pages": pages if pages not in ("", 0) else None,
                 }
             )

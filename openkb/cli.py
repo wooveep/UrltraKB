@@ -71,11 +71,13 @@ from openkb.indexer import (
 )
 from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.log import append_log
+from openkb.locks import async_kb_lock
 from openkb.application.documents import (
     _run_compile_with_retry,
     _snapshot_add_paths,
 )
 from openkb.application import documents as document_use_cases
+from openkb.application.knowledge_bases import display_document_type as _display_type
 from openkb.schema import AGENTS_MD, PAGE_CONTENT_DIRS
 from openkb.application.knowledge_bases import initialize_kb
 
@@ -270,15 +272,6 @@ _SHORT_DOC_TYPES = {
     "xlsx",
     "xls",
 }
-
-
-def _display_type(raw_type: str) -> str:
-    """Map a raw stored doc type to a display type string."""
-    if raw_type in _TYPE_DISPLAY_MAP:
-        return _TYPE_DISPLAY_MAP[raw_type]
-    if raw_type in _SHORT_DOC_TYPES:
-        return "short"
-    return raw_type
 
 
 # ---------------------------------------------------------------------------
@@ -806,17 +799,18 @@ def add(ctx, path, from_pageindex_cloud):
     from openkb.url_ingest import looks_like_url, fetch_url_to_raw
 
     if looks_like_url(path):
-        fetched = fetch_url_to_raw(path, kb_dir)
-        if fetched is None:
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            fetched = fetch_url_to_raw(path, kb_dir)
+            if fetched is None:
+                return
+            outcome = add_single_file(fetched, kb_dir)
+            # Only clean up on dedup-skip. On "failed" we keep the file so
+            # the user can retry (e.g. transient LLM error during compile)
+            # without re-downloading — and so they don't lose data when
+            # indexing has already succeeded but compilation didn't.
+            if outcome == "skipped":
+                fetched.unlink(missing_ok=True)
             return
-        outcome = add_single_file(fetched, kb_dir)
-        # Only clean up on dedup-skip. On "failed" we keep the file so
-        # the user can retry (e.g. transient LLM error during compile)
-        # without re-downloading — and so they don't lose data when
-        # indexing has already succeeded but compilation didn't.
-        if outcome == "skipped":
-            fetched.unlink(missing_ok=True)
-        return
 
     target = Path(path)
     if not target.exists():
@@ -858,55 +852,7 @@ def _stream_to_tty() -> bool:
     return sys.stdout.isatty()
 
 
-def save_exploration(kb_dir: Path, question: str, answer: str) -> Path | None:
-    """Save a query answer to ``wiki/explorations/`` as a markdown page.
-
-    Shared by the CLI ``query --save`` path and the REST ``/query?save`` path
-    so both behave identically. Strips ghost wikilinks, generates a unique
-    slug (with a CJK-safe fallback), and escapes the question for YAML
-    frontmatter.
-    """
-    import re
-    import hashlib
-    from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
-
-    if not answer:
-        return None
-    # Path allocation and the write share the KB mutation lock: otherwise two
-    # concurrent REST saves can both select the same unused suffix and one
-    # answer silently overwrites the other.
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        explore_dir = kb_dir / "wiki" / "explorations"
-        explore_dir.mkdir(parents=True, exist_ok=True)
-
-        # Strip ghost wikilinks the agent may have emitted to non-existent
-        # concept/summary pages -- the schema_md in the agent's instructions
-        # encourages [[wikilinks]] but the agent's view of "which pages
-        # exist" can drift from disk reality.
-        known = list_existing_wiki_targets(kb_dir / "wiki")
-        cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
-
-        slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]
-        if not slug:
-            # CJK / punctuation-only questions collapse to an empty slug.
-            # Fall back to a short hash so each question gets its own file.
-            slug = hashlib.sha256(question.encode("utf-8")).hexdigest()[:12]
-        explore_path = explore_dir / f"{slug}.md"
-        # Uniquify to avoid clobbering an existing exploration with a colliding slug.
-        counter = 1
-        while explore_path.exists():
-            explore_path = explore_dir / f"{slug}-{counter}.md"
-            counter += 1
-
-        # Escape the question for YAML frontmatter: wrap in double quotes and
-        # escape backslashes and double quotes so questions containing `"` don't
-        # produce invalid YAML.
-        escaped = question.replace("\\", "\\\\").replace('"', '\\"')
-        atomic_write_text(
-            explore_path,
-            f'---\nquery: "{escaped}"\n---\n\n{cleaned_answer}\n',
-        )
-    return explore_path
+from openkb.application.answers import save_exploration as save_exploration
 
 
 @cli.command()
@@ -920,6 +866,7 @@ def save_exploration(kb_dir: Path, question: str, answer: str) -> Path | None:
     help="Show raw markdown source instead of rendered output (keeps tool-call colors).",
 )
 @click.pass_context
+@_with_kb_lock(exclusive=True)
 def query(ctx, question, save, raw):
     """Query the knowledge base with QUESTION."""
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
@@ -958,10 +905,7 @@ def query(ctx, question, save, raw):
         # exist" can drift from disk reality.
         known = list_existing_wiki_targets(kb_dir / "wiki")
         cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
-        explore_path.write_text(
-            f'---\nquery: "{question}"\n---\n\n{cleaned_answer}\n',
-            encoding="utf-8",
-        )
+        atomic_write_text(explore_path, f'---\nquery: "{question}"\n---\n\n{cleaned_answer}\n')
         click.echo(f"\nSaved to {explore_path}")
 
 
@@ -1775,12 +1719,12 @@ async def iter_recompile(
 
     openkb_dir = kb_dir / ".openkb"
     wiki_dir = kb_dir / "wiki"
-    registry = HashRegistry(openkb_dir / "hashes.json")
 
     def _classify(meta: dict) -> str:
         return "long" if _is_long_doc(meta) else "short"
 
-    with kb_ingest_lock(openkb_dir):
+    async with async_kb_lock(openkb_dir, exclusive=True):
+        registry = HashRegistry(openkb_dir / "hashes.json")
         # --- validate args ---
         if all_docs and doc_name:
             yield {
@@ -2138,7 +2082,7 @@ async def run_lint(kb_dir: Path) -> Path | None:
 
     openkb_dir = kb_dir / ".openkb"
 
-    with kb_read_lock(openkb_dir):
+    async with async_kb_lock(openkb_dir, exclusive=False):
         # Skip lint entirely when the KB has no indexed documents
         hashes_file = openkb_dir / "hashes.json"
         if hashes_file.exists():
@@ -2165,7 +2109,7 @@ async def run_lint(kb_dir: Path) -> Path | None:
         click.echo(knowledge_report)
 
     # Write combined report
-    with kb_ingest_lock(openkb_dir):
+    async with async_kb_lock(openkb_dir, exclusive=True):
         reports_dir = kb_dir / "wiki" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         import datetime
@@ -3237,7 +3181,7 @@ async def run_lint_report(
     lint_files_changed: int | None = None
     lint_ghosts_removed: int | None = None
     if fix:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             files_changed, ghosts = fix_broken_links(kb_dir / "wiki")
         lint_files_changed = files_changed
         lint_ghosts_removed = ghosts

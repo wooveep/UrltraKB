@@ -422,6 +422,11 @@ def resolve_credential_bundle(kb_dir: Path) -> LlmCredentialBundle:
     is never written, so concurrent requests for different KBs cannot see each
     other's key.
     """
+    from openkb.config_state import active_values
+
+    captured = active_values(kb_dir)
+    if captured is not None:
+        return LlmCredentialBundle(**captured["credentials"])
     kb_values: dict[str, str | None] = {}
     kb_env = kb_dir / ".env"
     if kb_env.exists():
@@ -473,6 +478,12 @@ def load_config(config_path: Path) -> dict[str, Any]:
 
     If the file does not exist, returns a copy of the defaults.
     """
+    from openkb.config_state import active_values
+
+    if config_path.name == "config.yaml" and config_path.parent.name == ".openkb":
+        captured = active_values(config_path.parent.parent)
+        if captured is not None:
+            return captured["raw"]
     config = dict(DEFAULT_CONFIG)
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as fh:
@@ -523,6 +534,11 @@ def resolve_effective_config(kb_dir: Path) -> tuple[dict[str, Any], dict[str, st
     file and are copied verbatim (including a meaningful ``null`` such as
     ``parallel_tool_calls: null``).
     """
+    from openkb.config_state import active_values
+
+    captured = active_values(kb_dir)
+    if captured is not None:
+        return captured["effective"], captured["sources"]
     effective: dict[str, Any] = dict(DEFAULT_CONFIG)
     sources: dict[str, str] = {key: "default" for key in GLOBAL_SCALAR_KEYS}
 

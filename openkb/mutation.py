@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -368,6 +369,31 @@ def snapshot_paths(
         shutil.rmtree(backup_dir, ignore_errors=True)
         raise
     return snapshot
+
+
+@contextmanager
+def mutation_scope(kb_dir: Path, paths: list[Path], *, operation: str):
+    """Commit a protected multi-file change, retaining evidence if rollback fails.
+
+    The caller holds the KB write lease for the entire scope. Post-commit
+    cleanup is best effort; it can never undo a committed result.
+    """
+    from openkb.locks import kb_ingest_lock_held
+
+    if not kb_ingest_lock_held(kb_dir / ".openkb"):
+        raise RuntimeError("Mutation requires the knowledge-base write lease")
+    snapshot = snapshot_paths(kb_dir, paths, operation=operation)
+    try:
+        yield snapshot
+        snapshot.mark_committed()
+    except BaseException:
+        if snapshot.rollback_best_effort() is not None:
+            atomic_write_json(repair_marker(kb_dir), {"journal": snapshot.journal_path.name})
+            raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
+        snapshot.discard_best_effort()
+        raise
+    else:
+        snapshot.discard_best_effort()
 
 
 def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:

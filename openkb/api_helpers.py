@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import time
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -34,13 +35,13 @@ from openkb.api_models import (
     RemoveRequest,
     SkillRequest,
 )
+from openkb.application.answers import save_exploration
 from openkb.application.documents import _add_for_api
 from openkb.application.knowledge_bases import initialize_kb
 from openkb.cli import (
     SUPPORTED_EXTENSIONS,
     iter_recompile,
     run_remove_for_api,
-    save_exploration,
 )
 from openkb.config import (
     DEFAULT_CONFIG,
@@ -423,39 +424,42 @@ async def _stream_query(
     yield _sse("start", {"endpoint": "query"})
     run_config = build_run_config_from_bundle(model, bundle)
     try:
-        config = resolve_effective_config(kb_dir)[0]
-        language = config.get("language", "en")
-        agent = build_query_agent(str(kb_dir / "wiki"), model, language=language, bundle=bundle)
-        final_answer = ""
-        async for event in iter_agent_response_events(
-            agent, request.question, run_config=run_config
-        ):
-            data = event["data"]
-            if event["event"] == "final":
-                # Persist the fully-computed answer *before* checking for a
-                # disconnect: the caller asked to save it, so a client that
-                # drops at the last moment must not lose the write. Only the
-                # client-facing SSE frame is skipped when disconnected.
-                final_answer = data["answer"]
-                saved_path = (
-                    _save_query_answer(kb_dir, request.question, final_answer)
-                    if request.save
-                    else None
-                )
-                append_log(kb_dir / "wiki", "query", request.question)
-                if await fastapi_request.is_disconnected():
-                    break
-                yield _sse(
-                    "final",
-                    {
-                        "answer": final_answer,
-                        "saved_path": str(saved_path) if saved_path else None,
-                    },
-                )
-            else:
-                if await fastapi_request.is_disconnected():
-                    break
-                yield _sse(event["event"], data)
+        from openkb.locks import async_kb_lock
+
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+            config = resolve_effective_config(kb_dir)[0]
+            language = config.get("language", "en")
+            agent = build_query_agent(str(kb_dir / "wiki"), model, language=language, bundle=bundle)
+            final_answer = ""
+            stream = iter_agent_response_events(agent, request.question, run_config=run_config)
+            async with aclosing(stream):
+                async for event in stream:
+                    data = event["data"]
+                    if event["event"] == "final":
+                        # Persist the fully-computed answer *before* checking for a
+                        # disconnect: the caller asked to save it, so a client that
+                        # drops at the last moment must not lose the write. Only the
+                        # client-facing SSE frame is skipped when disconnected.
+                        final_answer = data["answer"]
+                        saved_path = (
+                            _save_query_answer(kb_dir, request.question, final_answer)
+                            if request.save
+                            else None
+                        )
+                        append_log(kb_dir / "wiki", "query", request.question)
+                        if await fastapi_request.is_disconnected():
+                            break
+                        yield _sse(
+                            "final",
+                            {
+                                "answer": final_answer,
+                                "saved_path": str(saved_path) if saved_path else None,
+                            },
+                        )
+                    else:
+                        if await fastapi_request.is_disconnected():
+                            break
+                        yield _sse(event["event"], data)
     except Exception as exc:
         yield _sse("error", {"message": f"Query failed: {exc}"})
     yield _sse("done", {})
@@ -472,14 +476,13 @@ async def _stream_chat(
     yield _sse("start", {"endpoint": "chat", "session_id": session.id})
     run_config = build_run_config_from_bundle(session.model, bundle)
     try:
-        append_log(kb_dir / "wiki", "query", request.message)
         agent = build_chat_session_agent(kb_dir, session, bundle=bundle)
-        async for event in iter_chat_turn_events(
-            agent, session, request.message, run_config=run_config
-        ):
-            if await fastapi_request.is_disconnected():
-                break
-            yield _sse(event["event"], event["data"])
+        stream = iter_chat_turn_events(agent, session, request.message, run_config=run_config)
+        async with aclosing(stream):
+            async for event in stream:
+                if await fastapi_request.is_disconnected():
+                    break
+                yield _sse(event["event"], event["data"])
     except Exception as exc:
         yield _sse("error", {"message": f"Chat failed: {exc}"})
     yield _sse("done", {})

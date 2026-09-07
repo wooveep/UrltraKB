@@ -3414,3 +3414,54 @@ def test_delete_kb_filenotfound_is_idempotent(monkeypatch, tmp_path):
     )
     assert r.status_code == 200
     assert r.json()["deleted"] is True
+
+
+def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
+    """A blocked request must leave its writer's event loop able to finish.
+
+    Bound the process, since regressing to a synchronous lock would prevent
+    even an asyncio timeout from running in the stuck application loop.
+    """
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent("""
+        import asyncio
+        import sys
+        from pathlib import Path
+        import httpx
+        from openkb.api import create_app
+        from openkb.locks import async_kb_lock
+
+        async def main():
+            kb = Path(sys.argv[1])
+            app = create_app()
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://local"
+            ) as client:
+                requests = []
+                async with async_kb_lock(kb / ".openkb", exclusive=True):
+                    for endpoint in ("list", "status"):
+                        requests.append(asyncio.create_task(client.post(
+                            f"/api/v1/{endpoint}", json={"kb": kb.name}
+                        )))
+                    # Both public requests must be able to start waiting without
+                    # blocking the loop that owns their writer's lease.
+                    await asyncio.sleep(0.2)
+                    assert all(not request.done() for request in requests)
+                responses = await asyncio.gather(*requests)
+                assert [r.status_code for r in responses] == [200, 200], responses
+
+        asyncio.run(main())
+    """)
+    env = dict(os.environ, OPENKB_API_TOKEN="", OPENKB_KB_ROOT=str(kb_dir.parent))
+    subprocess.run(
+        [sys.executable, "-c", probe, str(kb_dir)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
