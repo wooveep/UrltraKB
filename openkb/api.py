@@ -251,16 +251,16 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No files uploaded.",
             )
-        # Reserve unique raw paths under the lock so concurrent same-name
-        # uploads cannot race on _unique_raw_path and overwrite each other,
-        # then stream the bodies outside it so a large or slow upload does not
-        # block other same-KB mutations (lint/recompile/other adds).
-        async with _kb_mutation_lock(kb):
-            reserved = await run_in_threadpool(_reserve_add_uploads, resolved_kb_dir, files)
+        # Transfer privately; each complete input is published and consumed
+        # together under the shared KB lease by the application adapter.
+        reserved = await run_in_threadpool(_reserve_add_uploads, resolved_kb_dir, files)
         saved_uploads = await _write_add_uploads(reserved, files)
         if _parse_stream_form(stream):
-            return StreamingResponse(
+            from openkb.api_uploads import UploadStreamingResponse
+
+            return UploadStreamingResponse(
                 _stream_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle),
+                uploads=saved_uploads,
                 media_type="text/event-stream",
             )
         return await _run_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle)

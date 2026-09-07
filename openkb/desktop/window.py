@@ -38,6 +38,7 @@ from openkb.runtime.requests import (
     SavePage,
 )
 from openkb.runtime.tasks import TaskManager
+from openkb.runtime.watch import NativeWatchRegistry
 
 _STATES = {
     "queued": "排队中",
@@ -64,6 +65,11 @@ _OPERATIONS = {
     "CheckKnowledge": "知识检查与修复",
 }
 
+_STAGES = {
+    "waiting-input": "等待文件稳定",
+    "input-returned-to-watch": "输入仍在变化，已交回监听补查",
+}
+
 
 class Workbench(QMainWindow):
     def __init__(self, *, history_dir: Path | None = None):
@@ -84,6 +90,7 @@ class Workbench(QMainWindow):
         self._quitting = False
         self.io = LocalIO(self)
         self.manager = TaskManager(history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks")
+        self.watch_registry = NativeWatchRegistry(self.manager)
         from openkb.desktop.layout import build_workbench
 
         build_workbench(self)
@@ -97,6 +104,11 @@ class Workbench(QMainWindow):
             "资料、页面、对话和任务始终归属于各自的知识库。",
             Path.cwd(),
         )
+
+    def _watch(self):
+        from openkb.desktop.watch import WatchDialog
+
+        WatchDialog(self.watch_registry, self.kb, self).exec()
 
     def _settings(self, *, global_defaults=False):
         from openkb.desktop.settings import SettingsDialog
@@ -539,7 +551,7 @@ class Workbench(QMainWindow):
                 + (f" · {quality_count} 项质量提示" if quality_count else ""),
                 f"成功 {task.succeeded} · 跳过 {task.skipped} · "
                 f"失败 {task.failed} · 未处理 {task.unfinished}",
-                task.error or task.stage,
+                task.error or _STAGES.get(task.stage, task.stage),
             ]
             for column, value in enumerate(values):
                 item = self.task_table.item(row, column)
@@ -562,6 +574,7 @@ class Workbench(QMainWindow):
         if self._quitting:
             if (
                 self.manager.join(0)
+                and self.watch_registry.stopped()
                 and self.io.stopped()
                 and all(view.rendering_stopped() for view in (self.reader, self.chat))
             ):
@@ -620,6 +633,7 @@ class Workbench(QMainWindow):
     def request_quit(self):
         if self._quitting:
             return
+        self.watch_registry.stop_all(close=False)
         stop = False
         if any(task.state not in TERMINAL for task in self.manager.tasks()):
             box = QMessageBox(self)
@@ -630,9 +644,11 @@ class Workbench(QMainWindow):
             box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
             box.exec()
             if box.clickedButton() not in (wait, halt):
+                self.statusBar().showMessage("已取消退出。目录监听已停止，可手动重新启用。")
                 return
             stop = box.clickedButton() == halt
         self._quitting = True
+        self.watch_registry.stop_all()
         self.setEnabled(False)
         self.manager.shutdown(stop=stop)
         self.io.stop()

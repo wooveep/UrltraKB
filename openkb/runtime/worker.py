@@ -256,13 +256,19 @@ def _execute(
 
             result = import_url(root, request.url, context=context, prepared_dir=prepared_dir)
         else:
-            result = import_document(root, Path(request.source), context=context)
+            result = import_document(
+                root,
+                Path(request.source),
+                context=context,
+                source_root=root / "raw" if request.wait_for_stable else None,
+            )
         return UnitResult(
             "completed" if result.status == "added" else result.status,
             resources=result.resources,
             error="Document import failed" if result.status == "failed" else None,
             quality=result.quality,
             unfinished=result.unfinished,
+            revision=result.input_version,
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio
@@ -306,6 +312,7 @@ def run_unit(
     # configuration runs in the task manager's process.
     from openkb.add_coordinator import DirtyRollbackError
     from openkb.application.execution import ExecutionContext
+    from openkb.inputs import InputChanged
     from openkb.locks import LockCancelled
     from openkb.mutation import RecoveryRequired
 
@@ -322,6 +329,13 @@ def run_unit(
         except WaitingForLease:
             channel.send("deferred")
             return
+        except InputChanged:
+            if isinstance(request, ImportFile) and request.wait_for_stable:
+                # Input preparation has not begun business or fixed new
+                # credentials; this wait never retries a completed model call.
+                channel.send("deferred", reason="input")
+                return
+            result = UnitResult("failed", error="Input changed during preparation")
         except LockCancelled:
             result = UnitResult("stopped")
         except (RecoveryRequired, DirtyRollbackError):

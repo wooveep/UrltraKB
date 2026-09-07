@@ -3,6 +3,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from openkb.application.pages import read_page
 
 
@@ -82,3 +84,139 @@ def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monke
     assert "private-key" not in repr(context)
     assert "private-key" not in repr(context.snapshot)
     assert resolve_effective_config(kb_dir)[0]["model"] == "openai/changed"
+
+
+@pytest.mark.parametrize("extension", [".md", ".markdown"])
+def test_import_freezes_relative_images_at_the_business_boundary(
+    kb_dir, tmp_path, monkeypatch, extension
+):
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.execution import ExecutionContext
+
+    source = tmp_path / f"中文 图解{extension}"
+    figure = tmp_path / "图.png"
+    figure.write_bytes(b"original image")
+    source.write_text("# 图解\n![first](图.png)\n![again](图.png)\n![missing](later.png)")
+    original = source.read_bytes()
+
+    def after_start(snapshot):
+        source.write_text("changed source")
+        figure.write_bytes(b"changed image")
+        (tmp_path / "later.png").write_bytes(b"created after start")
+
+    values = iter(
+        [
+            {"description": "Notes", "content": "# Notes"},
+            {"create": [], "update": [], "related": []},
+        ]
+    )
+    monkeypatch.setattr(
+        litellm,
+        "completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(values))))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
+        ),
+    )
+    result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
+    assert result.status == "added"
+    assert next((kb_dir / "raw").iterdir()).read_bytes() == original
+    images = list((kb_dir / "wiki/sources/images").rglob("*.png"))
+    assert len(images) == 1 and images[0].read_bytes() == b"original image"
+    converted = next((kb_dir / "wiki/sources").glob("*.md")).read_text()
+    assert converted.count("图.png)") == 2 and "![missing](later.png)" in converted
+
+
+def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp_path, monkeypatch):
+    import threading
+
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+
+    source = tmp_path / "notes.md"
+    source.write_text("![figure](figure.png)")
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"old")
+    acquired, release = threading.Event(), threading.Event()
+
+    def hold():
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            acquired.set()
+            assert release.wait(10)
+
+    def waiting(event):
+        if event["stage"] == "waiting":
+            figure.write_bytes(b"latest")
+            release.set()
+
+    values = iter(
+        [
+            {"description": "Notes", "content": "# Notes"},
+            {"create": [], "update": [], "related": []},
+        ]
+    )
+    monkeypatch.setattr(
+        litellm,
+        "completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(values))))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
+        ),
+    )
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert acquired.wait(10)
+    try:
+        result = import_document(kb_dir, source, context=ExecutionContext(on_event=waiting))
+    finally:
+        release.set()
+        holder.join(10)
+    assert result.status == "added"
+    assert next((kb_dir / "wiki/sources/images").rglob("*.png")).read_bytes() == b"latest"
+
+
+def test_watched_source_replaced_with_external_symlink_while_waiting_never_starts(kb_dir, tmp_path):
+    import os
+    import threading
+
+    from openkb.application.documents import import_document
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+
+    if os.name == "nt":
+        pytest.skip("POSIX symlink fixture")
+    source = kb_dir / "raw/notes.md"
+    source.write_text("approved input")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside raw")
+    acquired, release = threading.Event(), threading.Event()
+
+    def hold():
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            acquired.set()
+            assert release.wait(10)
+
+    def waiting(event):
+        if event["stage"] == "waiting":
+            source.unlink()
+            source.symlink_to(outside)
+            release.set()
+
+    context = ExecutionContext(on_event=waiting)
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert acquired.wait(5)
+    try:
+        with pytest.raises(ValueError, match="Watched input"):
+            import_document(kb_dir, source, source_root=kb_dir / "raw", context=context)
+    finally:
+        release.set()
+        holder.join(5)
+    assert context.snapshot is None
+    assert outside.read_text() == "outside raw"
+    assert not list((kb_dir / "wiki/summaries").iterdir())

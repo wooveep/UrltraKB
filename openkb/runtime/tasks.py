@@ -42,6 +42,7 @@ class _Attempt:
     identity: UnitIdentity
     result: UnitResult | None = None
     deferred: bool = False
+    deferred_reason: str = "lease"
     unconfirmed: bool = False
     stop_sent: bool = False
     eof: bool = False
@@ -170,6 +171,25 @@ class TaskManager:
                 self._update(task, state="stopped", stage="stopped")
                 self._discard_inputs(task_id)
 
+    def release_input_wait(self, task_id: str) -> bool:
+        """Return a never-started watch input to its bounded candidate scan.
+
+        Only a reaped preparation attempt is eligible. An acknowledged config
+        snapshot or any active child makes this operation refuse the release.
+        """
+        with self._condition:
+            task = self._tasks[task_id]
+            if (
+                task_id in self._active
+                or task.view.started_at is not None
+                or task.view.state != "waiting"
+                or task.view.stage != "waiting-input"
+            ):
+                return False
+            self._update(task, state="stopped", stage="input-returned-to-watch")
+            self._discard_inputs(task_id)
+            return True
+
     def _discard_inputs(self, task_id: str, unit_id: str | None = None) -> None:
         root = Path(self._preparations.name) / task_id
         if unit_id is not None:
@@ -277,6 +297,7 @@ class TaskManager:
                     attempt.eof = True
             elif kind == "deferred":
                 attempt.deferred = True
+                attempt.deferred_reason = "input" if message.get("reason") == "input" else "lease"
             elif kind in ("result", "unconfirmed"):
                 attempt.result = message["result"]
                 attempt.terminal_sequence = message.get("sequence")
@@ -319,7 +340,11 @@ class TaskManager:
             else:
                 task.ready_at = time.monotonic() + task.wait_delay
                 task.wait_delay = min(2, task.wait_delay * 2)
-                self._update(task, state="waiting", stage="waiting")
+                self._update(
+                    task,
+                    state="waiting",
+                    stage="waiting-input" if attempt.deferred_reason == "input" else "waiting",
+                )
                 self._pending.append(task.view.id)
             return
         self._discard_inputs(task.view.id, attempt.identity.unit_id)

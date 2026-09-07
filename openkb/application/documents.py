@@ -16,6 +16,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
+from openkb.inputs import PreparedInput, prepared_input, validate_source_root
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import publish_staged_tree
@@ -97,7 +98,7 @@ def add_single_file(
     bundle=None,
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
-    prepared: tuple[Path, str] | None = None,
+    prepared: PreparedInput | None = None,
     origin_url: str | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document under the KB mutation lock."""
@@ -122,7 +123,7 @@ def _add_single_file_locked(
     bundle=None,
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
-    prepared: tuple[Path, str] | None = None,
+    prepared: PreparedInput | None = None,
     origin_url: str | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document into the knowledge base.
@@ -367,6 +368,7 @@ class DocumentResult:
     resources: tuple[str, ...]
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    input_version: str | None = None
 
 
 def import_document(
@@ -377,19 +379,20 @@ def import_document(
     on_event: Callable[[dict], None] | None = None,
     context: ExecutionContext | None = None,
     origin_url: str | None = None,
+    source_root: Path | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
     from openkb.state import HashRegistry
 
     root = kb_dir.expanduser().resolve()
-    source = source.expanduser().resolve()
+    requested_source = source.expanduser().absolute()
+    validate_source_root(requested_source, source_root)
+    source = requested_source.resolve()
     if not (root / ".openkb/config.yaml").is_file():
         raise ValueError(f"Not a knowledge base: {root}")
     if not source.is_file():
         raise FileNotFoundError(source)
     from contextlib import nullcontext
-
-    from openkb.inputs import copy_stable, prepared_input
 
     if context:
         context.on_event({"stage": "preparing", "source": str(source)})
@@ -400,8 +403,10 @@ def import_document(
             cancelled=context.cancelled if context else None,
             on_wait=context.waiting if context else None,
         ):
-            if HashRegistry.hash_file(source) != ready[1]:
-                ready = (ready[0], copy_stable(source, ready[0]))
+            validate_source_root(requested_source, source_root)
+            if not ready.is_current():
+                ready = ready.refresh()
+            validate_source_root(requested_source, source_root)
             with (
                 context.begin(root) if context else nullcontext(bundle) as credentials,
                 collect_compile_report() as compilation,
@@ -415,7 +420,7 @@ def import_document(
                     origin_url=origin_url,
                 )
             entries = HashRegistry(root / ".openkb/hashes.json")
-            meta = entries.get(ready[1])
+            meta = entries.get(ready.digest)
             resources = []
             if meta:
                 for key in ("raw_path", "source_path"):
@@ -435,4 +440,5 @@ def import_document(
                 tuple(resources),
                 tuple(compilation.quality),
                 tuple(compilation.unfinished),
+                ready.digest,
             )

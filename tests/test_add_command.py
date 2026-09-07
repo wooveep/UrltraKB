@@ -87,7 +87,7 @@ class TestAddCommand:
 
         with (
             patch("openkb.agent.compiler.compile_short_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.cli.time.sleep"),
+            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -191,7 +191,7 @@ class TestAddCommand:
             patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.cli.time.sleep"),
+            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -228,7 +228,7 @@ class TestAddCommand:
             patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index_dedup),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.cli.time.sleep"),
+            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -747,7 +747,7 @@ class TestImportFromPageindexCloud:
         with (
             patch("openkb.cli.prepare_cloud_import", return_value=cloud),
             patch("openkb.cli.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.cli.time.sleep"),
+            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = import_from_pageindex_cloud("cloud-1", kb_dir)
