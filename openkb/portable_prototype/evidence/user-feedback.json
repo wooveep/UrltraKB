@@ -6,5 +6,11 @@
   "prototype_source_commit": "0ba2b5281bc908c8baeff99509e9791171fa438a",
   "archive_sha256": "bd258385dbe6831df136398e09612157f24483e70325140654d13e15638d3b31",
   "windows_full_bundle": "Not built or run in this session; this response is not treated as Windows execution evidence.",
-  "tray_available_path": "Not exercised; current GNOME reports no available system tray."
+  "tray_available_path": "Not exercised; current GNOME reports no available system tray.",
+  "subsequent_route_decision": {
+    "verbatim": "Windows 11 完整包同样采用该方案即可 ；\n继续后续决策 。",
+    "adopted_direction": "PyInstaller onedir and explicit multiprocessing spawn for both target platforms.",
+    "gate_change": "User accepts choosing the Windows direction now and proceeding with later decisions; Windows runtime evidence remains a future build/delivery gate.",
+    "windows_test_status": "Still not built or run in this session."
+  }
 }
