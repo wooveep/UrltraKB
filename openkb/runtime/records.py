@@ -30,6 +30,8 @@ class UnitResult:
     output_state: str = "none"
     revision: str | None = None
     page: Page | None = field(default=None, repr=False)
+    changes: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "skipped", "failed", "stopped", "blocked"}:
@@ -42,6 +44,9 @@ class UnitResult:
             raise ValueError("Invalid resource references")
         if not isinstance(self.quality, tuple) or not all(isinstance(p, str) for p in self.quality):
             raise ValueError("Invalid quality notes")
+        for values in (self.changes, self.unfinished):
+            if not isinstance(values, tuple) or not all(isinstance(p, str) for p in values):
+                raise ValueError("Invalid result facts")
         if type(self.turn_count) is not int or self.turn_count < 0 or type(self.halt) is not bool:
             raise ValueError("Invalid unit counts or halt flag")
         if any(
@@ -64,6 +69,8 @@ class UnitResult:
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> UnitResult:
+        if any(not isinstance(value.get(key, []), list) for key in ("changes", "unfinished")):
+            raise ValueError("Invalid result facts")
         if not isinstance(value.get("resources", []), list) or not isinstance(
             value.get("quality", []), list
         ):
@@ -78,6 +85,8 @@ class UnitResult:
             halt=value.get("halt", False),
             output_state=value.get("output_state", "none"),
             revision=value.get("revision"),
+            changes=tuple(value.get("changes", ())),
+            unfinished=tuple(value.get("unfinished", ())),
         )
 
 

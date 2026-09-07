@@ -173,6 +173,12 @@ print("OpenKB")
 
         verify_settings(window, first, wait_until)
         checks.append("native KB/global settings save, inheritance, credential rotation and clear")
+        from openkb.desktop.verification_removal import verify_removal
+
+        verify_removal(window, first, wait_until)
+        checks.append(
+            "native removal preview, stale confirmation, spawned cleanup and kept resources"
+        )
         if args.model_base:
             from openkb.application.conversations import read_conversation
             from openkb.application.knowledge_bases import get_kb_list

@@ -64,6 +64,7 @@ _OPERATIONS = {
     "AskQuestion": "问答",
     "ContinueConversation": "对话",
     "ImportFile": "导入资料",
+    "RemoveDocument": "删除资料",
 }
 
 
@@ -106,6 +107,19 @@ class Workbench(QMainWindow):
         dialog = SettingsDialog(self.io, None if global_defaults else self.kb, self)
         dialog.exec()
 
+    def _documents(self):
+        if self.kb is not None:
+            from openkb.desktop.documents import DocumentsDialog
+
+            DocumentsDialog(self, self.kb).exec()
+
+    def _task_details(self):
+        task_id = self._selected_task()
+        if task_id:
+            from openkb.desktop.task_details import show_task_details
+
+            show_task_details(self.manager.get(task_id), self)
+
     def _action(self, toolbar, label, callback):
         action = QAction(label, self)
         action.triggered.connect(callback)
@@ -126,6 +140,7 @@ class Workbench(QMainWindow):
         toolbar.addWidget(self.kbs)
         self._action(toolbar, "导入文件", self._import_files)
         self._action(toolbar, "导入目录", self._import_directory)
+        self._action(toolbar, "资料管理", self._documents)
         self._action(toolbar, "刷新", self._refresh_current)
         settings = self.menuBar().addMenu("设置")
         settings.addAction("当前知识库…", lambda: self._settings(global_defaults=False))
@@ -216,6 +231,9 @@ class Workbench(QMainWindow):
         stop = QPushButton("安全停止所选任务")
         stop.clicked.connect(self._stop_selected)
         tasks_layout.addWidget(stop)
+        details = QPushButton("查看所选任务结果")
+        details.clicked.connect(self._task_details)
+        tasks_layout.addWidget(details)
         dock = QDockWidget("任务 · 所有知识库", self)
         dock.setWidget(tasks_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)

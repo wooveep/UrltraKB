@@ -14,6 +14,7 @@ from openkb.runtime.requests import (
     AskQuestion,
     ContinueConversation,
     ImportFile,
+    RemoveDocument,
     SavePage,
     UnitRequest,
 )
@@ -95,6 +96,37 @@ def _execute(request: UnitRequest, identity: UnitIdentity, context: Any) -> Unit
                     page=saved.page if saved.status == "saved" else None,
                 )
     context.install_process_settings = True
+    if isinstance(request, RemoveDocument):
+        from openkb.application.removal import remove_document
+
+        removal = remove_document(
+            root,
+            request.identifier,
+            version=request.version,
+            keep_raw=request.keep_raw,
+            keep_empty=request.keep_empty,
+            context=context,
+        )
+        removal_result = removal.result
+        return UnitResult(
+            "completed"
+            if removal.status == "removed"
+            else "blocked"
+            if removal.status == "blocked"
+            else "failed",
+            resources=tuple(str(root / path) for path in removal.retained),
+            error=None
+            if removal.status == "removed"
+            else (
+                f"Cleanup failed ({removal_result.error_type}); "
+                "see completed changes and unfinished stages"
+                if removal_result
+                else f"Document removal: {removal.status}"
+            ),
+            changes=tuple(removal_result.changes) if removal_result else (),
+            unfinished=removal.unfinished,
+            halt=removal.status == "blocked",
+        )
     if isinstance(request, ImportFile):
         from openkb.application.documents import import_document
 

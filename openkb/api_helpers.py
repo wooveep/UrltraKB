@@ -38,10 +38,10 @@ from openkb.api_models import (
 from openkb.application.answers import save_exploration
 from openkb.application.documents import _add_for_api
 from openkb.application.knowledge_bases import initialize_kb
+from openkb.application.removal import run_remove_for_api
 from openkb.cli import (
     SUPPORTED_EXTENSIONS,
     iter_recompile,
-    run_remove_for_api,
 )
 from openkb.config import (
     DEFAULT_CONFIG,
