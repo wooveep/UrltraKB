@@ -468,14 +468,22 @@ def save_eval_set(
     prompts: list[EvalPrompt],
 ) -> Path:
     """Persist an eval set to ``<kb>/.openkb/eval-sets/<skill_name>.json``."""
+    from openkb.locks import atomic_write_text, kb_ingest_lock
+    from openkb.mutation import mutation_scope
+    from openkb.skill import validate_skill_name
+
+    error = validate_skill_name(skill_name)
+    if error:
+        raise ValueError(error)
     out_dir = kb_dir / ".openkb" / "eval-sets"
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{skill_name}.json"
     data = {
         "should_trigger": [p.question for p in prompts if p.expected == "trigger"],
         "should_not": [p.question for p in prompts if p.expected == "no-trigger"],
     }
-    out_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        with mutation_scope(kb_dir, [out_path], operation="save-eval-set"):
+            atomic_write_text(out_path, json.dumps(data, indent=2) + "\n")
     return out_path
 
 
