@@ -44,3 +44,19 @@ def prepared_input(source: Path) -> Iterator[tuple[Path, str]]:
         frozen = Path(directory) / source.name
         digest = copy_stable(source, frozen)
         yield frozen, digest
+
+
+# Supported document extensions shared by import adapters
+SUPPORTED_EXTENSIONS = {
+    ".pdf",
+    ".md",
+    ".markdown",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".xls",
+    ".html",
+    ".htm",
+    ".txt",
+    ".csv",
+}

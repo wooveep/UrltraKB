@@ -138,13 +138,23 @@ def get_pdf_page_count(path: Path) -> int:
         return doc.page_count
 
 
-def convert_document(src: Path, kb_dir: Path, *, staging_dir: Path | None = None) -> ConvertResult:
+def convert_document(
+    src: Path,
+    kb_dir: Path,
+    *,
+    staging_dir: Path | None = None,
+    prepared: tuple[Path, str] | None = None,
+) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
 
-    with prepared_input(src) as (prepared, digest):
+    if prepared is not None:
         return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, prepared=prepared, file_hash=digest
+            src, kb_dir, staging_dir=staging_dir, prepared=prepared[0], file_hash=prepared[1]
+        )
+    with prepared_input(src) as (frozen, digest):
+        return _convert_prepared_document(
+            src, kb_dir, staging_dir=staging_dir, prepared=frozen, file_hash=digest
         )
 
 

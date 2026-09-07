@@ -110,7 +110,9 @@ def capture_config(kb_dir: Path) -> ConfigSnapshot:
         for _ in range(3):
             before = read_versions()
             effective, sources = config.resolve_effective_config(kb_dir)
+            config.validate_runtime_config(effective)
             raw = config.load_config(paths[0])
+            config.validate_runtime_config(raw, allow_inherited=True)
             environment = dict(os.environ)
             for key, value in dotenv_values(paths[3]).items():
                 if value and not environment.get(key):

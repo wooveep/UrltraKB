@@ -441,9 +441,14 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
                 raise ValueError("Mutation backup is missing; live content was not removed")
 
 
-def recover_pending_journals(kb_dir: Path) -> list[str]:
+def recover_pending_journals(kb_dir: Path, *, repairing: bool = False) -> list[str]:
     """Rollback active journals left by an interrupted process."""
-    if repair_marker(kb_dir).exists():
+    if repairing:
+        from openkb.locks import kb_ingest_lock_held
+
+        if not kb_ingest_lock_held(kb_dir / ".openkb"):
+            raise RuntimeError("Controlled recovery requires the KB write lease")
+    if repair_marker(kb_dir).exists() and not repairing:
         raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
     journal_dir = kb_dir / ".openkb" / "journal"
     if not journal_dir.is_dir():

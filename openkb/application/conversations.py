@@ -44,18 +44,18 @@ async def ask_question(
     save: bool = False,
     context: ExecutionContext | None = None,
 ) -> AnswerResult:
-    from openkb.agent.query import (
-        build_query_agent,
-        build_run_config_from_bundle,
-        iter_agent_response_events,
-    )
-
     root = _validate_question(kb_dir, question)
     context = context or ExecutionContext()
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
     ):
         with context.begin(root) as bundle:
+            from openkb.agent.query import (
+                build_query_agent,
+                build_run_config_from_bundle,
+                iter_agent_response_events,
+            )
+
             config = resolve_effective_config(root)[0]
             model = config["model"]
             agent = build_query_agent(str(root / "wiki"), model, config["language"], bundle)
@@ -86,9 +86,6 @@ async def continue_conversation(
     session_id: str | None = None,
     context: ExecutionContext | None = None,
 ) -> AnswerResult:
-    from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
-    from openkb.agent.query import build_run_config_from_bundle
-
     root = _validate_question(kb_dir, message)
     context = context or ExecutionContext()
     session = ChatSession.new(root, "", "")
@@ -104,6 +101,9 @@ async def continue_conversation(
                 # a deleted session or build on a stale completed history.
                 session = load_session(root, session_id)
             with context.begin(root) as bundle:
+                from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
+                from openkb.agent.query import build_run_config_from_bundle
+
                 if not session_id:
                     config = resolve_effective_config(root)[0]
                     session.model, session.language = config["model"], config["language"]
@@ -133,3 +133,26 @@ async def continue_conversation(
                 return AnswerResult(
                     "stopped", "".join(parts), session_id=session.id, turn_count=session.turn_count
                 )
+
+
+@dataclass(frozen=True)
+class ConversationView:
+    id: str
+    title: str
+    model: str
+    language: str
+    turns: tuple[tuple[str, str], ...]
+
+
+def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
+    from openkb.locks import kb_read_lock
+
+    with kb_read_lock(kb_dir / ".openkb"):
+        session = load_session(kb_dir, session_id)
+        return ConversationView(
+            session.id,
+            session.title,
+            session.model,
+            session.language,
+            tuple(zip(session.user_turns, session.assistant_texts)),
+        )

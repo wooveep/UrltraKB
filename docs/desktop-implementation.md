@@ -77,3 +77,49 @@ outcomes, actual worker isolation/configuration tests and reliable task results.
 Other management/generator writers must receive full-operation protection before
 being exposed to concurrent desktop tasks. P3–P5 and browser-product retirement
 remain pending; prototype evidence is not substituted for product acceptance.
+
+## P2 checkpoint — native execution path (2026-09-07)
+
+The desktop entry point now opens a real Qt Widgets workbench. It calls local
+application operations without a REST service. Initial controls cover KB
+opening/creation, file/directory import, page reading/body saving, one-off
+questions, conversation continuation and task/retained-resource observation.
+This remains a checkpoint: it is not the complete daily workflow or the P2 gate.
+
+The task manager owns logical batches. Each unit runs in a new spawn child;
+waiting for a busy KB releases the worker slot. The first actual execution
+acknowledges its complete configuration snapshot before business work starts;
+subsequent units retain it in memory. Independent control/progress channels,
+correlated per-unit receipts and content-free history distinguish business
+results, unavailable answer text and process cleanup. Repair-blocked execution
+halts the remainder; missing receipts do not trigger replay.
+
+The first runtime review found incorrect page-resource paths, continued batches
+after failed recovery, stale historical process waits and unavailable answer
+text after lost final delivery. These paths have been corrected. Configuration
+validation preserves legacy empty-string and zero/negative-threshold values
+while rejecting incorrectly shaped data. Controlled repair reuses that boundary.
+
+| Check | Actual result |
+| --- | --- |
+| `pytest -q` at this checkpoint | 1271 passed, 2 existing warnings, 35.87 seconds |
+| Ruff check / format check | Passed / 157 files formatted |
+| `mypy openkb` | Passed, 84 source files |
+| Real SDK against a controlled local HTTP model | Dual-KB model/key/header isolation; fixed batch snapshot; latest queued task; parent environment/cwd unchanged |
+| Real child termination during a model request | Interrupted outcome; remaining unit not replayed; child reaped |
+| Busy KB with one worker slot | Independent KB completed; waiting task stopped without writes |
+| GNOME/X11 native window | Chinese, inline fraction, block formula, flowchart, table and code displayed; body saved via child; explicit exit reaped task processes |
+
+The window smoke check found a quit race (save-completion callbacks scheduling
+reads after shutdown) and a close-event veto of explicit application quit;
+both were fixed and the smoke check then completed successfully. A screenshot
+and logs are local evidence under `/tmp/openkb-native-first.png` and
+`/tmp/openkb-desktop-smoke-2.log`; they are not portable-package acceptance.
+
+The renderer uses the accepted MathJax/Merman/resvg code and font adaptations.
+`prepare_desktop_assets.py` verifies Node/font hashes, installs the exact npm
+lock without install scripts and builds the locked Rust helper. PySide6
+Essentials/shiboken 6.11.2 are isolated in the `desktop` extra. Full rendering
+coverage, first product freezing, Windows GUI/package evidence, remaining
+management/generator/watch/settings workflows, browser retirement and matching
+source/licence distributions remain pending.

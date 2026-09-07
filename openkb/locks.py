@@ -258,6 +258,25 @@ def kb_ingest_lock_held(openkb_dir: Path) -> bool:
         return bool(held and held[1])
 
 
+@contextlib.contextmanager
+def kb_repair_lock(openkb_dir: Path) -> Iterator[None]:
+    """Exclusive access for controlled diagnostics/repair, without auto-recovery.
+
+    Normal business operations always use kb_lock. Repair must inspect failed
+    evidence while the durable marker is still present, then explicitly verify
+    recovery before it clears that marker.
+    """
+    if not openkb_dir.is_dir():
+        raise FileNotFoundError(f"Knowledge base not found: {openkb_dir.parent}")
+    lease = _Lease(openkb_dir / "ingest.lock", True)
+    try:
+        while not lease.try_acquire():
+            time.sleep(0.05)
+        yield
+    finally:
+        lease.release()
+
+
 def _session_lease(kb_dir: Path, session_id: str) -> _Lease:
     name = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
     lease = _Lease(kb_dir / ".openkb/session-locks" / f"{name}.lock", True)

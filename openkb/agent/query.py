@@ -8,6 +8,7 @@ from typing import Any
 
 from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 
+from openkb.agent.streaming import settled_stream
 from openkb.agent.tools import (
     artifact_event_from_write,
     get_wiki_page_content,
@@ -168,7 +169,7 @@ async def iter_agent_response_events(
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
 
-    stream = result.stream_events()
+    stream = settled_stream(result)
     try:
         async for event in stream:
             if isinstance(event, RawResponsesStreamEvent):
@@ -202,8 +203,6 @@ async def iter_agent_response_events(
                         yield {"event": "artifact", "data": payload}
 
     finally:
-        if not result.is_complete:
-            result.cancel(mode="after_turn")
         await stream.aclose()
 
     answer = "".join(collected).strip()
@@ -442,7 +441,7 @@ async def run_query(
     )
     collected: list[str] = []
     segment: list[str] = []
-    stream_events = result.stream_events()
+    stream_events = settled_stream(result)
     try:
         live = _start_live()
         async for event in stream_events:
@@ -494,8 +493,6 @@ async def run_query(
                 elif item.type == "tool_call_output_item":
                     pass
     finally:
-        if not result.is_complete:
-            result.cancel(mode="after_turn")
         await stream_events.aclose()
         if live:
             if segment:
