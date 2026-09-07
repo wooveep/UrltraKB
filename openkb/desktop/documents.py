@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -16,9 +17,10 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.application.knowledge_bases import get_kb_list
+from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
 from openkb.runtime.records import TERMINAL
-from openkb.runtime.requests import RemoveDocument
+from openkb.runtime.requests import RecompileDocument, RemoveDocument
 
 
 class DocumentsDialog(QDialog):
@@ -37,7 +39,7 @@ class DocumentsDialog(QDialog):
         self.table.setHorizontalHeaderLabels(["资料", "类型"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.invalidate)
         layout.addWidget(self.table)
@@ -61,6 +63,14 @@ class DocumentsDialog(QDialog):
             button.clicked.connect(callback)
             actions.addWidget(button)
         layout.addLayout(actions)
+        recompilation = QHBoxLayout()
+        self.recompile_selected = QPushButton("重编译所选资料")
+        self.recompile_all = QPushButton("重编译全部资料")
+        self.recompile_selected.clicked.connect(lambda: self.recompile(all_docs=False))
+        self.recompile_all.clicked.connect(lambda: self.recompile(all_docs=True))
+        recompilation.addWidget(self.recompile_selected)
+        recompilation.addWidget(self.recompile_all)
+        layout.addLayout(recompilation)
         self.status = QLabel("正在读取资料…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -99,7 +109,8 @@ class DocumentsDialog(QDialog):
 
     def preview(self):
         row = self.table.currentRow()
-        if row < 0 or self._task:
+        if row < 0 or self._task or len(self.table.selectionModel().selectedRows()) != 1:
+            self.status.setText("请只选择一份资料查看删除计划。")
             return
         identifier = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         keep_raw, keep_empty = self.keep_raw.isChecked(), self.keep_empty.isChecked()
@@ -135,6 +146,55 @@ class DocumentsDialog(QDialog):
         self.invalidate()
         self.status.setText("删除任务已提交，可在主窗口查看状态或安全停止。")
 
+    def recompile(self, *, all_docs):
+        if self._task:
+            return
+        selected = {
+            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
+            for index in self.table.selectionModel().selectedRows()
+        }
+        if not all_docs and not selected:
+            self.status.setText("请先选择要重编译的资料。")
+            return
+        self.invalidate()
+        generation = self._generation
+
+        def loaded(selection, error):
+            if self._closed or generation != self._generation or self._task:
+                return
+            if error:
+                self.status.setText(f"无法读取重编译资料（{type(error).__name__}）")
+                return
+            targets = [t for t in selection.targets if all_docs or t.file_hash in selected]
+            if not targets:
+                self.status.setText("没有可重编译的资料，请刷新列表。")
+                return
+            question = QMessageBox(self)
+            question.setWindowTitle("确认重编译")
+            question.setText(f"重编译 {len(targets)} 份资料？")
+            question.setInformativeText(
+                "将使用已有来源与长文索引重新生成摘要、概念和实体页面。"
+                "这些页面的手工编辑可能被覆盖。每份资料完成后保留结果；停止任务不会撤销已完成项。"
+            )
+            question.setDetailedText("\n".join(t.doc_name for t in targets))
+            question.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            question.setDefaultButton(QMessageBox.StandardButton.No)
+            if question.exec() != QMessageBox.StandardButton.Yes:
+                return
+            self._task = self.window.manager.submit(
+                self.kb, [RecompileDocument(t.file_hash, selection.version) for t in targets]
+            )
+            self.status.setText("重编译任务已提交，可在主窗口查看逐项结果或安全停止。")
+
+        self.window.io.submit(
+            lambda: select_recompilation(self.kb, all_docs=True, confirmation=True),
+            loaded,
+            kb=self.kb,
+            obsolete=lambda: self._closed or generation != self._generation,
+        )
+
     def poll(self):
         if self._task is None:
             return
@@ -146,6 +206,7 @@ class DocumentsDialog(QDialog):
         for result in task.results:
             if result.error:
                 lines.append(result.error)
+            lines.extend(f"质量提示：{note}" for note in result.quality)
             lines.extend(result.changes)
             lines.extend(f"保留 / 已提交：{path}" for path in result.resources)
             lines.extend(f"未完成：{stage}" for stage in result.unfinished)
@@ -153,9 +214,11 @@ class DocumentsDialog(QDialog):
             lines.append(task.error)
         self.details.setPlainText("\n".join(lines))
         self.status.setText(
-            "清理完成。"
+            "任务已执行，含质量提示或未完成阶段，请查看结果。"
+            if any(result.quality or result.unfinished for result in task.results)
+            else "任务完成。"
             if task.state == "completed"
-            else "清理未全部完成。请查看结果；重新查看计划后可明确重试。"
+            else "任务未全部完成。请查看逐项结果；确认最新资料后可手动重试。"
         )
         self.reload()
 

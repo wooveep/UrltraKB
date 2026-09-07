@@ -30,6 +30,7 @@ from pathlib import Path
 import litellm
 
 from openkb import frontmatter
+from openkb.compilation_report import report_compile_issue
 from openkb.config import (
     DEFAULT_ENTITY_TYPES,
     get_extra_headers,
@@ -597,6 +598,7 @@ def _page_fields(raw: str) -> tuple[str, str, dict | None]:
 def _filter_concept_items(items: list, label: str) -> list[dict]:
     """Keep only dicts that carry a non-empty ``name``; warn about anything else."""
     if not isinstance(items, list):
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
         logger.warning(
             "concepts plan: %s was %s, expected list — dropping", label, type(items).__name__
         )
@@ -631,6 +633,7 @@ def _require_nonempty_content(content, name: str) -> None:
 def _filter_related_slugs(items: list) -> list[str]:
     """Keep only non-empty string slugs; warn about anything else."""
     if not isinstance(items, list):
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
         logger.warning(
             "concepts plan: related was %s, expected list — dropping", type(items).__name__
         )
@@ -661,6 +664,7 @@ def _filter_entity_items(items: object, valid_types: frozenset | None = None) ->
         valid_types = _ENTITY_TYPES
     out: list[dict] = []
     if not isinstance(items, list):
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
         return out
     for it in items:
         if not isinstance(it, dict):
@@ -688,6 +692,8 @@ def _parse_entities_plan(parsed: object, valid_types: frozenset | None = None) -
         return empty
     group = parsed.get("entities")
     if not isinstance(group, dict):
+        if "entities" in parsed:
+            report_compile_issue("malformed_plan_items", "concepts", "entities")
         return empty
     return {
         "create": _filter_entity_items(group.get("create", []), valid_types),
@@ -1648,6 +1654,7 @@ async def _compile_concepts(
     try:
         parsed = _parse_json(plan_raw)
     except (json.JSONDecodeError, ValueError) as exc:
+        report_compile_issue("concept_plan_unparseable", "concepts", "entities")
         preview = plan_raw[:500] + ("..." if len(plan_raw) > 500 else "")
         logger.warning(
             "Failed to parse concepts plan: %s. Raw output (first 500 chars): %r",
@@ -1670,6 +1677,7 @@ async def _compile_concepts(
     # an "entities" key; the legacy flat shape (create/update/related at top
     # level) is still honored by falling back to ``parsed`` itself.
     if not isinstance(parsed, (list, dict)):
+        report_compile_issue("concept_plan_unparseable", "concepts", "entities")
         # A JSON scalar (int/str/None/bool) is valid JSON but not a usable
         # plan. ``_parse_json`` normally rejects scalars, but guard here too
         # so ``parsed.get(...)`` can never raise AttributeError and abort the
@@ -1689,6 +1697,8 @@ async def _compile_concepts(
         plan = {"create": _filter_concept_items(parsed, "list"), "update": [], "related": []}
         entities_plan = {"create": [], "update": [], "related": []}
     else:
+        if "concepts" in parsed and not isinstance(parsed["concepts"], dict):
+            report_compile_issue("malformed_plan_items", "concepts", "entities")
         concepts_group = (
             parsed.get("concepts") if isinstance(parsed.get("concepts"), dict) else parsed
         )
@@ -1753,6 +1763,9 @@ async def _compile_concepts(
             f"item(s), all dropped as malformed — see log (stderr).\n"
         )
         sys.stdout.flush()
+
+    if original_total > post_filter_total:
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
 
     if (
         not create_items
@@ -1995,6 +2008,7 @@ async def _compile_concepts(
         # self-contained — per-failure WARNINGs go to stderr.
         written = len(pending_writes)
         if written < total:
+            report_compile_issue("concept_generation_incomplete", "concepts")
             reason = ", ".join(sorted(set(failure_types))) if failure_types else "see log (stderr)"
             sys.stdout.write(
                 f"    [WARN] {total} concept(s) planned but only {written} written "
@@ -2014,6 +2028,7 @@ async def _compile_concepts(
 
         ewritten = len(entity_pending)
         if ewritten < etotal:
+            report_compile_issue("entity_generation_incomplete", "entities")
             reason = (
                 ", ".join(sorted(set(entity_failure_types)))
                 if entity_failure_types
@@ -2105,6 +2120,7 @@ async def _compile_concepts(
         if candidate:
             final_summary = candidate
         else:
+            report_compile_issue("summary_rewrite_fallback", "summary_rewrite")
             # Rewrite produced no content (empty response or exception).
             # Strip the v1 summary against the same whitelist so the
             # fallback doesn't reintroduce ghost links.

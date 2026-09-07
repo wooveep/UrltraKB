@@ -20,7 +20,7 @@ from typing import Any, Sequence
 from openkb.config_state import ConfigSnapshot
 from openkb.locks import atomic_write_json
 from openkb.runtime.records import TERMINAL, TaskView, UnitIdentity, UnitResult, read_receipt
-from openkb.runtime.requests import REQUEST_TYPES, UnitRequest
+from openkb.runtime.requests import REQUEST_TYPES, RecompileDocument, UnitRequest
 from openkb.runtime.worker import run_unit
 
 
@@ -336,6 +336,19 @@ class TaskManager:
         result = receipt
         if attempt.result is not None and attempt.result.summary() == receipt.summary():
             result = attempt.result
+        current = task.requests[len(task.view.results)]
+        if isinstance(current, RecompileDocument) and result.revision and not result.halt:
+            # Only a durable receipt advances this batch's confirmed state.
+            # The next worker still checks it under its own full-unit lease.
+            index = len(task.view.results)
+            task.requests = tuple(
+                replace(request, version=result.revision)
+                if i > index
+                and isinstance(request, RecompileDocument)
+                and request.version == current.version
+                else request
+                for i, request in enumerate(task.requests)
+            )
         results = (*task.view.results, result)
         self._update(
             task,

@@ -71,7 +71,36 @@ class ImportUrl:
             raise ValueError("请输入完整的 HTTP 或 HTTPS 地址")
 
 
+@dataclass(frozen=True)
+class RecompileDocument:
+    file_hash: str
+    version: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.file_hash, str)
+            or not self.file_hash
+            or not isinstance(self.version, str)
+            or not self.version
+        ):
+            raise ValueError("Choose an indexed document to recompile")
+
+
 UnitRequest = (
-    SavePage | AskQuestion | ContinueConversation | ImportFile | ImportUrl | RemoveDocument
+    SavePage
+    | AskQuestion
+    | ContinueConversation
+    | ImportFile
+    | ImportUrl
+    | RemoveDocument
+    | RecompileDocument
 )
-REQUEST_TYPES = (SavePage, AskQuestion, ContinueConversation, ImportFile, ImportUrl, RemoveDocument)
+REQUEST_TYPES = (
+    SavePage,
+    AskQuestion,
+    ContinueConversation,
+    ImportFile,
+    ImportUrl,
+    RemoveDocument,
+    RecompileDocument,
+)

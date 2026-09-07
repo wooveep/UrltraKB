@@ -1404,13 +1404,10 @@ def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     _seed_short(kb_dir)
     _patch_recompile(monkeypatch)
-    called = {"n": 0}
+    from openkb.schema import AGENTS_MD
 
-    def fake_refresh(wiki_dir):
-        called["n"] += 1
-        return False
-
-    monkeypatch.setattr("openkb.cli._refresh_schema", fake_refresh)
+    schema = kb_dir / "wiki/AGENTS.md"
+    schema.write_text("Previous custom schema", encoding="utf-8")
 
     response = client.post(
         "/api/v1/recompile",
@@ -1418,7 +1415,8 @@ def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir):
         headers=_auth(),
     )
     assert response.status_code == 200, response.text
-    assert called["n"] == 1
+    assert schema.read_text(encoding="utf-8") == AGENTS_MD
+    assert (kb_dir / "wiki/AGENTS.md.bak").read_text() == "Previous custom schema"
 
 
 def test_recompile_skip_missing_source(monkeypatch, kb_dir):

@@ -15,6 +15,7 @@ from openkb.runtime.requests import (
     ContinueConversation,
     ImportFile,
     ImportUrl,
+    RecompileDocument,
     RemoveDocument,
     SavePage,
     UnitRequest,
@@ -99,6 +100,27 @@ def _execute(
                     page=saved.page if saved.status == "saved" else None,
                 )
     context.install_process_settings = True
+    if isinstance(request, RecompileDocument):
+        import asyncio
+
+        from openkb.application.recompilation import recompile_document
+
+        recompiled = asyncio.run(
+            recompile_document(root, request.file_hash, context=context, version=request.version)
+        )
+        return UnitResult(
+            {"compiled": "completed", "conflict": "failed"}.get(
+                recompiled.status, recompiled.status
+            ),
+            resources=recompiled.resources,
+            error=f"{recompiled.message} ({recompiled.error_type})"
+            if recompiled.error_type
+            else recompiled.message,
+            changes=recompiled.changes,
+            unfinished=recompiled.unfinished,
+            revision=recompiled.version,
+            quality=recompiled.quality,
+        )
     if isinstance(request, RemoveDocument):
         from openkb.application.removal import remove_document
 

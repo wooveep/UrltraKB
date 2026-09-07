@@ -72,6 +72,7 @@ _OPERATIONS = {
     "ContinueConversation": "对话",
     "ImportFile": "导入资料",
     "RemoveDocument": "删除资料",
+    "RecompileDocument": "重编译资料",
     "ImportUrl": "导入网址",
 }
 
@@ -632,10 +633,14 @@ class Workbench(QMainWindow):
         self.task_table.blockSignals(True)
         self.task_table.setRowCount(len(tasks))
         for row, task in enumerate(tasks):
+            quality_count = sum(
+                bool(result.quality or result.unfinished) for result in task.results
+            )
             values = [
                 Path(task.kb_dir).name,
                 _OPERATIONS.get(task.operation, task.operation),
-                _STATES.get(task.state, task.state),
+                _STATES.get(task.state, task.state)
+                + (f" · {quality_count} 项质量提示" if quality_count else ""),
                 f"成功 {task.succeeded} · 跳过 {task.skipped} · "
                 f"失败 {task.failed} · 未处理 {task.unfinished}",
                 task.error or task.stage,
