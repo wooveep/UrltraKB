@@ -129,6 +129,8 @@ class DiagnosticsDialog(QDialog):
                 return
             self.status.setText(
                 "恢复与存储检查通过，可以重新打开。"
+                if result.repaired and result.initialized
+                else "初始化已回滚；关闭此窗口后，使用“新建知识库”在原目录重试。"
                 if result.repaired
                 else "修复未完成，继续保留恢复证据与写入限制。"
             )
@@ -137,7 +139,7 @@ class DiagnosticsDialog(QDialog):
                 + "\n\n"
                 + (result.structural_report or "")
             )
-            self.open_button.setEnabled(result.repaired)
+            self.open_button.setEnabled(result.repaired and result.initialized)
 
         self.window.io.submit(
             lambda: repair_knowledge_base(self.kb),

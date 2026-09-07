@@ -20,6 +20,7 @@ class RepairResult:
     recovery: tuple[str, ...]
     issues: tuple[str, ...]
     structural_report: str | None = None
+    initialized: bool = True
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,16 @@ def repair_knowledge_base(kb_dir: Path) -> RepairResult:
         messages: list[str] = []
         try:
             messages = recover_pending_journals(root, repairing=True)
+            from openkb.application.knowledge_bases import initialization_rolled_back
+
+            if initialization_rolled_back(root):
+                repair_marker(root).unlink(missing_ok=True)
+                return RepairResult(
+                    True,
+                    tuple(messages),
+                    ("初始化已回滚；请使用“新建知识库”在此目录重新创建。",),
+                    initialized=False,
+                )
             for directory in (root / "wiki", root / "raw"):
                 if not directory.is_dir():
                     raise ValueError(f"Required directory is missing: {directory.name}")
@@ -117,14 +128,19 @@ def repair_knowledge_base(kb_dir: Path) -> RepairResult:
             if not isinstance(config, dict):
                 raise ValueError("Configuration must be a mapping")
             validate_runtime_config(config, allow_inherited=True)
+            from dotenv.parser import parse_stream
+
+            if (root / ".env").exists():
+                with (root / ".env").open(encoding="utf-8") as stream:
+                    if any(binding.error for binding in parse_stream(stream)):
+                        raise ValueError("Knowledge-base credential file is invalid")
             validate_runtime_config(resolve_effective_config(root)[0])
             registry_file = root / ".openkb/hashes.json"
             if registry_file.exists():
                 entries = json.loads(registry_file.read_text(encoding="utf-8"))
-                if not isinstance(entries, dict) or any(
-                    not isinstance(value, dict) for value in entries.values()
-                ):
-                    raise ValueError("Document registry must contain document records")
+                from openkb.state import validate_registry
+
+                validate_registry(entries)
             issues = find_invalid_frontmatter(root / "wiki")
             if issues:
                 atomic_write_json(repair_marker(root), {"error_type": "InvalidFrontmatter"})

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from openkb.config import DEFAULT_CONFIG, load_config, register_kb, save_config
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
@@ -39,6 +40,8 @@ def open_kb(kb_dir: Path) -> Path:
     with kb_ingest_lock(root / ".openkb"):
         from openkb.config import resolve_effective_config, validate_runtime_config
 
+        if not (root / ".openkb/config.yaml").is_file() or not (root / "wiki").is_dir():
+            raise ValueError(f"Knowledge base is not initialized; create it explicitly: {root}")
         validate_runtime_config(load_config(root / ".openkb/config.yaml"), allow_inherited=True)
         validate_runtime_config(resolve_effective_config(root)[0])
         register_kb(root)
@@ -59,6 +62,110 @@ def _newest_mtime_iso(paths: list[Path]) -> str | None:
     ).isoformat()
 
 
+@contextmanager
+def _creation(kb_dir: Path, *, require_empty: bool) -> Iterator[None]:
+    """Own initialization and recover a previous incomplete attempt first."""
+    from openkb.mutation import mutation_scope
+
+    state = kb_dir / ".openkb"
+    if state.is_symlink():
+        raise ValueError("Knowledge-base state must stay inside its directory")
+    if state.is_dir() and not any(state.iterdir()):
+        # Preserve the legacy refusal for an existing state directory with no
+        # ownership/recovery evidence. A held creation lease has ingest.lock.
+        raise FileExistsError(f"Knowledge base already initialized: {kb_dir}")
+    with kb_ingest_lock(state):
+        if (
+            require_empty
+            and not initialization_rolled_back(kb_dir)
+            and any(path != state for path in kb_dir.iterdir())
+        ):
+            raise ValueError("请选择空目录创建知识库；已有知识库请使用“打开”。")
+        # Recovery leaves these empty directories and the stable lock inode.
+        # Any actual state still present belongs to an existing/partial KB.
+        for path in state.iterdir():
+            if path.name == "ingest.lock":
+                continue
+            if path.name == "initializing.json" and initialization_pending(kb_dir):
+                continue
+            if (
+                path.name in {"journal", "staging"}
+                and not path.is_symlink()
+                and path.is_dir()
+                and not any(path.iterdir())
+            ):
+                continue
+            raise FileExistsError(f"Knowledge base already initialized: {kb_dir}")
+        directories = [
+            kb_dir / name
+            for name in (
+                "raw",
+                "wiki",
+                "wiki/sources",
+                "wiki/sources/images",
+                "wiki/summaries",
+                "wiki/concepts",
+                "wiki/entities",
+            )
+        ]
+        files = [kb_dir / "wiki" / name for name in ("AGENTS.md", "index.md", "log.md")]
+        files += [state / "config.yaml", state / "hashes.json"]
+        if not (kb_dir / ".env").exists():
+            files.append(kb_dir / ".env")
+        targets = [path for path in directories if not path.exists()] + files
+        if any(
+            path.is_symlink() or not path.resolve().is_relative_to(kb_dir)
+            for path in directories + files
+        ):
+            raise ValueError("Initialization paths must stay inside the knowledge base")
+        # Record only highest missing directories, avoiding overlapping rollback
+        # targets and backing up unrelated pre-existing documents.
+        targets = [
+            path for path in targets if not any(parent in targets for parent in path.parents)
+        ]
+        # This intent survives rollback. It distinguishes a creation that may be
+        # explicitly retried from an established KB whose config was lost.
+        intent = state / "initializing.json"
+        atomic_write_json(intent, {"version": 1, "kb_dir": str(kb_dir)})
+        with mutation_scope(kb_dir, [*targets, intent], operation="initialize"):
+            yield
+            # Intent removal commits with all seed files. A crash before commit
+            # restores it; a committed creation never leaves a retry signal.
+            intent.unlink(missing_ok=True)
+
+
+def initialization_pending(kb_dir: Path) -> bool:
+    """Whether this directory retains an explicit, unfinished creation intent."""
+    root = kb_dir.expanduser().resolve()
+    marker = root / ".openkb/initializing.json"
+    try:
+        return not marker.is_symlink() and json.loads(marker.read_text("utf-8")) == {
+            "version": 1,
+            "kb_dir": str(root),
+        }
+    except (OSError, ValueError):
+        return False
+
+
+def initialization_rolled_back(kb_dir: Path) -> bool:
+    """A retained intent permits retry only after every persisted seed is gone."""
+    if not initialization_pending(kb_dir):
+        return False
+    state = kb_dir / ".openkb"
+    for path in state.iterdir():
+        if path.name in {"ingest.lock", "initializing.json", "needs-repair.json"}:
+            continue
+        if (
+            path.name in {"journal", "staging"}
+            and not path.is_symlink()
+            and path.is_dir()
+            and not any(path.iterdir())
+        ):
+            continue
+        return False
+    return True
+
+
 def initialize_kb(
     kb_dir: Path,
     *,
@@ -68,6 +175,7 @@ def initialize_kb(
     language: str | None = None,
     template_dir: Path | None = None,
     seed_environment: bool = True,
+    require_empty: bool = False,
 ) -> dict[str, Any]:
     """Initialize a knowledge base at an explicit directory (REST ``/init``).
 
@@ -78,84 +186,72 @@ def initialize_kb(
     """
     kb_dir = kb_dir.expanduser().resolve()
     openkb_dir = kb_dir / ".openkb"
-    from openkb.locks import kb_ingest_lock_held
+    with _creation(kb_dir, require_empty=require_empty):
+        kb_dir.mkdir(parents=True, exist_ok=True)
+        (kb_dir / "raw").mkdir(exist_ok=True)
+        (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True, exist_ok=True)
+        (kb_dir / "wiki" / "summaries").mkdir(parents=True, exist_ok=True)
+        (kb_dir / "wiki" / "concepts").mkdir(parents=True, exist_ok=True)
+        (kb_dir / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
 
-    # A caller may pre-acquire execution before waiting for global settings.
-    # Its lock file is not an initialization marker. Only that exact, owned
-    # directory shape is accepted; arbitrary partial/existing KBs are rejected.
-    prepared_lock = (
-        kb_ingest_lock_held(openkb_dir)
-        and openkb_dir.is_dir()
-        and {path.name for path in openkb_dir.iterdir()} == {"ingest.lock"}
-    )
-    if openkb_dir.exists() and not prepared_lock:
-        raise FileExistsError(f"Knowledge base already initialized: {kb_dir}")
+        atomic_write_text(kb_dir / "wiki" / "AGENTS.md", AGENTS_MD)
+        atomic_write_text(kb_dir / "wiki" / "index.md", INDEX_SEED)
+        atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
 
-    kb_dir.mkdir(parents=True, exist_ok=True)
-    (kb_dir / "raw").mkdir(exist_ok=True)
-    (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True, exist_ok=True)
-    (kb_dir / "wiki" / "summaries").mkdir(parents=True, exist_ok=True)
-    (kb_dir / "wiki" / "concepts").mkdir(parents=True, exist_ok=True)
-    (kb_dir / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
+        openkb_dir.mkdir(exist_ok=True)
+        # Seed config.yaml: an explicit model wins; otherwise inherit the
+        # operator's project-root config.yaml (model/language/optional blocks)
+        # so a KB created via the REST UI matches the deployed setup instead of
+        # the hardcoded DEFAULT_CONFIG (gpt-5.4 / en). Defaults are the last resort.
+        template_config = template_dir / "config.yaml" if template_dir else None
+        if model is not None:
+            config = {
+                "model": model,
+                "language": language or DEFAULT_CONFIG["language"],
+                "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
+            }
+            save_config(openkb_dir / "config.yaml", config)
+        elif template_config is not None and template_config.exists():
+            shutil.copy2(template_config, openkb_dir / "config.yaml")
+        else:
+            config = {
+                "model": DEFAULT_CONFIG["model"],
+                "language": language or DEFAULT_CONFIG["language"],
+                "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
+            }
+            save_config(openkb_dir / "config.yaml", config)
+        atomic_write_json(openkb_dir / "hashes.json", {})
 
-    atomic_write_text(kb_dir / "wiki" / "AGENTS.md", AGENTS_MD)
-    atomic_write_text(kb_dir / "wiki" / "index.md", INDEX_SEED)
-    atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
-
-    openkb_dir.mkdir(exist_ok=prepared_lock)
-    # Seed config.yaml: an explicit model wins; otherwise inherit the
-    # operator's project-root config.yaml (model/language/optional blocks)
-    # so a KB created via the REST UI matches the deployed setup instead of
-    # the hardcoded DEFAULT_CONFIG (gpt-5.4 / en). Defaults are the last resort.
-    template_config = template_dir / "config.yaml" if template_dir else None
-    if model is not None:
-        config = {
-            "model": model,
-            "language": language or DEFAULT_CONFIG["language"],
-            "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-        }
-        save_config(openkb_dir / "config.yaml", config)
-    elif template_config is not None and template_config.exists():
-        shutil.copy2(template_config, openkb_dir / "config.yaml")
-    else:
-        config = {
-            "model": DEFAULT_CONFIG["model"],
-            "language": language or DEFAULT_CONFIG["language"],
-            "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-        }
-        save_config(openkb_dir / "config.yaml", config)
-    atomic_write_json(openkb_dir / "hashes.json", {})
-
-    # Seed KB-local .env: inherit LLM credentials from the project-root .env so
-    # a new KB can run queries/compiles out of the box. REST-server variables
-    # (OPENKB_API_TOKEN, OPENKB_KB_ROOT, ...) are filtered out — they scope to
-    # the server, not a single KB. Explicit api_key/openai_api_base params
-    # override anything inherited. Precedence: default -> template -> explicit.
-    env_path = kb_dir / ".env"
-    can_write_env = not env_path.exists()
-    env_pairs: dict[str, str] = {}
-    if can_write_env:
-        if seed_environment:
-            env_pairs["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
-        template_env = template_dir / ".env" if template_dir else None
-        if template_env is not None and template_env.exists():
-            for raw in template_env.read_text(encoding="utf-8").splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key = key.strip()
-                # Skip REST-server variables; keep LLM/provider config.
-                if key.startswith("OPENKB_"):
-                    continue
-                env_pairs[key] = val.strip()
-        if api_key:
-            env_pairs["LLM_API_KEY"] = api_key
-        if openai_api_base:
-            env_pairs["OPENAI_API_BASE"] = openai_api_base
-        if env_pairs:
-            env_path.touch(mode=0o600, exist_ok=False)
-            atomic_write_text(env_path, "".join(f"{k}={v}\n" for k, v in env_pairs.items()))
+        # Seed KB-local .env: inherit LLM credentials from the project-root .env so
+        # a new KB can run queries/compiles out of the box. REST-server variables
+        # (OPENKB_API_TOKEN, OPENKB_KB_ROOT, ...) are filtered out — they scope to
+        # the server, not a single KB. Explicit api_key/openai_api_base params
+        # override anything inherited. Precedence: default -> template -> explicit.
+        env_path = kb_dir / ".env"
+        can_write_env = not env_path.exists()
+        env_pairs: dict[str, str] = {}
+        if can_write_env:
+            if seed_environment:
+                env_pairs["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+            template_env = template_dir / ".env" if template_dir else None
+            if template_env is not None and template_env.exists():
+                for raw in template_env.read_text(encoding="utf-8").splitlines():
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    # Skip REST-server variables; keep LLM/provider config.
+                    if key.startswith("OPENKB_"):
+                        continue
+                    env_pairs[key] = val.strip()
+            if api_key:
+                env_pairs["LLM_API_KEY"] = api_key
+            if openai_api_base:
+                env_pairs["OPENAI_API_BASE"] = openai_api_base
+            if env_pairs:
+                env_path.touch(mode=0o600, exist_ok=False)
+                atomic_write_text(env_path, "".join(f"{k}={v}\n" for k, v in env_pairs.items()))
 
     register_kb(kb_dir)
     return {
