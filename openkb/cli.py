@@ -1845,10 +1845,11 @@ def skill_history(ctx, name):
     help="Skip confirmation.",
 )
 @click.pass_context
+@_with_kb_lock(exclusive=True)
 def skill_rollback(ctx, name, to_n, yes_flag):
     """Restore a previous iteration as the current skill."""
-    from openkb.skill.marketplace import regenerate_marketplace
-    from openkb.skill.workspace import list_iterations, restore_iteration
+    from openkb.application.skill_maintenance import rollback_skill
+    from openkb.skill.workspace import list_iterations
 
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
@@ -1898,12 +1899,11 @@ def skill_rollback(ctx, name, to_n, yes_flag):
             ctx.exit(1)
 
     try:
-        restore_iteration(kb_dir, name, n=to_n)
+        rollback_skill(kb_dir, name, iteration=target_n)
     except FileNotFoundError as exc:
         click.echo(f"[ERROR] {exc}", err=True)
         ctx.exit(1)
 
-    regenerate_marketplace(kb_dir)
     click.echo(f"Restored output/skills/{name}/ from {target_label}.")
     click.echo("Manifest: .claude-plugin/marketplace.json updated")
 
@@ -1983,6 +1983,7 @@ def skill_validate(ctx, name, strict):
     help="Number of should-trigger + should-not prompts (each).",
 )
 @click.pass_context
+@_with_kb_lock(exclusive=True)
 def skill_eval(ctx, name, save_flag, eval_set_path, count):
     """Measure how accurately a compiled skill's description fires.
 

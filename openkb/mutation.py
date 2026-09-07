@@ -358,6 +358,8 @@ def snapshot_paths(
             backup = backup_dir / rel
             backup.parent.mkdir(parents=True, exist_ok=True)
             if target.is_dir():
+                if any(child.is_symlink() for child in target.rglob("*")):
+                    raise ValueError("Mutation directory snapshots require regular files")
                 if target in hardlink_resolved:
                     shutil.copytree(target, backup, copy_function=_hardlink_or_copy)
                     snapshot.hardlinked_dirs.add(target)

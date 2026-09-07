@@ -31,6 +31,23 @@ __all__ = [
 ]
 
 
+def validate_skill_name(name: str) -> str | None:
+    """Existing public Skill/deck slug rules and error messages."""
+    if not name:
+        return "Skill name must not be empty."
+    if len(name) > 64:
+        return "Skill name must be at most 64 characters."
+    if not all(("a" <= c <= "z") or ("0" <= c <= "9") or c == "-" for c in name):
+        return "Skill name must contain only lowercase letters, digits, and dashes."
+    if name.startswith("-"):
+        return "Skill name must not have a leading dash."
+    if name.endswith("-"):
+        return "Skill name must not have a trailing dash."
+    if "--" in name:
+        return "Skill name must not contain consecutive dashes."
+    return None
+
+
 def skills_root(kb_dir: Path) -> Path:
     """``<kb>/output/skills`` — the directory holding every compiled skill."""
     return kb_dir / "output" / "skills"
