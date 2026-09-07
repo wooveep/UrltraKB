@@ -14,6 +14,7 @@ from openkb.runtime.requests import (
     AskQuestion,
     ContinueConversation,
     ImportFile,
+    ImportUrl,
     RemoveDocument,
     SavePage,
     UnitRequest,
@@ -77,7 +78,9 @@ class WorkerChannel:
             self.truncated = True
 
 
-def _execute(request: UnitRequest, identity: UnitIdentity, context: Any) -> UnitResult:
+def _execute(
+    request: UnitRequest, identity: UnitIdentity, context: Any, prepared_dir: Path | None = None
+) -> UnitResult:
     from openkb.application.pages import save_page
     from openkb.locks import kb_ingest_lock
 
@@ -127,14 +130,21 @@ def _execute(request: UnitRequest, identity: UnitIdentity, context: Any) -> Unit
             unfinished=removal.unfinished,
             halt=removal.status == "blocked",
         )
-    if isinstance(request, ImportFile):
+    if isinstance(request, (ImportFile, ImportUrl)):
         from openkb.application.documents import import_document
 
-        result = import_document(root, Path(request.source), context=context)
+        if isinstance(request, ImportUrl):
+            from openkb.application.urls import import_url
+
+            result = import_url(root, request.url, context=context, prepared_dir=prepared_dir)
+        else:
+            result = import_document(root, Path(request.source), context=context)
         return UnitResult(
             "completed" if result.status == "added" else result.status,
             resources=result.resources,
             error="Document import failed" if result.status == "failed" else None,
+            quality=result.quality,
+            unfinished=result.unfinished,
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio
@@ -172,6 +182,7 @@ def run_unit(
     receipt_dir: Path,
     connection: Any,
     events: Any,
+    prepared_dir: Path | None = None,
 ) -> None:
     # Imports stay inside the spawn child. No Qt, Click initialization or SDK
     # configuration runs in the task manager's process.
@@ -189,7 +200,7 @@ def run_unit(
     )
     try:
         try:
-            result = _execute(request, identity, context)
+            result = _execute(request, identity, context, prepared_dir)
         except WaitingForLease:
             channel.send("deferred")
             return
@@ -212,6 +223,15 @@ def run_unit(
             "result", result=result, truncated=channel.truncated, sequence=channel.sequence
         )
     finally:
+        if channel.parent_gone.is_set() and prepared_dir is not None:
+            import logging
+            import shutil
+
+            try:
+                if prepared_dir.exists():
+                    shutil.rmtree(prepared_dir)
+            except OSError:
+                logging.getLogger(__name__).warning("Orphaned task input cleanup failed")
         # Progress is lossy by contract. A full queue must never prevent child
         # exit; results use the receipt and the separately consumed pipe.
         events.cancel_join_thread()

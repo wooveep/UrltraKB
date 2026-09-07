@@ -22,6 +22,8 @@ def main() -> int:
     parser.add_argument("--model-base", help="Controlled HTTP model fixture URL")
     parser.add_argument("--inputs", type=Path, help="Document fixtures to import through workers")
     parser.add_argument("--corpus", type=Path, help="Render corpus through the actual Qt reader")
+    parser.add_argument("--url", help="Controlled HTTP article fixture")
+    parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     args = parser.parse_args()
     root = args.output.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -219,6 +221,49 @@ print("OpenKB")
                 window.open_page(str(summary.relative_to(other / "wiki")))
                 wait_until(lambda: "Native compiled" in window.reader.toPlainText())
                 checks.append("real document conversion, compilation, registry and native reading")
+            if args.url:
+                from PySide6.QtCore import QTimer
+                from PySide6.QtWidgets import QInputDialog
+
+                from openkb.state import HashRegistry
+
+                def enter_urls():
+                    dialog = QApplication.activeModalWidget()
+                    assert isinstance(dialog, QInputDialog)
+                    dialog.setTextValue("\n".join([args.url + "-missing", args.url, args.url]))
+                    dialog.accept()
+
+                QTimer.singleShot(100, enter_urls)
+                window._import_urls()
+                task_id = window.manager.tasks()[-1].id
+                wait_until(lambda: task_id in window._seen_terminal, timeout=120)
+                result = window.manager.get(task_id)
+                assert (result.failed, result.succeeded, result.skipped) == (1, 1, 1), result
+                assert result.processes_reaped
+                entries = HashRegistry(other / ".openkb/hashes.json").all_entries()
+                entry = next(m for m in entries.values() if m.get("origin") == "url")
+                assert entry["path"] == args.url
+                assert (other / entry["raw_path"]).is_file()
+                assert (other / entry["source_path"]).is_file()
+                assert result.results[0].unfinished == ("acquisition",)
+                checks.append(
+                    "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation"
+                )
+            if args.one_shot_url:
+                from openkb.runtime.requests import ImportUrl
+
+                with kb_ingest_lock(other / ".openkb"):
+                    task_id = window.manager.submit(other, [ImportUrl(args.one_shot_url)])
+                    wait_until(lambda: window.manager._tasks[task_id].wait_delay >= 1, timeout=45)
+                    assert window.manager.get(task_id).started_at is None
+                wait_until(lambda: task_id in window._seen_terminal, timeout=90)
+                result = window.manager.get(task_id)
+                assert result.state == "completed" and result.processes_reaped, result
+                prepared_inputs = Path(window.manager._preparations.name) / task_id
+                assert not list(prepared_inputs.rglob("*"))
+                checks.append(
+                    "one-shot HTTP PDF survives worker deferral; private input is collected"
+                )
             window.mode.setCurrentIndex(0)
             window.save_answer.setChecked(True)
             window.question.setPlainText("What does this knowledge base contain?")

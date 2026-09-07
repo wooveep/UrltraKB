@@ -147,22 +147,31 @@ def _unique_path(target: Path) -> Path:
     raise RuntimeError(f"Could not find a free filename for {target} after 10k attempts")
 
 
-def _download_pdf_chunked(response, head_bytes: bytes, target: Path) -> None:
+def _download_pdf_chunked(response, head_bytes: bytes, target: Path, *, cancelled=None) -> None:
     """Write the already-read ``head_bytes`` plus the remaining streamed
     body to ``target``. Chunked so very large PDFs (50+ MB) don't sit in
     RAM.
     """
+    received = len(head_bytes)
     with open(target, "wb") as fh:
         if head_bytes:
             fh.write(head_bytes)
         while True:
+            _check_stop(cancelled)
             chunk = response.read(_CHUNK_BYTES)
             if not chunk:
                 break
             fh.write(chunk)
+            received += len(chunk)
+    length = response.headers.get("Content-Length")
+    if length is not None and received != int(length):
+        target.unlink(missing_ok=True)
+        raise OSError("PDF transfer ended before its declared length was received")
 
 
-def _extract_html(url: str, raw_dir: Path) -> Path | None:
+def _extract_html(
+    url: str, raw_dir: Path, *, report=click.echo, cancelled=None, on_quality=None
+) -> Path | None:
     """Fetch the URL through trafilatura, extract the main content as
     Markdown, and write it to ``raw/<title-slug>.md``.
 
@@ -173,9 +182,11 @@ def _extract_html(url: str, raw_dir: Path) -> Path | None:
     """
     import trafilatura
 
+    _check_stop(cancelled)
     raw_html = trafilatura.fetch_url(url)
+    _check_stop(cancelled)
     if not raw_html:
-        click.echo(f"  [ERROR] Could not fetch URL: {url}", err=True)
+        report(f"  [ERROR] Could not fetch URL: {url}", err=True)
         return None
 
     markdown = trafilatura.extract(
@@ -184,14 +195,16 @@ def _extract_html(url: str, raw_dir: Path) -> Path | None:
         include_links=True,
     )
     if not markdown:
-        click.echo(
+        report(
             "  [ERROR] No main content extracted — page may be empty, JS-rendered, or paywalled.",
             err=True,
         )
         return None
 
     if len(markdown) < _HTML_MIN_EXTRACT_CHARS:
-        click.echo(
+        if on_quality:
+            on_quality("short_extraction")
+        report(
             f"  [WARN] Only {len(markdown)} chars extracted — page may be "
             f"JS-rendered or behind a login. Saving anyway; inspect the "
             f"resulting wiki entry and use `openkb remove` if it's empty.",
@@ -206,14 +219,16 @@ def _extract_html(url: str, raw_dir: Path) -> Path | None:
     # registry pointing at stale bytes.
     target = _unique_path(raw_dir / filename)
     target.write_text(markdown, encoding="utf-8")
-    click.echo(
+    report(
         f"  Extracted: {title!r}\n"
         f"  Saved: raw/{target.name} ({len(markdown) // 1024 or 1} KB clean markdown)"
     )
     return target
 
 
-def fetch_url_to_raw(url: str, kb_dir: Path) -> Path | None:
+def fetch_url_to_raw(
+    url: str, kb_dir: Path, *, report=click.echo, cancelled=None, on_quality=None
+) -> Path | None:
     """Fetch ``url`` into ``<kb>/raw/`` and return the local path.
 
     Routing is decided by HTTP ``Content-Type`` validated against magic
@@ -227,10 +242,11 @@ def fetch_url_to_raw(url: str, kb_dir: Path) -> Path | None:
     existing PageIndex / markitdown routing by file extension and page
     count takes over from there.
     """
+    _check_stop(cancelled)
     raw_dir = kb_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Downloading: {url}")
+    report(f"Downloading: {url}")
 
     request = urllib.request.Request(
         url,
@@ -239,13 +255,13 @@ def fetch_url_to_raw(url: str, kb_dir: Path) -> Path | None:
     try:
         response = urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS)
     except urllib.error.HTTPError as exc:
-        click.echo(f"  [ERROR] HTTP {exc.code} {exc.reason}", err=True)
+        report(f"  [ERROR] HTTP {exc.code} {exc.reason}", err=True)
         return None
     except urllib.error.URLError as exc:
-        click.echo(f"  [ERROR] Network error: {exc.reason}", err=True)
+        report(f"  [ERROR] Network error: {exc.reason}", err=True)
         return None
     except Exception as exc:
-        click.echo(f"  [ERROR] Fetch failed: {exc}", err=True)
+        report(f"  [ERROR] Fetch failed: {exc}", err=True)
         return None
 
     with response:
@@ -266,17 +282,26 @@ def fetch_url_to_raw(url: str, kb_dir: Path) -> Path | None:
                 response.headers.get("Content-Disposition"),
             )
             target = _unique_path(raw_dir / filename)
-            _download_pdf_chunked(response, head_bytes, target)
+            _download_pdf_chunked(response, head_bytes, target, cancelled=cancelled)
             size_mb = target.stat().st_size / (1024 * 1024)
-            click.echo(f"  Saved: raw/{target.name} ({size_mb:.1f} MB PDF)")
+            report(f"  Saved: raw/{target.name} ({size_mb:.1f} MB PDF)")
             return target
 
     if actual == "html":
-        return _extract_html(url, raw_dir)
+        return _extract_html(
+            url, raw_dir, report=report, cancelled=cancelled, on_quality=on_quality
+        )
 
-    click.echo(
+    report(
         f"  [ERROR] Unsupported content type {declared!r} for URL ingest. "
         "Download the file manually and pass its path to `openkb add` instead.",
         err=True,
     )
     return None
+
+
+def _check_stop(cancelled) -> None:
+    if cancelled is not None and cancelled():
+        from openkb.locks import LockCancelled
+
+        raise LockCancelled("URL acquisition stopped")

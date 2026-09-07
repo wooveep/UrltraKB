@@ -97,6 +97,7 @@ def add_single_file(
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
     prepared: tuple[Path, str] | None = None,
+    origin_url: str | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document under the KB mutation lock."""
     with kb_ingest_lock(kb_dir / ".openkb"):
@@ -108,6 +109,7 @@ def add_single_file(
             report=report,
             on_event=on_event,
             prepared=prepared,
+            origin_url=origin_url,
         )
 
 
@@ -120,6 +122,7 @@ def _add_single_file_locked(
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
     prepared: tuple[Path, str] | None = None,
+    origin_url: str | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document into the knowledge base.
 
@@ -268,8 +271,10 @@ def _add_single_file_locked(
                 "name": file_path.name,
                 "doc_name": doc_name,
                 "type": doc_type,
-                "path": _registry_path(file_path, kb_dir),
+                "path": origin_url or _registry_path(file_path, kb_dir),
             }
+            if origin_url:
+                meta["origin"] = "url"
             if result.raw_path is not None:
                 meta["raw_path"] = _registry_path(result.raw_path, kb_dir)
             if result.source_path is not None:
@@ -359,6 +364,8 @@ class DocumentResult:
     source: str
     status: str
     resources: tuple[str, ...]
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 def import_document(
@@ -368,6 +375,7 @@ def import_document(
     bundle=None,
     on_event: Callable[[dict], None] | None = None,
     context: ExecutionContext | None = None,
+    origin_url: str | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
     from openkb.state import HashRegistry
@@ -400,6 +408,7 @@ def import_document(
                     bundle=credentials,
                     prepared=ready,
                     on_event=on_event or (context.on_event if context else None),
+                    origin_url=origin_url,
                 )
             entries = HashRegistry(root / ".openkb/hashes.json")
             meta = entries.get(ready[1])
