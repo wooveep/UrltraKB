@@ -138,8 +138,8 @@ class TestAddCommand:
         )
 
         with (
-            patch("openkb.cli.convert_document", return_value=result),
-            patch("openkb.cli.publish_staged_tree"),
+            patch("openkb.application.documents.convert_document", return_value=result),
+            patch("openkb.application.documents.publish_staged_tree"),
             patch("openkb.cli.asyncio.run"),
             patch("openkb.cli._setup_llm_key"),
             patch("openkb.add_coordinator.run_add_mutation", return_value=True) as mock_run,
@@ -188,7 +188,7 @@ class TestAddCommand:
         conv = self._long_doc_conv(kb_dir, "paper", "cafebabe00" * 8)
 
         with (
-            patch("openkb.cli.convert_document", return_value=conv),
+            patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
             patch("openkb.cli.time.sleep"),
@@ -225,7 +225,7 @@ class TestAddCommand:
         conv = self._long_doc_conv(kb_dir, "dup", "feedface00" * 8)
 
         with (
-            patch("openkb.cli.convert_document", return_value=conv),
+            patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index_dedup),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
             patch("openkb.cli.time.sleep"),
@@ -314,7 +314,7 @@ class TestAddCommand:
         runner = CliRunner()
         with (
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.cli.convert_document", return_value=mock_result),
+            patch("openkb.application.documents.convert_document", return_value=mock_result),
             patch("openkb.cli.asyncio.run") as mock_arun,
         ):
             result = runner.invoke(cli, ["add", str(doc)])
@@ -355,7 +355,7 @@ class TestAddCommand:
         runner = CliRunner()
         with (
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.cli.convert_document", return_value=mock_result),
+            patch("openkb.application.documents.convert_document", return_value=mock_result),
             patch("openkb.agent.compiler.compile_short_doc", new=compile_noop),
         ):
             result = runner.invoke(cli, ["add", str(doc)])

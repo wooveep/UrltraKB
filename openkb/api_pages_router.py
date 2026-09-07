@@ -23,7 +23,8 @@ from openkb.api_models import (
     PageRequest,
     PageResponse,
 )
-from openkb.page_ops import delete_wiki_page, edit_wiki_page, page_link_context
+from openkb.application.pages import read_page, save_page
+from openkb.page_ops import delete_wiki_page, page_link_context
 
 pages_router = APIRouter()
 
@@ -34,15 +35,13 @@ async def page_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageResponse:
     kb_dir = _resolve_kb(request.kb)
-    wiki_dir = (kb_dir / "wiki").resolve()
-    rel = request.path if request.path.endswith(".md") else f"{request.path}.md"
-    target = (wiki_dir / rel).resolve()
-    if not target.is_relative_to(wiki_dir):
-        raise HTTPException(status_code=400, detail="Invalid page path.")
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail=f"Page not found: {request.path}")
-    content = await run_in_threadpool(target.read_text, encoding="utf-8")
-    return PageResponse(path=request.path, content=content)
+    try:
+        page = await run_in_threadpool(read_page, kb_dir, request.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid page path.") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Page not found: {request.path}") from exc
+    return PageResponse(path=request.path, content=page.content)
 
 
 @pages_router.post("/api/v1/page/delete", response_model=PageDeleteResponse)
@@ -84,9 +83,14 @@ async def edit_page_endpoint(
 ) -> PageEditResponse:
     kb_dir = _resolve_kb(request.kb)
     try:
-        result = await run_in_threadpool(edit_wiki_page, kb_dir, request.path, request.content)
+        result = await run_in_threadpool(save_page, kb_dir, request.path, request.content)
     except ValueError as exc:  # invalid/traversal-unsafe page ref
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if result["status"] == "not_found":
+    if result.page is None:
         raise HTTPException(status_code=404, detail=f"Page not found: {request.path}")
-    return PageEditResponse(**result)
+    return PageEditResponse(
+        status=result.status,
+        target=request.path,
+        ghosts_stripped=list(result.ghosts_stripped),
+        content=result.page.content,
+    )

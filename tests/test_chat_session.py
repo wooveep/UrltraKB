@@ -201,3 +201,20 @@ async def test_substantive_streamed_text_is_not_duplicated_by_final(tmp_path, mo
     text_steps = [s for s in persisted_trace if s.get("kind") == "text"]
     assert len(text_steps) == 1
     assert text_steps[0]["text"] == "The real answer."
+
+
+def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
+    import pytest
+
+    from openkb.agent.chat_session import ChatSession, delete_session, load_session
+
+    session = ChatSession.new(kb_dir, "test", "zh")
+    session.record_turn("One", "First answer", [])
+    stale = load_session(kb_dir, session.id)
+    session.record_turn("Two", "Second answer", [])
+    with pytest.raises(RuntimeError, match="changed"):
+        stale.record_turn("Stale", "Old context", [])
+    assert load_session(kb_dir, session.id).user_turns == ["One", "Two"]
+    assert delete_session(kb_dir, session.id)
+    with pytest.raises(FileNotFoundError):
+        session.record_turn("Three", "Must not resurrect", [])

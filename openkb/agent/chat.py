@@ -937,66 +937,74 @@ async def iter_chat_turn_events(
     the turn into the session (history + counts) before re-emitting it with
     ``session_id``/``turn_count``.
     """
-    new_input = session.history + [{"role": "user", "content": user_input}]
+    from openkb.locks import async_kb_lock, async_session_lock
 
-    # Accumulate the ordered, interleaved trace (narration text + tool reads) in
-    # SSE arrival order, mirroring the frontend's live fold, so a RESTORED turn
-    # renders step-by-step identically instead of collapsing to one text block.
-    # Persisted per turn via record_turn(trace=...). Only READ tools go into the
-    # trace (see _TRACE_READ_TOOLS): they are all the frontend renders, and
-    # recording a non-read tool like write_file would persist its full `content`
-    # argument (the whole generated file) into the session JSON and ship it to
-    # the browser on restore only to be dropped — the same large-payload waste
-    # the `final` frame already avoids by stripping history.
-    trace: list[dict[str, Any]] = []
+    kb_dir = session.path.parent.parent.parent
+    async with async_session_lock(kb_dir, session.id):
+        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+            session.reload()
+            new_input = session.history + [{"role": "user", "content": user_input}]
 
-    async for event in iter_agent_response_events(
-        agent, new_input, max_turns=MAX_TURNS, run_config=run_config
-    ):
-        kind = event["event"]
-        if kind == "delta":
-            text = event["data"].get("text", "")
-            if text:
-                if trace and trace[-1].get("kind") == "text":
-                    trace[-1]["text"] += text
-                else:
-                    trace.append({"kind": "text", "text": text})
-            yield event
-            continue
-        if kind == "tool_call":
-            d = event["data"]
-            # Record only read-tool calls (the frontend renders nothing else);
-            # this keeps write_file's large `content` argument out of the
-            # persisted trace and off the restore wire.
-            if d.get("name") in _TRACE_READ_TOOLS:
-                trace.append(
-                    {"kind": "tool", "name": d.get("name"), "arguments": d.get("arguments")}
-                )
-            yield event
-            continue
-        if kind != "final":
-            yield event
-            continue
+            # Accumulate the ordered, interleaved trace (narration text + tool reads) in
+            # SSE arrival order, mirroring the frontend's live fold, so a RESTORED turn
+            # renders step-by-step identically instead of collapsing to one text block.
+            # Persisted per turn via record_turn(trace=...). Only READ tools go into the
+            # trace (see _TRACE_READ_TOOLS): they are all the frontend renders, and
+            # recording a non-read tool like write_file would persist its full `content`
+            # argument (the whole generated file) into the session JSON and ship it to
+            # the browser on restore only to be dropped — the same large-payload waste
+            # the `final` frame already avoids by stripping history.
+            trace: list[dict[str, Any]] = []
 
-        data = event["data"]
-        answer = data["answer"]
-        # If the model streamed no *substantive* text (answer came from
-        # final_output, or the only streamed deltas were whitespace like " " /
-        # "\n"), ensure the answer still lands in the trace so the restored turn
-        # is not empty. A whitespace-only delta creates a text step, so guarding
-        # on mere presence of a text step would wrongly treat that empty step as
-        # the answer; require a text step with non-whitespace content instead.
-        if answer and not any(s.get("kind") == "text" and s.get("text", "").strip() for s in trace):
-            trace.append({"kind": "text", "text": answer})
-        session.record_turn(user_input, answer, data["history"], trace=trace)
-        yield {
-            "event": "final",
-            "data": {
-                "answer": answer,
-                "session_id": session.id,
-                "turn_count": session.turn_count,
-            },
-        }
+            async for event in iter_agent_response_events(
+                agent, new_input, max_turns=MAX_TURNS, run_config=run_config
+            ):
+                kind = event["event"]
+                if kind == "delta":
+                    text = event["data"].get("text", "")
+                    if text:
+                        if trace and trace[-1].get("kind") == "text":
+                            trace[-1]["text"] += text
+                        else:
+                            trace.append({"kind": "text", "text": text})
+                    yield event
+                    continue
+                if kind == "tool_call":
+                    d = event["data"]
+                    # Record only read-tool calls (the frontend renders nothing else);
+                    # this keeps write_file's large `content` argument out of the
+                    # persisted trace and off the restore wire.
+                    if d.get("name") in _TRACE_READ_TOOLS:
+                        trace.append(
+                            {"kind": "tool", "name": d.get("name"), "arguments": d.get("arguments")}
+                        )
+                    yield event
+                    continue
+                if kind != "final":
+                    yield event
+                    continue
+
+                data = event["data"]
+                answer = data["answer"]
+                # If the model streamed no *substantive* text (answer came from
+                # final_output, or the only streamed deltas were whitespace like " " /
+                # "\n"), ensure the answer still lands in the trace so the restored turn
+                # is not empty. A whitespace-only delta creates a text step, so guarding
+                # on mere presence of a text step would wrongly treat that empty step as
+                # the answer; require a text step with non-whitespace content instead.
+                if answer and not any(
+                    s.get("kind") == "text" and s.get("text", "").strip() for s in trace
+                ):
+                    trace.append({"kind": "text", "text": answer})
+                session.record_turn(user_input, answer, data["history"], trace=trace)
+                yield {
+                    "event": "final",
+                    "data": {
+                        "answer": answer,
+                        "session_id": session.id,
+                        "turn_count": session.turn_count,
+                    },
+                }
 
 
 async def run_chat(
@@ -1058,12 +1066,14 @@ async def run_chat(
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue
 
-        from openkb.locks import kb_ingest_lock
+        from openkb.locks import async_kb_lock, async_session_lock
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
-            append_log(kb_dir / "wiki", "query", user_input)
         try:
-            await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
+            async with async_session_lock(kb_dir, session.id):
+                async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+                    session.reload()
+                    append_log(kb_dir / "wiki", "query", user_input)
+                    await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))
         except Exception as exc:

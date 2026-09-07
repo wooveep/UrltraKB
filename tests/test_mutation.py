@@ -392,13 +392,8 @@ def test_hardlink_falls_back_to_copy_on_eacces(tmp_path, monkeypatch):
 # --- recover_pending_journals: bounded retry (pre-existing issue) ----------
 
 
-def test_recovery_gives_up_on_persistently_failing_journal(tmp_path, monkeypatch):
-    """A journal whose rollback keeps failing (e.g. persistent ENOSPC) must
-    not be retried forever — otherwise the backup dir + journal leak and every
-    future lock acquisition re-attempts the same failing rollback. After
-    MAX_ROLLBACK_ATTEMPTS failed attempts recovery discards it with a loud
-    message so a human can intervene, bounding the on-disk retention.
-    """
+def test_recovery_failure_retains_journal_and_blocks_subsequent_operations(tmp_path, monkeypatch):
+    """Issue #8 L5: preserve recovery evidence and stop ordinary modifications."""
     import openkb.mutation as mut
 
     kb_dir = tmp_path
@@ -416,12 +411,13 @@ def test_recovery_gives_up_on_persistently_failing_journal(tmp_path, monkeypatch
 
     monkeypatch.setattr(mut.MutationSnapshot, "rollback", boom)
 
-    for _ in range(mut.MAX_ROLLBACK_ATTEMPTS + 1):
-        recover_pending_journals(kb_dir)
-
-    # Given up + discarded, not retained forever.
+    for _ in range(6):
+        with pytest.raises(mut.RecoveryRequired, match="needs repair"):
+            recover_pending_journals(kb_dir)
     journal_dir = kb_dir / ".openkb" / "journal"
-    assert not any(journal_dir.glob("*.json"))
+    assert len(list(journal_dir.glob("*.json"))) == 1
+    assert list((kb_dir / ".openkb/staging").glob("rollback-*"))
+    assert target.read_text() == "after"
 
 
 @pytest.mark.parametrize(
@@ -433,31 +429,22 @@ def test_recovery_gives_up_on_persistently_failing_journal(tmp_path, monkeypatch
         '{"not": "a journal"}',  # valid JSON, wrong shape -> KeyError
     ],
 )
-def test_recover_skips_malformed_journal_without_bricking_lock(tmp_path, payload):
-    """A corrupt/empty/stray .json in journal/ must not crash recovery.
-
-    ``snapshot`` is assigned inside the try (after json.loads /
-    _snapshot_from_journal), but the except block referenced it unconditionally
-    — so a single malformed journal raised NameError out of recovery, and thus
-    out of every exclusive kb_lock acquisition (draining runs on first
-    acquisition), bricking add/remove/recompile/chat for the whole KB. Recovery
-    must instead drop the unrecoverable journal, log loudly, and keep going so
-    the lock still acquires.
-    """
+def test_malformed_journal_blocks_writes_without_destroying_evidence(tmp_path, payload):
+    """The approved repair barrier replaces the old discard-and-continue policy."""
     from openkb.locks import kb_ingest_lock
+    from openkb.mutation import RecoveryRequired
 
     kb_dir = tmp_path
     journal_dir = kb_dir / ".openkb" / "journal"
     journal_dir.mkdir(parents=True)
     (journal_dir / "deadbeef.json").write_text(payload, encoding="utf-8")
 
-    messages = recover_pending_journals(kb_dir)  # must not raise NameError
-    assert any("Unrecoverable mutation journal" in m for m in messages)
-    assert not any(journal_dir.glob("*.json"))  # bad journal removed, not retained
-
-    # The whole point: the KB's mutation lock still acquires afterwards.
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        pass
+    with pytest.raises(RecoveryRequired, match="needs repair"):
+        recover_pending_journals(kb_dir)
+    assert (journal_dir / "deadbeef.json").read_text() == payload
+    with pytest.raises(RecoveryRequired, match="needs repair"):
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            pytest.fail("A knowledge base needing repair must not accept writes")
 
 
 # --- O(touched) rollback for hardlinked dirs (pre-existing issue) ----------
