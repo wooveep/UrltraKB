@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from agents import Agent, Runner, function_tool
@@ -104,7 +105,12 @@ def build_lint_agent(
 
 
 async def run_knowledge_lint(
-    kb_dir: Path, model: str, *, bundle: LlmCredentialBundle | None = None, run_config=None
+    kb_dir: Path,
+    model: str,
+    *,
+    bundle: LlmCredentialBundle | None = None,
+    run_config=None,
+    on_issue: Callable[[str], None] | None = None,
 ) -> str:
     """Run the semantic knowledge lint agent against the wiki.
 
@@ -135,4 +141,10 @@ async def run_knowledge_lint(
         if run_config
         else await Runner.run(agent, prompt, max_turns=MAX_TURNS)
     )
-    return result.final_output or "Knowledge lint completed. No output produced."
+    output = result.final_output
+    if output is not None and not isinstance(output, str):
+        raise ValueError("Semantic report must be text")
+    if not output or not output.strip():
+        if on_issue:
+            on_issue("semantic_report_missing")
+    return output or "Knowledge lint completed. No output produced."

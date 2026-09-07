@@ -9,6 +9,17 @@ from openkb.cli import cli
 from openkb.schema import AGENTS_MD
 
 
+def test_lint_fix_keeps_repairs_when_later_model_setup_fails(kb_dir):
+    (kb_dir / ".openkb/hashes.json").write_text('{"document": {}}')
+    page = kb_dir / "wiki/concepts/topic.md"
+    page.write_text("# Topic\n[[concepts/missing]]")
+    (kb_dir / ".env").write_bytes(b"\xff")
+    result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "lint", "--fix"])
+    assert result.exit_code != 0
+    assert "[[concepts/missing]]" not in page.read_text()
+    assert "Fixed 1 wikilink(s) across 1 file(s)." in result.output
+
+
 def test_version_flag_reports_installed_version():
     import importlib.metadata
 
