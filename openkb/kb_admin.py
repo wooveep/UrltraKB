@@ -46,24 +46,84 @@ def unregister_kb(kb_path: Path) -> None:
             config._atomic_yaml_dump(config.GLOBAL_CONFIG_PATH, gc)
 
 
-def delete_kb(kb_dir: Path) -> None:
+def resolve_deletion_alias(name: str) -> Path:
+    """Use the existing name policy, validating its original registered path."""
+    import os
+
+    from openkb.lifecycle import deletion_target
+
+    name = config.validate_kb_name(name)
+    with config._with_global_config_lock():
+        values = config.load_global_config()
+        target = config.resolve_kb_alias(name)
+
+        def validated(path: Path) -> Path:
+            resolved = deletion_target(path)
+            if resolved != target:
+                raise ValueError("Knowledge-base path changed during name resolution")
+            return resolved
+
+        aliases = values.get("kb_aliases", {})
+        alias = aliases.get(name) if isinstance(aliases, dict) else None
+        if isinstance(alias, str):
+            return validated(Path(alias))
+        raw_root = os.environ.get("OPENKB_KB_ROOT") or values.get("kb_root")
+        if not isinstance(raw_root, str) or not raw_root.strip():
+            raw_root = str(config.GLOBAL_CONFIG_DIR / "kbs")
+        candidate = Path(raw_root).expanduser() / name
+        if candidate.resolve() == target:
+            return validated(candidate)
+        known = values.get("known_kbs", [])
+        if isinstance(known, list):
+            for raw in known:
+                if isinstance(raw, str) and Path(raw).expanduser().resolve() == target:
+                    return validated(Path(raw))
+        return validated(target)
+
+
+def delete_kb(kb_dir: Path, *, generation: str | None = None, cancelled=None, on_wait=None) -> None:
     """Physically delete a KB directory and unregister it (irreversible; the
     CALLER confirms). An existing ``kb_dir`` MUST be a KB (``.openkb`` + ``wiki``)
     or :class:`ValueError` is raised and nothing removed; a ghost entry
     (directory already gone) is tolerated — no ``rmtree``, just unregistered.
     """
-    kb_dir = kb_dir.resolve()
-    if kb_dir.exists():
-        if not config._is_kb_dir(kb_dir):
-            raise ValueError(f"Refusing to delete: not a knowledge base directory: {kb_dir}")
-        # Serialize against in-flight ingest/recompile by acquiring the ingest
-        # lock as a BARRIER (it drains pending journals and waits out any active
-        # mutation), then RELEASING it before rmtree. The lock file lives INSIDE
-        # kb_dir and Windows cannot delete a still-open file, so it must not be
-        # held during rmtree. Re-check existence in case a concurrent delete won
-        # the race while we waited on the barrier.
-        with kb_ingest_lock(kb_dir / ".openkb"):
-            pass
-        if kb_dir.exists():
+    import uuid
+
+    from openkb.lifecycle import (
+        LifecycleState,
+        deletion_binding,
+        deletion_target,
+        directory_identity,
+        exclusive_lifecycle,
+        read_state,
+        write_state,
+    )
+
+    requested = kb_dir
+    kb_dir = deletion_target(requested)
+    expected_directory = directory_identity(kb_dir)
+    expected_generation = read_state(kb_dir).generation
+    with exclusive_lifecycle(kb_dir, cancelled=cancelled, on_wait=on_wait):
+        previous = read_state(kb_dir)
+        if (
+            deletion_target(requested) != kb_dir
+            or directory_identity(kb_dir) != expected_directory
+            or previous.generation != expected_generation
+            or (generation is not None and deletion_binding(kb_dir) != generation)
+        ):
+            raise ValueError("Refusing to delete a replaced directory; review the current target")
+        exists = kb_dir.exists()
+        if previous.status == "deleting":
+            if exists and directory_identity(kb_dir) != previous.directory:
+                raise ValueError("Refusing to resume deletion of a replaced directory")
+        elif exists:
+            if not config._is_kb_dir(kb_dir):
+                raise ValueError(f"Refusing to delete: not a knowledge base directory: {kb_dir}")
+            with kb_ingest_lock(kb_dir / ".openkb"):
+                pass  # Recover while the internal handle can still be opened.
+        state = LifecycleState(uuid.uuid4().hex, "deleting", directory_identity(kb_dir))
+        write_state(kb_dir, state)  # Invalidate queued work BEFORE removing any files.
+        if exists:
             shutil.rmtree(kb_dir)
-    unregister_kb(kb_dir)
+        write_state(kb_dir, LifecycleState(state.generation, "absent"))
+        unregister_kb(kb_dir)

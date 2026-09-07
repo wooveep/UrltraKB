@@ -15,8 +15,8 @@ from starlette.concurrency import run_in_threadpool
 
 from openkb.api_helpers import _is_kb_dir, require_bearer_token
 from openkb.api_models import KbDeleteRequest, KbDeleteResponse
-from openkb.config import registered_kbs, resolve_kb_alias
-from openkb.kb_admin import delete_kb
+from openkb.config import registered_kbs
+from openkb.kb_admin import delete_kb, resolve_deletion_alias
 
 kbs_router = APIRouter()
 
@@ -32,7 +32,7 @@ async def delete_kb_endpoint(
     if request.confirm_name != request.kb:
         raise HTTPException(status_code=400, detail="confirm_name does not match the KB name.")
     try:
-        kb_dir = await asyncio.to_thread(resolve_kb_alias, request.kb)
+        kb_dir = await asyncio.to_thread(resolve_deletion_alias, request.kb)
     except ValueError as exc:  # malformed name
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Accept a live KB dir OR a registered name whose directory is already gone

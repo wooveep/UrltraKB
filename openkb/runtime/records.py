@@ -164,6 +164,7 @@ class UnitIdentity:
     kb_dir: str
     request_hash: str
     version: int = PROTOCOL_VERSION
+    generation: str | None = None
 
     def __post_init__(self) -> None:
         if self.version != PROTOCOL_VERSION or not re.fullmatch(r"[0-9a-f]{32}", self.task_id):
@@ -174,12 +175,24 @@ class UnitIdentity:
             raise ValueError("Invalid execution identity")
         if not isinstance(self.kb_dir, str) or not Path(self.kb_dir).is_absolute():
             raise ValueError("Invalid knowledge-base identity")
+        if self.generation is not None and (
+            not isinstance(self.generation, str) or not self.generation
+        ):
+            raise ValueError("Invalid knowledge-base generation")
 
     @classmethod
-    def create(cls, task_id: str, index: int, kb_dir: str, request: UnitRequest) -> UnitIdentity:
+    def create(
+        cls,
+        task_id: str,
+        index: int,
+        kb_dir: str,
+        request: UnitRequest,
+        *,
+        generation: str | None = None,
+    ) -> UnitIdentity:
         payload = json.dumps(asdict(request), sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha256((type(request).__name__ + payload).encode()).hexdigest()
-        return cls(task_id, str(index), kb_dir, digest)
+        return cls(task_id, str(index), kb_dir, digest, generation=generation)
 
 
 def save_receipt(directory: Path, identity: UnitIdentity, result: UnitResult) -> None:
@@ -192,7 +205,7 @@ def save_receipt(directory: Path, identity: UnitIdentity, result: UnitResult) ->
 def read_receipt(directory: Path, identity: UnitIdentity) -> UnitResult | None:
     try:
         value = json.loads((directory / identity.task_id / f"{identity.unit_id}.json").read_text())
-        if value["identity"] != asdict(identity):
+        if UnitIdentity(**value["identity"]) != identity:
             return None
         return UnitResult.from_summary(value["result"])
     except (OSError, ValueError, KeyError, TypeError):
