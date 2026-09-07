@@ -86,6 +86,25 @@ class RecompileDocument:
             raise ValueError("Choose an indexed document to recompile")
 
 
+@dataclass(frozen=True)
+class DeleteConversation:
+    session_id: str
+    version: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not self.session_id or not self.version:
+            raise ValueError("Conversation deletion requires a confirmed completed history")
+
+
+@dataclass(frozen=True)
+class ExportConversation:
+    session_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not self.session_id:
+            raise ValueError("Select a completed conversation to export")
+
+
 UnitRequest = (
     SavePage
     | AskQuestion
@@ -94,6 +113,8 @@ UnitRequest = (
     | ImportUrl
     | RemoveDocument
     | RecompileDocument
+    | DeleteConversation
+    | ExportConversation
 )
 REQUEST_TYPES = (
     SavePage,
@@ -103,4 +124,6 @@ REQUEST_TYPES = (
     ImportUrl,
     RemoveDocument,
     RecompileDocument,
+    DeleteConversation,
+    ExportConversation,
 )

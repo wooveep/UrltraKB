@@ -314,12 +314,26 @@ def _session_lease(kb_dir: Path, session_id: str) -> _Lease:
 
 
 @contextlib.contextmanager
-def session_lock(kb_dir: Path, session_id: str) -> Iterator[None]:
+def session_lock(
+    kb_dir: Path,
+    session_id: str,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    on_wait: Callable[[], None] | None = None,
+) -> Iterator[None]:
     """Conversation identity survives deletion; acquire this before the KB lock."""
     lease = _session_lease(kb_dir, session_id)
+    notified = False
     try:
-        while not lease.try_acquire():
+        while True:
+            _check_wait(cancelled, None)
+            if lease.try_acquire():
+                break
+            if on_wait and not notified:
+                on_wait()
+                notified = True
             time.sleep(0.05)
+        _check_wait(cancelled, None)
         yield
     finally:
         lease.release()

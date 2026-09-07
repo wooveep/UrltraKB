@@ -13,6 +13,8 @@ from openkb.runtime.records import UnitIdentity, UnitResult, save_receipt
 from openkb.runtime.requests import (
     AskQuestion,
     ContinueConversation,
+    DeleteConversation,
+    ExportConversation,
     ImportFile,
     ImportUrl,
     RecompileDocument,
@@ -99,6 +101,29 @@ def _execute(
                     revision=saved.page.version if saved.page else None,
                     page=saved.page if saved.status == "saved" else None,
                 )
+    if isinstance(request, (DeleteConversation, ExportConversation)):
+        from openkb.application.sessions import delete_conversation, export_conversation
+
+        session_result = (
+            delete_conversation(root, request.session_id, version=request.version, context=context)
+            if isinstance(request, DeleteConversation)
+            else export_conversation(root, request.session_id, unique=True, context=context)
+        )
+        return UnitResult(
+            "completed"
+            if session_result.status in {"deleted", "exported"}
+            else "skipped"
+            if session_result.status == "missing"
+            else "failed",
+            resources=session_result.resources,
+            changes=session_result.changes,
+            session_id=request.session_id,
+            error="Conversation changed; review its latest completed history"
+            if session_result.status == "conflict"
+            else "Conversation no longer exists; no change was made"
+            if session_result.status == "missing"
+            else None,
+        )
     context.install_process_settings = True
     if isinstance(request, RecompileDocument):
         import asyncio
