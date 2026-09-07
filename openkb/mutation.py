@@ -16,11 +16,13 @@ from openkb.locks import _fsync_directory, _target_mode, atomic_write_json
 
 logger = logging.getLogger(__name__)
 
-# Cap how many times recover_pending_journals retries an active journal whose
-# rollback keeps failing. Without a cap, a deterministically-failing rollback
-# (e.g. persistent ENOSPC) is retried on every lock acquisition forever,
-# re-doing the failed work and never releasing the backup dir + journal.
-MAX_ROLLBACK_ATTEMPTS = 5
+
+class RecoveryRequired(RuntimeError):
+    """The KB needs explicit repair before normal reads or writes can resume."""
+
+
+def repair_marker(kb_dir: Path) -> Path:
+    return kb_dir / ".openkb" / "needs-repair.json"
 
 
 def _apply_mode(path: Path, mode: int) -> None:
@@ -384,8 +386,39 @@ def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:
     return snapshot
 
 
+def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
+    """Validate every path and backup before recovery changes any live content."""
+    root = kb_dir.resolve()
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise ValueError("Unknown mutation journal format")
+    if Path(data["kb_dir"]).resolve() != root:
+        raise ValueError("Mutation journal belongs to another knowledge base")
+    backup_dir = Path(data["backup_dir"]).resolve()
+    staging = root / ".openkb" / "staging"
+    if not backup_dir.is_relative_to(staging) or backup_dir == staging:
+        raise ValueError("Invalid mutation backup directory")
+    if data.get("status") not in {"active", "committed", "rolled_back"}:
+        raise ValueError("Unknown mutation journal status")
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("Invalid mutation entries")
+    for entry in entries:
+        target = Path(entry["target"]).resolve()
+        if not target.is_relative_to(root) or target == root:
+            raise ValueError("Mutation target is outside the knowledge base")
+        backup = entry.get("backup")
+        if backup is not None:
+            source = Path(backup).resolve()
+            if not source.is_relative_to(backup_dir) or source == backup_dir:
+                raise ValueError("Mutation backup is outside its staging directory")
+            if data["status"] == "active" and not source.exists():
+                raise ValueError("Mutation backup is missing; live content was not removed")
+
+
 def recover_pending_journals(kb_dir: Path) -> list[str]:
     """Rollback active journals left by an interrupted process."""
+    if repair_marker(kb_dir).exists():
+        raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
     journal_dir = kb_dir / ".openkb" / "journal"
     if not journal_dir.is_dir():
         return []
@@ -394,6 +427,7 @@ def recover_pending_journals(kb_dir: Path) -> list[str]:
         snapshot: MutationSnapshot | None = None
         try:
             data = json.loads(journal_path.read_text(encoding="utf-8"))
+            _validate_recovery_data(kb_dir, data)
             snapshot = _snapshot_from_journal(journal_path, data)
             status = data.get("status", "active")
             if status in {"committed", "rolled_back"}:
@@ -406,41 +440,22 @@ def recover_pending_journals(kb_dir: Path) -> list[str]:
                 f"Rolled back interrupted {snapshot.operation} journal {journal_path.name}."
             )
         except Exception as exc:
-            if snapshot is None:
-                # The journal couldn't be read or reconstructed (corrupt/empty/
-                # stray .json, or missing the kb_dir/backup_dir keys recovery
-                # needs). There is nothing to roll back or retry — and leaving
-                # it in place would re-trigger this failure on every future lock
-                # acquisition (draining runs on first exclusive acquisition),
-                # bricking add/remove/recompile/chat for the whole KB. Best-effort
-                # remove the unrecoverable journal and log loudly; any backup_dir
-                # it referenced is unreachable now and may leak.
-                journal_path.unlink(missing_ok=True)
-                messages.append(
-                    f"Unrecoverable mutation journal {journal_path.name} "
-                    f"({type(exc).__name__}: {exc}); removed so it can't block "
-                    f"recovery. The KB may need manual review."
+            # Never discard evidence or repeatedly retry partial recovery during
+            # ordinary operations. All adapters see this durable repair barrier.
+            try:
+                atomic_write_json(
+                    repair_marker(kb_dir),
+                    {
+                        "journal": journal_path.name,
+                        "error_type": type(exc).__name__,
+                    },
                 )
-                continue
-            # Rollback failed. Retry a bounded number of times across recovery
-            # runs (a later attempt may succeed once the cause clears, e.g. disk
-            # space freed), then give up: discard the journal + backup and log
-            # loudly so it can't leak forever re-doing the same failing rollback.
-            snapshot.attempts += 1
-            if snapshot.attempts >= MAX_ROLLBACK_ATTEMPTS:
-                snapshot.discard()
-                messages.append(
-                    f"GAVE UP on {snapshot.operation} journal {journal_path.name} after "
-                    f"{snapshot.attempts} failed rollback(s): {type(exc).__name__}: {exc}. "
-                    f"The KB may be in a partially-rolled-back state — manual review needed."
-                )
-            else:
-                snapshot.write_journal("active")  # persist incremented attempts
-                messages.append(
-                    f"Rollback of {snapshot.operation} journal {journal_path.name} failed "
-                    f"(attempt {snapshot.attempts}/{MAX_ROLLBACK_ATTEMPTS}): "
-                    f"{type(exc).__name__}: {exc}; retained for retry."
-                )
+            except OSError:
+                logger.exception("Could not persist knowledge-base repair status")
+            raise RecoveryRequired(
+                f"Knowledge base needs repair: {kb_dir}; "
+                f"journal and backups retained ({journal_path.name})"
+            ) from exc
     return messages
 
 

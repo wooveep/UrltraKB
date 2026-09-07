@@ -30,7 +30,8 @@ from typing import Any
 
 from watchdog.observers import Observer
 
-from openkb.cli import SUPPORTED_EXTENSIONS, _add_for_api
+from openkb.application.documents import _add_for_api
+from openkb.cli import SUPPORTED_EXTENSIONS
 from openkb.config import LlmCredentialBundle, resolve_credential_bundle
 from openkb.watcher import start_watch
 

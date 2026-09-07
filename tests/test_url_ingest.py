@@ -508,7 +508,7 @@ def test_add_single_file_returns_added_on_success(tmp_path):
         return None
 
     with (
-        patch("openkb.cli.convert_document", return_value=mock_result),
+        patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.agent.compiler.compile_short_doc", new=compile_noop),
     ):
         outcome = add_single_file(doc, tmp_path)
@@ -528,7 +528,7 @@ def test_add_single_file_returns_skipped_on_dedup(tmp_path):
     doc.write_text("# Hello")
 
     skipped = ConvertResult(skipped=True)
-    with patch("openkb.cli.convert_document", return_value=skipped):
+    with patch("openkb.application.documents.convert_document", return_value=skipped):
         outcome = add_single_file(doc, tmp_path)
 
     assert outcome == "skipped"
@@ -566,7 +566,7 @@ def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
 
     # Make both compile attempts raise to drive the failure path.
     with (
-        patch("openkb.cli.convert_document", return_value=mock_result),
+        patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
         patch("openkb.cli.time.sleep"),
     ):
@@ -600,7 +600,10 @@ def test_url_ingest_cleans_up_orphan_on_dedup_skip(tmp_path, monkeypatch):
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
         patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
-        patch("openkb.cli.convert_document", return_value=ConvertResult(skipped=True)),
+        patch(
+            "openkb.application.documents.convert_document",
+            return_value=ConvertResult(skipped=True),
+        ),
     ):
         result = runner.invoke(cli, ["add", "https://example.com/paper.pdf"])
 
@@ -678,7 +681,7 @@ def test_url_ingest_keeps_raw_file_on_pipeline_failure(tmp_path):
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
         patch("openkb.url_ingest.fetch_url_to_raw", return_value=fetched_path),
-        patch("openkb.cli.convert_document", return_value=mock_result),
+        patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
         patch("openkb.cli.time.sleep"),
     ):

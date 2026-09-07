@@ -8,12 +8,16 @@ inconsistent.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import tempfile
 import threading
+import time
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import IO, Iterator
 
@@ -43,155 +47,262 @@ def funlock(fh: IO) -> None:
 
 
 _LOCKS_GUARD = threading.Lock()
-_LOCAL_LOCKS: dict[Path, "_LocalRwLock"] = {}
-_HELD_LOCKS = threading.local()
+# An asyncio task is part of ownership: copied contexts and sibling tasks on
+# the same thread must never inherit another operation's reentrant privilege.
+_HELD_LOCKS: dict[tuple[Path, int, object], tuple[int, bool, IO]] = {}
 
 
-class _LocalRwLock:
-    def __init__(self) -> None:
-        self._condition = threading.Condition(threading.Lock())
-        self._readers = 0
-        self._writer = False
-
-    @contextlib.contextmanager
-    def read(self) -> Iterator[None]:
-        with self._condition:
-            while self._writer:
-                self._condition.wait()
-            self._readers += 1
-        try:
-            yield
-        finally:
-            with self._condition:
-                self._readers -= 1
-                if self._readers == 0:
-                    self._condition.notify_all()
-
-    @contextlib.contextmanager
-    def write(self) -> Iterator[None]:
-        with self._condition:
-            while self._writer or self._readers:
-                self._condition.wait()
-            self._writer = True
-        try:
-            yield
-        finally:
-            with self._condition:
-                self._writer = False
-                self._condition.notify_all()
+class LockCancelled(RuntimeError):
+    """Execution was stopped before it obtained permission to write."""
 
 
-def _held_locks() -> dict[Path, tuple[int, int]]:
-    held = getattr(_HELD_LOCKS, "counts", None)
-    if held is None:
-        held = {}
-        _HELD_LOCKS.counts = held
-    return held
+def _owner() -> tuple[int, object]:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    return threading.get_ident(), task
 
 
-def _local_lock(lock_path: Path) -> _LocalRwLock:
-    resolved = lock_path.resolve()
-    with _LOCKS_GUARD:
-        lock = _LOCAL_LOCKS.get(resolved)
-        if lock is None:
-            lock = _LocalRwLock()
-            _LOCAL_LOCKS[resolved] = lock
-        return lock
+class _Lease:
+    def __init__(self, path: Path, exclusive: bool) -> None:
+        self.path = path.resolve()
+        self.exclusive = exclusive
+        self.key = (self.path, *_owner())
+        self.acquired = False
+        self.first = False
+
+    def try_acquire(self) -> bool:
+        with _LOCKS_GUARD:
+            held = _HELD_LOCKS.get(self.key)
+            if held:
+                depth, exclusive, fh = held
+                if self.exclusive and not exclusive:
+                    raise RuntimeError("Cannot upgrade an existing KB read lock to a write lock")
+                _HELD_LOCKS[self.key] = (depth + 1, exclusive, fh)
+                self.acquired = True
+                return True
+            for key, (_, exclusive, _) in _HELD_LOCKS.items():
+                if key[0] == self.path and (self.exclusive or exclusive):
+                    return False
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fh = self.path.open("a+", encoding="utf-8")
+            flags = portalocker.LOCK_EX if self.exclusive else portalocker.LOCK_SH
+            try:
+                portalocker.lock(fh, flags | portalocker.LOCK_NB)
+            except portalocker.exceptions.AlreadyLocked:
+                fh.close()
+                return False
+            except BaseException:
+                fh.close()
+                raise
+            _HELD_LOCKS[self.key] = (1, self.exclusive, fh)
+            self.acquired = self.first = True
+            return True
+
+    def release(self) -> None:
+        if not self.acquired:
+            return
+        with _LOCKS_GUARD:
+            depth, exclusive, fh = _HELD_LOCKS[self.key]
+            if depth > 1:
+                _HELD_LOCKS[self.key] = (depth - 1, exclusive, fh)
+            else:
+                try:
+                    funlock(fh)
+                finally:
+                    fh.close()
+                    del _HELD_LOCKS[self.key]
+            self.acquired = False
+
+
+def _check_wait(cancelled: Callable[[], bool] | None, deadline: float | None) -> None:
+    if cancelled is not None and cancelled():
+        raise LockCancelled("Stopped while waiting for knowledge-base execution")
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError("Timed out waiting for knowledge-base execution")
 
 
 def _drain_pending_journals(openkb_dir: Path) -> None:
-    """Roll back any mutation journals an interrupted process left behind.
-
-    Draining recovery is part of *taking* the mutation lock, not part of any
-    one command: a process that acquires the exclusive lock must restore the
-    KB to a known state before mutating it. Wiring this into ``kb_lock`` means
-    every exclusive-lock holder — ``add``, ``remove``, ``recompile``, ``lint``,
-    ``chat`` — drains on first acquisition, so an ``add`` that crashed mid-
-    commit cannot leave an active journal on disk that a later ``add`` rolls
-    back over the top of an intervening ``remove``/``recompile`` (clobbering
-    those edits). ``openkb_dir`` is the ``kb_dir/.openkb`` directory callers
-    pass to ``kb_lock``; the journal lives at ``openkb_dir/journal``, so the
-    KB root is ``openkb_dir.parent``.
-
-    The delayed import breaks the ``locks`` ↔ ``mutation`` cycle (``mutation``
-    imports atomic-write helpers from this module at top level). Called only
-    on first OS-lock acquisition (the reentrant branch above returns early),
-    never on a read lock, so queries pay nothing.
-    """
     from openkb.mutation import recover_pending_journals
 
-    log = logging.getLogger(__name__)
     for message in recover_pending_journals(openkb_dir.parent):
-        log.warning(message)
+        logging.getLogger(__name__).warning(message)
+
+
+def _pending_recovery(openkb_dir: Path) -> bool:
+    return (openkb_dir / "needs-repair.json").exists() or any(
+        (openkb_dir / "journal").glob("*.json")
+    )
 
 
 @contextlib.contextmanager
-def kb_lock(openkb_dir: Path, *, exclusive: bool) -> Iterator[None]:
-    """Hold a KB-level advisory lock."""
-    lock_path = openkb_dir / "ingest.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved = lock_path.resolve()
-    held = _held_locks()
-    exclusive_depth, shared_depth = held.get(resolved, (0, 0))
+def kb_lock(
+    openkb_dir: Path,
+    *,
+    exclusive: bool,
+    cancelled: Callable[[], bool] | None = None,
+    on_wait: Callable[[], None] | None = None,
+    deadline: float | None = None,
+) -> Iterator[None]:
+    """Hold a canonical KB lock with cancellable, unbounded contention waiting.
 
-    if exclusive_depth or shared_depth:
-        if exclusive and not exclusive_depth:
-            raise RuntimeError("Cannot upgrade an existing KB read lock to a write lock")
-        held[resolved] = (
-            exclusive_depth + (1 if exclusive else 0),
-            shared_depth + (0 if exclusive else 1),
-        )
-        try:
-            yield
-        finally:
-            current_exclusive, current_shared = held[resolved]
-            next_counts = (
-                current_exclusive - (1 if exclusive else 0),
-                current_shared - (0 if exclusive else 1),
-            )
-            if next_counts == (0, 0):
-                del held[resolved]
-            else:
-                held[resolved] = next_counts
-        return
+    Async entry points use async_kb_lock so contention never blocks their loop.
+    A deadline, if supplied, is an absolute time.monotonic() value.
+    """
+    lease = _Lease(openkb_dir / "ingest.lock", exclusive)
+    notified = False
+    try:
+        while True:
+            _check_wait(cancelled, deadline)
+            if lease.try_acquire():
+                break
+            if on_wait and not notified:
+                on_wait()
+                notified = True
+            time.sleep(0.05)
+        if lease.first:
+            if exclusive:
+                _drain_pending_journals(openkb_dir)
+            elif _pending_recovery(openkb_dir):
+                # Release the read lease before independent exclusive recovery;
+                # never upgrade a held shared lock in place.
+                lease.release()
+                with kb_lock(
+                    openkb_dir,
+                    exclusive=True,
+                    cancelled=cancelled,
+                    on_wait=on_wait,
+                    deadline=deadline,
+                ):
+                    pass
+                with kb_lock(
+                    openkb_dir,
+                    exclusive=False,
+                    cancelled=cancelled,
+                    on_wait=on_wait,
+                    deadline=deadline,
+                ):
+                    yield
+                return
+        _check_wait(cancelled, deadline)
+        yield
+    finally:
+        lease.release()
 
-    local_lock = _local_lock(lock_path)
-    local_context = local_lock.write() if exclusive else local_lock.read()
-    with local_context:
-        with lock_path.open("a+", encoding="utf-8") as fh:
-            flock(fh, exclusive=exclusive)
-            held[resolved] = (1, 0) if exclusive else (0, 1)
-            try:
-                if exclusive:
-                    _drain_pending_journals(openkb_dir)
-                yield
-            finally:
-                held.pop(resolved, None)
-                funlock(fh)
+
+@contextlib.asynccontextmanager
+async def async_kb_lock(
+    openkb_dir: Path,
+    *,
+    exclusive: bool,
+    cancelled: Callable[[], bool] | None = None,
+    on_wait: Callable[[], None] | None = None,
+    deadline: float | None = None,
+) -> AsyncIterator[None]:
+    """Keep acquisition, protected execution and release in the owning task."""
+    lease = _Lease(openkb_dir / "ingest.lock", exclusive)
+    notified = False
+    try:
+        while True:
+            _check_wait(cancelled, deadline)
+            if lease.try_acquire():
+                break
+            if on_wait and not notified:
+                on_wait()
+                notified = True
+            await asyncio.sleep(0.05)
+        if lease.first:
+            if exclusive:
+                _drain_pending_journals(openkb_dir)
+            elif _pending_recovery(openkb_dir):
+                lease.release()
+                async with async_kb_lock(
+                    openkb_dir,
+                    exclusive=True,
+                    cancelled=cancelled,
+                    on_wait=on_wait,
+                    deadline=deadline,
+                ):
+                    pass
+                async with async_kb_lock(
+                    openkb_dir,
+                    exclusive=False,
+                    cancelled=cancelled,
+                    on_wait=on_wait,
+                    deadline=deadline,
+                ):
+                    yield
+                return
+        _check_wait(cancelled, deadline)
+        yield
+    finally:
+        lease.release()
 
 
-def kb_ingest_lock(openkb_dir: Path):
+def kb_ingest_lock(openkb_dir: Path, **kwargs):
     """Hold an exclusive KB mutation lock."""
-    return kb_lock(openkb_dir, exclusive=True)
+    return kb_lock(openkb_dir, exclusive=True, **kwargs)
 
 
-def kb_read_lock(openkb_dir: Path):
-    """Hold a shared KB read lock."""
-    return kb_lock(openkb_dir, exclusive=False)
+def kb_read_lock(openkb_dir: Path, **kwargs):
+    """Read consistent committed content, recovering interrupted mutations first."""
+    return kb_lock(openkb_dir, exclusive=False, **kwargs)
 
 
 def kb_ingest_lock_held(openkb_dir: Path) -> bool:
-    """Return True iff the *current thread* holds the exclusive ingest lock.
+    """Whether this thread AND asyncio task owns exclusive execution."""
+    key = ((openkb_dir / "ingest.lock").resolve(), *_owner())
+    with _LOCKS_GUARD:
+        held = _HELD_LOCKS.get(key)
+        return bool(held and held[1])
 
-    Reentrancy is tracked per-thread (``threading.local``), so a worker thread
-    returns ``False`` even when the main thread holds the lock. Mutation
-    primitives use this to assert they run on the lock-owning thread rather
-    than silently deadlocking on a worker's separate OS ``flock`` acquire.
-    """
-    held = _held_locks()
-    resolved = (openkb_dir / "ingest.lock").resolve()
-    exclusive_depth, _ = held.get(resolved, (0, 0))
-    return exclusive_depth > 0
+
+def _session_lease(kb_dir: Path, session_id: str) -> _Lease:
+    name = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    lease = _Lease(kb_dir / ".openkb/session-locks" / f"{name}.lock", True)
+    with _LOCKS_GUARD:
+        nested = lease.key in _HELD_LOCKS
+    if not nested and kb_ingest_lock_held(kb_dir / ".openkb"):
+        raise RuntimeError("Acquire the conversation lock before the knowledge-base lock")
+    return lease
+
+
+@contextlib.contextmanager
+def session_lock(kb_dir: Path, session_id: str) -> Iterator[None]:
+    """Conversation identity survives deletion; acquire this before the KB lock."""
+    lease = _session_lease(kb_dir, session_id)
+    try:
+        while not lease.try_acquire():
+            time.sleep(0.05)
+        yield
+    finally:
+        lease.release()
+
+
+@contextlib.asynccontextmanager
+async def async_session_lock(
+    kb_dir: Path,
+    session_id: str,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    on_wait: Callable[[], None] | None = None,
+) -> AsyncIterator[None]:
+    lease = _session_lease(kb_dir, session_id)
+    notified = False
+    try:
+        while True:
+            _check_wait(cancelled, None)
+            if lease.try_acquire():
+                break
+            if on_wait and not notified:
+                on_wait()
+                notified = True
+            await asyncio.sleep(0.05)
+        _check_wait(cancelled, None)
+        yield
+    finally:
+        lease.release()
 
 
 def _fsync_directory(path: Path) -> None:

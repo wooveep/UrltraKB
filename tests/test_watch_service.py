@@ -13,7 +13,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from openkb.cli import AddFileResult
+from openkb.application.documents import AddFileResult
 from openkb.watch_service import (
     WatcherState,
     WatchRegistry,

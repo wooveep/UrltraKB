@@ -96,9 +96,8 @@ from openkb.api_models import (
 )
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
+from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.cli import (
-    get_kb_list,
-    get_kb_status,
     iter_recompile,
     run_lint_report,
     run_remove_for_api,
@@ -395,7 +394,7 @@ def create_app() -> FastAPI:
     ) -> ChatSessionDeleteResponse:
         kb_dir = _resolve_kb(request.kb)
         try:
-            deleted = delete_session(kb_dir, request.session_id)
+            deleted = await run_in_threadpool(delete_session, kb_dir, request.session_id)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

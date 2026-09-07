@@ -13,7 +13,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from openkb.api import create_app
-from openkb.cli import AddFileResult
+from openkb.application.documents import AddFileResult
 
 
 def _client(monkeypatch, token: str | None = "secret") -> TestClient:

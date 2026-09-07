@@ -34,10 +34,10 @@ from openkb.api_models import (
     RemoveRequest,
     SkillRequest,
 )
+from openkb.application.documents import _add_for_api
+from openkb.application.knowledge_bases import initialize_kb
 from openkb.cli import (
     SUPPORTED_EXTENSIONS,
-    _add_for_api,
-    initialize_kb,
     iter_recompile,
     run_remove_for_api,
     save_exploration,
@@ -161,6 +161,7 @@ def _init_kb_for_api(
     """
     result = initialize_kb(
         kb_dir,
+        template_dir=Path.cwd(),
         model=model,
         api_key=api_key,
         openai_api_base=openai_api_base,

@@ -773,7 +773,7 @@ def test_add_persists_doc_name_for_later_remove(tmp_path):
     # Mock convert_document + asyncio.run to skip the LLM-driven compile.
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.cli.convert_document", return_value=mock_result),
+        patch("openkb.application.documents.convert_document", return_value=mock_result),
         patch("openkb.cli.asyncio.run"),
     ):
         add_res = runner.invoke(cli, ["add", str(doc)])
@@ -1021,7 +1021,7 @@ def test_add_long_pdf_persists_doc_id_to_registry(tmp_path):
     runner = CliRunner()
     with (
         patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.cli.convert_document", return_value=convert_mock),
+        patch("openkb.application.documents.convert_document", return_value=convert_mock),
         patch("openkb.indexer.index_long_document", return_value=index_mock),
         patch("openkb.cli.asyncio.run"),
     ):

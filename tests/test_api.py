@@ -499,7 +499,7 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.cli import AddFileResult
+    from openkb.application.documents import AddFileResult
 
     calls = []
 
@@ -549,7 +549,7 @@ def test_add_endpoint_runs_real_add_helper_outside_event_loop(monkeypatch, kb_di
         assert target_kb == kb_dir
 
     monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.cli.convert_document", fake_convert)
+    monkeypatch.setattr("openkb.application.documents.convert_document", fake_convert)
     monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fake_compile_short_doc)
 
     response = client.post(
@@ -570,7 +570,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.cli import AddFileResult
+    from openkb.application.documents import AddFileResult
 
     calls = []
 
@@ -635,7 +635,7 @@ def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / "raw" / "paper.md").write_text("existing", encoding="utf-8")
 
-    from openkb.cli import AddFileResult
+    from openkb.application.documents import AddFileResult
 
     def fake_add(path, target_kb, **kwargs):
         return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
@@ -660,7 +660,7 @@ def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.cli import AddFileResult
+    from openkb.application.documents import AddFileResult
 
     skipped_path = None
 
@@ -694,7 +694,7 @@ def test_add_endpoint_streams_events(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.cli import AddFileResult
+    from openkb.application.documents import AddFileResult
 
     def fake_add(path, target_kb, **kwargs):
         return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")

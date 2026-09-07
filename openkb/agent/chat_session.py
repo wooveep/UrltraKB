@@ -9,14 +9,16 @@ references before the history is reused or persisted.
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 import random
 import string
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
 
 _IMAGE_HISTORY_NOTE = "Image output omitted from chat history to avoid persisting raw data URLs."
 
@@ -121,6 +123,7 @@ class ChatSession:
     # CLI-recorded turns): the frontend falls back to the flat text for those.
     assistant_traces: list[list[dict[str, Any]]]
     path: Path
+    _version: str | None = field(default=None, repr=False)
 
     @classmethod
     def new(cls, kb_dir: Path, model: str, language: str) -> "ChatSession":
@@ -157,13 +160,24 @@ class ChatSession:
         }
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-        os.replace(tmp, self.path)
+        kb_dir = self.path.parent.parent.parent
+        with session_lock(kb_dir, self.id), kb_ingest_lock(kb_dir / ".openkb"):
+            if self._version is not None:
+                # Missing is deletion, not permission to recreate this identity.
+                current = self.path.read_text(encoding="utf-8")
+                if hashlib.sha256(current.encode("utf-8")).hexdigest() != self._version:
+                    raise RuntimeError("Conversation changed; reload its latest completed history")
+            elif self.path.exists():
+                raise RuntimeError("Conversation changed; session identity already exists")
+            text = json.dumps(self.to_dict(), ensure_ascii=False, indent=2, default=str)
+            atomic_write_text(self.path, text)
+            self._version = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def reload(self) -> None:
+        """Refresh a continuing session inside its full-turn execution lease."""
+        if self._version is not None or self.path.exists():
+            latest = load_session(self.path.parent.parent.parent, self.id)
+            self.__dict__.update(latest.__dict__)
 
     def record_turn(
         self,
@@ -191,8 +205,9 @@ class ChatSession:
 
 
 def load_session(kb_dir: Path, session_id: str) -> ChatSession:
-    path = chats_dir(kb_dir) / f"{session_id}.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
+    path = _session_path(kb_dir, session_id)
+    text = path.read_text(encoding="utf-8")
+    data = json.loads(text)
     return ChatSession(
         id=data["id"],
         created_at=data["created_at"],
@@ -206,6 +221,7 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         assistant_texts=data.get("assistant_texts", []),
         assistant_traces=data.get("assistant_traces", []),
         path=path,
+        _version=hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
 
 
@@ -261,11 +277,12 @@ def resolve_session_id(kb_dir: Path, query: str) -> str | None:
 
 
 def delete_session(kb_dir: Path, session_id: str) -> bool:
-    path = chats_dir(kb_dir) / f"{session_id}.json"
-    if path.exists():
-        path.unlink()
-        return True
-    return False
+    path = _session_path(kb_dir, session_id)
+    with session_lock(kb_dir, session_id), kb_ingest_lock(kb_dir / ".openkb"):
+        if path.exists():
+            path.unlink()
+            return True
+        return False
 
 
 def relative_time(iso_str: str) -> str:
@@ -285,3 +302,9 @@ def relative_time(iso_str: str) -> str:
     if seconds < 86400 * 7:
         return f"{seconds // 86400}d ago"
     return t.strftime("%Y-%m-%d")
+
+
+def _session_path(kb_dir: Path, session_id: str) -> Path:
+    if not session_id or any(c in session_id for c in "/\\") or session_id.startswith("."):
+        raise ValueError("Invalid conversation ID")
+    return chats_dir(kb_dir) / f"{session_id}.json"

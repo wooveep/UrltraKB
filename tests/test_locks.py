@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import stat
 import threading
@@ -15,6 +16,33 @@ from openkb.locks import (
     kb_ingest_lock_held,
     kb_read_lock,
 )
+
+
+@pytest.mark.asyncio
+async def test_independent_async_writer_waits_and_can_cancel(tmp_path):
+    from openkb.locks import LockCancelled, async_kb_lock
+
+    waiting = asyncio.Event()
+    cancelled = threading.Event()
+    openkb_dir = tmp_path / ".openkb"
+
+    async def competing_writer():
+        with pytest.raises(LockCancelled):
+            async with async_kb_lock(
+                openkb_dir,
+                exclusive=True,
+                cancelled=cancelled.is_set,
+                on_wait=waiting.set,
+            ):
+                pytest.fail("A cancelled waiter must not execute")
+
+    async with async_kb_lock(openkb_dir, exclusive=True):
+        competitor = asyncio.create_task(competing_writer())
+        await asyncio.wait_for(waiting.wait(), timeout=2)
+        cancelled.set()
+        await asyncio.wait_for(competitor, timeout=2)
+        with kb_ingest_lock(openkb_dir):
+            assert kb_ingest_lock_held(openkb_dir)
 
 
 def test_write_lock_is_reentrant(tmp_path):
