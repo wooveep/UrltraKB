@@ -40,12 +40,15 @@ class ContinueConversation:
 @dataclass(frozen=True)
 class ImportFile:
     source: str
+    wait_for_stable: bool = False
 
     def __post_init__(self) -> None:
         from pathlib import Path
 
         if not Path(self.source).is_absolute():
             raise ValueError("Import source must be an absolute path")
+        if type(self.wait_for_stable) is not bool:
+            raise ValueError("Invalid input stability policy")
 
 
 @dataclass(frozen=True)

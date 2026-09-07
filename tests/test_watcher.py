@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from openkb.watcher import DebouncedHandler
+from openkb.watcher import DebouncedHandler, start_watch
 
 
 def _make_file_event(src_path: str, is_directory: bool = False):
@@ -123,3 +123,39 @@ class TestDebouncedHandler:
             handler._timer.cancel()
 
         assert handler._pending == {"/raw/new.pdf", "/raw/existing.md"}
+
+
+def test_atomic_move_uses_destination_and_stop_prevents_late_delivery(tmp_path):
+    import threading
+
+    from watchdog.events import FileMovedEvent
+
+    delivered = threading.Event()
+    received = []
+
+    def callback(paths):
+        received.extend(paths)
+        delivered.set()
+
+    handler = DebouncedHandler(callback, debounce_seconds=0.03)
+    handler.on_moved(FileMovedEvent(str(tmp_path / ".temporary"), str(tmp_path / "final.md")))
+    assert delivered.wait(2)
+    assert received == [str(tmp_path / "final.md")]
+    handler.stop()
+    handler.on_created(_make_file_event(str(tmp_path / "late.md")))
+    assert handler.join(2)
+    assert received == [str(tmp_path / "final.md")]
+
+
+def test_stopped_observer_reaps_pending_debounce_timer(tmp_path):
+    import time
+
+    received = []
+    watcher = start_watch(tmp_path, received.extend, debounce=1)
+    (tmp_path / "file.md").write_text("complete")
+    time.sleep(0.1)
+    watcher.stop()
+    watcher.join(2)
+    assert not watcher.is_alive()
+    time.sleep(0.05)
+    assert received == []

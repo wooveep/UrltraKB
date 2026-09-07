@@ -335,6 +335,14 @@ print("OpenKB")
         checks.append(
             "native artifacts: graph, SDK generation, archive consent, supporting-file exports"
         )
+        from openkb.desktop.verification_watch import verify_watch
+
+        verify_watch(
+            window, other if args.model_base else first, wait_until, model=bool(args.model_base)
+        )
+        checks.append(
+            "native watch: startup scan, recursive atomic moves, independent workers and stop"
+        )
         if args.corpus:
             from openkb.desktop.verification_rendering import verify_corpus
 
@@ -346,6 +354,7 @@ print("OpenKB")
         window.request_quit()
         wait_until(
             lambda: window.manager.join(0)
+            and window.watch_registry.stopped()
             and window.io.stopped()
             and window.reader.rendering_stopped()
             and window.chat.rendering_stopped()

@@ -14,6 +14,7 @@ import pymupdf
 
 from openkb.config import resolve_effective_config
 from openkb.images import convert_pdf_with_images, copy_relative_images, extract_base64_images
+from openkb.inputs import PreparedInput
 from openkb.locks import atomic_write_text, kb_ingest_lock
 from openkb.state import HashRegistry
 
@@ -143,19 +144,15 @@ def convert_document(
     kb_dir: Path,
     *,
     staging_dir: Path | None = None,
-    prepared: tuple[Path, str] | None = None,
+    prepared: PreparedInput | None = None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
 
     if prepared is not None:
-        return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, prepared=prepared[0], file_hash=prepared[1]
-        )
-    with prepared_input(src) as (frozen, digest):
-        return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, prepared=frozen, file_hash=digest
-        )
+        return _convert_prepared_document(src, kb_dir, staging_dir=staging_dir, ready=prepared)
+    with prepared_input(src) as ready:
+        return _convert_prepared_document(src, kb_dir, staging_dir=staging_dir, ready=ready)
 
 
 def _convert_prepared_document(
@@ -163,8 +160,7 @@ def _convert_prepared_document(
     kb_dir: Path,
     *,
     staging_dir: Path | None = None,
-    prepared: Path,
-    file_hash: str,
+    ready: PreparedInput,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -176,6 +172,7 @@ def _convert_prepared_document(
     5. Otherwise — run MarkItDown, extract base64 images, save to ``wiki/sources/``.
     6. Register hash in the registry.
     """
+    prepared, file_hash = ready.path, ready.digest
     with kb_ingest_lock(kb_dir / ".openkb"):
         # ------------------------------------------------------------------
         # Load config & state
@@ -243,9 +240,11 @@ def _convert_prepared_document(
         images_dir = artifact_root / "wiki" / "sources" / "images" / doc_name
         images_dir.mkdir(parents=True, exist_ok=True)
 
-        if src.suffix.lower() == ".md":
+        if src.suffix.lower() in {".md", ".markdown"}:
             markdown = prepared.read_text(encoding="utf-8")
-            markdown = copy_relative_images(markdown, src.parent, doc_name, images_dir)
+            markdown = copy_relative_images(
+                markdown, src.parent, doc_name, images_dir, prepared=ready.images
+            )
         elif src.suffix.lower() == ".pdf":
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
             markdown = convert_pdf_with_images(prepared, doc_name, images_dir)

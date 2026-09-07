@@ -6,11 +6,13 @@ import asyncio
 import hmac
 import json
 import os
+import threading
 import time
 from contextlib import aclosing
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
+import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -36,13 +38,13 @@ from openkb.api_models import (
     SkillRequest,
 )
 from openkb.api_recompile import iter_recompile
+from openkb.api_uploads import cleanup_uploads as _cleanup_uploads
+from openkb.api_uploads import reserve_upload
 from openkb.application.answers import save_exploration
 from openkb.application.documents import _add_for_api
 from openkb.application.knowledge_bases import initialize_kb
 from openkb.application.removal import run_remove_for_api
-from openkb.cli import (
-    SUPPORTED_EXTENSIONS,
-)
+from openkb.application.uploads import published_input
 from openkb.config import (
     DEFAULT_CONFIG,
     register_kb_alias,
@@ -183,64 +185,16 @@ def _parse_stream_form(value: str | bool | None) -> bool:
     return value.strip().lower() not in {"false", "0", "no", "off"}
 
 
-def _safe_upload_name(filename: str | None) -> str:
-    name = Path(filename or "").name
-    if not name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is missing a filename.",
-        )
-    return name
-
-
-def _unique_raw_path(raw_dir: Path, filename: str) -> Path:
-    candidate = raw_dir / filename
-    if not candidate.exists():
-        return candidate
-
-    stem = candidate.stem
-    suffix = candidate.suffix
-    counter = 1
-    while True:
-        candidate = raw_dir / f"{stem}-{counter}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def _reserve_upload_path(raw_dir: Path, upload: UploadFile) -> tuple[Path, str]:
-    """Validate an upload's name/type and reserve a unique raw path for it.
-
-    Synchronous and fast: allocates via :func:`_unique_raw_path` and creates an
-    empty placeholder so a concurrent reservation sees the name as taken. The
-    caller holds the per-KB mutation lock for this step alone — never for the
-    (potentially slow) body transfer in :func:`_write_upload`.
-    """
-    original_name = _safe_upload_name(upload.filename)
-    suffix = Path(original_name).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Unsupported file type: {suffix}. "
-                f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-            ),
-        )
-    saved_path = _unique_raw_path(raw_dir, original_name)
-    saved_path.touch()
-    return saved_path, original_name
-
-
 async def _write_upload(
     saved_path: Path,
     upload: UploadFile,
     request_bytes_so_far: int,
 ) -> int:
-    """Stream an upload's body into its already-reserved path.
+    """Stream an upload body into its owned private path.
 
     Runs outside the per-KB mutation lock so a large or slow upload does not
     block other same-KB mutations (lint/recompile/other adds). Returns the
-    bytes written; unlinks the (placeholder) file on failure.
+    bytes written; unlinks the private file on failure.
     """
     try:
         file_bytes = 0
@@ -292,22 +246,13 @@ def _reserve_add_uploads(
     kb_dir: Path,
     files: list[UploadFile],
 ) -> list[tuple[Path, str]]:
-    """Reserve a unique raw path (with a placeholder) for each upload.
-
-    Fast and synchronous so the caller can hold the per-KB mutation lock for
-    this step alone: that makes :func:`_unique_raw_path`'s ``exists()`` check
-    race-free against concurrent same-name uploads without serializing the
-    body transfers that follow in :func:`_write_add_uploads`.
-    """
-    raw_dir = kb_dir / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    """Reserve private paths; unfinished bodies never appear in a watched tree."""
     reserved: list[tuple[Path, str]] = []
     try:
         for upload in files:
-            reserved.append(_reserve_upload_path(raw_dir, upload))
-    except Exception:
-        for saved_path, _ in reserved:
-            saved_path.unlink(missing_ok=True)
+            reserved.append(reserve_upload(upload))
+    except BaseException:
+        _cleanup_uploads(reserved)
         raise
     return reserved
 
@@ -326,9 +271,8 @@ async def _write_add_uploads(
     try:
         for (saved_path, _original), upload in zip(reserved, files):
             request_bytes += await _write_upload(saved_path, upload, request_bytes)
-    except Exception:
-        for saved_path, _ in reserved:
-            saved_path.unlink(missing_ok=True)
+    except BaseException:
+        _cleanup_uploads(reserved)
         raise
     return reserved
 
@@ -341,8 +285,11 @@ async def _run_add_uploads(
     bundle=None,
 ) -> AddResponse:
     results = []
-    for saved_path, original_name in saved_uploads:
-        results.append(await _add_saved_file(kb_dir, saved_path, original_name, bundle=bundle))
+    try:
+        for saved_path, original_name in saved_uploads:
+            results.append(await _add_saved_file(kb_dir, saved_path, original_name, bundle=bundle))
+    finally:
+        _cleanup_uploads(saved_uploads)
     return _summarize_add_results(kb, results)
 
 
@@ -353,22 +300,49 @@ async def _stream_add_uploads(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
-    yield _sse(
-        "start",
-        {"endpoint": "add", "kb": kb, "file_count": len(saved_uploads)},
-    )
     results: list[AddFileItem] = []
     try:
+        yield _sse(
+            "start",
+            {"endpoint": "add", "kb": kb, "file_count": len(saved_uploads)},
+        )
         for saved_path, original_name in saved_uploads:
-            yield _sse(
-                "uploaded",
-                {"original_name": original_name, "saved_path": str(saved_path)},
+            loop = asyncio.get_running_loop()
+            published: asyncio.Future[Path] = loop.create_future()
+            cancelled = threading.Event()
+
+            def on_published(path, future=published):
+                loop.call_soon_threadsafe(future.set_result, path)
+
+            worker = asyncio.create_task(
+                _add_saved_file(
+                    kb_dir,
+                    saved_path,
+                    original_name,
+                    bundle=bundle,
+                    on_published=on_published,
+                    cancelled=cancelled.is_set,
+                )
             )
-            yield _sse(
-                "file_start",
-                {"original_name": original_name, "saved_path": str(saved_path)},
-            )
-            item = await _add_saved_file(kb_dir, saved_path, original_name, bundle=bundle)
+            try:
+                pending: set[asyncio.Future[Any]] = {published, worker}
+                await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                if published.done():
+                    data = {"original_name": original_name, "saved_path": str(published.result())}
+                    yield _sse("uploaded", data)
+                    yield _sse("file_start", data)
+                item = await asyncio.shield(worker)
+            finally:
+                cancelled.set()
+                # An observer disconnect cannot delete a worker's private input
+                # while it is still reading it or release its whole-unit lease.
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await asyncio.shield(worker)
+                    except Exception:
+                        # The normal await reports business failures. On
+                        # disconnect preserve cancellation/GeneratorExit.
+                        pass
             results.append(item)
             yield _sse("file_done", _model_payload(item))
         final = _summarize_add_results(kb, results)
@@ -377,19 +351,37 @@ async def _stream_add_uploads(
         yield _sse("error", {"message": exc.detail})
     except Exception as exc:
         yield _sse("error", {"message": f"Add failed: {exc}"})
+    finally:
+        _cleanup_uploads(saved_uploads)
     yield _sse("done", {})
 
 
 async def _add_saved_file(
-    kb_dir: Path, saved_path: Path, original_name: str, *, bundle=None
+    kb_dir: Path,
+    saved_path: Path,
+    original_name: str,
+    *,
+    bundle=None,
+    on_published: Callable[[Path], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> AddFileItem:
-    result = await run_in_threadpool(_add_for_api, saved_path, kb_dir, bundle=bundle)
-    item = AddFileItem(**result.__dict__)
-    item.original_name = original_name
-    if item.status == "skipped":
-        saved_path.unlink(missing_ok=True)
-        item.saved_path = None
-    return item
+    def consume():
+        try:
+            with published_input(kb_dir, saved_path, cancelled=cancelled) as owned:
+                if on_published:
+                    on_published(owned.path)
+                result = _add_for_api(owned.path, kb_dir, bundle=bundle)
+                item = AddFileItem(**result.__dict__)
+                item.original_name = original_name
+                if item.status == "skipped":
+                    owned.discard_if_unregistered()
+                    item.saved_path = None
+                return item
+        finally:
+            _cleanup_uploads([(saved_path, original_name)])
+
+    with anyio.CancelScope(shield=True):
+        return await run_in_threadpool(consume)
 
 
 def _load_or_create_session(kb_dir: Path, session_id: str | None) -> ChatSession:

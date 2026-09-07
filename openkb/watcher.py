@@ -7,6 +7,7 @@ before calling the user's callback with a sorted list of affected paths.
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -36,25 +37,40 @@ class DebouncedHandler(FileSystemEventHandler):
         self._debounce_seconds = debounce_seconds
         self._pending: set[str] = set()
         self._timer: threading.Timer | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.Condition()
+        self._accepting = True
+        self._callbacks = 0
+        self._timers: set[threading.Timer] = set()
 
     def _schedule_flush(self) -> None:
         """Cancel any existing timer and start a fresh debounce timer."""
         with self._lock:
+            if not self._accepting:
+                return
             if self._timer is not None:
                 self._timer.cancel()
             self._timer = threading.Timer(self._debounce_seconds, self._flush)
             self._timer.daemon = True
+            self._timers = {timer for timer in self._timers if timer.is_alive()}
+            self._timers.add(self._timer)
             self._timer.start()
 
     def _flush(self) -> None:
         """Call the callback with all collected pending paths, then clear."""
         with self._lock:
+            if not self._accepting:
+                return
             paths = sorted(self._pending)
             self._pending.clear()
             self._timer = None
-        if paths:
-            self._callback(paths)
+            self._callbacks += bool(paths)
+        try:
+            if paths:
+                self._callback(paths)
+        finally:
+            with self._lock:
+                self._callbacks -= bool(paths)
+                self._lock.notify_all()
 
     def _handle_event(self, event) -> None:
         """Add the event's source path to pending if it's a supported file."""
@@ -65,6 +81,8 @@ class DebouncedHandler(FileSystemEventHandler):
         if path.name.startswith("."):
             return
         with self._lock:
+            if not self._accepting:
+                return
             self._pending.add(str(path))
         self._schedule_flush()
 
@@ -75,6 +93,59 @@ class DebouncedHandler(FileSystemEventHandler):
     def on_modified(self, event) -> None:
         """Handle file modification events."""
         self._handle_event(event)
+
+    def on_moved(self, event) -> None:
+        from watchdog.events import FileCreatedEvent
+
+        if not event.is_directory:
+            self._handle_event(FileCreatedEvent(event.dest_path))
+
+    def stop(self) -> None:
+        with self._lock:
+            self._accepting = False
+            self._pending.clear()
+            for timer in self._timers:
+                timer.cancel()
+            self._lock.notify_all()
+
+    def join(self, timeout: float | None = None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._lock:
+            timers = tuple(self._timers)
+        for timer in timers:
+            if timer is not threading.current_thread():
+                timer.join(None if deadline is None else max(0, deadline - time.monotonic()))
+        with self._lock:
+            while self._callbacks:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return False
+                self._lock.wait(None if deadline is None else max(0, deadline - time.monotonic()))
+        return not any(timer.is_alive() for timer in timers)
+
+    def is_alive(self) -> bool:
+        with self._lock:
+            return bool(self._callbacks or any(timer.is_alive() for timer in self._timers))
+
+
+class WatchHandle:
+    """The observer and debounce callbacks form one owned lifecycle."""
+
+    def __init__(self, observer, handler: DebouncedHandler):
+        self.observer, self.handler = observer, handler
+
+    def stop(self) -> None:
+        self.handler.stop()
+        self.observer.stop()
+
+    def join(self, timeout: float | None = None) -> None:
+        started = time.monotonic()
+        self.observer.join(timeout)
+        self.handler.join(
+            None if timeout is None else max(0, timeout - (time.monotonic() - started))
+        )
+
+    def is_alive(self) -> bool:
+        return self.observer.is_alive() or self.handler.is_alive()
 
 
 def watch_directory(
@@ -106,7 +177,7 @@ def start_watch(
     raw_dir: Path,
     callback: Callable[[list[str]], None],
     debounce: float = 2.0,
-) -> Observer:
+) -> WatchHandle:
     """Start a non-blocking watcher on *raw_dir* and return its Observer.
 
     The caller owns the Observer's lifecycle: call ``observer.stop()`` then
@@ -125,4 +196,4 @@ def start_watch(
     observer = Observer()
     observer.schedule(handler, str(raw_dir), recursive=True)
     observer.start()
-    return observer
+    return WatchHandle(observer, handler)

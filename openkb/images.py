@@ -6,8 +6,12 @@ import base64
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pymupdf
+
+if TYPE_CHECKING:
+    from openkb.inputs import PreparedImage
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +236,24 @@ def extract_base64_images(markdown: str, doc_name: str, images_dir: Path) -> str
     return result
 
 
-def copy_relative_images(markdown: str, source_dir: Path, doc_name: str, images_dir: Path) -> str:
+def relative_image_paths(markdown: str, source_dir: Path) -> dict[str, Path]:
+    """Resolve local image references contained by the original document directory."""
+    root = source_dir.resolve()
+    return {
+        match.group(2): path
+        for match in _RELATIVE_RE.finditer(markdown)
+        if (path := (root / match.group(2)).resolve()).is_relative_to(root)
+    }
+
+
+def copy_relative_images(
+    markdown: str,
+    source_dir: Path,
+    doc_name: str,
+    images_dir: Path,
+    *,
+    prepared: dict[str, PreparedImage] | None = None,
+) -> str:
     """Copy locally-referenced images into the KB images directory and rewrite links.
 
     For each ``![alt](relative/path)`` match (skipping http/https and data URIs):
@@ -249,14 +270,20 @@ def copy_relative_images(markdown: str, source_dir: Path, doc_name: str, images_
     # single image.
     assigned: dict[Path, str] = {}
     taken: set[str] = set()
+    paths = (
+        relative_image_paths(markdown, source_dir)
+        if prepared is None
+        else {reference: image.original for reference, image in prepared.items()}
+    )
 
     for match in _RELATIVE_RE.finditer(markdown):
         alt, rel_path = match.group(1), match.group(2)
-        src = (source_dir / rel_path).resolve()
-        if not src.is_relative_to(source_dir.resolve()):
+        src = paths.get(rel_path)
+        if src is None:
             logger.warning("Image path escapes source dir: %s; skipping.", rel_path)
             continue
-        if not src.exists():
+        frozen = prepared[rel_path].path if prepared is not None else src
+        if frozen is None or not frozen.is_file():
             logger.warning("Relative image not found: %s; leaving original link.", src)
             continue
 
@@ -272,7 +299,7 @@ def copy_relative_images(markdown: str, source_dir: Path, doc_name: str, images_
             images_dir.mkdir(parents=True, exist_ok=True)
             from openkb.inputs import copy_stable
 
-            copy_stable(src, images_dir / filename)
+            copy_stable(frozen, images_dir / filename)
 
         new_ref = md_image_ref(alt, doc_name, filename)
         result = result.replace(match.group(0), new_ref, 1)

@@ -55,6 +55,7 @@ def build_workbench(window):
     maintenance = window.menuBar().addMenu("维护")
     maintenance.addAction("当前知识库检查与修复…", window._maintenance)
     maintenance.addAction("诊断指定知识库…", lambda: window._diagnose())
+    maintenance.addAction("目录监听…", window._watch)
     artifacts = window.menuBar().addMenu("生成与产物")
     artifacts.addAction("Skill、幻灯片、图谱与产物管理…", window._manage_artifacts)
     _action(window, toolbar, "退出", window.request_quit)
