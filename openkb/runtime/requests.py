@@ -59,5 +59,19 @@ class RemoveDocument:
             raise ValueError("Document removal requires a confirmed preview")
 
 
-UnitRequest = SavePage | AskQuestion | ContinueConversation | ImportFile | RemoveDocument
-REQUEST_TYPES = (SavePage, AskQuestion, ContinueConversation, ImportFile, RemoveDocument)
+@dataclass(frozen=True)
+class ImportUrl:
+    url: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(self.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("请输入完整的 HTTP 或 HTTPS 地址")
+
+
+UnitRequest = (
+    SavePage | AskQuestion | ContinueConversation | ImportFile | ImportUrl | RemoveDocument
+)
+REQUEST_TYPES = (SavePage, AskQuestion, ContinueConversation, ImportFile, ImportUrl, RemoveDocument)

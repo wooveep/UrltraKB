@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import multiprocessing as mp
 import queue
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -60,6 +63,7 @@ class TaskManager:
         self.history_dir = history_dir.expanduser().resolve()
         self.history_dir.mkdir(parents=True, exist_ok=True)
         self.receipt_dir = self.history_dir / "units"
+        self._preparations = tempfile.TemporaryDirectory(prefix="openkb-task-inputs-")
         self.max_workers = max_workers
         self._context = mp.get_context("spawn")
         self._condition = threading.Condition(threading.RLock())
@@ -164,6 +168,18 @@ class TaskManager:
             self._update(task, stop_requested=True)
             if task_id not in self._active and task.view.state not in TERMINAL:
                 self._update(task, state="stopped", stage="stopped")
+                self._discard_inputs(task_id)
+
+    def _discard_inputs(self, task_id: str, unit_id: str | None = None) -> None:
+        root = Path(self._preparations.name) / task_id
+        if unit_id is not None:
+            root /= unit_id
+        try:
+            if root.exists():
+                shutil.rmtree(root)
+        except OSError:
+            logging.getLogger(__name__).warning("Temporary task input cleanup failed")
+            self._update(self._tasks[task_id], error="Temporary task input could not be removed")
 
     def wait(self, task_id: str, *, timeout: float = 60) -> TaskView:
         deadline = time.monotonic() + timeout
@@ -196,17 +212,28 @@ class TaskManager:
         identity = task.identities[index]
         parent, child = self._context.Pipe()
         events = self._context.Queue(maxsize=128)
+        prepared_dir = Path(self._preparations.name) / identity.task_id / identity.unit_id
         process = self._context.Process(
             target=run_unit,
-            args=(task.requests[index], identity, task.snapshot, self.receipt_dir, child, events),
+            args=(
+                task.requests[index],
+                identity,
+                task.snapshot,
+                self.receipt_dir,
+                child,
+                events,
+                prepared_dir,
+            ),
             name=f"openkb-unit-{identity.task_id[:8]}-{identity.unit_id}",
         )
         try:
+            prepared_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             process.start()
         except Exception:
             parent.close()
             events.close()
             self._update(task, state="failed", stage="failed", error="Worker could not start")
+            self._discard_inputs(task.view.id)
             return
         finally:
             child.close()
@@ -288,12 +315,14 @@ class TaskManager:
         if attempt.deferred and exitcode == 0:
             if task.view.stop_requested:
                 self._update(task, state="stopped", stage="stopped")
+                self._discard_inputs(task.view.id)
             else:
                 task.ready_at = time.monotonic() + task.wait_delay
                 task.wait_delay = min(2, task.wait_delay * 2)
                 self._update(task, state="waiting", stage="waiting")
                 self._pending.append(task.view.id)
             return
+        self._discard_inputs(task.view.id, attempt.identity.unit_id)
         receipt = read_receipt(self.receipt_dir, attempt.identity)
         if receipt is None or attempt.unconfirmed:
             self._update(
@@ -374,5 +403,11 @@ class TaskManager:
                         continue
                     self._start(task)
                 if self._closing and not self._active and not self._pending:
+                    try:
+                        self._preparations.cleanup()
+                    except OSError:
+                        logging.getLogger(__name__).warning(
+                            "Temporary task directory cleanup failed"
+                        )
                     return
                 self._condition.wait(0.025)

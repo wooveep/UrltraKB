@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QMainWindow,
@@ -44,7 +45,13 @@ from openkb.desktop.reader import MarkdownView
 from openkb.inputs import SUPPORTED_EXTENSIONS
 from openkb.page_ops import EDITABLE_SECTIONS
 from openkb.runtime.records import TERMINAL
-from openkb.runtime.requests import AskQuestion, ContinueConversation, ImportFile, SavePage
+from openkb.runtime.requests import (
+    AskQuestion,
+    ContinueConversation,
+    ImportFile,
+    ImportUrl,
+    SavePage,
+)
 from openkb.runtime.tasks import TaskManager
 
 _STATES = {
@@ -65,6 +72,7 @@ _OPERATIONS = {
     "ContinueConversation": "对话",
     "ImportFile": "导入资料",
     "RemoveDocument": "删除资料",
+    "ImportUrl": "导入网址",
 }
 
 
@@ -140,6 +148,7 @@ class Workbench(QMainWindow):
         toolbar.addWidget(self.kbs)
         self._action(toolbar, "导入文件", self._import_files)
         self._action(toolbar, "导入目录", self._import_directory)
+        self._action(toolbar, "导入网址", self._import_urls)
         self._action(toolbar, "资料管理", self._documents)
         self._action(toolbar, "刷新", self._refresh_current)
         settings = self.menuBar().addMenu("设置")
@@ -498,6 +507,19 @@ class Workbench(QMainWindow):
                 self.manager.submit(
                     self.kb, [ImportFile(str(Path(path).resolve())) for path in files]
                 )
+
+    def _import_urls(self):
+        if self.kb is None:
+            return
+        value, accepted = QInputDialog.getMultiLineText(
+            self, "导入网址", "每行一个 HTTP / HTTPS 地址"
+        )
+        if accepted and value.strip():
+            try:
+                requests = [ImportUrl(line.strip()) for line in value.splitlines() if line.strip()]
+                self.manager.submit(self.kb, requests)
+            except ValueError as exc:
+                self._error(exc)
 
     def _import_directory(self):
         if not self.kb:

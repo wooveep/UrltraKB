@@ -50,6 +50,34 @@ class Fixture(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        if self.path == "/once.pdf":
+            self.server.one_shot_gets += 1
+            if self.server.one_shot_gets > 1:
+                self.send_error(410)
+                return
+            body = self.server.pdf_bytes
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path != "/article":
+            self.send_error(404)
+            return
+        body = (
+            "<!doctype html><html><head><title>Native URL acquisition</title></head>"
+            "<body><article><h1>Native URL acquisition</h1><p>"
+            + "Private URL preparation is compiled into a persistent knowledge base. " * 8
+            + "</p></article></body></html>"
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.send_response(200)
@@ -95,8 +123,17 @@ def main():
     parser.add_argument("--program", help="Frozen OpenKBVerify executable; otherwise use source")
     parser.add_argument("--output", required=True)
     parser.add_argument("--inputs")
+    parser.add_argument("--urls", action="store_true")
     args = parser.parse_args()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+    if args.urls:
+        import pymupdf
+
+        with pymupdf.open() as document:
+            page = document.new_page()
+            page.insert_text((72, 72), "One-time URL input survives waiting for a knowledge base.")
+            server.pdf_bytes = document.tobytes()
+        server.one_shot_gets = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -110,7 +147,12 @@ def main():
         )
         if args.inputs:
             command.extend(["--inputs", args.inputs])
+        if args.urls:
+            command.extend(["--url", f"http://127.0.0.1:{server.server_port}/article"])
+            command.extend(["--one-shot-url", f"http://127.0.0.1:{server.server_port}/once.pdf"])
         subprocess.run(command, check=True, timeout=240)
+        if args.urls:
+            assert server.one_shot_gets == 1, "A complete download must survive KB lease deferral"
     finally:
         server.shutdown()
         server.server_close()
