@@ -8,6 +8,27 @@ from pathlib import Path
 from openkb.locks import atomic_write_json
 
 
+def validate_registry(value: object) -> None:
+    """Check stored records while retaining older hashes and optional metadata."""
+    if not isinstance(value, dict):
+        raise ValueError("Document registry must be a mapping")
+    text_fields = {
+        "name",
+        "doc_name",
+        "type",
+        "path",
+        "raw_path",
+        "source_path",
+        "doc_id",
+        "origin",
+    }
+    for key, record in value.items():
+        if not isinstance(key, str) or not key or not isinstance(record, dict):
+            raise ValueError("Document registry must contain named document records")
+        if any(field in record and not isinstance(record[field], str) for field in text_fields):
+            raise ValueError("Document registry contains invalid document metadata")
+
+
 class HashRegistry:
     """Persistent registry mapping file SHA-256 hashes to metadata dicts."""
 
@@ -16,6 +37,7 @@ class HashRegistry:
         if path.exists():
             with path.open("r", encoding="utf-8") as fh:
                 self._data: dict[str, dict] = json.load(fh)
+            validate_registry(self._data)
         else:
             self._data = {}
 

@@ -207,11 +207,8 @@ class Workbench(QMainWindow):
     def _create_kb(self):
         path = QFileDialog.getExistingDirectory(self, "选择新知识库的空目录")
         if path:
-            if any(Path(path).iterdir()):
-                self._error(ValueError("请选择空目录创建知识库；已有知识库请使用“打开”。"))
-                return
             self.io.submit(
-                lambda: initialize_kb(Path(path), seed_environment=False),
+                lambda: initialize_kb(Path(path), seed_environment=False, require_empty=True),
                 lambda result, error: None
                 if self._error(error)
                 else self.open_knowledge_base(Path(path)),
