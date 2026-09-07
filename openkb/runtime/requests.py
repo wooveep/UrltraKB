@@ -47,5 +47,17 @@ class ImportFile:
             raise ValueError("Import source must be an absolute path")
 
 
-UnitRequest = SavePage | AskQuestion | ContinueConversation | ImportFile
-REQUEST_TYPES = (SavePage, AskQuestion, ContinueConversation, ImportFile)
+@dataclass(frozen=True)
+class RemoveDocument:
+    identifier: str
+    version: str
+    keep_raw: bool = False
+    keep_empty: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.identifier or not self.version:
+            raise ValueError("Document removal requires a confirmed preview")
+
+
+UnitRequest = SavePage | AskQuestion | ContinueConversation | ImportFile | RemoveDocument
+REQUEST_TYPES = (SavePage, AskQuestion, ContinueConversation, ImportFile, RemoveDocument)

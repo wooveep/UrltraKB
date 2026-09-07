@@ -39,6 +39,7 @@ from openkb.config import (
 from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
 from openkb.locks import atomic_write_text
 from openkb.schema import INDEX_SEED, get_agents_md
+from openkb.source_refs import scan_affected_pages as scan_affected_pages
 
 logger = logging.getLogger(__name__)
 
@@ -1398,33 +1399,6 @@ def _remove_doc_from_pages(
             modified.append(path.stem)
 
     return {"modified": modified, "deleted": deleted}
-
-
-def scan_affected_pages(pages_dir: Path, source_file_marker: str) -> list[tuple[str, int]]:
-    """Return ``(slug, remaining_sources)`` for pages under ``pages_dir`` whose
-    frontmatter ``sources:`` list contains ``source_file_marker``.
-
-    Used by the ``openkb remove`` dry-run preview. Lives here, beside
-    ``remove_doc_from_concept_pages`` / ``remove_doc_from_entity_pages`` and
-    sharing ``_parse_yaml_list_value`` with them, so the preview and the
-    executor can't drift apart on how the sources list is parsed (a hand-rolled
-    comma-split here once kept the JSON quotes and matched nothing).
-    """
-    affected: list[tuple[str, int]] = []
-    if not pages_dir.is_dir():
-        return affected
-    for path in sorted(pages_dir.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        fm_dict = frontmatter.parse(text)
-        if not fm_dict:
-            continue
-        sources = fm_dict.get("sources")
-        if not isinstance(sources, list):
-            continue
-        items = [str(x) for x in sources]
-        if source_file_marker in items:
-            affected.append((path.stem, max(len(items) - 1, 0)))
-    return affected
 
 
 def remove_doc_from_concept_pages(
