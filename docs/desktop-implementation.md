@@ -325,3 +325,11 @@ native-library provenance and patch mapping, complete installed notice
 reconciliation, and final matching source/licence/NOTICE/build assets still
 need completion before formal portable archives can pass distribution review.
 No release has been published.
+
+The two production Windows QA knowledge bases were subsequently unregistered,
+and their two task summaries/receipts archived before clearing them through
+the task-history interface. The original global YAML was restored only after
+its exact pre-test SHA256 matched; other profile fields were not guessed or
+rolled back. All scheduled tasks created for these OS checks were removed.
+The retained screenshots/records describe the earlier acceptance runs, before
+this deliberate QA cleanup.
