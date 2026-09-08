@@ -7,7 +7,6 @@ import logging
 import multiprocessing as mp
 import queue
 import shutil
-import tempfile
 import threading
 import time
 import uuid
@@ -19,6 +18,7 @@ from typing import Any, Sequence
 
 from openkb.config_state import ConfigSnapshot
 from openkb.locks import atomic_write_json
+from openkb.runtime.input_store import InputStore
 from openkb.runtime.records import TERMINAL, TaskView, UnitIdentity, UnitResult, read_receipt
 from openkb.runtime.requests import REQUEST_TYPES, RecompileDocument, UnitRequest
 from openkb.runtime.worker import run_unit
@@ -64,7 +64,7 @@ class TaskManager:
         self.history_dir = history_dir.expanduser().resolve()
         self.history_dir.mkdir(parents=True, exist_ok=True)
         self.receipt_dir = self.history_dir / "units"
-        self._preparations = tempfile.TemporaryDirectory(prefix="openkb-task-inputs-")
+        self._preparations = InputStore(self.history_dir)
         self.max_workers = max_workers
         self._context = mp.get_context("spawn")
         self._condition = threading.Condition(threading.RLock())
