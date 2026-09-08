@@ -5,11 +5,24 @@ from __future__ import annotations
 import shutil
 import tempfile
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 from openkb.state import HashRegistry
+
+_preparation_root: ContextVar[Path | None] = ContextVar("openkb_preparation_root", default=None)
+
+
+@contextmanager
+def preparation_directory(path: Path | None) -> Iterator[None]:
+    """Place private copies in a caller-owned execution directory when provided."""
+    token = _preparation_root.set(path)
+    try:
+        yield
+    finally:
+        _preparation_root.reset(token)
 
 
 class InputChanged(ValueError):
@@ -114,7 +127,9 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
 @contextmanager
 def prepared_input(source: Path) -> Iterator[PreparedInput]:
     """Freeze primary bytes, image bytes and missing-image state before business."""
-    with tempfile.TemporaryDirectory(prefix="openkb-input-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="openkb-input-", dir=_preparation_root.get()
+    ) as directory:
         yield _prepare(source, Path(directory))
 
 

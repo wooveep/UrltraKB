@@ -316,10 +316,11 @@ def run_unit(
     # configuration runs in the task manager's process.
     from openkb.add_coordinator import DirtyRollbackError
     from openkb.application.execution import ExecutionContext
-    from openkb.inputs import InputChanged
+    from openkb.inputs import InputChanged, preparation_directory
     from openkb.lifecycle import KnowledgeBaseIncomplete, KnowledgeBaseRemoved, expected_generation
     from openkb.locks import LockCancelled
     from openkb.mutation import RecoveryRequired
+    from openkb.runtime.input_store import child_preparation, reap_orphaned_inputs
 
     channel = WorkerChannel(connection, events, identity)
     context = ExecutionContext(
@@ -330,7 +331,11 @@ def run_unit(
     )
     try:
         try:
-            with expected_generation(Path(identity.kb_dir), identity.generation):
+            with (
+                child_preparation(prepared_dir),
+                preparation_directory(prepared_dir),
+                expected_generation(Path(identity.kb_dir), identity.generation),
+            ):
                 result = _execute(request, identity, context, prepared_dir)
         except WaitingForLease:
             channel.send("deferred")
@@ -372,6 +377,7 @@ def run_unit(
             try:
                 if prepared_dir.exists():
                     shutil.rmtree(prepared_dir)
+                reap_orphaned_inputs(prepared_dir.parents[2])
             except OSError:
                 logging.getLogger(__name__).warning("Orphaned task input cleanup failed")
         # Progress is lossy by contract. A full queue must never prevent child
