@@ -23,7 +23,12 @@ def verify_conversations(window, kb, root, wait):
     button(window, "对话历史").click()
     wait(lambda: "对话" in window.workspaces.panels)
     history = window.workspaces.panels["对话"][0]
-    wait(lambda: history.table.rowCount() > 0)
+    wait(
+        lambda: any(
+            history.table.item(index, 0).data(Qt.ItemDataRole.UserRole) == session.id
+            for index in range(history.table.rowCount())
+        )
+    )
     row = next(
         index
         for index in range(history.table.rowCount())
