@@ -4,6 +4,12 @@ Target: GitHub issue #1 and the confirmed P0–P5 handoff in issue #10.
 Baseline: `0cec254bb2f37adff8b1af2e1bd2802ea56910ee` (main).
 The existing local CLAUDE.md, CONTEXT.md and CodeGraph changes are unrelated.
 
+Current status (2026-09-08): the matching corresponding-source/license materials
+and complete local packages are assembled and verified; clean-system acceptance
+is confirmed by the maintainer. See the final material checkpoint below and
+`desktop-evidence/release-materials-87bdcc7.json`. Earlier incomplete statements
+below describe their historical checkpoints. External publication has not run.
+
 ## P0 — compatibility baseline (2026-09-07)
 
 Host: Debian 13.6 x86_64. Python: CPython 3.12.13.
@@ -441,3 +447,52 @@ full SHA256 verified. Each archive contains an explicit internal-build note.
 No user KB or credential files are included. These archives do not close the
 outstanding corresponding-source/licence/NOTICE/build-material distribution
 gate and have not been published as releases.
+
+## Complete source, licenses and local delivery (2026-09-08)
+
+The maintainer confirmed clean-system complete acceptance and requested the full
+corresponding-source/license material assembly. That confirmation closes the
+clean-system input; the earlier agent observations retain their actual scope.
+The program stays at `87bdcc7b6e3306b2f1981b80af5a705b258e0c35`, version
+`0.1.dev42+g87bdcc7b6e33`; subsequent material-only commits do not relabel it.
+
+The exact CentOS GCC source RPMs and Windows GCC exception evidence, Qt/PySide
+source identities and public build recipes, unchanged NewCM and Noto resource
+terms, both python-build-standalone builds, nested Python native sources, and
+remaining Rust license texts are now reconciled. The component-specific records
+in `docs/desktop-evidence/*-source*`, `newcm-corresponding-source.md` and
+`rust-license-completion.md` explain the verified scope and upstream provenance.
+The original Apache-2.0 sources and third-party notices remain intact; the
+combined AGPLv3 arrangement does not relicense every component or independent
+resource. Microsoft runtime redistribution terms are separately documented.
+
+The 13 material files contain 8,988 explicitly selected input members and map
+228 primary components across the two actual inventories. All 7,215 About
+license entries decode strictly as UTF-8 and fit its size limit. Eight legacy
+encoding/RTF members have labelled readable copies; unchanged originals, exact
+hashes and conversion records accompany them in the component asset.
+
+| Final check | Result |
+| --- | --- |
+| Reviewed assembly | All input and archived member sizes/SHA256 verified; complete committed source export included |
+| Boundary probes | Six malformed plans rejected before output; valid assembly/extraction verifies source identity; injected write failure leaves no partial output |
+| Actual Windows and Debian REST programs | Both download all 13 complete material bodies with matching SHA256; protected KB endpoint returns 401 and advertises public materials; unlisted files return 404 |
+| Actual Windows and Debian native About | Matching version/commit, notice and material checksums displayed and copied; full original OFL text displayed, selected and copied; explicit Quit completes |
+| Full pytest | 1,470 passed; two existing warnings; 49.24 seconds |
+| Ruff check / format / mypy | Passed; 249 formatted files; 141 typed source files |
+| Standards / Spec review | Prior findings fixed; no remaining actionable findings in the final material slice |
+
+The full CLI suite registered 14 temporary test KBs in the local global profile.
+Only that run's entries were removed, and the pre-test profile bytes were
+restored after matching the original SHA256. Windows profile bytes remained
+unchanged. The QA applications, API servers and owned Windows scheduled task
+were stopped. No private profile, KB content or credential is in the deliverable.
+
+Complete platform archives now include the same material directory beside the
+executables. Their decompressed program files and material files were checked
+against the frozen inventories and release manifest. The local download page
+also offers each source, license, component and build asset independently.
+The detailed hashes and evidence are in `desktop-evidence/release-materials-87bdcc7.json`;
+the files are under `packaging/desktop/build/release-materials/87bdcc7/final`.
+This completes the local material delivery. No branch push, public release or
+issue closure was performed.
