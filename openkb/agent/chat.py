@@ -882,6 +882,7 @@ async def iter_chat_turn_events(
     *,
     run_config: Any = None,
     outputs: ModelOutputs | None = None,
+    attempt_id: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for one chat turn and persist the final turn.
 
@@ -960,7 +961,9 @@ async def iter_chat_turn_events(
                             trace.append({"kind": "text", "text": answer})
                         break
             if data is not None and "answer" in data:
-                session.record_turn(user_input, answer, data["history"], trace=trace)
+                session.record_turn(
+                    user_input, answer, data["history"], trace=trace, attempt_id=attempt_id
+                )
                 yield {
                     "event": "final",
                     "data": {

@@ -2,13 +2,16 @@
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
 )
 
@@ -29,35 +32,45 @@ class SessionsDialog(ManagementPanel):
         self.setWindowTitle(f"对话管理 · {kb.name}")
         self.resize(780, 540)
         layout = QVBoxLayout(self)
-        from openkb.desktop.location import LocationLabel
-
-        layout.addWidget(LocationLabel(str(kb)))
+        layout.addWidget(QLabel("自动保存的对话，点击即可继续。"))
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["对话", "完整回合", "最近更新"])
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2):
+            self.table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents
+            )
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.invalidate)
+        self.table.cellClicked.connect(lambda *_: self.open())
+        self.table.itemActivated.connect(lambda *_: self.open())
         layout.addWidget(self.table)
-        actions = QGridLayout()
-        for index, (label, callback) in enumerate(
-            (
-                ("刷新", self.reload),
-                ("阅读 / 继续", self.open),
-                ("导出 Markdown 副本", self.export),
-                ("删除对话…", self.delete),
-            )
-        ):
-            button = QPushButton(label)
-            button.clicked.connect(callback)
-            actions.addWidget(button, index // 2, index % 2)
+        actions = QHBoxLayout()
+        refresh = QPushButton("刷新")
+        refresh.clicked.connect(self.reload)
+        actions.addWidget(refresh)
+        actions.addStretch()
+        more = QToolButton()
+        more.setText("更多")
+        more.setAccessibleName("对话历史操作")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(more)
+        menu.addAction("导出 Markdown 副本", self.export)
+        menu.addAction("删除对话…", self.delete)
+        more.setMenu(menu)
+        actions.addWidget(more)
         layout.addLayout(actions)
         self.status = QLabel("正在读取完整对话…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
+        self.details.setMaximumHeight(110)
+        self.details.hide()
         layout.addWidget(self.details)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
@@ -80,16 +93,14 @@ class SessionsDialog(ManagementPanel):
                 self.status.setText(f"读取对话失败（{type(error).__name__}）")
                 return
             if not preserve_result:
-                self.status.setText(
-                    "选择会话以阅读、继续或导出。" if value else "暂无已保存的对话。"
-                )
+                self.status.setText("点击对话即可继续。" if value else "暂无已保存的对话。")
             self.table.setRowCount(len(value))
             for row, session in enumerate(value):
                 item = QTableWidgetItem(session["title"] or session["id"])
                 item.setData(Qt.ItemDataRole.UserRole, session["id"])
                 self.table.setItem(row, 0, item)
                 self.table.setItem(row, 1, QTableWidgetItem(str(session["turn_count"])))
-                self.table.setItem(row, 2, QTableWidgetItem(session["updated_at"]))
+                self.table.setItem(row, 2, QTableWidgetItem(session["updated_at"][:10]))
 
         self.window.io.submit(
             lambda: list_sessions(self.kb),
@@ -102,14 +113,7 @@ class SessionsDialog(ManagementPanel):
         identity = self.selected()
         if not identity or self.window.kb != self.kb:
             return
-        index = self.window.sessions.findData(identity)
-        if index < 0:
-            self.window.sessions.addItem(
-                self.table.item(self.table.currentRow(), 0).text(), identity
-            )
-            index = self.window.sessions.count() - 1
-        self.window.sessions.setCurrentIndex(index)
-        self.window._load_conversation()
+        self.window._load_conversation(identity)
         if not getattr(self, "embedded", False):
             self.accept()
 
@@ -165,6 +169,7 @@ class SessionsDialog(ManagementPanel):
         if task.error:
             lines.append(task.error)
         self.details.setPlainText("\n".join(lines))
+        self.details.setVisible(bool(lines))
         self.status.setText(
             "会话已不存在，本项已跳过。"
             if task.skipped

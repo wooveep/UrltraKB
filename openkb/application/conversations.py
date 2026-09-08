@@ -115,11 +115,14 @@ async def continue_conversation(
     message: str,
     *,
     session_id: str | None = None,
+    new_session_id: str | None = None,
+    attempt_id: str | None = None,
+    submission_order: int | None = None,
     context: ExecutionContext | None = None,
 ) -> AnswerResult:
     root = _validate_question(kb_dir, message)
     context = context or ExecutionContext()
-    session = ChatSession.new(root, "", "")
+    session = ChatSession.new(root, "", "", identity=new_session_id)
     identity = session_id or session.id
     async with async_session_lock(
         root, identity, cancelled=context.cancelled, on_wait=context.waiting
@@ -131,13 +134,22 @@ async def continue_conversation(
                 # Reload after both locks: a queued continuation cannot revive
                 # a deleted session or build on a stale completed history.
                 session = load_session(root, session_id)
+            elif new_session_id and session.path.exists():
+                session = load_session(root, new_session_id)
             with context.begin(root) as bundle:
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
 
-                if not session_id:
+                if not session.model:
                     config = (await asyncio.to_thread(resolve_effective_config, root))[0]
                     session.model, session.language = config["model"], config["language"]
+                    if session._version is not None:
+                        # A recovered queued submission already exists on disk.
+                        # Bind its first execution before the iterator reloads it.
+                        session.save()
+                attempt_id = session.begin_attempt(
+                    message, identity=attempt_id, submission_order=submission_order
+                )
                 agent = await asyncio.to_thread(build_chat_session_agent, root, session, bundle)
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(
@@ -146,6 +158,7 @@ async def continue_conversation(
                     message,
                     run_config=build_run_config_from_bundle(session.model, bundle),
                     outputs=(outputs := ModelOutputs()),
+                    attempt_id=attempt_id,
                 )
                 parts = []
                 try:
@@ -171,7 +184,7 @@ async def continue_conversation(
                         "".join(parts),
                         session_id=session.id,
                         turn_count=session.turn_count,
-                        resources=outputs.resources,
+                        resources=(*outputs.resources, str(session.path)),
                         changes=outputs.changes,
                         error=f"Conversation did not complete ({type(exc).__name__})",
                         unfinished=("complete conversation turn",),
@@ -181,7 +194,7 @@ async def continue_conversation(
                     "".join(parts),
                     session_id=session.id,
                     turn_count=session.turn_count,
-                    resources=outputs.resources,
+                    resources=(*outputs.resources, str(session.path)),
                     changes=outputs.changes,
                     unfinished=("complete conversation turn",),
                 )
@@ -195,6 +208,21 @@ class ConversationView:
     language: str
     turns: tuple[tuple[str, str], ...]
     version: str
+    incomplete: tuple[tuple[int, str], ...] = ()
+
+    @property
+    def timeline(self) -> tuple[tuple[str, str], ...]:
+        """Display unfinished submissions in order, separate from reusable model turns."""
+        rows: list[tuple[str, str]] = []
+        for index in range(len(self.turns) + 1):
+            rows.extend(
+                (message, "这次回答未完成，可以继续提问。")
+                for after, message in self.incomplete
+                if after == index
+            )
+            if index < len(self.turns):
+                rows.append(self.turns[index])
+        return tuple(rows)
 
 
 def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
@@ -209,4 +237,5 @@ def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
             session.language,
             tuple(zip(session.user_turns, session.assistant_texts)),
             session._version or "",
+            tuple((item["after_turn"], item["message"]) for item in session.incomplete),
         )

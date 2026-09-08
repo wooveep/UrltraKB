@@ -62,9 +62,9 @@ class Appearance(QObject):
             mode = self.window.theme.currentData()
             self.dark = self.system_dark if mode == "system" else mode == "dark"
             bg, surface, text, muted, border, accent, selection = (
-                ("#202020", "#262626", "#eeeeec", "#a4a4a0", "#3a3a38", "#d8dfd9", "#343634")
+                ("#202020", "#262626", "#eeeeec", "#a4a4a0", "#535550", "#d8dfd9", "#343634")
                 if self.dark
-                else ("#ffffff", "#fafaf9", "#262725", "#747671", "#e6e7e3", "#343d36", "#e9ece7")
+                else ("#ffffff", "#fafaf9", "#262725", "#747671", "#c5c8c0", "#343d36", "#e9ece7")
             )
             palette = QPalette()
             for role, color in (
@@ -101,7 +101,7 @@ class Appearance(QObject):
                 QMainWindow, QDialog, QWidget#workspace {{ background: {bg}; }}
                 QLabel {{ background: transparent; }}
                 QLabel#brand {{ font-size: 16px; font-weight: 500; }}
-                QLabel#pageTitle {{ font-size: 16px; font-weight: 500; }}
+                QLabel#pageTitle, QLabel#conversationTitle {{ font-size: 16px; font-weight: 500; }}
                 QLabel#welcomeTitle {{ font-size: 32px; font-weight: 500; margin-top: 32px; }}
                 QLabel#overviewStats {{ color: {text}; border: 0; padding: 24px 0;
                     font-size: 20px; }}
@@ -110,15 +110,19 @@ class Appearance(QObject):
                 QLabel#drawerTitle {{ font-size: 17px; font-weight: 500; }}
                 QFrame#navigation {{ background: {sidebar}; border: 0; }}
                 QFrame#topbar {{ background: {bg}; border: 0; }}
-                QPushButton, QToolButton, QComboBox {{ background: transparent;
-                    border: 1px solid transparent; border-radius: 7px; padding: 7px 10px;
+                QPushButton, QToolButton, QComboBox {{ background: {surface};
+                    border: 1px solid {border}; border-radius: 7px; padding: 7px 10px;
                     min-height: 20px; }}
                 QToolButton {{ padding: 6px; }}
                 QComboBox {{ padding-right: 24px; }}
                 QComboBox::drop-down {{ border: 0; width: 24px; }}
                 QComboBox::down-arrow {{ image: url("{chevron}"); width: 12px; height: 12px; }}
                 QToolButton::menu-indicator {{ image: none; }}
-                QFrame#navigation QPushButton {{ text-align: left; padding: 7px 10px; }}
+                QFrame#navigation QPushButton {{ text-align: left; padding: 7px 10px;
+                    font-size: 18px; background: transparent; border-color: transparent; }}
+                QFrame#navigation QPushButton:hover {{ background: {selection}; }}
+                QFrame#navigation QPushButton:checked {{ background: {selection};
+                    border-color: {border}; font-weight: 500; }}
                 QPushButton:hover, QToolButton:hover, QComboBox:hover {{ background: {selection}; }}
                 QPushButton:checked, QToolButton:checked {{ background: {selection};
                     color: {text}; font-weight: 500; }}

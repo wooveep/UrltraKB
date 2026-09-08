@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 
 from openkb.agent.chat_session import list_sessions
 from openkb.application.catalog import knowledge_bases
-from openkb.application.conversations import read_conversation
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status, initialize_kb, open_kb
 from openkb.application.pages import Page, read_page
 from openkb.application.reading import read_page_context
@@ -33,8 +32,6 @@ from openkb.inputs import SUPPORTED_EXTENSIONS
 from openkb.page_ops import EDITABLE_SECTIONS
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import (
-    AskQuestion,
-    ContinueConversation,
     ImportFile,
     ImportUrl,
     SavePage,
@@ -81,7 +78,6 @@ class Workbench(QMainWindow):
         self.kb: Path | None = None
         self.page: Page | None = None
         self._drafts: dict[tuple[str, str], PageDraft] = {}
-        self._task_questions: dict[str, str] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
         self._seen_terminal: set[str] = set()
         self._deleting_kbs: set[Path] = set()
@@ -89,9 +85,7 @@ class Workbench(QMainWindow):
         self._page_request_id = 0
         self._open_request_id = 0
         self._pending_open: Path | None = None
-        self._conversation_request_id = 0
         self._chat_task: str | None = None
-        self._last_chat_text = None
         self._quitting = False
         self.io = LocalIO(self)
         self.manager = TaskManager(history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks")
@@ -140,7 +134,6 @@ class Workbench(QMainWindow):
                 self._pending_open = None
             if self.kb == root:
                 self._page_request_id += 1
-                self._conversation_request_id += 1
         else:
             self._deleting_kbs.discard(root)
 
@@ -151,15 +144,13 @@ class Workbench(QMainWindow):
         self.kb = self.page = None
         self._open_request_id += 1
         self._page_request_id += 1
-        self._conversation_request_id += 1
         self._chat_task = None
         self.pages.clear()
         self.page_context.clear()
-        self.sessions.clear()
         self.editor.clear()
         self.save_button.setEnabled(False)
         self.reader.show_temporary("知识库已删除。请选择或创建另一个知识库。")
-        self.chat.show_temporary("")
+        self.conversations.reset()
         self.location.setText("尚未打开知识库")
         self.setWindowTitle(NAME)
         self.workspaces.reset()
@@ -294,13 +285,8 @@ class Workbench(QMainWindow):
         self.page_context.clear()
         self._page_request_id += 1
         self._chat_task = None
-        self._conversation_request_id += 1
-        self._last_chat_text = None
         self.reader.show_temporary("正在读取当前知识库…")
-        self.chat.show_temporary("在当前知识库开始问答，或选择已有对话。")
-        self.sessions.clear()
-        self.sessions.addItem("新对话", None)
-        self.question.clear()
+        self.conversations.reset()
         self.editor.blockSignals(True)
         self.editor.clear()
         self.editor.blockSignals(False)
@@ -314,7 +300,7 @@ class Workbench(QMainWindow):
         self.kbs.setCurrentIndex(index)
         self.kbs.setToolTip(str(root))
         self.workspaces.reset()
-        self._refresh()
+        self.conversations.recover(root)
 
     def _refresh(self):
         if self.kb is None or self.kb in self._deleting_kbs:
@@ -351,13 +337,7 @@ class Workbench(QMainWindow):
                 item = QTreeWidgetItem(groups[group], [Path(path).stem])
                 item.setData(0, Qt.ItemDataRole.UserRole, path)
             self.pages.expandToDepth(0)
-            selected = self.sessions.currentData()
-            self.sessions.clear()
-            self.sessions.addItem("新对话", None)
-            for session in sessions:
-                self.sessions.addItem(session["title"] or session["id"], session["id"])
-            found = self.sessions.findData(selected)
-            self.sessions.setCurrentIndex(max(0, found))
+            self.conversations.catalog_loaded(sessions)
             self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
             if self.page is None and (root / "wiki/index.md").exists():
                 self.open_page("index.md", activate=False)
@@ -537,54 +517,11 @@ class Workbench(QMainWindow):
             )
 
     def _ask(self):
-        if not self.kb or not self.question.toPlainText().strip():
-            return
-        question = self.question.toPlainText()
-        request = (
-            AskQuestion(question, self.save_answer.isChecked())
-            if self.mode.currentIndex() == 0
-            else ContinueConversation(question, self.sessions.currentData())
-        )
-        task_id = self.manager.submit(self.kb, [request])
-        self._conversation_request_id += 1
-        self._task_questions[task_id] = question
-        self._chat_task = task_id
-        self._last_chat_text = None
-        self.chat.show_temporary(question + "\n\n已排队，等待执行…")
-        self.workspaces.show_answer()
-        self.question.clear()
+        self.conversations.send()
 
-    def _load_conversation(self):
-        self._conversation_request_id += 1
-        request_id = self._conversation_request_id
-        if not self.kb or not self.sessions.currentData():
-            self._chat_task = None
-            self.chat.show_temporary("开始新对话。")
-            return
-        root, session_id = self.kb, self.sessions.currentData()
-        self._chat_task = None
-        self.chat.show_temporary("正在读取对话…")
-
-        def loaded(session, error):
-            if (
-                self.kb != root
-                or request_id != self._conversation_request_id
-                or self.sessions.currentData() != session_id
-                or self._error(error)
-            ):
-                return
-            self._chat_task = None
-            self.chat.show_turns(session.turns, root / "wiki")
-            self.workspaces.show_answer()
-            self.shell.navigate("对话")
-            self.mode.setCurrentIndex(1)
-
-        self.io.submit(
-            lambda: read_conversation(root, session_id),
-            loaded,
-            kb=root,
-            obsolete=lambda: root != self.kb or request_id != self._conversation_request_id,
-        )
+    def _load_conversation(self, identity):
+        self.conversations.open(identity)
+        self.shell.navigate("对话")
 
     def _follow_link(self, url: QUrl):
         if not self.kb:
@@ -659,7 +596,7 @@ class Workbench(QMainWindow):
             )
             for task in tasks
         )
-        self.shell.task_status.setText(f"任务 · {running} 运行 · {attention} 需关注")
+        self.shell.set_task_status(running, attention)
         self.shell.task_status.setToolTip("查看任务详情、错误、保留产物与安全停止")
         self.task_table.blockSignals(True)
         self.task_table.setRowCount(len(tasks))
@@ -684,12 +621,7 @@ class Workbench(QMainWindow):
                 item.setText(value)
                 item.setData(Qt.ItemDataRole.UserRole, task.id)
                 item.setToolTip(task.kb_dir if column == 0 else value)
-            if task.id == self._chat_task and self.kb and str(self.kb) == task.kb_dir:
-                if task.text != self._last_chat_text:
-                    self._last_chat_text = task.text
-                    self.chat.show_temporary(
-                        task.text or task.error or _STATES.get(task.state, task.state)
-                    )
+            self.conversations.observe(task)
             if task.state in TERMINAL and task.id not in self._seen_terminal:
                 self._seen_terminal.add(task.id)
                 self._task_finished(task)
@@ -737,17 +669,7 @@ class Workbench(QMainWindow):
                     self.editor.blockSignals(True)
                     self.editor.setPlainText(confirmed.body)
                     self.editor.blockSignals(False)
-        if task.id == self._chat_task and self.kb and str(self.kb) == task.kb_dir:
-            message = task.text or task.error or "未保存回答正文；可从已保存的对话或产物查看。"
-            if task.state != "completed":
-                message += f"\n\n> {_STATES.get(task.state, task.state)}。未完成内容仅临时保留。"
-            self.chat.show_turns(
-                [(self._task_questions.get(task.id, ""), message)], self.kb / "wiki"
-            )
-            if task.results and task.results[-1].session_id:
-                session_id = task.results[-1].session_id
-                self.sessions.addItem(session_id, session_id)
-                self.sessions.setCurrentIndex(self.sessions.count() - 1)
+        self.conversations.finished(task)
         if task.state != "completed":
             self.statusBar().showMessage("任务未全部完成。点击顶部“任务”查看错误、保留成果与重试。")
         if self.kb and str(self.kb) == task.kb_dir and not self._quitting:

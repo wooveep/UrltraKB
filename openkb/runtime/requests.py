@@ -31,10 +31,26 @@ class AskQuestion:
 class ContinueConversation:
     message: str = field(repr=False)
     session_id: str | None = None
+    new_session_id: str | None = None
+    attempt_id: str | None = None
+    submission_order: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.message, str) or not self.message.strip():
             raise ValueError("Enter a message")
+        if self.submission_order is not None and (
+            type(self.submission_order) is not int or self.submission_order < 0
+        ):
+            raise ValueError("Invalid submission order")
+        if self.session_id and self.new_session_id:
+            raise ValueError("Choose an existing or new conversation identity")
+        for identity in (self.new_session_id, self.attempt_id):
+            if identity is not None and (
+                not isinstance(identity, str)
+                or not identity
+                or not all(c.isascii() and (c.isalnum() or c in "-_") for c in identity)
+            ):
+                raise ValueError("Invalid conversation submission identity")
 
 
 @dataclass(frozen=True)

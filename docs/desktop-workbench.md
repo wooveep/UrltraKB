@@ -141,3 +141,17 @@ on Windows and Linux. Its native verifier additionally checks the real face name
 and OS/2 weight after QSS inheritance and actual Markdown bold/italic rendering.
 The original screenshot/check table above records the preceding redesign; the
 matching build's delivery report contains follow-up evidence and package hashes.
+
+## Continuous chat and compact layouts
+
+The desktop composer uses automatic multi-turn conversations with no mode or save
+checkbox. The history drawer opens conversations with a single click, while export
+and deletion live in its More menu. In-progress work shows a status, not the raw
+model trace. Completed answers use the SDK terminal output; explicit reasoning
+envelopes are filtered without removing literal Markdown code examples.
+
+Ordinary buttons have visible borders, sidebar labels use 18 px text, and action
+rows wrap as space narrows. The layout capture matrix now includes 720 × 600
+logical pixels. Native chat acceptance covers saved multi-turn history, tagged
+reasoning exclusion, duplicate Enter prevention and a background result arriving
+after the user starts a different conversation.

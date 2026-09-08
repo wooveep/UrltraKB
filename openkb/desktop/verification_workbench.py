@@ -110,6 +110,10 @@ def verify_workbench(window, first, other, root, wait):
 
     verify_presentation(window, root, wait)
 
+    from openkb.desktop.verification_conversations import verify_conversations
+
+    verify_conversations(window, first, root, wait)
+
     # System palette changes are supplied at the Qt platform boundary.
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QApplication, QDialog
@@ -143,7 +147,7 @@ def capture_workbench(window, theme, root, wait):
     pages = ("概览", "资料", "知识", "对话", "产物", "任务", "设置")
     for theme_name, suffix in (("浅色", "light"), ("深色", "dark")):
         theme.setCurrentText(theme_name)
-        for width, height in ((1366, 768), (1920, 1080), (900, 650)):
+        for width, height in ((1366, 768), (1920, 1080), (900, 650), (720, 600)):
             window.resize(width, height)
             for number, name in enumerate(pages):
                 window.shell.navigate(name)
@@ -238,8 +242,8 @@ def verify_history_submission(window, kb, wait):
         QTest.keyClick(window.question, Qt.Key.Key_Return)
         task_id = window.manager.tasks()[-1].id
         try:
+            wait(lambda: "已排队" in window.chat.toPlainText())
             assert on_page(window, "对话") and window.chat.isVisible()
-            assert "已排队" in window.chat.toPlainText()
         finally:
             window.manager.stop(task_id)
     wait(lambda: window.manager.get(task_id).state in TERMINAL)
