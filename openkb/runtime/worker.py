@@ -285,6 +285,9 @@ def _execute(
                     root,
                     request.message,
                     session_id=request.session_id,
+                    new_session_id=request.new_session_id,
+                    attempt_id=request.attempt_id,
+                    submission_order=request.submission_order,
                     context=context,
                 )
             )

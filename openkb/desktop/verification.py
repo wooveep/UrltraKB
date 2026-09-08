@@ -382,20 +382,20 @@ print("UrltraKB")  # fenced_code 中文知识
                 checks.append(
                     "one-shot HTTP PDF survives worker deferral; private input is collected"
                 )
-            window.mode.setCurrentIndex(0)
-            window.save_answer.setChecked(True)
-            window.question.setPlainText("What does this knowledge base contain?")
-            window._ask()
-            wait_until(lambda: window._chat_task in window._seen_terminal)
-            assert window._chat_task is not None
-            result = window.manager.get(window._chat_task)
+            from openkb.runtime.requests import AskQuestion
+
+            query_task = window.manager.submit(
+                other, [AskQuestion("What does this knowledge base contain?", True)]
+            )
+            wait_until(lambda: query_task in window._seen_terminal)
+            result = window.manager.get(query_task)
             assert result.state == "completed" and result.text == "Native answer", result
             assert result.results[0].resources and Path(result.results[0].resources[0]).is_file()
-            window.mode.setCurrentIndex(1)
-            window.sessions.setCurrentIndex(0)
+            window.conversations.new()
             for text in ("Start a conversation", "Continue the saved conversation"):
+                wait_until(lambda: not window.conversations.active.loading)
                 window.question.setPlainText(text)
-                window._ask()
+                window.ask_button.click()
                 wait_until(lambda: window._chat_task in window._seen_terminal)
                 assert window._chat_task is not None
                 result = window.manager.get(window._chat_task)
@@ -404,6 +404,9 @@ print("UrltraKB")  # fenced_code 中文知识
             assert session_id is not None
             session = read_conversation(other, session_id)
             assert len(session.turns) == 2
+            wait_until(lambda: "Continue the saved conversation" in window.chat.toPlainText())
+            assert "Start a conversation" in window.chat.toPlainText()
+            assert window.chat.toPlainText().count("Native answer") == 2
             checks.append(
                 "real SDK query/save and two persisted chat turns against local HTTP fixture"
             )

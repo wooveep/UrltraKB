@@ -46,10 +46,11 @@ class MarkdownView(QTextBrowser):
         dark: bool | None = None,
         scale: float | None = None,
         anchor: str = "",
+        preserve: bool = False,
     ) -> None:
         if self._closed:
             return
-        self.show_temporary("正在排版…")
+        self.show_temporary(None if preserve else "正在排版…")
         generation = self._generation
         dark = self._dark if dark is None else dark
         scale = self._scale if scale is None else scale
@@ -143,7 +144,7 @@ class MarkdownView(QTextBrowser):
         if changed and self._has_source:
             self.show_markdown(self._source, self._base)
 
-    def show_temporary(self, text: str) -> None:
+    def show_temporary(self, text: str | None) -> None:
         """Replace temporary text and revoke any older asynchronous rendering."""
         self._generation += 1
         self._has_source, self._anchor = False, ""
@@ -152,7 +153,8 @@ class MarkdownView(QTextBrowser):
         for future in self._futures:
             future.cancel()
         self._futures = [f for f in self._futures if not f.done()]
-        self.setPlainText(text)
+        if text is not None:
+            self.setPlainText(text)
 
     def stop_rendering(self) -> None:
         self._closed = True

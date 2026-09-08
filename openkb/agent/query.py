@@ -206,9 +206,12 @@ async def iter_agent_response_events(
     finally:
         await stream.aclose()
 
-    answer = "".join(collected).strip()
-    if not answer:
-        answer = (result.final_output or "").strip()
+    from openkb.agent.answer_text import visible_answer
+
+    # Deltas also contain assistant narration before tool calls. The SDK's
+    # terminal output identifies the actual answer, independently of that trace.
+    final = result.final_output
+    answer = visible_answer(final if isinstance(final, str) else "".join(collected))
     yield {
         "event": "final",
         "data": {

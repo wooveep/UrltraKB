@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from openkb.agent.chat_session import ChatSession, _session_path, load_session
+from openkb.agent.chat_session import ChatSession, _session_path, deletion_marker, load_session
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
 from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
@@ -45,7 +45,10 @@ def delete_conversation(
         if version is not None and hashlib.sha256(path.read_bytes()).hexdigest() != version:
             return SessionResult("conflict")
         with context.begin(root) if context else nullcontext():
-            with mutation_scope(root, [path], operation="delete-conversation"):
+            marker = deletion_marker(root, session_id)
+            contained_paths(root, [marker])
+            with mutation_scope(root, [path, marker], operation="delete-conversation"):
+                atomic_write_text(marker, "deleted\n")
                 path.unlink()
             return SessionResult(
                 "deleted", changes=(f"deleted: {path.relative_to(root).as_posix()}",)
@@ -119,7 +122,19 @@ def _transcript(kb_dir: Path, session: ChatSession) -> str:
         f"# Chat transcript  {session.title or session.id}",
         "",
     ]
-    for index, (user, answer) in enumerate(zip(session.user_turns, session.assistant_texts), 1):
+    from openkb.agent.answer_text import visible_answer
+
+    for index in range(len(session.user_turns) + 1):
+        for entry in session.incomplete:
+            if entry["after_turn"] == index:
+                lines.extend(
+                    [f"## [unfinished] {entry['message']}", "", "_(answer unfinished)_", ""]
+                )
+        if index == len(session.user_turns):
+            break
+        user, answer = session.user_turns[index], session.assistant_texts[index]
+        answer = visible_answer(answer)
+        index += 1
         lines.extend([f"## [{index}] {user}", ""])
         if answer:
             cleaned, _ = strip_ghost_wikilinks(answer, known, norm_index=norm_index)

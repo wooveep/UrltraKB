@@ -17,7 +17,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from time import time_ns
 from typing import Any
+from uuid import uuid4
 
 from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
 from openkb.mutation import mutation_scope
@@ -127,12 +129,16 @@ class ChatSession:
     # CLI-recorded turns): the frontend falls back to the flat text for those.
     assistant_traces: list[list[dict[str, Any]]]
     path: Path
+    incomplete: list[dict[str, Any]] = field(default_factory=list)
+    completed_attempts: list[str] = field(default_factory=list)
     _version: str | None = field(default=None, repr=False)
 
     @classmethod
-    def new(cls, kb_dir: Path, model: str, language: str) -> "ChatSession":
+    def new(
+        cls, kb_dir: Path, model: str, language: str, *, identity: str | None = None
+    ) -> "ChatSession":
         now = _utcnow_iso()
-        sid = _gen_id()
+        sid = identity or _gen_id()
         return cls(
             id=sid,
             created_at=now,
@@ -145,7 +151,7 @@ class ChatSession:
             user_turns=[],
             assistant_texts=[],
             assistant_traces=[],
-            path=chats_dir(kb_dir) / f"{sid}.json",
+            path=_session_path(kb_dir, sid),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -161,6 +167,8 @@ class ChatSession:
             "user_turns": self.user_turns,
             "assistant_texts": self.assistant_texts,
             "assistant_traces": self.assistant_traces,
+            "incomplete": self.incomplete,
+            "completed_attempts": self.completed_attempts,
         }
 
     def save(self) -> None:
@@ -173,6 +181,8 @@ class ChatSession:
                     raise RuntimeError("Conversation changed; reload its latest completed history")
             elif self.path.exists() or self.path.is_symlink():
                 raise RuntimeError("Conversation changed; session identity already exists")
+            elif deletion_marker(kb_dir, self.id).exists():
+                raise FileNotFoundError("Conversation was deleted")
             text = json.dumps(self.to_dict(), ensure_ascii=False, indent=2, default=str)
             with mutation_scope(kb_dir, [self.path], operation="save-chat-turn"):
                 atomic_write_text(self.path, text)
@@ -190,13 +200,73 @@ class ChatSession:
         assistant_text: str,
         new_history: list[dict[str, Any]],
         trace: list[dict[str, Any]] | None = None,
+        *,
+        attempt_id: str | None = None,
     ) -> None:
         previous = deepcopy(self.__dict__)
         try:
+            if attempt_id:
+                self.completed_attempts.append(attempt_id)
+                self.incomplete = [item for item in self.incomplete if item["id"] != attempt_id]
             self._record_turn(user_message, assistant_text, new_history, trace)
         except BaseException:
             self.__dict__.update(previous)
             raise
+
+    def begin_attempt(
+        self,
+        message: str,
+        *,
+        identity: str | None = None,
+        after_turn: int | None = None,
+        submission_order: int | None = None,
+    ) -> str:
+        """Keep submitted text across cancellation/crash without inventing an SDK turn."""
+        previous = deepcopy(self.__dict__)
+        identity = identity or uuid4().hex
+        if submission_order is not None and (
+            type(submission_order) is not int or submission_order < 0
+        ):
+            raise ValueError("Invalid submission order")
+        if after_turn is not None and (
+            type(after_turn) is not int or not 0 <= after_turn <= self.turn_count
+        ):
+            raise ValueError("Invalid submission turn position")
+        if identity in self.completed_attempts:
+            raise ValueError("This conversation turn was already completed")
+        for item in self.incomplete:
+            if item["id"] == identity:
+                if item["message"] != message:
+                    raise ValueError("Conversation submission identity mismatch")
+                if submission_order is not None and item.get("order") != submission_order:
+                    try:
+                        item["order"] = submission_order
+                        self.incomplete.sort(
+                            key=lambda row: (row["after_turn"], row.get("order", 0))
+                        )
+                        self.save()
+                    except BaseException:
+                        self.__dict__.update(previous)
+                        raise
+                return identity
+        try:
+            self.incomplete.append(
+                {
+                    "id": identity,
+                    "after_turn": self.turn_count if after_turn is None else after_turn,
+                    "message": message,
+                    "order": submission_order if submission_order is not None else time_ns(),
+                }
+            )
+            self.incomplete.sort(key=lambda row: (row["after_turn"], row.get("order", 0)))
+            if not self.title:
+                self.title = _title_from(message)
+            self.updated_at = _utcnow_iso()
+            self.save()
+        except BaseException:
+            self.__dict__.update(previous)
+            raise
+        return identity
 
     def _record_turn(
         self,
@@ -242,6 +312,23 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
             raise ValueError("Invalid conversation history")
     if type(data.get("turn_count", 0)) is not int or data.get("turn_count", 0) < 0:
         raise ValueError("Invalid completed conversation count")
+    incomplete = data.get("incomplete", [])
+    if not isinstance(incomplete, list) or any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("id"), str)
+        or not isinstance(item.get("message"), str)
+        or type(item.get("order", 0)) is not int
+        or item.get("order", 0) < 0
+        or type(item.get("after_turn")) is not int
+        or not 0 <= item["after_turn"] <= data.get("turn_count", 0)
+        for item in incomplete
+    ):
+        raise ValueError("Invalid incomplete conversation entries")
+    completed_attempts = data.get("completed_attempts", [])
+    if not isinstance(completed_attempts, list) or any(
+        not isinstance(item, str) for item in completed_attempts
+    ):
+        raise ValueError("Invalid completed submission identities")
     return ChatSession(
         id=data["id"],
         created_at=data["created_at"],
@@ -255,6 +342,8 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         assistant_texts=data.get("assistant_texts", []),
         assistant_traces=data.get("assistant_traces", []),
         path=path,
+        incomplete=incomplete,
+        completed_attempts=completed_attempts,
         _version=hashlib.sha256(content).hexdigest(),
     )
 
@@ -347,3 +436,9 @@ def _session_path(kb_dir: Path, session_id: str) -> Path:
     if not path.resolve().is_relative_to(kb_dir.resolve()):
         raise ValueError("Conversation path escapes the knowledge base")
     return path
+
+
+def deletion_marker(kb_dir: Path, session_id: str) -> Path:
+    """A deleted identity must not be recreated by an unacknowledged submission."""
+    path = _session_path(kb_dir, session_id)
+    return path.parent / ".deleted" / path.name

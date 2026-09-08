@@ -97,17 +97,22 @@ its checks are described in the [build guide](../packaging/desktop/README.md).
 
 ## Ask questions and keep conversations
 
-**对话** (Conversations) separates **一次问答**, with an explicit **保存回答** option,
-from continuous **对话**, with session selection and **对话历史** management.
-Query produces a grounded answer using the current KB. Chat streams a turn and
-can resume existing CLI conversations. Completed turns retain the established
-session format and the session's model/language choices. Concurrent attempts to
-write the same conversation wait for exclusive access.
+**对话** (Conversations) opens directly into an automatically saved, multi-turn chat.
+Type a message and press Enter; Shift + Enter adds a line. **新对话** starts a fresh
+context and **对话历史** opens saved chats with one click. Reopening a KB restores
+the last selected conversation. The complete transcript stays visible during a
+follow-up, and the composer offers **停止** while a reply is running.
 
-Save an answer or export a transcript to keep it as an exploration. Desktop
-exports choose a new name so that repeated saves preserve prior outputs.
-Incomplete streamed text remains readable and copyable for the current run;
-an interrupted answer is not recorded as a completed conversation turn.
+The chat displays a short progress status until the final answer is ready. Tool
+narration and explicitly tagged reasoning are excluded from the answer. Quoted
+code, citations, formulas and diagrams remain available. Completed turns retain
+the established session model/language and reusable SDK history. Accepted submissions are first saved in a private desktop outbox, including
+while the KB is busy. Recovery transfers them into the conversation without
+replaying model requests; interrupted submissions remain in the timeline
+with an unfinished notice and are never counted as completed model turns.
+
+History's **更多** menu exports a Markdown copy or confirms deletion. Exports use
+new filenames to preserve prior copies. CLI/API one-shot queries remain available.
 
 ## Generate and export outputs
 

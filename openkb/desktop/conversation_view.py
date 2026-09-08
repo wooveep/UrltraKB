@@ -5,6 +5,7 @@ import html
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QPlainTextEdit
 
+from openkb.agent.answer_text import visible_answer
 from openkb.desktop.fonts import text_font
 from openkb.desktop.reader import MarkdownView
 
@@ -51,25 +52,41 @@ class ConversationView(MarkdownView):
     def __init__(self):
         super().__init__()
         self._turns = None
+        self._pending = None
 
-    def show_turns(self, turns, base):
+    def show_turns(self, turns, base, *, pending=None):
         self._turns = tuple(turns)
+        self._pending = pending
         background = "#30312e" if self._dark else "#f0f1ed"
         parts = []
-        for question, answer in self._turns:
+        for question, answer in (*self._turns, *((pending,) if pending else ())):
             question = html.escape(question).replace("\n", "<br>")
             parts.append(
-                f'<table align="right" width="88%" cellspacing="0" cellpadding="14">'
-                f'<tr><td bgcolor="{background}">{question}</td></tr></table>\n\n'
-                "<h5>UrltraKB</h5>\n\n" + answer
+                '<table width="100%" cellspacing="0" cellpadding="14">'
+                f'<tr><td width="22%"></td><td bgcolor="{background}">{question}</td></tr>'
+                '</table>\n\n<p style="font-size: 13px; margin-top: 24px;">UrltraKB</p>\n\n'
+                + visible_answer(answer)
+                + '\n\n<p style="margin-bottom: 28px;"></p>'
             )
-        super().show_markdown("\n\n".join(parts), base)
+        if not parts:
+            self.show_temporary("")
+        else:
+            super().show_markdown("\n\n".join(parts), base, preserve=True)
+
+    def _apply_rendered(self, generation, value):
+        bar = self.verticalScrollBar()
+        previous = bar.value()
+        following = bar.maximum() - previous < 40
+        super()._apply_rendered(generation, value)
+        if generation == self._generation:
+            bar.setValue(bar.maximum() if following else previous)
 
     def show_temporary(self, text):
         # MarkdownView calls this while scheduling rendering. Keep the semantic
         # turns for a palette change; explicit temporary states replace them.
-        if text != "正在排版…":
+        if text not in (None, "正在排版…"):
             self._turns = None
+            self._pending = None
         super().show_temporary(text)
 
     def set_presentation(self, *, dark, scale):
@@ -77,6 +94,6 @@ class ConversationView(MarkdownView):
         changed = (dark, scale) != (self._dark, self._scale)
         if changed and turns is not None:
             self._dark, self._scale = dark, scale
-            self.show_turns(turns, base)
+            self.show_turns(turns, base, pending=self._pending)
         else:
             super().set_presentation(dark=dark, scale=scale)
