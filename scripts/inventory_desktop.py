@@ -224,7 +224,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     files = []
     expected_executables = {
         name + (".exe" if os.name == "nt" else "")
-        for name in ("OpenKB", "OpenKBCLI", "OpenKBAPI", "OpenKBVerify")
+        for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
     }
     found_executables = set()
     embedded_bootstrap = {}
@@ -328,7 +328,7 @@ def main() -> None:
     args = parser.parse_args()
     packaging = args.source / "packaging/desktop"
     result = inventory(
-        args.source, packaging / "dist/OpenKB", packaging / "build/freeze/desktop/Analysis-00.toc"
+        args.source, packaging / "dist/UrltraKB", packaging / "build/freeze/desktop/Analysis-00.toc"
     )
     with args.output.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(result, stream, indent=2, ensure_ascii=False)

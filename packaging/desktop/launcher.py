@@ -12,20 +12,20 @@ if __name__ == "__main__":
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
-    program = Path(sys.executable).stem.lower()
-    if program in {"openkbcli", "openkbapi"}:
+    program = Path(sys.executable).stem.lower().removeprefix("urltrakb")
+    if program in {"cli", "api"}:
         from openkb.runtime.assets import configure_sdk_resources
 
         configure_sdk_resources()
-    if program == "openkbcli":
+    if program == "cli":
         from openkb.cli import cli
 
         cli()
-    elif program == "openkbapi":
+    elif program == "api":
         from openkb.api import main
 
         main()
-    elif program == "openkbverify":
+    elif program == "verify":
         from openkb.desktop.verification import main
 
         raise SystemExit(main())

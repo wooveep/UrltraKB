@@ -71,7 +71,7 @@ class _SourceLink:
                 headers = MutableHeaders(scope=message)
                 link = (
                     f"<{scope.get('root_path', '')}/api/v1/distribution>; "
-                    'rel="describedby"; title="OpenKB source and licenses"'
+                    'rel="describedby"; title="UrltraKB source and licenses"'
                 )
                 previous = headers.get("Link")
                 headers["Link"] = f"{previous}, {link}" if previous else link

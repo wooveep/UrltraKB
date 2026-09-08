@@ -61,7 +61,7 @@ class ReleaseFile:
         name, kind, size, digest = (value[k] for k in ("name", "kind", "size", "sha256"))
         if (
             not isinstance(name, str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", name)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,199}", name)
             or not isinstance(kind, str)
             or kind not in _KINDS
             or type(size) is not int
@@ -79,6 +79,7 @@ class Distribution:
     version: str
     commit: str | None
     files: tuple[ReleaseFile, ...]
+    source_archive: ReleaseFile | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -92,6 +93,7 @@ class Distribution:
                 else "Development environment; matching distribution materials are not configured."
             ),
             "files": [asdict(file) for file in self.files],
+            **({"source_archive": asdict(self.source_archive)} if self.source_archive else {}),
         }
 
     def open_file(self, name: str) -> BinaryIO:
@@ -141,28 +143,50 @@ def load_distribution() -> Distribution:
         else Path(sys.executable).resolve().parent / "distribution"
     )
     try:
+        identity = _json(Path(__file__).with_name("_build_info.json"))
+        if not isinstance(identity, dict) or identity.get("version") != __version__:
+            raise DistributionError("Distribution version does not match this installation")
+        return read_distribution(root, identity)
+    except (OSError, ValueError, TypeError) as exc:
+        raise DistributionError("Matching release materials are unavailable or invalid") from exc
+
+
+def read_distribution(root: Path, identity: dict[str, str]) -> Distribution:
+    """Read complete or split materials against a verified installation/export identity."""
+    root = root.resolve()
+    try:
         path = root / "release.json"
         if path.is_symlink():
             raise DistributionError("Release manifest must not be redirected")
         value = _json(path)
-        if not isinstance(value, dict) or set(value) != {"schema", "version", "commit", "files"}:
+        fields = {"schema", "version", "commit", "files"}
+        if not isinstance(value, dict):
+            raise DistributionError("Invalid distribution manifest")
+        split = value.get("schema") == 2
+        if set(value) != (fields | {"source_archive"} if split else fields):
             raise DistributionError("Invalid distribution manifest")
         if (
             type(value["schema"]) is not int
-            or value["schema"] != 1
-            or value["version"] != __version__
+            or value["schema"] not in {1, 2}
+            or not isinstance(value["version"], str)
+            or not re.fullmatch(r"[A-Za-z0-9.+_-]+", value["version"])
             or not isinstance(value["commit"], str)
             or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["commit"])
             or not isinstance(value["files"], list)
-            or not 5 <= len(value["files"]) <= 256
+            or not (2 if split else 5) <= len(value["files"]) <= 256
         ):
             raise DistributionError("Distribution version or identity is invalid")
         files = tuple(ReleaseFile.parse(file) for file in value["files"])
-        if len({file.name for file in files}) != len(files) or {f.kind for f in files} != _KINDS:
+        kinds = {"licenses", "notice"} if split else _KINDS
+        if len({file.name for file in files}) != len(files) or {f.kind for f in files} != kinds:
             raise DistributionError("Distribution materials are incomplete or duplicated")
-        identity = _json(Path(__file__).with_name("_build_info.json"))
         if identity != {"version": value["version"], "commit": value["commit"]}:
             raise DistributionError("Distribution materials do not match this installation")
-        return Distribution(root, value["version"], value["commit"], files)
+        source_archive = ReleaseFile.parse(value["source_archive"]) if split else None
+        if source_archive and (
+            source_archive.kind != "source" or source_archive.name in {f.name for f in files}
+        ):
+            raise DistributionError("Invalid separate source archive")
+        return Distribution(root, value["version"], value["commit"], files, source_archive)
     except (OSError, ValueError, TypeError) as exc:
         raise DistributionError("Matching release materials are unavailable or invalid") from exc

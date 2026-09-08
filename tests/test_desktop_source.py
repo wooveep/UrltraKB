@@ -124,3 +124,102 @@ def test_local_replacement_refs_cannot_change_committed_blob_bytes(tmp_path):
     output = tmp_path / "export"
     export_source(repo, output)
     assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux"])
+def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
+    import hashlib
+    import tarfile
+    import zipfile
+    from dataclasses import asdict
+
+    from openkb.distribution import read_distribution
+    from scripts.export_desktop_source import export_source
+    from scripts.package_desktop import package_materials, package_runtime, record
+
+    source = tmp_path / "export"
+    identity = export_source(_repository(tmp_path), source)
+    materials = tmp_path / "complete-materials"
+    materials.mkdir()
+    material_files = []
+    for kind in ("source", "licenses", "notice", "components", "build"):
+        path = materials / f"UrltraKB-{kind}.txt"
+        path.write_text(f"Complete {kind} material", encoding="utf-8")
+        material_files.append(asdict(record(path, kind)))
+    (materials / "release.json").write_text(
+        json.dumps({"schema": 1, **identity, "files": material_files}), encoding="utf-8"
+    )
+    program = tmp_path / "program"
+    (program / "_internal/openkb").mkdir(parents=True)
+    suffix = ".exe" if system == "Windows" else ""
+    for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify"):
+        (program / (name + suffix)).write_bytes(b"inventoried executable fixture")
+        (program / (name + suffix)).chmod(0o755)
+    (program / "_internal/openkb/_build_info.json").write_text(json.dumps(identity))
+    if system == "Linux":
+        (program / "_internal/library.so.1").write_bytes(b"shared runtime")
+        (program / "_internal/library.so").symlink_to("library.so.1")
+    rows = []
+    for path in program.rglob("*"):
+        if path.is_file():
+            row = asdict(record(path, "build"))
+            row["path"] = path.relative_to(program).as_posix()
+            if path.is_symlink():
+                row["link"] = path.readlink().as_posix()
+            rows.append(row)
+    inventory = {**identity, "platform": {"system": system, "machine": "x86_64"}, "files": rows}
+    (program / "private.env").write_text("must never ship")
+    output = tmp_path / "delivery"
+    companion = package_materials(source, materials, output)
+    runtime = package_runtime(
+        source, program, inventory, materials, output / companion.name, output
+    )
+    assert runtime.name.startswith(f"UrltraKB-{identity['version']}-")
+    with zipfile.ZipFile(output / companion.name) as archive:
+        assert "UrltraKB/distribution/UrltraKB-source.txt" in archive.namelist()
+    extracted = tmp_path / "extracted"
+    if system == "Windows":
+        with zipfile.ZipFile(output / runtime.name) as archive:
+            archive.extractall(extracted)
+    else:
+        with tarfile.open(output / runtime.name) as archive:
+            archive.extractall(extracted, filter="data")
+        assert (extracted / "UrltraKB/UrltraKB").stat().st_mode & 0o111
+        assert (extracted / "UrltraKB/_internal/library.so").read_bytes() == b"shared runtime"
+    release = read_distribution(extracted / "UrltraKB/distribution", identity)
+    assert {f.kind for f in release.files} == {"licenses", "notice"}
+    assert release.source_archive == companion
+    assert not list(extracted.rglob("*source*"))
+    assert not list(extracted.rglob("private.env"))
+    assert not list(extracted.rglob("OpenKB*"))
+    with release.open_file("UrltraKB-licenses.txt") as stream:
+        assert stream.read() == b"Complete licenses material"
+    import os
+
+    for path in [*program.rglob("*"), *materials.iterdir()]:
+        if path.is_file():
+            os.utime(path, (946684800, 946684800))
+    repeat = tmp_path / "repeat"
+    repeated_companion = package_materials(source, materials, repeat)
+    assert repeated_companion.sha256 == companion.sha256
+    repeated_runtime = package_runtime(
+        source, program, inventory, materials, repeat / companion.name, repeat
+    )
+    assert repeated_runtime.sha256 == runtime.sha256
+    if system == "Linux":
+        (program / "UrltraKB").chmod(0o644)
+        with pytest.raises(ValueError, match="not executable"):
+            package_runtime(
+                source, program, inventory, materials, output / companion.name, tmp_path / "nonexec"
+            )
+        (program / "UrltraKB").chmod(0o755)
+    (program / ("UrltraKB" + suffix)).write_bytes(b"changed executable")
+    before = hashlib.sha256((output / runtime.name).read_bytes()).hexdigest()
+    with pytest.raises(FileExistsError):
+        package_runtime(source, program, inventory, materials, output / companion.name, output)
+    assert hashlib.sha256((output / runtime.name).read_bytes()).hexdigest() == before
+    with pytest.raises(ValueError, match="Program input changed"):
+        package_runtime(
+            source, program, inventory, materials, output / companion.name, tmp_path / "bad"
+        )
+    assert not list((tmp_path / "bad").iterdir())

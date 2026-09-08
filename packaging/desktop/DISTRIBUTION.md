@@ -1,9 +1,14 @@
-# Corresponding source and distribution materials
+# UrltraKB source and distribution materials
 
-The program identity is the commit embedded in `openkb/_build_info.json`, not
-the checkout used later to assemble its distribution materials. The current
-accepted program is `87bdcc7b6e3306b2f1981b80af5a705b258e0c35`, version
-`0.1.dev42+g87bdcc7b6e33`. Materials-only changes do not change that identity.
+Program archives are named `UrltraKB-VERSION-windows-x64.zip` and
+`UrltraKB-VERSION-debian13.6-x64.tar.gz`, containing `UrltraKB/` and the
+UrltraKB executable names. Full source/build materials are delivered separately
+as `UrltraKB-VERSION-materials.zip`; runtime archives retain full licenses,
+notices and the companion archive identity. This separation is the default.
+
+The program identity is the commit and version embedded in
+`openkb/_build_info.json`, not a later materials-only checkout. Follow the
+actual export identity and release manifests rather than historical examples.
 
 ## Contents and license scope
 
@@ -43,7 +48,7 @@ records distinguish the two platforms' Python runtime builds and native
 dependencies even where their public package versions are identical.
 
 From `program-source/`, follow `packaging/desktop/README.md`. Set
-`SETUPTOOLS_SCM_PRETEND_VERSION=0.1.dev42+g87bdcc7b6e33` before installation.
+`SETUPTOOLS_SCM_PRETEND_VERSION` to the exported version before installation.
 On Debian:
 
 ```sh
@@ -108,10 +113,11 @@ directory. It also requires the complete committed source export and rejects
 case-insensitive path collisions between ZIP assets. It copies only named inputs, re-reads every archived member to
 verify its hash, and creates `release.json` after all assets verify.
 
-For reassembly, extract **all** ZIP assets into one empty input directory.
-Copy the standalone `NOTICE-87bdcc7.txt` into that directory as
-`NOTICE.distribution.txt`, and retain the downloaded `materials-plan.json`.
-Run the following command from the extracted input directory:
+For reassembly, extract the independent materials ZIP. Its
+`UrltraKB/distribution/` contains all named ZIP assets, the notice and
+`materials-plan.json`. Extract the inner ZIP assets into one empty input
+directory, and copy the standalone notice to `NOTICE.distribution.txt` there.
+Run the included assembly tool with the extracted plan and inputs:
 
 ```sh
 python build/tools/assemble_distribution.py --plan materials-plan.json \
@@ -133,10 +139,13 @@ license copies through their conversion manifest. Provenance-only binary
 downloads and rejected source candidates are intentionally not source inputs;
 the component records explain those distinctions.
 
-Place the complete `distribution/` directory beside the program executables.
+The runtime package has a compact `distribution/` directory with licenses and
+a notice. For full local source access, extract the independent materials archive
+at the same location as the runtime archive, merging `UrltraKB/distribution/`.
 The native **About / Source and licenses** dialog loads the matching version,
-source identity, notices and selectable full license texts. The standalone
-REST service exposes the same verified material files at
+source identity, notices and selectable full license texts. With the compact
+manifest it also identifies the separate archive and its checksum. The standalone
+REST service exposes only locally installed verified material files at
 `/api/v1/distribution`, including to users who lack KB credentials. For a
 source/wheel REST deployment, install the matching exported package and set
 `OPENKB_DISTRIBUTION_DIR` to the complete material directory.
@@ -153,7 +162,6 @@ archive for a different commit is not a substitute.
 
 ## Acceptance record
 
-The maintainer confirmed clean-system complete acceptance on 2026-09-08 in
-the implementation task. This closes that acceptance input. The earlier
-agent-generated Windows and Debian environment records remain unchanged as
-the record of what the agent itself observed; no Sandbox run is asserted.
+Record each build's inventory, runtime/archive checks and material checks against
+its exact commit. Historical clean-system acceptance is not automatically
+acceptance of a newer build. Packaging and local delivery do not publish a release.

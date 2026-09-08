@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
+    parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
     parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
     parser.add_argument("--lifecycle-state", type=Path, help="Previous lifecycle run for restart")
@@ -142,6 +143,12 @@ print("OpenKB")
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.distribution:
+            from openkb.desktop.verification_distribution import verify_distribution
+
+            verify_distribution(window, root, wait_until)
+            checks.append("native release identity, separate source reference and full licenses")
+            return 0
         if args.workbench_restart:
             from openkb.desktop.verification_workbench import verify_appearance_restart
 
