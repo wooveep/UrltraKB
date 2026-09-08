@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-_TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples"}
+_TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "assets"}
 _FILES = {
     ".gitignore",
     "README.md",
@@ -52,6 +52,8 @@ def _source(name: str) -> bool:
         or any(name == generated or name.startswith(generated + "/") for generated in _GENERATED)
     ):
         return False
+    if name.startswith("assets/"):
+        return name.startswith("assets/fonts/") and len(path.parts) == 3
     return not name.startswith("openkb/web/") and (name in _FILES or path.parts[0] in _TREES)
 
 

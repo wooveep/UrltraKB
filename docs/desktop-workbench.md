@@ -5,7 +5,7 @@ The accepted Qt Widgets, shared application interfaces, isolated task workers an
 browser-free rendering architecture remain in place. The desktop uses the display
 name **UrltraKB**, while `openkb`, Python package/distribution names, `.openkb`,
 Qt `OpenKB/OpenKB` settings identity, CLI and REST contracts remain compatible.
-Previously released program names and original third-party notices are unchanged.
+Portable entry points and archive roots use `UrltraKB`; original third-party notices are retained.
 
 ## Composition
 
@@ -14,13 +14,28 @@ Previously released program names and original third-party notices are unchanged
 - `appearance.py` applies a shared palette and native control styling. Follow
   System is the initial choice; explicit Light/Dark and sidebar preference are
   stored as application-local Qt settings, separately from credentials and KBs.
-- `shell.py` owns the compact top bar, 216/60 logical-pixel navigation and page
+- `shell.py` owns the compact top bar, 224/64 logical-pixel navigation and page
   selection. Automatic compact mode below 1080 logical pixels never persists over
   the wide-window preference; its toggle remains reachable.
 - `workspaces.py` composes Overview, Documents, Knowledge, Conversations, Artifacts,
   Tasks and Settings using existing controls. Common management forms support
   page embedding; Escape cannot dismiss an embedded page. Destructive confirmation,
   conflict review, recovery and detailed task inspection retain their dialogs.
+- `fonts.py` loads the supplied `assets/fonts/` files into the application only.
+  Source Han Sans CN VF 2.005 supplies interface and prose; its `wght` axis is
+  explicitly 400 because selecting the Regular style alone can retain the default
+  ExtraLight instance. Source Code Pro 2.042 supplies code and the source editor.
+  Wheels and portable builds include the original font bytes and their OFL notices.
+  Windows desktop entry points select Qt's bundled FreeType font engine for
+  consistent variable-font rasterization. Explicit Qt platform arguments or the
+  `QT_QPA_PLATFORM` environment setting take precedence; system settings are untouched.
+- The flat, neutral shell uses a full-height navigation rail and a quiet context
+  bar. Conversations use a centered readable column, distinct user messages and a
+  bottom composer. Enter sends, Shift+Enter inserts a line, and IME confirmation
+  does not send a message.
+- `drawer.py` keeps conversation history and page sources in local overlays with
+  an interruptible 180 ms fade/slide. Escape and outside clicks close a drawer and
+  return focus; changing workspaces or KBs retires it without losing drafts.
 - Knowledge directory and page sources are local, optional panes. The reading
   and editing controls persist while navigating, so toggles preserve drafts.
   Task-owned outputs are displayed exclusively with their task's full KB location.
@@ -53,7 +68,9 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
 .venv/bin/pytest
 ```
 
-The workbench runner drives the real Qt window, checks visible pages and keyboard
+The workbench runner also checks the supplied fonts, intermediate fade frames,
+reversed transitions, drawer resizing/focus, draft retention and IME-safe submission.
+It drives the real Qt window, checks visible pages and keyboard
 controls, verifies a saved draft and failure feedback through real tasks, switches
 between same-named KBs, simulates palette input at the Qt boundary, and checks
 preferences in a fresh process. Its screenshot matrix contains all seven pages
@@ -65,20 +82,21 @@ pages; restricted recovery and destructive confirmations remain modal.
 ## Actual application screenshots
 
 Captured on 2026-09-08 with PySide6/Qt 6.11.2, Linux x86_64, the offscreen Qt
-platform and 150% scale. These are actual Workbench captures from isolated sample
+platform and 100% scale. These are actual Workbench captures from isolated sample
 KBs, including empty source/artifact lists and a deliberately failed revision
-check. Blank lists are empty states, not simulated data. Files are retained
+check. The conversation screenshot uses a presentation fixture, not an actual model response.
+Blank lists are empty states. Files are retained
 without image editing; screenshot pixels include Qt's device scaling.
 
 | Page | Screenshot |
 | --- | --- |
 | Overview, light, 1366×768 logical | [Overview](desktop-evidence/workbench/overview.png) |
-| Documents, dark, 900×650 logical | [Documents](desktop-evidence/workbench/documents.png) |
-| Knowledge, dark, 900×650 logical | [Knowledge](desktop-evidence/workbench/knowledge.png) |
-| Conversations, dark, 1366×768 logical | [Conversations](desktop-evidence/workbench/conversations.png) |
-| Artifacts, light, 900×650 logical | [Artifacts](desktop-evidence/workbench/artifacts.png) |
-| Tasks, light, 900×650 logical | [Tasks](desktop-evidence/workbench/tasks.png) |
-| Settings, dark, 900×650 logical | [Settings](desktop-evidence/workbench/settings.png) |
+| Documents, light, 1366×768 logical | [Documents](desktop-evidence/workbench/documents.png) |
+| Knowledge, light, 1366×768 logical | [Knowledge](desktop-evidence/workbench/knowledge.png) |
+| Conversations, light, 1366×768 logical | [Conversations](desktop-evidence/workbench/conversations.png) |
+| Artifacts, light, 1366×768 logical | [Artifacts](desktop-evidence/workbench/artifacts.png) |
+| Tasks, light, 1366×768 logical | [Tasks](desktop-evidence/workbench/tasks.png) |
+| Settings, light, 1366×768 logical | [Settings](desktop-evidence/workbench/settings.png) |
 
 This is source-run Qt behavior and visual evidence. Offscreen tray-menu activation
 checks application behavior, not physical OS tray integration. It does not claim
@@ -94,13 +112,11 @@ Source acceptance on 2026-09-08 (Python 3.12.13, Qt 6.11.2):
 
 | Check | Result |
 | --- | --- |
-| Full pytest suite after review fixes | 1,471 passed, 57.49 seconds |
-| Workbench, shutdown/restart, module size | 9 passed |
-| Source export, Markdown and render-process regressions | 18 passed |
-| Controlled local HTTP/model acceptance | 20 checks passed, including management through pages |
+| Full pytest suite after review fixes | 1,474 passed, 60.06 seconds |
+| Controlled local HTTP/model acceptance | 22 checks passed, including management through pages |
 | Actual Qt corpus | 296 cases across both themes at 100/150/200/400% |
 | Expected unsupported-input fallbacks | 16 cases, verified as explicit source fallbacks |
-| Inline formula baseline checks | Maximum measured error 0.470 logical pixels |
+| Inline formula baseline checks | Maximum measured error 0.605 logical pixels |
 | Screenshot matrix | 42 views at 100%; repeated at 150% device scale |
 | Ruff / formatting / mypy | Passed |
 
@@ -110,8 +126,8 @@ The corpus runner leaves its exhaustive visual verdict separate from structural
 checks. This change includes representative screenshot inspection, not a renewed
 qualification of every supported diagram at every scale.
 
-The independent Standards review identified one low-severity page-order coupling
-in shutdown; it was removed. The Spec review identified stale inherited settings
-and a hidden answer when submitting from history; both were reproduced and fixed,
-with behavior regressions in the actual Workbench runner. The follow-up reviews
-reported **Standards: 0 remaining; Spec: 0 remaining**.
+The independent Standards review reported no findings. The Spec review caught a
+Chinese fallback to a system font inside code; both the source editor and Markdown
+code now name Source Han Sans after Source Code Pro. Actual glyph runs verify both
+families and the weight axis. Follow-up review reported **Standards: 0 remaining;
+Spec: 0 remaining**.

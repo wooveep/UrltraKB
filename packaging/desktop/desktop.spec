@@ -12,6 +12,7 @@ datas = collect_data_files(
     "openkb", excludes=["**/web/**", "**/rendering/assets/**", "**/rust-helper/**"]
 )
 datas += [(str(assets), "openkb/rendering/assets")]
+datas += [(str(repo / "assets/fonts"), "openkb/desktop/assets/fonts")]
 datas += [(str(packaging / "build/token-cache"), "openkb/token-cache")]
 datas += copy_metadata("openkb", recursive=True)
 for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):

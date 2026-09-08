@@ -1,13 +1,17 @@
 """Assemble the native shell and retain an observable shutdown workspace."""
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QApplication, QDialog
 
 from openkb.desktop.shell import WorkbenchShell
 from openkb.desktop.workspaces import Workspaces
 
 
 def build_workbench(window):
+    from openkb.desktop.fonts import register_fonts, text_font
+
+    register_fonts()
+    QApplication.instance().setFont(text_font())
     preferences = QSettings(
         QSettings.defaultFormat(), QSettings.Scope.UserScope, "OpenKB", "OpenKB"
     )

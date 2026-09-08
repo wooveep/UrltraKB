@@ -14,6 +14,8 @@ def _repository(tmp_path):
         "openkb/example.py": "COMMITTED = True\n",
         "openkb/示例资源.txt": "已提交的中文资源\n",
         "openkb/version.txt": "$Format:%H$\n",
+        "assets/fonts/SourceCodePro-Regular.ttf": "committed font fixture",
+        "assets/private.txt": "private asset",
         "openkb/web/index.html": "retired browser bundle",
         "pyproject.toml": "[project]\nname = 'openkb'\n",
         "LICENSE": "original license",
@@ -53,7 +55,17 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
     identity = export_source(repo, output)
     assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
     assert (output / "openkb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
-    for name in ("CLAUDE.md", ".env", "docs/internal", "openkb/web", "openkb/untracked.py"):
+    assert (
+        output / "assets/fonts/SourceCodePro-Regular.ttf"
+    ).read_text() == "committed font fixture"
+    for name in (
+        "CLAUDE.md",
+        ".env",
+        "docs/internal",
+        "openkb/web",
+        "openkb/untracked.py",
+        "assets/private.txt",
+    ):
         assert not (output / name).exists()
     assert json.loads((output / "openkb/_build_info.json").read_text("utf-8")) == identity
     assert verify_source(output) == identity

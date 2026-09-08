@@ -18,7 +18,7 @@ _PATHS = {
 
 
 def navigation_icon(name, dark=False):
-    color = "#b3c3d6" if dark else "#536b83"
+    color = "#b8bab5" if dark else "#6c7069"
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
         f'fill="none" stroke="{color}" stroke-width="1.7" '

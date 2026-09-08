@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from openkb.desktop.reader import MarkdownView
@@ -26,9 +26,6 @@ class Appearance(QObject):
         self.app.installEventFilter(self)
         self.app.styleHints().colorSchemeChanged.connect(self.system_changed)
         window.theme.currentIndexChanged.connect(self.choose)
-        font = QFont("Noto Sans CJK SC")
-        font.setPixelSize(14)
-        self.app.setFont(font)
         self.apply()
 
     def choose(self):
@@ -65,9 +62,9 @@ class Appearance(QObject):
             mode = self.window.theme.currentData()
             self.dark = self.system_dark if mode == "system" else mode == "dark"
             bg, surface, text, muted, border, accent, selection = (
-                ("#101722", "#192230", "#edf2f8", "#a9b7c9", "#324154", "#5fc4ca", "#254459")
+                ("#202020", "#262626", "#eeeeec", "#a4a4a0", "#3a3a38", "#d8dfd9", "#343634")
                 if self.dark
-                else ("#f2f6fa", "#ffffff", "#172439", "#53657b", "#d5dfe9", "#296575", "#dceff2")
+                else ("#ffffff", "#fafaf9", "#262725", "#747671", "#e6e7e3", "#343d36", "#e9ece7")
             )
             palette = QPalette()
             for role, color in (
@@ -96,53 +93,77 @@ class Appearance(QObject):
                 button.setIcon(navigation_icon(name, self.dark))
             self.app.setPalette(palette)
             chevron = (Path(__file__).parent / "assets/chevron.svg").as_posix()
+            sidebar = "#181818" if self.dark else "#f5f5f3"
+            composer = "#2a2a29" if self.dark else "#f6f6f4"
+            inverse = "#202020" if self.dark else "#ffffff"
             self.app.setStyleSheet(f"""
                 QWidget {{ color: {text}; }}
-                QMainWindow, QDialog {{ background: {bg}; }}
+                QMainWindow, QDialog, QWidget#workspace {{ background: {bg}; }}
                 QLabel {{ background: transparent; }}
-                QLabel#brand {{ font-size: 18px; font-weight: 700; }}
-                QLabel#pageTitle {{ font-size: 24px; font-weight: 700; }}
-                QLabel#welcomeTitle {{ font-size: 28px; font-weight: 600; margin-top: 24px; }}
-                QLabel#overviewStats {{ background: {surface}; border: 1px solid {border};
-                    border-radius: 8px; padding: 28px 18px; font-size: 20px; }}
-                QFrame#navigation, QFrame#topbar {{ background: {surface}; border: 0;
-                    border-right: 1px solid {border}; border-bottom: 1px solid {border}; }}
-                QPushButton, QToolButton, QComboBox {{ background: {surface};
-                    border: 1px solid {border}; border-radius: 8px; padding: 7px 10px;
+                QLabel#brand {{ font-size: 16px; font-weight: 600; }}
+                QLabel#pageTitle {{ font-size: 16px; font-weight: 500; }}
+                QLabel#welcomeTitle {{ font-size: 32px; font-weight: 500; margin-top: 32px; }}
+                QLabel#overviewStats {{ color: {text}; border: 0; padding: 24px 0;
+                    font-size: 20px; }}
+                QLabel#muted, QLabel#composerHint {{ color: {muted}; font-size: 12px; }}
+                QLabel#chatWelcome {{ font-size: 28px; font-weight: 500; }}
+                QLabel#drawerTitle {{ font-size: 17px; font-weight: 500; }}
+                QFrame#navigation {{ background: {sidebar}; border: 0; }}
+                QFrame#topbar {{ background: {bg}; border: 0; }}
+                QPushButton, QToolButton, QComboBox {{ background: transparent;
+                    border: 1px solid transparent; border-radius: 7px; padding: 7px 10px;
                     min-height: 20px; }}
                 QToolButton {{ padding: 6px; }}
                 QComboBox {{ padding-right: 24px; }}
                 QComboBox::drop-down {{ border: 0; width: 24px; }}
                 QComboBox::down-arrow {{ image: url("{chevron}"); width: 12px; height: 12px; }}
                 QToolButton::menu-indicator {{ image: none; }}
-                QFrame#navigation QToolButton {{ border: 1px solid transparent; text-align: left; }}
+                QFrame#navigation QPushButton {{ text-align: left; padding: 7px 10px; }}
                 QPushButton:hover, QToolButton:hover, QComboBox:hover {{ background: {selection}; }}
-                QToolButton:checked {{ background: {selection}; color: {accent};
-                    font-weight: 600; }}
+                QPushButton:checked, QToolButton:checked {{ background: {selection};
+                    color: {text}; font-weight: 500; }}
                 QPushButton:focus, QToolButton:focus, QComboBox:focus, QLineEdit:focus,
                 QPlainTextEdit:focus, QTreeView:focus, QTableView:focus {{
-                    border: 2px solid {accent}; }}
+                    border: 1px solid {muted}; }}
                 QWidget:disabled {{ color: {muted}; }}
-                QLineEdit, QPlainTextEdit, QTextBrowser, QAbstractItemView {{ background: {surface};
-                    border: 1px solid {border}; border-radius: 8px; padding: 6px;
+                QLineEdit, QPlainTextEdit {{ background: {surface};
+                    border: 1px solid {border}; border-radius: 8px; padding: 8px;
+                    selection-background-color: {selection}; selection-color: {text}; }}
+                QTextBrowser, QAbstractItemView {{ background: {bg}; border: 0; padding: 6px;
                     selection-background-color: {selection}; selection-color: {text}; }}
                 QLineEdit {{ min-height: 22px; }}
-                QAbstractItemView::item {{ padding: 6px; min-height: 22px; }}
+                QAbstractItemView::item {{ padding: 8px; min-height: 22px; border: 0; }}
                 QAbstractItemView::item:selected {{ background: {selection}; color: {text}; }}
+                QAbstractItemView::item:hover {{ background: {surface}; }}
                 QHeaderView::section {{ background: {bg}; color: {muted};
-                    border: 0; border-bottom: 1px solid {border}; padding: 8px; }}
+                    border: 0; border-bottom: 1px solid {border}; padding: 10px 8px; }}
+                QTableView {{ gridline-color: {border}; }}
                 QTabWidget::pane {{ border: 0; }}
                 QTabBar::tab {{ background: transparent; color: {muted}; padding: 9px 14px;
                     border-bottom: 2px solid transparent; }}
-                QTabBar::tab:selected {{ color: {accent}; border-bottom: 2px solid {accent}; }}
-                QSplitter::handle {{ background: {bg}; width: 8px; height: 8px; }}
+                QTabBar::tab:selected {{ color: {text}; border-bottom: 2px solid {text}; }}
+                QSplitter::handle {{ background: {bg}; width: 12px; height: 12px; }}
                 QScrollArea {{ background: transparent; border: 0; }}
+                QScrollBar:vertical {{ background: transparent; width: 8px; margin: 3px 1px; }}
+                QScrollBar::handle:vertical {{ background: {border}; min-height: 36px;
+                    border-radius: 3px; }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
                 QMenu {{ background: {surface}; border: 1px solid {border}; padding: 6px; }}
-                QMenu::item {{ padding: 8px 20px; }}
+                QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
                 QMenu::item:selected {{ background: {selection}; }}
                 QToolTip {{ color: {text}; background: {surface};
                     border: 1px solid {border}; padding: 6px; }}
-                QStatusBar {{ color: {muted}; background: {bg}; font-size: 12px; }}
+                QStatusBar {{ color: {muted}; background: {bg}; font-size: 11px; }}
+                QFrame#composer {{ background: {composer}; border: 1px solid {border};
+                    border-radius: 18px; }}
+                QPlainTextEdit#question {{ background: transparent; border: 0; padding: 4px; }}
+                QPushButton#sendButton {{ background: {text}; color: {inverse};
+                    border: 0; border-radius: 16px; padding: 5px 15px; min-height: 24px; }}
+                QPushButton#sendButton:disabled {{ background: {border}; color: {muted}; }}
+                QWidget#drawerOverlay {{ background: rgba(0, 0, 0, 22); }}
+                QFrame#drawerPanel {{ background: {bg}; border: 0;
+                    border-left: 1px solid {border}; }}
             """)
             self.present_readers()
         finally:

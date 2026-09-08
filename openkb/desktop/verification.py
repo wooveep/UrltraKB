@@ -35,7 +35,6 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=False)
 
     from PySide6.QtCore import QTimer
-    from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from openkb import config
@@ -53,13 +52,12 @@ def main() -> int:
         str((args.workbench_restart or root) / "qt"),
     )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    from openkb.desktop.fonts import application_arguments
     from openkb.desktop.window import Workbench
 
-    app = QApplication([])
+    app = QApplication(application_arguments([]))
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("OpenKB Verification")
-    for font in (Path(__file__).parents[1] / "rendering/assets/fonts").glob("*.otf"):
-        QFontDatabase.addApplicationFont(str(font))
     if args.lifecycle:
         from openkb.desktop.verification_lifecycle import verify_lifecycle
 
@@ -80,7 +78,8 @@ description: 原生阅读验证
 ---
 # 原生知识阅读
 
-这是中文段落。行内公式 \(\frac{a}{b}+\sqrt{x}\) 与文字保持基线。
+这是中文段落。`inline_code 中文知识` 使用代码字体。
+行内公式 \(\frac{a}{b}+\sqrt{x}\) 与文字保持基线。
 
 \[ E = mc^2 \]
 
@@ -96,7 +95,7 @@ flowchart LR
 | 中文标签 | 随包字体 |
 
 ```python
-print("OpenKB")
+print("UrltraKB")  # fenced_code 中文知识
 ```
 """
     with kb_ingest_lock(first / ".openkb"):

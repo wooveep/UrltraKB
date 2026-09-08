@@ -10,6 +10,7 @@ from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Signal
 from PySide6.QtGui import QFont, QFontMetricsF, QTextCharFormat, QTextImageFormat
 from PySide6.QtWidgets import QTextBrowser
 
+from openkb.desktop.fonts import MONO, SANS, text_font
 from openkb.rendering.markdown import RenderedMarkdown, heading_anchor, render_markdown
 from openkb.rendering.renderer import Renderer
 
@@ -33,8 +34,7 @@ class MarkdownView(QTextBrowser):
         self._has_source = False
         self._anchor = ""
         self.rendered.connect(self._apply_rendered)
-        font = QFont("Noto Sans CJK SC")
-        font.setPixelSize(20)
+        font = text_font(18)
         self.document().setDefaultFont(font)
         self.setStyleSheet("QTextBrowser { padding: 18px; border: 0; }")
 
@@ -117,9 +117,20 @@ class MarkdownView(QTextBrowser):
 
     def _apply_presentation(self):
         font = self.document().defaultFont()
-        font.setPixelSize(round(20 * self._scale))
+        font.setPixelSize(round(18 * self._scale))
         self.document().setDefaultFont(font)
-        background, foreground = ("#151922", "#e7eaf0") if self._dark else ("#ffffff", "#17202c")
+        code_background = "#2a2a29" if self._dark else "#f4f4f2"
+        self.document().setDefaultStyleSheet(f"""
+            body {{ font-family: '{SANS}'; font-size: {18 * self._scale}px; }}
+            p {{ line-height: 150%; margin-top: 0; margin-bottom: 16px; }}
+            h1, h2, h3 {{ font-weight: 600; margin-top: 24px; margin-bottom: 12px; }}
+            pre, code {{ font-family: '{MONO}', '{SANS}'; font-size: {15 * self._scale}px;
+                background-color: {code_background}; }}
+            pre {{ white-space: pre-wrap; margin-top: 12px; margin-bottom: 20px; }}
+            a {{ color: {"#add1bc" if self._dark else "#326f51"}; }}
+            th, td {{ padding: 8px; }}
+        """)
+        background, foreground = ("#202020", "#eeeeec") if self._dark else ("#ffffff", "#262725")
         self.setStyleSheet(
             f"QTextBrowser {{ padding: 18px; border: 0; background: {background}; "
             f"color: {foreground}; }}"

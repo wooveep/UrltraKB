@@ -550,7 +550,7 @@ class Workbench(QMainWindow):
         self._task_questions[task_id] = question
         self._chat_task = task_id
         self._last_chat_text = None
-        self.chat.show_temporary("已排队，等待执行…")
+        self.chat.show_temporary(question + "\n\n已排队，等待执行…")
         self.workspaces.show_answer()
         self.question.clear()
 
@@ -574,10 +574,7 @@ class Workbench(QMainWindow):
             ):
                 return
             self._chat_task = None
-            text = "\n\n".join(
-                f"**你**\n\n{user}\n\n**UrltraKB**\n\n{answer}" for user, answer in session.turns
-            )
-            self.chat.show_markdown(text, root / "wiki")
+            self.chat.show_turns(session.turns, root / "wiki")
             self.workspaces.show_answer()
             self.shell.navigate("对话")
             self.mode.setCurrentIndex(1)
@@ -744,7 +741,9 @@ class Workbench(QMainWindow):
             message = task.text or task.error or "未保存回答正文；可从已保存的对话或产物查看。"
             if task.state != "completed":
                 message += f"\n\n> {_STATES.get(task.state, task.state)}。未完成内容仅临时保留。"
-            self.chat.show_markdown(message, self.kb / "wiki")
+            self.chat.show_turns(
+                [(self._task_questions.get(task.id, ""), message)], self.kb / "wiki"
+            )
             if task.results and task.results[-1].session_id:
                 session_id = task.results[-1].session_id
                 self.sessions.addItem(session_id, session_id)
