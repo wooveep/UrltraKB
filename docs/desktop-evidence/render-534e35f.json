@@ -1,0 +1,3558 @@
+{
+  "commit": "534e35fa63105d84b881f739e7cfbd1274147ba1",
+  "scope": "Frozen native QTextDocument outputs, 37 cases x 2 themes x 4 scales on each platform. PNG hashes identify originals. Whole document paint; no viewport cropping. Platform build/runtime acceptance remains separate.",
+  "cases": {
+    "linux/c4-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "User→Desktop→Model；Uses/Requests/HTTPS文字正确",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "c4-basic-light-1.png",
+          "sha256": "2d0fbc8b241e1b7b854d1971ededdc59570649816d9ffc67a1a4829a92e0116b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-1.png",
+          "sha256": "16c78bba649688e93097c4ea4acd81d8c303a4961589b1d0649bce2a73c5807a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-1.5.png",
+          "sha256": "cf4d0ff12fbfcdeef7903fdc97be03783e49fae2e3cb4fb1db6c93fecbcee347",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-1.5.png",
+          "sha256": "c75db4481e92919fbd60f5bf8776b73e485be05f4452eb067656534edb1d693b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-2.png",
+          "sha256": "3845a93e949ca1a9e78436ed4e708d53c8b9ba15d8056c4389836c09fc074334",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-2.png",
+          "sha256": "e04efa82633bc2e1e90f978526245ba6f680af01bfdf82dca3de66164348c3ae",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-4.png",
+          "sha256": "c9cfdd3fa06317964576c0f0b88c91dab6a9b783567ed16d57007c2cb54fd1b7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-4.png",
+          "sha256": "1c0488e594dd4bc991f268929d9a122eabd246111964de023abfbc0356b2ba1b",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/c4-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个角色的中文名称/描述完整；关系与方向正确",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "c4-cn-light-1.png",
+          "sha256": "477729a8b3bef52f41e19751e3833613ddb16aa98f8a1545917a6435f9c93c45",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-1.png",
+          "sha256": "38a809db54a84280eca3e2f6db91bfd77a081e2efc0a8fa3db90922e0632a823",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-1.5.png",
+          "sha256": "7bb0e917471e773d1511f068ce077b82a09f0a8cf756a198ea966b149b27d0a4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-1.5.png",
+          "sha256": "bf9137dba274aa256e0ab5043e11b1fd7fc8e10fd435f8f29ae6b56aa8438a91",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-2.png",
+          "sha256": "52f2a0f2b377c956872969960c3f7957238215936b0ba5582c21b0694e6a416f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-2.png",
+          "sha256": "756c1642558ae16e24d22745de7f3ba9122715b007c6df828d1a868de321faec",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-4.png",
+          "sha256": "c2042272fe53ba3d6ab09eeeb027ddae4dc14c768b7f081160f519ea51c18214",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-4.png",
+          "sha256": "bf4eeaa101218af8224ac1f3fc20e8a5c4380914972c2b4720f50b68a39d871b",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/class-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Cat 继承 Animal；空心三角在 Animal 端；属性方法存在",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "class-basic-light-1.png",
+          "sha256": "9416f04b0e950bc41320f11b31c314efddfafb0d45424be8a7834e8fd25ee4b3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-1.png",
+          "sha256": "7c0d5c5282529a7041c044171af473fd2b299c1b45d19e60b723c2eaf8049875",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-1.5.png",
+          "sha256": "75901691472b3bc698d196688732d536a18d61ca3e1d41c3f3cbf42776164eaf",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-1.5.png",
+          "sha256": "8876842fba679b31f4587b2b99aae6b5f13aeb364e40b4efee47b71aca89ef75",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-2.png",
+          "sha256": "acc87409c4e6eb941369e0ab514496f862a510f3b9c58dd0979bc15068d34b2a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-2.png",
+          "sha256": "118e490b9a3421e1c7aae2c7defeff9ef60ad2fffdf128e33554b6e5645caf56",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-4.png",
+          "sha256": "ceb6fd4740af3648cc83ac79de25305cc23181f4077b9f9547ce942a49a6d975",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-4.png",
+          "sha256": "acb03d8c3d8d4daafaf0b8ba006063aa509edf9b0279bb0b22c7d7542ce98aef",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/class-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "知识库/原始资料标题完整；1/many 与管理和编译在正确位置",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "class-cn-light-1.png",
+          "sha256": "d3bbac02c1a9e759212bebb551e3a8da5730701d1ade12a8703447b3e8f4f379",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-1.png",
+          "sha256": "aae9da1206877e18b63ecba41ecf2bbef7cdb735ddf62304cef9faa623b35beb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-1.5.png",
+          "sha256": "d8f30737fafd42e776e0b50103910d391f959f22534eb95035d9265dff716d68",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-1.5.png",
+          "sha256": "f262837653eb4fb849081eb3293b2e18d6f5819693d6846257338033f060da90",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-2.png",
+          "sha256": "81c250ec2bbefc4f4f85ae7a88b3fb5480d29294f41689916fbd2f9f2593be45",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-2.png",
+          "sha256": "3e17dce658aecbbd5e967ba9688ab3b8d7cfd326115b48527a826cd26d2b6d64",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-4.png",
+          "sha256": "67553eb3757ef67c0d15ab2e8c071f1a8baad0226ff0f965ba38f1ed7fc0f092",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-4.png",
+          "sha256": "ab327bc4fe73c7db07b553d489ea353c8683bb86a74b66d3286387750d85edd1",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/er-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "CUSTOMER一端，ORDER零到多；PK/FK可辨认",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "er-basic-light-1.png",
+          "sha256": "1fe226eb391d98dfe661e38b713b0d96e2c140c7536e6933027006ed2074fffd",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-1.png",
+          "sha256": "cb50b98fb6ee44a0f245ff56771000e868677f90d6e0efedee0cf7d6c20b37c7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-1.5.png",
+          "sha256": "7cd0a93e8b3709c3bf6539ab6741ce85cece4ed48d0456ab41be273dc7a2a9fb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-1.5.png",
+          "sha256": "a4b0ec290a3e687c66f5d11d972cf49aa26e43d211aecdc3cf7f51d2c848ef29",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-2.png",
+          "sha256": "36db6b960bace2e551840fa5cd29fdb51f94db573ff98f9ecdd4421283281eb9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-2.png",
+          "sha256": "d755c9720766528b939b0fcad60b153dbde62a92df9e1cc0f10d55f8c5e5ab19",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-4.png",
+          "sha256": "092545c9fead65dffb387deb7193721de052d7682c5d5dbbfc1792dd639f2e4f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-4.png",
+          "sha256": "935785cf05898db5b47520becbb03294667ed6866d3285f2162e0eeda104af34",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/er-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "关系中文与两张表中的属性说明不被截断；零到多基数正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "er-cn-light-1.png",
+          "sha256": "8c6146ab853acc51f24093e2d83bef77fc11ac31278d6cfa312ca5e584c66f14",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-1.png",
+          "sha256": "0521f31fd8f742692201fe96c8210f381f8bbc1206f6c3881a67876539d0d7ba",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-1.5.png",
+          "sha256": "17f5dc0cdbf5b358af90a38753b559992be9c856f7f6f75f4c3e03736d29d57a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-1.5.png",
+          "sha256": "b16e1b5627cbcbf612bfa6b34a8f0eac3e299eb83554a9567a8002045afb69ab",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-2.png",
+          "sha256": "c0639edcb245b79014ac8a7f5a11b18932a1b029bfec58e1c5c0c336d073e01d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-2.png",
+          "sha256": "1a706ae7a5749f95c7d85d21a1341da123f1e63c4bb883be289fe3617628618e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-4.png",
+          "sha256": "e4b79dc58d1ebc1fbbd3d72b482a8ce76a2f4b167fce94c410c7bd7bad789171",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-4.png",
+          "sha256": "7d4e7e216844ec8325925ca59b4cc552035bcde2509f045b7a1e29369bbccade",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/error-diagram": {
+      "verdict": "pass",
+      "expected_error": true,
+      "expectation": "明确无法解析，原文保留",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "error-diagram-light-1.png",
+          "sha256": "b787e1cf0abff21ee8aec51861bacfd067d5709b9f263dfa3652e87ba90f08a3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-1.png",
+          "sha256": "f433b02647a59f92ec4ee1380132b02ca5652e88d426bf8986f39a0ccc17e0d1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-1.5.png",
+          "sha256": "1ce46a6e87f243983193f5b0732c9ae8c29fe85bbd559494d72c5a11b2fbeb23",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-1.5.png",
+          "sha256": "7e132854e29575401f9572b3a83e8db7fec6fa2e276e5d444fcaae7ebdf19929",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-2.png",
+          "sha256": "68bd9ba96a29d27a1e90bc584f98918c22bcb0d4168e1220789439f949cc16c8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-2.png",
+          "sha256": "476b3fa46ea5c10fc463a7ab251e11fb05af849e476f6b1f8aee56187f13659d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-4.png",
+          "sha256": "e556880128c69502b83312b81355a2440a6c1b783d130a7c7a3d15651e269a38",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-4.png",
+          "sha256": "b3a5744fa907510a9a6360dd5ce7aff26b2769631dc780b9d1fcf6adf9f01a65",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/error-macro": {
+      "verdict": "pass",
+      "expected_error": true,
+      "expectation": "明确错误，不能显示红字就算渲染成功",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "error-macro-light-1.png",
+          "sha256": "2d4a9d7ddde747078424dffc58aa50edbbc6b967cd417f779e7052b24acbb066",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-1.png",
+          "sha256": "caca47fd3934b6fa43d06947c4a79b9101032bace5a1f8fcdb1a36be867dcf18",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-1.5.png",
+          "sha256": "0ed452f3ad2c092bf23650ee9eb90853a73a8ed3f8f7f4166134bc6ae2b4927f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-1.5.png",
+          "sha256": "f4cdd0a401c74fb8047822407755ffea76654a56fff4cf679da5e0a27bf8cf67",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-2.png",
+          "sha256": "2edc45e684c39f8f383701485748b7c8a2900f1e6366ac520454c8a55a7ca113",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-2.png",
+          "sha256": "1c8e581ca23a429569f07ae94643b4ffa1eba098c85e986c2e2b9900073e0e75",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-4.png",
+          "sha256": "bcb5336f714ac476afc0825f395b6ac922aa73544e9a6b598ac771ab5bb1c4aa",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-4.png",
+          "sha256": "dd5e8cb205482dbb37b0e5f449d393b147d2ba1346804ba68b3248f9cd138789",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/flow-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Start→Ready；Yes→Done；No→Retry→Ready",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "flow-basic-light-1.png",
+          "sha256": "a5385a4249bb26fd4325ba9d7523a77323e46b87075dfc1497821b9360192eaa",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-1.png",
+          "sha256": "fe35fec796021d57fe6bc642c7b174dd80a8b216600cfee2971c17e23d21a5b3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-1.5.png",
+          "sha256": "75b2d3be2a0572ab46baaad5ccbff61d31150dfe70984e31f901504ebd170fe3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-1.5.png",
+          "sha256": "13820d468dff560ef83114dd4789f6cac3f1c9dbe50876e85cb7f20ccffeeef1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-2.png",
+          "sha256": "77164bf1f178e0ee08a4dbf8382a59e1fd20a8641725570a11b07a9da0549a6f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-2.png",
+          "sha256": "18aa92fbc562fae01e82574b2e93bb6296833921b25be9b300e1af88ad894165",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-4.png",
+          "sha256": "512ce89143716415e36785ebb270d901383bc806a1606d299e0a64dffd008d9e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-4.png",
+          "sha256": "48f29102f3aa82786125ba0852df3aa95d0f8fc416e78bdb495eb4023c426356",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/flow-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文完整；是→跳过，否→编译；箭头不穿过文字",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "flow-cn-light-1.png",
+          "sha256": "f9ded0ccf2cabf62da689355d7f0c51c730ad1fc09cde553c29a20f20664f421",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-1.png",
+          "sha256": "c724617dee343dd1479aef5126ebbef0468dc92f9d2d5f87fcb85408280c444f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-1.5.png",
+          "sha256": "db21f0fa57c89e5fc48d6518b0db7b1a46429ff26c73324a52a560439e51b00c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-1.5.png",
+          "sha256": "8056c15309ed6b3900fc2cd7a118f49908f2f358b5ff3fd319a26272563012f5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-2.png",
+          "sha256": "87264f6de89dc623ed285259f2d134a284c3a390b0a948c19ff86f1cdec044a2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-2.png",
+          "sha256": "a73b0baa901cb17c31f09aa4674dd6418bf69f6a60d60398d63e2e5e87e55381",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-4.png",
+          "sha256": "2be66beede6a6aa1225e76153b3ed4ae12bfaa137da7133b297e023b67532c23",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-4.png",
+          "sha256": "d49aa2643208ee25ff192493cf1058a0a195b443e95391ed6d9ae0863cd5ab25",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/gantt-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Formula起于09-01；Diagram在Formula之后；Review里程碑",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "gantt-basic-light-1.png",
+          "sha256": "c05dbbbdc0b4a09ca6aa6fcd25ab56a0d9d728d0eeecd092da41dcb3ae14c2db",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-1.png",
+          "sha256": "5ff729b3c4e82db216306d9189d38d1d9cb7b5e268b149676c9ef2637f331e64",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-1.5.png",
+          "sha256": "016a8f85f79a7e0e633a1b3aceb8b08a1ec1f44036de2a2de5612b65c8a528bb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-1.5.png",
+          "sha256": "fe2f2502d0697881d497cf5197e6dcb756ba2bfbff87e34fb4dea544c1840fb1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-2.png",
+          "sha256": "5ca5b6ee0dffa533e232e4c9a4228f2549341d4e8f881107a2288ef9a734a116",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-2.png",
+          "sha256": "d496fba85fa74431d0671f7d023dba3bc5d5962a3eac4924f4c20fa454c9d906",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-4.png",
+          "sha256": "058989ccd2f429e3a69ccfebaa04b972944379ae56ffbd847656694c1a2838f4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-4.png",
+          "sha256": "ca30e4e30880ec46c536c7c1b72dee919a9b82944ed2b7e9f7f7d1674ca2e7d6",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/gantt-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文章节与任务完整；先公式再图表再Windows",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "gantt-cn-light-1.png",
+          "sha256": "284fc6a80dd0ad7a460b8320ab3479977bb5ffff183d23b3d1cfbf4ffe712733",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-1.png",
+          "sha256": "c06584599f96f7615c7827439b53dc2af18262831eab41e2d234f603262df8b1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-1.5.png",
+          "sha256": "6a4e37088a76e39daaf712f2a0db6aad047f3a67383dc59ea305d8a57d766e10",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-1.5.png",
+          "sha256": "d2cc9f57619e78e24b7a90cccf4a3d4d7247f42b20e490b15ac4d58478a63af8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-2.png",
+          "sha256": "3bb23b2dd9eb05e2de7a20310b1489f670318ef81d8f05d32aab322af25c419e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-2.png",
+          "sha256": "c47ee970a0f6267c5c8b9da4d6fb7dea6ffa4e9be00c9a9f84790211f75e9f7f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-4.png",
+          "sha256": "3fc8045120010cc309d71319ad7d8a5500e591ff14ae0777dbab57202041fecf",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-4.png",
+          "sha256": "136523c2fc4d2aa9872cd0c2cee73e2ca49b9c31451942c5150abfa4c5c43fdc",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-accents": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "向量箭头、帽、横线位置正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-accents-light-1.png",
+          "sha256": "c7ca4ab264cb3af244200ce7b30be390e823389d9af0ae6c1a3333ed848a95d8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-1.png",
+          "sha256": "afec0b3ceb34274479c7bfd5528a2c2ff386a5154dd1564cb3b741cf26752ba0",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-1.5.png",
+          "sha256": "d5bda302fb71cbd0f585412f83fcd3e836fa69454990bcbc50d4e2bb11f9e056",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-1.5.png",
+          "sha256": "900cd9f41fc9454b0641cc52a93ac10993f88669e1377361f764862c1ff06346",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-2.png",
+          "sha256": "e34d2ff39bbcbcaa346f543f8162b4c964346b5cfa725c452caee948b9183449",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-2.png",
+          "sha256": "e37c0943e7841857d91855e17a9f813e299d095dc0f7b44eb21d6b12ecd75778",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-4.png",
+          "sha256": "e4e96e687fa2c500221beae073d7aea452249a98997df815d31f8ed960114641",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-4.png",
+          "sha256": "830793fcd7cb71d152036d80f53b87a725c827a141af3e4a6321a86747056eae",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-aligned": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "两行等号对齐",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-aligned-light-1.png",
+          "sha256": "52b4711c3a56cb66b34db1d7a19ccda5a48ef5b7018225e79d4e219adb1b1918",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-1.png",
+          "sha256": "17c4fba1c5828a48b7fd3eb58f5d8433e26fb1a363d4593effcc576a89680ccc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-1.5.png",
+          "sha256": "573733867f4e522aa9c45209e1232988fa73a6cf4d24e8baba3dd5efde644fef",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-1.5.png",
+          "sha256": "77119e0825f5ca26e122f443e37fafaac6170f77cac4e4eb852656ac01f3aa69",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-2.png",
+          "sha256": "360fb2265e93c05605b374b5b9969a1ec013a827f723b59415149e79b372e43f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-2.png",
+          "sha256": "504961d4f3a2fbbd9ef4001a6c1122e26bf29086c5a210dc5b27f906f25e76db",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-4.png",
+          "sha256": "a3f7975c24f22cf17f533c1b23fa629b71eb917211939eab91cdb3c5a909884a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-4.png",
+          "sha256": "685aebe934245dd2c99fdf2339f214754d591e25390dae65306b9acef3badd69",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-cases": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "大左括号；两行条件位置对应",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-cases-light-1.png",
+          "sha256": "708fb9f3ec432a6e658e472fd44949d42d6ba2dace0e8ee74e94366157a6ad47",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-1.png",
+          "sha256": "e53a7e88a377535c375b4276de347cc168112abacb08425b07dace5c9d509f93",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-1.5.png",
+          "sha256": "d2865af88a44198f91233db7da13cbaf6de2ce20b469d7ebd24b31230aa6bd37",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-1.5.png",
+          "sha256": "2819f1b9d23794e15f3ba165b6a7c8f095447f1e9ced1a741107fc65706840fd",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-2.png",
+          "sha256": "14c8b327c75d4b4329d79a98f228a678e24e859523b6bbee1ea17be3a47a7fbe",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-2.png",
+          "sha256": "d27ebf4fd686e782d04f8eab4032ec309b5d4c610a4ff9a37de26549b67905b4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-4.png",
+          "sha256": "cc3c082e26b22b5b71b564a1d9079306ceca5c8dfaf9760424b8f28a50390495",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-4.png",
+          "sha256": "0daa7384a0e3d383b020dc6388ed58738bdfe203f144c2205b63a74bc4688ee2",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-chinese": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文与数学混排不碰撞、不缺字",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-chinese-light-1.png",
+          "sha256": "6cee95273e7261ae94e379ba13af1824da5ba149ccdee0a800d8306f87f16ce4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-1.png",
+          "sha256": "ff2e2b8450acb6e596521d4b5dbaeb11fba152c9643ccd981511f3a2f0c95548",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-1.5.png",
+          "sha256": "e34fe2706550dcc6847310683f1742395eb09873d4026fcc4733e97282d19256",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-1.5.png",
+          "sha256": "12049f23b92b460310dca99422f8ae6a40c2936d1bb7e10bb2d30747bb0c05be",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-2.png",
+          "sha256": "1f57f04ea34637c1435aa179ff01916379798b6ca1874fb9c85511e485031a42",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-2.png",
+          "sha256": "c983ecc1c1e7bfa7a516ad3fbc389a92e423bc5f6927b99f50ad1d9c2a2c7d10",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-4.png",
+          "sha256": "1d3a923d6e8074f965bf5143a9f6ce7c6d41642e7133818e087927f506fae6c3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-4.png",
+          "sha256": "9412147a3cff40d09a514209de964a457833fea2923dd0ccc7c8a04e60846b0c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-chinese-frac": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "分子分母长中文完整，分数线覆盖文字宽度",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-chinese-frac-light-1.png",
+          "sha256": "0adbd9fbbbe69fe4bce197c36253c5e4289b58e85db11f9ea5bf1f2f89a47290",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-1.png",
+          "sha256": "7ba54215dc0bdda089c146342862a277c436077cf93ff735a220c4c0874a4dc2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-1.5.png",
+          "sha256": "dd5c57ec91f40d1c1c6c048d4ec7ca904fccff32079f509675de67a2e1675bbc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-1.5.png",
+          "sha256": "aff2e81017cb75a02a57fcc85e2a5f1e279b8daafc182ddfdd7fd96cc95accc1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-2.png",
+          "sha256": "30290e84dca8b55e44f326f4dca27dc79ec2b931e0fb7c386f9c9c3946388659",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-2.png",
+          "sha256": "a30bd7af668f599732ae18185e9d7d81c0283177f2d1cda2f041e95a8c158b6e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-4.png",
+          "sha256": "e43fc5af6d6df2bc3b82e52acba9c92219f44457cdb3c4a0f247767bc001d07b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-4.png",
+          "sha256": "375e645aa1fee3440efff06b1a930a81e9c863695dcde15677f6d147ce9b0d0c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-delimiters": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "嵌套分数括号与范数双竖线",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-delimiters-light-1.png",
+          "sha256": "e53cda2c58225a218e598350675e0f302bfd781a7d52494ac6d104a9f33334b2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-1.png",
+          "sha256": "d8cbf245f94b32656d5c5ca41d1b662462cef5ada185faee9159516dcd8ec7a9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-1.5.png",
+          "sha256": "b4fe7f9626f745113861d70c9bee639016f5697a494bb1e0bca476c0ea007a6e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-1.5.png",
+          "sha256": "0b0c5fbc14ee9a63070c65adc5a57655a9ab8c81d60516b3b2ab2f183d3a1740",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-2.png",
+          "sha256": "2b9e17dad802e05699222c771731fedfefec6dea6ffafc35db8de1a9d3960561",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-2.png",
+          "sha256": "847bb569f2efd92b32162f9bfb7f6ec766126a995ff1e2a869c740ede0743d0c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-4.png",
+          "sha256": "5bd67ade6e436f270409a9c698442bad11d68a1289090d0e3d409bb896064e5f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-4.png",
+          "sha256": "030eda5179ef7005bb351674a0cfd8c66d92c43a66e4dd8cc26d05c31a0532ac",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-fraction": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "分子a₁+b²，分母c₃",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-fraction-light-1.png",
+          "sha256": "3278f86cc17320a00724959dbabd0a6cb38e2f1855dc0ea53fb01f4951374df1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-1.png",
+          "sha256": "11607d2c3336a8aa420afa64b4b07ec2ae19ccc868a8206e73bf36901b7d3e9a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-1.5.png",
+          "sha256": "3d3b49e61b812156ca75fa349c2d40cdfa3c28d1fe4ee71d0f81a1d81daf31a9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-1.5.png",
+          "sha256": "00b2bcf67be08c56013c856cae72a0899e3ad7ee32ea1d927c09d9adbc2787e0",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-2.png",
+          "sha256": "b126c56bbd0bb1abba51583c1d447cd5ee1a5e8223513bcfa5d5a1883e397c01",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-2.png",
+          "sha256": "f577b553d01a10ebb649b2f18ae95feed862cded25f3f48db929ee8c7c37f0b4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-4.png",
+          "sha256": "61656cf1364fbb439d18c6dbc0d3c0912d01d6db6169e1db4cdb613b1c50e49d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-4.png",
+          "sha256": "d59b83b8898a92088bcd97e06ead59d647e122b74d9dd0c2a2e2c2229ab1277a",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-inline": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式置于中文正文中，分母低于正文基线",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-light-1.png",
+          "sha256": "237c8989b3d9b95ba4b1fe37dc1776bc753201bca3d242e2b68fa304ee515511",
+          "baseline_error_px": 0.2925000000000004
+        },
+        {
+          "name": "math-inline-dark-1.png",
+          "sha256": "f95344731c7abfd29a045eaa59f9ac9f658faf00b4487b5b97cd7126c454ed13",
+          "baseline_error_px": 0.2925000000000004
+        },
+        {
+          "name": "math-inline-light-1.5.png",
+          "sha256": "4b05b942495fe4e0d004c7ae03ee7ab9092cd3d5a1024c06c85771454e6eb601",
+          "baseline_error_px": 0.42312499999999886
+        },
+        {
+          "name": "math-inline-dark-1.5.png",
+          "sha256": "8b8b4cbdb439465aa626c28cbe52a147dbdd14fe8bef332170da58a4294da7c8",
+          "baseline_error_px": 0.42312499999999886
+        },
+        {
+          "name": "math-inline-light-2.png",
+          "sha256": "34e9afdd9e2de1706821aeba656766f93d49d1079e5b19cacf41d97e95591c4a",
+          "baseline_error_px": -0.43062499999999915
+        },
+        {
+          "name": "math-inline-dark-2.png",
+          "sha256": "285fbf2c8afc31d572ea74051eaef23b4ef54b04bcc0e39935db640242dc19b0",
+          "baseline_error_px": -0.43062499999999915
+        },
+        {
+          "name": "math-inline-light-4.png",
+          "sha256": "94be505d032e21e609ff3853e21d29de6d6164ed7dcbc4f3ad04c5a2f647c82f",
+          "baseline_error_px": 0.1231250000000017
+        },
+        {
+          "name": "math-inline-dark-4.png",
+          "sha256": "2a04375ea98cd651b913292f9e56cce449f439b05dece05df4537f2340e07bab",
+          "baseline_error_px": 0.1231250000000017
+        }
+      ]
+    },
+    "linux/math-inline-raised": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-raised-light-1.png",
+          "sha256": "c7da93dd1777d1aba938d30232cd953dca94ba060e1e1622ed42dab2bd4dd7c9",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-1.png",
+          "sha256": "d8b3b8962af7970c6d4868223815f22ead680925d17d0596fffb83e65c49b723",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-1.5.png",
+          "sha256": "d3f0561aad6b8b74a1779fc297215259e75364eb331ff82c9607eba9f05148bd",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-1.5.png",
+          "sha256": "f40aa830d941de09405502b859c4433c2f3f12e3725a3096d91131ff7afbda5d",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-2.png",
+          "sha256": "6786987b77c425e4bb054272ec429f3181275f2befb58f83bcc99b1711fb716e",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-2.png",
+          "sha256": "40657f1f786b29bd9273fa0af5188f1be166a5b999cb763a6d862c675a7bb352",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-4.png",
+          "sha256": "cda4939efc4de375a827281cd06af63d504d7d6e33b496dfefdddd213a61efd9",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-4.png",
+          "sha256": "fcbe6d694ecd26198d4adc5e0aa951a26cb3979aa1998397f9a49bb7959f702e",
+          "baseline_error_px": 0.0
+        }
+      ]
+    },
+    "linux/math-inline-simple": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-simple-light-1.png",
+          "sha256": "017c957e4f86a778b770e4d0781506e5619bc25eea0ec9fb4948d519dbd8edd8",
+          "baseline_error_px": -0.4375
+        },
+        {
+          "name": "math-inline-simple-dark-1.png",
+          "sha256": "ea1c297428e0ed570d4c6ef7d5b709fcfabd9e19aa8fcfda4063831927895d45",
+          "baseline_error_px": -0.4375
+        },
+        {
+          "name": "math-inline-simple-light-1.5.png",
+          "sha256": "af889e20263ef945634e66f5f7920646490e23c4c97bb46f2e6c19daa9fa7923",
+          "baseline_error_px": -0.171875
+        },
+        {
+          "name": "math-inline-simple-dark-1.5.png",
+          "sha256": "c34cd1b029b20e9f8b92e0cdc592294808b29a7bf574265d373bb9ab19b8a3e2",
+          "baseline_error_px": -0.171875
+        },
+        {
+          "name": "math-inline-simple-light-2.png",
+          "sha256": "48bd1db036eaca90af4b8eb22318b37e4a121f4d907617537ebf81e56c2373cc",
+          "baseline_error_px": 0.109375
+        },
+        {
+          "name": "math-inline-simple-dark-2.png",
+          "sha256": "1a7e24161c8b424a2a45c8406084e8c5a29ac84a2e45c1bcfd6c14a1a3b4e682",
+          "baseline_error_px": 0.109375
+        },
+        {
+          "name": "math-inline-simple-light-4.png",
+          "sha256": "7cac28c4c039a4a303a0a3c385543ba1fcb198e882e82bb7d5c132544605543b",
+          "baseline_error_px": 0.203125
+        },
+        {
+          "name": "math-inline-simple-dark-4.png",
+          "sha256": "8c1be7c650e1225cf3c731762410f292ea69a5e458b367be25355a7d1a404d1d",
+          "baseline_error_px": 0.203125
+        }
+      ]
+    },
+    "linux/math-inline-subscript": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-subscript-light-1.png",
+          "sha256": "1454bbb477d59b05b77e95db1774d56f0cc615615eba707f0aaca0b9ec67de95",
+          "baseline_error_px": 0.24249999999999972
+        },
+        {
+          "name": "math-inline-subscript-dark-1.png",
+          "sha256": "280f20a48dcd2b07b4afe068da023366551d9e5a9104886e7cb4fa387a08b165",
+          "baseline_error_px": 0.24249999999999972
+        },
+        {
+          "name": "math-inline-subscript-light-1.5.png",
+          "sha256": "3230bf5198eaa4b235e5a1685220dc1a3e4161d02ad81b93bde98a483f2f8168",
+          "baseline_error_px": -0.15187499999999687
+        },
+        {
+          "name": "math-inline-subscript-dark-1.5.png",
+          "sha256": "ecb8ce9849f0878aec4ca43f20f51377e3e4586fdfd2a67a2af1c5461c31d405",
+          "baseline_error_px": -0.15187499999999687
+        },
+        {
+          "name": "math-inline-subscript-light-2.png",
+          "sha256": "4e1f21e31c24b44825d0741ffec7a8719829c2ee9a7e900b35c8c52bdb1461f7",
+          "baseline_error_px": 0.46937499999999943
+        },
+        {
+          "name": "math-inline-subscript-dark-2.png",
+          "sha256": "667009344057e87f92ce239c44de1468833a5c851cc716564707521f3d635a46",
+          "baseline_error_px": 0.46937499999999943
+        },
+        {
+          "name": "math-inline-subscript-light-4.png",
+          "sha256": "95a5340fa3a3d5db240644c61ab7acb006c9c0f9cee687eb2a527eefb203bb90",
+          "baseline_error_px": -0.07687500000000114
+        },
+        {
+          "name": "math-inline-subscript-dark-4.png",
+          "sha256": "74e3fe93d20e2c72608155dae71e9290ff4e61fa184acdb82d613266ea87bfba",
+          "baseline_error_px": -0.07687500000000114
+        }
+      ]
+    },
+    "linux/math-inline-superscript": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-superscript-light-1.png",
+          "sha256": "a78957d1623f6e94597b8e1e1742c78833bcc37abbe7317216e339f6f3aff152",
+          "baseline_error_px": -0.4375
+        },
+        {
+          "name": "math-inline-superscript-dark-1.png",
+          "sha256": "8d850101c8094694c539f0b9d9f39946dd32f65695ea6df0571c8aa55d96b35d",
+          "baseline_error_px": -0.4375
+        },
+        {
+          "name": "math-inline-superscript-light-1.5.png",
+          "sha256": "e658235723910d9ce621ac307ee94c6a77001825e5389f9a0e511e7db7d0183d",
+          "baseline_error_px": -0.171875
+        },
+        {
+          "name": "math-inline-superscript-dark-1.5.png",
+          "sha256": "2edcc2bb83f5ec09aa579ea3136c936f83766a1c71d0f17e24d5376a92c4a33d",
+          "baseline_error_px": -0.171875
+        },
+        {
+          "name": "math-inline-superscript-light-2.png",
+          "sha256": "a8c9ba9ae7d853b59978170565b4cba7a373d26fea7cb18cf58e9f4a59f6440d",
+          "baseline_error_px": 0.109375
+        },
+        {
+          "name": "math-inline-superscript-dark-2.png",
+          "sha256": "d9a02dac3e44c7d8495bd406b7427087265061a0288e448d29276d9038bc10d1",
+          "baseline_error_px": 0.109375
+        },
+        {
+          "name": "math-inline-superscript-light-4.png",
+          "sha256": "07af0f29d54760f94777b85736e9f71cda2dfeec2259a79215efef1f1b16814a",
+          "baseline_error_px": 0.203125
+        },
+        {
+          "name": "math-inline-superscript-dark-4.png",
+          "sha256": "bce3e828c3c668bf809af996d9f7850c938b90605c8ed245091e397dff41e9f2",
+          "baseline_error_px": 0.203125
+        }
+      ]
+    },
+    "linux/math-inline-tall": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "RGBA pixels identical to all 8 visually approved corrected source Qt variants; new frozen baseline check also passed.",
+      "images": [
+        {
+          "name": "math-inline-tall-light-1.png",
+          "sha256": "2fb2c2eccc9d0492db47a5206b0e9292baa601f84ac097b4c9d05b790812d647",
+          "baseline_error_px": 0.10374999999999801
+        },
+        {
+          "name": "math-inline-tall-dark-1.png",
+          "sha256": "f324b01ba800770e90651fb84a69d50cddd077a6c956e20cbba52169be821156",
+          "baseline_error_px": 0.10374999999999801
+        },
+        {
+          "name": "math-inline-tall-light-1.5.png",
+          "sha256": "48b4e922026864047836cca1f630ac3afc351f34c8ae011bc67e0f7f5852391b",
+          "baseline_error_px": 0.015000000000000568
+        },
+        {
+          "name": "math-inline-tall-dark-1.5.png",
+          "sha256": "d0663d21edd1e0404aa67a10a30ab1750c8bf01481ebb7c9ca2da4605a530716",
+          "baseline_error_px": 0.015000000000000568
+        },
+        {
+          "name": "math-inline-tall-light-2.png",
+          "sha256": "d2dc8fd5526ac698871ada68a349120239ccd5688a3cf4ae738e5f152d263149",
+          "baseline_error_px": -0.07375000000000398
+        },
+        {
+          "name": "math-inline-tall-dark-2.png",
+          "sha256": "e95980523ccc7a250bd58d30752d9d946d228d33a714dc98385e781fad2d199d",
+          "baseline_error_px": -0.07375000000000398
+        },
+        {
+          "name": "math-inline-tall-light-4.png",
+          "sha256": "17bdbe1a930d43b3479c4a2bb3d26eb97f5209f944138a0e18b2e59827ebb23b",
+          "baseline_error_px": -0.14750000000000796
+        },
+        {
+          "name": "math-inline-tall-dark-4.png",
+          "sha256": "bcbba2f199ddd07424b76c1aa3772396125c991a1c0985a44e83b35a5151a5be",
+          "baseline_error_px": -0.14750000000000796
+        }
+      ]
+    },
+    "linux/math-integral": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "极限与求和上下限、积分上下限",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-integral-light-1.png",
+          "sha256": "6554a7a40c646486bc0befc93854ac5bcdbd17b14966b9c6ea14522b863825d1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-1.png",
+          "sha256": "fa7d648b68a0ce86965a1032da7d740a2e15dbf06cc6199ce58397783cf19613",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-1.5.png",
+          "sha256": "b932754ce3a51a68dcb6f113b08330be98bc9fdfd1836bf2462a761ff2f35ce7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-1.5.png",
+          "sha256": "4c89bba7bf96342171eaa0a7a0f3c5b2347e46845c64a9e985db4d0836b866ea",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-2.png",
+          "sha256": "b4fbc74c0feaff9e14c2e1e152b4b24588c4aa6691dfb4fc600b13a68ba06a97",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-2.png",
+          "sha256": "4ebe3c26031685b9b2e9f566704c2df33dc22f55ee58be1d8a5028dd2e93919b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-4.png",
+          "sha256": "84863ecab4e59a4df415367c1bc70f810dc19aee4b70cef49d6a8e70f4bf2079",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-4.png",
+          "sha256": "9eb355c122a32921fe8e0fd89835b201ea4d12c5ae17ce8276b00606339c41ed",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-macro": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "局部宏展开为粗体x和y",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-macro-light-1.png",
+          "sha256": "a7da6819f5f705431388c5e51759204659965c92ea26ea65ae30eaaa2002bc0f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-1.png",
+          "sha256": "138b94be78f7d42722e7968097864e2a60cc8929e4620c3d9b6ea0446ddc0678",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-1.5.png",
+          "sha256": "01e5cd2ab565e2baa8e258f135fc196f5fe15a80ef4addc39d2d3c95e08701ef",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-1.5.png",
+          "sha256": "f4d67305832f8d400b6b8b305da614788896081fa440a31e0db33086d539de07",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-2.png",
+          "sha256": "8cdcb83cf14e8efe732f1e4bd4bf364f995ef8d1a30dea2c4deb56cbdbc958e8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-2.png",
+          "sha256": "c9291c9770a1af13b3fcf5baa1fd031224203cff4da92b6af94473da3bb2f553",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-4.png",
+          "sha256": "3da6f6b6f546a9fec2e9e45716121a37ca87b12dcb020c425ba51c208a07c21a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-4.png",
+          "sha256": "5458ae616c9a1be803c521f46e106bc6516fbb0aa6f6bc195d8a420c94babb5c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-matrix": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "2行3列，左右方括号包住整矩阵",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-matrix-light-1.png",
+          "sha256": "812c49bcaf60ffe5ffd1c40ab8023ab3a4cd24cf7cd0f2de5ab441d97673f394",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-1.png",
+          "sha256": "f65ce552c8a05a1a7c372733189bf0734670f0c576cb7ef3122d34cabe090cd3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-1.5.png",
+          "sha256": "cad3f3bdbb3874f88d220707fe0ce8385168a0c056622853f65b0c6b5372bb1e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-1.5.png",
+          "sha256": "d7efde19ed8d3d6662b7ebfd7ce3809b6f46a81f66400c64b8223a1e682f71d4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-2.png",
+          "sha256": "6d561f5f55735c92726f27c9f88a0b314ddda125ac4c80148c12cf0e1de65fb9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-2.png",
+          "sha256": "382133d137a1e2ebc949c457a4b665e91f77afb8c71ecf9cb16f11b9e42dab33",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-4.png",
+          "sha256": "cc34dc33e74a3f51e6e93ec4b991f9130aed4ca06a671bc8bea0585af77ff5f5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-4.png",
+          "sha256": "059d964cfcdbb58b967ffe0c82df0d38cecf3864e80a950c752307d4f0a3abdc",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/math-root": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "二次根和三次根指数、分数位置",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-root-light-1.png",
+          "sha256": "e8358c29b63dd6a60e3bd4667068e91d4f377049fa68c26fcfcb91a31c5acbbc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-1.png",
+          "sha256": "33d75942591adeedc590634bcd290a7426c89510f70c9be4224bb4cf26b1e719",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-1.5.png",
+          "sha256": "b4860556ec0e797f9883b26f2228c9c6bbec82c730dec37176920ed93c1b7eb6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-1.5.png",
+          "sha256": "ae97b638c76aca99fa879b656a0999479e098048bc32cd50b615b297b133733f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-2.png",
+          "sha256": "417017aad438d9a098ca9436bfe075186602b8966422f24bff7a3dd82a5c2432",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-2.png",
+          "sha256": "5b1133e06e408f35051be726c0cc1ed55f7f097a057307654acaf4c272aa72aa",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-4.png",
+          "sha256": "3765c0295c0dc18c40ae12068d6a1d9004bd700f556217ade0babe3b0003cb9d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-4.png",
+          "sha256": "518777e5eac905178ef5fc7e454d228c4acb4c808af9bc1344f27cd1dabf0727",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/mindmap-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "root含Sources/Wiki/Chat；Files/URLs只属于Sources",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "mindmap-basic-light-1.png",
+          "sha256": "3b4acd120d0b48623965bb35561f7de1f5ba27120aa99a7baa66b7df2ccbb17a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-1.png",
+          "sha256": "1f1e4a285bf736379fed00f407f58841e82120f1caae712ba3ea400f558903ef",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-1.5.png",
+          "sha256": "7a8e044793aa6574134d9a88b82159e445bcd0fff555b655c5bf0969848b09f3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-1.5.png",
+          "sha256": "3afa52de6e9fc7134adf63d7ea8190530c72c3f0dd971083f77422015401917f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-2.png",
+          "sha256": "5888531305b1592673d8fb28102e7e3429042ece4d62a8ccc6ef291524b00273",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-2.png",
+          "sha256": "81b2599435e569365206d90e0525e783ae1166816f406a58b8da02157c977a5d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-4.png",
+          "sha256": "29781202e0c259490741937a42b65e88dadf70913f984db66b87a968eca898f1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-4.png",
+          "sha256": "7cbabbccde2ea451af2b88c90b1d719f241a8997f2ba4060bf60b50fee12143f",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/mindmap-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三主分支与四子分支；长中文不碰撞",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "mindmap-cn-light-1.png",
+          "sha256": "717f6e0ef4f94ad87fba13a6727031d283152ab9bd1deaf02adef9ed871615d5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-1.png",
+          "sha256": "2f285d6f292095bb899e665be6b7a3d7e3eeb6f1ea1c8eaea85e8b6a812ea4c6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-1.5.png",
+          "sha256": "7aa5e8afafe476f25e59db90588031608dcd4b3fc1a4344771f906f5c80b7cc7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-1.5.png",
+          "sha256": "e76674099030ca660601a1255335831a59936d191475a3671bdfcbc620172ef9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-2.png",
+          "sha256": "d170e5e55b1d2e99e2755069ce042f07cf3d556246a00af2a3c33ae368ba51d1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-2.png",
+          "sha256": "e2731ce98c9c2202252717ac3c059cd2ea5196036e9d140b1555e8fec01f0397",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-4.png",
+          "sha256": "8e94aea6b3561cd129995330edd15725fc3567bc64c55818353dfce15621920d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-4.png",
+          "sha256": "20fbab8bf6b82a0e0a1ca4e7a677a84002e517064bdcb4beedf386739cbe7516",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/pie-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "60%/30%/10% 对应Added/Skipped/Failed",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "pie-basic-light-1.png",
+          "sha256": "66934eed56b94b76e1109149b6eef0d58a636ee6795c716e18825a540c627887",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-1.png",
+          "sha256": "d7533063143bd556adb212bd0f3f7dff756af64459bbe72c9ca183d592616e18",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-1.5.png",
+          "sha256": "94520f3260d9e7bd77617a9f65003377a4ef62c5705645e24405ab7f9697e7bb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-1.5.png",
+          "sha256": "566f510fcfbb4de4705e35bbb3f4886ae7738331013bf6505ebcf662d07c03cb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-2.png",
+          "sha256": "ea5897849d13d00f35916b588939292f6d1859847fa8e488502d9ce1e2c4bb4c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-2.png",
+          "sha256": "61fa4593da50d57cb47cd0c6f69ba2b5c4d5098ff3051c113ff92cecd68ea5d1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-4.png",
+          "sha256": "7590d5eaddab90cf314bb04201cb32e24e2abacd4e64ad9b8d8d2b2657fcd834",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-4.png",
+          "sha256": "c71dce49e5e5908a607566b783841522ace9e427bd49aaa6b9855d21fa4b1641",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/pie-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三份中文图例完整，数值与扇区对应",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "pie-cn-light-1.png",
+          "sha256": "6f7188dd83e1e537fb315c4c27f9ea2cd63f6082a5312768c288dd3626c741b9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-1.png",
+          "sha256": "44852af6789f621c32e6a642f8c98397da77ac1d95d19e61378c25aa55885489",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-1.5.png",
+          "sha256": "fea38c6f5a75fc4b3014d1cff4ad572f7ac6b16b7a400235a2dec24326cc991d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-1.5.png",
+          "sha256": "cce651a50531a9a4365083a369567c01279220feae7ab201f25d72341108386b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-2.png",
+          "sha256": "f7f999098fecfa502028679ddc42d91a51da9abf23b53e746d219c314aedb59d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-2.png",
+          "sha256": "41fe2559c97d32538b427651443a3860f156fe550f3d9505bbbe1448f2a3d4ee",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-4.png",
+          "sha256": "b0559469afa93e52362d8bf15359db627f1b24b12e2c4748d1d9b63605a7933e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-4.png",
+          "sha256": "525921ccf0e6fb9317ee6dc5c4f2797fd5a5ec9c89875c1fa53b9a00e0cf76df",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/sequence-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "User→App 实线 Ask；App→User 虚线 Answer",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "sequence-basic-light-1.png",
+          "sha256": "52032d4b96e4bc840b564c7543da344822e4ab82f0c305bfd1b85f464b6b1b52",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-1.png",
+          "sha256": "9e3ca60b98483b7f7764a8b0c7c94bb5e56e86715c102afecba5a1734d8a2998",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-1.5.png",
+          "sha256": "5001f4bbb8f5999bdf32482f2ec1206ef9bf7fc43503a6c4116dcaba4d50bf3a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-1.5.png",
+          "sha256": "0c0ff9f116ffe75f497aa8b91876431f49a9aa01cc71b864bc061c1b4d02462a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-2.png",
+          "sha256": "ccb3c5504083ec9db73d7b3edaf35f46e782ad01fc379ac2ad6a69542d6e8c43",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-2.png",
+          "sha256": "4c594a7729e33095a60e3a4706efedb53853d4647f91a93991bd471f04b2aac5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-4.png",
+          "sha256": "93cc20f94af413e210b49e4a13789e7327d8f705750be3a45065714cd0b584c7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-4.png",
+          "sha256": "928939ba2df74a5743c1e58a852df9d47711685e5b2f98504db92cb6cffcf220",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/sequence-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个参与者；循环框包住进度；返回方向正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "sequence-cn-light-1.png",
+          "sha256": "9607000b89a726974aad0ac328fce741aa8c165fc2ab1b24eebb17763c96e88b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-1.png",
+          "sha256": "b1bda46aa4ffe62113be393fa2d6c7b9d15981f1b0283d14312f86979c4bd433",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-1.5.png",
+          "sha256": "44102cfc5f128eba536366415d02687c6e2d8016b6045d0244b8d28026faa394",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-1.5.png",
+          "sha256": "c70d34960ebf7cad06df965982331c9f2bedcb3a488bb811b6b4df21e23da67b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-2.png",
+          "sha256": "b3f89363497e2b8554bbe993fd4a0c79396ca3ab8d1f3d9824f7fbbced347207",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-2.png",
+          "sha256": "b720179b9967754d21ffd65847faba6a527e78d537ed0b2e16ae54b0f66c848b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-4.png",
+          "sha256": "ab087648275240ea1b7173764bfc867ebbe1a4cf9bbb6a78246580de3f4c770a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-4.png",
+          "sha256": "173ed0855cd7235e0c3ef144fbbfa71ca8727d5b771eee99847e1a9b0c93447d",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/state-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "起点到 Idle；start进入 Running；stop返回 Idle；done到终点",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "state-basic-light-1.png",
+          "sha256": "2b62c4297f5aa10c538eefd012203f9e087d35a15b8a39ef5dd4d9d4d0dc3fe2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-1.png",
+          "sha256": "8c8073d8edd858c2bdc300f00dea7c881c8ee25b5bceb7bbeb273c8bb4193f1d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-1.5.png",
+          "sha256": "1c5d1d996085810185d0fed079cd9da09358f7880cd34498a7ad95dd608bb3be",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-1.5.png",
+          "sha256": "7f25abbe86959decae23ca17ce64e2aab44491bd6b9601b01277e519e4b17945",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-2.png",
+          "sha256": "59424d365f4156f26d7faaa608e392b9ddff6aa1ced4b4a86d22a4b0bdbf9a63",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-2.png",
+          "sha256": "d7f0e732358010f23cb4f0c569721b9b444edf16f3421f60b3e1c53ec866f91d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-4.png",
+          "sha256": "b5d7b8d52b15a9e031888194451ab2821899b98965af5a18bb96ba0e4e2716d2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-4.png",
+          "sha256": "aa45bb477905249f7999ccf3f5cd44d7772c580d6def46d889220a1cdd538619",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "linux/state-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个中文状态及两条边标签完整；路径按顺序到终点",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "state-cn-light-1.png",
+          "sha256": "ec4cc9fd5488ef70901dae6225975687d161e1430567d274739056227cf18d9c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-1.png",
+          "sha256": "5a8d4753b98971d7e1e092b890a8e1ead74a7c7fd5ff01faae370d6111847f7b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-1.5.png",
+          "sha256": "ab42681ffc770e147fe9afbe93e65a9d193eb96079055358c31780a8dc802110",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-1.5.png",
+          "sha256": "aa3233881704cb1bbdbec3a974629e39623859e28ffe4d398ba8cb6e8b0cf171",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-2.png",
+          "sha256": "9792c56ddd933b783cfddc0afc0550b645348c7819e0a54ecad112fd4075080f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-2.png",
+          "sha256": "049ae2690cc895cdea8747eaf8d3a318c0f8ec3f2d24e31022f300467e863ccf",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-4.png",
+          "sha256": "d4760eb18fec1bc2cdd97597b7b766277b13d45401fe9b3d05a03603233caee8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-4.png",
+          "sha256": "90687af5cbade57e686af6ecaa4b619e30009dd3d4c1c8420a95211754ad2cda",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/c4-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "User→Desktop→Model；Uses/Requests/HTTPS文字正确",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "c4-basic-light-1.png",
+          "sha256": "2d0fbc8b241e1b7b854d1971ededdc59570649816d9ffc67a1a4829a92e0116b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-1.png",
+          "sha256": "16c78bba649688e93097c4ea4acd81d8c303a4961589b1d0649bce2a73c5807a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-1.5.png",
+          "sha256": "cf4d0ff12fbfcdeef7903fdc97be03783e49fae2e3cb4fb1db6c93fecbcee347",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-1.5.png",
+          "sha256": "c75db4481e92919fbd60f5bf8776b73e485be05f4452eb067656534edb1d693b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-2.png",
+          "sha256": "3845a93e949ca1a9e78436ed4e708d53c8b9ba15d8056c4389836c09fc074334",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-2.png",
+          "sha256": "e04efa82633bc2e1e90f978526245ba6f680af01bfdf82dca3de66164348c3ae",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-light-4.png",
+          "sha256": "c9cfdd3fa06317964576c0f0b88c91dab6a9b783567ed16d57007c2cb54fd1b7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-basic-dark-4.png",
+          "sha256": "1c0488e594dd4bc991f268929d9a122eabd246111964de023abfbc0356b2ba1b",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/c4-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个角色的中文名称/描述完整；关系与方向正确",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "c4-cn-light-1.png",
+          "sha256": "477729a8b3bef52f41e19751e3833613ddb16aa98f8a1545917a6435f9c93c45",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-1.png",
+          "sha256": "38a809db54a84280eca3e2f6db91bfd77a081e2efc0a8fa3db90922e0632a823",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-1.5.png",
+          "sha256": "7bb0e917471e773d1511f068ce077b82a09f0a8cf756a198ea966b149b27d0a4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-1.5.png",
+          "sha256": "bf9137dba274aa256e0ab5043e11b1fd7fc8e10fd435f8f29ae6b56aa8438a91",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-2.png",
+          "sha256": "52f2a0f2b377c956872969960c3f7957238215936b0ba5582c21b0694e6a416f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-2.png",
+          "sha256": "756c1642558ae16e24d22745de7f3ba9122715b007c6df828d1a868de321faec",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-light-4.png",
+          "sha256": "c2042272fe53ba3d6ab09eeeb027ddae4dc14c768b7f081160f519ea51c18214",
+          "baseline_error_px": null
+        },
+        {
+          "name": "c4-cn-dark-4.png",
+          "sha256": "bf4eeaa101218af8224ac1f3fc20e8a5c4380914972c2b4720f50b68a39d871b",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/class-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Cat 继承 Animal；空心三角在 Animal 端；属性方法存在",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "class-basic-light-1.png",
+          "sha256": "9416f04b0e950bc41320f11b31c314efddfafb0d45424be8a7834e8fd25ee4b3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-1.png",
+          "sha256": "7c0d5c5282529a7041c044171af473fd2b299c1b45d19e60b723c2eaf8049875",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-1.5.png",
+          "sha256": "75901691472b3bc698d196688732d536a18d61ca3e1d41c3f3cbf42776164eaf",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-1.5.png",
+          "sha256": "8876842fba679b31f4587b2b99aae6b5f13aeb364e40b4efee47b71aca89ef75",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-2.png",
+          "sha256": "acc87409c4e6eb941369e0ab514496f862a510f3b9c58dd0979bc15068d34b2a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-2.png",
+          "sha256": "118e490b9a3421e1c7aae2c7defeff9ef60ad2fffdf128e33554b6e5645caf56",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-light-4.png",
+          "sha256": "9c96250f631d30680fcbac0f6f681307c76f793c1159647cc9a2934d43407214",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-basic-dark-4.png",
+          "sha256": "04bed78026ba5137d659fdc187a74e0c1ec101d4040e3564db80778331ed5510",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/class-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "知识库/原始资料标题完整；1/many 与管理和编译在正确位置",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "class-cn-light-1.png",
+          "sha256": "d3bbac02c1a9e759212bebb551e3a8da5730701d1ade12a8703447b3e8f4f379",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-1.png",
+          "sha256": "aae9da1206877e18b63ecba41ecf2bbef7cdb735ddf62304cef9faa623b35beb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-1.5.png",
+          "sha256": "d8f30737fafd42e776e0b50103910d391f959f22534eb95035d9265dff716d68",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-1.5.png",
+          "sha256": "f262837653eb4fb849081eb3293b2e18d6f5819693d6846257338033f060da90",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-2.png",
+          "sha256": "81c250ec2bbefc4f4f85ae7a88b3fb5480d29294f41689916fbd2f9f2593be45",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-2.png",
+          "sha256": "3e17dce658aecbbd5e967ba9688ab3b8d7cfd326115b48527a826cd26d2b6d64",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-light-4.png",
+          "sha256": "98e15e933238185e476116460280a4f6767124037f79ad6306a8f64b3391e8cc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "class-cn-dark-4.png",
+          "sha256": "d98d612da5171d77d59d73443c3fed72f37c90b08572d60152abc3ace37b9c15",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/er-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "CUSTOMER一端，ORDER零到多；PK/FK可辨认",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "er-basic-light-1.png",
+          "sha256": "1fe226eb391d98dfe661e38b713b0d96e2c140c7536e6933027006ed2074fffd",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-1.png",
+          "sha256": "cb50b98fb6ee44a0f245ff56771000e868677f90d6e0efedee0cf7d6c20b37c7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-1.5.png",
+          "sha256": "7cd0a93e8b3709c3bf6539ab6741ce85cece4ed48d0456ab41be273dc7a2a9fb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-1.5.png",
+          "sha256": "a4b0ec290a3e687c66f5d11d972cf49aa26e43d211aecdc3cf7f51d2c848ef29",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-2.png",
+          "sha256": "36db6b960bace2e551840fa5cd29fdb51f94db573ff98f9ecdd4421283281eb9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-2.png",
+          "sha256": "d755c9720766528b939b0fcad60b153dbde62a92df9e1cc0f10d55f8c5e5ab19",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-light-4.png",
+          "sha256": "f18363396a06492d1b05681a04d38f4ec20f1eea970f26c45b2a53fa5d493053",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-basic-dark-4.png",
+          "sha256": "1cc125edff1727191585e81cde59c6b692476e9f986d62b8e9b5cd5ea8576083",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/er-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "关系中文与两张表中的属性说明不被截断；零到多基数正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "er-cn-light-1.png",
+          "sha256": "8c6146ab853acc51f24093e2d83bef77fc11ac31278d6cfa312ca5e584c66f14",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-1.png",
+          "sha256": "0521f31fd8f742692201fe96c8210f381f8bbc1206f6c3881a67876539d0d7ba",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-1.5.png",
+          "sha256": "17f5dc0cdbf5b358af90a38753b559992be9c856f7f6f75f4c3e03736d29d57a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-1.5.png",
+          "sha256": "b16e1b5627cbcbf612bfa6b34a8f0eac3e299eb83554a9567a8002045afb69ab",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-2.png",
+          "sha256": "c0639edcb245b79014ac8a7f5a11b18932a1b029bfec58e1c5c0c336d073e01d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-2.png",
+          "sha256": "1a706ae7a5749f95c7d85d21a1341da123f1e63c4bb883be289fe3617628618e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-light-4.png",
+          "sha256": "e4b79dc58d1ebc1fbbd3d72b482a8ce76a2f4b167fce94c410c7bd7bad789171",
+          "baseline_error_px": null
+        },
+        {
+          "name": "er-cn-dark-4.png",
+          "sha256": "7d4e7e216844ec8325925ca59b4cc552035bcde2509f045b7a1e29369bbccade",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/error-diagram": {
+      "verdict": "pass",
+      "expected_error": true,
+      "expectation": "明确无法解析，原文保留",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "error-diagram-light-1.png",
+          "sha256": "12eada6b1ffe35b193afe711f4380c56b4b1a4e2519813b581fa85e4406537fe",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-1.png",
+          "sha256": "bb7a9df02a6f6e2150d8425ad17b65064e86f28e32dee9f77317b3df9a2b797f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-1.5.png",
+          "sha256": "18b842a703ff96b7a81a8c9514a733ecd0ff8e7012ee8c2063d5ddefce1f23fb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-1.5.png",
+          "sha256": "16b9c03379db5f1bbe59ee484d9517bb9466ff3e9ae295817278cd4773210e03",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-2.png",
+          "sha256": "cad97f65247a6a1224f657907f2e714db1948d6efd18bd50cbd4529d336e730c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-2.png",
+          "sha256": "bd0eab27d3018dc00b2e469b000fbfa8318ff6e6ba94aed3bee745c338c3abfb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-light-4.png",
+          "sha256": "967f9ae4a894eed1fafcac1604a8c738cb58315f98d28b9047bf856c7c94720d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-diagram-dark-4.png",
+          "sha256": "e2632cb84da779259f7b54e4bbae2c331ea6c34c2c008eb69f02bedcac266409",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/error-macro": {
+      "verdict": "pass",
+      "expected_error": true,
+      "expectation": "明确错误，不能显示红字就算渲染成功",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "error-macro-light-1.png",
+          "sha256": "6c56426b9c790462e37994e3d37177a1cf4ffd4cb2848e2b37688ac3669cd3f7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-1.png",
+          "sha256": "c391c20d2718dbe05743aa3428c6e3ce620188207d201de17415f632ef9f38a0",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-1.5.png",
+          "sha256": "9de3f29e9d242347c7290fa1f533c48dccdc7564ced362c9ce18ba609ad59183",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-1.5.png",
+          "sha256": "ce9ade0706987a53fbd2bd3c7f9b0558493f2c3908c8292c3cb10fb30c17b14c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-2.png",
+          "sha256": "fed636ced4b43d709af31c1fe01a64da4ad7ac4bb7556daf4e723c5e9850909d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-2.png",
+          "sha256": "317c2f20cdaa4b2026ae0ba954d6e0852541791d89e4e6225fb808104f8ba98b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-light-4.png",
+          "sha256": "56f89e5bddec7428333bf44ccece0a6273b48e5ee20c52d6fe800b40a9171762",
+          "baseline_error_px": null
+        },
+        {
+          "name": "error-macro-dark-4.png",
+          "sha256": "c3b06991932600933c247530098091317eabf265a6dad667ec915d1142f4f371",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/flow-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Start→Ready；Yes→Done；No→Retry→Ready",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "flow-basic-light-1.png",
+          "sha256": "a5385a4249bb26fd4325ba9d7523a77323e46b87075dfc1497821b9360192eaa",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-1.png",
+          "sha256": "fe35fec796021d57fe6bc642c7b174dd80a8b216600cfee2971c17e23d21a5b3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-1.5.png",
+          "sha256": "75b2d3be2a0572ab46baaad5ccbff61d31150dfe70984e31f901504ebd170fe3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-1.5.png",
+          "sha256": "13820d468dff560ef83114dd4789f6cac3f1c9dbe50876e85cb7f20ccffeeef1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-2.png",
+          "sha256": "77164bf1f178e0ee08a4dbf8382a59e1fd20a8641725570a11b07a9da0549a6f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-2.png",
+          "sha256": "18aa92fbc562fae01e82574b2e93bb6296833921b25be9b300e1af88ad894165",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-light-4.png",
+          "sha256": "512ce89143716415e36785ebb270d901383bc806a1606d299e0a64dffd008d9e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-basic-dark-4.png",
+          "sha256": "48f29102f3aa82786125ba0852df3aa95d0f8fc416e78bdb495eb4023c426356",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/flow-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文完整；是→跳过，否→编译；箭头不穿过文字",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "flow-cn-light-1.png",
+          "sha256": "f9ded0ccf2cabf62da689355d7f0c51c730ad1fc09cde553c29a20f20664f421",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-1.png",
+          "sha256": "c724617dee343dd1479aef5126ebbef0468dc92f9d2d5f87fcb85408280c444f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-1.5.png",
+          "sha256": "db21f0fa57c89e5fc48d6518b0db7b1a46429ff26c73324a52a560439e51b00c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-1.5.png",
+          "sha256": "8056c15309ed6b3900fc2cd7a118f49908f2f358b5ff3fd319a26272563012f5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-2.png",
+          "sha256": "2a0072d5f21cc7e61d43ae78356213b17a3e78fa573accdd5260511bec6334b3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-2.png",
+          "sha256": "969ec9db42d6a4c62ebd2ea1474c495c4fc5111176635d29050b659b7aab1e82",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-light-4.png",
+          "sha256": "2be66beede6a6aa1225e76153b3ed4ae12bfaa137da7133b297e023b67532c23",
+          "baseline_error_px": null
+        },
+        {
+          "name": "flow-cn-dark-4.png",
+          "sha256": "d49aa2643208ee25ff192493cf1058a0a195b443e95391ed6d9ae0863cd5ab25",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/gantt-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "Formula起于09-01；Diagram在Formula之后；Review里程碑",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "gantt-basic-light-1.png",
+          "sha256": "c05dbbbdc0b4a09ca6aa6fcd25ab56a0d9d728d0eeecd092da41dcb3ae14c2db",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-1.png",
+          "sha256": "5ff729b3c4e82db216306d9189d38d1d9cb7b5e268b149676c9ef2637f331e64",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-1.5.png",
+          "sha256": "016a8f85f79a7e0e633a1b3aceb8b08a1ec1f44036de2a2de5612b65c8a528bb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-1.5.png",
+          "sha256": "fe2f2502d0697881d497cf5197e6dcb756ba2bfbff87e34fb4dea544c1840fb1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-2.png",
+          "sha256": "5ca5b6ee0dffa533e232e4c9a4228f2549341d4e8f881107a2288ef9a734a116",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-2.png",
+          "sha256": "d496fba85fa74431d0671f7d023dba3bc5d5962a3eac4924f4c20fa454c9d906",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-light-4.png",
+          "sha256": "058989ccd2f429e3a69ccfebaa04b972944379ae56ffbd847656694c1a2838f4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-basic-dark-4.png",
+          "sha256": "ca30e4e30880ec46c536c7c1b72dee919a9b82944ed2b7e9f7f7d1674ca2e7d6",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/gantt-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文章节与任务完整；先公式再图表再Windows",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "gantt-cn-light-1.png",
+          "sha256": "284fc6a80dd0ad7a460b8320ab3479977bb5ffff183d23b3d1cfbf4ffe712733",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-1.png",
+          "sha256": "c06584599f96f7615c7827439b53dc2af18262831eab41e2d234f603262df8b1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-1.5.png",
+          "sha256": "6a4e37088a76e39daaf712f2a0db6aad047f3a67383dc59ea305d8a57d766e10",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-1.5.png",
+          "sha256": "d2cc9f57619e78e24b7a90cccf4a3d4d7247f42b20e490b15ac4d58478a63af8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-2.png",
+          "sha256": "3bb23b2dd9eb05e2de7a20310b1489f670318ef81d8f05d32aab322af25c419e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-2.png",
+          "sha256": "c47ee970a0f6267c5c8b9da4d6fb7dea6ffa4e9be00c9a9f84790211f75e9f7f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-light-4.png",
+          "sha256": "3fc8045120010cc309d71319ad7d8a5500e591ff14ae0777dbab57202041fecf",
+          "baseline_error_px": null
+        },
+        {
+          "name": "gantt-cn-dark-4.png",
+          "sha256": "136523c2fc4d2aa9872cd0c2cee73e2ca49b9c31451942c5150abfa4c5c43fdc",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-accents": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "向量箭头、帽、横线位置正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-accents-light-1.png",
+          "sha256": "c7ca4ab264cb3af244200ce7b30be390e823389d9af0ae6c1a3333ed848a95d8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-1.png",
+          "sha256": "afec0b3ceb34274479c7bfd5528a2c2ff386a5154dd1564cb3b741cf26752ba0",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-1.5.png",
+          "sha256": "d5bda302fb71cbd0f585412f83fcd3e836fa69454990bcbc50d4e2bb11f9e056",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-1.5.png",
+          "sha256": "900cd9f41fc9454b0641cc52a93ac10993f88669e1377361f764862c1ff06346",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-2.png",
+          "sha256": "e34d2ff39bbcbcaa346f543f8162b4c964346b5cfa725c452caee948b9183449",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-2.png",
+          "sha256": "e37c0943e7841857d91855e17a9f813e299d095dc0f7b44eb21d6b12ecd75778",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-light-4.png",
+          "sha256": "e4e96e687fa2c500221beae073d7aea452249a98997df815d31f8ed960114641",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-accents-dark-4.png",
+          "sha256": "830793fcd7cb71d152036d80f53b87a725c827a141af3e4a6321a86747056eae",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-aligned": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "两行等号对齐",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-aligned-light-1.png",
+          "sha256": "52b4711c3a56cb66b34db1d7a19ccda5a48ef5b7018225e79d4e219adb1b1918",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-1.png",
+          "sha256": "17c4fba1c5828a48b7fd3eb58f5d8433e26fb1a363d4593effcc576a89680ccc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-1.5.png",
+          "sha256": "573733867f4e522aa9c45209e1232988fa73a6cf4d24e8baba3dd5efde644fef",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-1.5.png",
+          "sha256": "77119e0825f5ca26e122f443e37fafaac6170f77cac4e4eb852656ac01f3aa69",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-2.png",
+          "sha256": "360fb2265e93c05605b374b5b9969a1ec013a827f723b59415149e79b372e43f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-2.png",
+          "sha256": "504961d4f3a2fbbd9ef4001a6c1122e26bf29086c5a210dc5b27f906f25e76db",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-light-4.png",
+          "sha256": "a3f7975c24f22cf17f533c1b23fa629b71eb917211939eab91cdb3c5a909884a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-aligned-dark-4.png",
+          "sha256": "685aebe934245dd2c99fdf2339f214754d591e25390dae65306b9acef3badd69",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-cases": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "大左括号；两行条件位置对应",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-cases-light-1.png",
+          "sha256": "708fb9f3ec432a6e658e472fd44949d42d6ba2dace0e8ee74e94366157a6ad47",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-1.png",
+          "sha256": "e53a7e88a377535c375b4276de347cc168112abacb08425b07dace5c9d509f93",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-1.5.png",
+          "sha256": "d2865af88a44198f91233db7da13cbaf6de2ce20b469d7ebd24b31230aa6bd37",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-1.5.png",
+          "sha256": "2819f1b9d23794e15f3ba165b6a7c8f095447f1e9ced1a741107fc65706840fd",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-2.png",
+          "sha256": "14c8b327c75d4b4329d79a98f228a678e24e859523b6bbee1ea17be3a47a7fbe",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-2.png",
+          "sha256": "d27ebf4fd686e782d04f8eab4032ec309b5d4c610a4ff9a37de26549b67905b4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-light-4.png",
+          "sha256": "cc3c082e26b22b5b71b564a1d9079306ceca5c8dfaf9760424b8f28a50390495",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-cases-dark-4.png",
+          "sha256": "0daa7384a0e3d383b020dc6388ed58738bdfe203f144c2205b63a74bc4688ee2",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-chinese": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "中文与数学混排不碰撞、不缺字",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-chinese-light-1.png",
+          "sha256": "6cee95273e7261ae94e379ba13af1824da5ba149ccdee0a800d8306f87f16ce4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-1.png",
+          "sha256": "ff2e2b8450acb6e596521d4b5dbaeb11fba152c9643ccd981511f3a2f0c95548",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-1.5.png",
+          "sha256": "016c0f8693d0b858bc1b390c9441850a781078a3bb1d70834b009c1d081c07b6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-1.5.png",
+          "sha256": "f59acc9e873bc1c611e6d3242d8e05ca9d950502aed32c7eaeb0b61effd16fe2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-2.png",
+          "sha256": "1f57f04ea34637c1435aa179ff01916379798b6ca1874fb9c85511e485031a42",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-2.png",
+          "sha256": "c983ecc1c1e7bfa7a516ad3fbc389a92e423bc5f6927b99f50ad1d9c2a2c7d10",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-light-4.png",
+          "sha256": "1d3a923d6e8074f965bf5143a9f6ce7c6d41642e7133818e087927f506fae6c3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-dark-4.png",
+          "sha256": "9412147a3cff40d09a514209de964a457833fea2923dd0ccc7c8a04e60846b0c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-chinese-frac": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "分子分母长中文完整，分数线覆盖文字宽度",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-chinese-frac-light-1.png",
+          "sha256": "0adbd9fbbbe69fe4bce197c36253c5e4289b58e85db11f9ea5bf1f2f89a47290",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-1.png",
+          "sha256": "7ba54215dc0bdda089c146342862a277c436077cf93ff735a220c4c0874a4dc2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-1.5.png",
+          "sha256": "dd5c57ec91f40d1c1c6c048d4ec7ca904fccff32079f509675de67a2e1675bbc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-1.5.png",
+          "sha256": "aff2e81017cb75a02a57fcc85e2a5f1e279b8daafc182ddfdd7fd96cc95accc1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-2.png",
+          "sha256": "30290e84dca8b55e44f326f4dca27dc79ec2b931e0fb7c386f9c9c3946388659",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-2.png",
+          "sha256": "a30bd7af668f599732ae18185e9d7d81c0283177f2d1cda2f041e95a8c158b6e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-light-4.png",
+          "sha256": "e43fc5af6d6df2bc3b82e52acba9c92219f44457cdb3c4a0f247767bc001d07b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-chinese-frac-dark-4.png",
+          "sha256": "375e645aa1fee3440efff06b1a930a81e9c863695dcde15677f6d147ce9b0d0c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-delimiters": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "嵌套分数括号与范数双竖线",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-delimiters-light-1.png",
+          "sha256": "e53cda2c58225a218e598350675e0f302bfd781a7d52494ac6d104a9f33334b2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-1.png",
+          "sha256": "d8cbf245f94b32656d5c5ca41d1b662462cef5ada185faee9159516dcd8ec7a9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-1.5.png",
+          "sha256": "b4fe7f9626f745113861d70c9bee639016f5697a494bb1e0bca476c0ea007a6e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-1.5.png",
+          "sha256": "0b0c5fbc14ee9a63070c65adc5a57655a9ab8c81d60516b3b2ab2f183d3a1740",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-2.png",
+          "sha256": "2b9e17dad802e05699222c771731fedfefec6dea6ffafc35db8de1a9d3960561",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-2.png",
+          "sha256": "847bb569f2efd92b32162f9bfb7f6ec766126a995ff1e2a869c740ede0743d0c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-light-4.png",
+          "sha256": "5bd67ade6e436f270409a9c698442bad11d68a1289090d0e3d409bb896064e5f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-delimiters-dark-4.png",
+          "sha256": "030eda5179ef7005bb351674a0cfd8c66d92c43a66e4dd8cc26d05c31a0532ac",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-fraction": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "分子a₁+b²，分母c₃",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-fraction-light-1.png",
+          "sha256": "3278f86cc17320a00724959dbabd0a6cb38e2f1855dc0ea53fb01f4951374df1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-1.png",
+          "sha256": "11607d2c3336a8aa420afa64b4b07ec2ae19ccc868a8206e73bf36901b7d3e9a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-1.5.png",
+          "sha256": "3d3b49e61b812156ca75fa349c2d40cdfa3c28d1fe4ee71d0f81a1d81daf31a9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-1.5.png",
+          "sha256": "00b2bcf67be08c56013c856cae72a0899e3ad7ee32ea1d927c09d9adbc2787e0",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-2.png",
+          "sha256": "b126c56bbd0bb1abba51583c1d447cd5ee1a5e8223513bcfa5d5a1883e397c01",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-2.png",
+          "sha256": "f577b553d01a10ebb649b2f18ae95feed862cded25f3f48db929ee8c7c37f0b4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-light-4.png",
+          "sha256": "61656cf1364fbb439d18c6dbc0d3c0912d01d6db6169e1db4cdb613b1c50e49d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-fraction-dark-4.png",
+          "sha256": "d59b83b8898a92088bcd97e06ead59d647e122b74d9dd0c2a2e2c2229ab1277a",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-inline": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式置于中文正文中，分母低于正文基线",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-light-1.png",
+          "sha256": "cc15fd1aa75ea1684fd3eda80663637f49df0829d8eec548fc52af1f570b620e",
+          "baseline_error_px": 0.4800000000000004
+        },
+        {
+          "name": "math-inline-dark-1.png",
+          "sha256": "bd784bbf6a6df00cad8207e9d74c43b37a0981aa9957f9754e4eb0d32f46d237",
+          "baseline_error_px": 0.4800000000000004
+        },
+        {
+          "name": "math-inline-light-1.5.png",
+          "sha256": "1fa21d97367adadf011661c52690dc3ff5726403a79bc8a8dcb848fb4d4c93b3",
+          "baseline_error_px": -0.7800000000000011
+        },
+        {
+          "name": "math-inline-dark-1.5.png",
+          "sha256": "5567816c14adc5a07eb63b020d250b407baf0947ce6876d43cf1653a34ba2225",
+          "baseline_error_px": -0.7800000000000011
+        },
+        {
+          "name": "math-inline-light-2.png",
+          "sha256": "e209c42ddd946add74d481a2a7d67f17b4212c6b13cd5deaba3280faefc5759c",
+          "baseline_error_px": -0.03999999999999915
+        },
+        {
+          "name": "math-inline-dark-2.png",
+          "sha256": "37641870d325f04edfbb015ef64d516e41b382f260edb0dacd45900460d4c5cf",
+          "baseline_error_px": -0.03999999999999915
+        },
+        {
+          "name": "math-inline-light-4.png",
+          "sha256": "f398d5c754a32e8a2102a5b9f6a4df817c67f83c39b688f1e1b5d4e310ce41e4",
+          "baseline_error_px": -0.0799999999999983
+        },
+        {
+          "name": "math-inline-dark-4.png",
+          "sha256": "6d8cc379b897dd85405b18c196c11ae10f3ab5d8a5a781a050dbe7dbff49377f",
+          "baseline_error_px": -0.0799999999999983
+        }
+      ]
+    },
+    "windows/math-inline-raised": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-raised-light-1.png",
+          "sha256": "faa2d32a7e30f49b5f50e01bdf8b398c9fee64e781dcd316d4d81e2690ebff2a",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-1.png",
+          "sha256": "d0e0ca93f7551dc9f9c1a9e693ae135f6c0655425acbf314a3b0a44d0855d4e4",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-1.5.png",
+          "sha256": "2e31840b01994db8a32f6741f856039af04f53625f4e1b54c981426cd4df0542",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-1.5.png",
+          "sha256": "f8293771e4c5bda06aef02f47e972e98a3f395a8483f780551320693010ccc8d",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-2.png",
+          "sha256": "0ec8c99d6c4437e5e0fbc54c499c8334aae8c001dc70897fbdbae94dbda3c76a",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-2.png",
+          "sha256": "07a3eeaed2a353faa79ca92f2ad36166bb46221fbb4efb201299a59f230d1213",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-light-4.png",
+          "sha256": "6874e4beb0fc321a88501186f495daa27b1d7850225ff6f3b2603614e9ec9b99",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-raised-dark-4.png",
+          "sha256": "2998316fe393e822b371bd38c6e87647646067321143d3e0615f37bbcc9a47d4",
+          "baseline_error_px": 0.0
+        }
+      ]
+    },
+    "windows/math-inline-simple": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-simple-light-1.png",
+          "sha256": "1ad4348184319eb8f777f8e619c46c07e33b0f01634699742e6bf2730b1dec66",
+          "baseline_error_px": -0.25
+        },
+        {
+          "name": "math-inline-simple-dark-1.png",
+          "sha256": "a49f47b92865cc057e852b98ebf0c77768ad190781e2cfad2b0cd4908f8004f6",
+          "baseline_error_px": -0.25
+        },
+        {
+          "name": "math-inline-simple-light-1.5.png",
+          "sha256": "eef059d7169677727af1c6042e387dff0410e062c4842885ba18a74b4ac971ce",
+          "baseline_error_px": -0.375
+        },
+        {
+          "name": "math-inline-simple-dark-1.5.png",
+          "sha256": "2ebc1f018590221499d1b36fda4d49bde4ec7b282e75f6ab845a83482da6682b",
+          "baseline_error_px": -0.375
+        },
+        {
+          "name": "math-inline-simple-light-2.png",
+          "sha256": "77dfa0dbea83694dfec3133a9076aede559d562f3a1421616478d94fd9cd7b61",
+          "baseline_error_px": -0.5
+        },
+        {
+          "name": "math-inline-simple-dark-2.png",
+          "sha256": "0c4ed9c84147908b38c8f6ae9a0d0083ed97c1f1a985e19f7b53aea447092f27",
+          "baseline_error_px": -0.5
+        },
+        {
+          "name": "math-inline-simple-light-4.png",
+          "sha256": "b599329b0ac95b5373c12ac53ce2b29b95eadba68f806a77b858a065ec1fc48c",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-simple-dark-4.png",
+          "sha256": "7e8088725f9f56c8c5f0fcd163d01f69c78dd4fefa6ebcb4c71022a1f9553383",
+          "baseline_error_px": 0.0
+        }
+      ]
+    },
+    "windows/math-inline-subscript": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-subscript-light-1.png",
+          "sha256": "20ec0f1f46d13fa935297de15cf418dd54948613e07e2e265fcd7da82bf63b48",
+          "baseline_error_px": 0.4299999999999997
+        },
+        {
+          "name": "math-inline-subscript-dark-1.png",
+          "sha256": "40ee6086458085cc066223a3ec6d278510840a0e46f052a6a706bc56ef56218a",
+          "baseline_error_px": 0.4299999999999997
+        },
+        {
+          "name": "math-inline-subscript-light-1.5.png",
+          "sha256": "54336ef9104f2cf78cebdb6a6c5eeb0b4b00d051ff981294a1ba1167122fb927",
+          "baseline_error_px": -0.3549999999999969
+        },
+        {
+          "name": "math-inline-subscript-dark-1.5.png",
+          "sha256": "0a7e863369ed736f3219bef06cd455313c6707504a8f3292c754294a3f203ea4",
+          "baseline_error_px": -0.3549999999999969
+        },
+        {
+          "name": "math-inline-subscript-light-2.png",
+          "sha256": "cc37dfb397a4723ff573d6f258307a735b5cf3dc2ed78b024e799e90a3afcf45",
+          "baseline_error_px": -0.14000000000000057
+        },
+        {
+          "name": "math-inline-subscript-dark-2.png",
+          "sha256": "97381fbf80bee091ce19a128aa656e0b564d0101caab22f72758ae600aff342a",
+          "baseline_error_px": -0.14000000000000057
+        },
+        {
+          "name": "math-inline-subscript-light-4.png",
+          "sha256": "72a6ff48ce66d342aa715e52f411390dc0df0ce627f9995f56839a426a698cb7",
+          "baseline_error_px": -0.28000000000000114
+        },
+        {
+          "name": "math-inline-subscript-dark-4.png",
+          "sha256": "353f1773c9c20aeb335bbff3dfd6bfa251b8c3ccd738f9e63f986ff2f906a6ee",
+          "baseline_error_px": -0.28000000000000114
+        }
+      ]
+    },
+    "windows/math-inline-superscript": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-superscript-light-1.png",
+          "sha256": "499ffdf88d805acc6e8696ff2ae5df488b6deda20a0f6f2860fefef90195b31f",
+          "baseline_error_px": -0.25
+        },
+        {
+          "name": "math-inline-superscript-dark-1.png",
+          "sha256": "9c3151bce2e81c50e3a07acf4a9d97df00f44b4ad544abd65e6eb5e9242033f2",
+          "baseline_error_px": -0.25
+        },
+        {
+          "name": "math-inline-superscript-light-1.5.png",
+          "sha256": "78dd4d18b97ff27de819aeb8e0d7f080c43dba22520ab40b92c62398d7fd756b",
+          "baseline_error_px": -0.375
+        },
+        {
+          "name": "math-inline-superscript-dark-1.5.png",
+          "sha256": "61fc7dcb755ceb8d91453a21b8e0d8d2f1e2990928ac1a7dd1c0d0654f4fe3d5",
+          "baseline_error_px": -0.375
+        },
+        {
+          "name": "math-inline-superscript-light-2.png",
+          "sha256": "42f5d4ec313282be7c23e16909da582e9c60316a41db02ea9ade825741a7d33b",
+          "baseline_error_px": -0.5
+        },
+        {
+          "name": "math-inline-superscript-dark-2.png",
+          "sha256": "0eca413e2f323ce2c59569ad278767f57019417279a876f28790754062527570",
+          "baseline_error_px": -0.5
+        },
+        {
+          "name": "math-inline-superscript-light-4.png",
+          "sha256": "2752262201c19f356cad1c11f74877be17a50de3d1ca8fb4ee7d42ca32c92fa2",
+          "baseline_error_px": 0.0
+        },
+        {
+          "name": "math-inline-superscript-dark-4.png",
+          "sha256": "79bb635afc0d336f0cbf9b0953b7504351dabe08db17115785b730429fc5e911",
+          "baseline_error_px": 0.0
+        }
+      ]
+    },
+    "windows/math-inline-tall": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "math-inline-tall-light-1.png",
+          "sha256": "fdea12b2b83a5b31d64b16cff4f244c6be1378a4bf4fc502b321fcf38465fc71",
+          "baseline_error_px": 0.509999999999998
+        },
+        {
+          "name": "math-inline-tall-dark-1.png",
+          "sha256": "3d3bce38c6fd1d2f8369e5b728c734528d4bee5e7fd9726c7dea6fda0339ff17",
+          "baseline_error_px": 0.509999999999998
+        },
+        {
+          "name": "math-inline-tall-light-1.5.png",
+          "sha256": "a093bd33bd9ddcec05160c55c33f25ddc84838a6fc283cf05b05ee8603f37984",
+          "baseline_error_px": -0.23499999999999943
+        },
+        {
+          "name": "math-inline-tall-dark-1.5.png",
+          "sha256": "13e7b5a720012da0c83b8585e4651741e627658d1f8ca4dab0b8d35b83557743",
+          "baseline_error_px": -0.23499999999999943
+        },
+        {
+          "name": "math-inline-tall-light-2.png",
+          "sha256": "a2e959e61d34c45644c9e30fb646310c0a64e07240f40c08e5a89190a6e44243",
+          "baseline_error_px": 0.01999999999999602
+        },
+        {
+          "name": "math-inline-tall-dark-2.png",
+          "sha256": "7a6ceddae0d63d644ed815cbe10570ff7626133832d8467307641d2a7b51c2ff",
+          "baseline_error_px": 0.01999999999999602
+        },
+        {
+          "name": "math-inline-tall-light-4.png",
+          "sha256": "4f1a6ce89790dfdcf6b36bbb04bc4dcdd9db6c55081c1813f04a3d091b5c2610",
+          "baseline_error_px": 0.03999999999999204
+        },
+        {
+          "name": "math-inline-tall-dark-4.png",
+          "sha256": "910b4fa5d1c60d2c127805158c6e74ebe20326049d68145cbf9983803a3b17df",
+          "baseline_error_px": 0.03999999999999204
+        }
+      ]
+    },
+    "windows/math-integral": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "极限与求和上下限、积分上下限",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-integral-light-1.png",
+          "sha256": "6554a7a40c646486bc0befc93854ac5bcdbd17b14966b9c6ea14522b863825d1",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-1.png",
+          "sha256": "fa7d648b68a0ce86965a1032da7d740a2e15dbf06cc6199ce58397783cf19613",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-1.5.png",
+          "sha256": "b932754ce3a51a68dcb6f113b08330be98bc9fdfd1836bf2462a761ff2f35ce7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-1.5.png",
+          "sha256": "4c89bba7bf96342171eaa0a7a0f3c5b2347e46845c64a9e985db4d0836b866ea",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-2.png",
+          "sha256": "b4fbc74c0feaff9e14c2e1e152b4b24588c4aa6691dfb4fc600b13a68ba06a97",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-2.png",
+          "sha256": "4ebe3c26031685b9b2e9f566704c2df33dc22f55ee58be1d8a5028dd2e93919b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-light-4.png",
+          "sha256": "84863ecab4e59a4df415367c1bc70f810dc19aee4b70cef49d6a8e70f4bf2079",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-integral-dark-4.png",
+          "sha256": "9eb355c122a32921fe8e0fd89835b201ea4d12c5ae17ce8276b00606339c41ed",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-macro": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "局部宏展开为粗体x和y",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-macro-light-1.png",
+          "sha256": "a7da6819f5f705431388c5e51759204659965c92ea26ea65ae30eaaa2002bc0f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-1.png",
+          "sha256": "138b94be78f7d42722e7968097864e2a60cc8929e4620c3d9b6ea0446ddc0678",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-1.5.png",
+          "sha256": "b340376127ad3c5955183a2afbaf80f6edf7c36a2db79a059348ca780ca91746",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-1.5.png",
+          "sha256": "9d70ae5e4d32f8c3ef8aff6be2c39e8df89d26dbb66742c775b1f94c1352dbf9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-2.png",
+          "sha256": "8cdcb83cf14e8efe732f1e4bd4bf364f995ef8d1a30dea2c4deb56cbdbc958e8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-2.png",
+          "sha256": "c9291c9770a1af13b3fcf5baa1fd031224203cff4da92b6af94473da3bb2f553",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-light-4.png",
+          "sha256": "3da6f6b6f546a9fec2e9e45716121a37ca87b12dcb020c425ba51c208a07c21a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-macro-dark-4.png",
+          "sha256": "5458ae616c9a1be803c521f46e106bc6516fbb0aa6f6bc195d8a420c94babb5c",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-matrix": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "2行3列，左右方括号包住整矩阵",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-matrix-light-1.png",
+          "sha256": "812c49bcaf60ffe5ffd1c40ab8023ab3a4cd24cf7cd0f2de5ab441d97673f394",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-1.png",
+          "sha256": "f65ce552c8a05a1a7c372733189bf0734670f0c576cb7ef3122d34cabe090cd3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-1.5.png",
+          "sha256": "cad3f3bdbb3874f88d220707fe0ce8385168a0c056622853f65b0c6b5372bb1e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-1.5.png",
+          "sha256": "d7efde19ed8d3d6662b7ebfd7ce3809b6f46a81f66400c64b8223a1e682f71d4",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-2.png",
+          "sha256": "6d561f5f55735c92726f27c9f88a0b314ddda125ac4c80148c12cf0e1de65fb9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-2.png",
+          "sha256": "382133d137a1e2ebc949c457a4b665e91f77afb8c71ecf9cb16f11b9e42dab33",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-light-4.png",
+          "sha256": "cc34dc33e74a3f51e6e93ec4b991f9130aed4ca06a671bc8bea0585af77ff5f5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-matrix-dark-4.png",
+          "sha256": "059d964cfcdbb58b967ffe0c82df0d38cecf3864e80a950c752307d4f0a3abdc",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/math-root": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "二次根和三次根指数、分数位置",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "math-root-light-1.png",
+          "sha256": "e8358c29b63dd6a60e3bd4667068e91d4f377049fa68c26fcfcb91a31c5acbbc",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-1.png",
+          "sha256": "33d75942591adeedc590634bcd290a7426c89510f70c9be4224bb4cf26b1e719",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-1.5.png",
+          "sha256": "b4860556ec0e797f9883b26f2228c9c6bbec82c730dec37176920ed93c1b7eb6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-1.5.png",
+          "sha256": "ae97b638c76aca99fa879b656a0999479e098048bc32cd50b615b297b133733f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-2.png",
+          "sha256": "417017aad438d9a098ca9436bfe075186602b8966422f24bff7a3dd82a5c2432",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-2.png",
+          "sha256": "5b1133e06e408f35051be726c0cc1ed55f7f097a057307654acaf4c272aa72aa",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-light-4.png",
+          "sha256": "3765c0295c0dc18c40ae12068d6a1d9004bd700f556217ade0babe3b0003cb9d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "math-root-dark-4.png",
+          "sha256": "518777e5eac905178ef5fc7e454d228c4acb4c808af9bc1344f27cd1dabf0727",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/mindmap-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "root含Sources/Wiki/Chat；Files/URLs只属于Sources",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "mindmap-basic-light-1.png",
+          "sha256": "3b4acd120d0b48623965bb35561f7de1f5ba27120aa99a7baa66b7df2ccbb17a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-1.png",
+          "sha256": "1f1e4a285bf736379fed00f407f58841e82120f1caae712ba3ea400f558903ef",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-1.5.png",
+          "sha256": "7a8e044793aa6574134d9a88b82159e445bcd0fff555b655c5bf0969848b09f3",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-1.5.png",
+          "sha256": "3afa52de6e9fc7134adf63d7ea8190530c72c3f0dd971083f77422015401917f",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-2.png",
+          "sha256": "5888531305b1592673d8fb28102e7e3429042ece4d62a8ccc6ef291524b00273",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-2.png",
+          "sha256": "81b2599435e569365206d90e0525e783ae1166816f406a58b8da02157c977a5d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-light-4.png",
+          "sha256": "d0a248377a06f31c489244ae9ae0ebff72c59ccdf27a8a1a778f39c631d151e6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-basic-dark-4.png",
+          "sha256": "1a0787b9938cd5a7558891bbcfc834e0428346202afedcac65c825843c25861a",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/mindmap-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三主分支与四子分支；长中文不碰撞",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "mindmap-cn-light-1.png",
+          "sha256": "717f6e0ef4f94ad87fba13a6727031d283152ab9bd1deaf02adef9ed871615d5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-1.png",
+          "sha256": "2f285d6f292095bb899e665be6b7a3d7e3eeb6f1ea1c8eaea85e8b6a812ea4c6",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-1.5.png",
+          "sha256": "7aa5e8afafe476f25e59db90588031608dcd4b3fc1a4344771f906f5c80b7cc7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-1.5.png",
+          "sha256": "e76674099030ca660601a1255335831a59936d191475a3671bdfcbc620172ef9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-2.png",
+          "sha256": "941230ab2d11c02fc5acf2c063e73d023fefd57bcb3b8e48c9ff5fe526a47e1d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-2.png",
+          "sha256": "1f3cf79317bf2589eeac0bc979742e3916cc67449b37f902b6257be57569f59b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-light-4.png",
+          "sha256": "8e94aea6b3561cd129995330edd15725fc3567bc64c55818353dfce15621920d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "mindmap-cn-dark-4.png",
+          "sha256": "20fbab8bf6b82a0e0a1ca4e7a677a84002e517064bdcb4beedf386739cbe7516",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/pie-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "60%/30%/10% 对应Added/Skipped/Failed",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "pie-basic-light-1.png",
+          "sha256": "66934eed56b94b76e1109149b6eef0d58a636ee6795c716e18825a540c627887",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-1.png",
+          "sha256": "d7533063143bd556adb212bd0f3f7dff756af64459bbe72c9ca183d592616e18",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-1.5.png",
+          "sha256": "94520f3260d9e7bd77617a9f65003377a4ef62c5705645e24405ab7f9697e7bb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-1.5.png",
+          "sha256": "566f510fcfbb4de4705e35bbb3f4886ae7738331013bf6505ebcf662d07c03cb",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-2.png",
+          "sha256": "5ec4b0f8db262d0eb46639612c25b53a9f0d7245b1be439e5433e945d4673940",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-2.png",
+          "sha256": "2d1512a3595deae14f2f5dcafb3f1f608119f98ed730829cad32e620090dff5a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-light-4.png",
+          "sha256": "7590d5eaddab90cf314bb04201cb32e24e2abacd4e64ad9b8d8d2b2657fcd834",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-basic-dark-4.png",
+          "sha256": "c71dce49e5e5908a607566b783841522ace9e427bd49aaa6b9855d21fa4b1641",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/pie-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三份中文图例完整，数值与扇区对应",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "pie-cn-light-1.png",
+          "sha256": "6f7188dd83e1e537fb315c4c27f9ea2cd63f6082a5312768c288dd3626c741b9",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-1.png",
+          "sha256": "44852af6789f621c32e6a642f8c98397da77ac1d95d19e61378c25aa55885489",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-1.5.png",
+          "sha256": "fea38c6f5a75fc4b3014d1cff4ad572f7ac6b16b7a400235a2dec24326cc991d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-1.5.png",
+          "sha256": "cce651a50531a9a4365083a369567c01279220feae7ab201f25d72341108386b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-2.png",
+          "sha256": "f7f999098fecfa502028679ddc42d91a51da9abf23b53e746d219c314aedb59d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-2.png",
+          "sha256": "41fe2559c97d32538b427651443a3860f156fe550f3d9505bbbe1448f2a3d4ee",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-light-4.png",
+          "sha256": "b0559469afa93e52362d8bf15359db627f1b24b12e2c4748d1d9b63605a7933e",
+          "baseline_error_px": null
+        },
+        {
+          "name": "pie-cn-dark-4.png",
+          "sha256": "525921ccf0e6fb9317ee6dc5c4f2797fd5a5ec9c89875c1fa53b9a00e0cf76df",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/sequence-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "User→App 实线 Ask；App→User 虚线 Answer",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "sequence-basic-light-1.png",
+          "sha256": "52032d4b96e4bc840b564c7543da344822e4ab82f0c305bfd1b85f464b6b1b52",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-1.png",
+          "sha256": "9e3ca60b98483b7f7764a8b0c7c94bb5e56e86715c102afecba5a1734d8a2998",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-1.5.png",
+          "sha256": "5001f4bbb8f5999bdf32482f2ec1206ef9bf7fc43503a6c4116dcaba4d50bf3a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-1.5.png",
+          "sha256": "0c0ff9f116ffe75f497aa8b91876431f49a9aa01cc71b864bc061c1b4d02462a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-2.png",
+          "sha256": "ccb3c5504083ec9db73d7b3edaf35f46e782ad01fc379ac2ad6a69542d6e8c43",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-2.png",
+          "sha256": "4c594a7729e33095a60e3a4706efedb53853d4647f91a93991bd471f04b2aac5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-light-4.png",
+          "sha256": "93cc20f94af413e210b49e4a13789e7327d8f705750be3a45065714cd0b584c7",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-basic-dark-4.png",
+          "sha256": "928939ba2df74a5743c1e58a852df9d47711685e5b2f98504db92cb6cffcf220",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/sequence-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个参与者；循环框包住进度；返回方向正确",
+      "method": "RGBA pixels identical to visually approved 320a0a6 frozen outputs in every variant.",
+      "images": [
+        {
+          "name": "sequence-cn-light-1.png",
+          "sha256": "9607000b89a726974aad0ac328fce741aa8c165fc2ab1b24eebb17763c96e88b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-1.png",
+          "sha256": "b1bda46aa4ffe62113be393fa2d6c7b9d15981f1b0283d14312f86979c4bd433",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-1.5.png",
+          "sha256": "44102cfc5f128eba536366415d02687c6e2d8016b6045d0244b8d28026faa394",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-1.5.png",
+          "sha256": "c70d34960ebf7cad06df965982331c9f2bedcb3a488bb811b6b4df21e23da67b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-2.png",
+          "sha256": "b3f89363497e2b8554bbe993fd4a0c79396ca3ab8d1f3d9824f7fbbced347207",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-2.png",
+          "sha256": "b720179b9967754d21ffd65847faba6a527e78d537ed0b2e16ae54b0f66c848b",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-light-4.png",
+          "sha256": "ab087648275240ea1b7173764bfc867ebbe1a4cf9bbb6a78246580de3f4c770a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "sequence-cn-dark-4.png",
+          "sha256": "173ed0855cd7235e0c3ef144fbbfa71ca8727d5b771eee99847e1a9b0c93447d",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/state-basic": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "起点到 Idle；start进入 Running；stop返回 Idle；done到终点",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "state-basic-light-1.png",
+          "sha256": "2b62c4297f5aa10c538eefd012203f9e087d35a15b8a39ef5dd4d9d4d0dc3fe2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-1.png",
+          "sha256": "8c8073d8edd858c2bdc300f00dea7c881c8ee25b5bceb7bbeb273c8bb4193f1d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-1.5.png",
+          "sha256": "4b29537419c6902c08f10448e38147004e7a2a74ff7d276064a7d382b63f037c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-1.5.png",
+          "sha256": "7f25abbe86959decae23ca17ce64e2aab44491bd6b9601b01277e519e4b17945",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-2.png",
+          "sha256": "11c61e0098b0fed2edec333d025731b996f833c31d16f56424d7eae408cc5f62",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-2.png",
+          "sha256": "6e44395a2f5c62e7522586b89a41f9bfaf177558832ae2ce5369415e272f73d2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-light-4.png",
+          "sha256": "a20c887aaeaad2fe73d65c19edc56b2c6e43eb0c4f7b88760bcef25e290aaa7a",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-basic-dark-4.png",
+          "sha256": "c01acde750f242fadd60484b6491bbc6dc6b3bd097fa6317e2cdffe40ee43139",
+          "baseline_error_px": null
+        }
+      ]
+    },
+    "windows/state-cn": {
+      "verdict": "pass",
+      "expected_error": false,
+      "expectation": "三个中文状态及两条边标签完整；路径按顺序到终点",
+      "method": "All 8 actual frozen variants visually inspected: glyphs, relationships, arrow direction, positions and unclipped content match the stated expectation.",
+      "images": [
+        {
+          "name": "state-cn-light-1.png",
+          "sha256": "ec4cc9fd5488ef70901dae6225975687d161e1430567d274739056227cf18d9c",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-1.png",
+          "sha256": "9ccdb930de72411f304eef3fea8c061b735138a8a6537cf0e57165c67ec065c8",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-1.5.png",
+          "sha256": "3396099a0babd84c648b17a81da578c1a6efc42f71afbdabca449245fb479d6d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-1.5.png",
+          "sha256": "83ce868d9aa035c8145cafaceb47fd125f1c2c1b1982e95ec0fa5875f54548e2",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-2.png",
+          "sha256": "0bd7db83db1358884be89c3292dfaee5fe0d5c0fc6ca25aeb2aa277ab1d34fb5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-2.png",
+          "sha256": "8d699527f25e3905124ffb23a45e1470c4a9c6ad6c8af1b6c166a48c1bc123e5",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-light-4.png",
+          "sha256": "870dbf7ea1387e148784d111e376257d316633a274ad16a0f2963be75e88311d",
+          "baseline_error_px": null
+        },
+        {
+          "name": "state-cn-dark-4.png",
+          "sha256": "8438c7d24e7384bd1f4f654e3b0157dab017781ce021f7136f733cfca4c54387",
+          "baseline_error_px": null
+        }
+      ]
+    }
+  }
+}
