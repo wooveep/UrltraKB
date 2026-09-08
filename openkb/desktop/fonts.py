@@ -1,22 +1,21 @@
 """Application-local typography from the exact font files supplied with UrltraKB."""
 
+import json
 import os
 import sys
 from pathlib import Path
 
 from PySide6.QtGui import QFont, QFontDatabase
 
-SANS = "Source Han Sans CN VF"
+SANS = "Source Han Sans CN"
 MONO = "Source Code Pro"
 
 
 def register_fonts():
     bundled = Path(__file__).parent / "assets/fonts"
     root = bundled if bundled.is_dir() else Path(__file__).parents[2] / "assets/fonts"
-    for filename, family in (
-        ("SourceHanSansCN-VF.ttf", SANS),
-        ("SourceCodePro-Regular.ttf", MONO),
-    ):
+    for face in json.loads((root / "manifest.json").read_text("utf-8")):
+        filename, family = face["file"], face["family"]
         identity = QFontDatabase.addApplicationFont(str(root / filename))
         if identity < 0 or family not in QFontDatabase.applicationFontFamilies(identity):
             raise RuntimeError(f"Bundled application font could not be loaded: {filename}")
@@ -25,11 +24,9 @@ def register_fonts():
 def text_font(size=15, *, code=False):
     font = QFont()
     font.setFamilies([MONO, SANS] if code else [SANS])
-    # The variable CJK font's first named instance is ExtraLight. Select Regular
-    # explicitly so Windows and Linux use the same readable weight.
-    font.setStyleName("Regular")
+    # Leave style and axes unset so QSS/Markdown can select the bundled real
+    # Regular, Medium, Bold and italic faces, including Chinese code fallback.
     font.setWeight(QFont.Weight.Normal)
-    font.setVariableAxis(QFont.Tag("wght"), 400.0)
     font.setPixelSize(size)
     font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)

@@ -100,7 +100,7 @@ class Appearance(QObject):
                 QWidget {{ color: {text}; }}
                 QMainWindow, QDialog, QWidget#workspace {{ background: {bg}; }}
                 QLabel {{ background: transparent; }}
-                QLabel#brand {{ font-size: 16px; font-weight: 600; }}
+                QLabel#brand {{ font-size: 16px; font-weight: 500; }}
                 QLabel#pageTitle {{ font-size: 16px; font-weight: 500; }}
                 QLabel#welcomeTitle {{ font-size: 32px; font-weight: 500; margin-top: 32px; }}
                 QLabel#overviewStats {{ color: {text}; border: 0; padding: 24px 0;

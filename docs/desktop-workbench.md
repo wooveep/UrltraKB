@@ -22,10 +22,13 @@ Portable entry points and archive roots use `UrltraKB`; original third-party not
   page embedding; Escape cannot dismiss an embedded page. Destructive confirmation,
   conflict review, recovery and detailed task inspection retain their dialogs.
 - `fonts.py` loads the supplied `assets/fonts/` files into the application only.
-  Source Han Sans CN VF 2.005 supplies interface and prose; its `wght` axis is
-  explicitly 400 because selecting the Regular style alone can retain the default
-  ExtraLight instance. Source Code Pro 2.042 supplies code and the source editor.
-  Wheels and portable builds include the original font bytes and their OFL notices.
+  Source Han Sans CN 2.005 uses the supplied static Regular (400), Medium (500)
+  and Bold (700) faces. Source Code Pro 2.042 supplies the same code weights;
+  its 1.062 Italic/Bold Italic faces preserve emphasized code. The base QFont
+  leaves its style name and variable axes unset so QSS and Markdown inherit
+  real weights, with Source Han Sans as the explicit Chinese code fallback.
+  Only manifest-listed faces and notices are included in wheels and runtime
+  archives; unused reference fonts stay in the source workspace.
   Windows desktop entry points select Qt's bundled FreeType font engine for
   consistent variable-font rasterization. Explicit Qt platform arguments or the
   `QT_QPA_PLATFORM` environment setting take precedence; system settings are untouched.
@@ -131,3 +134,10 @@ Chinese fallback to a system font inside code; both the source editor and Markdo
 code now name Source Han Sans after Source Code Pro. Actual glyph runs verify both
 families and the weight axis. Follow-up review reported **Standards: 0 remaining;
 Spec: 0 remaining**.
+
+
+The font-weight follow-up reproduces the earlier 400/500 glyph-outline collapse
+on Windows and Linux. Its native verifier additionally checks the real face name
+and OS/2 weight after QSS inheritance and actual Markdown bold/italic rendering.
+The original screenshot/check table above records the preceding redesign; the
+matching build's delivery report contains follow-up evidence and package hashes.

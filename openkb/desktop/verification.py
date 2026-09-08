@@ -79,6 +79,8 @@ description: 原生阅读验证
 # 原生知识阅读
 
 这是中文段落。`inline_code 中文知识` 使用代码字体。
+**bold_text 中文知识** 与 **`bold_code 中文知识`** 使用真实粗体。
+*`italic_code`* 与 ***`bold_italic_code`*** 使用真实斜体。
 行内公式 \(\frac{a}{b}+\sqrt{x}\) 与文字保持基线。
 
 \[ E = mc^2 \]

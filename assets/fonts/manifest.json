@@ -1,16 +1,74 @@
 [
   {
-    "file": "SourceHanSansCN-VF.ttf",
-    "family": "Source Han Sans CN VF",
+    "file": "SourceHanSansCN-Regular.otf",
+    "family": "Source Han Sans CN",
+    "style": "Regular",
+    "weight": 400,
     "version": "2.005",
-    "sha256": "25a01e41b5cc99893eb35a6cd2cc7611841dc19eb03cbaf7f0c1de8210f2ba0b",
-    "license": "SourceHanSansCN-VF-OFL.txt"
+    "sha256": "e2bc8a2e7f37474b774fff8db758681ece40bb6947a90d571bce9dd60671a8e4",
+    "license": "SourceHanSansCN-OFL.txt"
+  },
+  {
+    "file": "SourceHanSansCN-Medium.otf",
+    "family": "Source Han Sans CN",
+    "style": "Medium",
+    "weight": 500,
+    "version": "2.005",
+    "sha256": "a94e558a2fe972bee4f46bce0843abff37063fd68c33f1e7d9058f6f09432b01",
+    "license": "SourceHanSansCN-OFL.txt"
+  },
+  {
+    "file": "SourceHanSansCN-Bold.otf",
+    "family": "Source Han Sans CN",
+    "style": "Bold",
+    "weight": 700,
+    "version": "2.005",
+    "sha256": "62383707c086a32f3afd5e293f34c7eff64c7fea31f579fdc6cbe34d920519a6",
+    "license": "SourceHanSansCN-OFL.txt"
   },
   {
     "file": "SourceCodePro-Regular.ttf",
     "family": "Source Code Pro",
+    "style": "Regular",
+    "weight": 400,
     "version": "2.042",
     "sha256": "74bd80d3e42a08517cd7e1108ba3d86f2da29ac0f3065be95e0357956ab9db37",
     "license": "SourceCodePro-Regular-OFL.txt"
+  },
+  {
+    "file": "SourceCodePro-Medium.ttf",
+    "family": "Source Code Pro",
+    "style": "Medium",
+    "weight": 500,
+    "version": "2.042",
+    "sha256": "f9dbc746f60c83f5cb1503b19f90729d8195cab6bb67f2b861d4eb257ed86536",
+    "license": "SourceCodePro-Regular-OFL.txt"
+  },
+  {
+    "file": "SourceCodePro-Bold.ttf",
+    "family": "Source Code Pro",
+    "style": "Bold",
+    "weight": 700,
+    "version": "2.042",
+    "sha256": "b2095e0d657e6d28dc32444a9dacabab0c9241d0bf39d96371756cc9bdbc3a5f",
+    "license": "SourceCodePro-Regular-OFL.txt"
+  },
+  {
+    "file": "SourceCodePro-It.ttf",
+    "family": "Source Code Pro",
+    "style": "Italic",
+    "weight": 400,
+    "version": "1.062",
+    "sha256": "9c9e0f4d016210a3c5bdfba5262637c5b26ddff4ccc382ebbc781de5961d0042",
+    "license": "SourceCodePro-It-OFL.txt"
+  },
+  {
+    "file": "SourceCodePro-BoldIt.ttf",
+    "family": "Source Code Pro",
+    "style": "Bold Italic",
+    "weight": 700,
+    "version": "1.062",
+    "sha256": "1b49d9304012bf8db9e5dd4104183d5c122c445d0570a2259125f71977595b90",
+    "license": "SourceCodePro-It-OFL.txt"
   }
 ]

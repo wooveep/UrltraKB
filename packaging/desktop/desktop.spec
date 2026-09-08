@@ -1,4 +1,5 @@
 # Build the actual desktop, CLI, REST and acceptance entry points together.
+import json
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
@@ -9,10 +10,19 @@ assets = repo / "openkb/rendering/assets"
 if not (assets / "manifest.json").is_file():
     raise RuntimeError("Run scripts/prepare_desktop_assets.py before freezing")
 datas = collect_data_files(
-    "openkb", excludes=["**/web/**", "**/rendering/assets/**", "**/rust-helper/**"]
+    "openkb",
+    excludes=[
+        "**/web/**", "**/rendering/assets/**", "**/desktop/assets/fonts/**", "**/rust-helper/**",
+    ],
 )
 datas += [(str(assets), "openkb/rendering/assets")]
-datas += [(str(repo / "assets/fonts"), "openkb/desktop/assets/fonts")]
+# The manifest is the runtime whitelist; reference fonts stay in the source tree.
+fonts = json.loads((repo / "assets/fonts/manifest.json").read_text("utf-8"))
+font_files = {"manifest.json", "README.md"} | {f[k] for f in fonts for k in ("file", "license")}
+datas += [
+    (str(repo / "assets/fonts" / name), "openkb/desktop/assets/fonts")
+    for name in sorted(font_files)
+]
 datas += [(str(packaging / "build/token-cache"), "openkb/token-cache")]
 datas += copy_metadata("openkb", recursive=True)
 for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):
