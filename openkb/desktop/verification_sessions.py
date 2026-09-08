@@ -15,8 +15,9 @@ def verify_sessions(window, kb, wait_until):
 
     session = ChatSession.new(kb, "openai/verification", "zh")
     session.record_turn("原生会话", "第一个完整回答。", [])
-    dialog = SessionsDialog(window, kb)
-    dialog.show()
+    from openkb.desktop.verification_workbench import management_page
+
+    dialog = management_page(window, kb, "对话", SessionsDialog, wait_until)
     stale = True
     confirmer = QTimer()
     tasks = SubmittedTasks(window.manager, wait_until)

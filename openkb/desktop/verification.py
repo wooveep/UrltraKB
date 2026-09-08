@@ -25,6 +25,8 @@ def main() -> int:
     parser.add_argument("--url", help="Controlled HTTP article fixture")
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
+    parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
+    parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
     parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
     parser.add_argument("--lifecycle-state", type=Path, help="Previous lifecycle run for restart")
     args = parser.parse_args()
@@ -42,6 +44,14 @@ def main() -> int:
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = root / "settings/global.yaml"
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        str((args.workbench_restart or root) / "qt"),
+    )
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     from openkb.desktop.window import Workbench
 
     app = QApplication([])
@@ -103,7 +113,7 @@ print("OpenKB")
         if dialog.windowTitle() == "操作未完成":
             unexpected_dialogs.append(dialog.text())
             dialog.close()
-        elif "failure" in evidence and dialog.windowTitle() == "退出 OpenKB":
+        elif "failure" in evidence and dialog.windowTitle() == "退出 UrltraKB":
             for button in dialog.buttons():
                 if button.text() == "安全停止并退出":
                     button.click()
@@ -132,6 +142,18 @@ print("OpenKB")
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.workbench_restart:
+            from openkb.desktop.verification_workbench import verify_appearance_restart
+
+            verify_appearance_restart(window)
+            checks.append("fresh-process appearance preferences retained")
+            return 0
+        if args.workbench:
+            from openkb.desktop.verification_workbench import verify_workbench
+
+            verify_workbench(window, first, other, root, wait_until)
+            checks.append("workbench navigation, ownership and persistent appearance")
+            return 0
         if args.catalog_only:
             from openkb.desktop.verification_catalog import verify_catalog
 
@@ -266,6 +288,9 @@ print("OpenKB")
             from openkb.inputs import SUPPORTED_EXTENSIONS
             from openkb.runtime.requests import ImportFile
 
+            window.open_knowledge_base(other)
+            wait_until(lambda: window.kb == other and window.page is not None)
+            window.shell.navigate("资料")
             if args.inputs:
                 inputs = sorted(
                     p.resolve()
@@ -318,6 +343,12 @@ print("OpenKB")
                 result = window.manager.get(task_id)
                 assert (result.failed, result.succeeded, result.skipped) == (1, 1, 1), result
                 assert result.processes_reaped
+                from openkb.desktop.documents import DocumentsDialog
+
+                documents = next(p for p in window.findChildren(DocumentsDialog) if p.isVisible())
+                wait_until(
+                    lambda: documents.table.rowCount() == len(get_kb_list(other)["documents"])
+                )
                 entries = HashRegistry(other / ".openkb/hashes.json").all_entries()
                 entry = next(m for m in entries.values() if m.get("origin") == "url")
                 assert entry["path"] == args.url

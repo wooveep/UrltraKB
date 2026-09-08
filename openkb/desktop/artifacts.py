@@ -6,7 +6,6 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -31,12 +30,13 @@ from openkb.application.artifacts import (
     read_artifact,
 )
 from openkb.application.generators import GenerationOptions, preview_generation
+from openkb.desktop.panels import ManagementPanel
 from openkb.desktop.reader import MarkdownView
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import GenerateArtifact, GenerateGraph
 
 
-class ArtifactsDialog(QDialog):
+class ArtifactsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
@@ -48,7 +48,9 @@ class ArtifactsDialog(QDialog):
         self.setWindowTitle(f"生成与产物 · {kb.name}")
         self.resize(1080, 800)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(str(kb)))
+        from openkb.desktop.location import LocationLabel
+
+        layout.addWidget(LocationLabel(str(kb)))
         form = QFormLayout()
         self.kind = QComboBox()
         self.kind.addItem("Skill", "skill")
@@ -183,6 +185,8 @@ class ArtifactsDialog(QDialog):
             if error:
                 self.status.setText(f"无法读取产物（{type(error).__name__}）")
                 return
+            if not items:
+                self.reader.show_temporary("暂无产物。生成 Skill、幻灯片或知识图谱后在这里查看。")
             selected = self.items.currentItem()
             selected_path = selected.data(Qt.ItemDataRole.UserRole) if selected else None
             self.items.clear()

@@ -48,7 +48,7 @@ class AboutDialog(QDialog):
         self._closed = False
         self._selection = 0
         self.release = None
-        self.setWindowTitle("关于 OpenKB · 源码与许可")
+        self.setWindowTitle("关于 UrltraKB · 源码与许可")
         self.resize(900, 700)
         layout = QVBoxLayout(self)
         self.status = QLabel("正在读取发行信息…")

@@ -19,6 +19,14 @@ _FILES = {
     "pyproject.toml",
     "uv.lock",
     "docs/desktop.md",
+    "docs/desktop-workbench.md",
+    "docs/desktop-evidence/workbench/overview.png",
+    "docs/desktop-evidence/workbench/documents.png",
+    "docs/desktop-evidence/workbench/knowledge.png",
+    "docs/desktop-evidence/workbench/conversations.png",
+    "docs/desktop-evidence/workbench/artifacts.png",
+    "docs/desktop-evidence/workbench/tasks.png",
+    "docs/desktop-evidence/workbench/settings.png",
     "docs/golden-principles.md",
 }
 _GENERATED = {

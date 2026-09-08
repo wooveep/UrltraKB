@@ -7,11 +7,15 @@ def verify_settings(window, kb, wait_until):
     from openkb import config
     from openkb.application.settings import read_settings_view
     from openkb.desktop.settings import SettingsDialog
+    from openkb.desktop.verification_workbench import button
     from openkb.locks import atomic_write_json
     from openkb.mutation import repair_marker
 
-    dialog = SettingsDialog(window.io, kb, window)
-    dialog.show()
+    window.open_knowledge_base(kb)
+    wait_until(lambda: window.kb == kb and window.page is not None)
+    button(window, "设置").click()
+    window.workspaces.settings_tabs.setCurrentIndex(1)
+    dialog = next(p for p in window.findChildren(SettingsDialog) if p.isVisible())
     wait_until(lambda: dialog.form.isEnabled())
     try:
         language, key = dialog.fields["language"], dialog.fields["api_key"]

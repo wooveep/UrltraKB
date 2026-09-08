@@ -4,7 +4,6 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.watch import NativeWatchRegistry
 
 _STATES = {
@@ -27,7 +27,7 @@ _STATES = {
 }
 
 
-class WatchDialog(QDialog):
+class WatchDialog(ManagementPanel):
     def __init__(self, registry: NativeWatchRegistry, root: Path | None, parent=None):
         super().__init__(parent)
         self.registry, self.root = registry, root

@@ -15,8 +15,10 @@ def verify_watch(window, kb, wait_until, *, model=False):
                 registry.hash_file(source), {"name": source.name, "raw_path": "raw/监听启动.md"}
             )
     before = {task.id for task in window.manager.tasks()}
-    dialog = WatchDialog(window.watch_registry, kb, window)
-    dialog.show()
+    window.open_knowledge_base(kb)
+    wait_until(lambda: window.kb == kb and window.page is not None)
+    window._watch()
+    dialog = next(p for p in window.findChildren(WatchDialog) if p.isVisible())
     try:
         dialog.start_button.click()
         watch = window.watch_registry.start(kb / ".")

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>OpenKB monochrome dark mark</title>
+  <path d="M202.5 133C151 145.5 118 192.5 118 251C118 315.5 160.5 364 222 378" stroke="#081226" stroke-width="72" stroke-linecap="round"/>
+  <path d="M309.5 133C361 145.5 394 192.5 394 251C394 315.5 351.5 364 290 378" stroke="#081226" stroke-width="72" stroke-linecap="round"/>
+  <path d="M194 256H318" stroke="#081226" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="24" fill="#081226"/>
+</svg>

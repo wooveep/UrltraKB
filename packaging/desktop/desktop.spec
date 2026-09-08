@@ -40,6 +40,7 @@ executables = [
         pyz, analysis.scripts, [], exclude_binaries=True, name=name,
         debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
         console=name != "OpenKB", disable_windowed_traceback=False,
+        icon=str(repo / "openkb/desktop/assets/brand/openkb-app-icon.ico"),
     )
     for name in ("OpenKB", "OpenKBCLI", "OpenKBAPI", "OpenKBVerify")
 ]
