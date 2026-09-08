@@ -100,7 +100,19 @@ exclude = ["/openkb/web", "/frontend"]
 # `openkb deck new` / `--critique` / chat `/deck` work right after
 # `pip install` (scan_local_skills also looks under openkb/_skills/).
 [tool.hatch.build.targets.wheel.force-include]
-"assets/fonts" = "openkb/desktop/assets/fonts"
+"assets/fonts/README.md" = "openkb/desktop/assets/fonts/README.md"
+"assets/fonts/SourceCodePro-Bold.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Bold.ttf"
+"assets/fonts/SourceCodePro-BoldIt.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-BoldIt.ttf"
+"assets/fonts/SourceCodePro-It-OFL.txt" = "openkb/desktop/assets/fonts/SourceCodePro-It-OFL.txt"
+"assets/fonts/SourceCodePro-It.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-It.ttf"
+"assets/fonts/SourceCodePro-Medium.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Medium.ttf"
+"assets/fonts/SourceCodePro-Regular-OFL.txt" = "openkb/desktop/assets/fonts/SourceCodePro-Regular-OFL.txt"
+"assets/fonts/SourceCodePro-Regular.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Regular.ttf"
+"assets/fonts/SourceHanSansCN-Bold.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Bold.otf"
+"assets/fonts/SourceHanSansCN-Medium.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Medium.otf"
+"assets/fonts/SourceHanSansCN-OFL.txt" = "openkb/desktop/assets/fonts/SourceHanSansCN-OFL.txt"
+"assets/fonts/SourceHanSansCN-Regular.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Regular.otf"
+"assets/fonts/manifest.json" = "openkb/desktop/assets/fonts/manifest.json"
 "skills/openkb-deck-neon" = "openkb/_skills/openkb-deck-neon"
 "skills/openkb-deck-editorial" = "openkb/_skills/openkb-deck-editorial"
 "skills/openkb-html-critic" = "openkb/_skills/openkb-html-critic"

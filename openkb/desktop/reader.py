@@ -123,7 +123,7 @@ class MarkdownView(QTextBrowser):
         self.document().setDefaultStyleSheet(f"""
             body {{ font-family: '{SANS}'; font-size: {18 * self._scale}px; }}
             p {{ line-height: 150%; margin-top: 0; margin-bottom: 16px; }}
-            h1, h2, h3 {{ font-weight: 600; margin-top: 24px; margin-bottom: 12px; }}
+            h1, h2, h3 {{ font-weight: 700; margin-top: 24px; margin-bottom: 12px; }}
             pre, code {{ font-family: '{MONO}', '{SANS}'; font-size: {15 * self._scale}px;
                 background-color: {code_background}; }}
             pre {{ white-space: pre-wrap; margin-top: 12px; margin-bottom: 20px; }}

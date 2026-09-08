@@ -3,19 +3,45 @@
 import json
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFont, QFontInfo, QInputMethodEvent, QRawFont, QTextLayout
+from PySide6.QtGui import QFontInfo, QInputMethodEvent, QRawFont, QTextLayout
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
+
+
+def assert_font_face(font, text, family, weight=400, style="Regular"):
+    layout = QTextLayout(text, font)
+    layout.beginLayout()
+    layout.createLine().setLineWidth(1000)
+    layout.endLayout()
+    assert layout.glyphRuns()
+    for run in layout.glyphRuns():
+        raw = run.rawFont()
+        assert raw.familyName() == family, (text, raw.familyName())
+        assert raw.styleName() == style, (weight, raw.styleName())
+        # OS/2 identifies the real face's weight, even if Qt synthesizes bold.
+        assert int.from_bytes(bytes(raw.fontTable("OS/2"))[4:6], "big") == weight
 
 
 def assert_code_fonts(font):
-    for text, family in (("source_code", "Source Code Pro"), ("中文知识", "Source Han Sans CN VF")):
-        layout = QTextLayout(text, font)
-        layout.beginLayout()
-        layout.createLine().setLineWidth(1000)
-        layout.endLayout()
-        assert {run.rawFont().familyName() for run in layout.glyphRuns()} == {family}
-    assert font.variableAxisValue(QFont.Tag("wght")) == 400
+    from openkb.desktop.fonts import MONO, SANS
+
+    for text, family in (("source_code", MONO), ("中文知识", SANS)):
+        assert_font_face(font, text, family)
+
+
+def assert_font_weights():
+    """Verify real faces after QSS inheritance, including Chinese code fallback."""
+    from openkb.desktop.fonts import MONO, SANS, text_font
+
+    for code in (False, True):
+        for weight, style in ((400, "Regular"), (500, "Medium"), (700, "Bold")):
+            label = QLabel("中文知识 Source_Code")
+            label.setFont(text_font(20, code=code))
+            label.setStyleSheet(f"font-weight: {weight};")
+            label.ensurePolished()
+            for text, family in (("中文知识", SANS), ("Source_Code", MONO if code else SANS)):
+                assert_font_face(label.font(), text, family, weight, style)
+            label.deleteLater()
 
 
 def verify_presentation(window, root, wait):
@@ -26,11 +52,23 @@ def verify_presentation(window, root, wait):
     assert QFontInfo(window.editor.font()).family() == MONO
     assert QRawFont.fromFont(QApplication.font()).supportsCharacter(ord("知"))
     assert_code_fonts(window.editor.font())
+    assert_font_weights()
     wait(lambda: "fenced_code 中文知识" in window.reader.toPlainText())
     for marker in ("inline_code 中文知识", "fenced_code 中文知识"):
         cursor = window.reader.document().find(marker)
         assert not cursor.isNull()
         assert_code_fonts(cursor.charFormat().font())
+    for marker, family, weight, style in (
+        ("bold_text 中文知识", SANS, 700, "Bold"),
+        ("bold_code 中文知识", MONO, 700, "Bold"),
+        ("italic_code", MONO, 400, "Italic"),
+        ("bold_italic_code", MONO, 700, "Bold Italic"),
+    ):
+        cursor = window.reader.document().find(marker)
+        assert not cursor.isNull(), marker
+        assert_font_face(cursor.charFormat().font(), marker.split()[0], family, weight, style)
+        if "中文" in marker:
+            assert_font_face(cursor.charFormat().font(), "中文知识", SANS, weight, style)
     window.shell.navigate("对话")
     window.question.setPlainText("保留中文草稿与 source_code()")
     window.question.setFocus()
@@ -87,6 +125,7 @@ def verify_presentation(window, root, wait):
                 "drawer_intermediate_frames": len([v for v in samples if 0 < v < 1]),
                 "checks": [
                     "bundled Source Han Sans and Source Code Pro selected",
+                    "real Regular/Medium/Bold faces selected through QSS and Chinese fallback",
                     "fade, reversal, outside click, Escape and focus restoration",
                     "narrow drawer and persistent message/page drafts",
                     "Shift+Enter and IME confirmation do not submit work",
