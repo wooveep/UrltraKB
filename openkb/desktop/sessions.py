@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -40,16 +40,18 @@ class SessionsDialog(ManagementPanel):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.invalidate)
         layout.addWidget(self.table)
-        actions = QHBoxLayout()
-        for label, callback in (
-            ("刷新", self.reload),
-            ("阅读 / 继续", self.open),
-            ("导出 Markdown 副本", self.export),
-            ("删除对话…", self.delete),
+        actions = QGridLayout()
+        for index, (label, callback) in enumerate(
+            (
+                ("刷新", self.reload),
+                ("阅读 / 继续", self.open),
+                ("导出 Markdown 副本", self.export),
+                ("删除对话…", self.delete),
+            )
         ):
             button = QPushButton(label)
             button.clicked.connect(callback)
-            actions.addWidget(button)
+            actions.addWidget(button, index // 2, index % 2)
         layout.addLayout(actions)
         self.status = QLabel("正在读取完整对话…")
         self.status.setWordWrap(True)

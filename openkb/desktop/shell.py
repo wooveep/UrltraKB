@@ -1,6 +1,6 @@
 """Responsive workbench navigation; page contents retain their own state."""
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -36,31 +36,74 @@ class WorkbenchShell(QWidget):
         self.window, self.preferences = window, preferences
         self.expanded = preferences.value("navigation/expanded", True, type=bool)
         self._compact = False
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.navigation = QFrame()
+        self.navigation.setObjectName("navigation")
+        nav = QVBoxLayout(self.navigation)
+        nav.setContentsMargins(10, 14, 10, 12)
+        nav.setSpacing(4)
+        self.brand_row = QWidget()
+        brand = QHBoxLayout(self.brand_row)
+        brand.setContentsMargins(6, 0, 0, 12)
+        self.mark = QLabel()
+        self.mark.setPixmap(mark_icon().pixmap(24, 24))
+        self.mark.setAccessibleName("UrltraKB 标志")
+        brand.addWidget(self.mark)
+        self.brand_name = QLabel(NAME)
+        self.brand_name.setObjectName("brand")
+        brand.addWidget(self.brand_name, 1)
+        self.toggle = QToolButton()
+        self.toggle.setText("☰")
+        self.toggle.setFixedSize(32, 34)
+        self.toggle.clicked.connect(self.toggle_navigation)
+        brand.addWidget(self.toggle)
+        nav.addWidget(self.brand_row)
+        self.buttons = {}
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for name in PAGES:
+            if name == "设置":
+                nav.addStretch()
+            button = QPushButton()
+            button.setText(name)
+            button.setIcon(navigation_icon(name))
+            button.setIconSize(QSize(19, 19))
+            button.setAccessibleName(name)
+            button.setToolTip(name)
+            button.setCheckable(True)
+            button.setMinimumHeight(38)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.clicked.connect(lambda checked=False, page=name: self.navigate(page))
+            group.addButton(button)
+            nav.addWidget(button)
+            self.buttons[name] = button
+        layout.addWidget(self.navigation)
+        workspace = QWidget()
+        workspace.setObjectName("workspace")
+        main = QVBoxLayout(workspace)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
         self.top = QFrame()
         self.top.setObjectName("topbar")
         top = QHBoxLayout(self.top)
-        top.setContentsMargins(16, 8, 16, 8)
-        mark = QLabel()
-        mark.setPixmap(mark_icon().pixmap(32, 32))
-        mark.setAccessibleName("UrltraKB 标志")
-        top.addWidget(mark)
-        name = QLabel(NAME)
-        name.setObjectName("brand")
-        top.addWidget(name)
-        top.addSpacing(20)
+        top.setContentsMargins(26, 14, 22, 14)
+        self.title = QLabel("概览")
+        self.title.setObjectName("pageTitle")
+        self.title.setAccessibleName("当前工作区")
+        top.addWidget(self.title)
+        top.addSpacing(12)
         window.kbs = QComboBox()
         window.kbs.setAccessibleName("当前知识库")
         window.kbs.setPlaceholderText("选择知识库")
-        window.kbs.setMinimumWidth(160)
-        window.kbs.setMaximumWidth(480)
+        window.kbs.setMinimumWidth(150)
+        window.kbs.setMaximumWidth(320)
         window.kbs.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         window.kbs.activated.connect(self._switch_kb)
-        top.addWidget(window.kbs, 1)
+        top.addWidget(window.kbs)
         manage = action("管理", window._knowledge_bases)
         manage.setAccessibleName("知识库管理")
         top.addWidget(manage)
@@ -82,52 +125,13 @@ class WorkbenchShell(QWidget):
         menu.addAction("退出", window.request_quit)
         more.setMenu(menu)
         top.addWidget(more)
-        layout.addWidget(self.top)
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        self.navigation = QFrame()
-        self.navigation.setObjectName("navigation")
-        nav = QVBoxLayout(self.navigation)
-        nav.setContentsMargins(8, 16, 8, 12)
-        nav.setSpacing(8)
-        self.toggle = QToolButton()
-        self.toggle.setText("☰")
-        self.toggle.setMinimumHeight(36)
-        self.toggle.clicked.connect(self.toggle_navigation)
-        nav.addWidget(self.toggle)
-        self.buttons = {}
-        group = QButtonGroup(self)
-        group.setExclusive(True)
-        for name in PAGES:
-            if name == "设置":
-                nav.addStretch()
-            button = QToolButton()
-            button.setText(name)
-            button.setIcon(navigation_icon(name))
-            button.setIconSize(QSize(20, 20))
-            button.setAccessibleName(name)
-            button.setToolTip(name)
-            button.setCheckable(True)
-            button.setMinimumHeight(40)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.clicked.connect(lambda checked=False, page=name: self.navigate(page))
-            group.addButton(button)
-            nav.addWidget(button)
-            self.buttons[name] = button
-        body.addWidget(self.navigation)
-        workspace = QWidget()
-        main = QVBoxLayout(workspace)
-        main.setContentsMargins(24, 20, 24, 20)
-        main.setSpacing(16)
-        self.title = QLabel("概览")
-        self.title.setObjectName("pageTitle")
-        self.title.setAccessibleName("当前工作区")
-        main.addWidget(self.title)
+        main.addWidget(self.top)
+        content = QVBoxLayout()
+        content.setContentsMargins(26, 12, 26, 18)
         self.stack = QStackedWidget()
-        main.addWidget(self.stack, 1)
-        body.addWidget(workspace, 1)
-        layout.addLayout(body, 1)
+        content.addWidget(self.stack, 1)
+        main.addLayout(content, 1)
+        layout.addWidget(workspace, 1)
         self.update_navigation()
 
     def _switch_kb(self):
@@ -156,16 +160,15 @@ class WorkbenchShell(QWidget):
 
     def update_navigation(self):
         compact = self._compact if self.width() < 1080 else not self.expanded
-        self.navigation.setFixedWidth(60 if compact else 216)
+        self.navigation.setFixedWidth(64 if compact else 224)
+        self.brand_name.setVisible(not compact)
+        self.mark.setVisible(not compact)
+        self.brand_row.layout().setContentsMargins(0 if compact else 6, 0, 0, 12)
         label = "展开导航" if compact else "收起导航"
         self.toggle.setAccessibleName(label)
         self.toggle.setToolTip(label)
-        for button in self.buttons.values():
-            button.setToolButtonStyle(
-                Qt.ToolButtonStyle.ToolButtonIconOnly
-                if compact
-                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-            )
+        for name, button in self.buttons.items():
+            button.setText("" if compact else name)
 
     def resizeEvent(self, event):
         if (event.oldSize().width() < 1080) != (event.size().width() < 1080):

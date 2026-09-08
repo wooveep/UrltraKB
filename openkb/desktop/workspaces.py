@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from openkb.desktop.drawer import Drawer
+from openkb.desktop.fonts import text_font
 from openkb.desktop.location import LocationLabel
 from openkb.desktop.reader import MarkdownView
 from openkb.desktop.shell import PAGES, action
@@ -67,7 +70,15 @@ class Workspaces:
         self.reset()
 
     def _overview(self):
-        layout = self.hosts["概览"]
+        outer = self.hosts["概览"]
+        content, layout = page()
+        content.setMaximumWidth(960)
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(content, 1)
+        row.addStretch()
+        outer.addLayout(row, 1)
+        layout.setContentsMargins(20, 32, 20, 20)
         title = QLabel("知识，从这里开始")
         title.setObjectName("welcomeTitle")
         layout.addWidget(title)
@@ -147,6 +158,7 @@ class Workspaces:
         w.tabs.addTab(w.reader, "阅读")
         editor_panel, editor_layout = page()
         w.editor = QPlainTextEdit()
+        w.editor.setFont(text_font(15, code=True))
         w.editor.setPlaceholderText("选择页面后编辑正文；原有元数据会保留。")
         w.editor.textChanged.connect(w._keep_draft)
         editor_layout.addWidget(w.editor, 1)
@@ -165,11 +177,14 @@ class Workspaces:
 
         w.page_context = PageContextView(w)
         w.page_context.setMinimumWidth(180)
-        self.reading.addWidget(w.page_context)
-        w.page_context.hide()
         self.reading.setStretchFactor(1, 1)
-        self.reading.setSizes([220, 720, 260])
-        layout.addWidget(self.reading, 1)
+        self.reading.setSizes([210, 800])
+        reading_host, reading_layout = page()
+        reading_layout.addWidget(self.reading)
+        layout.addWidget(reading_host, 1)
+        self.context_drawer = Drawer(reading_host, "来源与链接", width=380)
+        self.context_drawer.set_content(w.page_context)
+        self.context_drawer.openedChanged.connect(self.context_toggle.setChecked)
         self.resize_reading(False)
 
     def toggle_directory(self):
@@ -185,59 +200,117 @@ class Workspaces:
         if visible and self._narrow:
             self._directory_narrow = False
             self.resize_reading(True)
-        self.window.page_context.setVisible(visible)
+        self.context_drawer.set_open(visible)
 
     def resize_reading(self, narrow):
         if narrow != self._narrow:
             self._directory_narrow = False
-            self.window.page_context.hide()
+            self.context_drawer.set_open(False, immediate=True)
             self.context_toggle.setChecked(False)
         self._narrow = narrow
         visible = self._directory_narrow if narrow else self._directory_wide
         self.window.pages.setVisible(visible)
         self.directory_toggle.setChecked(visible)
         if visible and narrow:
-            self.window.page_context.hide()
+            self.context_drawer.set_open(False, immediate=True)
             self.context_toggle.setChecked(False)
 
     def _conversations(self):
+        from openkb.desktop.conversation_view import ConversationView, QuestionEdit
+
         w = self.window
         layout = self.hosts["对话"]
         row = QHBoxLayout()
-        w.mode = QComboBox()
-        w.mode.setAccessibleName("问答模式")
-        w.mode.addItems(["一次问答", "对话"])
         w.sessions = QComboBox()
         w.sessions.setAccessibleName("对话会话")
         w.sessions.setMinimumWidth(120)
+        w.sessions.setMaximumWidth(400)
         w.sessions.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         w.sessions.addItem("新对话", None)
         w.sessions.activated.connect(w._load_conversation)
-        w.save_answer = QCheckBox("保存回答")
+        row.addWidget(w.sessions)
+        row.addStretch()
         self.history_toggle = action("对话历史", self.toggle_history)
         self.history_toggle.setCheckable(True)
-        for control in (w.mode, w.sessions, w.save_answer, self.history_toggle):
-            row.addWidget(control)
-        row.addStretch()
+        row.addWidget(self.history_toggle)
         layout.addLayout(row)
         self.chat_stack = QTabWidget()
         self.chat_stack.tabBar().hide()
         chat_page, chat_layout = page()
-        w.chat = MarkdownView()
+        centered = QHBoxLayout()
+        centered.addStretch()
+        column, column_layout = page()
+        column.setMaximumWidth(860)
+        centered.addWidget(column, 1)
+        centered.addStretch()
+        chat_layout.addLayout(centered, 1)
+        self.chat_welcome, welcome = page()
+        welcome.addStretch()
+        title = QLabel("有什么想了解的？")
+        title.setObjectName("chatWelcome")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome.addWidget(title)
+        hint = QLabel("从你的知识库出发，连接资料与想法。")
+        hint.setObjectName("muted")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome.addWidget(hint)
+        welcome.addStretch()
+        column_layout.addWidget(self.chat_welcome, 1)
+        w.chat = ConversationView()
         w.chat.anchorClicked.connect(w._follow_link)
-        chat_layout.addWidget(w.chat, 1)
+        column_layout.addWidget(w.chat, 1)
+        w.chat.textChanged.connect(self.conversation_content)
         self.chat_stack.addTab(chat_page, "当前对话")
         layout.addWidget(self.chat_stack, 1)
-        w.question = QPlainTextEdit()
-        w.question.setPlaceholderText("向当前知识库提问…")
-        w.question.setMaximumHeight(90)
-        layout.addWidget(w.question)
+        self.history_drawer = Drawer(self.chat_stack, "对话历史", width=640)
+        self.history_drawer.openedChanged.connect(self.history_toggle.setChecked)
+        composer_row = QHBoxLayout()
+        composer_row.addStretch()
+        composer_column, composer_layout = page()
+        composer_column.setMaximumWidth(860)
+        composer = QFrame()
+        composer.setObjectName("composer")
+        composer_body = QVBoxLayout(composer)
+        composer_body.setContentsMargins(16, 12, 14, 10)
+        composer_body.setSpacing(4)
+        w.question = QuestionEdit()
+        composer_body.addWidget(w.question)
+        controls = QHBoxLayout()
+        w.mode = QComboBox()
+        w.mode.setAccessibleName("问答模式")
+        w.mode.addItems(["一次问答", "对话"])
+        controls.addWidget(w.mode)
+        w.save_answer = QCheckBox("保存回答")
+        controls.addWidget(w.save_answer)
+        controls.addStretch()
         w.ask_button = action("发送", w._ask)
-        layout.addWidget(w.ask_button)
+        w.ask_button.setObjectName("sendButton")
+        w.ask_button.setToolTip("发送 · Enter")
+        controls.addWidget(w.ask_button)
+        composer_body.addLayout(controls)
+        w.question.submitted.connect(w.ask_button.click)
+        composer_layout.addWidget(composer)
+        hint = QLabel("Enter 发送 · Shift + Enter 换行")
+        hint.setObjectName("composerHint")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        composer_layout.addWidget(hint)
+        composer_row.addWidget(composer_column, 1)
+        composer_row.addStretch()
+        layout.addLayout(composer_row)
         w.mode.currentIndexChanged.connect(self.conversation_mode)
         self.conversation_mode()
+        self.conversation_content()
+
+    def conversation_content(self):
+        empty = self.window.chat.toPlainText() in {
+            "",
+            "开始新对话。",
+            "在当前知识库开始问答，或选择已有对话。",
+        }
+        self.chat_welcome.setVisible(empty)
+        self.window.chat.setVisible(not empty)
 
     def conversation_mode(self):
         chat = self.window.mode.currentIndex() == 1
@@ -246,11 +319,10 @@ class Workspaces:
 
     def toggle_history(self):
         self.activate("对话")
-        self.chat_stack.setCurrentIndex(1 if self.history_toggle.isChecked() else 0)
+        self.history_drawer.set_open(self.history_toggle.isChecked())
 
     def show_answer(self):
-        self.history_toggle.setChecked(False)
-        self.chat_stack.setCurrentIndex(0)
+        self.history_drawer.set_open(False)
 
     def _tasks(self):
         w = self.window
@@ -350,7 +422,9 @@ class Workspaces:
             self.chat_stack.removeTab(1)
         while self.settings_tabs.count() > 1:
             self.settings_tabs.removeTab(1)
-        self.history_toggle.setChecked(False)
+        self.history_drawer.set_open(False, immediate=True)
+        self.history_drawer.set_content(None)
+        self.context_drawer.set_open(False, immediate=True)
         enabled = self.window.kb is not None
         self.shortcuts.setEnabled(enabled)
         self.import_controls.setEnabled(enabled)
@@ -368,6 +442,10 @@ class Workspaces:
         self.window.shell.navigate("概览")
 
     def activate(self, name):
+        if name != "对话":
+            self.history_drawer.set_open(False, immediate=True)
+        if name != "知识":
+            self.context_drawer.set_open(False, immediate=True)
         w = self.window
         if name == "设置":
             from openkb.desktop.settings import SettingsDialog
@@ -395,7 +473,7 @@ class Workspaces:
 
             panel = SessionsDialog(w, w.kb)
             panel.embedded = True
-            self.chat_stack.addTab(self.embed(name, panel), "对话历史")
+            self.history_drawer.set_content(self.embed(name, panel))
 
     def overview_loaded(self, info, status):
         self.stats.setText(

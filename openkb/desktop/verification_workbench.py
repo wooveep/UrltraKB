@@ -106,6 +106,9 @@ def verify_workbench(window, first, other, root, wait):
     assert "Must not overwrite" not in read_page(first, "concepts/原生阅读").body
 
     verify_history_submission(window, first, wait)
+    from openkb.desktop.verification_presentation import verify_presentation
+
+    verify_presentation(window, root, wait)
 
     # System palette changes are supplied at the Qt platform boundary.
     from PySide6.QtGui import QColor
@@ -228,11 +231,11 @@ def verify_history_submission(window, kb, wait):
 
     button(window, "对话").click()
     button(window, "对话历史").click()
-    wait(lambda: not window.chat.isVisible())
+    wait(lambda: window.workspaces.history_drawer.isVisible())
     window.question.setPlainText("排队显示验证")
     # Hold the real execution boundary and cancel before release: no model request.
     with kb_ingest_lock(kb / ".openkb"):
-        button(window, "发送").click()
+        QTest.keyClick(window.question, Qt.Key.Key_Return)
         task_id = window.manager.tasks()[-1].id
         try:
             assert on_page(window, "对话") and window.chat.isVisible()

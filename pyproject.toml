@@ -89,7 +89,7 @@ exclude = ["/openkb/web"]
 # state or retired bundles that may remain in an upgraded source checkout.
 [tool.hatch.build.targets.sdist]
 include = [
-    "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples",
+    "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
     "/docs/desktop.md", "/docs/golden-principles.md",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
@@ -100,6 +100,7 @@ exclude = ["/openkb/web", "/frontend"]
 # `openkb deck new` / `--critique` / chat `/deck` work right after
 # `pip install` (scan_local_skills also looks under openkb/_skills/).
 [tool.hatch.build.targets.wheel.force-include]
+"assets/fonts" = "openkb/desktop/assets/fonts"
 "skills/openkb-deck-neon" = "openkb/_skills/openkb-deck-neon"
 "skills/openkb-deck-editorial" = "openkb/_skills/openkb-deck-editorial"
 "skills/openkb-html-critic" = "openkb/_skills/openkb-html-critic"

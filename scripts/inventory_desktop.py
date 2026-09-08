@@ -69,6 +69,11 @@ class Inputs:
                 )
         self.node = self.add("runtime/Node", "24.20.0")
         self.font = self.add("font/NotoSansCJK", "Sans2.004")
+        self.application_fonts = {}
+        for font in json.loads((source / "assets/fonts/manifest.json").read_text("utf-8")):
+            key = self.add("font/" + font["family"], font["version"], declared_license="OFL-1.1")
+            for filename in (font["file"], font["license"]):
+                self.application_fonts[filename] = key
         self.renderer = self.add(
             "build/native-renderer",
             identity["version"],
@@ -151,6 +156,9 @@ class Inputs:
                     }:
                         return self.generated, "openkb/rendering/assets/" + relative
             raise ValueError(f"Unrecognized generated rendering asset: {relative}")
+        if path.is_relative_to(self.source / "assets/fonts"):
+            relative = path.relative_to(self.source).as_posix()
+            return self.application_fonts.get(path.name, self.openkb), relative
         if path in self.owners:
             return self.owners[path]
         if path.is_relative_to(self.source / "packaging/desktop/build/token-cache"):
