@@ -59,6 +59,8 @@ def build_workbench(window):
     maintenance.addAction("目录监听…", window._watch)
     artifacts = window.menuBar().addMenu("生成与产物")
     artifacts.addAction("Skill、幻灯片、图谱与产物管理…", window._manage_artifacts)
+    help_menu = window.menuBar().addMenu("帮助")
+    help_menu.addAction("关于 OpenKB · 源码与许可…", window._about)
     _action(window, toolbar, "退出", window.request_quit)
     window.addToolBarBreak()
     reading_toolbar = QToolBar("阅读显示", window)
