@@ -29,8 +29,9 @@ def main() -> int:
     root = args.output.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
 
+    from PySide6.QtCore import QTimer
     from PySide6.QtGui import QFontDatabase
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QMessageBox
 
     from openkb import config
     from openkb.application.knowledge_bases import initialize_kb
@@ -87,15 +88,38 @@ print("OpenKB")
     window.show()
     evidence: dict[str, object] = {"checks": []}
     checks: list[str] = []
+    unexpected_dialogs: list[str] = []
+
+    def observe_dialogs():
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QMessageBox):
+            return
+        if dialog.windowTitle() == "操作未完成":
+            unexpected_dialogs.append(dialog.text())
+            dialog.close()
+        elif "failure" in evidence and dialog.windowTitle() == "退出 OpenKB":
+            for button in dialog.buttons():
+                if button.text() == "安全停止并退出":
+                    button.click()
+
+    observer = QTimer(window)
+    observer.timeout.connect(observe_dialogs)
+    observer.start(10)
+
+    def assert_no_unexpected_dialogs():
+        if "failure" not in evidence:
+            assert not unexpected_dialogs, unexpected_dialogs
 
     def wait_until(condition, timeout=45):
         deadline = time.monotonic() + timeout
         while not condition():
             app.processEvents()
+            assert_no_unexpected_dialogs()
             if time.monotonic() >= deadline:
                 raise TimeoutError("Native acceptance condition did not complete")
             time.sleep(0.01)
         app.processEvents()
+        assert_no_unexpected_dialogs()
 
     def saved(count):
         return len(window._seen_terminal) >= count
@@ -271,7 +295,6 @@ print("OpenKB")
                 wait_until(lambda: "Native compiled" in window.reader.toPlainText())
                 checks.append("real document conversion, compilation, registry and native reading")
             if args.url:
-                from PySide6.QtCore import QTimer
                 from PySide6.QtWidgets import QInputDialog
 
                 from openkb.state import HashRegistry
@@ -392,7 +415,9 @@ print("OpenKB")
             and window.chat.rendering_stopped()
         )
         checks.append("explicit quit reaps execution workers and rendering")
+        observer.stop()
         evidence["checks"] = checks
+        evidence["unexpected_dialogs"] = unexpected_dialogs
         evidence["tasks"] = [task.summary() for task in window.manager.tasks()]
         (root / "verification.json").write_text(
             json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8"

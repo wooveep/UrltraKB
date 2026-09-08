@@ -182,6 +182,7 @@ class KnowledgeBasesDialog(QDialog):
 
     def _remove(self, root, binding):
         self._deleting, self._cancel = True, False
+        self.window._knowledge_base_deleting(root, True)
         self.table.setEnabled(False)
         for button in self.buttons:
             button.setEnabled(False)
@@ -189,18 +190,26 @@ class KnowledgeBasesDialog(QDialog):
         watches = [watch for watch in self.window.watch_registry.watches() if watch.root == root]
         for watch in watches:
             watch.stop()
-        for task in self.window.manager.tasks():
-            if Path(task.kb_dir) == root and task.state not in TERMINAL:
-                self.window.manager.stop(task.id)
+
+        def stop_tasks():
+            for task in self.window.manager.tasks():
+                if Path(task.kb_dir) == root and task.state not in TERMINAL:
+                    self.window.manager.stop(task.id)
+
+        stop_tasks()
         self.status.setText("正在停止此库的监听与任务，并等待目录可删除。")
 
         def remove():
+            # Scans already holding a read lease may submit after the first
+            # stop sweep. This exclusive lease closes that submission window.
+            stop_tasks()
             if any(not watch.join(0) for watch in watches) or self.window.manager.has_work(root):
                 _defer_wait()
             delete_kb(root, generation=binding, cancelled=lambda: self._cancel)
 
         def removed(_value, error):
             self._deleting = False
+            self.window._knowledge_base_deleting(root, False)
             self.table.setEnabled(True)
             for button in self.buttons:
                 button.setEnabled(True)
@@ -211,6 +220,8 @@ class KnowledgeBasesDialog(QDialog):
                     if isinstance(error, LockCancelled)
                     else f"删除未完成：{error}。检查目录后可重新确认删除。"
                 )
+                if isinstance(error, LockCancelled) and self.window.kb == root:
+                    self.window._refresh_current()
             else:
                 self.window._removed_knowledge_base(root)
                 self.status.setText(f"已删除 {root}。任务历史摘要仍保留。")

@@ -133,3 +133,12 @@ def verify_catalog(window, output, wait_until):
     assert window.manager.get(queued).state == "stopped"
     dialog.grab().save(str(output / "native-kb-deleted.png"))
     dialog.accept()
+
+    # Reusing the pathname must not revive callbacks from the deleted generation.
+    initialize_kb(first, seed_environment=False)
+    with kb_ingest_lock(first / ".openkb"):
+        atomic_write_text(first / "wiki/index.md", "# 新建的知识库\n")
+    window.open_knowledge_base(first)
+    wait_until(lambda: window.kb == first and window.page is not None)
+    wait_until(lambda: "新建的知识库" in window.reader.toPlainText())
+    assert "关联阅读" not in window.reader.toPlainText()

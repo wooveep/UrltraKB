@@ -84,8 +84,11 @@ class Workbench(QMainWindow):
         self._task_questions: dict[str, str] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
         self._seen_terminal: set[str] = set()
+        self._deleting_kbs: set[Path] = set()
+        self._kb_deletion_versions: dict[Path, int] = {}
         self._page_request_id = 0
         self._open_request_id = 0
+        self._pending_open: Path | None = None
         self._conversation_request_id = 0
         self._chat_task: str | None = None
         self._last_chat_text = None
@@ -135,6 +138,19 @@ class Workbench(QMainWindow):
         from openkb.desktop.knowledge_bases import KnowledgeBasesDialog
 
         KnowledgeBasesDialog(self).exec()
+
+    def _knowledge_base_deleting(self, root, deleting):
+        if deleting:
+            self._deleting_kbs.add(root)
+            self._kb_deletion_versions[root] = self._kb_deletion_versions.get(root, 0) + 1
+            if self.kb == root or self._pending_open == root:
+                self._open_request_id += 1
+                self._pending_open = None
+            if self.kb == root:
+                self._page_request_id += 1
+                self._conversation_request_id += 1
+        else:
+            self._deleting_kbs.discard(root)
 
     def _removed_knowledge_base(self, root):
         self._drafts = {key: draft for key, draft in self._drafts.items() if key[0] != str(root)}
@@ -253,16 +269,24 @@ class Workbench(QMainWindow):
             )
 
     def open_knowledge_base(self, path: Path):
+        path = path.expanduser().resolve()
+        if path in self._deleting_kbs:
+            return
         self._open_request_id += 1
         request_id = self._open_request_id
+        self._pending_open = path
+
+        def loaded(value, error):
+            if request_id == self._open_request_id:
+                self._pending_open = None
+                self._opened(value, error, attempted=path)
+
         if self.kb:
             self.kbs.setCurrentIndex(self.kbs.findData(str(self.kb)))
         self.statusBar().showMessage(f"正在打开 {path}；若有写入任务，将等待其安全完成。")
         self.io.submit(
             lambda: open_kb(path),
-            lambda value, error: self._opened(value, error, attempted=path)
-            if request_id == self._open_request_id
-            else None,
+            loaded,
             kb=path,
             exclusive=True,
             global_settings=True,
@@ -302,9 +326,15 @@ class Workbench(QMainWindow):
         self._refresh()
 
     def _refresh(self):
-        if self.kb is None:
+        if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
+        request_id = self._open_request_id
+
+        def obsolete():
+            return (
+                root != self.kb or request_id != self._open_request_id or root in self._deleting_kbs
+            )
 
         def read():
             return (
@@ -316,7 +346,7 @@ class Workbench(QMainWindow):
             )
 
         def loaded(value, error):
-            if self.kb != root or self._error(error):
+            if obsolete() or self._error(error):
                 return
             pages, sessions, info = value
             self.pages.clear()
@@ -339,7 +369,7 @@ class Workbench(QMainWindow):
             if self.page is None and (root / "wiki/index.md").exists():
                 self.open_page("index.md")
 
-        self.io.submit(read, loaded, kb=root, global_settings=True)
+        self.io.submit(read, loaded, kb=root, global_settings=True, obsolete=obsolete)
 
     def _refresh_current(self):
         self._refresh()
@@ -352,7 +382,7 @@ class Workbench(QMainWindow):
             self.open_page(path)
 
     def open_page(self, path: str, anchor: str = ""):
-        if self.kb is None:
+        if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
         self._page_request_id += 1
@@ -407,13 +437,23 @@ class Workbench(QMainWindow):
         self.statusBar().showMessage("保存任务已提交；出现版本冲突时草稿会保留。")
 
     def _review_draft(self):
-        if not self.kb or not self.page:
+        if not self.kb or not self.page or self.kb in self._deleting_kbs:
             return
         root, path = self.kb, self.page.path
+        request_id = self._page_request_id
         self._keep_draft()
 
+        def obsolete():
+            return (
+                self.kb != root
+                or root in self._deleting_kbs
+                or request_id != self._page_request_id
+                or not self.page
+                or self.page.path != path
+            )
+
         def loaded(latest, error):
-            if self.kb != root or not self.page or self.page.path != path or self._error(error):
+            if obsolete() or self._error(error):
                 return
             self._keep_draft()
             draft = self._drafts.get(
@@ -428,7 +468,7 @@ class Workbench(QMainWindow):
                 self.editor.setPlainText(dialog.draft.toPlainText())
                 self._save_page()
 
-        self.io.submit(lambda: read_page(root, path), loaded, kb=root)
+        self.io.submit(lambda: read_page(root, path), loaded, kb=root, obsolete=obsolete)
 
     def _export_draft(self):
         if not self.page:
@@ -474,18 +514,29 @@ class Workbench(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "递归导入目录")
         if path:
             root = self.kb
+            deletion_version = self._kb_deletion_versions.get(root, 0)
 
-            def loaded(files, error):
-                if not self._error(error) and files:
-                    self.manager.submit(root, [ImportFile(str(path)) for path in files])
+            def obsolete():
+                return root in self._deleting_kbs or deletion_version != (
+                    self._kb_deletion_versions.get(root, 0)
+                )
 
-            self.io.submit(
-                lambda: sorted(
+            def submit_directory():
+                files = sorted(
                     p.resolve()
                     for p in Path(path).rglob("*")
                     if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-                ),
-                loaded,
+                )
+                if files and not obsolete():
+                    task_id = self.manager.submit(root, [ImportFile(str(path)) for path in files])
+                    if obsolete():
+                        self.manager.stop(task_id)
+
+            self.io.submit(
+                submit_directory,
+                lambda _value, error: self._error(error),
+                kb=root,
+                obsolete=obsolete,
             )
 
     def _ask(self):
