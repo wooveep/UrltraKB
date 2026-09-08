@@ -74,6 +74,26 @@ it does not establish live model quality or a real provider connection.
 Corpus checks establish technical output/error handling; visual inspection
 of labels, relationships, baselines and clipping remains a separate check.
 
+The lifecycle runner exercises actual Qt event loops and spawned workers. It
+checks waiting-batch completion, stopping before execution, and shutdown during
+a pending KB deletion. Each restart is a separate process using the previous
+run's KB and history. Use a new output directory for every command:
+
+```sh
+packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-wait --lifecycle wait
+packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-stop --lifecycle stop
+packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-delete --lifecycle delete
+packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/restarted \
+  --lifecycle restart --lifecycle-state /tmp/exit-wait
+```
+
+These checks trigger actual tray menu actions programmatically and record tray
+availability. They do not substitute for an OS tray click, stopping an in-flight
+model unit, replacing a program directory, or checking all descendant processes
+from an external observer. The `shutdown.png` and `lifecycle.json` files record
+the tested case and its scope; a restart checks KB/history retention, not the
+previous run's global settings.
+
 The native About dialog and `/api/v1/distribution` read fixed matching materials
 from `distribution/` beside the executable. A source/wheel REST deployment can
 set `OPENKB_DISTRIBUTION_DIR` to that directory, but must also install the matching

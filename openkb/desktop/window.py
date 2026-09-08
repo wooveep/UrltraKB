@@ -490,7 +490,7 @@ class Workbench(QMainWindow):
     def _import_files(self):
         if self.kb:
             files, _ = QFileDialog.getOpenFileNames(self, "导入资料")
-            if files:
+            if files and not self._quitting:
                 self.manager.submit(
                     self.kb, [ImportFile(str(Path(path).resolve())) for path in files]
                 )
@@ -501,7 +501,7 @@ class Workbench(QMainWindow):
         value, accepted = QInputDialog.getMultiLineText(
             self, "导入网址", "每行一个 HTTP / HTTPS 地址"
         )
-        if accepted and value.strip():
+        if accepted and value.strip() and not self._quitting:
             try:
                 requests = [ImportUrl(line.strip()) for line in value.splitlines() if line.strip()]
                 self.manager.submit(self.kb, requests)
@@ -512,13 +512,15 @@ class Workbench(QMainWindow):
         if not self.kb:
             return
         path = QFileDialog.getExistingDirectory(self, "递归导入目录")
-        if path:
+        if path and not self._quitting:
             root = self.kb
             deletion_version = self._kb_deletion_versions.get(root, 0)
 
             def obsolete():
-                return root in self._deleting_kbs or deletion_version != (
-                    self._kb_deletion_versions.get(root, 0)
+                return (
+                    self._quitting
+                    or root in self._deleting_kbs
+                    or deletion_version != (self._kb_deletion_versions.get(root, 0))
                 )
 
             def submit_directory():
@@ -685,17 +687,23 @@ class Workbench(QMainWindow):
                 self._task_finished(task)
         self.task_table.blockSignals(False)
         if self._quitting:
-            if (
-                self.manager.join(0)
-                and self.watch_registry.stopped()
-                and self.io.stopped()
-                and all(view.rendering_stopped() for view in (self.reader, self.chat))
-            ):
+            if self.shutdown_complete():
                 self.timer.stop()
                 self.tray.hide()
                 QApplication.instance().quit()
 
+    def shutdown_complete(self):
+        return (
+            self.manager.join(0)
+            and self.watch_registry.stopped()
+            and self.io.stopped()
+            and all(view.rendering_stopped() for view in self.findChildren(MarkdownView))
+        )
+
     def _task_finished(self, task):
+        if self._quitting:
+            self._select_task()
+            return
         if task.id in self._save_tasks and task.succeeded:
             key, body = self._save_tasks.pop(task.id)
             draft = self._drafts.get(key)
@@ -736,7 +744,11 @@ class Workbench(QMainWindow):
 
     def closeEvent(self, event):
         if self._quitting:
-            event.accept()
+            if self.timer.isActive():
+                event.ignore()
+                self.statusBar().showMessage("正在退出；可查看任务进度与结果，或安全停止所选任务。")
+            else:
+                event.accept()
             return
         event.ignore()
         if QSystemTrayIcon.isSystemTrayAvailable() and self.tray.isVisible():
@@ -763,9 +775,11 @@ class Workbench(QMainWindow):
             stop = box.clickedButton() == halt
         self._quitting = True
         self.watch_registry.stop_all()
-        self.setEnabled(False)
+        from openkb.desktop.layout import observe_shutdown
+
         self.manager.shutdown(stop=stop)
         self.io.stop()
-        self.reader.stop_rendering()
-        self.chat.stop_rendering()
+        observe_shutdown(self)
+        for view in self.findChildren(MarkdownView):
+            view.stop_rendering()
         self.statusBar().showMessage("正在收尾并回收后台进程…")

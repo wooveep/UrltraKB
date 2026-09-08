@@ -14,6 +14,11 @@ def show_task_details(task, parent):
         task.kb_dir,
         f"任务：{task.id}",
         f"状态：{task.state}",
+        f"阶段：{task.stage}",
+        f"成功：{task.succeeded} · 跳过：{task.skipped} · "
+        f"失败：{task.failed} · 未处理：{task.unfinished}",
+        f"错误：{task.error or '无'}",
+        f"已请求安全停止：{task.stop_requested}",
         f"进程已回收：{task.processes_reaped}",
     ]
     if task.retry_of:

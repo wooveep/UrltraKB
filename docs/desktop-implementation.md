@@ -217,3 +217,45 @@ The final committed fixes still require fresh frozen builds and acceptance on
 both targets. Complete visual verdicts, actual tray/exit/replacement scenarios,
 clean-system and live-provider evidence, matching source/licence materials and
 final archives remain pending.
+
+## Frozen renderer and shutdown checkpoint (2026-09-08)
+
+Both actual program directories exported from `534e35f` passed the native
+workflow and the 22-check controlled HTTP model workflow, including the corrected
+Windows Unicode fixtures. Windows ran in the logged-in interactive session 1.
+Debian ran as a non-root user in a Debian 13.6 runtime rootfs containing no Python,
+Node, Rust or browser commands, with the host GNOME/X11 display socket attached.
+That establishes isolated runtime dependencies, not a fresh whole-machine image.
+
+The corpus now contains 37 cases, each rendered at four scales and two themes
+on each platform. All 592 outputs were visually approved by inspecting changed
+variants and matching unchanged RGBA pixels to previously inspected originals.
+Per-case expectations, verification methods and original PNG hashes are in
+`docs/desktop-evidence/render-534e35f.json`. The 16 expected unsupported-input
+results on each platform remain errors with source preserved; they are not
+counted as successful rendering of supported input.
+
+This inspection exposed and corrected C4 stereotype-label squeezing, inline
+formula baselines, and Windows Gantt ticks shifted by the host's eight-hour UTC
+offset. The fixed Windows ticks match the task dates. Actual Qt paint and text
+line metrics measure 48 inline variants per platform; maximum baseline error is
+0.47 px on Debian and 0.78 px on Windows. Raised glyphs intentionally remain above
+the baseline; tall formulas and the following Chinese paragraph do not collide.
+
+Shutdown review then found that waiting to exit from the tray left the main
+window hidden and disabled task diagnostics. The fix reveals the task panel,
+keeps task selection, result copying and cooperative stop available, and disables
+new business controls. Existing modal dialogs are revoked, including cancellation
+of a pending KB deletion. Closing the waiting window preserves observation.
+All child Markdown readers, including artifact dialogs, enter the render shutdown
+barrier; task completion no longer starts new reading or rendering during exit.
+
+The real Qt/spawn probes failed before these fixes and passed afterwards. Three
+new subprocess scenarios cover waiting, stopping before execution, and pending
+deletion; each then starts a fresh process over the same KB/history without
+replay or restored watching. The latest targeted checks passed on Debian (9)
+and Windows (8); GNOME/X11 also passed the visible no-tray fallback and waiting
+case. These shutdown fixes postdate the `534e35f` frozen packages and need a new
+frozen run. Real OS tray clicks, in-flight model cancellation, external process
+observation, program replacement, live-provider/clean-Windows acceptance and
+complete distribution materials are still outstanding.

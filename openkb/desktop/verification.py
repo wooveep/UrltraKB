@@ -25,6 +25,8 @@ def main() -> int:
     parser.add_argument("--url", help="Controlled HTTP article fixture")
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
+    parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
+    parser.add_argument("--lifecycle-state", type=Path, help="Previous lifecycle run for restart")
     args = parser.parse_args()
     root = args.output.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -47,6 +49,10 @@ def main() -> int:
     app.setApplicationName("OpenKB Verification")
     for font in (Path(__file__).parents[1] / "rendering/assets/fonts").glob("*.otf"):
         QFontDatabase.addApplicationFont(str(font))
+    if args.lifecycle:
+        from openkb.desktop.verification_lifecycle import verify_lifecycle
+
+        return verify_lifecycle(app, root, args.lifecycle, args.lifecycle_state)
     first, other = root / "知识库 A", root / "知识库 B"
     for kb in (first, other):
         initialize_kb(
@@ -407,13 +413,7 @@ print("OpenKB")
         raise
     finally:
         window.request_quit()
-        wait_until(
-            lambda: window.manager.join(0)
-            and window.watch_registry.stopped()
-            and window.io.stopped()
-            and window.reader.rendering_stopped()
-            and window.chat.rendering_stopped()
-        )
+        wait_until(window.shutdown_complete)
         checks.append("explicit quit reaps execution workers and rendering")
         observer.stop()
         evidence["checks"] = checks
