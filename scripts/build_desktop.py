@@ -5,13 +5,19 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from importlib.metadata import version
 from pathlib import Path
+
+from export_desktop_source import verify_source
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = ROOT / "packaging/desktop"
 
 
 def main() -> None:
+    identity = verify_source(ROOT)
+    if version("openkb") != identity["version"]:
+        raise ValueError("Install this exported source with its recorded version before freezing")
     cache = PACKAGING / "build/token-cache"
     cache.mkdir(parents=True, exist_ok=True)
     environment = dict(os.environ, TIKTOKEN_CACHE_DIR=str(cache))
@@ -27,6 +33,7 @@ def main() -> None:
         env=environment,
         check=True,
     )
+
     environment.update(LITELLM_LOCAL_MODEL_COST_MAP="True", OTEL_SDK_DISABLED="true")
     subprocess.run(
         [
@@ -45,6 +52,8 @@ def main() -> None:
         env=environment,
         check=True,
     )
+    if verify_source(ROOT) != identity:
+        raise ValueError("Source identity changed during the build")
 
 
 if __name__ == "__main__":
