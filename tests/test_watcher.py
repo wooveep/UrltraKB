@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from openkb.watcher import DebouncedHandler, start_watch
@@ -27,8 +28,8 @@ class TestDebouncedHandler:
         if handler._timer:
             handler._timer.cancel()
 
-        assert "/raw/doc.pdf" in handler._pending
-        assert "/raw/notes.md" in handler._pending
+        assert str(Path("/raw/doc.pdf")) in handler._pending
+        assert str(Path("/raw/notes.md")) in handler._pending
 
     def test_collects_modified_files(self):
         callback = MagicMock()
@@ -39,7 +40,7 @@ class TestDebouncedHandler:
         if handler._timer:
             handler._timer.cancel()
 
-        assert "/raw/paper.txt" in handler._pending
+        assert str(Path("/raw/paper.txt")) in handler._pending
 
     def test_ignores_directories(self):
         callback = MagicMock()
@@ -122,7 +123,7 @@ class TestDebouncedHandler:
         if handler._timer:
             handler._timer.cancel()
 
-        assert handler._pending == {"/raw/new.pdf", "/raw/existing.md"}
+        assert handler._pending == {str(Path("/raw/new.pdf")), str(Path("/raw/existing.md"))}
 
 
 def test_atomic_move_uses_destination_and_stop_prevents_late_delivery(tmp_path):

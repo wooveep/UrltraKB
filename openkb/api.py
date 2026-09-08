@@ -39,7 +39,6 @@ from openkb.api_helpers import (
     _iter_deck,
     _iter_skill,
     _load_or_create_session,
-    _mount_web_ui,
     _parse_stream_form,
     _reserve_add_uploads,
     _resolve_kb,
@@ -744,9 +743,7 @@ def create_app() -> FastAPI:
         buf.seek(0)
         return StreamingResponse(buf, media_type="application/zip")
 
-    # Catch-all for unknown API paths so they return JSON 404 instead of being
-    # swallowed by the StaticFiles mount below (which serves index.html for SPA
-    # routing and would turn API 404s into HTML 200s).
+    # Preserve the established JSON error shape for unknown API paths.
     @app.api_route(
         "/api/{path:path}",
         methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
@@ -756,8 +753,6 @@ def create_app() -> FastAPI:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",
         )
-
-    _mount_web_ui(app)
 
     return app
 

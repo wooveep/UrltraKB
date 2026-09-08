@@ -29,7 +29,7 @@
 
 # 📑 What is OpenKB
 
-**OpenKB (Open Knowledge Base)** is an open-source system (in CLI) that compiles raw documents into a structured, interlinked wiki-style knowledge base using LLMs, powered by [**PageIndex**](https://github.com/VectifyAI/PageIndex)'s vectorless, reasoning-based retrieval for long documents.
+**OpenKB (Open Knowledge Base)** compiles raw documents into a structured, interlinked wiki using LLMs, powered by [**PageIndex**](https://github.com/VectifyAI/PageIndex)'s vectorless retrieval for long documents. This fork provides a native desktop workbench alongside the CLI and independent REST API, using the existing knowledge-base format.
 
 The idea is based on a [concept](https://x.com/karpathy/status/2039805659525644595) described by Andrej Karpathy: LLMs generate summaries, concept pages, and cross-references, all maintained automatically. Knowledge compounds over time instead of being re-derived on every query.
 
@@ -49,7 +49,7 @@ OpenKB has two layers: a **wiki foundation** that compiles and maintains your kn
 - **Skill Factory:** Distills redistributable agent skills from your wiki.
 - **OKF-ready:** Wiki pages follow the [Google OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) specification for knowledge sharing.
 - **Obsidian-compatible:** The wiki is plain `.md` files with cross-links. Opens in Obsidian for graph view.
-- **Knowledge Workbench (Web UI):** A bundled web UI served at `/` to browse the KB, upload and compile documents, and stream queries and chats — all in the browser.
+- **Native desktop workbench:** Browse and edit pages, import documents, stream queries and conversations, manage tasks and settings, and generate outputs in Qt Widgets.
 
 # 🚀 Getting Started
 
@@ -118,18 +118,21 @@ LLM_API_KEY=your_llm_api_key
 
 Subscription-based providers that authenticate via OAuth device flow (e.g. `chatgpt/*`, `github_copilot/*`) need no API key; OpenKB skips the missing-key warning for them.
 
-### Knowledge Workbench (Web UI)
+### Native desktop workbench
 
-OpenKB ships a bundled web UI, served by the REST API at `/`. Install the API extra and start the server — no configuration needed:
+The desktop targets Windows 11 x86_64 and Debian 13.6 x86_64 with GNOME/X11. Open the `OpenKB` program from the complete portable program directory. Knowledge bases and settings remain in their user-selected locations when program files are replaced.
 
-```bash
-pip install "openkb[web]"
-openkb-web                       # serves the API + Workbench at http://127.0.0.1:7566/
+For development in this checkout:
+
+```sh
+uv sync --frozen --python 3.12.13 --extra desktop --extra api --extra dev
+uv run python scripts/prepare_desktop_assets.py
+uv run openkb-desktop
 ```
 
-Open `http://127.0.0.1:7566/` for the Workbench. Auth is off by default (local-first); set `OPENKB_API_TOKEN` to require a bearer token before exposing the server. See the [full Web UI guide](examples/rest-api/README.md#knowledge-workbench-web-ui).
+Asset preparation needs Rust 1.95.0 and network access; it installs the pinned local renderers and fonts. The packaged application includes these resources. Formula and diagram display runs locally without a browser engine or rendering service.
 
-> Working on the UI itself? Run the Vite dev server with `cd frontend && npm install && npm run dev` (it proxies `/api` to a running `openkb-web`), or `npm run build` to regenerate the bundled `openkb/web/`.
+See the [desktop guide](docs/desktop.md) for daily workflows, configuration, watching and safe exit, and the [build guide](packaging/desktop/README.md) for distribution and validation status. The old React interface, `openkb-web` command and `web` extra have been removed. HTTP clients use `openkb-api` and the `api` extra.
 
 # 🧩 How OpenKB Works
 
@@ -341,7 +344,7 @@ The skill is read-only. It won't run `openkb add`, `remove`, or `lint --fix` wit
 
 # REST API
 
-OpenKB ships a FastAPI service for HTTP clients. Install with `pip install -e ".[web]"`, then start with `python -m openkb.api`. The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman).
+OpenKB ships an independent FastAPI service for HTTP clients. Install with `pip install -e ".[api]"`, then start with `openkb-api` (or `python -m openkb.api`). The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve an application. Authentication, SSE, CORS and generated HTML artifact endpoints remain available.
 
 See the [full REST API reference](examples/rest-api/README.md#rest-api) for endpoints, auth, and SSE streaming.
 
@@ -374,7 +377,7 @@ See the [full REST API reference](examples/rest-api/README.md#rest-api) for endp
 - [ ] Scale to large document collections with nested folder support
 - [ ] Hierarchical concept (topic) indexing for massive knowledge bases
 - [ ] Database-backed storage engine
-- [x] Web UI for browsing and managing wikis (Knowledge Workbench, served at `/`)
+- [x] Native desktop workbench for browsing and managing knowledge bases
 
 ### Contributing
 
@@ -382,7 +385,7 @@ Contributions are welcome! Submit a pull request or open an [issue](https://gith
 
 ### License
 
-Apache 2.0. See [LICENSE](LICENSE).
+OpenKB's original source is Apache 2.0; its copyright and [LICENSE](LICENSE) remain in place. Portable distributions include separately licensed components, including PyMuPDF/MuPDF. The combined distribution follows the accepted AGPLv3 route and must include matching corresponding source, build information and third-party license notices; it is not an Apache-only binary distribution. See the [distribution guide](packaging/desktop/README.md).
 
 ### 🌐 Open-Source Ecosystem
 

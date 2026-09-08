@@ -26,11 +26,6 @@ docs/internal/
 # new drops from being swept into commits.
 examples/docs/
 
-# Built Workbench web bundle (regenerate with `cd frontend && npm install && npm run build`).
-# Shipped inside the wheel via hatchling `artifacts`, never committed to git.
-/openkb/web/
-web/
-
 # Locally assembled native rendering runtimes (included by desktop packaging).
 /openkb/rendering/assets/
 /openkb/rendering/rust-helper/target/

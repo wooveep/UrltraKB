@@ -60,8 +60,6 @@ Issues = "https://github.com/VectifyAI/OpenKB/issues"
 [project.scripts]
 openkb = "openkb.cli:cli"
 openkb-desktop = "openkb.desktop.bootstrap:main"
-openkb-web = "openkb.api:main"
-# Backwards-compatible alias for the historical name; same entry point.
 openkb-api = "openkb.api:main"
 
 [tool.pytest.ini_options]
@@ -77,24 +75,25 @@ dev = [
     "mypy==1.15.0",
     "types-PyYAML==6.0.12.20260518",
 ]
-# The Knowledge Workbench Web UI is served by this FastAPI server. `web` is the
-# canonical extra; `api` is a backwards-compatible alias so an existing
-# `pip install "openkb[api]"` keeps working.
-web = ["fastapi", "uvicorn", "python-multipart"]
-api = ["openkb[web]"]
+# Independent REST dependencies, pinned to the versions already in uv.lock.
+api = ["fastapi==0.139.0", "uvicorn==0.47.0", "python-multipart==0.0.29"]
 
 [tool.hatch.version]
 source = "vcs"
 
-# The Workbench web bundle (openkb/web) is git-ignored but must ship in the
-# published package. `artifacts` force-includes it into both the sdist and the
-# wheel when present (built by `npm run build`, e.g. in release CI). When it is
-# absent the build still succeeds — the API server just serves no UI.
-[tool.hatch.build]
-artifacts = ["openkb/web/**"]
-
 [tool.hatch.build.targets.wheel]
 packages = ["openkb"]
+exclude = ["/openkb/web"]
+
+# Ship reproducible application/build sources, not maintainer-local workspace
+# state or retired bundles that may remain in an upgraded source checkout.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples",
+    "/docs/desktop.md", "/docs/golden-principles.md",
+    "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock",
+]
+exclude = ["/openkb/web", "/frontend"]
 
 # Bundle the built-in deck themes + html critic into the wheel so
 # `openkb deck new` / `--critique` / chat `/deck` work right after
