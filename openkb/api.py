@@ -158,6 +158,10 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="OpenKB API", lifespan=lifespan)
 
+    from openkb.api_distribution import install_distribution_routes
+
+    install_distribution_routes(app)
+
     _configure_cors(app)
     app.include_router(graph_router)
     app.include_router(output_router)

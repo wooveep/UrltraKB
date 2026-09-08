@@ -112,6 +112,11 @@ class Workbench(QMainWindow):
 
         WatchDialog(self.watch_registry, self.kb, self).exec()
 
+    def _about(self):
+        from openkb.desktop.about import AboutDialog
+
+        AboutDialog(self.io, self).exec()
+
     def _settings(self, *, global_defaults=False):
         from openkb.desktop.settings import SettingsDialog
 

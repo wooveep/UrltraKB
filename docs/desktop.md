@@ -135,3 +135,21 @@ to exit. A fresh launch does not restart tasks or subscriptions automatically.
 For a manual update, finish explicit Quit, replace the complete program directory
 with the new version, then reopen your existing KB locations. Do not replace
 program files while background work is still running.
+
+## Version, source and licenses
+
+Open **Help → About OpenKB · Source and licenses** to inspect and copy the
+installed version, source commit, material filenames and SHA256 checksums. The
+license tab displays original copyright and license texts without opening a
+browser. The material-directory button locates the matching source archives,
+component inventory and build records supplied with a complete distribution.
+
+The independent REST API advertises `/api/v1/distribution` in its `Link` response
+header. This public endpoint lists only fixed release materials; its download
+routes remain available when private KB endpoints require authentication. Files
+are verified against the manifest and served from fixed temporary copies.
+
+Development environments without matching installed build identity and release
+materials are identified explicitly. A missing, damaged or mismatched manifest
+does not become a verified release by pointing to the public repository. Final
+distribution acceptance remains subject to the [build guide](../packaging/desktop/README.md).
