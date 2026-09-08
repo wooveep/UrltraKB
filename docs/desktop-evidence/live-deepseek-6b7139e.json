@@ -517,7 +517,7 @@
     "description": "Generated Markdown artifact frontmatter appeared as a large heading in the reading view. Raw source and disk contents were intact.",
     "source_fix": "Strip only valid nonempty mapping frontmatter with exact independent delimiters for reading; retain original source and disk bytes.",
     "validation": "Native UI regression failed before fix; passed after fix. Invalid opening and closing delimiter counterexamples were added and also passed after correction.",
-    "frozen_revalidation": "Pending the new program build; live-provider tests in this record used 6b7139e."
+    "frozen_revalidation": "Both 87bdcc7 program directories pass all 14 native checks, including frontmatter, source retention and malformed delimiters; see acceptance-87bdcc7.json."
   },
   "evidence_root": "packaging/desktop/build/evidence/live-deepseek-6b7139e",
   "evidence_files": [

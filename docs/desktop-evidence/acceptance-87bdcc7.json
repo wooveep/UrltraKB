@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "date": "2026-09-08",
+  "program_commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+  "version": "0.1.dev42+g87bdcc7b6e33",
+  "scope": "Final frozen native revalidation after artifact reading correction. Live-provider workflow remains attributed to 6b7139e; no repeated real-provider generation was needed for the read-only presentation change.",
+  "platforms": {
+    "debian": {
+      "native_checks": 14,
+      "unexpected_dialogs": [],
+      "environment": "Non-root Debian 13.6 runtime rootfs with host GNOME/X11"
+    },
+    "windows": {
+      "native_checks": 14,
+      "unexpected_dialogs": [],
+      "exit_code": 0,
+      "environment": "Existing Windows 11 x86_64 interactive desktop; Windows Sandbox declined by user"
+    }
+  },
+  "display_checks": [
+    "Valid mapping frontmatter is excluded from the rendered artifact body",
+    "Raw source tab and on-disk bytes preserve complete frontmatter",
+    "Invalid independent delimiters keep their ordinary Markdown text visible",
+    "The intended Skill file is selected explicitly regardless of platform sorting"
+  ],
+  "dependency_delta_from_6b7139e": {
+    "linux": {
+      "changed_python_source_modules": [
+        "openkb.desktop.artifacts",
+        "openkb.desktop.verification_artifacts"
+      ],
+      "changed_native_or_font_files": [],
+      "files": 10832,
+      "python_modules": 7228,
+      "components": 224
+    },
+    "windows": {
+      "changed_python_source_modules": [
+        "openkb.desktop.artifacts",
+        "openkb.desktop.verification_artifacts"
+      ],
+      "changed_native_or_font_files": [],
+      "files": 11331,
+      "python_modules": 7302,
+      "components": 153
+    }
+  },
+  "tests": {
+    "pytest_passed": 1470,
+    "pytest_seconds": 49.56,
+    "existing_warnings": 2,
+    "ruff_check": "passed",
+    "ruff_format_files": 248,
+    "mypy_source_files": 141,
+    "module_size": "passed",
+    "subsequent_change": "Verification-only explicit file selection; production source unchanged after the full pytest run."
+  },
+  "remaining": "Formal corresponding-source/license/NOTICE/build material reconciliation and assembly remain incomplete; local acceptance archives are not formal releases.",
+  "evidence_root": "packaging/desktop/build/evidence/87bdcc7",
+  "evidence_files": [
+    {
+      "file": "debian/verification.json",
+      "bytes": 15449,
+      "sha256": "860b501e6202c99b723b5e0d4a5f5eec3c0bde8e8d3371678b961205a51faf11"
+    },
+    {
+      "file": "debian/native-artifact-reading.png",
+      "bytes": 72020,
+      "sha256": "d3864dabbe33d7bdc657bccc5ad172af5bf5be876281dbf270d5026eee9d6be3"
+    },
+    {
+      "file": "debian/native-reading.png",
+      "bytes": 119306,
+      "sha256": "dbcc3986f2c7017bfff8395a709696b1831a50bcb64e5033f0bea94a990b166d"
+    },
+    {
+      "file": "debian/native-artifacts.png",
+      "bytes": 67566,
+      "sha256": "72bd6168b07dc7e508956440bd3d402ff3bc44cbcf761bf960816c7cdf29031b"
+    },
+    {
+      "file": "debian/inventory.json",
+      "bytes": 6455532,
+      "sha256": "63c04cf23d6ff19ea16050b7eb20c8421f0a9fb2b4df29bff238bd31ba2d4b1b"
+    },
+    {
+      "file": "windows/verification.json",
+      "bytes": 16870,
+      "sha256": "3621c8c99457138f3fe2b311ba43943a7c2030a5b16556bf278ad9242adeb32a"
+    },
+    {
+      "file": "windows/native-artifact-reading.png",
+      "bytes": 34993,
+      "sha256": "45eb4d48d27365ddddc0f5803bfc136523cd42b9340a94e300dfc6a4ff19a9cc"
+    },
+    {
+      "file": "windows/native-reading.png",
+      "bytes": 62398,
+      "sha256": "6aa6bc4095ce6bc6f0abfece588b64ee3128dfbfe7e1fa6d992e23c6d20bf5b8"
+    },
+    {
+      "file": "windows/native-artifacts.png",
+      "bytes": 25631,
+      "sha256": "2130b52d655024893f12de7a3e6517dc42f07436734a6e19fbbe1faadb0bc284"
+    },
+    {
+      "file": "windows/inventory.json",
+      "bytes": 6566465,
+      "sha256": "db19d5f7c7d4ef73dc95f71883c8f97618da5d20ab9de413a293d8af7b96ccf6"
+    },
+    {
+      "file": "dependency-delta.json",
+      "bytes": 513,
+      "sha256": "4132ed3161d7b2f081fa9cc937d0a889e6bb879d517da12f7d6b32c7857932b0"
+    },
+    {
+      "file": "windows/result.json",
+      "bytes": 216,
+      "sha256": "de6b2639ac83cd5a9d83ba898511a7d30186a4f233f300fa08971d083e976355"
+    },
+    {
+      "file": "pytest.log",
+      "bytes": 10044,
+      "sha256": "5b01d27db5988e70699c81e7c173431a5c796c3e8b0a74cfc64d485ff8ec9ac2"
+    },
+    {
+      "file": "mypy.log",
+      "bytes": 783,
+      "sha256": "7a40df9bed5d64c7bd86887607e38afbe0ef02f88ba0c9a47ad3a9ce4fb0d4ca"
+    },
+    {
+      "file": "regression/frontmatter-red.json",
+      "bytes": 12979,
+      "sha256": "e1a5a6f3152c9db52758566e89c13fdf9073faf46fd78c8f414ead6f762ddb1b"
+    },
+    {
+      "file": "regression/delimiter-red.json",
+      "bytes": 12911,
+      "sha256": "f137499f5509f8c5d66de7270d99c53f82e2cc8884ca88d6bb54d9af3e9802d4"
+    },
+    {
+      "file": "regression/delimiter-green.json",
+      "bytes": 15531,
+      "sha256": "8508bd898cabf275202d26bf7ccea9161497e4ccf616fcfd83728e0e9059d889"
+    },
+    {
+      "file": "regression/selection-green.json",
+      "bytes": 15527,
+      "sha256": "c852a3886428aa64b52b50956f67f14b7089fc9d283054e2fbb4795b618cf628"
+    }
+  ],
+  "internal_archives": {
+    "scope": "Local internal acceptance packages, not formal releases",
+    "debian": {
+      "scope": "Local internal acceptance archive; not a formal release or complete distribution-material assembly",
+      "commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+      "version": "0.1.dev42+g87bdcc7b6e33",
+      "archive": "packaging/desktop/build/internal-packages/87bdcc7/OpenKB-0.1.dev42+g87bdcc7b6e33-debian13.6-x64-INTERNAL.tar.gz",
+      "bytes": 442890460,
+      "sha256": "ae43d2e2c41972d2286a6f5b27278e978fce79ee5519c9eb60361f57aca50e7d",
+      "verified_program_files": 10832,
+      "user_data_or_credentials_included": false
+    },
+    "windows": {
+      "scope": "Local internal acceptance archive; not a formal release or complete distribution-material assembly",
+      "commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+      "version": "0.1.dev42+g87bdcc7b6e33",
+      "archive": "packaging/desktop/build/internal-packages/87bdcc7/OpenKB-0.1.dev42+g87bdcc7b6e33-windows-x64-INTERNAL.zip",
+      "bytes": 392799930,
+      "sha256": "52696aaa437d033c537379139defe3af1b5feb6747500b54972db367417257d5",
+      "verified_program_files": 11331,
+      "user_data_or_credentials_included": false
+    }
+  }
+}
