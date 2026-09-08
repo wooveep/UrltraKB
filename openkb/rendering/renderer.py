@@ -17,7 +17,7 @@ from openkb.locks import atomic_write_bytes
 from openkb.rendering.svg_adapter import adapt_diagram
 
 # Bump when the renderer, adapters, fonts, or output protocol changes.
-CACHE_VERSION = "mathjax4.1.3-merman0.7.0-resvg0.46.0-noto2.004-adapter1"
+CACHE_VERSION = "mathjax4.1.3-merman0.7.0-resvg0.46.0-noto2.004-adapter2"
 
 
 @dataclass(frozen=True)

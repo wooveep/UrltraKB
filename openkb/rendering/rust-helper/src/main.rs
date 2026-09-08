@@ -50,7 +50,12 @@ fn run(request: &Value) -> Result<Value, Box<dyn std::error::Error>> {
             })))
             .with_host_theme(&theme)
             .with_diagram_id(id);
-        renderer.render_svg_sync(source)?.ok_or("no SVG produced")?
+        // The builder scopes its offset to parsing. Gantt layout also reads
+        // local time; Windows ignores TZ, so keep the same offset through SVG.
+        merman::time::with_fixed_local_offset_minutes(Some(0), || {
+            renderer.render_svg_sync(source)
+        })?
+        .ok_or("no SVG produced")?
     };
     if request["svg_only"].as_bool().unwrap_or(false) {
         return Ok(json!({"ok":true,"svg":svg}));

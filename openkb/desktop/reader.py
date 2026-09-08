@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Signal
-from PySide6.QtGui import QFont, QTextCharFormat, QTextImageFormat
+from PySide6.QtGui import QFont, QFontMetricsF, QTextCharFormat, QTextImageFormat
 from PySide6.QtWidgets import QTextBrowser
 
 from openkb.rendering.markdown import RenderedMarkdown, heading_anchor, render_markdown
@@ -93,7 +93,22 @@ class MarkdownView(QTextBrowser):
             image.setHeight(block.height * self._scale)
             image.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignBaseline)
             if not block.display:
-                image.setBaselineOffset(-block.depth / 20 * 100)
+                # Qt ignores baselineOffset when drawing inline images. Its
+                # AlignBaseline instead uses the image format's font descent.
+                # Give this image its own metrics; the surrounding text keeps
+                # the document font and the image keeps its original dimensions.
+                depth = block.depth * self._scale
+                if depth <= 0:
+                    image.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignNormal)
+                else:
+                    font = QFont(self.document().defaultFont())
+                    font.setPointSizeF(100)
+                    for _ in range(3):
+                        descent = QFontMetricsF(font).descent()
+                        if descent <= 0 or abs(descent - depth) < 0.05:
+                            break
+                        font.setPointSizeF(font.pointSizeF() * depth / descent)
+                    image.setFont(font)
             image.setToolTip(block.source)
             cursor.insertImage(image)
         self.document().setModified(False)
