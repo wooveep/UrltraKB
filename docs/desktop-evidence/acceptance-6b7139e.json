@@ -1,0 +1,2631 @@
+{
+  "schema": 1,
+  "commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+  "date": "2026-09-08",
+  "status": "implementation checkpoint; final distribution acceptance incomplete",
+  "platforms": {
+    "debian": {
+      "inventory": {
+        "sha256": "6a83019466a0365a96054c126730fa51813d7cc24d78380db71fd8ae5a005ca4",
+        "files": 10832,
+        "embedded_modules": 7228,
+        "primary_components": 224,
+        "scope": "Actual frozen files and primary build inputs; nested dependency/source/licence audit required"
+      },
+      "workflows": {
+        "native": {
+          "checks": [
+            "native Chinese, formulas, flowchart, table, code; source unchanged",
+            "save during continued editing retains draft and advances confirmed version",
+            "external version conflict is visible and preserves the local draft",
+            "busy-KB read requests do not starve navigation to an independent KB",
+            "superseded rendering cannot replace new text; switching KB clears old content",
+            "native KB/global settings save, inheritance, credential rotation and clear",
+            "native conversation wait/stop, unique transcript copies and version-bound deletion",
+            "native structural report, link repair confirmation, restricted inspection and recovery",
+            "native artifacts: graph and folder export",
+            "native watch: start and stop without submitted work",
+            "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+            "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+            "desktop environment and cwd remain unchanged",
+            "explicit quit reaps execution workers and rendering"
+          ],
+          "verification_sha256": "811daba04c919cd6f2892862a8914f7af0a35fc6d5c55889db38f7fe0a4c7d7a",
+          "model_boundary": null
+        },
+        "model": {
+          "checks": [
+            "native Chinese, formulas, flowchart, table, code; source unchanged",
+            "save during continued editing retains draft and advances confirmed version",
+            "external version conflict is visible and preserves the local draft",
+            "busy-KB read requests do not starve navigation to an independent KB",
+            "superseded rendering cannot replace new text; switching KB clears old content",
+            "native KB/global settings save, inheritance, credential rotation and clear",
+            "native removal preview, stale confirmation, spawned cleanup and kept resources",
+            "native conversation wait/stop, unique transcript copies and version-bound deletion",
+            "native structural report, link repair confirmation, restricted inspection and recovery",
+            "native selected/all recompile, skipped missing source, existing long index reused",
+            "native semantic audit with real SDK requests and saved report",
+            "real long-PDF PageIndex tree, database and all page content",
+            "real document conversion, compilation, registry and native reading",
+            "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation",
+            "one-shot HTTP PDF survives worker deferral; private input is collected",
+            "real SDK query/save and two persisted chat turns against local HTTP fixture",
+            "native artifacts: graph, SDK generation, archive consent, supporting-file exports",
+            "native watch: startup scan, recursive atomic moves, independent workers and stop",
+            "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+            "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+            "desktop environment and cwd remain unchanged",
+            "explicit quit reaps execution workers and rendering"
+          ],
+          "verification_sha256": "e38e341d383bb5e3a175a981af16d4637a2d45fbd09e9c228776bd58fae52f31",
+          "model_boundary": "controlled local HTTP fixtures"
+        }
+      },
+      "lifecycle": {
+        "wait": {
+          "sha256": "656af085cb127cd064d3a452722d7165562300daf3b3d75acffd38b8d598afc0",
+          "mode": "wait",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "stop": {
+          "sha256": "fe6f191aab30594e3784428ab8746c2552203f989d03923fc714589731647a9f",
+          "mode": "stop",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "delete": {
+          "sha256": "6bc81d5520ffa3c032f30a3f12b0fd6d374da8890d512b705c7524b50011d86f",
+          "mode": "delete",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "wait-restart": {
+          "sha256": "ca60c66d45e433a1192c51e70b8d63a3ac00c6baeed6630850e8b42099296ab9",
+          "mode": "restart",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "stop-restart": {
+          "sha256": "ca60c66d45e433a1192c51e70b8d63a3ac00c6baeed6630850e8b42099296ab9",
+          "mode": "restart",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "delete-restart": {
+          "sha256": "ca60c66d45e433a1192c51e70b8d63a3ac00c6baeed6630850e8b42099296ab9",
+          "mode": "restart",
+          "pid": 1,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        }
+      },
+      "environment": "Debian 13.6 non-root runtime rootfs with host GNOME/X11; not a fresh whole-machine image"
+    },
+    "windows": {
+      "inventory": {
+        "sha256": "a7a339a02bd35bde0539fd4d5ae9cc8f2feca0e3ce7b99e707ea5510c3063245",
+        "files": 11331,
+        "embedded_modules": 7302,
+        "primary_components": 153,
+        "scope": "Actual frozen files and primary build inputs; nested dependency/source/licence audit required"
+      },
+      "workflows": {
+        "native": {
+          "checks": [
+            "native Chinese, formulas, flowchart, table, code; source unchanged",
+            "save during continued editing retains draft and advances confirmed version",
+            "external version conflict is visible and preserves the local draft",
+            "busy-KB read requests do not starve navigation to an independent KB",
+            "superseded rendering cannot replace new text; switching KB clears old content",
+            "native KB/global settings save, inheritance, credential rotation and clear",
+            "native conversation wait/stop, unique transcript copies and version-bound deletion",
+            "native structural report, link repair confirmation, restricted inspection and recovery",
+            "native artifacts: graph and folder export",
+            "native watch: start and stop without submitted work",
+            "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+            "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+            "desktop environment and cwd remain unchanged",
+            "explicit quit reaps execution workers and rendering"
+          ],
+          "verification_sha256": "349a15f4e221c42d24054698a81b931ce0700b21fe3d6564d525cf9fd52398d9",
+          "model_boundary": null
+        },
+        "model": {
+          "checks": [
+            "native Chinese, formulas, flowchart, table, code; source unchanged",
+            "save during continued editing retains draft and advances confirmed version",
+            "external version conflict is visible and preserves the local draft",
+            "busy-KB read requests do not starve navigation to an independent KB",
+            "superseded rendering cannot replace new text; switching KB clears old content",
+            "native KB/global settings save, inheritance, credential rotation and clear",
+            "native removal preview, stale confirmation, spawned cleanup and kept resources",
+            "native conversation wait/stop, unique transcript copies and version-bound deletion",
+            "native structural report, link repair confirmation, restricted inspection and recovery",
+            "native selected/all recompile, skipped missing source, existing long index reused",
+            "native semantic audit with real SDK requests and saved report",
+            "real long-PDF PageIndex tree, database and all page content",
+            "real document conversion, compilation, registry and native reading",
+            "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation",
+            "one-shot HTTP PDF survives worker deferral; private input is collected",
+            "real SDK query/save and two persisted chat turns against local HTTP fixture",
+            "native artifacts: graph, SDK generation, archive consent, supporting-file exports",
+            "native watch: startup scan, recursive atomic moves, independent workers and stop",
+            "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+            "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+            "desktop environment and cwd remain unchanged",
+            "explicit quit reaps execution workers and rendering"
+          ],
+          "verification_sha256": "e9a773696582128fb29e7d3eb2ce754f22107e37eeced52ea88bc3d778023f84",
+          "model_boundary": "controlled local HTTP fixtures"
+        }
+      },
+      "lifecycle": {
+        "wait": {
+          "sha256": "09e1586d0fa55e132ed619ace09e4d0425f4f89446f0b113989d9e45c794643e",
+          "mode": "wait",
+          "pid": 5372,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "stop": {
+          "sha256": "8c33356a6d522edd60cfa4d1dd6885eabf74f44bb7d85acffdc16f289f9ee90a",
+          "mode": "stop",
+          "pid": 14324,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "delete": {
+          "sha256": "512fe637de4a12479666f435dbdcf8e9a120aec803e05b5d50aafac501cf598d",
+          "mode": "delete",
+          "pid": 13900,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "wait-restart": {
+          "sha256": "9c8f61af8d4331540a2b73741a7aa873246255402e4452f36558d33b671b8c13",
+          "mode": "restart",
+          "pid": 13144,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "stop-restart": {
+          "sha256": "b831bc2328b70e4614b57291ddbae773fae1f10e186a40f3af6352edc21b6e4d",
+          "mode": "restart",
+          "pid": 11792,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        },
+        "delete-restart": {
+          "sha256": "f30ac45d6c403ce817815c18b082b7ab9590d4a06875b4f89394c957d4332b92",
+          "mode": "restart",
+          "pid": 1348,
+          "scope": "Actual frozen verifier with Qt processEvents; tray QActions are invoked by verifier, not by OS input."
+        }
+      },
+      "environment": "Windows 11 interactive session 1 on a host containing developer runtimes; not a clean OS acceptance run"
+    }
+  },
+  "source_tests": {
+    "pytest": "1470 passed in 49.02s; existing unawaited coroutine warnings remain",
+    "initialization_fixture_correction": "Tests now acquire creation lifecycle before KB/global locks. Production code did not change.",
+    "ruff": "check and format passed, 248 files",
+    "mypy": "passed, 141 source files",
+    "review_baseline": "0cec254",
+    "standards": "no outstanding code findings",
+    "spec": "Live provider, clean whole systems and complete distribution materials remain. Windows production OS watching, tray reopening, wait/safe-stop, exit and restart have passed their recorded scenarios.",
+    "tested_commit": "eb40577"
+  },
+  "debian-production-replacement": {
+    "evidence_sha256": "0d7c00872cdbe44524645654190075b3bd4e060188fabb5aa4d5a4d93a6e8e60",
+    "result": {
+      "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+      "first_exit_container_gone": true,
+      "replacement_file_count": 10832,
+      "replacement": "Full directory copied, verified and renamed into the same launch path after exit; same build version",
+      "data_unchanged_after_replacement": true,
+      "second_exit_container_gone": true,
+      "reopened_recent_kb": true,
+      "data_unchanged_after_relaunch": true,
+      "scope": "Actual production OpenKB app.exec, X11 mouse/keyboard, no-tray fallback, idle explicit quits and same-version replacement. In-flight task exit not exercised here."
+    }
+  },
+  "debian-production-inflight": {
+    "evidence_sha256": "14a40248fe6866bea7720feda4b50e97b28ec9613cee5a968dffcc7fff417404",
+    "result": {
+      "schema": 1,
+      "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+      "mode": "safe stop during first model request of a two-document batch",
+      "production_entrypoint": true,
+      "input": "X11 mouse/keyboard; actual Qt file picker and explicit Quit prompt",
+      "task": {
+        "id": "7911869c01aa438a9e38980d5b948829",
+        "kb_dir": "/tmp/openkb-clean-runtime-6b7139e/production-inflight/kb",
+        "operation": "ImportFile",
+        "state": "stopped",
+        "stage": "stopped",
+        "total": 2,
+        "results": [
+          {
+            "status": "completed",
+            "resources": [
+              "/tmp/openkb-clean-runtime-6b7139e/production-inflight/kb/raw/unit-1.md",
+              "/tmp/openkb-clean-runtime-6b7139e/production-inflight/kb/wiki/sources/unit-1.md",
+              "/tmp/openkb-clean-runtime-6b7139e/production-inflight/kb/wiki/summaries/unit-1.md"
+            ],
+            "error": null,
+            "session_id": null,
+            "turn_count": 0,
+            "quality": [],
+            "halt": false,
+            "output_state": "none",
+            "revision": "b416ab0482532038244a56cdc1fd895e55686194c086d472edf56810de2f1e43",
+            "changes": [],
+            "unfinished": []
+          }
+        ],
+        "stop_requested": true,
+        "processes_reaped": true,
+        "started_at": "2026-09-08T04:15:15.719459+00:00",
+        "error": null,
+        "text_truncated": false,
+        "retry_of": null
+      },
+      "requests": [
+        {
+          "unit": "1",
+          "request": 1
+        },
+        {
+          "unit": "1",
+          "request": 2
+        }
+      ],
+      "observed_host_pids": [
+        2545726,
+        2547791,
+        2547792
+      ],
+      "observed_pids_gone": true,
+      "scope": "Controlled HTTP model boundary, actual frozen workers. No result had completed before requesting stop; current result completed afterwards, and the remaining unit did not start.",
+      "fresh_production_launch_showed_stopped_history": true,
+      "model_requests_unchanged_after_restart": true,
+      "kb_unchanged_after_restart": true,
+      "second_idle_quit": true
+    }
+  },
+  "windows-production-direct-quit": {
+    "evidence_sha256": "022e8c9cd491ae0ee75bf23b9f0dbd490394ad380f02f4467799be2e808017a1",
+    "result": [
+      {
+        "hwnd": 7930204,
+        "step": "initial",
+        "pid": 12240,
+        "exit_button_exists": true
+      },
+      {
+        "exited": true,
+        "step": "physical_quit"
+      }
+    ]
+  },
+  "windows-production-folder-and-tray": {
+    "evidence_sha256": "d7885e9252376899a3b31d819211eb2ff5ac6ad60c2a0d127a6bfef235ae64e2",
+    "result": [
+      {
+        "mode": "cancel",
+        "physical_quit": true,
+        "folder_cancel_by_escape": true,
+        "status": "passed",
+        "pid": 3848,
+        "hwnd": 2622200,
+        "dialog_hwnd": 2032740
+      },
+      {
+        "tray_runtime_id": "42,262558,4,61",
+        "tray_mouse_reopen": true,
+        "physical_quit": true,
+        "status": "passed",
+        "mode": "tray",
+        "pid": 13352,
+        "hwnd": 2163708,
+        "closed_to_tray": true
+      },
+      {
+        "mode": "cancel-tray",
+        "tray_mouse_reopen": true,
+        "closed_to_tray": true,
+        "physical_quit": true,
+        "folder_cancel_by_escape": true,
+        "status": "passed",
+        "tray_runtime_id": "42,262558,4,63",
+        "pid": 10612,
+        "hwnd": 20972802,
+        "dialog_hwnd": 4457414
+      }
+    ]
+  },
+  "windows_rendering": {
+    "outputs": 296,
+    "pixel_identical_to_534e35f": 284,
+    "remaining_state_variants_visually_reviewed": 12,
+    "source_verdicts": "render-534e35f.json",
+    "images": [
+      {
+        "path": "corpus/state-cn-light-4.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "72df12a70454bf1373f6d68e982701df1e4a36da48efdc418b2a8b44635aaf79",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-cn-light-2.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "3bde4a4e5a231051ccaec8154a0ee239f64f3b5bae387684952002075e9d33f4",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ec4cc9fd5488ef70901dae6225975687d161e1430567d274739056227cf18d9c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/state-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3396099a0babd84c648b17a81da578c1a6efc42f71afbdabca449245fb479d6d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/state-cn-dark-4.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "7837dc48711e82aec936121b65a952054083cb7d5ad5ca2a6054c8338289832c",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-cn-dark-2.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "481bc573b5784cec7e6734eb15c5b2e60219f4a44566f7ba9df009be092c21ce",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-cn-dark-1.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "3900a563c11d2d3091a971ff2e1086998988bdc348aeaa5748a116f3012466ff",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "d8fa4b700b8ff244ec93cd08a7b0917e253100e2eec3f0367bf0b89e679effe0",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-light-4.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "d6a1ec24c1511c9fc991f662b588cdbc44c029aca76870fe0b2d8cc88e05a9e3",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-light-2.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "8e9796f1a87ef03754443911b8577d96136814e33487803f040a03b17b71a02e",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2b62c4297f5aa10c538eefd012203f9e087d35a15b8a39ef5dd4d9d4d0dc3fe2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/state-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "1c5d1d996085810185d0fed079cd9da09358f7880cd34498a7ad95dd608bb3be",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-dark-4.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "ccd50b5d3cba63027d6e605dad44e4b327c44f20efc0a1fde0e1c2f679303470",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-dark-2.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "364d3f486d460d9a8d9e92bd41bccc5b15811043bac4a54d15efc02cc29cb0b2",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/state-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8c8073d8edd858c2bdc300f00dea7c881c8ee25b5bceb7bbeb273c8bb4193f1d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/state-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": false,
+        "sha256": "46fd01538a434be91aadb992e94dc3fee364ddd12c5f2e9ba13dd41e013fc0a2",
+        "verdict": "pass",
+        "method": "State diagram reviewed visually across light/dark and four scales; label order and arrow directions intact"
+      },
+      {
+        "path": "corpus/sequence-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ab087648275240ea1b7173764bfc867ebbe1a4cf9bbb6a78246580de3f4c770a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b3f89363497e2b8554bbe993fd4a0c79396ca3ab8d1f3d9824f7fbbced347207",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9607000b89a726974aad0ac328fce741aa8c165fc2ab1b24eebb17763c96e88b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "44102cfc5f128eba536366415d02687c6e2d8016b6045d0244b8d28026faa394",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "173ed0855cd7235e0c3ef144fbbfa71ca8727d5b771eee99847e1a9b0c93447d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b720179b9967754d21ffd65847faba6a527e78d537ed0b2e16ae54b0f66c848b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b1bda46aa4ffe62113be393fa2d6c7b9d15981f1b0283d14312f86979c4bd433",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c70d34960ebf7cad06df965982331c9f2bedcb3a488bb811b6b4df21e23da67b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "93cc20f94af413e210b49e4a13789e7327d8f705750be3a45065714cd0b584c7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ccb3c5504083ec9db73d7b3edaf35f46e782ad01fc379ac2ad6a69542d6e8c43",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "52032d4b96e4bc840b564c7543da344822e4ab82f0c305bfd1b85f464b6b1b52",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5001f4bbb8f5999bdf32482f2ec1206ef9bf7fc43503a6c4116dcaba4d50bf3a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "928939ba2df74a5743c1e58a852df9d47711685e5b2f98504db92cb6cffcf220",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "4c594a7729e33095a60e3a4706efedb53853d4647f91a93991bd471f04b2aac5",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9e3ca60b98483b7f7764a8b0c7c94bb5e56e86715c102afecba5a1734d8a2998",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/sequence-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0c0ff9f116ffe75f497aa8b91876431f49a9aa01cc71b864bc061c1b4d02462a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b0559469afa93e52362d8bf15359db627f1b24b12e2c4748d1d9b63605a7933e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f7f999098fecfa502028679ddc42d91a51da9abf23b53e746d219c314aedb59d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6f7188dd83e1e537fb315c4c27f9ea2cd63f6082a5312768c288dd3626c741b9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fea38c6f5a75fc4b3014d1cff4ad572f7ac6b16b7a400235a2dec24326cc991d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "525921ccf0e6fb9317ee6dc5c4f2797fd5a5ec9c89875c1fa53b9a00e0cf76df",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "41fe2559c97d32538b427651443a3860f156fe550f3d9505bbbe1448f2a3d4ee",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "44852af6789f621c32e6a642f8c98397da77ac1d95d19e61378c25aa55885489",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cce651a50531a9a4365083a369567c01279220feae7ab201f25d72341108386b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7590d5eaddab90cf314bb04201cb32e24e2abacd4e64ad9b8d8d2b2657fcd834",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5ec4b0f8db262d0eb46639612c25b53a9f0d7245b1be439e5433e945d4673940",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "66934eed56b94b76e1109149b6eef0d58a636ee6795c716e18825a540c627887",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "94520f3260d9e7bd77617a9f65003377a4ef62c5705645e24405ab7f9697e7bb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c71dce49e5e5908a607566b783841522ace9e427bd49aaa6b9855d21fa4b1641",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2d1512a3595deae14f2f5dcafb3f1f608119f98ed730829cad32e620090dff5a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d7533063143bd556adb212bd0f3f7dff756af64459bbe72c9ca183d592616e18",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/pie-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "566f510fcfbb4de4705e35bbb3f4886ae7738331013bf6505ebcf662d07c03cb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8e94aea6b3561cd129995330edd15725fc3567bc64c55818353dfce15621920d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "941230ab2d11c02fc5acf2c063e73d023fefd57bcb3b8e48c9ff5fe526a47e1d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "717f6e0ef4f94ad87fba13a6727031d283152ab9bd1deaf02adef9ed871615d5",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7aa5e8afafe476f25e59db90588031608dcd4b3fc1a4344771f906f5c80b7cc7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "20fbab8bf6b82a0e0a1ca4e7a677a84002e517064bdcb4beedf386739cbe7516",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1f3cf79317bf2589eeac0bc979742e3916cc67449b37f902b6257be57569f59b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2f285d6f292095bb899e665be6b7a3d7e3eeb6f1ea1c8eaea85e8b6a812ea4c6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e76674099030ca660601a1255335831a59936d191475a3671bdfcbc620172ef9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d0a248377a06f31c489244ae9ae0ebff72c59ccdf27a8a1a778f39c631d151e6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5888531305b1592673d8fb28102e7e3429042ece4d62a8ccc6ef291524b00273",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3b4acd120d0b48623965bb35561f7de1f5ba27120aa99a7baa66b7df2ccbb17a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7a8e044793aa6574134d9a88b82159e445bcd0fff555b655c5bf0969848b09f3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1a0787b9938cd5a7558891bbcfc834e0428346202afedcac65c825843c25861a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "81b2599435e569365206d90e0525e783ae1166816f406a58b8da02157c977a5d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1f1e4a285bf736379fed00f407f58841e82120f1caae712ba3ea400f558903ef",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/mindmap-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3afa52de6e9fc7134adf63d7ea8190530c72c3f0dd971083f77422015401917f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3765c0295c0dc18c40ae12068d6a1d9004bd700f556217ade0babe3b0003cb9d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "417017aad438d9a098ca9436bfe075186602b8966422f24bff7a3dd82a5c2432",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e8358c29b63dd6a60e3bd4667068e91d4f377049fa68c26fcfcb91a31c5acbbc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b4860556ec0e797f9883b26f2228c9c6bbec82c730dec37176920ed93c1b7eb6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "518777e5eac905178ef5fc7e454d228c4acb4c808af9bc1344f27cd1dabf0727",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5b1133e06e408f35051be726c0cc1ed55f7f097a057307654acaf4c272aa72aa",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "33d75942591adeedc590634bcd290a7426c89510f70c9be4224bb4cf26b1e719",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-root-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ae97b638c76aca99fa879b656a0999479e098048bc32cd50b615b297b133733f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cc34dc33e74a3f51e6e93ec4b991f9130aed4ca06a671bc8bea0585af77ff5f5",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6d561f5f55735c92726f27c9f88a0b314ddda125ac4c80148c12cf0e1de65fb9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "812c49bcaf60ffe5ffd1c40ab8023ab3a4cd24cf7cd0f2de5ab441d97673f394",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cad3f3bdbb3874f88d220707fe0ce8385168a0c056622853f65b0c6b5372bb1e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "059d964cfcdbb58b967ffe0c82df0d38cecf3864e80a950c752307d4f0a3abdc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "382133d137a1e2ebc949c457a4b665e91f77afb8c71ecf9cb16f11b9e42dab33",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f65ce552c8a05a1a7c372733189bf0734670f0c576cb7ef3122d34cabe090cd3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-matrix-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d7efde19ed8d3d6662b7ebfd7ce3809b6f46a81f66400c64b8223a1e682f71d4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3da6f6b6f546a9fec2e9e45716121a37ca87b12dcb020c425ba51c208a07c21a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8cdcb83cf14e8efe732f1e4bd4bf364f995ef8d1a30dea2c4deb56cbdbc958e8",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a7da6819f5f705431388c5e51759204659965c92ea26ea65ae30eaaa2002bc0f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b340376127ad3c5955183a2afbaf80f6edf7c36a2db79a059348ca780ca91746",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5458ae616c9a1be803c521f46e106bc6516fbb0aa6f6bc195d8a420c94babb5c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c9291c9770a1af13b3fcf5baa1fd031224203cff4da92b6af94473da3bb2f553",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "138b94be78f7d42722e7968097864e2a60cc8929e4620c3d9b6ea0446ddc0678",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-macro-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9d70ae5e4d32f8c3ef8aff6be2c39e8df89d26dbb66742c775b1f94c1352dbf9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "84863ecab4e59a4df415367c1bc70f810dc19aee4b70cef49d6a8e70f4bf2079",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b4fbc74c0feaff9e14c2e1e152b4b24588c4aa6691dfb4fc600b13a68ba06a97",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6554a7a40c646486bc0befc93854ac5bcdbd17b14966b9c6ea14522b863825d1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b932754ce3a51a68dcb6f113b08330be98bc9fdfd1836bf2462a761ff2f35ce7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9eb355c122a32921fe8e0fd89835b201ea4d12c5ae17ce8276b00606339c41ed",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "4ebe3c26031685b9b2e9f566704c2df33dc22f55ee58be1d8a5028dd2e93919b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fa7d648b68a0ce86965a1032da7d740a2e15dbf06cc6199ce58397783cf19613",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-integral-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "4c89bba7bf96342171eaa0a7a0f3c5b2347e46845c64a9e985db4d0836b866ea",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "4f1a6ce89790dfdcf6b36bbb04bc4dcdd9db6c55081c1813f04a3d091b5c2610",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a2e959e61d34c45644c9e30fb646310c0a64e07240f40c08e5a89190a6e44243",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fdea12b2b83a5b31d64b16cff4f244c6be1378a4bf4fc502b321fcf38465fc71",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a093bd33bd9ddcec05160c55c33f25ddc84838a6fc283cf05b05ee8603f37984",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "910b4fa5d1c60d2c127805158c6e74ebe20326049d68145cbf9983803a3b17df",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7a6ceddae0d63d644ed815cbe10570ff7626133832d8467307641d2a7b51c2ff",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3d3bce38c6fd1d2f8369e5b728c734528d4bee5e7fd9726c7dea6fda0339ff17",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-tall-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "13e7b5a720012da0c83b8585e4651741e627658d1f8ca4dab0b8d35b83557743",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2752262201c19f356cad1c11f74877be17a50de3d1ca8fb4ee7d42ca32c92fa2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "42f5d4ec313282be7c23e16909da582e9c60316a41db02ea9ade825741a7d33b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "499ffdf88d805acc6e8696ff2ae5df488b6deda20a0f6f2860fefef90195b31f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "78dd4d18b97ff27de819aeb8e0d7f080c43dba22520ab40b92c62398d7fd756b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "79bb635afc0d336f0cbf9b0953b7504351dabe08db17115785b730429fc5e911",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0eca413e2f323ce2c59569ad278767f57019417279a876f28790754062527570",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9c3151bce2e81c50e3a07acf4a9d97df00f44b4ad544abd65e6eb5e9242033f2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-superscript-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "61fc7dcb755ceb8d91453a21b8e0d8d2f1e2990928ac1a7dd1c0d0654f4fe3d5",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "72a6ff48ce66d342aa715e52f411390dc0df0ce627f9995f56839a426a698cb7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cc37dfb397a4723ff573d6f258307a735b5cf3dc2ed78b024e799e90a3afcf45",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "20ec0f1f46d13fa935297de15cf418dd54948613e07e2e265fcd7da82bf63b48",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "54336ef9104f2cf78cebdb6a6c5eeb0b4b00d051ff981294a1ba1167122fb927",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "353f1773c9c20aeb335bbff3dfd6bfa251b8c3ccd738f9e63f986ff2f906a6ee",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "97381fbf80bee091ce19a128aa656e0b564d0101caab22f72758ae600aff342a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "40ee6086458085cc066223a3ec6d278510840a0e46f052a6a706bc56ef56218a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-subscript-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0a7e863369ed736f3219bef06cd455313c6707504a8f3292c754294a3f203ea4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b599329b0ac95b5373c12ac53ce2b29b95eadba68f806a77b858a065ec1fc48c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "77dfa0dbea83694dfec3133a9076aede559d562f3a1421616478d94fd9cd7b61",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1ad4348184319eb8f777f8e619c46c07e33b0f01634699742e6bf2730b1dec66",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "eef059d7169677727af1c6042e387dff0410e062c4842885ba18a74b4ac971ce",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7e8088725f9f56c8c5f0fcd163d01f69c78dd4fefa6ebcb4c71022a1f9553383",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0c4ed9c84147908b38c8f6ae9a0d0083ed97c1f1a985e19f7b53aea447092f27",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a49f47b92865cc057e852b98ebf0c77768ad190781e2cfad2b0cd4908f8004f6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-simple-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2ebc1f018590221499d1b36fda4d49bde4ec7b282e75f6ab845a83482da6682b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6874e4beb0fc321a88501186f495daa27b1d7850225ff6f3b2603614e9ec9b99",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0ec8c99d6c4437e5e0fbc54c499c8334aae8c001dc70897fbdbae94dbda3c76a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "faa2d32a7e30f49b5f50e01bdf8b398c9fee64e781dcd316d4d81e2690ebff2a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2e31840b01994db8a32f6741f856039af04f53625f4e1b54c981426cd4df0542",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2998316fe393e822b371bd38c6e87647646067321143d3e0615f37bbcc9a47d4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "07a3eeaed2a353faa79ca92f2ad36166bb46221fbb4efb201299a59f230d1213",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d0e0ca93f7551dc9f9c1a9e693ae135f6c0655425acbf314a3b0a44d0855d4e4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-raised-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f8293771e4c5bda06aef02f47e972e98a3f395a8483f780551320693010ccc8d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f398d5c754a32e8a2102a5b9f6a4df817c67f83c39b688f1e1b5d4e310ce41e4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e209c42ddd946add74d481a2a7d67f17b4212c6b13cd5deaba3280faefc5759c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cc15fd1aa75ea1684fd3eda80663637f49df0829d8eec548fc52af1f570b620e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1fa21d97367adadf011661c52690dc3ff5726403a79bc8a8dcb848fb4d4c93b3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6d8cc379b897dd85405b18c196c11ae10f3ab5d8a5a781a050dbe7dbff49377f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "37641870d325f04edfbb015ef64d516e41b382f260edb0dacd45900460d4c5cf",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "bd784bbf6a6df00cad8207e9d74c43b37a0981aa9957f9754e4eb0d32f46d237",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-inline-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5567816c14adc5a07eb63b020d250b407baf0947ce6876d43cf1653a34ba2225",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "61656cf1364fbb439d18c6dbc0d3c0912d01d6db6169e1db4cdb613b1c50e49d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b126c56bbd0bb1abba51583c1d447cd5ee1a5e8223513bcfa5d5a1883e397c01",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3278f86cc17320a00724959dbabd0a6cb38e2f1855dc0ea53fb01f4951374df1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3d3b49e61b812156ca75fa349c2d40cdfa3c28d1fe4ee71d0f81a1d81daf31a9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d59b83b8898a92088bcd97e06ead59d647e122b74d9dd0c2a2e2c2229ab1277a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f577b553d01a10ebb649b2f18ae95feed862cded25f3f48db929ee8c7c37f0b4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "11607d2c3336a8aa420afa64b4b07ec2ae19ccc868a8206e73bf36901b7d3e9a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-fraction-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "00b2bcf67be08c56013c856cae72a0899e3ad7ee32ea1d927c09d9adbc2787e0",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5bd67ade6e436f270409a9c698442bad11d68a1289090d0e3d409bb896064e5f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2b9e17dad802e05699222c771731fedfefec6dea6ffafc35db8de1a9d3960561",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e53cda2c58225a218e598350675e0f302bfd781a7d52494ac6d104a9f33334b2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b4fe7f9626f745113861d70c9bee639016f5697a494bb1e0bca476c0ea007a6e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "030eda5179ef7005bb351674a0cfd8c66d92c43a66e4dd8cc26d05c31a0532ac",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "847bb569f2efd92b32162f9bfb7f6ec766126a995ff1e2a869c740ede0743d0c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d8cbf245f94b32656d5c5ca41d1b662462cef5ada185faee9159516dcd8ec7a9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-delimiters-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0b0c5fbc14ee9a63070c65adc5a57655a9ab8c81d60516b3b2ab2f183d3a1740",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1d3a923d6e8074f965bf5143a9f6ce7c6d41642e7133818e087927f506fae6c3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1f57f04ea34637c1435aa179ff01916379798b6ca1874fb9c85511e485031a42",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6cee95273e7261ae94e379ba13af1824da5ba149ccdee0a800d8306f87f16ce4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "016c0f8693d0b858bc1b390c9441850a781078a3bb1d70834b009c1d081c07b6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e43fc5af6d6df2bc3b82e52acba9c92219f44457cdb3c4a0f247767bc001d07b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "30290e84dca8b55e44f326f4dca27dc79ec2b931e0fb7c386f9c9c3946388659",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0adbd9fbbbe69fe4bce197c36253c5e4289b58e85db11f9ea5bf1f2f89a47290",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "dd5c57ec91f40d1c1c6c048d4ec7ca904fccff32079f509675de67a2e1675bbc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "375e645aa1fee3440efff06b1a930a81e9c863695dcde15677f6d147ce9b0d0c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a30bd7af668f599732ae18185e9d7d81c0283177f2d1cda2f041e95a8c158b6e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7ba54215dc0bdda089c146342862a277c436077cf93ff735a220c4c0874a4dc2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-frac-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "aff2e81017cb75a02a57fcc85e2a5f1e279b8daafc182ddfdd7fd96cc95accc1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9412147a3cff40d09a514209de964a457833fea2923dd0ccc7c8a04e60846b0c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c983ecc1c1e7bfa7a516ad3fbc389a92e423bc5f6927b99f50ad1d9c2a2c7d10",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ff2e2b8450acb6e596521d4b5dbaeb11fba152c9643ccd981511f3a2f0c95548",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-chinese-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f59acc9e873bc1c611e6d3242d8e05ca9d950502aed32c7eaeb0b61effd16fe2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cc3c082e26b22b5b71b564a1d9079306ceca5c8dfaf9760424b8f28a50390495",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "14c8b327c75d4b4329d79a98f228a678e24e859523b6bbee1ea17be3a47a7fbe",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "708fb9f3ec432a6e658e472fd44949d42d6ba2dace0e8ee74e94366157a6ad47",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d2865af88a44198f91233db7da13cbaf6de2ce20b469d7ebd24b31230aa6bd37",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0daa7384a0e3d383b020dc6388ed58738bdfe203f144c2205b63a74bc4688ee2",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d27ebf4fd686e782d04f8eab4032ec309b5d4c610a4ff9a37de26549b67905b4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e53a7e88a377535c375b4276de347cc168112abacb08425b07dace5c9d509f93",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-cases-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2819f1b9d23794e15f3ba165b6a7c8f095447f1e9ced1a741107fc65706840fd",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a3f7975c24f22cf17f533c1b23fa629b71eb917211939eab91cdb3c5a909884a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "360fb2265e93c05605b374b5b9969a1ec013a827f723b59415149e79b372e43f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "52b4711c3a56cb66b34db1d7a19ccda5a48ef5b7018225e79d4e219adb1b1918",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "573733867f4e522aa9c45209e1232988fa73a6cf4d24e8baba3dd5efde644fef",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "685aebe934245dd2c99fdf2339f214754d591e25390dae65306b9acef3badd69",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "504961d4f3a2fbbd9ef4001a6c1122e26bf29086c5a210dc5b27f906f25e76db",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "17c4fba1c5828a48b7fd3eb58f5d8433e26fb1a363d4593effcc576a89680ccc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-aligned-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "77119e0825f5ca26e122f443e37fafaac6170f77cac4e4eb852656ac01f3aa69",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e4e96e687fa2c500221beae073d7aea452249a98997df815d31f8ed960114641",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e34d2ff39bbcbcaa346f543f8162b4c964346b5cfa725c452caee948b9183449",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c7ca4ab264cb3af244200ce7b30be390e823389d9af0ae6c1a3333ed848a95d8",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d5bda302fb71cbd0f585412f83fcd3e836fa69454990bcbc50d4e2bb11f9e056",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "830793fcd7cb71d152036d80f53b87a725c827a141af3e4a6321a86747056eae",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e37c0943e7841857d91855e17a9f813e299d095dc0f7b44eb21d6b12ecd75778",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "afec0b3ceb34274479c7bfd5528a2c2ff386a5154dd1564cb3b741cf26752ba0",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/math-accents-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "900cd9f41fc9454b0641cc52a93ac10993f88669e1377361f764862c1ff06346",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3fc8045120010cc309d71319ad7d8a5500e591ff14ae0777dbab57202041fecf",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3bb23b2dd9eb05e2de7a20310b1489f670318ef81d8f05d32aab322af25c419e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "284fc6a80dd0ad7a460b8320ab3479977bb5ffff183d23b3d1cfbf4ffe712733",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6a4e37088a76e39daaf712f2a0db6aad047f3a67383dc59ea305d8a57d766e10",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "136523c2fc4d2aa9872cd0c2cee73e2ca49b9c31451942c5150abfa4c5c43fdc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c47ee970a0f6267c5c8b9da4d6fb7dea6ffa4e9be00c9a9f84790211f75e9f7f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c06584599f96f7615c7827439b53dc2af18262831eab41e2d234f603262df8b1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d2cc9f57619e78e24b7a90cccf4a3d4d7247f42b20e490b15ac4d58478a63af8",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "058989ccd2f429e3a69ccfebaa04b972944379ae56ffbd847656694c1a2838f4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5ca5b6ee0dffa533e232e4c9a4228f2549341d4e8f881107a2288ef9a734a116",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c05dbbbdc0b4a09ca6aa6fcd25ab56a0d9d728d0eeecd092da41dcb3ae14c2db",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "016a8f85f79a7e0e633a1b3aceb8b08a1ec1f44036de2a2de5612b65c8a528bb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ca30e4e30880ec46c536c7c1b72dee919a9b82944ed2b7e9f7f7d1674ca2e7d6",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d496fba85fa74431d0671f7d023dba3bc5d5962a3eac4924f4c20fa454c9d906",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "5ff729b3c4e82db216306d9189d38d1d9cb7b5e268b149676c9ef2637f331e64",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/gantt-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fe2f2502d0697881d497cf5197e6dcb756ba2bfbff87e34fb4dea544c1840fb1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2be66beede6a6aa1225e76153b3ed4ae12bfaa137da7133b297e023b67532c23",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2a0072d5f21cc7e61d43ae78356213b17a3e78fa573accdd5260511bec6334b3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f9ded0ccf2cabf62da689355d7f0c51c730ad1fc09cde553c29a20f20664f421",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "db21f0fa57c89e5fc48d6518b0db7b1a46429ff26c73324a52a560439e51b00c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d49aa2643208ee25ff192493cf1058a0a195b443e95391ed6d9ae0863cd5ab25",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "969ec9db42d6a4c62ebd2ea1474c495c4fc5111176635d29050b659b7aab1e82",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c724617dee343dd1479aef5126ebbef0468dc92f9d2d5f87fcb85408280c444f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8056c15309ed6b3900fc2cd7a118f49908f2f358b5ff3fd319a26272563012f5",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "512ce89143716415e36785ebb270d901383bc806a1606d299e0a64dffd008d9e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "77164bf1f178e0ee08a4dbf8382a59e1fd20a8641725570a11b07a9da0549a6f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a5385a4249bb26fd4325ba9d7523a77323e46b87075dfc1497821b9360192eaa",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "75b2d3be2a0572ab46baaad5ccbff61d31150dfe70984e31f901504ebd170fe3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "48f29102f3aa82786125ba0852df3aa95d0f8fc416e78bdb495eb4023c426356",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "18aa92fbc562fae01e82574b2e93bb6296833921b25be9b300e1af88ad894165",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fe35fec796021d57fe6bc642c7b174dd80a8b216600cfee2971c17e23d21a5b3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/flow-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "13820d468dff560ef83114dd4789f6cac3f1c9dbe50876e85cb7f20ccffeeef1",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "56f89e5bddec7428333bf44ccece0a6273b48e5ee20c52d6fe800b40a9171762",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "fed636ced4b43d709af31c1fe01a64da4ad7ac4bb7556daf4e723c5e9850909d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "6c56426b9c790462e37994e3d37177a1cf4ffd4cb2848e2b37688ac3669cd3f7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9de3f29e9d242347c7290fa1f533c48dccdc7564ced362c9ce18ba609ad59183",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c3b06991932600933c247530098091317eabf265a6dad667ec915d1142f4f371",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "317c2f20cdaa4b2026ae0ba954d6e0852541791d89e4e6225fb808104f8ba98b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c391c20d2718dbe05743aa3428c6e3ce620188207d201de17415f632ef9f38a0",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-macro-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "ce9ade0706987a53fbd2bd3c7f9b0558493f2c3908c8292c3cb10fb30c17b14c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "967f9ae4a894eed1fafcac1604a8c738cb58315f98d28b9047bf856c7c94720d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cad97f65247a6a1224f657907f2e714db1948d6efd18bd50cbd4529d336e730c",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "12eada6b1ffe35b193afe711f4380c56b4b1a4e2519813b581fa85e4406537fe",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "18b842a703ff96b7a81a8c9514a733ecd0ff8e7012ee8c2063d5ddefce1f23fb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e2632cb84da779259f7b54e4bbae2c331ea6c34c2c008eb69f02bedcac266409",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "bd0eab27d3018dc00b2e469b000fbfa8318ff6e6ba94aed3bee745c338c3abfb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "bb7a9df02a6f6e2150d8425ad17b65064e86f28e32dee9f77317b3df9a2b797f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/error-diagram-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "16b9c03379db5f1bbe59ee484d9517bb9466ff3e9ae295817278cd4773210e03",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e4b79dc58d1ebc1fbbd3d72b482a8ce76a2f4b167fce94c410c7bd7bad789171",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c0639edcb245b79014ac8a7f5a11b18932a1b029bfec58e1c5c0c336d073e01d",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8c6146ab853acc51f24093e2d83bef77fc11ac31278d6cfa312ca5e584c66f14",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "17f5dc0cdbf5b358af90a38753b559992be9c856f7f6f75f4c3e03736d29d57a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7d4e7e216844ec8325925ca59b4cc552035bcde2509f045b7a1e29369bbccade",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1a706ae7a5749f95c7d85d21a1341da123f1e63c4bb883be289fe3617628618e",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "0521f31fd8f742692201fe96c8210f381f8bbc1206f6c3881a67876539d0d7ba",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "b16e1b5627cbcbf612bfa6b34a8f0eac3e299eb83554a9567a8002045afb69ab",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f18363396a06492d1b05681a04d38f4ec20f1eea970f26c45b2a53fa5d493053",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "36db6b960bace2e551840fa5cd29fdb51f94db573ff98f9ecdd4421283281eb9",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1fe226eb391d98dfe661e38b713b0d96e2c140c7536e6933027006ed2074fffd",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7cd0a93e8b3709c3bf6539ab6741ce85cece4ed48d0456ab41be273dc7a2a9fb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1cc125edff1727191585e81cde59c6b692476e9f986d62b8e9b5cd5ea8576083",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d755c9720766528b939b0fcad60b153dbde62a92df9e1cc0f10d55f8c5e5ab19",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cb50b98fb6ee44a0f245ff56771000e868677f90d6e0efedee0cf7d6c20b37c7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/er-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "a4b0ec290a3e687c66f5d11d972cf49aa26e43d211aecdc3cf7f51d2c848ef29",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "98e15e933238185e476116460280a4f6767124037f79ad6306a8f64b3391e8cc",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "81c250ec2bbefc4f4f85ae7a88b3fb5480d29294f41689916fbd2f9f2593be45",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d3bbac02c1a9e759212bebb551e3a8da5730701d1ade12a8703447b3e8f4f379",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d8f30737fafd42e776e0b50103910d391f959f22534eb95035d9265dff716d68",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "d98d612da5171d77d59d73443c3fed72f37c90b08572d60152abc3ace37b9c15",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3e17dce658aecbbd5e967ba9688ab3b8d7cfd326115b48527a826cd26d2b6d64",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "aae9da1206877e18b63ecba41ecf2bbef7cdb735ddf62304cef9faa623b35beb",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "f262837653eb4fb849081eb3293b2e18d6f5819693d6846257338033f060da90",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9c96250f631d30680fcbac0f6f681307c76f793c1159647cc9a2934d43407214",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "acc87409c4e6eb941369e0ab514496f862a510f3b9c58dd0979bc15068d34b2a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "9416f04b0e950bc41320f11b31c314efddfafb0d45424be8a7834e8fd25ee4b3",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "75901691472b3bc698d196688732d536a18d61ca3e1d41c3f3cbf42776164eaf",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "04bed78026ba5137d659fdc187a74e0c1ec101d4040e3564db80778331ed5510",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "118e490b9a3421e1c7aae2c7defeff9ef60ad2fffdf128e33554b6e5645caf56",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7c0d5c5282529a7041c044171af473fd2b299c1b45d19e60b723c2eaf8049875",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/class-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "8876842fba679b31f4587b2b99aae6b5f13aeb364e40b4efee47b71aca89ef75",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c2042272fe53ba3d6ab09eeeb027ddae4dc14c768b7f081160f519ea51c18214",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "52f2a0f2b377c956872969960c3f7957238215936b0ba5582c21b0694e6a416f",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "477729a8b3bef52f41e19751e3833613ddb16aa98f8a1545917a6435f9c93c45",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "7bb0e917471e773d1511f068ce077b82a09f0a8cf756a198ea966b149b27d0a4",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "bf4eeaa101218af8224ac1f3fc20e8a5c4380914972c2b4720f50b68a39d871b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "756c1642558ae16e24d22745de7f3ba9122715b007c6df828d1a868de321faec",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "38a809db54a84280eca3e2f6db91bfd77a081e2efc0a8fa3db90922e0632a823",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-cn-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "bf9137dba274aa256e0ab5043e11b1fd7fc8e10fd435f8f29ae6b56aa8438a91",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-light-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c9cfdd3fa06317964576c0f0b88c91dab6a9b783567ed16d57007c2cb54fd1b7",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-light-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "3845a93e949ca1a9e78436ed4e708d53c8b9ba15d8056c4389836c09fc074334",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-light-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "2d0fbc8b241e1b7b854d1971ededdc59570649816d9ffc67a1a4829a92e0116b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-light-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "cf4d0ff12fbfcdeef7903fdc97be03783e49fae2e3cb4fb1db6c93fecbcee347",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-dark-4.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "1c0488e594dd4bc991f268929d9a122eabd246111964de023abfbc0356b2ba1b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-dark-2.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "e04efa82633bc2e1e90f978526245ba6f680af01bfdf82dca3de66164348c3ae",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-dark-1.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "16c78bba649688e93097c4ea4acd81d8c303a4961589b1d0649bce2a73c5807a",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      },
+      {
+        "path": "corpus/c4-basic-dark-1.5.png",
+        "rgba_identical_to_534e35f": true,
+        "sha256": "c75db4481e92919fbd60f5bf8776b73e485be05f4452eb067656534edb1d693b",
+        "verdict": "pass",
+        "method": "Exact RGBA identity with visually approved 534e35f output"
+      }
+    ]
+  },
+  "windows-production-inflight": {
+    "evidence_sha256": "a0240379c84a755154dfcbd84c594ffa758127c42e453331e92345e9057ec7b3",
+    "result": {
+      "schema": 1,
+      "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+      "production_entrypoint": true,
+      "scope": "Safe stop during first model request of a two-document batch. Real Windows mouse/keyboard, controlled local HTTP responses. Current result completed after stop; pending second unit never started.",
+      "task": {
+        "id": "36e4c31ec5ee429b95325dc2ee9441f9",
+        "kb_dir": "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-inflight-6b7139e\\kb",
+        "operation": "ImportFile",
+        "state": "stopped",
+        "stage": "stopped",
+        "total": 2,
+        "results": [
+          {
+            "status": "completed",
+            "resources": [
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-inflight-6b7139e\\kb\\raw\\unit-0.md",
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-inflight-6b7139e\\kb\\wiki\\sources\\unit-0.md",
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-inflight-6b7139e\\kb\\wiki\\summaries\\unit-0.md"
+            ],
+            "error": null,
+            "session_id": null,
+            "turn_count": 0,
+            "quality": [],
+            "halt": false,
+            "output_state": "none",
+            "revision": "477da367cc30d185e200d4f51dc6f250b7c3d3777bf01b102395b22802254198",
+            "changes": [],
+            "unfinished": []
+          }
+        ],
+        "stop_requested": true,
+        "processes_reaped": true,
+        "started_at": "2026-09-08T04:53:11.293261+00:00",
+        "error": null,
+        "text_truncated": false,
+        "retry_of": null
+      },
+      "requests": [
+        {
+          "unit": "0",
+          "request": 1
+        },
+        {
+          "unit": "0",
+          "request": 2
+        }
+      ],
+      "ui": {
+        "progress_visible": true,
+        "new_import_disabled": true,
+        "task_details_enabled": true,
+        "observed_processes": [
+          {
+            "ProcessId": 14064,
+            "ParentProcessId": 12212,
+            "Name": "OpenKB.exe"
+          },
+          {
+            "ProcessId": 13044,
+            "ParentProcessId": 14064,
+            "Name": "OpenKB.exe"
+          }
+        ],
+        "observed_processes_gone": true,
+        "http_request_paused": true,
+        "scope": "Production OpenKB app.exec, real OS keyboard/mouse, controlled HTTP model response",
+        "pid": 14064,
+        "status": "passed",
+        "opened_kb": true
+      },
+      "fresh_production_launch_showed_stopped_history": true,
+      "model_requests_unchanged_after_restart": true,
+      "kb_unchanged_after_restart": true,
+      "second_idle_quit": true,
+      "restart_ui": [
+        {
+          "stopped_history_visible": true,
+          "step": "restart"
+        },
+        {
+          "hwnd": 4326188,
+          "step": "initial",
+          "pid": 13832,
+          "exit_button_exists": true
+        },
+        {
+          "exited": true,
+          "step": "physical_quit"
+        }
+      ]
+    }
+  },
+  "windows-production-replacement": {
+    "evidence_sha256": "8b8a332fb3980bcbf228ed6574e37e1288303acd5f40f24d05cd5f43a39b8ca7",
+    "result": {
+      "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+      "replacement_file_count": 11331,
+      "replacement": "Verified copy into the same launch directory after all owned application processes exited; same build version",
+      "data_unchanged_after_replacement": true,
+      "retained_data_files": 246,
+      "data_unchanged_after_relaunch": true
+    }
+  },
+  "windows-production-replacement-restart": {
+    "evidence_sha256": "54f1b0da8e702f284c894144b6ba177ccf52ec891a8e787870e34d2a7d499029",
+    "result": [
+      {
+        "hwnd": 6095740,
+        "step": "initial",
+        "pid": 13240,
+        "exit_button_exists": true
+      },
+      {
+        "exited": true,
+        "step": "physical_quit"
+      }
+    ]
+  },
+  "windows-production-watch-tray-wait": {
+    "evidence_sha256": "91edd487fc9fef498838b5f81dfade524b7f8a1ba4233f1c6e50e804a3499516",
+    "result": {
+      "schema": 1,
+      "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+      "production_entrypoint": true,
+      "scope": "Production watching continued while hidden to tray and triggered one file task. Physical tray click reopened the window. Wait-for-completion Quit stopped new watch input; file added afterwards stayed unprocessed. Real Windows OS input and controlled local HTTP model.",
+      "task": {
+        "id": "eddba7cdb011481fa81a2a3da1ea31c8",
+        "kb_dir": "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-watch-6b7139e\\kb",
+        "operation": "ImportFile",
+        "state": "completed",
+        "stage": "completed",
+        "total": 1,
+        "results": [
+          {
+            "status": "completed",
+            "resources": [
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-watch-6b7139e\\kb\\raw\\unit-0.md",
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-watch-6b7139e\\kb\\wiki\\sources\\unit-0.md",
+              "C:\\Users\\cloudyi\\OpenKB-native-20260907\\production-watch-6b7139e\\kb\\wiki\\summaries\\unit-0.md"
+            ],
+            "error": null,
+            "session_id": null,
+            "turn_count": 0,
+            "quality": [],
+            "halt": false,
+            "output_state": "none",
+            "revision": "477da367cc30d185e200d4f51dc6f250b7c3d3777bf01b102395b22802254198",
+            "changes": [],
+            "unfinished": []
+          }
+        ],
+        "stop_requested": false,
+        "processes_reaped": true,
+        "started_at": "2026-09-08T05:01:02.634460+00:00",
+        "error": null,
+        "text_truncated": false,
+        "retry_of": null
+      },
+      "requests": [
+        {
+          "unit": "0",
+          "request": 1
+        },
+        {
+          "unit": "0",
+          "request": 2
+        }
+      ],
+      "ui": {
+        "tray_runtime_id": "42,262558,4,65",
+        "progress_visible": true,
+        "tray_mouse_reopen": true,
+        "observed_processes": [
+          {
+            "ProcessId": 14272,
+            "ParentProcessId": 9932,
+            "Name": "OpenKB.exe"
+          },
+          {
+            "ProcessId": 10644,
+            "ParentProcessId": 14272,
+            "Name": "OpenKB.exe"
+          }
+        ],
+        "new_file_after_quit": true,
+        "observed_processes_gone": true,
+        "listening": true,
+        "watch_triggered_model_while_hidden": true,
+        "scope": "Production app.exec; real OS tray mouse and keyboard; controlled HTTP model; wait for completion with watching",
+        "pid": 14272,
+        "status": "passed",
+        "closed_to_tray": true
+      },
+      "fresh_production_launch_watch_list_empty": true,
+      "model_requests_unchanged_after_restart": true,
+      "kb_unchanged_after_restart": true,
+      "second_idle_quit": true,
+      "restart_ui": {
+        "status": "passed",
+        "idle_quit": true,
+        "pid": 12240,
+        "watch_list_empty": true
+      }
+    }
+  }
+}
