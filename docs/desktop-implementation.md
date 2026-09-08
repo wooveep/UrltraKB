@@ -259,3 +259,69 @@ case. These shutdown fixes postdate the `534e35f` frozen packages and need a new
 frozen run. Real OS tray clicks, in-flight model cancellation, external process
 observation, program replacement, live-provider/clean-Windows acceptance and
 complete distribution materials are still outstanding.
+
+## Production lifecycle and source audit checkpoint (2026-09-08)
+
+The program directories exported from `6b7139e` now pass all six frozen
+lifecycle/restart scenarios and the native and controlled HTTP model workflows
+on Debian and Windows. The 22-check model workflow exercises real worker
+processes and SDK HTTP calls; responses remain local fixtures. Windows ran in
+interactive session 1. Debian used a non-root Debian 13.6 runtime rootfs with
+GNOME/X11 supplied by the host. Neither result establishes a clean Windows
+installation or a fresh whole-machine Debian image.
+
+The following additional checks launch the production application event loop
+and use real OS mouse/keyboard input, outside the built-in Qt verifier:
+
+| Scenario | Evidence |
+| --- | --- |
+| Debian no-tray close and idle Quit | Window stayed visible with the fallback explanation; explicit Quit ended the container |
+| Windows native directory cancellation, tray reopen and Quit | Three fresh processes passed cancellation, mouse tray reopening and their combined sequence |
+| Safe stop during a model request, both systems | First active document completed after stop; pending second document never started; observed application/worker PIDs ended |
+| Fresh launch after safe stop, both systems | Stopped history and completed results remained; KB hashes and model request counts did not change |
+| Windows watching while hidden | Adding a raw file while the workbench was hidden triggered a model task; a physical tray click reopened the running task |
+| Windows wait-for-completion Quit | Active watched task completed; a file added after Quit was not accepted; all observed program processes ended |
+| Windows launch after watching exit | Watch list remained empty and the unprocessed raw file did not trigger work |
+| Same-version program replacement, both systems | Complete copies of 10,832 Debian / 11,331 Windows program files were verified and renamed into the same launch path after exit; 240 / 246 retained data and evidence files stayed unchanged through relaunch |
+
+The production safe-stop cases each use two documents, with no earlier completed
+item at the time stop is requested. Broader completed/active/pending batch
+semantics remain covered by the shared application tests. The replacement
+checks replace the same build version; they do not claim a cross-version data
+migration test. Failed early Windows input automation selected the wrong recent
+KB or missed native controls; successful reruns use the owned process/window
+and actual OS input. Those automation failures are not counted as product bugs
+or passing acceptance.
+
+Windows produced another 296 corpus outputs: 284 were RGBA-identical to the
+previously reviewed `534e35f` images; all 12 changed state-diagram variants were
+visually approved. Debian retains the prior renderer verdicts, with current
+native/model rendering checks passing. Current summaries and original evidence
+hashes are in `docs/desktop-evidence/acceptance-6b7139e.json`; raw local evidence
+is retained under `packaging/desktop/build/evidence/6b7139e`.
+
+The final full pytest run at `eb40577` passed 1,470 tests in 49.02 seconds.
+One earlier failure was an initialization test setup acquiring the KB lock
+before the creation lifecycle; two fixtures now follow the supported lock
+order. Product code did not change in that correction. Existing unawaited
+coroutine warnings remain. Ruff check/format (248 files), mypy (141 source
+files) and the module-size check passed.
+
+Source archive hashes have been rechecked and recorded in
+`docs/desktop-evidence/source-audit-6b7139e.json`. Additional extraction inspected
+946 source archives and retained 1,781 licence/copyright/NOTICE files. The Eigen
+ZIP checksum changed, but all 1,784 files match the exact required upstream Git
+commit; its full Git tree is now archived, with the original checksum mismatch
+and explicit rebuild-input requirement retained. These are source-audit inputs,
+not a declaration that every optional dependency was linked or that all
+corresponding-source and licence conditions have been met.
+
+P5 remains incomplete. A real model-provider configuration is still awaited.
+The connected Windows host contains development tools; Windows Sandbox is
+available as a disabled system feature, and a read-only mapping/test setup has
+been prepared. Enabling that host feature awaits user authorization; the script
+will not restart the host. Exact NewCM font inputs/terms, remaining embedded
+native-library provenance and patch mapping, complete installed notice
+reconciliation, and final matching source/licence/NOTICE/build assets still
+need completion before formal portable archives can pass distribution review.
+No release has been published.
