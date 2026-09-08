@@ -12,10 +12,22 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
     from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import atomic_write_text, kb_ingest_lock
 
+    reading_path = "output/skills/native-reading/SKILL.md"
+    reading_source = (
+        "---\nname: native-reading\ndescription: 元数据应保留在源文件\n---\n\n"
+        "# 原生 Skill 正文\n\n阅读时直接显示操作说明。\n"
+    )
+    delimiter_cases = {
+        "opening.md": "---Warning: keep backups\n---\n\n# 保留正文\n",
+        "closing.md": "---\nWarning: keep backups\n---not-a-delimiter\n\n# 保留正文\n",
+    }
     with kb_ingest_lock(kb / ".openkb"):
         atomic_write_text(
             kb / "wiki/concepts/产物验证.md", "# 产物验证\n\n可供生成器引用的原生验收知识。"
         )
+        atomic_write_text(kb / reading_path, reading_source)
+        for name, source in delimiter_cases.items():
+            atomic_write_text(kb / "output/skills/native-reading" / name, source)
     dialog = ArtifactsDialog(window, kb)
     dialog.show()
     tasks = SubmittedTasks(window.manager, wait_until)
@@ -28,6 +40,22 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
         return task
 
     try:
+        wait_until(lambda: dialog.items.count() > 0)
+        for i in range(dialog.items.count()):
+            item = dialog.items.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == "output/skills/native-reading":
+                dialog.items.setCurrentItem(item)
+                break
+        wait_until(lambda: "原生 Skill 正文" in dialog.reader.toPlainText())
+        assert dialog.reader.toPlainText().strip().startswith("原生 Skill 正文")
+        assert "元数据应保留在源文件" not in dialog.reader.toPlainText()
+        assert dialog.source.toPlainText() == reading_source
+        assert (kb / reading_path).read_text(encoding="utf-8") == reading_source
+        dialog.grab().save(str(kb.parent / "native-artifact-reading.png"))
+        for name, source in delimiter_cases.items():
+            dialog.files.setCurrentText(f"output/skills/native-reading/{name}")
+            wait_until(lambda: dialog.source.toPlainText() == source)
+            assert "Warning: keep backups" in dialog.reader.toPlainText()
         dialog.graph_button.click()
         task = finish()
         assert task.succeeded == 1, task
