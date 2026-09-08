@@ -176,3 +176,44 @@ render-helper parent-loss behavior and the remaining platform acceptance
 details need completion. Full settings, maintenance, generators and watching
 in the workbench, browser-product retirement, clean-system replacement tests
 and matching source/licence distributions remain P3–P5 work.
+
+## P3/P4 implementation and P5 package checkpoint (2026-09-08)
+
+The subsequent shared/native slices implement document management, settings,
+conversation management, maintenance/recovery, generators and exports, stable
+file/URL inputs, independent directory watching, manual retry and history
+cleanup. Directory-generation leases protect removed/recreated KBs, including
+CLI/API operations. The React product, static hosting and obsolete web entry
+point have been removed; independent REST and HTML artifact contracts remain.
+These implementation results do not establish final distribution acceptance.
+
+Source exports identify the exact Git commit and installed version. The native
+About dialog and REST material endpoints validate matching, immutable copies
+of distribution materials; actual release materials are still being assembled.
+The frozen inventory now accounts for executable Python archives, collected
+files and primary component provenance on both systems. Nested native component
+source/licence reconciliation remains separate work.
+
+| Latest targeted evidence | Actual result |
+| --- | --- |
+| `8eddcd7` frozen Debian GNOME/X11 | Native workflow and 256 rendering outputs/error cases passed technical checks |
+| `8eddcd7` frozen Windows 11, interactive session 1 | Native and corpus checks passed; model workflow exposed an artifact export failure |
+| Artifact export regression | Four tests passed on Debian and Windows; a profile containing only global lifecycle state no longer counts as a KB, while incomplete initialization remains protected |
+| Real Qt deletion race | Before the fix, 26 of 30 runs displayed a stale-read error; 30 subsequent runs passed without unexpected dialogs |
+| Delayed open result after target deletion | Actual Workbench/LocalIO probe now retains the previously active KB |
+| Source GNOME/X11 controlled model after export/read fixes | 22 checks, 34 tasks, every task process reaped, no unexpected dialogs |
+| Current Ruff / mypy / module size | Passed; mypy covers 140 source files |
+
+The controlled model run exercises actual HTTP SDK requests, seven document
+formats, 20-page PageIndex output, URL preparation, query/chat, generation,
+watching and saved outputs. Its model responses are fixtures; it does not prove
+a connection to a real provider. The full pytest suite has not been repeated
+since the earlier checkpoint and remains a final completion check.
+
+Windows analysis also exposed collection of SDK utility DLLs from the build
+host's PATH. Restricting the freezer's PATH to Python and Windows system paths
+removed that dependency, and the resulting program passed native/corpus checks.
+The final committed fixes still require fresh frozen builds and acceptance on
+both targets. Complete visual verdicts, actual tray/exit/replacement scenarios,
+clean-system and live-provider evidence, matching source/licence materials and
+final archives remain pending.
