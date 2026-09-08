@@ -6,12 +6,14 @@ import pytest
 def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_path, monkeypatch):
     from openkb import config
     from openkb.application.knowledge_bases import initialize_kb
+    from openkb.lifecycle import creation_lifecycle
     from openkb.locks import kb_ingest_lock
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
     kb = tmp_path / "created"
-    with kb_ingest_lock(kb / ".openkb"):
+    # An adapter's creation lease must precede the KB and global leases.
+    with creation_lifecycle(kb), kb_ingest_lock(kb / ".openkb"):
         with config._with_global_config_lock():
             assert initialize_kb(kb, seed_environment=False)["created"]
         with pytest.raises(FileExistsError):
@@ -20,7 +22,7 @@ def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_p
     incomplete = tmp_path / "incomplete/.openkb"
     incomplete.mkdir(parents=True)
     (incomplete / "unexpected").write_text("keep")
-    with kb_ingest_lock(incomplete):
+    with creation_lifecycle(incomplete.parent), kb_ingest_lock(incomplete):
         with pytest.raises(FileExistsError):
             initialize_kb(incomplete.parent)
     assert (incomplete / "unexpected").read_text() == "keep"
