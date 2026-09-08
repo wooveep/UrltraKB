@@ -388,6 +388,7 @@ def import_document(
     context: ExecutionContext | None = None,
     origin_url: str | None = None,
     source_root: Path | None = None,
+    report=logger.info,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
     from openkb.state import HashRegistry
@@ -426,6 +427,7 @@ def import_document(
                     prepared=ready,
                     on_event=on_event or (context.on_event if context else None),
                     origin_url=origin_url,
+                    report=report,
                 )
             entries = HashRegistry(root / ".openkb/hashes.json")
             meta = entries.get(ready.digest)
