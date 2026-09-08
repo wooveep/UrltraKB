@@ -241,6 +241,7 @@ class KnowledgeBasesDialog(QDialog):
         if self._deleting:
             self._close_requested = True
             self.cancel()
-            return
+            if not self.window._quitting:
+                return
         self._closed = True
         super().done(result)

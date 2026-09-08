@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QDockWidget,
     QHBoxLayout,
     QLabel,
@@ -145,6 +146,7 @@ def build_workbench(window):
     window.task_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     window.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     window.task_table.horizontalHeader().setStretchLastSection(True)
+    window.task_table.setColumnWidth(3, 280)
     window.task_table.itemSelectionChanged.connect(window._select_task)
     tasks_layout.addWidget(window.task_table)
     stop = QPushButton("安全停止所选任务")
@@ -178,3 +180,27 @@ def build_workbench(window):
     context_dock = QDockWidget("当前页面 · 来源与链接", window)
     context_dock.setWidget(window.page_context)
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, context_dock)
+    window.task_dock = dock
+    window.shutdown_controls = (
+        toolbar,
+        reading_toolbar,
+        window.menuBar(),
+        splitter,
+        context_dock,
+        retry,
+        clear,
+    )
+
+
+def observe_shutdown(window):
+    """Keep task progress, diagnostics and cooperative stop available while closing."""
+    # End nested business event loops before making the observation window visible.
+    # LocalIO has already stopped delivery; in-flight writes are still joined.
+    for dialog in window.findChildren(QDialog):
+        if dialog.isVisible():
+            dialog.done(QDialog.DialogCode.Rejected)
+    for control in window.shutdown_controls:
+        control.setEnabled(False)
+    window.task_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+    window.task_dock.show()
+    window._show_window()
