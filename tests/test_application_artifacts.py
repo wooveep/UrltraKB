@@ -5,6 +5,42 @@ import zipfile
 import pytest
 
 
+def test_artifact_export_allows_a_profile_containing_global_lifecycle_state(kb_dir, tmp_path):
+    from openkb.application.artifacts import export_artifact
+
+    profile = tmp_path.parent / f"{tmp_path.name}-profile"
+    (profile / ".openkb/kb-lifecycle").mkdir(parents=True)
+    destination = profile / "Documents/exports"
+    destination.mkdir(parents=True)
+    source = kb_dir / "output/result.md"
+    source.parent.mkdir(exist_ok=True)
+    source.write_text("Complete artifact", encoding="utf-8")
+
+    exported = export_artifact(kb_dir, "output/result.md", destination)
+    assert exported.read_text(encoding="utf-8") == "Complete artifact"
+
+
+def test_artifact_export_rejects_an_unfinished_initialization(kb_dir, tmp_path, monkeypatch):
+    from openkb.application.artifacts import export_artifact
+    from openkb.application.knowledge_bases import initialization_pending, initialize_kb
+
+    target = tmp_path.parent / f"{tmp_path.name}-incomplete"
+    source = kb_dir / "output/result.md"
+    source.parent.mkdir(exist_ok=True)
+    source.write_text("Complete artifact", encoding="utf-8")
+
+    def fail_transaction(*args, **kwargs):
+        raise OSError("cannot prepare transaction")
+
+    monkeypatch.setattr("openkb.mutation.mutation_scope", fail_transaction)
+    with pytest.raises(OSError, match="cannot prepare"):
+        initialize_kb(target, seed_environment=False, require_empty=True)
+    assert initialization_pending(target)
+    with pytest.raises(ValueError, match="outside every knowledge base"):
+        export_artifact(kb_dir, "output/result.md", target)
+    assert not (target / "result.md").exists()
+
+
 def test_artifact_export_keeps_supporting_files_and_existing_exports(kb_dir, tmp_path):
     from openkb.application.artifacts import export_artifact, list_artifacts
 
@@ -47,5 +83,5 @@ def test_graph_generation_preserves_links_and_replaces_only_its_fixed_artifact(k
     result.path.write_text("Old graph")
     again = generate_graph(kb_dir)
     assert again.path == result.path
-    assert "<canvas" in again.path.read_text()
+    assert "<canvas" in again.path.read_text(encoding="utf-8")
     assert not list((kb_dir / ".openkb/journal").glob("*.json"))
