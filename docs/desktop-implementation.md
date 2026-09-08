@@ -409,3 +409,35 @@ native reading probe exposed a test-selection assumption: Windows sorts
 intended file. The probe now explicitly selects `SKILL.md`. This correction
 changes verification only; the product reading code is unchanged. The failed
 probe is retained and is not counted as passing Windows native acceptance.
+
+## Frozen reading correction and internal archives (2026-09-08)
+
+Both `87bdcc7` program directories now pass all 14 native checks, including the
+explicit file selection and valid/malformed frontmatter cases. Windows runs in
+its interactive session; Debian runs in the non-root Debian 13.6 rootfs using
+host GNOME/X11. The final Skill reading screenshots were visually checked on
+both systems. All owned native-verification processes have exited and their two
+Windows scheduled tasks were removed.
+
+The final inventory maps 10,832 files / 7,228 Python modules on Debian and 11,331
+files / 7,302 modules on Windows. Comparing source inputs against `6b7139e` shows
+only `openkb.desktop.artifacts` and `openkb.desktop.verification_artifacts`
+changed; collected native libraries, executables under `_internal`, and font
+files remain byte-identical. Generated renderer assets were reused only after
+comparing their build inputs and verifying every manifest hash. The detailed
+record is `docs/desktop-evidence/acceptance-87bdcc7.json`.
+
+Local internal archives are available under
+`packaging/desktop/build/internal-packages/87bdcc7`:
+
+| Archive | Size (bytes) | SHA256 |
+| --- | ---: | --- |
+| `OpenKB-0.1.dev42+g87bdcc7b6e33-debian13.6-x64-INTERNAL.tar.gz` | 442890460 | `ae43d2e2c41972d2286a6f5b27278e978fce79ee5519c9eb60361f57aca50e7d` |
+| `OpenKB-0.1.dev42+g87bdcc7b6e33-windows-x64-INTERNAL.zip` | 392799930 | `52696aaa437d033c537379139defe3af1b5feb6747500b54972db367417257d5` |
+
+Every archived program file was decompressed and checked against its frozen
+inventory hash. The Windows ZIP was also copied back to this workspace and its
+full SHA256 verified. Each archive contains an explicit internal-build note.
+No user KB or credential files are included. These archives do not close the
+outstanding corresponding-source/licence/NOTICE/build-material distribution
+gate and have not been published as releases.
