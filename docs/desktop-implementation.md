@@ -316,15 +316,12 @@ and explicit rebuild-input requirement retained. These are source-audit inputs,
 not a declaration that every optional dependency was linked or that all
 corresponding-source and licence conditions have been met.
 
-P5 remains incomplete. A real model-provider configuration is still awaited.
-The connected Windows host contains development tools; Windows Sandbox is
-available as a disabled system feature, and a read-only mapping/test setup has
-been prepared. Enabling that host feature awaits user authorization; the script
-will not restart the host. Exact NewCM font inputs/terms, remaining embedded
-native-library provenance and patch mapping, complete installed notice
-reconciliation, and final matching source/licence/NOTICE/build assets still
-need completion before formal portable archives can pass distribution review.
-No release has been published.
+At this checkpoint P5 remained incomplete. The subsequent live-provider and
+Sandbox decisions are recorded below. Exact resource terms, applicable embedded
+native-library source and patch mapping, installed notice reconciliation, and
+final matching source/licence/NOTICE/build assets still need completion before
+formal portable archives can pass distribution review. No release has been
+published.
 
 The two production Windows QA knowledge bases were subsequently unregistered,
 and their two task summaries/receipts archived before clearing them through
@@ -333,3 +330,73 @@ its exact pre-test SHA256 matched; other profile fields were not guessed or
 rolled back. All scheduled tasks created for these OS checks were removed.
 The retained screenshots/records describe the earlier acceptance runs, before
 this deliberate QA cleanup.
+
+## Live DeepSeek acceptance and artifact reading (2026-09-08)
+
+The user supplied `https://api.deepseek.com` and `deepseek-v4-flash`, and explicitly
+declined Windows Sandbox. No Windows feature was enabled. Tests use the existing
+Windows 11 x86_64 host and the non-root Debian 13.6 runtime rootfs described above;
+these results do not claim a clean whole-machine installation. The wire model is
+`deepseek-v4-flash`; the existing LiteLLM configuration uses
+`openai/deepseek-v4-flash` for the custom OpenAI-compatible endpoint. The provider
+model-list request returned HTTP 200 and included the requested model.
+
+Both `6b7139e` production applications ran through their ordinary event loop with
+OS mouse/keyboard input and the actual external provider. Each completed eight
+KB tasks: a Chinese synthetic document import, saved grounded question, two
+turns of one conversation, Skill generation, two HTML deck requests, and import
+of the public Python.org executive-summary HTTPS article. The question and
+conversation retained the document's device identifier, 17-day interval and
+responsible person's name; saved sessions contain exactly two completed turns.
+Skill and eight-slide deck files were retained, and the final deck passed the
+existing validator without errors or warnings.
+
+The first deck request asked for four slides, below the existing five-slide
+minimum. Both programs correctly retained its completed output and exposed the
+quality error/warning. A separately named eight-slide request passed. One early
+Windows input driver also selected the artifact-file combo as a candidate for
+the generation-type combo; the driver was corrected before the deck request.
+These are recorded as QA setup issues, not product failures or clean passes.
+
+Explicit Quit ended the observed program processes. After fresh launch and
+opening the same KB, all 25 Debian / 27 Windows retained data files had identical
+hashes, task IDs stayed unchanged, and both completed conversations were intact.
+The applications then quit normally again. Windows QA registration and eight
+archived task records were removed; the original global YAML was restored only
+after comparing all other fields with the private pre-test backup. Its original
+SHA256 matched. Seven QA scheduled tasks were removed. API keys, private profile
+backups and raw private logs are excluded from the retained evidence.
+
+Reading the generated Skill exposed a display defect: the YAML header was being
+rendered as a large Markdown heading. The reading view now strips valid nonempty
+mapping frontmatter only when both delimiters are independent `---` lines; the
+source tab and file bytes remain unchanged. A native UI regression failed before
+that fix and passed afterwards. Two malformed-delimiter cases were then added
+following both review axes, failed before the guard and passed after it. The
+source native workflow passed all 14 checks. Full pytest, lint/format and mypy
+results, plus new frozen-program evidence, are recorded when available below.
+
+The detailed live-provider record is
+`docs/desktop-evidence/live-deepseek-6b7139e.json`, with 105 whitelisted evidence
+files under `packaging/desktop/build/evidence/live-deepseek-6b7139e`. Its production
+commit is intentionally still `6b7139e`; it is not relabelled as a test of the
+subsequent reading fix.
+
+Seven renderer crates lacking standalone licence filenames now have explicit
+full-text mappings: six Merman crates inherit the licence of their exact recorded
+workspace commit, and selectors 0.37.0 names MPL-2.0 in its source header and
+manifest, supplemented with Mozilla's canonical full text. Original notices are
+retained. Both review axes confirmed the narrow reading correction; the standards
+review also verified these licence mappings.
+
+Formal distribution remains open. The remaining audit must identify the exact
+sources for the Linux standalone GCC runtime libraries, map Qt's actual source
+and patches, and resolve the exact NewCM resources' terms and modifiable source
+form. Windows static GCC code, Pillow, and python-build-standalone require their
+own component-specific assessment; unmodified general-purpose tools are not
+automatically required in the source asset. The five distribution-material kinds
+and final portable archives have not yet been assembled or published.
+
+After the delimiter guard, full pytest passed 1,470 tests in 49.56 seconds with
+two existing unawaited-coroutine warnings. Ruff check/format passed for 248 files,
+mypy passed for 141 source files, and the module-size gate passed in pytest.

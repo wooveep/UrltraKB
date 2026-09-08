@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from openkb import frontmatter
 from openkb.application.artifacts import (
     artifact_files,
     export_artifact,
@@ -237,7 +238,12 @@ class ArtifactsDialog(QDialog):
                 return
             self.source.setPlainText(text)
             if Path(relative).suffix.lower() == ".md":
-                self.reader.show_markdown(text, (self.kb / relative).parent)
+                parts = frontmatter.split(text) if frontmatter.parse(text) else None
+                if parts:
+                    lines = parts[0].splitlines()
+                    if lines[0] != "---" or lines[-1] != "---":
+                        parts = None
+                self.reader.show_markdown(parts[1] if parts else text, (self.kb / relative).parent)
                 self.tabs.setCurrentIndex(0)
             else:
                 self.reader.show_temporary(

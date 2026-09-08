@@ -6505,10 +6505,10 @@
     }
   ],
   "remaining": [
-    "NewCM font generation inputs and full provenance/terms for the exact MathJax 4.1.3 package remain unresolved.",
-    "Exact GCC runtime provenance, Qt prebuilt patches/build details, Pillow/PBS and other embedded native dependency mapping remain incomplete.",
-    "License extraction and actual installed notice reconciliation are incomplete; aggregate package declarations are not substituted for component notices.",
-    "Final release.json, matching complete source/license/NOTICE assets, and portable archives have not been assembled."
+    "Exact NewCM resource terms and modifiable source form remain unresolved; missing generation inputs do not by themselves establish an obligation to include every unmodified font-generation tool.",
+    "Exact corresponding source for Linux separately shipped GCC runtime libraries and actual Qt source/patch mapping remain incomplete. Assess Windows static GCC, Pillow and PBS output dependencies separately against their actual components and applicable exceptions.",
+    "Installed component-to-source/license/notice reconciliation remains incomplete; extracted candidate archives and package declarations are not a substitute for that mapping.",
+    "Final release.json, matching complete source/license/NOTICE/build assets, and portable archives have not been assembled."
   ],
   "extended_licence_extraction": {
     "index": "license-evidence/extended-evidence.json",
@@ -9947,5 +9947,181 @@
       "files": 160,
       "scope": "Exact licence/notice/copyright files collected in this program directory, matched to the frozen inventory. Primary component ownership does not establish every nested licence obligation."
     }
+  },
+  "renderer_license_supplement": {
+    "scope": "Full license texts for seven target renderer crates without standalone license filenames in their crate archives; not an assertion about unrelated candidate crates or whole distribution compliance.",
+    "records": [
+      {
+        "name": "dugong",
+        "version": "0.7.0",
+        "crate_sha256": "8182775cd5c441f69e5be06b29f1452503568c4270168cef67a557cd8fbcaba0",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/dugong"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "dugong-graphlib",
+        "version": "0.7.0",
+        "crate_sha256": "faffb9e2480ff1c6901e6376f143614df5331052e60e0dd5086f12399a18c61d",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/dugong-graphlib"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "manatee",
+        "version": "0.7.0",
+        "crate_sha256": "85f575aa9013f7fc6f6804dcc8fc47299ee61692c2a7cb017573dc5f3a85a5a4",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/manatee"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "merman",
+        "version": "0.7.0",
+        "crate_sha256": "316af7de4c273fb450fa7db94441df29bd09d5dcc5fd7f31f946766dea7272b3",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/merman"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "merman-core",
+        "version": "0.7.0",
+        "crate_sha256": "4b7ca468603ca22bad2578b3d3fbc0b436e28b5ccb726e2cf99d7bb75fa8c167",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/merman-core"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "merman-render",
+        "version": "0.7.0",
+        "crate_sha256": "46cda864705a73dd80ec8985463d4bf735e991954d5bf63ca5604bf59287582a",
+        "vcs": {
+          "git": {
+            "sha1": "00a2f291025913d612b6ca1ce9b6df6daf5bef94"
+          },
+          "path_in_vcs": "crates/merman-render"
+        },
+        "basis": "Exact crate VCS commit and original Cargo manifest inherit root workspace license; retain original file notices as well.",
+        "workspace_source": "upstream/Merman-0.7.0-00a2f2910259.tar.gz",
+        "workspace_source_sha256": "a4d5045b753ccb4ad9750a4255392d2b1f38bed2fc972edd063c9923940b56be",
+        "license_files": [
+          "merman-0.7.0/LICENSE",
+          "merman-0.7.0/LICENSE-APACHE",
+          "merman-0.7.0/LICENSE-MIT",
+          "merman-0.7.0/THIRD_PARTY_NOTICES.md"
+        ]
+      },
+      {
+        "name": "selectors",
+        "version": "0.37.0",
+        "crate_sha256": "2cfaaa6035167f0e604e42723c7650d59ee269ef220d7bbe0565602c8a0173b9",
+        "vcs": {
+          "git": {
+            "sha1": "6cfce6f3293b5e13c2246838380e514b8b206a27"
+          },
+          "path_in_vcs": "selectors"
+        },
+        "basis": "Original lib.rs header and Cargo manifest explicitly designate MPL-2.0; canonical full text supplements, rather than replaces, original source notices.",
+        "canonical_license_url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+        "license_files": [
+          "selectors-0.37.0/MPL-2.0.txt",
+          "selectors-0.37.0/lib.rs-license-header.txt"
+        ]
+      }
+    ],
+    "archive": "license-evidence/renderer-supplement.zip",
+    "archive_sha256": "df12b7cff2cf518145667714f4acd1a1bf40ffcf1e6a15e98f0f7184dfc5e872",
+    "files": [
+      {
+        "path": "merman-0.7.0/LICENSE",
+        "sha256": "c6e988f88cde095b65186a9a327d13ab14abff174802bc8c963c16294c7a17da",
+        "bytes": 127
+      },
+      {
+        "path": "merman-0.7.0/LICENSE-APACHE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "bytes": 11357
+      },
+      {
+        "path": "merman-0.7.0/LICENSE-MIT",
+        "sha256": "645fe3acd17f0ec18b05a5cbc8071c16fc888bfa8356d9087c265df69464d893",
+        "bytes": 1076
+      },
+      {
+        "path": "merman-0.7.0/THIRD_PARTY_NOTICES.md",
+        "sha256": "dd09f5b77d2540191610b5320af3d63c055196c939e9f395e17a1f61cb90d02e",
+        "bytes": 1634
+      },
+      {
+        "path": "selectors-0.37.0/MPL-2.0.txt",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "bytes": 16726
+      },
+      {
+        "path": "selectors-0.37.0/lib.rs-license-header.txt",
+        "sha256": "766674381e88a468d55e07de3596987391cf0e8beebe51baf4fddf11078785b3",
+        "bytes": 206
+      }
+    ]
   }
 }

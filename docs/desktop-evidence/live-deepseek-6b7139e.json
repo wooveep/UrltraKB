@@ -1,0 +1,1050 @@
+{
+  "schema": 1,
+  "date": "2026-09-08",
+  "program_commit": "6b7139ef32118b9e2abf9771695cb168a5b786f1",
+  "program_version": "0.1.dev37+g6b7139ef3211",
+  "scope": "Actual production application event loop and OS mouse/keyboard input with a real external DeepSeek provider; synthetic Chinese calibration document and a public Python.org article. This is separate from earlier local HTTP fixture acceptance.",
+  "provider": {
+    "api_base_url": "https://api.deepseek.com",
+    "wire_model": "deepseek-v4-flash",
+    "configured_model": "openai/deepseek-v4-flash",
+    "model_list_http_status": 200,
+    "credential_in_evidence": false
+  },
+  "environment": {
+    "debian": "Non-root Debian 13.6 runtime rootfs with host GNOME/X11; same production directory previously validated, no separate REST service.",
+    "windows": "Existing Windows 11 x86_64 interactive desktop through the user-authorized host; contains development tools.",
+    "sandbox_decision": "User explicitly declined Windows Sandbox on 2026-09-08. No feature was enabled and no Sandbox run is claimed.",
+    "clean_machine_acceptance_claimed": false
+  },
+  "public_url": "https://www.python.org/doc/essays/blurb/",
+  "platforms": {
+    "debian": {
+      "retained_file_count": 25,
+      "tasks": [
+        {
+          "id": "189e45b05a3f45038df57a612b5f7dd8",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:53:38.072804+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/output/skills/orchid-calibration-guide/SKILL.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/output/skills/orchid-calibration-guide/references/operator-qa.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/.claude-plugin/marketplace.json"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: .claude-plugin/marketplace.json",
+                "updated: output/skills/orchid-calibration-guide/SKILL.md",
+                "updated: output/skills/orchid-calibration-guide/references/operator-qa.md"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "1f3b46d3e40740dfabb27bc39f86c3a9",
+          "operation": "ImportUrl",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T07:07:02.408422+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/raw/What-is-Python-Executive-Summary.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/wiki/sources/What-is-Python-Executive-Summary.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/wiki/summaries/What-is-Python-Executive-Summary.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": "813cacd185e3f3326df847bcaba1f7cae90c1def46e17a9a768970a785af8b64",
+              "changes": [],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "2d5db97d15594bdf8377d65e4cdfb8ca",
+          "operation": "ImportFile",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:42:31.346807+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/raw/校准验收.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/wiki/sources/校准验收.md",
+                "/tmp/openkb-live-deepseek-20260908/kb/wiki/summaries/校准验收.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9",
+              "changes": [],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "36d968b7b467414db472f5749d2d55e7",
+          "operation": "ContinueConversation",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:46:01.113332+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/.openkb/chats/20260908-064601-568.json"
+              ],
+              "error": null,
+              "session_id": "20260908-064601-568",
+              "turn_count": 1,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "saved turn: 20260908-064601-568"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "4f01f140cf2e4d24b596c41419f8d1e7",
+          "operation": "AskQuestion",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:44:13.471514+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/wiki/explorations/a3f6e6af92fb.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "created: wiki/explorations/a3f6e6af92fb.md"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "c221c0c34bc14e00ac32066db1587e34",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T07:01:46.239932+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/output/decks/orchid-calibration-slides-valid/index.html"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: output/decks/orchid-calibration-slides-valid/index.html"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "df76f426f9d14fbfa74f25c491943e23",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:56:44.775557+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/output/decks/orchid-calibration-slides/index.html"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [
+                "validation_errors",
+                "validation_warnings"
+              ],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: output/decks/orchid-calibration-slides/index.html"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "e01f0b264554459f8602bcda46e6e788",
+          "operation": "ContinueConversation",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:51:24.239476+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "/tmp/openkb-live-deepseek-20260908/kb/.openkb/chats/20260908-064601-568.json"
+              ],
+              "error": null,
+              "session_id": "20260908-064601-568",
+              "turn_count": 2,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "saved turn: 20260908-064601-568"
+              ],
+              "unfinished": []
+            }
+          ]
+        }
+      ],
+      "sessions": [
+        {
+          "id": "20260908-064601-568",
+          "turn_count": 2,
+          "user_turn_count": 2,
+          "assistant_text_count": 2,
+          "model": "openai/deepseek-v4-flash"
+        }
+      ],
+      "checks": {
+        "all_tasks_completed_and_workers_reaped": true,
+        "query_saved_and_source_facts_correct": true,
+        "two_completed_turns_same_session": true,
+        "skill_and_supporting_files_retained": true,
+        "eight_slide_html_validation_errors": [],
+        "eight_slide_html_validation_warnings": [],
+        "public_https_url_import": true,
+        "quit_and_relaunch": true,
+        "retained_files_unchanged": true,
+        "task_ids_unchanged": true,
+        "completed_sessions_unchanged": true
+      },
+      "initial_four_slide_deck": "Completed with visible validation error/warning because the QA request specified four slides while the existing minimum is five; retained, then generated a separately named eight-slide deck with no quality issues."
+    },
+    "windows": {
+      "retained_file_count": 27,
+      "tasks": [
+        {
+          "id": "0654cfd9049b474ca86fdecd6e3ed501",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:57:18.763568+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\output\\decks\\orchid-calibration-slides\\index.html"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [
+                "validation_errors",
+                "validation_warnings"
+              ],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: output/decks/orchid-calibration-slides/index.html"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "165ff84ea16b431f8d4cc299d1a11c61",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T07:01:36.176779+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\output\\decks\\orchid-calibration-slides-valid\\index.html"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: output/decks/orchid-calibration-slides-valid/index.html"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "4a6a094f46e74dc08627b7a588d2bbd5",
+          "operation": "ImportFile",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:43:29.280373+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\raw\\calibration.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\wiki\\sources\\calibration.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\wiki\\summaries\\calibration.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9",
+              "changes": [],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "6ab94f6a8fc84430956c8313106fbd4b",
+          "operation": "ContinueConversation",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:46:23.906623+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\.openkb\\chats\\20260908-144612-523.json"
+              ],
+              "error": null,
+              "session_id": "20260908-144612-523",
+              "turn_count": 2,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "saved turn: 20260908-144612-523"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "758dc72a1e35450c828f6e632fcf950d",
+          "operation": "ImportUrl",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T07:06:34.728933+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\raw\\What-is-Python-Executive-Summary.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\wiki\\sources\\What-is-Python-Executive-Summary.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\wiki\\summaries\\What-is-Python-Executive-Summary.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": "67828111cb4ad75a5ab67314d0132e0db4024d4ed5b0e89e97034e844158d4a7",
+              "changes": [],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "942cdae9f5b04dde8eafca1aae6cf384",
+          "operation": "ContinueConversation",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:46:12.267530+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\.openkb\\chats\\20260908-144612-523.json"
+              ],
+              "error": null,
+              "session_id": "20260908-144612-523",
+              "turn_count": 1,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "saved turn: 20260908-144612-523"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "a9ec276ef11c41ef886ed6b8d8abc672",
+          "operation": "GenerateArtifact",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:52:55.875776+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\output\\skills\\orchid-calibration-guide\\references\\procedure-facts.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\output\\skills\\orchid-calibration-guide\\SKILL.md",
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\.claude-plugin\\marketplace.json"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "none",
+              "revision": null,
+              "changes": [
+                "updated: .claude-plugin/marketplace.json",
+                "updated: output/skills/orchid-calibration-guide/SKILL.md",
+                "updated: output/skills/orchid-calibration-guide/references/procedure-facts.md"
+              ],
+              "unfinished": []
+            }
+          ]
+        },
+        {
+          "id": "c991c43738434bb283151fc531c8e895",
+          "operation": "AskQuestion",
+          "state": "completed",
+          "processes_reaped": true,
+          "started_at": "2026-09-08T06:46:00.644623+00:00",
+          "results": [
+            {
+              "status": "completed",
+              "resources": [
+                "C:\\Users\\cloudyi\\OpenKB-native-20260907\\live-deepseek-20260908\\kb\\wiki\\explorations\\a3f6e6af92fb.md"
+              ],
+              "error": null,
+              "session_id": null,
+              "turn_count": 0,
+              "quality": [],
+              "halt": false,
+              "output_state": "unavailable",
+              "revision": null,
+              "changes": [
+                "created: wiki/explorations/a3f6e6af92fb.md"
+              ],
+              "unfinished": []
+            }
+          ]
+        }
+      ],
+      "sessions": [
+        {
+          "id": "20260908-144612-523",
+          "turn_count": 2,
+          "user_turn_count": 2,
+          "assistant_text_count": 2,
+          "model": "openai/deepseek-v4-flash"
+        }
+      ],
+      "checks": {
+        "all_tasks_completed_and_workers_reaped": true,
+        "query_saved_and_source_facts_correct": true,
+        "two_completed_turns_same_session": true,
+        "skill_and_supporting_files_retained": true,
+        "eight_slide_html_validation_errors": [],
+        "eight_slide_html_validation_warnings": [],
+        "public_https_url_import": true,
+        "quit_and_relaunch": true,
+        "retained_files_unchanged": true,
+        "task_ids_unchanged": true,
+        "completed_sessions_unchanged": true
+      },
+      "initial_four_slide_deck": "Completed with visible validation error/warning because the QA request specified four slides while the existing minimum is five; retained, then generated a separately named eight-slide deck with no quality issues."
+    }
+  },
+  "windows_cleanup": {
+    "scope": "Remove only live-provider QA registration and archived QA task history after production Quit; retain QA KB data",
+    "original_global_yaml_restored": true,
+    "original_global_yaml_sha256": "e25678470c1a5011889e78b4e6b0fc45a01d5f4e6ec693220e43e91c783596fa",
+    "archived_and_cleared_task_count": 8,
+    "qa_kb_retained": true
+  },
+  "known_display_defect": {
+    "description": "Generated Markdown artifact frontmatter appeared as a large heading in the reading view. Raw source and disk contents were intact.",
+    "source_fix": "Strip only valid nonempty mapping frontmatter with exact independent delimiters for reading; retain original source and disk bytes.",
+    "validation": "Native UI regression failed before fix; passed after fix. Invalid opening and closing delimiter counterexamples were added and also passed after correction.",
+    "frozen_revalidation": "Pending the new program build; live-provider tests in this record used 6b7139e."
+  },
+  "evidence_root": "packaging/desktop/build/evidence/live-deepseek-6b7139e",
+  "evidence_files": [
+    {
+      "file": "linux/after.json",
+      "bytes": 11411,
+      "sha256": "6f332e94a408ea61f40566b1695df312b3f7a61ca59504c97d4b8f09ec03e61b"
+    },
+    {
+      "file": "linux/before.json",
+      "bytes": 11306,
+      "sha256": "715547872d7f41103fcab18411f2f72a5bbb498dc009c1f09c21b818f828a82d"
+    },
+    {
+      "file": "linux/kb/.claude-plugin/marketplace.json",
+      "bytes": 518,
+      "sha256": "ae0e62eba621d47ff2258650ae71273555009f517d6b190c73df52a4b0ec91c4"
+    },
+    {
+      "file": "linux/kb/.openkb/chats/20260908-064601-568.json",
+      "bytes": 13035,
+      "sha256": "f0086fa6f85bb821e2737cb27851c0ea50828ba7b1ff77bff0c932deaa5b9833"
+    },
+    {
+      "file": "linux/kb/.openkb/config.yaml",
+      "bytes": 69,
+      "sha256": "d8ef3334d7bb7cb291eaabda3fa41f5d1945b02236f84a56df9bfa1d02af5f78"
+    },
+    {
+      "file": "linux/kb/.openkb/hashes.json",
+      "bytes": 787,
+      "sha256": "c955081d4008d77dd49a12c557716db83ac9608df6785244147b98c62a9b22d5"
+    },
+    {
+      "file": "linux/kb/output/decks/orchid-calibration-slides/index.html",
+      "bytes": 15661,
+      "sha256": "338195fc58d5b702943c3ad1eec933654e9bf9bf4c44fa1bf5cfa77285e894e8"
+    },
+    {
+      "file": "linux/kb/output/decks/orchid-calibration-slides-valid/index.html",
+      "bytes": 19668,
+      "sha256": "704d4815167713de8291dce500d7e8ef3558192619afa900afa991fb49389c53"
+    },
+    {
+      "file": "linux/kb/output/skills/orchid-calibration-guide/SKILL.md",
+      "bytes": 6462,
+      "sha256": "9fa2c79e2c4854226137b86f1c7431cad29f96bb35fdd9a6192fd72ce87d0d77"
+    },
+    {
+      "file": "linux/kb/output/skills/orchid-calibration-guide/references/operator-qa.md",
+      "bytes": 2143,
+      "sha256": "4132549a73e71a70a8c8a43c35afed6dcc365c387f4e8e88595ad89d580b19f9"
+    },
+    {
+      "file": "linux/kb/raw/What-is-Python-Executive-Summary.md",
+      "bytes": 1753,
+      "sha256": "813cacd185e3f3326df847bcaba1f7cae90c1def46e17a9a768970a785af8b64"
+    },
+    {
+      "file": "linux/kb/raw/校准验收.md",
+      "bytes": 444,
+      "sha256": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9"
+    },
+    {
+      "file": "linux/kb/wiki/AGENTS.md",
+      "bytes": 2926,
+      "sha256": "10ff1217c4d7b806d2135ff65bacebf492c068b2a24fba97d61036850e03fa31"
+    },
+    {
+      "file": "linux/kb/wiki/concepts/calibration.md",
+      "bytes": 1110,
+      "sha256": "097504b681f6145db4d8bfbbfc7ee82b1829f688ee74c1f79dfa026429d75407"
+    },
+    {
+      "file": "linux/kb/wiki/concepts/debugging.md",
+      "bytes": 1725,
+      "sha256": "94d363a4843930f6b7784d3f453f819deb147d0c667d66fbb988d03248f0818e"
+    },
+    {
+      "file": "linux/kb/wiki/concepts/dynamic-typing.md",
+      "bytes": 2349,
+      "sha256": "cac065098e99fa959cdcda4d454b81b2f0cb05e24a14f9101da2e5bd1ed3cfdd"
+    },
+    {
+      "file": "linux/kb/wiki/concepts/interpreted-language.md",
+      "bytes": 2462,
+      "sha256": "37a7a28259365d0cdfc8e42c864e01a058515e23e0622f41f15fe7796a91dfc6"
+    },
+    {
+      "file": "linux/kb/wiki/concepts/knowledge-retention.md",
+      "bytes": 1301,
+      "sha256": "e0bb2e5283b58d61ec744a4ad88aa8107cba352a78c272bbea8f7302b207660e"
+    },
+    {
+      "file": "linux/kb/wiki/entities/lanhua-station.md",
+      "bytes": 927,
+      "sha256": "50a0ad25e3dceb0105065cbf4dc091715196278c0e1e87d4b4bbeef048aa3b22"
+    },
+    {
+      "file": "linux/kb/wiki/entities/python.md",
+      "bytes": 1212,
+      "sha256": "dce280e94edde2a0a1af6815933b58843f6a9b8dc96c8c3fe2ae1c6776ec8a96"
+    },
+    {
+      "file": "linux/kb/wiki/explorations/a3f6e6af92fb.md",
+      "bytes": 870,
+      "sha256": "af3d386ae48556eb2b10605bddfafb2511afbad272693088d74126362845de08"
+    },
+    {
+      "file": "linux/kb/wiki/index.md",
+      "bytes": 1369,
+      "sha256": "5c769ef84525a7e1cb5b705e3d7258048ee1695d00cac91df0c8937f421c96c4"
+    },
+    {
+      "file": "linux/kb/wiki/log.md",
+      "bytes": 515,
+      "sha256": "5a74dbf4dc29a9e54005585b3ebd5b0cc0450d40e6759668538419e55db4ee89"
+    },
+    {
+      "file": "linux/kb/wiki/sources/What-is-Python-Executive-Summary.md",
+      "bytes": 1753,
+      "sha256": "813cacd185e3f3326df847bcaba1f7cae90c1def46e17a9a768970a785af8b64"
+    },
+    {
+      "file": "linux/kb/wiki/sources/校准验收.md",
+      "bytes": 444,
+      "sha256": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9"
+    },
+    {
+      "file": "linux/kb/wiki/summaries/What-is-Python-Executive-Summary.md",
+      "bytes": 2210,
+      "sha256": "6bbfa5c935719ad20a1b524b51bb7cd89d4249e35d7649e7cf69aadf0355e7fd"
+    },
+    {
+      "file": "linux/kb/wiki/summaries/校准验收.md",
+      "bytes": 789,
+      "sha256": "a5a7c60c164cc955c9407f03373495ea251ed8679616e3e3d419cfe8a6f90e62"
+    },
+    {
+      "file": "linux/tasks/189e45b05a3f45038df57a612b5f7dd8.json",
+      "bytes": 1621,
+      "sha256": "237a84118b0a1c56ea12a12f209a223566bfaf9ccb8dcca004858a0b60090d9b"
+    },
+    {
+      "file": "linux/tasks/1f3b46d3e40740dfabb27bc39f86c3a9.json",
+      "bytes": 1452,
+      "sha256": "33be6eafa5f70478278d9c97a7da82b07881b077d119e82e75a3c5f9d37dbf23"
+    },
+    {
+      "file": "linux/tasks/2d5db97d15594bdf8377d65e4cdfb8ca.json",
+      "bytes": 1429,
+      "sha256": "a7a4620f8f7fd42fa9af9daeccd07bd97641b75ba65e2e4b39e091de0fe8285f"
+    },
+    {
+      "file": "linux/tasks/36d968b7b467414db472f5749d2d55e7.json",
+      "bytes": 1275,
+      "sha256": "2646905ae97d7788e7cb94d929c8f54df30c7328edc6ad4519b75305f4a73ad0"
+    },
+    {
+      "file": "linux/tasks/4f01f140cf2e4d24b596c41419f8d1e7.json",
+      "bytes": 1255,
+      "sha256": "dbf76c25a320db4c04c463e2c89b9655edfa0a1d51dd0055663441405dcb4a3a"
+    },
+    {
+      "file": "linux/tasks/c221c0c34bc14e00ac32066db1587e34.json",
+      "bytes": 1297,
+      "sha256": "5a8665c0b271e94955f3e829d63de8ddf463258f6acece903f4d8e3461d36419"
+    },
+    {
+      "file": "linux/tasks/df76f426f9d14fbfa74f25c491943e23.json",
+      "bytes": 1357,
+      "sha256": "6c0edcaf7aa3ac93b0a7b1d8caa5112d9dcf4458dd805d494d941b4212861cbe"
+    },
+    {
+      "file": "linux/tasks/e01f0b264554459f8602bcda46e6e788.json",
+      "bytes": 1275,
+      "sha256": "2668e6b1e8d712b5c3f1d6b30d3ca7b39e3fd51416e1f08b83f1613b0cd4994f"
+    },
+    {
+      "file": "windows/after.json",
+      "bytes": 12284,
+      "sha256": "3394c55040010069560d9f99a0e246d729bdce1282541bad011771fa30e60378"
+    },
+    {
+      "file": "windows/before.json",
+      "bytes": 12179,
+      "sha256": "104775006cc2ffa0f06de2c62f88163737f27aaa381d22ff278cf7d51fa35e16"
+    },
+    {
+      "file": "windows/kb/.claude-plugin/marketplace.json",
+      "bytes": 518,
+      "sha256": "ae0e62eba621d47ff2258650ae71273555009f517d6b190c73df52a4b0ec91c4"
+    },
+    {
+      "file": "windows/kb/.openkb/chats/20260908-144612-523.json",
+      "bytes": 16900,
+      "sha256": "65d70c66f456aa4f8eb3d614a160de1432f62c151eb01c54f79c8ab77ebfac79"
+    },
+    {
+      "file": "windows/kb/.openkb/config.yaml",
+      "bytes": 69,
+      "sha256": "d8ef3334d7bb7cb291eaabda3fa41f5d1945b02236f84a56df9bfa1d02af5f78"
+    },
+    {
+      "file": "windows/kb/.openkb/hashes.json",
+      "bytes": 743,
+      "sha256": "fe6222d107e9d46ec7fb4ce948a54b1774d8277c25f9a5c43b5c7f6cfd96c4da"
+    },
+    {
+      "file": "windows/kb/output/decks/orchid-calibration-slides/index.html",
+      "bytes": 14246,
+      "sha256": "7370ab1e6b982c549ea2d3c5c90dc1699c245ca7c283562e0e7aa418fea3bfff"
+    },
+    {
+      "file": "windows/kb/output/decks/orchid-calibration-slides-valid/index.html",
+      "bytes": 20187,
+      "sha256": "123d28fe8a608d021f649c52126d6a74153ae47ee9d57a1cd31aa2075b20c5bb"
+    },
+    {
+      "file": "windows/kb/output/skills/orchid-calibration-guide/SKILL.md",
+      "bytes": 6680,
+      "sha256": "780df45260a70857199fc3df2aae783933e78e9c2b0701205b358cd1c31fe7bd"
+    },
+    {
+      "file": "windows/kb/output/skills/orchid-calibration-guide/references/procedure-facts.md",
+      "bytes": 1686,
+      "sha256": "1509eb26e68e9e0385b9a079e1a0243565c5d230bd6e572284a159b1eab4a3bf"
+    },
+    {
+      "file": "windows/kb/raw/What-is-Python-Executive-Summary.md",
+      "bytes": 1762,
+      "sha256": "67828111cb4ad75a5ab67314d0132e0db4024d4ed5b0e89e97034e844158d4a7"
+    },
+    {
+      "file": "windows/kb/raw/calibration.md",
+      "bytes": 444,
+      "sha256": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9"
+    },
+    {
+      "file": "windows/kb/wiki/AGENTS.md",
+      "bytes": 2926,
+      "sha256": "10ff1217c4d7b806d2135ff65bacebf492c068b2a24fba97d61036850e03fa31"
+    },
+    {
+      "file": "windows/kb/wiki/concepts/calibration.md",
+      "bytes": 1250,
+      "sha256": "ce77365d44866ab41cef12b8b778e2efbccd92e83ae0e0a80e3448f9e6dfead0"
+    },
+    {
+      "file": "windows/kb/wiki/concepts/data-retention.md",
+      "bytes": 1134,
+      "sha256": "244ddae1740f67d9b14681c291bcfe7e238bca5dfa42799cda3b20f1ea287208"
+    },
+    {
+      "file": "windows/kb/wiki/concepts/dynamic-typing.md",
+      "bytes": 2032,
+      "sha256": "11212e484aa13538c14e1291144bbe7c9cb3cb642365248edd940506cbba6a7d"
+    },
+    {
+      "file": "windows/kb/wiki/concepts/exception-handling.md",
+      "bytes": 2245,
+      "sha256": "3868ba8ef5df666072e7f74db8dff0f1d9d1243b3423f9e45994026d487c213a"
+    },
+    {
+      "file": "windows/kb/wiki/concepts/interpreted-language.md",
+      "bytes": 2013,
+      "sha256": "5166b45f5e3e3dcbfddb56a1d1b5cc30cc946afecaa375e779fbc157e77152b0"
+    },
+    {
+      "file": "windows/kb/wiki/entities/lin-cheng.md",
+      "bytes": 585,
+      "sha256": "e1611afa103afa23efe82f787e613d9fc9a243b20be72842fb111ef4cbf1fd25"
+    },
+    {
+      "file": "windows/kb/wiki/entities/orchid-8426.md",
+      "bytes": 755,
+      "sha256": "0589e9e5b07bd05b773c22e61c8fd436e4ccfb5df6cb5d3fc080d68b14698a2d"
+    },
+    {
+      "file": "windows/kb/wiki/entities/orchid-station.md",
+      "bytes": 914,
+      "sha256": "6a760933a8b9271483c787fff7bf58636e5acbe665ac17117ef60462fc6445fb"
+    },
+    {
+      "file": "windows/kb/wiki/entities/python.md",
+      "bytes": 1235,
+      "sha256": "a7d7854be2171f98723ecbea49fd811c641a23a9f2579fd34f260401fc52b951"
+    },
+    {
+      "file": "windows/kb/wiki/explorations/a3f6e6af92fb.md",
+      "bytes": 1387,
+      "sha256": "65082c300e05d790dd53c87c8fbde42053c2b099981294557a7c03699e5ff4f5"
+    },
+    {
+      "file": "windows/kb/wiki/index.md",
+      "bytes": 1583,
+      "sha256": "7f4ef704ea39e5af58d34f20fb02a9f06d503cf2f3fd0aea57e06b38f1c5fbff"
+    },
+    {
+      "file": "windows/kb/wiki/log.md",
+      "bytes": 514,
+      "sha256": "e3792c97aa746adfa45d4fb14cbe68a498db1dfdf7b5e208f09e4398524695a0"
+    },
+    {
+      "file": "windows/kb/wiki/sources/What-is-Python-Executive-Summary.md",
+      "bytes": 1753,
+      "sha256": "813cacd185e3f3326df847bcaba1f7cae90c1def46e17a9a768970a785af8b64"
+    },
+    {
+      "file": "windows/kb/wiki/sources/calibration.md",
+      "bytes": 444,
+      "sha256": "49c8df836a6370d8434e703365172d3fbc1cc95c1fe7ac8a40caa82a9fb0ccd9"
+    },
+    {
+      "file": "windows/kb/wiki/summaries/What-is-Python-Executive-Summary.md",
+      "bytes": 1833,
+      "sha256": "2ac0a90722c2feb3400d8f9d4ee802aa47d4fe01a516645e44419f3c2bb96a19"
+    },
+    {
+      "file": "windows/kb/wiki/summaries/calibration.md",
+      "bytes": 1083,
+      "sha256": "1662f04305941d757068621a106ee73f06b76f2207a545e647132bdd88f76190"
+    },
+    {
+      "file": "windows/tasks/0654cfd9049b474ca86fdecd6e3ed501.json",
+      "bytes": 1460,
+      "sha256": "4810f6e301f2f6d28945aae89540daf6eadd28377d7456e47855a5d2d373c1af"
+    },
+    {
+      "file": "windows/tasks/165ff84ea16b431f8d4cc299d1a11c61.json",
+      "bytes": 1400,
+      "sha256": "1bc2b533e230281e550ea6d1a9a471c26368db08dd81f1f1abd8790e45459405"
+    },
+    {
+      "file": "windows/tasks/4a6a094f46e74dc08627b7a588d2bbd5.json",
+      "bytes": 1563,
+      "sha256": "cc8d3abbb6b33fe20759f2d6a483e1593d3b9e5a05ce2cab4705c4260bf2c6b1"
+    },
+    {
+      "file": "windows/tasks/6ab94f6a8fc84430956c8313106fbd4b.json",
+      "bytes": 1377,
+      "sha256": "aadaed0b61bc578376488c9996624563323fad2b908c5455c393be5b738fce1f"
+    },
+    {
+      "file": "windows/tasks/758dc72a1e35450c828f6e632fcf950d.json",
+      "bytes": 1625,
+      "sha256": "3602cb8487c66ea9207df28afee57c8899200238a18f5f94a666a275c8e19b1e"
+    },
+    {
+      "file": "windows/tasks/942cdae9f5b04dde8eafca1aae6cf384.json",
+      "bytes": 1377,
+      "sha256": "93be0e7d2be69384f370b82524d7ffb644966ea4ff4a160684ca34a307acbd5f"
+    },
+    {
+      "file": "windows/tasks/a9ec276ef11c41ef886ed6b8d8abc672.json",
+      "bytes": 1805,
+      "sha256": "4509649a286472c81c5b4b95b407857f5d17ff33ac5c091e575ae901ce47075b"
+    },
+    {
+      "file": "windows/tasks/c991c43738434bb283151fc531c8e895.json",
+      "bytes": 1357,
+      "sha256": "3e5439d105c9588cfd8070016169e7a03e986a84bf8fbc3aac0abcc5265ef164"
+    },
+    {
+      "file": "observations/provider-check.json",
+      "bytes": 110,
+      "sha256": "b5913a2149cb7d4e38a4160f919eae0be29363d2e90986f8637d467581c07eae"
+    },
+    {
+      "file": "observations/linux-quit.json",
+      "bytes": 155,
+      "sha256": "fa01f1bc4333ea411af59f29c0dc0ae48897d6e77c8a41b1d15a00df96602625"
+    },
+    {
+      "file": "observations/linux-imported.png",
+      "bytes": 117284,
+      "sha256": "e55c59f825b53ba791ab21309d0a4f967c8cb16bf5a70adf04e8c76ff25377d3"
+    },
+    {
+      "file": "observations/linux-query.png",
+      "bytes": 190150,
+      "sha256": "49e99214a1706d2e907fca8cf9b5361543662385a9416b2d8f0b06b69f544331"
+    },
+    {
+      "file": "observations/linux-chat-first.png",
+      "bytes": 190529,
+      "sha256": "98f429fa5ee755fb20b72ce907475dd1eb0df7e10362641f60be7e4fce7e4838"
+    },
+    {
+      "file": "observations/linux-chat-second.png",
+      "bytes": 161895,
+      "sha256": "d7fa24c41a3f177a8e6e9dbde24ce7de322f8f307afbca3bb4daa2f3abf2b021"
+    },
+    {
+      "file": "observations/linux-skill.png",
+      "bytes": 78433,
+      "sha256": "be2b28ef15c3ac7779f61936c8f1480937533fdbfeb2b3844d67b952eedc64c0"
+    },
+    {
+      "file": "observations/linux-deck-first-result.png",
+      "bytes": 90570,
+      "sha256": "f563e315bc2219c5f9d27317ac0c301a9b4a968aa31362ce9e02eded8eacdf9f"
+    },
+    {
+      "file": "observations/linux-url-completed.png",
+      "bytes": 115317,
+      "sha256": "c00679fea798b1f41b8ab026bd47462569c8268cd0c895edbffeee120b57a6f7"
+    },
+    {
+      "file": "observations/linux-restarted.png",
+      "bytes": 199078,
+      "sha256": "954751706b97ee5b16fcde98a67066a733c1bf56a288861492905b98811c5e2d"
+    },
+    {
+      "file": "observations/linux-skill-reading.png",
+      "bytes": 173636,
+      "sha256": "d185c377e5d6525ae10123738ecde5083eb7c6e18d8b9511ed3c36e45786bad9"
+    },
+    {
+      "file": "windows-ui/cleanup-result.json",
+      "bytes": 344,
+      "sha256": "f45c823b1a5835f9100bbbad4825885c5b1448c6a588fa1fb8890046c931b581"
+    },
+    {
+      "file": "windows-ui/conversation-progress.json",
+      "bytes": 1140,
+      "sha256": "e0c3ce341cd0759ce3cb1bb29eceec94f25b12882653ab76a8bd0db717c82d6d"
+    },
+    {
+      "file": "windows-ui/conversation-result.json",
+      "bytes": 1678,
+      "sha256": "44848f4d4df4cf0095278d7373093c1d6073ebee13c26c0fc6b0edcb2e01ae49"
+    },
+    {
+      "file": "windows-ui/deck-result.json",
+      "bytes": 1710,
+      "sha256": "cdd9d9a3b7cf236d27f047f6f613d76f5474bdb4bcf901ea9048d7c1f3a96d69"
+    },
+    {
+      "file": "windows-ui/deck-valid-result.json",
+      "bytes": 1573,
+      "sha256": "62fdef3c60490a9b69957a628f50a4f0a31db92399468cffb937b478273da669"
+    },
+    {
+      "file": "windows-ui/generation-progress.json",
+      "bytes": 2171,
+      "sha256": "d4c754747cc1585677ea760fdf278e2f3f44d7399944867c755d8c6ca576622a"
+    },
+    {
+      "file": "windows-ui/generation-result.json",
+      "bytes": 2253,
+      "sha256": "9a339c11475f2086aa1f345d001e32f7bdd2899fcd4e656dcd2b5e097eedef30"
+    },
+    {
+      "file": "windows-ui/import-result.json",
+      "bytes": 310,
+      "sha256": "9dc1b15151adc129fd83fea2295169da58a95207215f7500324b40064b540c9e"
+    },
+    {
+      "file": "windows-ui/live-artifact-empty.png",
+      "bytes": 18688,
+      "sha256": "af065a84a58ab8136e896518963f6c1af87a97d1235cda83dcd21e652ead67dc"
+    },
+    {
+      "file": "windows-ui/live-chat-turn1.png",
+      "bytes": 107076,
+      "sha256": "da488679fa48bdb203a0d2f95a455bc549fb7abe20f69cb46767b304056a0a1d"
+    },
+    {
+      "file": "windows-ui/live-chat-turn2.png",
+      "bytes": 101648,
+      "sha256": "c656ca984c1223fa65671ac0ca4b084215b1074ed139b501c20aa96b006dc245"
+    },
+    {
+      "file": "windows-ui/live-deck-valid.png",
+      "bytes": 30328,
+      "sha256": "43c4b75b1af8b24d8492a939a239964e3b60447f97fba0c6426046ffeb6de338"
+    },
+    {
+      "file": "windows-ui/live-deck.png",
+      "bytes": 31321,
+      "sha256": "5d6a0173d79df9fe750ae95083532a58b4338eb135c796b176a81f76bb8f2fa9"
+    },
+    {
+      "file": "windows-ui/live-import-completed.png",
+      "bytes": 52508,
+      "sha256": "89a92f88cbbd4379192809729f5184feee4d83a99464cc8a2b22754179c3fb1c"
+    },
+    {
+      "file": "windows-ui/live-query.png",
+      "bytes": 91945,
+      "sha256": "f9a0fa734095547668a95b41615e33b6286e710a7425f79229dc05f385476835"
+    },
+    {
+      "file": "windows-ui/live-restarted.png",
+      "bytes": 91234,
+      "sha256": "81744f7df4b5f4d23e149293a72170f3c76da36fb5672fbc3ad4814464d0cafe"
+    },
+    {
+      "file": "windows-ui/live-skill.png",
+      "bytes": 29067,
+      "sha256": "00bc69fba59068f1ede995b6b3f91b764e8cbde839b0d7cd370a83abbc0500cc"
+    },
+    {
+      "file": "windows-ui/live-url.png",
+      "bytes": 104911,
+      "sha256": "a070b6f6f9b5ce137a9c068955b388db1be6b037b4beab2db46fe0e4e0dda3d3"
+    },
+    {
+      "file": "windows-ui/progress.json",
+      "bytes": 189,
+      "sha256": "85cb23cec689508199576352d02a6f2ee7fa02cc861a384396f6761e5fbcb7b6"
+    },
+    {
+      "file": "windows-ui/restart-result.json",
+      "bytes": 1309,
+      "sha256": "07a8e7381600049a97819643610ab5f2566907d5714a5e3a65913c87f6c72b1d"
+    },
+    {
+      "file": "windows-ui/scheduled-cleanup.json",
+      "bytes": 439,
+      "sha256": "9c96e5f08760c57e6c92409d1e64be5d9cc2b9beda8af882263fa87f15b368b8"
+    },
+    {
+      "file": "windows-ui/url-result.json",
+      "bytes": 1942,
+      "sha256": "53bb6737069a5d8d1d04b31fc28db8a673ed9bc360e8b7a89138f2950788ccec"
+    }
+  ]
+}
