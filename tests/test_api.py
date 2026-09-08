@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -2045,7 +2046,7 @@ def test_deck_endpoint_non_stream_generates_artifact(monkeypatch, kb_dir):
         headers=_auth(),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["name"] == "my-deck"
     assert (kb_dir / "output" / "decks" / "my-deck" / "index.html").exists()
@@ -2660,8 +2661,9 @@ def test_global_config_patch_writes_api_key_to_global_env_0600(monkeypatch, tmp_
 
     env_path = tmp_path / ".env"
     assert "LLM_API_KEY=sk-global" in env_path.read_text(encoding="utf-8")
-    # The credential file must never be world-readable.
-    assert (env_path.stat().st_mode & 0o777) == 0o600
+    # POSIX mode bits do not represent Windows access-control permissions.
+    if os.name == "posix":
+        assert (env_path.stat().st_mode & 0o777) == 0o600
 
     follow_up = client.get("/api/v1/config", headers=_auth())
     assert follow_up.json()["has_api_key"] is True

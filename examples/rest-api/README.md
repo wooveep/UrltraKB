@@ -1,50 +1,19 @@
-# REST API & Knowledge Workbench
+# REST API
 
-This guide covers the OpenKB REST API (FastAPI) and the bundled Knowledge Workbench web UI.
+This guide covers the independent OpenKB REST API (FastAPI). The native desktop opens local knowledge bases directly; the API does not serve a browser application at `/`.
 
 > The interactive API reference is served live at [`/docs`](http://127.0.0.1:7566/docs) (OpenAPI/Swagger) once the server is running — you can import `/openapi.json` directly into Postman.
-
-## Knowledge Workbench (Web UI)
-
-
-OpenKB ships a bundled web single-page app — the **Knowledge Workbench** — served directly by the REST server at `/`, so you get a full browser interface with no separate frontend process. The built UI is packaged in the `openkb` wheel, so a normal install already has it:
-
-```bash
-# 1. Install with the API extra (the built UI ships inside the package)
-pip install "openkb[web]"
-
-# 2. Start the server — no config needed for local use
-openkb-web --host 127.0.0.1 --port 7566   # serves the API + Workbench at http://127.0.0.1:7566/
-```
-
-Optional environment variables:
-
-- `OPENKB_KB_ROOT` — where REST-created knowledge bases are stored (default `~/.config/openkb/kbs`).
-- `OPENKB_API_TOKEN` — set it to require bearer auth (see [Authentication](#authentication-and-common-behavior)); leave unset for open local use.
-
-> **From a source checkout?** The built bundle (`openkb/web/`) is git-ignored, so an editable install (`pip install -e ".[web]"`) has no UI until you build it once: `cd frontend && npm install && npm run build` (outputs to `openkb/web/`). Or run the Vite dev server with `npm run dev` (it proxies `/api` to a running `openkb-web`). Without the bundle, `openkb-web` serves only the REST API under `/api/v1` and `/` returns a 404.
-
-Open `http://127.0.0.1:7566/` in your browser. With no `OPENKB_API_TOKEN` set it connects to the local API immediately — no prompt. (If a token is configured, a **Connection** dialog asks for it once and caches it in the browser; you can also open it manually to point the UI at a remote API base.) The Workbench then provides:
-
-- **Overview** — index/concept/summary/report stat cards, clickable concept chips, recent documents, and last-compile/lint activity.
-- **Documents** — drag-and-drop multi-file upload with per-file SSE progress, hash table, and delete with confirmation.
-- **Query** — streamed answers with `tool_call` reasoning shown live in the right-pane timeline; GFM Markdown rendering (bold, tables, code, etc.).
-- **Chat** — multi-turn streaming with a persisted session list: load history, resume a session, delete it.
-- **Maintenance** — lint (with optional auto-fix), recompile (all or single doc, SSE log), and a file-watcher toggle.
-
-A right-pane **Inspector** timeline shows the vectorless retrieval & reasoning steps for every streamed operation. Creating a new KB from the Workbench inherits the project-root `config.yaml` and LLM credentials (`.env`) so it runs queries out of the box. The UI is responsive — on narrow screens the three panes collapse to a single column with a hamburger nav.
-
 
 ## REST API
 
 
-OpenKB also ships a FastAPI service for using a knowledge base from Postman,
+OpenKB ships a FastAPI service for using a knowledge base from Postman,
 frontends, or other HTTP clients.
 
 Install the API dependencies if needed:
 
 ```bash
-pip install -e ".[web]"
+pip install -e ".[api]"
 ```
 
 Start the API server:
@@ -61,9 +30,8 @@ Auth is **opt-in**, controlled by the `OPENKB_API_TOKEN` server environment
 variable:
 
 - **Unset (default)** — the API is unauthenticated. This is the local-first
-  default, so `openkb-web` and the Workbench work with no configuration.
-- **Set** — every request must carry the token, and the Workbench prompts for
-  it once (cached in the browser):
+  default for `openkb-api`.
+- **Set** — every request must carry the token:
 
   ```text
   Authorization: Bearer <OPENKB_API_TOKEN>
@@ -73,7 +41,7 @@ variable:
 
 > **Exposing the server?** Always set `OPENKB_API_TOKEN` when binding to a
 > non-loopback host (e.g. `--host 0.0.0.0`) — otherwise the API, and every KB
-> it can reach, is world-open. `openkb-web` prints a warning in that case.
+> it can reach, is world-open. `openkb-api` prints a warning in that case.
 
 `OPENKB_KB_ROOT` is optional. It controls where REST-created knowledge bases
 are stored. If unset, OpenKB uses `~/.config/openkb/kbs`.
@@ -162,10 +130,9 @@ Request (`InitRequest`):
 `api_key` and `openai_api_base` are written to the KB-local `.env` when the KB
 is created; secret values are not echoed back in the response.
 
-When `model`, `api_key`, and `openai_api_base` are all omitted (the Workbench's
-default), the new KB inherits the operator's project-root `config.yaml` and LLM
+When `model`, `api_key`, and `openai_api_base` are all omitted, the new KB inherits the operator's project-root `config.yaml` and LLM
 credentials from the server's working-directory `.env` (server-level `OPENKB_*`
-vars are filtered out), so a KB created from the UI runs queries out of the box.
+vars are filtered out), so a newly created KB can use the server's existing model connection.
 
 Response (`InitResponse`, `200`): `kb` (string), `created` (bool, `false` if the
 KB already existed), `env_written` (`{api_key: bool, openai_api_base: bool}`),
@@ -239,8 +206,8 @@ continue), `answer`, `turn_count` (total turns in the session). Stream events:
 
 #### Chat Sessions
 
-List, load, or delete persisted multi-turn sessions for a KB. These power the
-session sidebar in the Workbench.
+List, load, or delete persisted multi-turn sessions for a KB. These sessions
+use the same on-disk format as CLI and desktop conversations.
 
 ```http
 POST /api/v1/chat/sessions
