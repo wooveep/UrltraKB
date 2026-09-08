@@ -10,6 +10,7 @@ from pathlib import Path
 
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
+from openkb.config import _is_kb_dir
 from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 
@@ -70,7 +71,20 @@ def read_artifact(kb_dir: Path, relative: str) -> str:
 def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
     """Copy a file or a complete directory ZIP under a new, collision-free name."""
     kb_dir, destination = kb_dir.resolve(), destination.resolve()
-    if any((parent / ".openkb").is_dir() for parent in (destination, *destination.parents)):
+    if destination.is_relative_to(kb_dir) or any(
+        _is_kb_dir(parent)
+        or any(
+            (parent / ".openkb" / marker).exists()
+            for marker in (
+                "config.yaml",
+                "hashes.json",
+                "needs-repair.json",
+                "initializing.json",
+                "journal",
+            )
+        )
+        for parent in (destination, *destination.parents)
+    ):
         raise ValueError("Choose an export directory outside every knowledge base")
     if not destination.is_dir():
         raise NotADirectoryError(destination)
