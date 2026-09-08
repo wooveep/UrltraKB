@@ -1,0 +1,3279 @@
+{
+  "schema": 1,
+  "date": "2026-09-08",
+  "program_commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+  "scope": "Bounded primary-source audit of Pillow/lxml/cryptography/PyMuPDF/MuPDF/ONNX Runtime nested native components; excludes Qt/PySide, CPython/PBS and numpy GCC ownership. This is material input to release assembly, not a release approval.",
+  "relationships": [
+    {
+      "parent": "Pillow 12.2.0",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "status": "source-covered; platform linkage differentiated",
+      "children": [
+        {
+          "component": "libjpeg-turbo 3.1.4.1 / libtiff 4.7.1 / OpenJPEG 2.5.4 / LittleCMS 2.18 / libwebp 1.6.0 / FreeType 2.14.3",
+          "scope": "runtime-confirmed on both platforms by matching extension hashes + runtime version calls",
+          "sources": "native/sources.json",
+          "terms": "Preserve each original licence. JPEG includes IJG/libjpeg-turbo notices; FreeType FTL/GPL choice is separate; none inherit Pillow MIT-CMU."
+        },
+        {
+          "component": "libavif 1.4.1 -> dav1d 1.5.3, libaom 3.13.2, libyuv 6067afde563c3946eebd94f146b3824ab7a97a9c, libsharpyuv from libwebp 1.6.0",
+          "scope": "runtime-confirmed codec names/versions on both; libyuv/sharpyuv exact source from enabled fixed recipe plus binary markers/imports",
+          "sources": "native/sources.json; native/nested-sources.json; Pillow wheel recipe; libavif Local*.cmake",
+          "terms": "Original libavif BSD, dav1d BSD, libyuv BSD, libwebp BSD/PATENTS and AOM BSD/PATENTS retained; full source archives preserve the authoritative wording."
+        },
+        {
+          "component": "Brotli 1.2.0 / libpng 1.6.56 / XZ 5.8.3 / HarfBuzz 13.2.1 / libxcb 1.17.0 / Zstd 1.5.7 / libXau 1.0.9-3.el8",
+          "scope": "Linux frozen library files and DT_NEEDED establish actual inclusion; exact Xau package version additionally in ELF debuglink",
+          "sources": "native/sources.json; downloaded-sources.json; libXau-source-members.json; cached pristine libxcb archive",
+          "terms": "Use per-source original notices. XZ source archive contains differently licensed tools/build files; liblzma alone is not blanket GPL."
+        },
+        {
+          "component": "Raqm 0.10.3 and fribidi shim",
+          "scope": "vendored source in Pillow; Linux working Raqm capability confirmed. Windows feature unavailable; do not infer that all dependency code is absent solely from unavailable runtime capability.",
+          "sources": "pillow sdist src/thirdparty/raqm + fribidi-shim",
+          "terms": "Original source headers retained, including MIT Raqm attribution."
+        },
+        {
+          "component": "FriBidi 1.0.16",
+          "scope": "Linux separately collected Debian libfribidi0:amd64@1.0.16-1; no Windows frozen FriBidi DLL; Windows wheel explicitly skips its notice because DLL is not bundled",
+          "sources": "existing Debian source/copyright mapping; native source is an upstream candidate, not a substitute for Debian patches",
+          "terms": "LGPL-2.1-or-later applies to the distributed library; not Pillow MIT-CMU."
+        },
+        {
+          "component": "zlib-ng 2.3.3 / zlib",
+          "scope": "Windows static zlib-ng verified by runtime string and recipe; Linux Pillow compile-time zlib-ng feature must not be treated as proof of linked zlib-ng because actual imports resolve libz.so.1 (Debian 1.3.1).",
+          "sources": "native zlib-ng source + existing Debian zlib mapping",
+          "terms": "Retain exact upstream zlib/zlib-ng notices; build-source superset is intentionally broader than established runtime."
+        },
+        {
+          "component": "BZip2 / XDMCP / imagequant / alternative AVIF codecs / toolchain",
+          "scope": "upstream notice or build candidates only; not marked runtime merely because in scripts or notice bundle",
+          "sources": "upstream preserved build/notice superset",
+          "terms": "No obligation to ship all unmodified general-purpose compiler tools is inferred."
+        }
+      ]
+    },
+    {
+      "parent": "lxml 6.1.1",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "status": "previous Linux-only mapping corrected",
+      "children": [
+        {
+          "component": "Linux libxml2 2.14.6 + libxslt 1.1.43 + GNU libiconv 1.18 + zlib 1.3.2",
+          "scope": "runtime-confirmed; libiconv exported _libiconv_version=0x112, zlibVersion=1.3.2 and libxml/features queried in hash-matching etree ELF",
+          "sources": "native libxml2/libxslt archives; new libiconv-1.18 source; shared python-runtime-resolution zlib-1.3.2; fixed lxml workflow pins and buildlibxml.py",
+          "terms": "libxml/libxslt MIT-style plus original upstream exceptions; libiconv library LGPL-2.1-or-later; zlib licence. Include source/relocation or relinking material appropriate to actual static combination; do not describe entire extension as BSD-only."
+        },
+        {
+          "component": "Windows libxml2 2.11.9 + libxslt 1.1.45 + winlibs libiconv 1.17.1 + zlib 1.3.2",
+          "scope": "libxml/libxslt runtime-confirmed; iconv/zlib fixed bundle recipe inferred from matching release version pair, not an independent build attestation",
+          "sources": "lxml/libxml2-win-binaries 4e8ae01f61145dc823ce2ae1d79f06241b7b46de -> four exact Git submodule archives; libiconv.patch; build.ps1 and .github/workflows/main.yml",
+          "terms": "Original winlibs/upstream library licences and complete modified trees retained. Workflow applies libiconv.patch before build; do not substitute unpatched GNU 1.18 for Windows 1.17.1."
+        },
+        {
+          "component": "ElementTree-derived code / isoschematron resources / GPL test.py",
+          "scope": "Source retains file-specific statements. GPL test runner is a build/test candidate, not proof lxml runtime is GPL. Preserve resource headers for actual installed resources.",
+          "sources": "lxml sdist LICENSES.txt and doc/licenses plus source XSL/RNG headers",
+          "terms": "Do not overwrite individual copyright/licence text with aggregate BSD declaration."
+        }
+      ]
+    },
+    {
+      "parent": "cryptography 48.0.0",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "status": "fixed OpenSSL and all 32 locked registry crate sources available",
+      "children": [
+        {
+          "component": "OpenSSL 4.0.0",
+          "scope": "runtime-confirmed string on both hash-matching _rust extensions; no dynamic OpenSSL dependency in ELF/PE imports",
+          "sources": "native/OpenSSL-4.0.0.tar.gz + cryptography sdist build scripts",
+          "terms": "OpenSSL Apache-2.0 with original NOTICE and any source-specific third-party text; cryptography own dual Apache-2.0/BSD-3-Clause is separate."
+        },
+        {
+          "component": "32 Cargo.lock registry packages + cryptography Rust workspaces",
+          "scope": "locked build-source superset; proc-macro/build/other-target dependencies not asserted linked",
+          "sources": "crypto Cargo.lock/Cargo.toml + crates matched to lock checksums, enumerated below",
+          "terms": "Each crate licence expression and original notice members retained; no blanket reassignment."
+        }
+      ]
+    },
+    {
+      "parent": "PyMuPDF 1.27.2.3 / MuPDF 1.27.2",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "status": "source/embedded patches covered by exact releases",
+      "children": [
+        {
+          "component": "PyMuPDF + MuPDF core",
+          "scope": "runtime version matches both extensions; fixed PyMuPDF Git bf51516c1b1146d357e3705473f7dea6a405a589 and MuPDF source 73d3100d46d8a9ad634f6ef035bbe78f0f947886",
+          "sources": "PyMuPDF sdist/fixed Git archive + mupdf-1.27.2-source.tar.gz",
+          "terms": "D1 AGPL combination; retain original per-file GPL/AGPL/other notices without relabelling."
+        },
+        {
+          "component": "FreeType 2.13.3, patched HarfBuzz 6.0.0, patched IJG libjpeg 9f, patched lcms2 2.16 fork, OpenJPEG 2.5.4, zlib 1.3.1, patched Gumbo 0.10.1, patched Brotli 1.1.0",
+          "scope": "MuPDF documented required set; Linux defined exported symbols corroborate embedded implementation; Windows source/build correspondence supported by same version and binary features",
+          "sources": "MuPDF archive thirdparty subtrees; docs/other/third-party.rst",
+          "terms": "Use MuPDF embedded modified trees, not same-named Pillow versions. Preserve original FTL/BSD/MIT/Apache/zlib notices."
+        },
+        {
+          "component": "jbig2dec, MuJS, extract, Tesseract 5.5.0, Leptonica 1.85.0, Zint 2.13.0.9, patched ZXing-cpp 2.3.0",
+          "scope": "jbig2dec/MuJS and OCR/barcode functionality corroborated by actual Linux defined exports and Windows OCR strings; not all optional upstream UI/network libraries are implied",
+          "sources": "MuPDF thirdparty source trees and original COPYING/LICENSE/PATENTS files",
+          "terms": "jbig2dec/extract AGPL; MuJS ISC; Tesseract/ZXing Apache; Leptonica and Zint BSD-style with original file exceptions retained."
+        },
+        {
+          "component": "configuration, generated wrappers, fonts and other resources",
+          "scope": "PyMuPDF setup.py default TOFU_CJK_EXT override and Tesseract build selections are required controls; full MuPDF resource source retained as a build superset, not proof every font is present",
+          "sources": "PyMuPDF setup.py (Windows config.h prefix; Unix XCFLAGS/XCXXFLAGS), MuPDF platform/python and resources; optional FreeGLUT/curl retained only as source candidates",
+          "terms": "Do not discard original resource licences or assume all raw optional resource files were linked."
+        }
+      ]
+    },
+    {
+      "parent": "ONNX Runtime 1.20.1",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "status": "actual build commit identified; fixed CPU/Azure build superset available",
+      "children": [
+        {
+          "component": "ONNX Runtime core/MLAS + CPU and Azure provider stubs",
+          "scope": "runtime reports commit 5c1b7ccbff and providers AzureExecutionProvider/CPUExecutionProvider on both; this does not imply every optional provider implementation",
+          "sources": "fixed ONNXRuntime Git 5c1b7ccbff7e5141c1da7a9d963d660e5741c319",
+          "terms": "MIT project plus original ThirdPartyNotices.txt; aggregate notices may mention components not linked."
+        },
+        {
+          "component": "Abseil 20240722.0, ONNX 1.16.1, Protobuf 21.12, RE2 2024-07-02, Eigen fixed e7248b26, FlatBuffers 23.5.26, pybind11 2.13.1, cpuinfo fixed ca678952",
+          "scope": "fixed required build dependencies; actual binary markers/CPUINFO build flags corroborate main implementations. Not every header instantiation independently proven.",
+          "sources": "native/nested-sources.json exact deps.txt identities; main archive cmake/patches",
+          "terms": "Apache/BSD/MIT/MPL expressions remain component-specific; Eigen verified committed tree replaces changed upstream ZIP only with explicitly updated checksum/local path."
+        },
+        {
+          "component": "date, nsync, json, GSL, WIL, SafeInt, mp11, dlpack, FP16, utf8_range and remaining cached ONNX candidates",
+          "scope": "fixed build-source superset; target conditions and CMake selections must be followed. GoogleTest/benchmark, XNNPACK/FXdiv/psimd/pthreadpool, mimalloc are not labelled linked simply because downloaded.",
+          "sources": "cmake/deps.txt + external/*.cmake + patch files + cached fixed archives",
+          "terms": "Retain original full ThirdPartyNotices and each source notice; no MKL/CUDA/TensorRT linkage inferred from aggregate notice text."
+        }
+      ]
+    }
+  ],
+  "runtime_evidence": {
+    "linux": {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/linux-runtime.json",
+      "sha256": "c497a5a15170fea6043edfec836695e82f5b603a76f1945e8699c379f67f8b0d",
+      "data": {
+        "pillow": {
+          "pil": "12.2.0",
+          "tkinter": "9.0",
+          "freetype2": "2.14.3",
+          "littlecms2": "2.18",
+          "webp": "1.6.0",
+          "avif": "1.4.1",
+          "raqm": "0.10.3",
+          "fribidi": "1.0.16",
+          "harfbuzz": "13.2.1",
+          "libjpeg_turbo": "3.1.4.1",
+          "zlib_ng": "2.3.3",
+          "xcb": null,
+          "jpg": "6.2",
+          "jpg_2000": "2.5.4",
+          "zlib": "1.3.1",
+          "libtiff": "4.7.1"
+        },
+        "avif_codecs": "dav1d [dec]:1.5.3-0-gb546257, aom [enc]:3.13.2",
+        "lxml": {
+          "lxml": [
+            6,
+            1,
+            1,
+            0
+          ],
+          "libxml2": [
+            2,
+            14,
+            6
+          ],
+          "libxslt": [
+            1,
+            1,
+            43
+          ],
+          "libiconv_raw": 274,
+          "zlib": "1.3.2",
+          "features": [
+            "catalog",
+            "html",
+            "iconv",
+            "regexp",
+            "schematron",
+            "xmlschema",
+            "xpath",
+            "zlib"
+          ]
+        },
+        "openssl": "OpenSSL 4.0.0 14 Apr 2026",
+        "pymupdf": [
+          "1.27.2.3",
+          "1.27.2",
+          null
+        ],
+        "onnxruntime": {
+          "build": "ORT Build Info: git-branch=HEAD, git-commit-id=5c1b7ccbff, build type=Release, cmake cxx flags: -DNDEBUG -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -fstack-protector-strong -O3 -pipe -fstack-clash-protection -fcf-protection -ffunction-sections -fdata-sections -Wno-restrict  -DCPUINFO_SUPPORTED",
+          "providers": [
+            "AzureExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "binary_sha256": {
+          "PIL._imaging": "d89c8834f1c5b869708c241d81817c5781d38b6bc84b2bca099cb110bdb4a6c6",
+          "lxml.etree": "d7597a0fec22576416028238ff20a65f90d97ab6f96f65fe3a620780855add48",
+          "cryptography.hazmat.bindings._rust": "5156c422f65c5f911be1cbda8ebdc886e13b44bef884365fddc39b9fcd0329e6",
+          "pymupdf._mupdf": "e14f9f907e5591afede522040fbb6b556d5d5f1afc0fbe297be2b2728cec66ca",
+          "onnxruntime.capi.onnxruntime_pybind11_state": "496a9af5f0373c25f214613ca9d7fba7eb15dfc8319460af78682a2f40e06630"
+        }
+      }
+    },
+    "windows": {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/windows-runtime.json",
+      "sha256": "30a2a3784a3b59ceba89b484770601470db62891b6bea2434351b3af0bc10b9c",
+      "data": {
+        "pillow": {
+          "pil": "12.2.0",
+          "tkinter": "8.6",
+          "freetype2": "2.14.3",
+          "littlecms2": "2.18",
+          "webp": "1.6.0",
+          "avif": "1.4.1",
+          "libjpeg_turbo": "3.1.4.1",
+          "zlib_ng": "2.3.3",
+          "jpg": "8.0",
+          "jpg_2000": "2.5.4",
+          "zlib": "1.3.1.zlib-ng",
+          "libtiff": "4.7.1"
+        },
+        "avif_codecs": "dav1d [dec]:1.5.3-0-gb546257, aom [enc]:3.13.2",
+        "lxml": {
+          "lxml": [
+            6,
+            1,
+            1,
+            0
+          ],
+          "libxml2": [
+            2,
+            11,
+            9
+          ],
+          "libxslt": [
+            1,
+            1,
+            45
+          ]
+        },
+        "openssl": "OpenSSL 4.0.0 14 Apr 2026",
+        "pymupdf": [
+          "1.27.2.3",
+          "1.27.2",
+          null
+        ],
+        "onnxruntime": {
+          "build": "ORT Build Info: git-branch=HEAD, git-commit-id=5c1b7ccbff, build type=Release, cmake cxx flags: /MP /guard:cf /DWIN32 /D_WINDOWS /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR /DWINAPI_FAMILY=100 /DWINVER=0x0A00 /D_WIN32_WINNT=0x0A00 /DNTDDI_VERSION=0x0A000000 /Qspectre /DONNXRUNTIME_ENABLE_INTEL_METEOR_LAKE_MOBILE_PLATFORM_PERF_PATCH /O2 /Ob2 /DNDEBUG /Zc:__cplusplus /EHsc /wd26812 -DEIGEN_HAS_C99_MATH -DCPUINFO_SUPPORTED",
+          "providers": [
+            "AzureExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "binary_sha256": {
+          "PIL._imaging": "6dfd10a98bc81a1999e2b5ddb8be8c1cfb9a2c8e10258c56a52ee0d8930d3d7f",
+          "lxml.etree": "b5cef7d22ab972de3fee18e3787730ba74ecd12d5896eaa3660ebde418219669",
+          "cryptography.hazmat.bindings._rust": "051e355666d8d242827c7969b70f6da6b7f27aa23fcd5c36fcb0c81bc25a6856",
+          "pymupdf._mupdf": "d1933283d68dd9aaa683318c0ee4d548e4a8fce44eab0eddbd779595d59fe79d",
+          "onnxruntime.capi.onnxruntime_pybind11_state": "285c93c2deee3c577ad67a518eba9253596a062ea42865b8a326ff6641b5e407"
+        }
+      }
+    }
+  },
+  "source_archives": [
+    {
+      "file": "packaging/desktop/build/source-cache/native/libjpeg-turbo-3.1.4.1.tar.gz",
+      "sha256": "ecae8008e2cc9ade2f2c1bb9d5e6d4fb73e7c433866a056bd82980741571a022",
+      "bytes": 2528617,
+      "name": "libjpeg-turbo",
+      "origin": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.4.1/libjpeg-turbo-3.1.4.1.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libjpeg-turbo-3.1.4.1/LICENSE.md",
+          "sha256": "e10114e6e40f3d0311c401ca25245ac5ef459a43c20f976fd63f03e816f5741f",
+          "bytes": 5622
+        },
+        {
+          "member": "libjpeg-turbo-3.1.4.1/java/doc/legal/ADDITIONAL_LICENSE_INFO",
+          "sha256": "a69bce275ba7a3570af6579cb0f55682cd75fedfcd49e0e8e9022270c447c916",
+          "bytes": 2114
+        },
+        {
+          "member": "libjpeg-turbo-3.1.4.1/java/doc/legal/LICENSE",
+          "sha256": "4b9abebc4338048a7c2dc184e9f800deb349366bdf28eb23c2677a77b4c87726",
+          "bytes": 19274
+        },
+        {
+          "member": "libjpeg-turbo-3.1.4.1/release/License.rtf",
+          "sha256": "d26120ab237f87dea10aa4fa7fd4243cadffd26e54eb2f3903d5fb0f8ed336b2",
+          "bytes": 2178
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/zlib-ng-2.3.3.tar.gz",
+      "sha256": "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1",
+      "bytes": 2447397,
+      "name": "zlib-ng",
+      "origin": "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.3.3.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "zlib-ng-2.3.3/LICENSE.md",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+          "bytes": 867
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/xz-5.8.3.tar.gz",
+      "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+      "bytes": 2771455,
+      "name": "xz",
+      "origin": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "xz-5.8.3/COPYING",
+          "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8",
+          "bytes": 3119
+        },
+        {
+          "member": "xz-5.8.3/COPYING.0BSD",
+          "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1",
+          "bytes": 607
+        },
+        {
+          "member": "xz-5.8.3/COPYING.GPLv2",
+          "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
+          "bytes": 17984
+        },
+        {
+          "member": "xz-5.8.3/COPYING.GPLv3",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+          "bytes": 35149
+        },
+        {
+          "member": "xz-5.8.3/COPYING.LGPLv2.1",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "bytes": 26419
+        },
+        {
+          "member": "xz-5.8.3/build-aux/license-check.sh",
+          "sha256": "2b3fa1d23cb2ab084f3d919908159473cc0e1eed059d106e2a2857c0ec8af98a",
+          "bytes": 5127
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libwebp-1.6.0.tar.gz",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
+      "bytes": 4296070,
+      "name": "libwebp",
+      "origin": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libwebp-1.6.0/PATENTS",
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+          "bytes": 1436
+        },
+        {
+          "member": "libwebp-1.6.0/COPYING",
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+          "bytes": 1496
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libtiff-4.7.1.tar.gz",
+      "sha256": "f698d94f3103da8ca7438d84e0344e453fe0ba3b7486e04c5bf7a9a3fabe9b69",
+      "bytes": 4000609,
+      "name": "libtiff",
+      "origin": "https://download.osgeo.org/libtiff/tiff-4.7.1.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "tiff-4.7.1/doc/html-prebuilt/_sources/project/license.rst.txt",
+          "sha256": "02e86af3b805e0f2075ebb5ac512831f6ab2a97ddeb186de076c418956418ba1",
+          "bytes": 1181
+        },
+        {
+          "member": "tiff-4.7.1/doc/html-prebuilt/project/license.html",
+          "sha256": "c5bc827b485b77932fd610bbedf8ec7fe9fbbc6fa6e9cf944e9c5a7446e885a6",
+          "bytes": 5718
+        },
+        {
+          "member": "tiff-4.7.1/doc/project/license.rst",
+          "sha256": "02e86af3b805e0f2075ebb5ac512831f6ab2a97ddeb186de076c418956418ba1",
+          "bytes": 1181
+        },
+        {
+          "member": "tiff-4.7.1/LICENSE.md",
+          "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+          "bytes": 2416
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libpng-1.6.56.tar.gz",
+      "sha256": "8f91e941a07fb1069ebb3855278f82a849e6af14ca05821e14ec3d5348697ea5",
+      "bytes": 1577915,
+      "name": "libpng",
+      "origin": "https://sourceforge.net/projects/libpng/files/libpng16/1.6.56/libpng-1.6.56.tar.gz/download",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libpng-1.6.56/LICENSE",
+          "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+          "bytes": 5345
+        },
+        {
+          "member": "libpng-1.6.56/ci/LICENSE_MIT.txt",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "bytes": 1036
+        },
+        {
+          "member": "libpng-1.6.56/contrib/gregbook/COPYING",
+          "sha256": "d6cb0e9e560f51085556949a84af12b79a00f10ab8b66c752537faf7cd665572",
+          "bytes": 18097
+        },
+        {
+          "member": "libpng-1.6.56/contrib/gregbook/LICENSE",
+          "sha256": "b6a03c1803eb58ffb1f1278d5c7d4096c4c116e66dce8a7553e8c77d163c3438",
+          "bytes": 2373
+        },
+        {
+          "member": "libpng-1.6.56/contrib/pngexif/LICENSE_MIT.txt",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "bytes": 1036
+        },
+        {
+          "member": "libpng-1.6.56/contrib/pngminus/LICENSE.txt",
+          "sha256": "1806f1f10d393e9e377b3a8d1b968452b54f1a90378f14eeef45426946ace330",
+          "bytes": 1164
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/brotli-1.2.0.tar.gz",
+      "sha256": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec",
+      "bytes": 646315,
+      "name": "brotli",
+      "origin": "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "brotli-1.2.0/LICENSE",
+          "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+          "bytes": 1084
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/freetype-2.14.3.tar.gz",
+      "sha256": "e61b31ab26358b946e767ed7eb7f4bb2e507da1cfefeb7a8861ace7fd5c899a1",
+      "bytes": 4134916,
+      "name": "freetype",
+      "origin": "https://sourceforge.net/projects/freetype/files/freetype2/2.14.3/freetype-2.14.3.tar.gz/download",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "freetype-2.14.3/src/tools/update-copyright-year",
+          "sha256": "f3e4b6f122dce96b6ba85c3d600fd19a766ab5e0fd0cbdeee785d0d88f111d3a",
+          "bytes": 4272
+        },
+        {
+          "member": "freetype-2.14.3/src/tools/no-copyright",
+          "sha256": "3e2c8db4e09e12e9a138ba7ba8c0b762eff36802c6c1273d73ac049d4949a298",
+          "bytes": 1282
+        },
+        {
+          "member": "freetype-2.14.3/src/tools/update-copyright",
+          "sha256": "ae5b05f1d3f5235eb91ce41518be95022443f68bce5d200b6e1cc1fb57a5017e",
+          "bytes": 383
+        },
+        {
+          "member": "freetype-2.14.3/LICENSE.TXT",
+          "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b",
+          "bytes": 2149
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/lcms2-2.18.tar.gz",
+      "sha256": "ee67be3566f459362c1ee094fde2c159d33fa0390aa4ed5f5af676f9e5004347",
+      "bytes": 5599928,
+      "name": "lcms2",
+      "origin": "https://sourceforge.net/projects/lcms/files/lcms/2.18/lcms2-2.18.tar.gz/download",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "lcms2-2.18/LICENSE",
+          "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31",
+          "bytes": 1080
+        },
+        {
+          "member": "lcms2-2.18/plugins/fast_float/COPYING.GPL3",
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
+          "bytes": 35146
+        },
+        {
+          "member": "lcms2-2.18/plugins/threaded/COPYING.GPL3",
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
+          "bytes": 35146
+        },
+        {
+          "member": "lcms2-2.18/utils/jpgicc/LICENSE_iccjpeg",
+          "sha256": "8baac37d14eed89b82ffcb041677dd701164eb5cc0f26e165fe47eb11afa0dca",
+          "bytes": 3234
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/openjpeg-2.5.4.tar.gz",
+      "sha256": "a695fbe19c0165f295a8531b1e4e855cd94d0875d2f88ec4b61080677e27188a",
+      "bytes": 2157028,
+      "name": "openjpeg",
+      "origin": "https://github.com/uclouvain/openjpeg/archive/v2.5.4.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "openjpeg-2.5.4/LICENSE",
+          "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+          "bytes": 2112
+        },
+        {
+          "member": "openjpeg-2.5.4/src/bin/wx/OPJViewer/source/license.txt",
+          "sha256": "8081c33f6953950dcf424aa844714658b73ada0fcaea16e4487f5fa07ef0960d",
+          "bytes": 1683
+        },
+        {
+          "member": "openjpeg-2.5.4/thirdparty/astyle/LICENSE.md",
+          "sha256": "2e8480e753b7a1d100c80920f4250b1bc9f93a18c6a5953c42b11445218cd0fb",
+          "bytes": 1094
+        },
+        {
+          "member": "openjpeg-2.5.4/thirdparty/liblcms2/COPYING",
+          "sha256": "c725daac91a9259ce5e195683c0eeb797d345035c36ac5ba114c9fa80e11639a",
+          "bytes": 1078
+        },
+        {
+          "member": "openjpeg-2.5.4/thirdparty/libpng/LICENSE",
+          "sha256": "7317e078e2d3b5d7ba5a6159e650945153262b44b76f6700f8e9edb261c5143e",
+          "bytes": 5345
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/harfbuzz-13.2.1.tar.xz",
+      "sha256": "6695da3eb7e1be0aa3092fe4d81433a33b47f4519259c759d729e3a9a55c1429",
+      "bytes": 19508960,
+      "name": "harfbuzz",
+      "origin": "https://github.com/harfbuzz/harfbuzz/releases/download/13.2.1/harfbuzz-13.2.1.tar.xz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "harfbuzz-13.2.1/COPYING",
+          "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+          "bytes": 1971
+        },
+        {
+          "member": "harfbuzz-13.2.1/src/ms-use/COPYING",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "bytes": 1141
+        },
+        {
+          "member": "harfbuzz-13.2.1/test/COPYING",
+          "sha256": "9b35b8485f69cd298fccbb3c40a827dc06cf1185553bef827903497d2944a8d7",
+          "bytes": 4370
+        },
+        {
+          "member": "harfbuzz-13.2.1/test/shape/data/aots/COPYING",
+          "sha256": "f55f74bf740db07bb032a90aa74af4307adea3d489c1ccba12453cf0c0a764cb",
+          "bytes": 593
+        },
+        {
+          "member": "harfbuzz-13.2.1/test/shape/data/text-rendering-tests/COPYING",
+          "sha256": "d24039e4d22c9bc72096f6174374539d92a3d6e1163938546ec59179fe095e6f",
+          "bytes": 584
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/fribidi-1.0.16.zip",
+      "sha256": "1e619b9949db8ff00631a2442d72db8faf53ff104dc4a9bf13cc2c224f7cd2ea",
+      "bytes": 2210399,
+      "name": "fribidi",
+      "origin": "https://github.com/fribidi/fribidi/archive/v1.0.16.zip",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "fribidi-1.0.16/COPYING",
+          "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b",
+          "bytes": 26440
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libavif-1.4.1.tar.gz",
+      "sha256": "d4aea31a4becb3273ba7968221be2e48148ba05eb8a68d14e671963e17785648",
+      "bytes": 14528943,
+      "name": "libavif",
+      "origin": "https://github.com/AOMediaCodec/libavif/archive/v1.4.1.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libavif-1.4.1/LICENSE",
+          "sha256": "165abf92cc04b39e80d29cadea7a6a7e8fddf59407d4ad2616507a7ebe8216f9",
+          "bytes": 20415
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libxml2-2.14.6.tar.xz",
+      "sha256": "7ce458a0affeb83f0b55f1f4f9e0e55735dbfc1a9de124ee86fb4a66b597203a",
+      "bytes": 2327580,
+      "name": "libxml2",
+      "origin": "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.6.tar.xz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libxml2-2.14.6/Copyright",
+          "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626",
+          "bytes": 1314
+        },
+        {
+          "member": "libxml2-2.14.6/test/html-tokenizer/NOTICE",
+          "sha256": "d6a2cb265a0a249a234b89eeffa7f316ebe5bff546672a0a2b1a861dd2238460",
+          "bytes": 1270
+        },
+        {
+          "member": "libxml2-2.14.6/result/html-tokenizer/NOTICE",
+          "sha256": "d6a2cb265a0a249a234b89eeffa7f316ebe5bff546672a0a2b1a861dd2238460",
+          "bytes": 1270
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libxslt-1.1.43.tar.xz",
+      "sha256": "5a3d6b383ca5afc235b171118e90f5ff6aa27e9fea3303065231a6d403f0183a",
+      "bytes": 1518364,
+      "name": "libxslt",
+      "origin": "https://download.gnome.org/sources/libxslt/1.1/libxslt-1.1.43.tar.xz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libxslt-1.1.43/Copyright",
+          "sha256": "7e48e290b6bfccc2ec1b297023a1d77f2fd87417f71fbb9f50aabef40a851819",
+          "bytes": 2968
+        },
+        {
+          "member": "libxslt-1.1.43/tests/docbook/dtd/3.1.7/COPYRIGHT",
+          "sha256": "0bee12b76c0229ef2098650db83ab88fc60f75f60230cb5fb49af96e58cfa59a",
+          "bytes": 1095
+        },
+        {
+          "member": "libxslt-1.1.43/tests/docbook/dtd/simple/3.1.7.1/COPYRIGHT",
+          "sha256": "66ea6d01c5eb87efbb48748157e1f440e4193a4333f92078431dbe0b8ba47564",
+          "bytes": 1151
+        },
+        {
+          "member": "libxslt-1.1.43/tests/docbook/dtd/simple/4.1.2.4/COPYRIGHT",
+          "sha256": "ccd62010471aeec715e14bbf5f33bf3d3ea090e5b5f57ebbbcfb61b13dbf91d6",
+          "bytes": 1073
+        },
+        {
+          "member": "libxslt-1.1.43/tests/docbook/doc/copyright.html",
+          "sha256": "2603fdfb55d284663aa262c04ec740d1f00ef7f4fec565170e18d78e8992e8a6",
+          "bytes": 1575
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/OpenSSL-4.0.0.tar.gz",
+      "sha256": "c32cf49a959c4f345f9606982dd36e7d28f7c58b19c2e25d75624d2b3d2f79ac",
+      "bytes": 55046677,
+      "name": "OpenSSL",
+      "origin": "https://github.com/openssl/openssl/releases/download/openssl-4.0.0/openssl-4.0.0.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "openssl-4.0.0/LICENSE.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+          "bytes": 10175
+        },
+        {
+          "member": "openssl-4.0.0/external/perl/Text-Template-1.56/LICENSE",
+          "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181",
+          "bytes": 18412
+        },
+        {
+          "member": "openssl-4.0.0/util/perl/OpenSSL/copyright.pm",
+          "sha256": "04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608",
+          "bytes": 1145
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-abseil_cpp.zip",
+      "sha256": "95e90be7c3643e658670e0dd3c1b27092349c34b632c6e795686355f67eca89f",
+      "bytes": 3198385,
+      "name": "onnxruntime-abseil_cpp",
+      "origin": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20240722.0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "abseil-cpp-20240722.0/LICENSE",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "bytes": 11361
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-cxxopts.zip",
+      "sha256": "57b5f012372d4c0e0a975b2e534e9af647cd20530fc72f73a75a61e05e0f997e",
+      "bytes": 98330,
+      "name": "onnxruntime-cxxopts",
+      "origin": "https://github.com/jarro2783/cxxopts/archive/3c73d91c0b04e2b59462f0a741be8c07024c1bc0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "cxxopts-3c73d91c0b04e2b59462f0a741be8c07024c1bc0/LICENSE",
+          "sha256": "aa324fbe633a96546bebca975fbbab65caa175894bd00cfa13d7335e7363400c",
+          "bytes": 1055
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-date.zip",
+      "sha256": "f4300b96f7a304d4ef9bf6e0fa3ded72159f7f2d0f605bdde3e030a0dba7cf9f",
+      "bytes": 941286,
+      "name": "onnxruntime-date",
+      "origin": "https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "date-3.0.1/LICENSE.txt",
+          "sha256": "c90f6c00fb961170560299cbda28ca2d45804913aa8b2a9f36dbb8e0028d6930",
+          "bytes": 1637
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-dlpack.zip",
+      "sha256": "cb296b25f1ad5d52aa0efd7553e1aab17ab4561d1068b291fbe14d543d22f381",
+      "bytes": 44987,
+      "name": "onnxruntime-dlpack",
+      "origin": "https://github.com/dmlc/dlpack/archive/refs/tags/v0.6.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "dlpack-0.6/LICENSE",
+          "sha256": "3e8f6bc39276a586d60c8c5aaece2ff989262181cf2b3d2a128db58f97a9300c",
+          "bytes": 11345
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac-git-tree.tar.gz",
+      "sha256": "21c2f5ed6b7ccba0c994717887fd89e964c1e002747cd2008b557c5f95d5b487",
+      "bytes": 2676838,
+      "name": "onnxruntime-eigen",
+      "origin": "https://gitlab.com/libeigen/eigen/-/archive/e7248b26a1ed53fa030c5c459f7ea095dfd276ac/eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.APACHE",
+          "sha256": "03379001a7b12a2ec997a25554247d985270b353c10d5bafee9ac8d6519820b7",
+          "bytes": 11362
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.BSD",
+          "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb",
+          "bytes": 1517
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.GPL",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.LGPL",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "bytes": 26530
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.MINPACK",
+          "sha256": "c87b7f8ee88f6195e91743820c00354833583aef091b72e2d4a49c8e28e798a0",
+          "bytes": 2193
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.MPL2",
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+          "bytes": 16726
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/COPYING.README",
+          "sha256": "c83230b770f17ef1386ea1fd3681271dd98aa93646bdbfb5bff3a1b7050fff9d",
+          "bytes": 779
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/bench/btl/COPYING",
+          "sha256": "b8d0e2bcbf36f6af3cdbf94055ad2ea675d5a19fc623eb0ec82febb2b08e719b",
+          "bytes": 18109
+        },
+        {
+          "member": "eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac/unsupported/Eigen/src/LevenbergMarquardt/CopyrightMINPACK.txt",
+          "sha256": "8887036b1039e299ebcc8b95a73ea1538df548393fb8462361c80bea605a4fbe",
+          "bytes": 2194
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-flatbuffers.zip",
+      "sha256": "57bd580c0772fd1a726c34ab8bf05325293bc5f9c165060a898afa1feeeb95e1",
+      "bytes": 3209602,
+      "name": "onnxruntime-flatbuffers",
+      "origin": "https://github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "flatbuffers-23.5.26/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        },
+        {
+          "member": "flatbuffers-23.5.26/dart/LICENSE",
+          "sha256": "edd9b3459bee4c79b549a5ef66d06d12bd144ddb8d08e0b448fb421267f43dd5",
+          "bytes": 11341
+        },
+        {
+          "member": "flatbuffers-23.5.26/swift/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-fp16.zip",
+      "sha256": "e66e65515fa09927b348d3d584c68be4215cfe664100d01c9dbc7655a5716d70",
+      "bytes": 91373,
+      "name": "onnxruntime-fp16",
+      "origin": "https://github.com/Maratyszcza/FP16/archive/0a92994d729ff76a58f692d3028ca1b64b145d91.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "FP16-0a92994d729ff76a58f692d3028ca1b64b145d91/LICENSE",
+          "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+          "bytes": 1157
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-fxdiv.zip",
+      "sha256": "3d7b0e9c4c658a84376a1086126be02f9b7f753caa95e009d9ac38d11da444db",
+      "bytes": 16646,
+      "name": "onnxruntime-fxdiv",
+      "origin": "https://github.com/Maratyszcza/FXdiv/archive/63058eff77e11aa15bf531df5dd34395ec3017c8.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "FXdiv-63058eff77e11aa15bf531df5dd34395ec3017c8/LICENSE",
+          "sha256": "7cac00006125b1486a27e4801ed66357236e984c540bd323945ab7b66b078ec3",
+          "bytes": 1117
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-google_benchmark.zip",
+      "sha256": "39f57865cdbfa06f02ae91ea76465246046cc47d5908aa5a3abeb9026fb73dcc",
+      "bytes": 327614,
+      "name": "onnxruntime-google_benchmark",
+      "origin": "https://github.com/google/benchmark/archive/refs/tags/v1.8.5.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "benchmark-1.8.5/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-google_nsync.zip",
+      "sha256": "a723c8d8e48f12d94d01dc6245552193f4ddb7009a687849d8cfcf8cdd86e89f",
+      "bytes": 336679,
+      "name": "onnxruntime-google_nsync",
+      "origin": "https://github.com/google/nsync/archive/refs/tags/1.26.0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "nsync-1.26.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-googletest.zip",
+      "sha256": "ed98258b96c6dc8af33eeb03c8d94a05b185866604382e12980f576595bdc509",
+      "bytes": 1097620,
+      "name": "onnxruntime-googletest",
+      "origin": "https://github.com/google/googletest/archive/refs/tags/v1.15.0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "googletest-1.15.0/LICENSE",
+          "sha256": "9702de7e4117a8e2b20dafab11ffda58c198aede066406496bef670d40a22138",
+          "bytes": 1475
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-googlexnnpack.zip",
+      "sha256": "78d7eceab4a6133660bd7b0f7035fbe3edc7a5a561294903ba528d12f7f6d24e",
+      "bytes": 25426190,
+      "name": "onnxruntime-googlexnnpack",
+      "origin": "https://github.com/google/XNNPACK/archive/309b75c9e56e0a674bf78d59872ce131f814dfb6.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "XNNPACK-309b75c9e56e0a674bf78d59872ce131f814dfb6/LICENSE",
+          "sha256": "63f519e15726f4c4f830bd958f694c84fecb4e0a4cacc527d2696bb71ef95ada",
+          "bytes": 1560
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-json.zip",
+      "sha256": "ea4b0084709fb934f92ca0a68669daa0fe6f2a2c6400bf353454993a834bb0bb",
+      "bytes": 7381040,
+      "name": "onnxruntime-json",
+      "origin": "https://github.com/nlohmann/json/archive/refs/tags/v3.10.5.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "json-3.10.5/LICENSE.MIT",
+          "sha256": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14",
+          "bytes": 1076
+        },
+        {
+          "member": "json-3.10.5/doc/mkdocs/docs/home/license.md",
+          "sha256": "08c345dca1019879171c2c465410f7bee984bbfbdb177afd2d95bf9ff6267602",
+          "bytes": 1984
+        },
+        {
+          "member": "json-3.10.5/test/thirdparty/doctest/LICENSE.txt",
+          "sha256": "21d5cc7eacfbe785d8a7642457ecf630a611220683aa7d7d8cd9febfdb0d06fc",
+          "bytes": 1086
+        },
+        {
+          "member": "json-3.10.5/test/thirdparty/fifo_map/LICENSE.MIT",
+          "sha256": "842217cbb8aefea4834d2d4132f934afb0e018481bb7289d129a7010f9008535",
+          "bytes": 1076
+        },
+        {
+          "member": "json-3.10.5/third_party/amalgamate/LICENSE.md",
+          "sha256": "2ef7ef27af194a22edf4086439104ba038636877356e6e8eeb009e7de89894e4",
+          "bytes": 1543
+        },
+        {
+          "member": "json-3.10.5/third_party/cpplint/LICENSE",
+          "sha256": "02fd655b9adb79e771fd60267a722f0862d43381f95bb38bd6ada5e2080272c4",
+          "bytes": 1502
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-microsoft_gsl.zip",
+      "sha256": "eb91fcb10a6aa5ccb1d224e07a56c8ecffe9a1bb601fa1848276ec46a2200bfb",
+      "bytes": 78670,
+      "name": "onnxruntime-microsoft_gsl",
+      "origin": "https://github.com/microsoft/GSL/archive/refs/tags/v4.0.0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "GSL-4.0.0/LICENSE",
+          "sha256": "4c21dc82a1c7186ea754fd59d504c00947953a3401fe8e24eaa44109ef8e2555",
+          "bytes": 1157
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-microsoft_wil.zip",
+      "sha256": "f116af6cd96b8404d5e3cd6ef18853f7baa9c7d96930e741591fea8b5a3ef919",
+      "bytes": 600066,
+      "name": "onnxruntime-microsoft_wil",
+      "origin": "https://github.com/microsoft/wil/archive/refs/tags/v1.0.230629.1.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "wil-1.0.230629.1/LICENSE",
+          "sha256": "27ebda9d51f0a56b7e281ccd8230a27236dcb51c05f64b07869ecf6e965d68b0",
+          "bytes": 1162
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-mimalloc.zip",
+      "sha256": "23b1bffb2eff57b1e3cb8edc9410d448db2bb43400206a151e107dcabcad773a",
+      "bytes": 1301043,
+      "name": "onnxruntime-mimalloc",
+      "origin": "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.1.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "mimalloc-2.1.1/LICENSE",
+          "sha256": "19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d",
+          "bytes": 1096
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-mp11.zip",
+      "sha256": "81431bdc44c439a324e02c07ed067f8f556419fd86f2d8b486ff568df6aac899",
+      "bytes": 232716,
+      "name": "onnxruntime-mp11",
+      "origin": "https://github.com/boostorg/mp11/archive/refs/tags/boost-1.82.0.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": []
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-onnx.zip",
+      "sha256": "f9921d97a3d49b976c02bb15b728c6815e707035217388a679b31f6a61c3d33a",
+      "bytes": 15694808,
+      "name": "onnxruntime-onnx",
+      "origin": "https://github.com/onnx/onnx/archive/refs/tags/v1.16.1.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "onnx-1.16.1/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-protobuf.zip",
+      "sha256": "6a31b662deaeb0ac35e6287bda2f3369b19836e6c9f8828d4da444346f420298",
+      "bytes": 7180794,
+      "name": "onnxruntime-protobuf",
+      "origin": "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "protobuf-21.12/LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+          "bytes": 1732
+        },
+        {
+          "member": "protobuf-21.12/third_party/utf8_range/LICENSE",
+          "sha256": "5a629d2b868081d8af08bbce5d038116f3a0e2e0d4ce9adf4d53f14e76b6b2e0",
+          "bytes": 1065
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-psimd.zip",
+      "sha256": "dc615342bcbe51ca885323e51b68b90ed9bb9fa7df0f4419dbfa0297d5e837b7",
+      "bytes": 8327,
+      "name": "onnxruntime-psimd",
+      "origin": "https://github.com/Maratyszcza/psimd/archive/072586a71b55b7f8c584153d223e95687148a900.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "psimd-072586a71b55b7f8c584153d223e95687148a900/LICENSE",
+          "sha256": "984ce1e0b8ee89d234e28b960381f240e03a07a8031f35012f9c3256f56964e2",
+          "bytes": 1162
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-pthreadpool.zip",
+      "sha256": "a4cf06de57bfdf8d7b537c61f1c3071bce74e57524fe053e0bbd2332feca7f95",
+      "bytes": 72209,
+      "name": "onnxruntime-pthreadpool",
+      "origin": "https://github.com/Maratyszcza/pthreadpool/archive/4fe0e1e183925bf8cfa6aae24237e724a96479b8.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pthreadpool-4fe0e1e183925bf8cfa6aae24237e724a96479b8/LICENSE",
+          "sha256": "57814a606b4d0fb087d9a534919084b6c11b58a4174cb5a4aef200187780dc3a",
+          "bytes": 1378
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-pybind11.zip",
+      "sha256": "a3c9ea1225cb731b257f2759a0c12164db8409c207ea5cf851d4b95679dda072",
+      "bytes": 903966,
+      "name": "onnxruntime-pybind11",
+      "origin": "https://github.com/pybind/pybind11/archive/refs/tags/v2.13.1.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pybind11-2.13.1/LICENSE",
+          "sha256": "83965b843b98f670d3a85bd041ed4b372c8ec50d7b4a5995a83ac697ba675dcb",
+          "bytes": 1684
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-pytorch_cpuinfo.zip",
+      "sha256": "ea028ced757dbc3309518ae7038ed625b02d58190078a5801d30e7b28f8b9e9c",
+      "bytes": 3847625,
+      "name": "onnxruntime-pytorch_cpuinfo",
+      "origin": "https://github.com/pytorch/cpuinfo/archive/ca678952a9a8eaa6de112d154e8e104b22f9ab3f.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "cpuinfo-ca678952a9a8eaa6de112d154e8e104b22f9ab3f/LICENSE",
+          "sha256": "8e7e60636c3aa0cb03571a1a841ce5697f9551ff92b3c426c2561613d15ade70",
+          "bytes": 1424
+        },
+        {
+          "member": "cpuinfo-ca678952a9a8eaa6de112d154e8e104b22f9ab3f/deps/clog/LICENSE",
+          "sha256": "68a14c3e79add023eecd83d611e73f05b8bf1d16852efeb7eb4033a96736da9e",
+          "bytes": 1384
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-re2.zip",
+      "sha256": "a835fe55fbdcd8e80f38584ab22d0840662c67f2feb36bd679402da9641dc71e",
+      "bytes": 451539,
+      "name": "onnxruntime-re2",
+      "origin": "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "re2-2024-07-02/LICENSE",
+          "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+          "bytes": 1558
+        },
+        {
+          "member": "re2-2024-07-02/python/LICENSE",
+          "sha256": "1e881ecf2862d01e6e5bc2b861e46886d2a6fb01499c0c508a209a7271b13cf2",
+          "bytes": 10
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-safeint.zip",
+      "sha256": "3ffbd9a2fdff45da77da3e7269e9aa512ea43bed5c38ce8fd8f3d1068a032c3f",
+      "bytes": 626378,
+      "name": "onnxruntime-safeint",
+      "origin": "https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "SafeInt-3.0.28/Archive/license/license.json",
+          "sha256": "16db14c945059d9ea2c7a951abdaba4360fd8844f11d50e2aa0dec3f236881a1",
+          "bytes": 2862
+        },
+        {
+          "member": "SafeInt-3.0.28/LICENSE",
+          "sha256": "a46919cc8f01eb73f6e4b84af0d41b46b2a33b87c74e864279ef585079f82da4",
+          "bytes": 1066
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/onnxruntime-utf8_range.zip",
+      "sha256": "dffb52973f0226fe5df6d9ed40b0d1af1bb89f54beec6a64b66d25e7db9c4152",
+      "bytes": 71643,
+      "name": "onnxruntime-utf8_range",
+      "origin": "https://github.com/protocolbuffers/utf8_range/archive/72c943dea2b9240cd09efde15191e144bc7c7d38.zip",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "utf8_range-72c943dea2b9240cd09efde15191e144bc7c7d38/LICENSE",
+          "sha256": "02de69b64fc36d9e938f418e52723e42f0b2b226d58a9cb3c8dcbdf7059f5074",
+          "bytes": 1091
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libaom-3.13.2.tar.gz",
+      "sha256": "029754e1eb773f707a3d4adab912326b0ec74f252a2da4037af19a5e22b12635",
+      "bytes": 6325442,
+      "name": "libaom-3.13.2",
+      "origin": "https://aomedia.googlesource.com/aom/+archive/refs/tags/v3.13.2.tar.gz",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "LICENSE",
+          "sha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2",
+          "bytes": 1316
+        },
+        {
+          "member": "PATENTS",
+          "sha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61",
+          "bytes": 5701
+        },
+        {
+          "member": "third_party/SVT-AV1/LICENSE.md",
+          "sha256": "0acc2fcb27472bdc9aaf8b71f37055bbdac4f54671b7d922f241bd7fcd0dd3e6",
+          "bytes": 1709
+        },
+        {
+          "member": "third_party/SVT-AV1/PATENTS.md",
+          "sha256": "20678ab10402659106dc4c147c97b2a6e94b5c0695415e15a8f195ebc3547922",
+          "bytes": 5767
+        },
+        {
+          "member": "third_party/fastfeat/LICENSE",
+          "sha256": "043dcfd059386f9facd376351b2bd79325778744aa442177390cdfcca54babed",
+          "bytes": 1506
+        },
+        {
+          "member": "third_party/googletest/src/LICENSE",
+          "sha256": "9702de7e4117a8e2b20dafab11ffda58c198aede066406496bef670d40a22138",
+          "bytes": 1475
+        },
+        {
+          "member": "third_party/highway/LICENSE-BSD3",
+          "sha256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2",
+          "bytes": 1515
+        },
+        {
+          "member": "third_party/libwebm/LICENSE.TXT",
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+          "bytes": 1496
+        },
+        {
+          "member": "third_party/libwebm/PATENTS.TXT",
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+          "bytes": 1436
+        },
+        {
+          "member": "third_party/libyuv/LICENSE",
+          "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f",
+          "bytes": 1506
+        },
+        {
+          "member": "third_party/vector/LICENSE",
+          "sha256": "ff6c857ce2708e87701323078aef115c1872a1f80a9649f86dc899b48083bc60",
+          "bytes": 1084
+        },
+        {
+          "member": "third_party/x86inc/LICENSE",
+          "sha256": "719d8fa235f2068e0ae6d6a7dceb0a7720d7840f0f0ebed29957989e6ded3cd8",
+          "bytes": 936
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/dav1d-1.5.3.tar.gz",
+      "sha256": "cbe212b02faf8c6eed5b6d55ef8a6e363aaab83f15112e960701a9c3df813686",
+      "bytes": 1713950,
+      "name": "dav1d-1.5.3",
+      "origin": "https://code.videolan.org/videolan/dav1d/-/archive/1.5.3/dav1d-1.5.3.tar.gz",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "dav1d-1.5.3/COPYING",
+          "sha256": "dd92c3c2247c5651606fc23a5e2d6a1ebc5ace9a3e49cbde0e12f05ad1cb1ee5",
+          "bytes": 1317
+        },
+        {
+          "member": "dav1d-1.5.3/doc/PATENTS",
+          "sha256": "335eca574598bf4ca181b12f708d6669e5a5e78c8e1513e5b35fa1f03901484b",
+          "bytes": 5730
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/native/libyuv-6067afde563c3946eebd94f146b3824ab7a97a9c.tar.gz",
+      "sha256": "6249ecfbfba5b392618cf3ad383aaa400a604e0379b6ede217016c0514a2de00",
+      "bytes": 593906,
+      "name": "libyuv-6067afde563c3946eebd94f146b3824ab7a97a9c",
+      "origin": "https://chromium.googlesource.com/libyuv/libyuv/+archive/6067afde563c3946eebd94f146b3824ab7a97a9c.tar.gz",
+      "scope": "fixed-build-superset",
+      "original_notice_members": [
+        {
+          "member": "LICENSE",
+          "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f",
+          "bytes": 1506
+        },
+        {
+          "member": "PATENTS",
+          "sha256": "4da84211f947c6f9f7dd8fbce513e1522e01833407ae732b8c9a2bbb75fed495",
+          "bytes": 1387
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/upstream/mupdf-1.27.2-source.tar.gz",
+      "sha256": "553867b135303dc4c25ab67c5f234d8e900a0e36e66e8484d99adc05fe1e8737",
+      "bytes": 66968384,
+      "name": "MuPDF",
+      "origin": "https://mupdf.com/downloads/archive/mupdf-1.27.2-source.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "mupdf-1.27.2-source/COPYING",
+          "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+          "bytes": 34520
+        },
+        {
+          "member": "mupdf-1.27.2-source/docs/license.md",
+          "sha256": "1412b5e5fb96eaff8676441921586b1fe3951358815ae1780568779cd5714740",
+          "bytes": 1254
+        },
+        {
+          "member": "mupdf-1.27.2-source/resources/fonts/droid/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a",
+          "bytes": 10695
+        },
+        {
+          "member": "mupdf-1.27.2-source/resources/fonts/han/LICENSE.txt",
+          "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+          "bytes": 4301
+        },
+        {
+          "member": "mupdf-1.27.2-source/resources/fonts/noto/COPYING",
+          "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+          "bytes": 4301
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/brotli/LICENSE",
+          "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+          "bytes": 1084
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/curl/COPYING",
+          "sha256": "8c8824f50e73a021f5dde1fccbf69685939247399a33a32abab1fa448c9ddabb",
+          "bytes": 1088
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/curl/docs/LICENSE-MIXING.md",
+          "sha256": "6f4bfc06c8209f38bb7bd4a16820e94b5c05e9de4e8c14ec094f15dddfaed777",
+          "bytes": 4636
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/extract/COPYING",
+          "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+          "bytes": 34520
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/freeglut/COPYING",
+          "sha256": "b6593d5ec4c113a274abb85b10e8615895cb0ddb89f7912af5fe5aa8df38a275",
+          "bytes": 1439
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/freetype/LICENSE.TXT",
+          "sha256": "2e3bbb7d7c5c396368dd0853a790ec29ce5b8647163dde42a0493fb0d6556b2b",
+          "bytes": 2074
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/freetype/src/tools/no-copyright",
+          "sha256": "3e2c8db4e09e12e9a138ba7ba8c0b762eff36802c6c1273d73ac049d4949a298",
+          "bytes": 1282
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/freetype/src/tools/update-copyright",
+          "sha256": "ae5b05f1d3f5235eb91ce41518be95022443f68bce5d200b6e1cc1fb57a5017e",
+          "bytes": 383
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/freetype/src/tools/update-copyright-year",
+          "sha256": "1043ab2f00dc9b79e90f913f3cc8c9e45759f12b4676d8188a6be81a578612c1",
+          "bytes": 4272
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/gumbo-parser/COPYING",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "bytes": 11357
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/harfbuzz/COPYING",
+          "sha256": "4345e1735f8bc6d812fed5180cabb5a5e88a4109d332652f2a45c13cfa5ee692",
+          "bytes": 1829
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/harfbuzz/src/ms-use/COPYING",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "bytes": 1141
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/jbig2dec/COPYING",
+          "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+          "bytes": 34520
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/jbig2dec/LICENSE",
+          "sha256": "1bf5258afe453934484fd0cea97508b72301633a6a78b0ae8a9ee44ac78f26d9",
+          "bytes": 1170
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/lcms2/LICENSE",
+          "sha256": "74fe8934cee0e63e8368d4a6b3a703b603e753a62b75b75273572e98a57ebf75",
+          "bytes": 1075
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/lcms2/plugins/threaded/COPYING.GPL3",
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
+          "bytes": 35146
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/lcms2/utils/jpgicc/LICENSE_iccjpeg",
+          "sha256": "8baac37d14eed89b82ffcb041677dd701164eb5cc0f26e165fe47eb11afa0dca",
+          "bytes": 3234
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/leptonica/leptonica-license.txt",
+          "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806",
+          "bytes": 1521
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/leptonica/src/leptonica-license.txt",
+          "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806",
+          "bytes": 1521
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/mujs/COPYING",
+          "sha256": "0ca9b4fbfbcab8ac7d32475890d866efc02f4cffb6b6da5c0e9a0615cc3d82fe",
+          "bytes": 759
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/mujs/docs/license.html",
+          "sha256": "533d750392fdfa8a856732a479f9b267310b4fd31732b21695fa3663444dd344",
+          "bytes": 1400
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/openjpeg/LICENSE",
+          "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+          "bytes": 2112
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/tesseract/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/LICENSE",
+          "sha256": "d69af7f2442fcde1c3372cbbb43907fa1f4b3a91ef3899be69dd3a726dc255a4",
+          "bytes": 909
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/backend_qt/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/backend_tcl/licence.txt",
+          "sha256": "b1722b97c78ba93650e62ff02dac8bad2859eaf6d6965ce025510c8c0c508514",
+          "bytes": 728
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/debian/copyright",
+          "sha256": "edec41dba6f270124ad3ba658dc2514bb1e1a9d8c637b7d676cde361114680eb",
+          "bytes": 1325
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/frontend/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/frontend_qt/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/frontend_qt/res/LICENSE_feathericons",
+          "sha256": "7b4fbc0fda4330e71c1c20706b69e69f2c5ea721fcf3791911188e268975b523",
+          "bytes": 1082
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zint/frontend_qt/res/LICENSE_lucide",
+          "sha256": "1e7290b35280a048667bbf0ebabac1c7fd52a75300e8b2946ac165715997f2bc",
+          "bytes": 880
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zlib/LICENSE",
+          "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+          "bytes": 1002
+        },
+        {
+          "member": "mupdf-1.27.2-source/thirdparty/zxing-cpp/LICENSE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python/cryptography-48.0.0.tar.gz",
+      "sha256": "5c3932f4436d1cccb036cb0eaef46e6e2db91035166f1ad6505c3c9d5a635920",
+      "bytes": 832984,
+      "name": "cryptography",
+      "origin": "https://files.pythonhosted.org/packages/9f/a9/db8f313fdcd85d767d4973515e1db101f9c71f95fced83233de224673757/cryptography-48.0.0.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "cryptography-48.0.0/LICENSE",
+          "sha256": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb",
+          "bytes": 197
+        },
+        {
+          "member": "cryptography-48.0.0/LICENSE.APACHE",
+          "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+          "bytes": 11360
+        },
+        {
+          "member": "cryptography-48.0.0/LICENSE.BSD",
+          "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb",
+          "bytes": 1532
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python/lxml-6.1.1.tar.gz",
+      "sha256": "ba96ae44888e0185281e937633a743ea90d5a196c6000f82565ebb0580012d40",
+      "bytes": 4197430,
+      "name": "lxml",
+      "origin": "https://files.pythonhosted.org/packages/05/3b/aab6728cae887456f409b4d75e8a01856e4f04bd510de38052a47768b680/lxml-6.1.1.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "lxml-6.1.1/LICENSE.txt",
+          "sha256": "8fc2b568133516e46845d2147917adeee1648e70ae9ab5ed6c5417afef4ce855",
+          "bytes": 1507
+        },
+        {
+          "member": "lxml-6.1.1/LICENSES.txt",
+          "sha256": "41d49dd406aa0e1548a6d5f21a30d6bf638b3cd96eb7289dd348d83ed2e40392",
+          "bytes": 1514
+        },
+        {
+          "member": "lxml-6.1.1/src/lxml/isoschematron/resources/xsl/RNG2Schtrn.xsl",
+          "sha256": "39b79bb01f16b7e777b8803f539354f394e99d0dcfc4f5f7f1374e02aa2c31a7",
+          "bytes": 3172
+        },
+        {
+          "member": "lxml-6.1.1/src/lxml/isoschematron/resources/xsl/XSD2Schtrn.xsl",
+          "sha256": "430791ac820cfb315c820f7c19703609a59f21b8151345ca11e6127efbfaec0d",
+          "bytes": 4563
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python/pillow-12.2.0.tar.gz",
+      "sha256": "a830b1a40919539d07806aa58e1b114df53ddd43213d9c8b75847eee6c0182b5",
+      "bytes": 46987819,
+      "name": "pillow",
+      "origin": "https://files.pythonhosted.org/packages/8c/21/c2bcdd5906101a30244eaffc1b6e6ce71a31bd0742a01eb89e660ebfac2d/pillow-12.2.0.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "pillow-12.2.0/LICENSE",
+          "sha256": "15181e7363dca9aed78b79bebebc7fde7f1814b8bd311ea3b87ae8ccadfc185b",
+          "bytes": 1457
+        },
+        {
+          "member": "pillow-12.2.0/Tests/fonts/DejaVuSans/LICENSE.txt",
+          "sha256": "ba4aee7ef5b2ebc285e76df2497953d8a6e7480bc249f4e0a55f1199a3396622",
+          "bytes": 4950
+        },
+        {
+          "member": "pillow-12.2.0/Tests/fonts/LICENSE.txt",
+          "sha256": "b79f6f6a2fc060b2e0a6e7a6946c446ae199bec07b92a3df1295975e25c4d96b",
+          "bytes": 1676
+        },
+        {
+          "member": "pillow-12.2.0/Tests/icc/LICENSE.txt",
+          "sha256": "09e62757edb34e284bc11c54e3429b438d9db37f46c9cb36bd57b1b25ae36184",
+          "bytes": 1160
+        },
+        {
+          "member": "pillow-12.2.0/docs/COPYING",
+          "sha256": "d44ce2bbf81806be0eb34ec0ecb0cb013ccd56a94057daf214fb7381adde8f0c",
+          "bytes": 1475
+        },
+        {
+          "member": "pillow-12.2.0/src/thirdparty/fribidi-shim/fribidi.c",
+          "sha256": "7e8cfa78dcd21cebeb0ad91c0cd23e0dba6496c0fbd66e1ec3d25c5b1b365d11",
+          "bytes": 3064
+        },
+        {
+          "member": "pillow-12.2.0/src/thirdparty/pythoncapi_compat.h",
+          "sha256": "97b0e62657965bd01a783b93422a6f7138d64c48546657feacc218ec8319ee0b",
+          "bytes": 61260
+        },
+        {
+          "member": "pillow-12.2.0/src/thirdparty/raqm/COPYING",
+          "sha256": "4a574f631d5aee5223d108d3f7ec4f717343685d8a8904f42591be72c907ecba",
+          "bytes": 1180
+        },
+        {
+          "member": "pillow-12.2.0/src/thirdparty/raqm/raqm.c",
+          "sha256": "eb46870b00a7fbc137655c86036de7372e9bf59f40e415ee2fccce792afd361d",
+          "bytes": 69421
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python/pymupdf-1.27.2.3.tar.gz",
+      "sha256": "7a92faa25129e8bbec5e50eeb9214f187665428c31b05c4ef6e36c58c0b1c6d2",
+      "bytes": 85759618,
+      "name": "pymupdf",
+      "origin": "https://files.pythonhosted.org/packages/22/32/708bedc9dde7b328d45abbc076091769d44f2f24ad151ad92d56a6ec142b/pymupdf-1.27.2.3.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "pymupdf-1.27.2.3/COPYING",
+          "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+          "bytes": 34520
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/upstream/ONNXRuntime-1.20.1-5c1b7ccbff7e.tar.gz",
+      "sha256": "1c1bcd46f0a6e7e0ed8f3b7eb7f88efccdf5db3f070f2670f3880e75b5855db5",
+      "bytes": 240607833,
+      "name": "ONNXRuntime",
+      "origin": "https://codeload.github.com/microsoft/onnxruntime/tar.gz/5c1b7ccbff7e5141c1da7a9d963d660e5741c319",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "bytes": 1073
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/dockerfiles/LICENSE-IMAGE.txt",
+          "sha256": "ca180cdd0ec6f4ca68db0488ba79e7db666e26ea1e49db15c3b2a3b8381442fd",
+          "bytes": 903
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/rust/LICENSE-APACHE",
+          "sha256": "f4d2c773ac92765f2f2b2f4cae3b0710b6fb4293ddc555d8f8a011ada12e84f3",
+          "bytes": 10838
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/rust/LICENSE-MIT",
+          "sha256": "acda9cba15b9c7e0663718fdc8bd8e1cbbc142545da187d84c7e8e2a6146e76e",
+          "bytes": 1075
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/winml/test/collateral/images/LICENSE.md",
+          "sha256": "00ccbe927675ce8c8841c2d8849886d9e5e1160d982277d90fde7807f2a4aabb",
+          "bytes": 350
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/winml/test/collateral/models/LICENSE.md",
+          "sha256": "949addf0d4269f3d397bb85cee8660c4999eea1ca42db7144e5f0ff0f82aaa51",
+          "bytes": 3081
+        },
+        {
+          "member": "onnxruntime-5c1b7ccbff7e5141c1da7a9d963d660e5741c319/winml/test/scenario/models/LICENSE.md",
+          "sha256": "0703b52991ed9054dbc4a141ff6b64989d39f4904709f2e29b2ff94776129215",
+          "bytes": 212
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/upstream/PyMuPDF-1.27.2.3-bf51516c1b11.tar.gz",
+      "sha256": "aa4905e8517143b09e8a306d82460475b42258431000e3a80e7170f9fd22544a",
+      "bytes": 95440725,
+      "name": "PyMuPDF",
+      "origin": "https://codeload.github.com/pymupdf/PyMuPDF/tar.gz/bf51516c1b1146d357e3705473f7dea6a405a589",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "PyMuPDF-bf51516c1b1146d357e3705473f7dea6a405a589/COPYING",
+          "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+          "bytes": 34520
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/winlibs-libiconv-880a1fa8b558.tar.gz",
+      "sha256": "89dd45d7f074ddae04dcd25cc4ceace3432c04b72dc36a6508854aac713f3eb6",
+      "bytes": 5313881,
+      "name": "winlibs-libiconv",
+      "origin": "https://codeload.github.com/winlibs/libiconv/tar.gz/880a1fa8b5581e37e136a7b051947d3ea39097b6",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libiconv-880a1fa8b5581e37e136a7b051947d3ea39097b6/source/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        },
+        {
+          "member": "libiconv-880a1fa8b5581e37e136a7b051947d3ea39097b6/source/COPYING.LIB",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "bytes": 26530
+        },
+        {
+          "member": "libiconv-880a1fa8b5581e37e136a7b051947d3ea39097b6/source/libcharset/COPYING.LIB",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "bytes": 26530
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/winlibs-libxml2-bb84678855e3.tar.gz",
+      "sha256": "5182396205f97b183d34ab8dadd7693523c7d4e2137394aec02514a5a9a9dcf0",
+      "bytes": 4225102,
+      "name": "winlibs-libxml2",
+      "origin": "https://codeload.github.com/winlibs/libxml2/tar.gz/bb84678855e3407fc88180295c992f9c984e28e0",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libxml2-bb84678855e3407fc88180295c992f9c984e28e0/Copyright",
+          "sha256": "c5c63674f8a83c4d2e385d96d1c670a03cb871ba2927755467017317878574bd",
+          "bytes": 1289
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/winlibs-libxslt-c0076eaa6e0d.tar.gz",
+      "sha256": "d687aaf48527e042d942dccbc74fbcd150588522305e63d3e91785d9b6590677",
+      "bytes": 2705214,
+      "name": "winlibs-libxslt",
+      "origin": "https://codeload.github.com/winlibs/libxslt/tar.gz/c0076eaa6e0d1f99e01107e8db225a308eb1e543",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libxslt-c0076eaa6e0d1f99e01107e8db225a308eb1e543/Copyright",
+          "sha256": "7e48e290b6bfccc2ec1b297023a1d77f2fd87417f71fbb9f50aabef40a851819",
+          "bytes": 2968
+        },
+        {
+          "member": "libxslt-c0076eaa6e0d1f99e01107e8db225a308eb1e543/tests/docbook/doc/copyright.html",
+          "sha256": "2603fdfb55d284663aa262c04ec740d1f00ef7f4fec565170e18d78e8992e8a6",
+          "bytes": 1575
+        },
+        {
+          "member": "libxslt-c0076eaa6e0d1f99e01107e8db225a308eb1e543/tests/docbook/dtd/3.1.7/COPYRIGHT",
+          "sha256": "0bee12b76c0229ef2098650db83ab88fc60f75f60230cb5fb49af96e58cfa59a",
+          "bytes": 1095
+        },
+        {
+          "member": "libxslt-c0076eaa6e0d1f99e01107e8db225a308eb1e543/tests/docbook/dtd/simple/3.1.7.1/COPYRIGHT",
+          "sha256": "66ea6d01c5eb87efbb48748157e1f440e4193a4333f92078431dbe0b8ba47564",
+          "bytes": 1151
+        },
+        {
+          "member": "libxslt-c0076eaa6e0d1f99e01107e8db225a308eb1e543/tests/docbook/dtd/simple/4.1.2.4/COPYRIGHT",
+          "sha256": "ccd62010471aeec715e14bbf5f33bf3d3ea090e5b5f57ebbbcfb61b13dbf91d6",
+          "bytes": 1073
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/winlibs-zlib-0089522e62e6.tar.gz",
+      "sha256": "e2af9f28fcdf723e464b40af73fdeed07ce3e581a9ea110702c1ba733983f8a0",
+      "bytes": 1559272,
+      "name": "winlibs-zlib",
+      "origin": "https://codeload.github.com/winlibs/zlib/tar.gz/0089522e62e6b5d4950e62bd20f0cb06a9288413",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "zlib-0089522e62e6b5d4950e62bd20f0cb06a9288413/LICENSE",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "bytes": 1002
+        },
+        {
+          "member": "zlib-0089522e62e6b5d4950e62bd20f0cb06a9288413/contrib/dotzlib/LICENSE_1_0.txt",
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+          "bytes": 1359
+        },
+        {
+          "member": "zlib-0089522e62e6b5d4950e62bd20f0cb06a9288413/contrib/minizip/LICENSE.Info-Zip",
+          "sha256": "fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca",
+          "bytes": 3509
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/libiconv-1.18.tar.gz",
+      "sha256": "3b08f5f4f9b4eb82f151a7040bfd6fe6c6fb922efe4b1659c66ea933276965e8",
+      "bytes": 5822590,
+      "name": "libiconv",
+      "origin": "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.18.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libiconv-1.18/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "bytes": 26419
+        },
+        {
+          "member": "libiconv-1.18/libcharset/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "bytes": 26419
+        },
+        {
+          "member": "libiconv-1.18/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "bytes": 35147
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/zstd-1.5.7.tar.gz",
+      "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+      "bytes": 2434947,
+      "name": "zstd",
+      "origin": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "zstd-1.5.7/COPYING",
+          "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+          "bytes": 18091
+        },
+        {
+          "member": "zstd-1.5.7/LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "bytes": 1549
+        },
+        {
+          "member": "zstd-1.5.7/build/LICENSE",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "member": "zstd-1.5.7/tests/test-license.py",
+          "sha256": "a0bd1837d89c90e45722ff2c109530f2d280fa8296732b1a86adea2054f08ee9",
+          "bytes": 4388
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/libXau-1.0.9-3.el8.src.rpm",
+      "sha256": "f9e5775417473caa6b5699171eec64253ef90473f36f0efe81d020b52a5de49a",
+      "bytes": 340502,
+      "name": "libXau-1.0.9-3.el8.src.rpm",
+      "origin": "https://vault.almalinux.org/8.10/AppStream/Source/Packages/libXau-1.0.9-3.el8.src.rpm",
+      "scope": "source-rpm",
+      "original_notice_members": []
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/pillow-multibuild-64739327166f.tar.gz",
+      "sha256": "386b2a516d88257db95f69ab4a91c2c4c69892ceeefe42bebc3b70f4ff20a2dc",
+      "bytes": 825575,
+      "name": "pillow-multibuild-64739327166f.tar.gz",
+      "origin": "https://codeload.github.com/multi-build/multibuild/tar.gz/64739327166fcad1fa41ad9b23fa910fa244c84f",
+      "scope": "fixed-build-control-superset",
+      "original_notice_members": [
+        {
+          "member": "multibuild-64739327166fcad1fa41ad9b23fa910fa244c84f/LICENSE",
+          "sha256": "ce4aa8533d69c184f7697fe634f8390ff38e93ebfc794d8bfddea9e0f486b664",
+          "bytes": 1608
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/libXau-srpm/libXau-1.0.9.tar.bz2",
+      "sha256": "ccf8cbf0dbf676faa2ea0a6d64bcc3b6746064722b606c8c52917ed00dcb73ec",
+      "bytes": 322650,
+      "name": "libXau-1.0.9.tar.bz2",
+      "origin": "libXau-1.0.9-3.el8.src.rpm",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libXau-1.0.9/COPYING",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa",
+          "bytes": 1148
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/libXau-srpm/libXau.spec",
+      "sha256": "a93c25410749f0c9eea78971e8753ac57ed9c48deaad1d9b0528c03125e34e03",
+      "bytes": 9513,
+      "name": "libXau.spec",
+      "origin": "libXau-1.0.9-3.el8.src.rpm",
+      "scope": "source-and-build-input",
+      "original_notice_members": []
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/debian/libxcb_1.17.0-2/libxcb_1.17.0.orig.tar.gz",
+      "sha256": "2c69287424c9e2128cb47ffe92171e10417041ec2963bceafb65cb3fcf8f0b85",
+      "bytes": 661593,
+      "name": "libxcb 1.17.0 pristine upstream archive",
+      "origin": "existing Debian source cache; pristine upstream source, not Debian binary provenance",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "libxcb-1.17.0/COPYING",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd",
+          "bytes": 1337
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-runtime-resolution/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "bytes": 1502830,
+      "name": "zlib 1.3.2",
+      "origin": "https://zlib.net/zlib-1.3.2.tar.gz",
+      "scope": "source-and-build-input",
+      "original_notice_members": [
+        {
+          "member": "zlib-1.3.2/LICENSE",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "bytes": 1002
+        },
+        {
+          "member": "zlib-1.3.2/contrib/dotzlib/LICENSE_1_0.txt",
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+          "bytes": 1359
+        },
+        {
+          "member": "zlib-1.3.2/contrib/minizip/LICENSE.Info-Zip",
+          "sha256": "fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca",
+          "bytes": 3509
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/asn1-0.24.1.crate",
+      "sha256": "c9795210620c0cb3f9a7ce4f882808c38e1ef7b347c90591dceae0886e031fb1",
+      "bytes": 50502,
+      "name": "asn1 0.24.1",
+      "origin": "https://static.crates.io/crates/asn1/asn1-0.24.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "asn1-0.24.1/LICENSE",
+          "sha256": "c6deb2d156619439e147f8b62e1b3928598c8e3652ec8b56cc039490696b3985",
+          "bytes": 1540
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/asn1_derive-0.24.1.crate",
+      "sha256": "909e307f1cc32bb8bccbd98f446e6d1bf03fa30f7b53a4337da7181ad30fa11a",
+      "bytes": 9534,
+      "name": "asn1_derive 0.24.1",
+      "origin": "https://static.crates.io/crates/asn1_derive/asn1_derive-0.24.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "asn1_derive-0.24.1/LICENSE",
+          "sha256": "c6deb2d156619439e147f8b62e1b3928598c8e3652ec8b56cc039490696b3985",
+          "bytes": 1540
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/base64-0.22.1.crate",
+      "sha256": "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
+      "bytes": 81597,
+      "name": "base64 0.22.1",
+      "origin": "https://static.crates.io/crates/base64/base64-0.22.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "base64-0.22.1/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "base64-0.22.1/LICENSE-MIT",
+          "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7",
+          "bytes": 1076
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/bitflags-2.11.1.crate",
+      "sha256": "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3",
+      "bytes": 49082,
+      "name": "bitflags 2.11.1",
+      "origin": "https://static.crates.io/crates/bitflags/bitflags-2.11.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "bitflags-2.11.1/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "bitflags-2.11.1/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "bytes": 1071
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/cc-1.2.61.crate",
+      "sha256": "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d",
+      "bytes": 97163,
+      "name": "cc 1.2.61",
+      "origin": "https://static.crates.io/crates/cc/cc-1.2.61.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "cc-1.2.61/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "cc-1.2.61/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "bytes": 1057
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/cfg-if-1.0.4.crate",
+      "sha256": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
+      "bytes": 9360,
+      "name": "cfg-if 1.0.4",
+      "origin": "https://static.crates.io/crates/cfg-if/cfg-if-1.0.4.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "cfg-if-1.0.4/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "cfg-if-1.0.4/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "bytes": 1057
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/find-msvc-tools-0.1.9.crate",
+      "sha256": "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582",
+      "bytes": 31493,
+      "name": "find-msvc-tools 0.1.9",
+      "origin": "https://static.crates.io/crates/find-msvc-tools/find-msvc-tools-0.1.9.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "find-msvc-tools-0.1.9/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "find-msvc-tools-0.1.9/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "bytes": 1057
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/foreign-types-0.3.2.crate",
+      "sha256": "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1",
+      "bytes": 7504,
+      "name": "foreign-types 0.3.2",
+      "origin": "https://static.crates.io/crates/foreign-types/foreign-types-0.3.2.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "foreign-types-0.3.2/LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358
+        },
+        {
+          "member": "foreign-types-0.3.2/LICENSE-MIT",
+          "sha256": "333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734",
+          "bytes": 1072
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/foreign-types-shared-0.1.1.crate",
+      "sha256": "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b",
+      "bytes": 5672,
+      "name": "foreign-types-shared 0.1.1",
+      "origin": "https://static.crates.io/crates/foreign-types-shared/foreign-types-shared-0.1.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "foreign-types-shared-0.1.1/LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358
+        },
+        {
+          "member": "foreign-types-shared-0.1.1/LICENSE-MIT",
+          "sha256": "333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734",
+          "bytes": 1072
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/heck-0.5.0.crate",
+      "sha256": "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
+      "bytes": 11517,
+      "name": "heck 0.5.0",
+      "origin": "https://static.crates.io/crates/heck/heck-0.5.0.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "heck-0.5.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "heck-0.5.0/LICENSE-MIT",
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+          "bytes": 1071
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/itoa-1.0.18.crate",
+      "sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+      "bytes": 15935,
+      "name": "itoa 1.0.18",
+      "origin": "https://static.crates.io/crates/itoa/itoa-1.0.18.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "itoa-1.0.18/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "itoa-1.0.18/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/libc-0.2.186.crate",
+      "sha256": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
+      "bytes": 821883,
+      "name": "libc 0.2.186",
+      "origin": "https://static.crates.io/crates/libc/libc-0.2.186.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "libc-0.2.186/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "libc-0.2.186/LICENSE-MIT",
+          "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+          "bytes": 1066
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/once_cell-1.21.4.crate",
+      "sha256": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
+      "bytes": 35010,
+      "name": "once_cell 1.21.4",
+      "origin": "https://static.crates.io/crates/once_cell/once_cell-1.21.4.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "once_cell-1.21.4/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "once_cell-1.21.4/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/openssl-0.10.79.crate",
+      "sha256": "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542",
+      "bytes": 307119,
+      "name": "openssl 0.10.79",
+      "origin": "https://static.crates.io/crates/openssl/openssl-0.10.79.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "openssl-0.10.79/LICENSE",
+          "sha256": "f3d4287b4a21c5176fea2f9bd4ae800696004e2fb8e05cbc818be513f188a941",
+          "bytes": 618
+        },
+        {
+          "member": "openssl-0.10.79/LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/openssl-macros-0.1.1.crate",
+      "sha256": "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c",
+      "bytes": 5601,
+      "name": "openssl-macros 0.1.1",
+      "origin": "https://static.crates.io/crates/openssl-macros/openssl-macros-0.1.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "openssl-macros-0.1.1/LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358
+        },
+        {
+          "member": "openssl-macros-0.1.1/LICENSE-MIT",
+          "sha256": "ea5ab440900ab271811d5c2dc02a9de6e03a6956ac5727e85c11d76df5883d30",
+          "bytes": 1058
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/openssl-sys-0.9.115.crate",
+      "sha256": "158fe5b292746440aa6e7a7e690e55aeb72d41505e2804c23c6973ad0e9c9781",
+      "bytes": 75821,
+      "name": "openssl-sys 0.9.115",
+      "origin": "https://static.crates.io/crates/openssl-sys/openssl-sys-0.9.115.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "openssl-sys-0.9.115/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "bytes": 1057
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pem-3.0.6.crate",
+      "sha256": "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be",
+      "bytes": 18362,
+      "name": "pem 3.0.6",
+      "origin": "https://static.crates.io/crates/pem/pem-3.0.6.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pem-3.0.6/LICENSE.md",
+          "sha256": "b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf",
+          "bytes": 1085
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pkg-config-0.3.33.crate",
+      "sha256": "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e",
+      "bytes": 21590,
+      "name": "pkg-config 0.3.33",
+      "origin": "https://static.crates.io/crates/pkg-config/pkg-config-0.3.33.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pkg-config-0.3.33/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847
+        },
+        {
+          "member": "pkg-config-0.3.33/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "bytes": 1057
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/portable-atomic-1.13.1.crate",
+      "sha256": "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49",
+      "bytes": 197001,
+      "name": "portable-atomic 1.13.1",
+      "origin": "https://static.crates.io/crates/portable-atomic/portable-atomic-1.13.1.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "portable-atomic-1.13.1/LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "bytes": 10174
+        },
+        {
+          "member": "portable-atomic-1.13.1/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/proc-macro2-1.0.106.crate",
+      "sha256": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+      "bytes": 59765,
+      "name": "proc-macro2 1.0.106",
+      "origin": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.106.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "proc-macro2-1.0.106/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "proc-macro2-1.0.106/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pyo3-0.28.3.crate",
+      "sha256": "91fd8e38a3b50ed1167fb981cd6fd60147e091784c427b8f7183a7ee32c31c12",
+      "bytes": 1204476,
+      "name": "pyo3 0.28.3",
+      "origin": "https://static.crates.io/crates/pyo3/pyo3-0.28.3.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pyo3-0.28.3/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-0.28.3/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        },
+        {
+          "member": "pyo3-0.28.3/pyo3-runtime/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-0.28.3/pyo3-runtime/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pyo3-build-config-0.28.3.crate",
+      "sha256": "e368e7ddfdeb98c9bca7f8383be1648fd84ab466bf2bc015e94008db6d35611e",
+      "bytes": 35961,
+      "name": "pyo3-build-config 0.28.3",
+      "origin": "https://static.crates.io/crates/pyo3-build-config/pyo3-build-config-0.28.3.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pyo3-build-config-0.28.3/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-build-config-0.28.3/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pyo3-ffi-0.28.3.crate",
+      "sha256": "7f29e10af80b1f7ccaf7f69eace800a03ecd13e883acfacc1e5d0988605f651e",
+      "bytes": 80881,
+      "name": "pyo3-ffi 0.28.3",
+      "origin": "https://static.crates.io/crates/pyo3-ffi/pyo3-ffi-0.28.3.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pyo3-ffi-0.28.3/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-ffi-0.28.3/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pyo3-macros-0.28.3.crate",
+      "sha256": "df6e520eff47c45997d2fc7dd8214b25dd1310918bbb2642156ef66a67f29813",
+      "bytes": 8963,
+      "name": "pyo3-macros 0.28.3",
+      "origin": "https://static.crates.io/crates/pyo3-macros/pyo3-macros-0.28.3.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pyo3-macros-0.28.3/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-macros-0.28.3/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/pyo3-macros-backend-0.28.3.crate",
+      "sha256": "c4cdc218d835738f81c2338f822078af45b4afdf8b2e33cbb5916f108b813acb",
+      "bytes": 88063,
+      "name": "pyo3-macros-backend 0.28.3",
+      "origin": "https://static.crates.io/crates/pyo3-macros-backend/pyo3-macros-backend-0.28.3.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "pyo3-macros-backend-0.28.3/LICENSE-APACHE",
+          "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+          "bytes": 9807
+        },
+        {
+          "member": "pyo3-macros-backend-0.28.3/LICENSE-MIT",
+          "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+          "bytes": 1107
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/quote-1.0.45.crate",
+      "sha256": "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924",
+      "bytes": 31564,
+      "name": "quote 1.0.45",
+      "origin": "https://static.crates.io/crates/quote/quote-1.0.45.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "quote-1.0.45/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "quote-1.0.45/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/self_cell-1.2.2.crate",
+      "sha256": "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89",
+      "bytes": 23264,
+      "name": "self_cell 1.2.2",
+      "origin": "https://static.crates.io/crates/self_cell/self_cell-1.2.2.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "self_cell-1.2.2/LICENSE-APACHE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "bytes": 11357
+        },
+        {
+          "member": "self_cell-1.2.2/LICENSE-GPLv2",
+          "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+          "bytes": 18091
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/shlex-1.3.0.crate",
+      "sha256": "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64",
+      "bytes": 18713,
+      "name": "shlex 1.3.0",
+      "origin": "https://static.crates.io/crates/shlex/shlex-1.3.0.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "shlex-1.3.0/LICENSE-APACHE",
+          "sha256": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583",
+          "bytes": 566
+        },
+        {
+          "member": "shlex-1.3.0/LICENSE-MIT",
+          "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+          "bytes": 1092
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/syn-2.0.117.crate",
+      "sha256": "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99",
+      "bytes": 306011,
+      "name": "syn 2.0.117",
+      "origin": "https://static.crates.io/crates/syn/syn-2.0.117.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "syn-2.0.117/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "syn-2.0.117/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/target-lexicon-0.13.5.crate",
+      "sha256": "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca",
+      "bytes": 26928,
+      "name": "target-lexicon 0.13.5",
+      "origin": "https://static.crates.io/crates/target-lexicon/target-lexicon-0.13.5.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "target-lexicon-0.13.5/LICENSE",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "bytes": 12243
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/unicode-ident-1.0.24.crate",
+      "sha256": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
+      "bytes": 49298,
+      "name": "unicode-ident 1.0.24",
+      "origin": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.24.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "unicode-ident-1.0.24/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "bytes": 9723
+        },
+        {
+          "member": "unicode-ident-1.0.24/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023
+        },
+        {
+          "member": "unicode-ident-1.0.24/LICENSE-UNICODE",
+          "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+          "bytes": 1995
+        }
+      ]
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/rust-crates/vcpkg-0.2.15.crate",
+      "sha256": "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426",
+      "bytes": 228735,
+      "name": "vcpkg 0.2.15",
+      "origin": "https://static.crates.io/crates/vcpkg/vcpkg-0.2.15.crate",
+      "scope": "cryptography-locked-build-superset",
+      "original_notice_members": [
+        {
+          "member": "vcpkg-0.2.15/LICENSE-APACHE",
+          "sha256": "60c93a31f490375aadf64098b75f10715010379541021e00261045d7800611d3",
+          "bytes": 11050
+        },
+        {
+          "member": "vcpkg-0.2.15/LICENSE-MIT",
+          "sha256": "016d20f335060a70e79d9fcf8dfaa6201114d65d592211f4bdfb8ae9ca2bc1dc",
+          "bytes": 1082
+        }
+      ]
+    }
+  ],
+  "cryptography_crates": [
+    {
+      "name": "asn1",
+      "version": "0.24.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/asn1-0.24.1.crate",
+      "licence_expression": "BSD-3-Clause",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "asn1_derive",
+      "version": "0.24.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/asn1_derive-0.24.1.crate",
+      "licence_expression": "BSD-3-Clause",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "base64",
+      "version": "0.22.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/base64-0.22.1.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "bitflags",
+      "version": "2.11.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/bitflags-2.11.1.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "cc",
+      "version": "1.2.61",
+      "source": "packaging/desktop/build/source-cache/rust-crates/cc-1.2.61.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "source": "packaging/desktop/build/source-cache/rust-crates/cfg-if-1.0.4.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "find-msvc-tools",
+      "version": "0.1.9",
+      "source": "packaging/desktop/build/source-cache/rust-crates/find-msvc-tools-0.1.9.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "foreign-types",
+      "version": "0.3.2",
+      "source": "packaging/desktop/build/source-cache/rust-crates/foreign-types-0.3.2.crate",
+      "licence_expression": "MIT/Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "foreign-types-shared",
+      "version": "0.1.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/foreign-types-shared-0.1.1.crate",
+      "licence_expression": "MIT/Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0",
+      "source": "packaging/desktop/build/source-cache/rust-crates/heck-0.5.0.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.18",
+      "source": "packaging/desktop/build/source-cache/rust-crates/itoa-1.0.18.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.186",
+      "source": "packaging/desktop/build/source-cache/rust-crates/libc-0.2.186.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "source": "packaging/desktop/build/source-cache/rust-crates/once_cell-1.21.4.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "openssl",
+      "version": "0.10.79",
+      "source": "packaging/desktop/build/source-cache/rust-crates/openssl-0.10.79.crate",
+      "licence_expression": "Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "openssl-macros",
+      "version": "0.1.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/openssl-macros-0.1.1.crate",
+      "licence_expression": "MIT/Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "openssl-sys",
+      "version": "0.9.115",
+      "source": "packaging/desktop/build/source-cache/rust-crates/openssl-sys-0.9.115.crate",
+      "licence_expression": "MIT",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pem",
+      "version": "3.0.6",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pem-3.0.6.crate",
+      "licence_expression": "MIT",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pkg-config",
+      "version": "0.3.33",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pkg-config-0.3.33.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "portable-atomic",
+      "version": "1.13.1",
+      "source": "packaging/desktop/build/source-cache/rust-crates/portable-atomic-1.13.1.crate",
+      "licence_expression": "Apache-2.0 OR MIT",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.106",
+      "source": "packaging/desktop/build/source-cache/rust-crates/proc-macro2-1.0.106.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pyo3",
+      "version": "0.28.3",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pyo3-0.28.3.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pyo3-build-config",
+      "version": "0.28.3",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pyo3-build-config-0.28.3.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pyo3-ffi",
+      "version": "0.28.3",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pyo3-ffi-0.28.3.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pyo3-macros",
+      "version": "0.28.3",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pyo3-macros-0.28.3.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "pyo3-macros-backend",
+      "version": "0.28.3",
+      "source": "packaging/desktop/build/source-cache/rust-crates/pyo3-macros-backend-0.28.3.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.45",
+      "source": "packaging/desktop/build/source-cache/rust-crates/quote-1.0.45.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "self_cell",
+      "version": "1.2.2",
+      "source": "packaging/desktop/build/source-cache/rust-crates/self_cell-1.2.2.crate",
+      "licence_expression": "Apache-2.0 OR GPL-2.0-only",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "shlex",
+      "version": "1.3.0",
+      "source": "packaging/desktop/build/source-cache/rust-crates/shlex-1.3.0.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.117",
+      "source": "packaging/desktop/build/source-cache/rust-crates/syn-2.0.117.crate",
+      "licence_expression": "MIT OR Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "target-lexicon",
+      "version": "0.13.5",
+      "source": "packaging/desktop/build/source-cache/rust-crates/target-lexicon-0.13.5.crate",
+      "licence_expression": "Apache-2.0 WITH LLVM-exception",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "source": "packaging/desktop/build/source-cache/rust-crates/unicode-ident-1.0.24.crate",
+      "licence_expression": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    },
+    {
+      "name": "vcpkg",
+      "version": "0.2.15",
+      "source": "packaging/desktop/build/source-cache/rust-crates/vcpkg-0.2.15.crate",
+      "licence_expression": "MIT/Apache-2.0",
+      "scope": "locked-build-superset; not a claim that build/proc-macro/other-target code is linked"
+    }
+  ],
+  "supplemental_git_files": [
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": ".github/workflows/wheels.yml",
+      "git_blob": "af2f9b3e825da684d529703516f26b6d15de729a",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/.github/workflows/wheels.yml",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/.github/workflows/wheels.yml",
+      "sha256": "0842d864c6c97c6df25a6e001e6306d1b79c945595881e2b41db1a20287142f0"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": ".github/workflows/wheels-dependencies.sh",
+      "git_blob": "331eae2249b183bb911c895cdab156a691e2e5b9",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/.github/workflows/wheels-dependencies.sh",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/.github/workflows/wheels-dependencies.sh",
+      "sha256": "183bb875d137f03c13a572e6c604ae54814296b9d210fab629869ab5e24a0519"
+    },
+    {
+      "repo": "lxml/lxml",
+      "commit": "b4a4c595fb875d6f50ae113449834209a364643a",
+      "path": ".github/workflows/wheels.yml",
+      "git_blob": "1e95def94eb64d9982b44603e6b59ba29020cd94",
+      "url": "https://github.com/lxml/lxml/blob/b4a4c595fb875d6f50ae113449834209a364643a/.github/workflows/wheels.yml",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/lxml/.github/workflows/wheels.yml",
+      "sha256": "055ed4482fca278faa9a0bd4c2433c0846af7c0cc60e3e3ed612dcf31475356c"
+    },
+    {
+      "repo": "lxml/libxml2-win-binaries",
+      "commit": "4e8ae01f61145dc823ce2ae1d79f06241b7b46de",
+      "path": ".gitmodules",
+      "git_blob": "0819f9460d837197bb334886438cb24dc25c0e2a",
+      "url": "https://github.com/lxml/libxml2-win-binaries/blob/4e8ae01f61145dc823ce2ae1d79f06241b7b46de/.gitmodules",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/libxml2-win-binaries/.gitmodules",
+      "sha256": "1698b55aeacaabf7f09b9fd001debc29a1ee4fe0b486d11a2f20183f417b66d3"
+    },
+    {
+      "repo": "lxml/libxml2-win-binaries",
+      "commit": "4e8ae01f61145dc823ce2ae1d79f06241b7b46de",
+      "path": "build.ps1",
+      "git_blob": "4a3c4cb33fcb1e6604addbdb96586fe16bee51ea",
+      "url": "https://github.com/lxml/libxml2-win-binaries/blob/4e8ae01f61145dc823ce2ae1d79f06241b7b46de/build.ps1",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/libxml2-win-binaries/build.ps1",
+      "sha256": "bca4e9486154340e6ebd285dc4aac12835d212aba7cfb1766f6ef72b0d136e53"
+    },
+    {
+      "repo": "lxml/libxml2-win-binaries",
+      "commit": "4e8ae01f61145dc823ce2ae1d79f06241b7b46de",
+      "path": "libiconv.patch",
+      "git_blob": "772056d384cc2b4b67145ca6ff125229191a5cd2",
+      "url": "https://github.com/lxml/libxml2-win-binaries/blob/4e8ae01f61145dc823ce2ae1d79f06241b7b46de/libiconv.patch",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/libxml2-win-binaries/libiconv.patch",
+      "sha256": "bcdef004ed4e1d2bf7569e2ba16236dd6b9e37b2658647626b9f7aba40a5b4bb"
+    },
+    {
+      "repo": "lxml/libxml2-win-binaries",
+      "commit": "4e8ae01f61145dc823ce2ae1d79f06241b7b46de",
+      "path": "README.md",
+      "git_blob": "3d8cf4d32b83f3a5f48117cca8966a3f6431d7dd",
+      "url": "https://github.com/lxml/libxml2-win-binaries/blob/4e8ae01f61145dc823ce2ae1d79f06241b7b46de/README.md",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/libxml2-win-binaries/README.md",
+      "sha256": "7c4d1efa1bfc917f0c754e323555952a462a458e3d395761ac377ffa8f38de19"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": ".ci/requirements-cibw.txt",
+      "git_blob": "6e869a5c2e979d234a8ea65c15a1882a0044afa2",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/.ci/requirements-cibw.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/.ci/requirements-cibw.txt",
+      "sha256": "e9dede3c196155b92b2174f7109e787e1d08b3a4cdd53b899986989aa7b0b480"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": ".gitmodules",
+      "git_blob": "80d5ab16c7087cea5a21636fe887511782b325c1",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/.gitmodules",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/.gitmodules",
+      "sha256": "14d02156aed8854eaace2fb4abab1c7e347b2e786faac03fb3292fd49fb33444"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/README.md",
+      "git_blob": "1175616e1472c8f5a255b563edafef5f730e0ed6",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/README.md",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/README.md",
+      "sha256": "c804a69c144193e3040db45fa003ce3d7bb7cb0b97637fad32b93c3a48ac23e0"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/AOM.txt",
+      "git_blob": "3a2e46c264b9ce0e5c6471875c09a424e9f4e80e",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/AOM.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/AOM.txt",
+      "sha256": "60f3f7e003a4a7736aad7c008380fbfbcd3bf19544c589efebba824a2b9e145b"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/BROTLI.txt",
+      "git_blob": "33b7cdd2dbaeddce1e35aa1a13f63d71154dc42f",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/BROTLI.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/BROTLI.txt",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/BZIP2.txt",
+      "git_blob": "d3edf477d74bd109226653f58fc5cf8eb77c0f59",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/BZIP2.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/BZIP2.txt",
+      "sha256": "67fc67381a47fe66f07b5f6705472d26314e6bcdf949f92c2cdde64521bbfdce"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/DAV1D.txt",
+      "git_blob": "875b138ecf6f2b2b8e402c51ea541d7740246504",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/DAV1D.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/DAV1D.txt",
+      "sha256": "b327887de263238deaa80c34cdd2ff3e0ba1d35db585ce14a37ce3e74ee389e9"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/FREETYPE2.txt",
+      "git_blob": "8f2345992b0e86784823cc7a23c5bc28591f18f8",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/FREETYPE2.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/FREETYPE2.txt",
+      "sha256": "84b0b727a89a1984d9a12fb55348496fa3025828b8d609129051961e4b98c4d6"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/HARFBUZZ.txt",
+      "git_blob": "1dd917e9f2e72167de69e3b5dadbc4e7db417da1",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/HARFBUZZ.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/HARFBUZZ.txt",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LCMS2.txt",
+      "git_blob": "21ed6fb86dccb55086d248aaff4f9bbf5fe2690f",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LCMS2.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LCMS2.txt",
+      "sha256": "53ad5ca11b8f4079e9c9bfa61575927a33f53526d6d414287149ec3ab61e8e4d"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBAVIF.txt",
+      "git_blob": "350eb9d15ce1553438b09b8cd14c803e86da316b",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBAVIF.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBAVIF.txt",
+      "sha256": "165abf92cc04b39e80d29cadea7a6a7e8fddf59407d4ad2616507a7ebe8216f9"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBJPEG.txt",
+      "git_blob": "b5451f4057687ac1059328e0f4ce749fdbb0a7b3",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBJPEG.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBJPEG.txt",
+      "sha256": "a5708c3347b03391c6aa9a0f549f8e2a33d04ceac0724151e5e6e217871d1bfb"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBLZMA.txt",
+      "git_blob": "43c7a23bacc755adf78ed2574909f7ba99a8e416",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBLZMA.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBLZMA.txt",
+      "sha256": "8b13e158c7a8297e4da9d4de46a741f341abec4a5b7b1094066aa7808b786ee4"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBPNG.txt",
+      "git_blob": "c8ad24eecf7a825b035c761e4bfca9acaa36864c",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBPNG.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBPNG.txt",
+      "sha256": "dfe5a536b0e5a531f844fb9c101a3089aca60772a503893b8e15f9457e369960"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBTIFF.txt",
+      "git_blob": "dc255dec69163021fec18c9d44a9946aa257d8b4",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBTIFF.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBTIFF.txt",
+      "sha256": "92b72ba97e6c2749c2a94bc0ef646b47080217f1e772a482b33cf5a5f98a6506"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBWEBP.txt",
+      "git_blob": "83e4e6f6d7722fa52e30567ce891d096dd4d110f",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBWEBP.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBWEBP.txt",
+      "sha256": "e293d1dddc9785200b1f58a4f5293543cf8566d9e0b8a3c02fad955035b19f42"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/LIBYUV.txt",
+      "git_blob": "c911747a6b53f063503992c3903d932f54cf6c57",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/LIBYUV.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/LIBYUV.txt",
+      "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/OPENJPEG.txt",
+      "git_blob": "c41fc21d881a3dc310c33b80a28033154a8b76e4",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/OPENJPEG.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/OPENJPEG.txt",
+      "sha256": "0e8aaf2ea15e8b9b2a42ceb2c9aa38bbb4bf2a9fafb7867e599ecd148cb109e9"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/RAQM.txt",
+      "git_blob": "196511ef68831971bad858ee1ea24fc3c82214e1",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/RAQM.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/RAQM.txt",
+      "sha256": "bd20511a077235fa2c2eb45c0bc79da29f1f300bb2506faf26b1c6bd6246fd0c"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/XAU.txt",
+      "git_blob": "64492ad8091f917787b14f12ba236e56de7addd2",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/XAU.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/XAU.txt",
+      "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/XCB.txt",
+      "git_blob": "54bfbe5b02074d0c276959c9140072ccba0dc670",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/XCB.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/XCB.txt",
+      "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/XDMCP.txt",
+      "git_blob": "5532d143ce06b94b669caa7db3ba35187b6280cc",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/XDMCP.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/XDMCP.txt",
+      "sha256": "8a3c3f35b0dbcb60a4e242b9e4394a352a65bb27deb2938ea1e2e62a626e16e9"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/ZLIB.txt",
+      "git_blob": "84def6dc6a70743edf6a583755226672fc40c275",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/ZLIB.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/ZLIB.txt",
+      "sha256": "900b8782a9168f127d0d7d7512a371933a0aeb805013446ce09c4618f354ba7d"
+    },
+    {
+      "repo": "python-pillow/Pillow",
+      "commit": "3c41c095064200a02672d89cc5ff629eaf4b0d4f",
+      "path": "wheels/dependency_licenses/ZSTD.txt",
+      "git_blob": "75800288cc243f164b9d130f125e2ffae28f8e39",
+      "url": "https://github.com/python-pillow/Pillow/blob/3c41c095064200a02672d89cc5ff629eaf4b0d4f/wheels/dependency_licenses/ZSTD.txt",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/Pillow/wheels/dependency_licenses/ZSTD.txt",
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+    },
+    {
+      "repo": "lxml/libxml2-win-binaries",
+      "commit": "4e8ae01f61145dc823ce2ae1d79f06241b7b46de",
+      "path": ".github/workflows/main.yml",
+      "git_blob": "6563cfb0f1dc67d0f32d7af86a5d38ce09ef2e00",
+      "url": "https://github.com/lxml/libxml2-win-binaries/blob/4e8ae01f61145dc823ce2ae1d79f06241b7b46de/.github/workflows/main.yml",
+      "local": "packaging/desktop/build/source-cache/python-native-resolution/libxml2-win-binaries/.github/workflows/main.yml",
+      "sha256": "2b6c35c1c46331869cff6a9db2a491568b45a556f69c3f6cc8b62a9b384f083c"
+    }
+  ],
+  "original_wheel_notices": [
+    {
+      "platform": "linux",
+      "parent": "pillow",
+      "package_path": "pillow-12.2.0.dist-info/licenses/LICENSE",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/pillow-12.2.0.dist-info/licenses/LICENSE",
+      "sha256": "13e1d5014de0064b4b1ca4d837111797673cc91a116616e3dde555009243aaf6"
+    },
+    {
+      "platform": "linux",
+      "parent": "lxml",
+      "package_path": "lxml-6.1.1.dist-info/licenses/LICENSE.txt",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/lxml-6.1.1.dist-info/licenses/LICENSE.txt",
+      "sha256": "8fc2b568133516e46845d2147917adeee1648e70ae9ab5ed6c5417afef4ce855"
+    },
+    {
+      "platform": "linux",
+      "parent": "lxml",
+      "package_path": "lxml-6.1.1.dist-info/licenses/LICENSES.txt",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/lxml-6.1.1.dist-info/licenses/LICENSES.txt",
+      "sha256": "41d49dd406aa0e1548a6d5f21a30d6bf638b3cd96eb7289dd348d83ed2e40392"
+    },
+    {
+      "platform": "linux",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/cryptography-48.0.0.dist-info/licenses/LICENSE",
+      "sha256": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb"
+    },
+    {
+      "platform": "linux",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE.APACHE",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/cryptography-48.0.0.dist-info/licenses/LICENSE.APACHE",
+      "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe"
+    },
+    {
+      "platform": "linux",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE.BSD",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/cryptography-48.0.0.dist-info/licenses/LICENSE.BSD",
+      "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+    },
+    {
+      "platform": "linux",
+      "parent": "pymupdf",
+      "package_path": "pymupdf-1.27.2.3.dist-info/COPYING",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/pymupdf-1.27.2.3.dist-info/COPYING",
+      "sha256": "40e60697600535eabfb5ae05f72829d88cfe8d02dd4792f5a754f6f51dabe55b"
+    },
+    {
+      "platform": "linux",
+      "parent": "onnxruntime",
+      "package_path": "onnxruntime/LICENSE",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/onnxruntime/LICENSE",
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    },
+    {
+      "platform": "linux",
+      "parent": "onnxruntime",
+      "package_path": "onnxruntime/ThirdPartyNotices.txt",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/linux/onnxruntime/ThirdPartyNotices.txt",
+      "sha256": "cf7342f7ba482ef715ae58f5f497a8d3564fa255164175aea324cd293c5701a0"
+    },
+    {
+      "platform": "windows",
+      "parent": "pillow",
+      "package_path": "pillow-12.2.0.dist-info/licenses/LICENSE",
+      "sha256": "75bb81b58f9b39786eeb2e56a1eb829aae501042d49e1dc766ca187b6ce9656f",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/pillow-12.2.0.dist-info/licenses/LICENSE"
+    },
+    {
+      "platform": "windows",
+      "parent": "lxml",
+      "package_path": "lxml-6.1.1.dist-info/licenses/LICENSE.txt",
+      "sha256": "e7c3ce8d76331b0101cc46790ab43958ea90a364bcf962ed8763d5a818340e69",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/lxml-6.1.1.dist-info/licenses/LICENSE.txt"
+    },
+    {
+      "platform": "windows",
+      "parent": "lxml",
+      "package_path": "lxml-6.1.1.dist-info/licenses/LICENSES.txt",
+      "sha256": "ce53f508d0cb88bdb4621e236ca34881a3fa1805f97dfccf38960128a4e2ead9",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/lxml-6.1.1.dist-info/licenses/LICENSES.txt"
+    },
+    {
+      "platform": "windows",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE",
+      "sha256": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/cryptography-48.0.0.dist-info/licenses/LICENSE"
+    },
+    {
+      "platform": "windows",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE.APACHE",
+      "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/cryptography-48.0.0.dist-info/licenses/LICENSE.APACHE"
+    },
+    {
+      "platform": "windows",
+      "parent": "cryptography",
+      "package_path": "cryptography-48.0.0.dist-info/licenses/LICENSE.BSD",
+      "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/cryptography-48.0.0.dist-info/licenses/LICENSE.BSD"
+    },
+    {
+      "platform": "windows",
+      "parent": "pymupdf",
+      "package_path": "pymupdf-1.27.2.3.dist-info/COPYING",
+      "sha256": "40e60697600535eabfb5ae05f72829d88cfe8d02dd4792f5a754f6f51dabe55b",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/pymupdf-1.27.2.3.dist-info/COPYING"
+    },
+    {
+      "platform": "windows",
+      "parent": "onnxruntime",
+      "package_path": "onnxruntime/LICENSE",
+      "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/onnxruntime/LICENSE"
+    },
+    {
+      "platform": "windows",
+      "parent": "onnxruntime",
+      "package_path": "onnxruntime/ThirdPartyNotices.txt",
+      "sha256": "fac5bb85f568b38fd8f3a6aea32737985841f23a1a43e9ce952f79474f883aa9",
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/wheel-notices/windows/onnxruntime/ThirdPartyNotices.txt"
+    }
+  ],
+  "limitations": [
+    "Windows lxml libiconv/zlib exact source match uses fixed official release recipe and matching libxml/libxslt runtime pair; an upstream bit-for-bit build attestation is not claimed.",
+    "A complete build-source superset is preserved; optional/test/host-tool sources are not claimed to be shipped runtime.",
+    "Source archive availability does not itself exercise a clean source rebuild, static relinking, About/REST release download, or complete final licence assembly.",
+    "No compiler/toolchain source is required merely because it was used unmodified; no byte-identical rebuild requirement is introduced."
+  ],
+  "supporting_files": [
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/binary-probes.json",
+      "sha256": "99944b0ffcafc37d7e405fa98d57620bb65d7cb404727a6726037caf264e8e03",
+      "bytes": 28321
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/exported-symbols.json",
+      "sha256": "0c7092a01035e8a1123c0a7f6d130d997af046cae86c096340a406f6a5059ced",
+      "bytes": 1531
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/linux-frozen-inputs.json",
+      "sha256": "41a4275790ee0bdc98cc232e55b0aa8eb67ab7e57ddb105015f2b80556baf731",
+      "bytes": 37772
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/windows-frozen-inputs.json",
+      "sha256": "aa0cb2f95f43386fa895b5d58d57be2d1584c6b7bca98346d1732b2339a75ff0",
+      "bytes": 22853
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/lxml-windows-tree.json",
+      "sha256": "b7be26e6f621a36c53c14cd4220e80ad37f0e3037a1ad17cd791db5f88cde856",
+      "bytes": 3034
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/pillow-git-tree.json",
+      "sha256": "644dddc4f04e40301e8a6eaef6e071e5bba7568a7d39c28a2005bac006e48e52",
+      "bytes": 555324
+    },
+    {
+      "file": "packaging/desktop/build/source-cache/python-native-resolution/assemble_evidence.py",
+      "sha256": "4542e1eae6bca6087c95376961327985a9a0b0ba7a60a3489f6821564d8000b8",
+      "bytes": 16954
+    }
+  ]
+}

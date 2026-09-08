@@ -1,0 +1,1588 @@
+{
+  "schema": 1,
+  "date": "2026-09-08",
+  "program_commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+  "scope": "Actual CPython runtime and its nested dependencies only; supplements primary inventory, not a whole-application license conclusion.",
+  "status": "actual Python runtime source/license mapping complete; final distribution assembly must carry materials and separate Microsoft terms",
+  "provenance": {
+    "linux": {
+      "pbs_release": "20260623",
+      "pbs_commit": "7f93a7d443d97f08e3afc6e24a3c675e9994b6aa",
+      "pbs_build_recipe_archive": {
+        "path": "packaging/desktop/build/source-cache/upstream/python-build-standalone-20260623-7f93a7d443d9.tar.gz",
+        "sha256": "f9df20256d82d89de515b24564815d4316bd1acf960ce95f0669cb71dde10569",
+        "bytes": 430241
+      },
+      "pbs_build_recipe_url": "https://github.com/astral-sh/python-build-standalone/tree/7f93a7d443d97f08e3afc6e24a3c675e9994b6aa",
+      "archives": [
+        {
+          "path": "packaging/desktop/build/source-cache/python-runtime-resolution/cpython-3.12.13+20260623-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst",
+          "sha256": "86d2e330b63503fb8fb08a52f736106c5edf1d7ab2c679a6f1074a31f8b17c71",
+          "bytes": 111669149,
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13%2B20260623-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+          "github_digest": "sha256:86d2e330b63503fb8fb08a52f736106c5edf1d7ab2c679a6f1074a31f8b17c71",
+          "role": "binary provenance evidence; not corresponding source"
+        },
+        {
+          "path": "packaging/desktop/build/source-cache/python-runtime-resolution/cpython-3.12.13+20260623-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+          "sha256": "10a452caac7041357805f0c19a60576df53f1ab06d1abfc9200f1f0157cb3bd1",
+          "bytes": 34159178,
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13%2B20260623-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+          "github_digest": "sha256:10a452caac7041357805f0c19a60576df53f1ab06d1abfc9200f1f0157cb3bd1",
+          "role": "binary provenance evidence; not corresponding source"
+        }
+      ],
+      "metadata": {
+        "path": "packaging/desktop/build/source-cache/python-runtime-resolution/linux/python/PYTHON.json",
+        "sha256": "1388a0faf08a22bc3144d28a381de418962a7c43267e3adf569c2adf1b942f87",
+        "bytes": 114666
+      },
+      "build_options": "pgo+lto",
+      "target_triple": "x86_64-unknown-linux-gnu",
+      "runtime_introspection": {
+        "version": "3.12.13 (main, Jun 23 2026, 15:18:55) [Clang 22.1.3 ]",
+        "openssl": "OpenSSL 3.5.7 9 Jun 2026",
+        "zlib": "1.3.2",
+        "sqlite": "3.53.1",
+        "expat": "expat_2.8.1",
+        "mpdecimal": "4.0.0",
+        "builtins": [
+          "_abc",
+          "_ast",
+          "_asyncio",
+          "_bisect",
+          "_blake2",
+          "_bz2",
+          "_codecs",
+          "_codecs_cn",
+          "_codecs_hk",
+          "_codecs_iso2022",
+          "_codecs_jp",
+          "_codecs_kr",
+          "_codecs_tw",
+          "_collections",
+          "_contextvars",
+          "_csv",
+          "_ctypes",
+          "_curses",
+          "_curses_panel",
+          "_datetime",
+          "_decimal",
+          "_elementtree",
+          "_functools",
+          "_hashlib",
+          "_heapq",
+          "_imp",
+          "_io",
+          "_json",
+          "_locale",
+          "_lsprof",
+          "_lzma",
+          "_md5",
+          "_multibytecodec",
+          "_multiprocessing",
+          "_opcode",
+          "_operator",
+          "_pickle",
+          "_posixshmem",
+          "_posixsubprocess",
+          "_queue",
+          "_random",
+          "_sha1",
+          "_sha2",
+          "_sha3",
+          "_signal",
+          "_socket",
+          "_sqlite3",
+          "_sre",
+          "_ssl",
+          "_stat",
+          "_statistics",
+          "_string",
+          "_struct",
+          "_symtable",
+          "_testinternalcapi",
+          "_thread",
+          "_tokenize",
+          "_tracemalloc",
+          "_typing",
+          "_uuid",
+          "_warnings",
+          "_weakref",
+          "_xxinterpchannels",
+          "_xxsubinterpreters",
+          "_xxtestfuzz",
+          "_zoneinfo",
+          "array",
+          "atexit",
+          "audioop",
+          "binascii",
+          "builtins",
+          "cmath",
+          "errno",
+          "faulthandler",
+          "fcntl",
+          "gc",
+          "grp",
+          "itertools",
+          "marshal",
+          "math",
+          "mmap",
+          "ossaudiodev",
+          "posix",
+          "pwd",
+          "pyexpat",
+          "readline",
+          "resource",
+          "select",
+          "spwd",
+          "sys",
+          "syslog",
+          "termios",
+          "time",
+          "unicodedata",
+          "xxsubtype",
+          "zlib"
+        ],
+        "configure_args": "'--build=x86_64-unknown-linux-gnu' '--host=x86_64-unknown-linux-gnu' '--prefix=/install' '--with-openssl=/tools/deps' '--with-system-expat' '--with-system-libmpdec' '--without-ensurepip' '--with-readline=editline' '--enable-static-libpython-for-interpreter' '--enable-shared' '--enable-optimizations' '--enable-bolt' '--with-lto' '--with-build-python=/tools/host/bin/python3.12' '--with-dbmliborder=bdb' 'build_alias=x86_64-unknown-linux-gnu' 'host_alias=x86_64-unknown-linux-gnu' 'PKG_CONFIG=pkg-config --static' 'PKG_CONFIG_PATH=/tools/deps/share/pkgconfig:/tools/deps/lib/pkgconfig' 'CC=clang' 'CFLAGS=-O3 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -fPIC ' 'LDFLAGS=-Wl,-z,noexecstack -Wl,--exclude-libs,ALL ' 'CPPFLAGS=-O3 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -fPIC ' 'PROFILE_TASK=-m test --pgo -j 4'"
+      },
+      "runtime_matches": [
+        {
+          "path": "_internal/libpython3.12.so.1.0",
+          "input": "lib/libpython3.12.so.1.0",
+          "actual_sha256": "6fe343ab4b7d32bf5d3d71db9c0544fbcffd84bdfd41d165c49090a943bfa62f",
+          "pbs_sha256": "6fe343ab4b7d32bf5d3d71db9c0544fbcffd84bdfd41d165c49090a943bfa62f",
+          "match": true
+        }
+      ],
+      "patch_scope": "Complete fixed PBS source archive includes Windows build.py substitutions/support patches or Unix build*.sh and patch files; no local runtime source modifications. PyInstaller collection is mapped separately."
+    },
+    "windows": {
+      "pbs_release": "20260807",
+      "pbs_commit": "00c8a06113f11220667c3bcf5fab1672ff9e78ef",
+      "pbs_build_recipe_archive": {
+        "path": "packaging/desktop/build/source-cache/python-runtime-resolution/python-build-standalone-20260807-00c8a06113f1.tar.gz",
+        "sha256": "6571b9cae11c942d67902618a30ff13330b7ff2d091a3a88da4c51579780be99",
+        "bytes": 443196
+      },
+      "pbs_build_recipe_url": "https://github.com/astral-sh/python-build-standalone/tree/00c8a06113f11220667c3bcf5fab1672ff9e78ef",
+      "archives": [
+        {
+          "path": "packaging/desktop/build/source-cache/python-runtime-resolution/cpython-3.12.13+20260807-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+          "sha256": "98a0c5295bd53bef39147ffeb0a50d45df12b407e145c1799411cca53dcef90c",
+          "bytes": 43491815,
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.12.13%2B20260807-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+          "github_digest": "sha256:98a0c5295bd53bef39147ffeb0a50d45df12b407e145c1799411cca53dcef90c",
+          "role": "binary provenance evidence; not corresponding source"
+        },
+        {
+          "path": "packaging/desktop/build/source-cache/python-runtime-resolution/cpython-3.12.13+20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+          "sha256": "18bcc65b17921806b72cdc88bcf000bf67a2c99a8fc381fe1629f2b9ba56858d",
+          "bytes": 21962247,
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.12.13%2B20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+          "github_digest": "sha256:18bcc65b17921806b72cdc88bcf000bf67a2c99a8fc381fe1629f2b9ba56858d",
+          "role": "binary provenance evidence; not corresponding source"
+        }
+      ],
+      "metadata": {
+        "path": "packaging/desktop/build/source-cache/python-runtime-resolution/windows-20260807/python/PYTHON.json",
+        "sha256": "589f1985c8e03e5f902ffd626de438d1258ea6794d4b5e9da9f779bb90d50f8d",
+        "bytes": 62407
+      },
+      "build_options": "pgo",
+      "target_triple": "x86_64-pc-windows-msvc",
+      "runtime_introspection": {
+        "version": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+        "openssl": "OpenSSL 3.5.7 9 Jun 2026",
+        "zlib": "1.3.2",
+        "sqlite": "3.53.1",
+        "expat": "expat_2.7.4",
+        "mpdecimal": "2.5.1",
+        "builtins": [
+          "_abc",
+          "_ast",
+          "_bisect",
+          "_blake2",
+          "_codecs",
+          "_codecs_cn",
+          "_codecs_hk",
+          "_codecs_iso2022",
+          "_codecs_jp",
+          "_codecs_kr",
+          "_codecs_tw",
+          "_collections",
+          "_contextvars",
+          "_csv",
+          "_datetime",
+          "_functools",
+          "_heapq",
+          "_imp",
+          "_io",
+          "_json",
+          "_locale",
+          "_lsprof",
+          "_md5",
+          "_multibytecodec",
+          "_opcode",
+          "_operator",
+          "_pickle",
+          "_random",
+          "_sha1",
+          "_sha2",
+          "_sha3",
+          "_signal",
+          "_sre",
+          "_stat",
+          "_statistics",
+          "_string",
+          "_struct",
+          "_symtable",
+          "_thread",
+          "_tokenize",
+          "_tracemalloc",
+          "_typing",
+          "_warnings",
+          "_weakref",
+          "_winapi",
+          "_xxinterpchannels",
+          "_xxsubinterpreters",
+          "array",
+          "atexit",
+          "audioop",
+          "binascii",
+          "builtins",
+          "cmath",
+          "errno",
+          "faulthandler",
+          "gc",
+          "itertools",
+          "marshal",
+          "math",
+          "mmap",
+          "msvcrt",
+          "nt",
+          "sys",
+          "time",
+          "winreg",
+          "xxsubtype",
+          "zlib"
+        ]
+      },
+      "runtime_matches": [
+        {
+          "path": "_internal/_asyncio.pyd",
+          "input": "DLLs/_asyncio.pyd",
+          "actual_sha256": "42597fc17f9b065f49b3740d41254f0c1ff6b1e10b4a2abd512f51efb2a4ba9e",
+          "pbs_sha256": "42597fc17f9b065f49b3740d41254f0c1ff6b1e10b4a2abd512f51efb2a4ba9e",
+          "match": true
+        },
+        {
+          "path": "_internal/_bz2.pyd",
+          "input": "DLLs/_bz2.pyd",
+          "actual_sha256": "2046a236f6ec1858e514cbf1ceae05ad8b62797e3b9080ed833f71cb19d6131b",
+          "pbs_sha256": "2046a236f6ec1858e514cbf1ceae05ad8b62797e3b9080ed833f71cb19d6131b",
+          "match": true
+        },
+        {
+          "path": "_internal/_ctypes.pyd",
+          "input": "DLLs/_ctypes.pyd",
+          "actual_sha256": "7b1298bb2f3bc2703893c6be4423d656c273516637349c75c8aceb3402c43d9c",
+          "pbs_sha256": "7b1298bb2f3bc2703893c6be4423d656c273516637349c75c8aceb3402c43d9c",
+          "match": true
+        },
+        {
+          "path": "_internal/_decimal.pyd",
+          "input": "DLLs/_decimal.pyd",
+          "actual_sha256": "837ef191baac4bfacb5238ee29235ab226871bfb2868608f97ca69e40cbe44fd",
+          "pbs_sha256": "837ef191baac4bfacb5238ee29235ab226871bfb2868608f97ca69e40cbe44fd",
+          "match": true
+        },
+        {
+          "path": "_internal/_elementtree.pyd",
+          "input": "DLLs/_elementtree.pyd",
+          "actual_sha256": "6d8501e130b2b879e983b3b9d8be031acc879b844802606f1539a0a3c5ed2584",
+          "pbs_sha256": "6d8501e130b2b879e983b3b9d8be031acc879b844802606f1539a0a3c5ed2584",
+          "match": true
+        },
+        {
+          "path": "_internal/_hashlib.pyd",
+          "input": "DLLs/_hashlib.pyd",
+          "actual_sha256": "d1fc3632a1e3619f11cde5b7a4f3529fa8a9d2857daf95842281e69fe0e6739f",
+          "pbs_sha256": "d1fc3632a1e3619f11cde5b7a4f3529fa8a9d2857daf95842281e69fe0e6739f",
+          "match": true
+        },
+        {
+          "path": "_internal/_lzma.pyd",
+          "input": "DLLs/_lzma.pyd",
+          "actual_sha256": "cb930cd57d32c28e456b78d77a6f4d7ccbc3255d89a8928bc5169d1eabd7655f",
+          "pbs_sha256": "cb930cd57d32c28e456b78d77a6f4d7ccbc3255d89a8928bc5169d1eabd7655f",
+          "match": true
+        },
+        {
+          "path": "_internal/_multiprocessing.pyd",
+          "input": "DLLs/_multiprocessing.pyd",
+          "actual_sha256": "653149396879a9fcf0ecb6f967703de3a9334280086d4d5b511988022eb1e0d5",
+          "pbs_sha256": "653149396879a9fcf0ecb6f967703de3a9334280086d4d5b511988022eb1e0d5",
+          "match": true
+        },
+        {
+          "path": "_internal/_overlapped.pyd",
+          "input": "DLLs/_overlapped.pyd",
+          "actual_sha256": "a8d6127a4c1060043e608e8d58a459499625ef9dbcedf9fc794a468027344f75",
+          "pbs_sha256": "a8d6127a4c1060043e608e8d58a459499625ef9dbcedf9fc794a468027344f75",
+          "match": true
+        },
+        {
+          "path": "_internal/_queue.pyd",
+          "input": "DLLs/_queue.pyd",
+          "actual_sha256": "07f2135d64abefa66d7356cfdc7db9d5af3520666d9adc8c88441273d4a46cc5",
+          "pbs_sha256": "07f2135d64abefa66d7356cfdc7db9d5af3520666d9adc8c88441273d4a46cc5",
+          "match": true
+        },
+        {
+          "path": "_internal/_socket.pyd",
+          "input": "DLLs/_socket.pyd",
+          "actual_sha256": "cbc5e8c2a9e58c101b10b7719f9fe6deb80d9977e3de48003e641f56eedbab4f",
+          "pbs_sha256": "cbc5e8c2a9e58c101b10b7719f9fe6deb80d9977e3de48003e641f56eedbab4f",
+          "match": true
+        },
+        {
+          "path": "_internal/_sqlite3.pyd",
+          "input": "DLLs/_sqlite3.pyd",
+          "actual_sha256": "67f0cc3e63442b0853f9a2b4efdb92dd813261e83727026874bcf06af464442a",
+          "pbs_sha256": "67f0cc3e63442b0853f9a2b4efdb92dd813261e83727026874bcf06af464442a",
+          "match": true
+        },
+        {
+          "path": "_internal/_ssl.pyd",
+          "input": "DLLs/_ssl.pyd",
+          "actual_sha256": "5d3c564ae49bbc31273edb5a182d1acee8300c83f57dc03a21a8e06c42bb19fb",
+          "pbs_sha256": "5d3c564ae49bbc31273edb5a182d1acee8300c83f57dc03a21a8e06c42bb19fb",
+          "match": true
+        },
+        {
+          "path": "_internal/_uuid.pyd",
+          "input": "DLLs/_uuid.pyd",
+          "actual_sha256": "721f93c8f9629f222c9d5c28aa1b79e6a8e046c19038cfeecd04726ab40eb5ef",
+          "pbs_sha256": "721f93c8f9629f222c9d5c28aa1b79e6a8e046c19038cfeecd04726ab40eb5ef",
+          "match": true
+        },
+        {
+          "path": "_internal/_wmi.pyd",
+          "input": "DLLs/_wmi.pyd",
+          "actual_sha256": "14be9a6c4d573f58cb8cf77763aba6fb453d607364a859fbf4d6bed26d6e3e1f",
+          "pbs_sha256": "14be9a6c4d573f58cb8cf77763aba6fb453d607364a859fbf4d6bed26d6e3e1f",
+          "match": true
+        },
+        {
+          "path": "_internal/_zoneinfo.pyd",
+          "input": "DLLs/_zoneinfo.pyd",
+          "actual_sha256": "2e6bb04c4b43d46f01b202966e04b1f8b5e5292b027972716d7825edf842952d",
+          "pbs_sha256": "2e6bb04c4b43d46f01b202966e04b1f8b5e5292b027972716d7825edf842952d",
+          "match": true
+        },
+        {
+          "path": "_internal/libcrypto-3-x64.dll",
+          "input": "DLLs/libcrypto-3-x64.dll",
+          "actual_sha256": "c78d203bdd2d229e905b272b85f3d06db6c18075644602ca621905a568546c5d",
+          "pbs_sha256": "c78d203bdd2d229e905b272b85f3d06db6c18075644602ca621905a568546c5d",
+          "match": true
+        },
+        {
+          "path": "_internal/libffi-8.dll",
+          "input": "DLLs/libffi-8.dll",
+          "actual_sha256": "78f1922e71ca52ef2497774951673cdc9497bd50fcbd7fe46060cc2d028db89c",
+          "pbs_sha256": "78f1922e71ca52ef2497774951673cdc9497bd50fcbd7fe46060cc2d028db89c",
+          "match": true
+        },
+        {
+          "path": "_internal/libssl-3-x64.dll",
+          "input": "DLLs/libssl-3-x64.dll",
+          "actual_sha256": "fe9766368ea666408ee6a23d95230ae6cc540bdc77aa95142287f2522ed41460",
+          "pbs_sha256": "fe9766368ea666408ee6a23d95230ae6cc540bdc77aa95142287f2522ed41460",
+          "match": true
+        },
+        {
+          "path": "_internal/pyexpat.pyd",
+          "input": "DLLs/pyexpat.pyd",
+          "actual_sha256": "fac87cbfe7a8f310008b934c7a458bf499b94d470be3b6f1b14e5f3db55af85c",
+          "pbs_sha256": "fac87cbfe7a8f310008b934c7a458bf499b94d470be3b6f1b14e5f3db55af85c",
+          "match": true
+        },
+        {
+          "path": "_internal/python3.dll",
+          "input": "python3.dll",
+          "actual_sha256": "2d2330ce33d1443c67b1804bbf1a561653499dd4dcf8918048747cc17d1a63c4",
+          "pbs_sha256": "2d2330ce33d1443c67b1804bbf1a561653499dd4dcf8918048747cc17d1a63c4",
+          "match": true
+        },
+        {
+          "path": "_internal/python312.dll",
+          "input": "python312.dll",
+          "actual_sha256": "64a1dad031e97f13b1a0bac26c689d8e14a18d7dd1eab06e17f70e22373f4eec",
+          "pbs_sha256": "64a1dad031e97f13b1a0bac26c689d8e14a18d7dd1eab06e17f70e22373f4eec",
+          "match": true
+        },
+        {
+          "path": "_internal/select.pyd",
+          "input": "DLLs/select.pyd",
+          "actual_sha256": "0682b3d44fe431ecfea0792f1b5a314a9d87462752740a3073e505c638695cb8",
+          "pbs_sha256": "0682b3d44fe431ecfea0792f1b5a314a9d87462752740a3073e505c638695cb8",
+          "match": true
+        },
+        {
+          "path": "_internal/sqlite3.dll",
+          "input": "DLLs/sqlite3.dll",
+          "actual_sha256": "09435aa9de52c533f69fc3f6a23337e0276ad54567c808b80db64923c871257e",
+          "pbs_sha256": "09435aa9de52c533f69fc3f6a23337e0276ad54567c808b80db64923c871257e",
+          "match": true
+        },
+        {
+          "path": "_internal/unicodedata.pyd",
+          "input": "DLLs/unicodedata.pyd",
+          "actual_sha256": "98165e9c0b5e70d54c38424042e495efb0a6df9f6b735ab3e0c9c7f95903e0dc",
+          "pbs_sha256": "98165e9c0b5e70d54c38424042e495efb0a6df9f6b735ab3e0c9c7f95903e0dc",
+          "match": true
+        },
+        {
+          "path": "_internal/VCRUNTIME140.dll",
+          "input": "vcruntime140.dll",
+          "actual_sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066",
+          "pbs_sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066",
+          "match": true
+        },
+        {
+          "path": "_internal/VCRUNTIME140_1.dll",
+          "input": "vcruntime140_1.dll",
+          "actual_sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f",
+          "pbs_sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f",
+          "match": true
+        }
+      ],
+      "patch_scope": "Complete fixed PBS source archive includes Windows build.py substitutions/support patches or Unix build*.sh and patch files; no local runtime source modifications. PyInstaller collection is mapped separately."
+    }
+  },
+  "source_archives": [
+    {
+      "url": "https://www.python.org/ftp/python/3.12.13/Python-3.12.13.tar.xz",
+      "size": 20801708,
+      "sha256": "c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684",
+      "version": "3.12.13",
+      "licenses": [
+        "Python-2.0",
+        "CNRI-Python"
+      ],
+      "license_file": "LICENSE.cpython.txt",
+      "python_tag": "cp312",
+      "name": "cpython-3.12",
+      "file": "Python-3.12.13.tar.xz",
+      "bytes": 20801708,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/Python-3.12.13.tar.xz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://astral-sh.github.io/mirror/files/bzip2-1.0.8.tar.gz",
+      "size": 810029,
+      "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+      "version": "1.0.8",
+      "library_names": [
+        "bz2"
+      ],
+      "licenses": [
+        "bzip2-1.0.6"
+      ],
+      "license_file": "LICENSE.bzip2.txt",
+      "name": "bzip2",
+      "file": "bzip2-1.0.8.tar.gz",
+      "bytes": 810029,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/bzip2-1.0.8.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_1/expat-2.8.1.tar.xz",
+      "size": 512224,
+      "sha256": "10b195ee78160a908388180a8fe3603d4e9a12f4755fbf5f3816b23a9d750da0",
+      "version": "2.8.1",
+      "library_names": [
+        "expat"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "license_file": "LICENSE.expat.txt",
+      "name": "expat",
+      "file": "expat-2.8.1.tar.xz",
+      "bytes": 512224,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/expat-2.8.1.tar.xz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://thrysoee.dk/editline/libedit-20240808-3.1.tar.gz",
+      "size": 538611,
+      "sha256": "5f0573349d77c4a48967191cdd6634dd7aa5f6398c6a57fe037cc02696d6099f",
+      "version": "20240808-3.1",
+      "library_names": [
+        "edit"
+      ],
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "license_file": "LICENSE.libedit.txt",
+      "name": "libedit",
+      "file": "libedit-20240808-3.1.tar.gz",
+      "bytes": 538611,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/libedit-20240808-3.1.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz",
+      "size": 1391684,
+      "sha256": "b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e",
+      "version": "3.4.6",
+      "library_names": [
+        "ffi"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "license_file": "LICENSE.libffi.txt",
+      "name": "libffi",
+      "file": "libffi-3.4.6.tar.gz",
+      "bytes": 1391684,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-3.4.6.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://astral-sh.github.io/mirror/files/mpdecimal-4.0.0.tar.gz",
+      "size": 315325,
+      "sha256": "942445c3245b22730fd41a67a7c5c231d11cb1b9936b9c0f76334fb7d0b4468c",
+      "version": "4.0.0",
+      "library_names": [
+        "mpdec"
+      ],
+      "licenses": [
+        "BSD-2-Clause"
+      ],
+      "license_file": "LICENSE.mpdecimal.txt",
+      "name": "mpdecimal",
+      "file": "mpdecimal-4.0.0.tar.gz",
+      "bytes": 315325,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/mpdecimal-4.0.0.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://astral-sh.github.io/mirror/files/ncurses-6.5.tar.gz",
+      "size": 3688489,
+      "sha256": "136d91bc269a9a5785e5f9e980bc76ab57428f604ce3e5a5a90cebc767971cc6",
+      "version": "6.5",
+      "library_names": [
+        "ncurses",
+        "ncursesw",
+        "panel",
+        "panelw"
+      ],
+      "licenses": [
+        "X11"
+      ],
+      "license_file": "LICENSE.ncurses.txt",
+      "name": "ncurses",
+      "file": "ncurses-6.5.tar.gz",
+      "bytes": 3688489,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/ncurses-6.5.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
+      "size": 53153930,
+      "sha256": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
+      "version": "3.5.7",
+      "library_names": [
+        "crypto",
+        "ssl"
+      ],
+      "licenses": [
+        "Apache-2.0"
+      ],
+      "license_file": "LICENSE.openssl-3.txt",
+      "name": "openssl-3.5",
+      "file": "openssl-3.5.7.tar.gz",
+      "bytes": 53153930,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/openssl-3.5.7.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://www.sqlite.org/2026/sqlite-autoconf-3530100.tar.gz",
+      "size": 3275272,
+      "sha256": "83e6b2020a034e9a7ad4a72feea59e1ad52f162e09cbd26735a3ffb98359fc4f",
+      "version": "3530100",
+      "actual_version": "3.53.1.0",
+      "library_names": [
+        "sqlite3"
+      ],
+      "licenses": [],
+      "license_file": "LICENSE.sqlite.txt",
+      "license_public_domain": true,
+      "name": "sqlite",
+      "file": "sqlite-autoconf-3530100.tar.gz",
+      "bytes": 3275272,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/sqlite-autoconf-3530100.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://sourceforge.net/projects/libuuid/files/libuuid-1.0.3.tar.gz",
+      "size": 318256,
+      "sha256": "46af3275291091009ad7f1b899de3d0cea0252737550e7919d17237997db5644",
+      "version": "1.0.3",
+      "library_names": [
+        "uuid"
+      ],
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "license_file": "LICENSE.libuuid.txt",
+      "name": "uuid",
+      "file": "libuuid-1.0.3.tar.gz",
+      "bytes": 318256,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/libuuid-1.0.3.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+      "size": 2771455,
+      "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+      "version": "5.8.3",
+      "library_names": [
+        "lzma"
+      ],
+      "licenses": [
+        "0BSD"
+      ],
+      "license_file": "LICENSE.liblzma.txt",
+      "name": "xz",
+      "file": "xz-5.8.3.tar.gz",
+      "bytes": 2771455,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
+      "size": 1502830,
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "version": "1.3.2",
+      "library_names": [
+        "z"
+      ],
+      "licenses": [
+        "Zlib"
+      ],
+      "license_file": "LICENSE.zlib.txt",
+      "name": "zlib",
+      "file": "zlib-1.3.2.tar.gz",
+      "bytes": 1502830,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/zlib-1.3.2.tar.gz",
+      "upstream_hash_verified": true
+    },
+    {
+      "name": "windows-libffi-cpython-source-deps",
+      "version": "3.4.2-patched",
+      "commit": "16fad4855b3d8c03b5910e405ff3a04395b39a98",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/16fad4855b3d8c03b5910e405ff3a04395b39a98",
+      "file": "libffi-cpython-source-deps-16fad4855b3d.tar.gz",
+      "licenses": [
+        "MIT"
+      ],
+      "sha256": "f21ae7b0cce58cf9428e01d4d22aac9c3b70722a4e9b2c92b3a97d490a1b401c",
+      "bytes": 1337195,
+      "source_path": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-cpython-source-deps-16fad4855b3d.tar.gz",
+      "upstream_hash_verified": false
+    }
+  ],
+  "components": [
+    {
+      "name": "CPython",
+      "version": "3.12.13",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "Python-2.0 AND bundled notices",
+      "actual_binary_paths": [
+        "linux:_internal/base_library.zip",
+        "linux:_internal/libpython3.12.so.1.0",
+        "windows:_internal/_asyncio.pyd",
+        "windows:_internal/_bz2.pyd",
+        "windows:_internal/_ctypes.pyd",
+        "windows:_internal/_decimal.pyd",
+        "windows:_internal/_elementtree.pyd",
+        "windows:_internal/_hashlib.pyd",
+        "windows:_internal/_lzma.pyd",
+        "windows:_internal/_multiprocessing.pyd",
+        "windows:_internal/_overlapped.pyd",
+        "windows:_internal/_queue.pyd",
+        "windows:_internal/_socket.pyd",
+        "windows:_internal/_sqlite3.pyd",
+        "windows:_internal/_ssl.pyd",
+        "windows:_internal/_uuid.pyd",
+        "windows:_internal/_wmi.pyd",
+        "windows:_internal/_zoneinfo.pyd",
+        "windows:_internal/base_library.zip",
+        "windows:_internal/libcrypto-3-x64.dll",
+        "windows:_internal/libffi-8.dll",
+        "windows:_internal/libssl-3-x64.dll",
+        "windows:_internal/pyexpat.pyd",
+        "windows:_internal/python3.dll",
+        "windows:_internal/python312.dll",
+        "windows:_internal/select.pyd",
+        "windows:_internal/sqlite3.dll",
+        "windows:_internal/unicodedata.pyd"
+      ],
+      "license_members": [
+        "linux/LICENSE.cpython.txt",
+        "windows/LICENSE.cpython.txt",
+        "CPython/LICENSE",
+        "CPython/Doc-license.rst"
+      ],
+      "notes": "stdlib source and built-in vendored C sources are in the exact Python3.12.13 release tarball. base_library.zip and frozenstdlib are derived by PyInstaller using source/build recipes already recorded in the main inventory."
+    },
+    {
+      "name": "bzip2",
+      "version": "1.0.8",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "bzip2",
+      "declared_license": "bzip2-1.0.6",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.bzip2.txt"
+      ],
+      "notes": "Statically included via built-in _bz2; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "expat",
+      "version": "2.8.1",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "expat",
+      "declared_license": "MIT",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.expat.txt"
+      ],
+      "notes": "Statically included via built-in pyexpat,_elementtree; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "libffi",
+      "version": "3.4.6",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "libffi",
+      "declared_license": "MIT",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.libffi.txt"
+      ],
+      "notes": "Statically included via built-in _ctypes; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "mpdecimal",
+      "version": "4.0.0",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "mpdecimal",
+      "declared_license": "BSD-2-Clause",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.mpdecimal.txt"
+      ],
+      "notes": "Statically included via built-in _decimal; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "libedit",
+      "version": "20240808-3.1",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "libedit",
+      "declared_license": "BSD-3-Clause",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.libedit.txt"
+      ],
+      "notes": "Statically included via built-in readline; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "ncurses",
+      "version": "6.5",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "ncurses",
+      "declared_license": "X11",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.ncurses.txt"
+      ],
+      "notes": "Statically included via built-in _curses,_curses_panel,readline; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "openssl-3.5",
+      "version": "3.5.7",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "openssl-3.5",
+      "declared_license": "Apache-2.0",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.openssl-3.txt"
+      ],
+      "notes": "Statically included via built-in _ssl,_hashlib; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "sqlite",
+      "version": "3.53.1.0",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "sqlite",
+      "declared_license": "Public Domain",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.sqlite.txt"
+      ],
+      "notes": "Statically included via built-in _sqlite3; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "uuid",
+      "version": "1.0.3",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "uuid",
+      "declared_license": "BSD-3-Clause",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.libuuid.txt"
+      ],
+      "notes": "Statically included via built-in _uuid; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "xz",
+      "version": "5.8.3",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "xz",
+      "declared_license": "0BSD",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.liblzma.txt"
+      ],
+      "notes": "Statically included via built-in _lzma; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "platforms": [
+        "linux"
+      ],
+      "source_id": "zlib",
+      "declared_license": "Zlib",
+      "actual_binary_paths": [
+        "_internal/libpython3.12.so.1.0"
+      ],
+      "license_members": [
+        "linux/LICENSE.zlib.txt"
+      ],
+      "notes": "Statically included via built-in zlib,binascii; confirmed runtime builtin table plus matching full-archive build_info links. PBS Unix build scripts include dependency-specific patches/configuration."
+    },
+    {
+      "name": "bzip2",
+      "version": "1.0.8",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "bzip2",
+      "declared_license": "bzip2-1.0.6",
+      "actual_binary_paths": [
+        "_internal/_bz2.pyd"
+      ],
+      "license_members": [
+        "windows/LICENSE.bzip2.txt"
+      ],
+      "notes": "PBS20260807 Windows build.py selects the pinned source in pythonbuild/downloads.py."
+    },
+    {
+      "name": "openssl-3.5",
+      "version": "3.5.7",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "openssl-3.5",
+      "declared_license": "Apache-2.0",
+      "actual_binary_paths": [
+        "_internal/libcrypto-3-x64.dll",
+        "_internal/libssl-3-x64.dll",
+        "_internal/_ssl.pyd",
+        "_internal/_hashlib.pyd"
+      ],
+      "license_members": [
+        "windows/LICENSE.openssl-3.txt"
+      ],
+      "notes": "PBS20260807 Windows build.py selects the pinned source in pythonbuild/downloads.py."
+    },
+    {
+      "name": "sqlite",
+      "version": "3.53.1.0",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "sqlite",
+      "declared_license": "Public Domain",
+      "actual_binary_paths": [
+        "_internal/sqlite3.dll",
+        "_internal/_sqlite3.pyd"
+      ],
+      "license_members": [
+        "windows/LICENSE.sqlite.txt"
+      ],
+      "notes": "PBS20260807 Windows build.py selects the pinned source in pythonbuild/downloads.py."
+    },
+    {
+      "name": "xz",
+      "version": "5.8.3",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "xz",
+      "declared_license": "0BSD",
+      "actual_binary_paths": [
+        "_internal/_lzma.pyd"
+      ],
+      "license_members": [
+        "windows/LICENSE.liblzma.txt"
+      ],
+      "notes": "PBS20260807 Windows build.py selects the pinned source in pythonbuild/downloads.py."
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "zlib",
+      "declared_license": "Zlib",
+      "actual_binary_paths": [
+        "_internal/python312.dll"
+      ],
+      "license_members": [
+        "windows/LICENSE.zlib.txt"
+      ],
+      "notes": "PBS20260807 Windows build.py selects the pinned source in pythonbuild/downloads.py."
+    },
+    {
+      "name": "windows-libffi-cpython-source-deps",
+      "version": "3.4.2-patched",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "windows-libffi-cpython-source-deps",
+      "declared_license": "MIT",
+      "actual_binary_paths": [
+        "_internal/libffi-8.dll",
+        "_internal/_ctypes.pyd"
+      ],
+      "license_members": [
+        "windows/LICENSE.libffi.txt"
+      ],
+      "notes": "Windows libffi uses the exact CPython-source-deps commit from build_libffi(), not the generic 3.4.6 entry."
+    },
+    {
+      "name": "vendored-expat",
+      "version": "2.7.4",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "MIT",
+      "actual_binary_paths": [
+        "_internal/pyexpat.pyd"
+      ],
+      "license_members": [
+        "CPython/expat-COPYING"
+      ],
+      "notes": "Vendored Modules/expat; version read from actual runtime and expat.h. Do not map the Linux2.8.1 or PBS20260807 generic2.8.2 entry onto this binary."
+    },
+    {
+      "name": "vendored-mpdecimal",
+      "version": "2.5.1",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "BSD-2-Clause",
+      "actual_binary_paths": [
+        "_internal/_decimal.pyd"
+      ],
+      "license_members": [
+        "CPython/mpdecimal-2.5.1-header.txt"
+      ],
+      "notes": "Vendored Modules/_decimal/libmpdec. Windows3.12 keeps the bundled source; external4.0.0 is used on Linux."
+    },
+    {
+      "name": "vendored-HACL*",
+      "version": "bb3d0dc8d9d15a5cd51094d5b69e70aa09005ff0",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "MIT",
+      "actual_binary_paths": [
+        "linux:_internal/libpython3.12.so.1.0",
+        "windows:_internal/python312.dll"
+      ],
+      "license_members": [
+        "CPython/HACL-MIT-header.txt"
+      ],
+      "notes": "Vendored C/header source and refresh.sh recorded in CPython Modules/_hacl. This commit is recorded by refresh.sh; no claim that upstream generic verification/generation tools are part of the frozen application."
+    },
+    {
+      "name": "vendored-KreMLin support headers",
+      "version": "CPython3.12.13 vendored snapshot",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "Apache-2.0",
+      "actual_binary_paths": [
+        "linux:_internal/libpython3.12.so.1.0",
+        "windows:_internal/python312.dll"
+      ],
+      "license_members": [
+        "CPython/KreMLin-lowstar_endianness-header.txt",
+        "CPython/KreMLin-FStar_UInt128_Verified-header.txt",
+        "CPython/KreMLin-Apache-2.0.txt"
+      ],
+      "notes": "Compiled helper headers included by HACL hash sources are part of runtime source; original Apache2.0 notices are retained separately from MIT HACL notices."
+    },
+    {
+      "name": "vendored-BLAKE2",
+      "version": "CPython3.12.13 vendored snapshot",
+      "platforms": [
+        "linux",
+        "windows"
+      ],
+      "source_id": "cpython-3.12",
+      "declared_license": "CC0-1.0",
+      "actual_binary_paths": [
+        "linux:_internal/libpython3.12.so.1.0",
+        "windows:_internal/python312.dll"
+      ],
+      "license_members": [
+        "CPython/BLAKE2-CC0-header.txt",
+        "CPython/CC0-1.0.txt"
+      ],
+      "notes": "Vendored Modules/_blake2 C source; retain exact per-file notices in source archive."
+    },
+    {
+      "name": "Microsoft VC runtime",
+      "version": "14.44.35211.0",
+      "platforms": [
+        "windows"
+      ],
+      "source_id": null,
+      "declared_license": "LicenseRef-Microsoft-Visual-Studio-Distributable-Code",
+      "actual_binary_paths": [
+        "_internal/VCRUNTIME140.dll",
+        "_internal/VCRUNTIME140_1.dll"
+      ],
+      "license_members": [
+        "Microsoft/Visual_Studio_2026-License-Community_ENU.txt",
+        "Microsoft/Visual-C-V14-License-Redistributable_and_Runtime_ENU.txt",
+        "Microsoft/Visual-C-Runtime-2015-2022-License-1.txt"
+      ],
+      "notes": "Object files are unmodified and match the installed non-debug Visual Studio Community2026 redist directory. Microsoft terms stay separate; no source redistribution is asserted. Runtime-only EULA is not a stand-alone redistribution grant: use installed VisualStudio distributable-code terms and retain downstream protection terms."
+    }
+  ],
+  "licenses_archive": {
+    "path": "packaging/desktop/build/source-cache/python-runtime-resolution/python-runtime-licenses.zip",
+    "sha256": "80c6d5a48ea3ae448bd3b5d10c2df46de778cbb3838df8b24dec6d589f9bad5a",
+    "bytes": 155166
+  },
+  "license_index": [
+    {
+      "member": "CPython/BLAKE2-CC0-header.txt",
+      "sha256": "a27d7169aa4b7db350c5e46da87184c4b7a8ac8e4d86dce38845fdffd789d7b5",
+      "bytes": 519,
+      "origin": "CPython3.12.13:Modules/_blake2/impl/blake2b.c:leading comment, exact bytes"
+    },
+    {
+      "member": "CPython/CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "bytes": 7048,
+      "origin": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt"
+    },
+    {
+      "member": "CPython/Doc-license.rst",
+      "sha256": "341832873fd316a37927e79385093fbbfd40a467428480835fe435a80cadf4e5",
+      "bytes": 54130,
+      "origin": "CPython3.12.13:Doc/license.rst"
+    },
+    {
+      "member": "CPython/HACL-MIT-header.txt",
+      "sha256": "998ce04fb8ad9dedb0bc1b44938f8c3dcf1089780fa105ce1c8c30fb5554d78c",
+      "bytes": 1207,
+      "origin": "CPython3.12.13:Modules/_hacl/Hacl_Hash_SHA2.c:leading comment, exact bytes"
+    },
+    {
+      "member": "CPython/KreMLin-Apache-2.0.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "bytes": 10175,
+      "origin": "Full Apache2.0 text from pinned PBS license corpus; original KreMLin headers explicitly select Apache2.0"
+    },
+    {
+      "member": "CPython/KreMLin-FStar_UInt128_Verified-header.txt",
+      "sha256": "54079ca9757dbaa2a54053fbd9be60f77c5e06695fa997191fc141cd20d41d59",
+      "bytes": 117,
+      "origin": "CPython3.12.13:Modules/_hacl/include/krml/FStar_UInt128_Verified.h:leading comment, exact bytes"
+    },
+    {
+      "member": "CPython/KreMLin-lowstar_endianness-header.txt",
+      "sha256": "6b7cb4bd5441f287eeb8b745073c11bc5d2974252bec3b6d8c101ff67f918a26",
+      "bytes": 116,
+      "origin": "CPython3.12.13:Modules/_hacl/include/krml/lowstar_endianness.h:leading comment, exact bytes"
+    },
+    {
+      "member": "CPython/LICENSE",
+      "sha256": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf",
+      "bytes": 13936,
+      "origin": "CPython3.12.13:LICENSE"
+    },
+    {
+      "member": "CPython/expat-COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+      "bytes": 1144,
+      "origin": "CPython3.12.13:Modules/expat/COPYING"
+    },
+    {
+      "member": "CPython/mpdecimal-2.5.1-header.txt",
+      "sha256": "b07528d8b1dbf1e2d2741052996f0876e23342ce2d30d0effa39c5457716c25a",
+      "bytes": 1359,
+      "origin": "CPython3.12.13:Modules/_decimal/libmpdec/mpdecimal.h:leading comment, exact bytes"
+    },
+    {
+      "member": "Microsoft/Visual-C-Runtime-2015-2022-License-1.txt",
+      "sha256": "ed875263593823eb4b685cd543eda0ab075a6f57a76f7718908f2237466c442f",
+      "bytes": 6590,
+      "origin": "Plain text paragraph extraction of Visual-C-Runtime-2015-2022-License-1.docx"
+    },
+    {
+      "member": "Microsoft/Visual-C-V14-License-Redistributable_and_Runtime_ENU.txt",
+      "sha256": "923d8b11a03c277d59f3262727abc7e422158f5243a5565d67d5c270c6b05e3c",
+      "bytes": 11894,
+      "origin": "Plain text paragraph extraction of Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx"
+    },
+    {
+      "member": "Microsoft/Visual_Studio_2026-License-Community_ENU.txt",
+      "sha256": "0fb6a590997880cccc81c6453d4938e79e3e1ae6003e466314758de51bfb8233",
+      "bytes": 27204,
+      "origin": "Plain text paragraph extraction of Visual_Studio_2026-License-Community_ENU.docx"
+    },
+    {
+      "member": "build-recipes/linux-PBS-LICENSE",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "bytes": 16725,
+      "origin": "PBS source7f93a7d443d97f08e3afc6e24a3c675e9994b6aa:LICENSE"
+    },
+    {
+      "member": "build-recipes/windows-PBS-LICENSE",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "bytes": 16725,
+      "origin": "PBS source00c8a06113f11220667c3bcf5fab1672ff9e78ef:LICENSE"
+    },
+    {
+      "member": "linux/LICENSE.bzip2.txt",
+      "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441",
+      "bytes": 1743,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.bzip2.txt"
+    },
+    {
+      "member": "linux/LICENSE.cpython.txt",
+      "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd",
+      "bytes": 36164,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.cpython.txt"
+    },
+    {
+      "member": "linux/LICENSE.expat.txt",
+      "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534",
+      "bytes": 1144,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.expat.txt"
+    },
+    {
+      "member": "linux/LICENSE.libedit.txt",
+      "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1",
+      "bytes": 1614,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.libedit.txt"
+    },
+    {
+      "member": "linux/LICENSE.libffi.txt",
+      "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0",
+      "bytes": 1132,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.libffi.txt"
+    },
+    {
+      "member": "linux/LICENSE.liblzma.txt",
+      "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02",
+      "bytes": 660,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.liblzma.txt"
+    },
+    {
+      "member": "linux/LICENSE.libuuid.txt",
+      "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b",
+      "bytes": 1432,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.libuuid.txt"
+    },
+    {
+      "member": "linux/LICENSE.mpdecimal.txt",
+      "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b",
+      "bytes": 1284,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.mpdecimal.txt"
+    },
+    {
+      "member": "linux/LICENSE.ncurses.txt",
+      "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c",
+      "bytes": 1447,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.ncurses.txt"
+    },
+    {
+      "member": "linux/LICENSE.openssl-3.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "bytes": 10175,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.openssl-3.txt"
+    },
+    {
+      "member": "linux/LICENSE.sqlite.txt",
+      "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719",
+      "bytes": 1481,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.sqlite.txt"
+    },
+    {
+      "member": "linux/LICENSE.zlib.txt",
+      "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c",
+      "bytes": 995,
+      "origin": "PBS20260623 full:python/licenses/LICENSE.zlib.txt"
+    },
+    {
+      "member": "upstream/bzip2/bzip2-1.0.8/LICENSE",
+      "sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3",
+      "bytes": 1896,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/bzip2-1.0.8.tar.gz:bzip2-1.0.8/LICENSE"
+    },
+    {
+      "member": "upstream/expat/expat-2.8.1/COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+      "bytes": 1144,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/expat-2.8.1.tar.xz:expat-2.8.1/COPYING"
+    },
+    {
+      "member": "upstream/libedit/libedit-20240808-3.1/COPYING",
+      "sha256": "9da6c9c74987a36c84302982799d17d2f748ba1c1c0c471425716173c1d07649",
+      "bytes": 1615,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libedit-20240808-3.1.tar.gz:libedit-20240808-3.1/COPYING"
+    },
+    {
+      "member": "upstream/libffi/libffi-3.4.6/LICENSE",
+      "sha256": "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195",
+      "bytes": 1132,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-3.4.6.tar.gz:libffi-3.4.6/LICENSE"
+    },
+    {
+      "member": "upstream/libffi/libffi-3.4.6/LICENSE-BUILDTOOLS",
+      "sha256": "e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94",
+      "bytes": 18698,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-3.4.6.tar.gz:libffi-3.4.6/LICENSE-BUILDTOOLS"
+    },
+    {
+      "member": "upstream/mpdecimal/mpdecimal-4.0.0/COPYRIGHT.txt",
+      "sha256": "2713324211652ce4a60e6e21e54f9dc3004299e591b0933a352f1a89c5fb53c2",
+      "bytes": 1285,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/mpdecimal-4.0.0.tar.gz:mpdecimal-4.0.0/COPYRIGHT.txt"
+    },
+    {
+      "member": "upstream/mpdecimal/mpdecimal-4.0.0/doc/COPYRIGHT.txt",
+      "sha256": "25329ef0e2a8823b88786a39f168304a65a3138f720ab39ffc1e9fbee67b74a9",
+      "bytes": 2943,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/mpdecimal-4.0.0.tar.gz:mpdecimal-4.0.0/doc/COPYRIGHT.txt"
+    },
+    {
+      "member": "upstream/ncurses/ncurses-6.5/COPYING",
+      "sha256": "b2feb54f39529abe226f709a292584fde48a2e5721559fee417d2cdd51cb7cc1",
+      "bytes": 1447,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/ncurses-6.5.tar.gz:ncurses-6.5/COPYING"
+    },
+    {
+      "member": "upstream/openssl-3.5/openssl-3.5.7/LICENSE.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "bytes": 10175,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/openssl-3.5.7.tar.gz:openssl-3.5.7/LICENSE.txt"
+    },
+    {
+      "member": "upstream/sqlite/sqlite-autoconf-3530100/autosetup/LICENSE",
+      "sha256": "679b9208e67df09977456d1d2ae4d885b9badf02c47b45a28cf95ee27c14cb18",
+      "bytes": 1737,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/sqlite-autoconf-3530100.tar.gz:sqlite-autoconf-3530100/autosetup/LICENSE"
+    },
+    {
+      "member": "upstream/sqlite/sqlite-autoconf-3530100/tea/license.terms",
+      "sha256": "66e056b6e8687f32af30d5187611b98b12a8f46f07aaf62f43585f276e8f0ac9",
+      "bytes": 257,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/sqlite-autoconf-3530100.tar.gz:sqlite-autoconf-3530100/tea/license.terms"
+    },
+    {
+      "member": "upstream/uuid/libuuid-1.0.3/COPYING",
+      "sha256": "18a4a3931b5b703202793f7ec14b07639dd6b502162049f66250aa6445032ae3",
+      "bytes": 214,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libuuid-1.0.3.tar.gz:libuuid-1.0.3/COPYING"
+    },
+    {
+      "member": "upstream/windows-libffi-cpython-source-deps/cpython-source-deps-16fad4855b3d8c03b5910e405ff3a04395b39a98/LICENSE",
+      "sha256": "a61d06e8f7be57928e71e800eb9273b05cb8868c484108afe41e4305bb320dde",
+      "bytes": 1132,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-cpython-source-deps-16fad4855b3d.tar.gz:cpython-source-deps-16fad4855b3d8c03b5910e405ff3a04395b39a98/LICENSE"
+    },
+    {
+      "member": "upstream/windows-libffi-cpython-source-deps/cpython-source-deps-16fad4855b3d8c03b5910e405ff3a04395b39a98/LICENSE-BUILDTOOLS",
+      "sha256": "e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94",
+      "bytes": 18698,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/libffi-cpython-source-deps-16fad4855b3d.tar.gz:cpython-source-deps-16fad4855b3d8c03b5910e405ff3a04395b39a98/LICENSE-BUILDTOOLS"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/COPYING",
+      "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8",
+      "bytes": 3119,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/COPYING"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/COPYING.0BSD",
+      "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1",
+      "bytes": 607,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/COPYING.0BSD"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/COPYING.GPLv2",
+      "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
+      "bytes": 17984,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/COPYING.GPLv2"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/COPYING.GPLv3",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "bytes": 35149,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/COPYING.GPLv3"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/COPYING.LGPLv2.1",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+      "bytes": 26419,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/COPYING.LGPLv2.1"
+    },
+    {
+      "member": "upstream/xz/xz-5.8.3/build-aux/license-check.sh",
+      "sha256": "2b3fa1d23cb2ab084f3d919908159473cc0e1eed059d106e2a2857c0ec8af98a",
+      "bytes": 5127,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/xz-5.8.3.tar.gz:xz-5.8.3/build-aux/license-check.sh"
+    },
+    {
+      "member": "upstream/zlib/zlib-1.3.2/LICENSE",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "bytes": 1002,
+      "origin": "packaging/desktop/build/source-cache/python-runtime-resolution/zlib-1.3.2.tar.gz:zlib-1.3.2/LICENSE"
+    },
+    {
+      "member": "windows/LICENSE.bzip2.txt",
+      "sha256": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910",
+      "bytes": 1780,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.bzip2.txt"
+    },
+    {
+      "member": "windows/LICENSE.cpython.txt",
+      "sha256": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e",
+      "bytes": 36935,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.cpython.txt"
+    },
+    {
+      "member": "windows/LICENSE.libffi.txt",
+      "sha256": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c",
+      "bytes": 1153,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.libffi.txt"
+    },
+    {
+      "member": "windows/LICENSE.liblzma.txt",
+      "sha256": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec",
+      "bytes": 673,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.liblzma.txt"
+    },
+    {
+      "member": "windows/LICENSE.openssl-3.txt",
+      "sha256": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96",
+      "bytes": 10352,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.openssl-3.txt"
+    },
+    {
+      "member": "windows/LICENSE.sqlite.txt",
+      "sha256": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d",
+      "bytes": 1504,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.sqlite.txt"
+    },
+    {
+      "member": "windows/LICENSE.zlib.txt",
+      "sha256": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8",
+      "bytes": 1016,
+      "origin": "PBS20260807 full:python/licenses/LICENSE.zlib.txt"
+    }
+  ],
+  "msvc_installed_redist_match": {
+    "visual_studio_edition": "Community2026",
+    "visual_studio_version": "18.8.12023.21",
+    "redist_pointer": "Distributable Code for Microsoft Visual Studio (Includes Utilities & BuildServer Files)\r\n\r\nFor the latest version of this Redist.txt file, please visit https://aka.ms/vs/18/redistribution.\r\n",
+    "files": [
+      {
+        "redist_relative_path": "VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT/vcruntime140.dll",
+        "name": "vcruntime140.dll",
+        "sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066",
+        "file_version": "14.44.35211.0"
+      },
+      {
+        "redist_relative_path": "VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT/vcruntime140_1.dll",
+        "name": "vcruntime140_1.dll",
+        "sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f",
+        "file_version": "14.44.35211.0"
+      }
+    ],
+    "redist_pointer_file": {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/msvc-installed-Redist.txt",
+      "bytes": 190,
+      "sha256": "2d69e3b0ac782d5513b503bafdf269a93c4fec0f1f8efac82bfbfa4b6296aef5",
+      "installed_relative_path": "Licenses/1033/Redist.txt"
+    }
+  },
+  "msvc_license_documents": [
+    {
+      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual_Studio_2026-License-Community_ENU.docx",
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/Visual_Studio_2026-License-Community_ENU.docx",
+      "sha256": "02ac07637f4a513a807cd3721c7620433fc483bc049d25784b0c10c54b05e1fb"
+    },
+    {
+      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+      "sha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/visualstudio/releases/2026/redistribution",
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/microsoft-redist-2026.html",
+      "sha256": "c0efa782cfda1ac59d140a92f3207e8e82e16b06fe291c71247797805e6de6ce"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution",
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/microsoft-redist-2022.html",
+      "sha256": "7a5e3e817e53d08284aaf9ecdf4481f62efeb5b0ac42becc72aa34109c1ab69e"
+    }
+  ],
+  "license_archive_format": "UTF8 plain-text license/notice members only; original MicrosoftDOCX and REDISTHTML go in build/provenance",
+  "additional_provenance_materials": [
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/Visual-C-Runtime-2015-2022-License-1.docx",
+      "sha256": "f1e3d56ceb2ad68aae0711b910375009e651ac5530fa0760f0dea6e81e54fae1",
+      "bytes": 39644
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+      "sha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783",
+      "bytes": 39553
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/Visual_Studio_2026-License-Community_ENU.docx",
+      "sha256": "02ac07637f4a513a807cd3721c7620433fc483bc049d25784b0c10c54b05e1fb",
+      "bytes": 69066
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/microsoft-redist-2022.html",
+      "sha256": "7a5e3e817e53d08284aaf9ecdf4481f62efeb5b0ac42becc72aa34109c1ab69e",
+      "bytes": 62589
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/microsoft-redist-2026.html",
+      "sha256": "c0efa782cfda1ac59d140a92f3207e8e82e16b06fe291c71247797805e6de6ce",
+      "bytes": 48438
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/msvc-installed-Redist.txt",
+      "sha256": "2d69e3b0ac782d5513b503bafdf269a93c4fec0f1f8efac82bfbfa4b6296aef5",
+      "bytes": 190
+    },
+    {
+      "path": "packaging/desktop/build/source-cache/python-runtime-resolution/msvc-installed-redist-match.json",
+      "sha256": "1c56dc1b24190d627730670b944c2aa489b69febd332fc58916780652a4e5927",
+      "bytes": 1166
+    }
+  ],
+  "metadata_corrections": [
+    "PBS20260623 only matches Linux; Windows matches20260807.",
+    "PYTHON.json uses conservative library-name license mappings: Linux OpenSSL1.1 and zlib-ng labels do not mean those alternatives are present. Actualversions and pinned selectedinputs identify OpenSSL3.5.7 and zlib1.3.2.",
+    "Windows PYTHON.json retains obsolete1_1DLLlinknames; actualSHA-matched files/imports are libcrypto-3-x64.dll and libssl-3-x64.dll.",
+    "Windows_uuid uses system rpcrt4; generic libuuid annotation is not an included libuuid binary.",
+    "Windows expat2.7.4 and mpdecimal2.5.1 are CPython-vendored; Unix uses separate expat2.8.1 and mpdecimal4.0.0."
+  ],
+  "excluded_from_runtime_source_set": [
+    {
+      "name": "BerkeleyDB/Sleepycat",
+      "reason": "Linux _dbm shared extension absent from actual inventory and notbuiltin."
+    },
+    {
+      "name": "Tcl/Tk/Tix/X11/Xau/xcb",
+      "reason": "PBS tkinter optional shared extension/runtime absent from actual CPython inventory. Other Qt/Linux native copies are separately mapped by the main inventory."
+    },
+    {
+      "name": "glibc and Win32 OS import libraries",
+      "reason": "Unbundled OS/runtime interfaces; system-library source exclusion is assessed per AGPLsection1; collected Debian libraries elsewhere still have separate actual-source mapping."
+    },
+    {
+      "name": "PBS MPL2 build tooling",
+      "reason": "Build recipe source is supplied under its own MPL2 terms; its license is not applied wholesale to generated Python runtime binaries."
+    }
+  ],
+  "assembly_instructions": [
+    "Include all13source_archives and both fixed PBS build_recipe_archives; their checksums are recorded.",
+    "Unpack python-runtime-licenses.zip into release LICENSES materials or concatenate readable texts with member provenance; retain full original sources/notices and Microsoft-specific wording.",
+    "The full PBSbinaryarchives and extracted installers are provenance evidence, not source deliverables; do not add unrelated optional components to runtime SBOM because they appear there.",
+    "Retain Microsoft runtime independent proprietary terms and downstream protection terms; AGPL label applies to combined application under decision11, not Microsoft runtime code.",
+    "Source-map improvements do not change runtime bytes and do not require rebuilding program87bdcc7."
+  ]
+}
