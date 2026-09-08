@@ -9,6 +9,7 @@ def verify_sessions(window, kb, wait_until):
 
     from openkb.agent.chat_session import ChatSession
     from openkb.desktop.sessions import SessionsDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import session_lock
     from openkb.runtime.requests import ExportConversation
 
@@ -18,6 +19,7 @@ def verify_sessions(window, kb, wait_until):
     dialog.show()
     stale = True
     confirmer = QTimer()
+    tasks = SubmittedTasks(window.manager, wait_until)
 
     def confirm():
         modal = QApplication.activeModalWidget()
@@ -27,10 +29,17 @@ def verify_sessions(window, kb, wait_until):
             modal.done(QMessageBox.StandardButton.Yes)
 
     def finish():
-        wait_until(lambda: dialog._task is not None)
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        return window.manager.get(task_id)
+        task = tasks.finish(lambda: dialog._task is None)
+        expected = (
+            "会话已不存在，本项已跳过。"
+            if task.skipped
+            else "任务完成。"
+            if task.state == "completed"
+            else "任务未完成，请查看结果。"
+        )
+        assert dialog.status.text() == expected, dialog.status.text()
+        assert_result_text(task, dialog.details.toPlainText(), resources=True)
+        return task
 
     confirmer.timeout.connect(confirm)
     confirmer.start(100)

@@ -6,6 +6,7 @@ def verify_maintenance(window, kb, wait_until):
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from openkb.desktop.maintenance import MaintenanceDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import atomic_write_text, kb_ingest_lock
 
     page = kb / "wiki/concepts/native-repair.md"
@@ -15,6 +16,7 @@ def verify_maintenance(window, kb, wait_until):
     dialog.show()
     dialog.semantic.setChecked(False)
     stale = True
+    tasks = SubmittedTasks(window.manager, wait_until)
     confirmer = QTimer()
 
     def confirm():
@@ -26,10 +28,12 @@ def verify_maintenance(window, kb, wait_until):
             modal.done(QMessageBox.StandardButton.Yes)
 
     def finish():
-        wait_until(lambda: dialog._task is not None)
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        return window.manager.get(task_id)
+        task = tasks.finish(lambda: dialog._task is None)
+        assert dialog.status.text() == (
+            "检查结束，请查看报告中的问题。" if task.succeeded else "本次检查未完成，请查看结果。"
+        ), dialog.status.text()
+        assert_result_text(task, dialog.details.toPlainText())
+        return task
 
     confirmer.timeout.connect(confirm)
     confirmer.start(100)
@@ -99,15 +103,17 @@ def verify_diagnostics(window, kb, wait_until):
 
 def verify_semantic_maintenance(window, kb, wait_until):
     from openkb.desktop.maintenance import MaintenanceDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
 
     dialog = MaintenanceDialog(window, kb)
     dialog.show()
+    tasks = SubmittedTasks(window.manager, wait_until)
     try:
         dialog.check_button.click()
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        task = window.manager.get(task_id)
+        task = tasks.finish(lambda: dialog._task is None)
         assert task.succeeded == 1 and not task.results[0].quality, task
+        assert dialog.status.text() == "检查结束，请查看报告中的问题。"
+        assert_result_text(task, dialog.details.toPlainText())
         assert task.results[0].resources and task.processes_reaped
         wait_until(lambda: "Semantic" in dialog.details.toPlainText())
     finally:

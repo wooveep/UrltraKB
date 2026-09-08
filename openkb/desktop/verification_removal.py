@@ -5,6 +5,7 @@ from __future__ import annotations
 
 def verify_removal(window, kb, wait_until):
     from openkb.desktop.documents import DocumentsDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, finished_document
     from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 
     with kb_ingest_lock(kb / ".openkb"):
@@ -24,6 +25,7 @@ def verify_removal(window, kb, wait_until):
         atomic_write_text(kb / "wiki/summaries/native-removal.md", "# 摘要\n")
     dialog = DocumentsDialog(window, kb)
     dialog.show()
+    tasks = SubmittedTasks(window.manager, wait_until)
     try:
         wait_until(lambda: dialog.table.rowCount() == 1)
         dialog.table.selectRow(0)
@@ -38,17 +40,13 @@ def verify_removal(window, kb, wait_until):
                 "---\nsources: [summaries/native-removal.md]\n---\n保留页面。\n",
             )
         dialog.confirm_button.click()
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        assert window.manager.get(task_id).failed == 1
+        assert finished_document(tasks, dialog).failed == 1
         assert (kb / "wiki/summaries/native-removal.md").exists()
         dialog.table.selectRow(0)
         dialog.preview_button.click()
         wait_until(lambda: dialog.confirm_button.isEnabled())
         dialog.confirm_button.click()
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        result = window.manager.get(task_id)
+        result = finished_document(tasks, dialog)
         assert result.state == "completed" and result.processes_reaped, result
         assert not (kb / "wiki/summaries/native-removal.md").exists()
         assert (kb / "raw/待删除资料.md").exists()

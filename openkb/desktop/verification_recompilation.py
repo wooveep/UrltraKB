@@ -8,6 +8,7 @@ def verify_recompilation(window, kb, wait_until):
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from openkb.desktop.documents import DocumentsDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, finished_document
     from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 
     with kb_ingest_lock(kb / ".openkb"):
@@ -37,6 +38,7 @@ def verify_recompilation(window, kb, wait_until):
     dialog.show()
     confirmer = QTimer()
     stale_confirmation = True
+    tasks = SubmittedTasks(window.manager, wait_until)
 
     def confirm():
         modal = QApplication.activeModalWidget()
@@ -52,28 +54,21 @@ def verify_recompilation(window, kb, wait_until):
         wait_until(lambda: dialog.table.rowCount() == 3)
         dialog.table.selectRow(0)
         dialog.recompile_selected.click()
-        wait_until(lambda: dialog._task is not None)
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        conflict = window.manager.get(task_id)
+        conflict = finished_document(tasks, dialog)
         assert conflict.failed == 1 and conflict.started_at is None, conflict
-        assert (kb / "wiki/concepts/after-confirmation.md").read_text() == "手工编辑。"
+        assert (kb / "wiki/concepts/after-confirmation.md").read_text(
+            encoding="utf-8"
+        ) == "手工编辑。"
         stale_confirmation = False
         dialog.table.selectRow(0)
         dialog.recompile_selected.click()
-        wait_until(lambda: dialog._task is not None)
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        selected = window.manager.get(task_id)
+        selected = finished_document(tasks, dialog)
         assert selected.succeeded == 1 and selected.processes_reaped, selected
         assert str(kb / "wiki/summaries/native-short.md") in selected.results[0].resources
         dialog.recompile_all.click()
-        wait_until(lambda: dialog._task is not None)
-        task_id = dialog._task
-        wait_until(lambda: dialog._task is None)
-        all_docs = window.manager.get(task_id)
+        all_docs = finished_document(tasks, dialog)
         assert (all_docs.succeeded, all_docs.skipped, all_docs.failed) == (2, 1, 0), all_docs
-        assert "Summary" in (kb / "wiki/summaries/native-long.md").read_text()
+        assert "Summary" in (kb / "wiki/summaries/native-long.md").read_text(encoding="utf-8")
         assert not (kb / ".openkb/pageindex.db").exists()
         assert "已有的来源正文" not in str(all_docs.summary())
     finally:
