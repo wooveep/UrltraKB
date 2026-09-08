@@ -159,3 +159,42 @@ def test_stopped_observer_reaps_pending_debounce_timer(tmp_path):
     assert not watcher.is_alive()
     time.sleep(0.05)
     assert received == []
+
+
+def test_blocking_watch_cancellation_reaps_observer_and_callbacks(tmp_path):
+    import threading
+    import time
+
+    from openkb.watcher import watch_directory
+
+    delivered = threading.Event()
+    cancelled = threading.Event()
+    errors = []
+    received = []
+
+    def callback(paths):
+        received.extend(paths)
+        delivered.set()
+
+    def run():
+        try:
+            watch_directory(tmp_path, callback, debounce=0.03, cancelled=cancelled.is_set)
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 3
+        while not delivered.is_set() and time.monotonic() < deadline:
+            (tmp_path / "first.md").write_text("ready")
+            delivered.wait(0.1)
+        assert delivered.is_set(), errors
+    finally:
+        cancelled.set()
+        thread.join(3)
+    assert not thread.is_alive()
+    assert not errors
+    previous = list(received)
+    (tmp_path / "late.md").write_text("after stop")
+    assert received == previous

@@ -152,6 +152,8 @@ def watch_directory(
     raw_dir: Path,
     callback: Callable[[list[str]], None],
     debounce: float = 2.0,
+    *,
+    cancelled: Callable[[], bool] | None = None,
 ) -> None:
     """Start watching *raw_dir* and block until Ctrl+C.
 
@@ -166,11 +168,13 @@ def watch_directory(
     """
     observer = start_watch(raw_dir, callback, debounce)
     try:
-        while observer.is_alive():
+        while observer.is_alive() and not (cancelled and cancelled()):
             observer.join(timeout=1.0)
     except KeyboardInterrupt:
+        pass
+    finally:
         observer.stop()
-    observer.join()
+        observer.join()
 
 
 def start_watch(

@@ -1110,24 +1110,71 @@ def watch(ctx):
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
 
+    import threading
+
+    from openkb.lifecycle import (
+        KnowledgeBaseIncomplete,
+        KnowledgeBaseRemoved,
+        current_generation,
+        expected_generation,
+    )
+    from openkb.mutation import RecoveryRequired
     from openkb.watcher import watch_directory
 
+    kb_dir = kb_dir.resolve()
+    generation = current_generation(kb_dir)
     raw_dir = kb_dir / "raw"
-    raw_dir.mkdir(exist_ok=True)
+    with expected_generation(kb_dir, generation), kb_ingest_lock(kb_dir / ".openkb"):
+        if raw_dir.resolve() != raw_dir:
+            raise ValueError("Watched raw directory must remain inside its knowledge base")
+        raw_dir.mkdir(exist_ok=True)
+    stopped = threading.Event()
+    callback_lock = threading.Lock()
+
+    def stop(reason):
+        if not stopped.is_set():
+            stopped.set()
+            click.echo(f"Watching stopped: {reason}")
+
+    def cancelled():
+        if not stopped.is_set():
+            try:
+                if current_generation(kb_dir) != generation:
+                    stop("knowledge base was removed or replaced")
+                elif not (kb_dir / ".openkb/config.yaml").is_file():
+                    stop("knowledge base configuration is unavailable")
+                elif raw_dir.resolve() != raw_dir:
+                    stop("raw directory moved outside its knowledge base")
+            except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete) as exc:
+                stop(str(exc))
+        return stopped.is_set()
 
     def on_new_files(paths):
-        for p in paths:
-            fp = Path(p)
-            if fp.suffix.lower() not in SUPPORTED_EXTENSIONS:
-                click.echo(
-                    f"Skipping unsupported file type: {fp.suffix}. "
-                    f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-                )
-                continue
-            add_single_file(fp, kb_dir)
+        with callback_lock:
+            for p in paths:
+                if cancelled():
+                    return
+                fp = Path(p)
+                if fp.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                    click.echo(
+                        f"Skipping unsupported file type: {fp.suffix}. "
+                        f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+                    )
+                    continue
+                try:
+                    with expected_generation(kb_dir, generation):
+                        _setup_llm_key(kb_dir)
+                        document_use_cases.import_document(
+                            kb_dir, fp, source_root=raw_dir, report=click.echo
+                        )
+                except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete) as exc:
+                    stop(str(exc))
+                    return
+                except (OSError, ValueError) as exc:
+                    click.echo(f"[ERROR] Cannot process {fp.name}: {exc}")
 
     click.echo(f"Watching {raw_dir} for new documents. Press Ctrl+C to stop.")
-    watch_directory(raw_dir, on_new_files)
+    watch_directory(raw_dir, on_new_files, cancelled=cancelled)
 
 
 async def run_lint(kb_dir: Path, *, fix: bool = False) -> Path | None:
