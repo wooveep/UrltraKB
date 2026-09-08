@@ -91,7 +91,7 @@ exclude = ["/openkb/web"]
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples",
     "/docs/desktop.md", "/docs/golden-principles.md",
-    "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock",
+    "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]
 exclude = ["/openkb/web", "/frontend"]
 
