@@ -1,4 +1,4 @@
-# Native desktop guide
+# UrltraKB native desktop guide
 
 The desktop opens local knowledge bases in their existing format. It uses Qt
 Widgets for its interface and local static rendering for mathematics and Mermaid.
@@ -24,9 +24,36 @@ uses the existing OpenKB user configuration directory. Task summaries and
 directory lifecycle records also live outside the program directory. Replacing
 program files after a full exit does not move or delete these data.
 
+## Workbench navigation and appearance
+
+The compact top bar selects the active KB; hover the selection to inspect its
+full location. **管理** opens knowledge-base administration. The application menu
+(**⋯**) also provides Create, Open, diagnosis without opening a damaged KB, About
+and explicit Quit. Opening a KB starts on **概览** (Overview), with existing
+statistics, recent compilation/inspection times and shortcuts.
+
+The left navigation contains **概览、资料、知识、对话、产物、任务**, with **设置** at the
+bottom. The navigation toggle switches between text labels and an icon rail.
+Names remain available as tooltips and keyboard focus is visible. A narrow
+window temporarily compacts navigation; widening restores your saved preference.
+
+**知识** contains reading and body editing. **知识目录** and **来源与链接** toggle
+secondary panes without discarding the selected page or draft. Narrow windows
+initially hide the directory. Sources and links always belong to the current
+page; task outputs belong to their task on **任务**, including tasks from another KB.
+
+**设置 → 外观** offers **跟随系统** (default), **浅色**, and **深色**. The selected
+mode applies to all pages and newly opened dialogs. Appearance and sidebar
+choices use the existing Qt `OpenKB/OpenKB` application identity in the user's
+platform settings, separately from KB/model/credential configuration. The reader's
+zoom is available on the Knowledge page and applies to content previews as well.
+
+See [implementation and evidence](desktop-workbench.md) for the scope, assets,
+actual application screenshots and reproducible source acceptance commands.
+
 ## Import and maintain knowledge
 
-Import files, folders, or URLs from the workbench. Supported document inputs
+Import files, folders, or URLs from **资料** (Documents). Supported document inputs
 include PDF, Markdown, Word, PowerPoint, Excel, HTML, text and CSV. Each task
 shows its KB, current stage and individual outcomes. An already indexed input
 may be skipped. A batch can retain completed documents while reporting failed
@@ -49,7 +76,7 @@ against a replacement directory that happens to occupy the same path.
 
 ## Read, edit and follow links
 
-Browse summaries, concepts, entities and explorations. The page context shows
+Browse summaries, concepts, entities and explorations in **知识** (Knowledge). The page context shows
 source material, outgoing links and backlinks. Missing or ambiguous targets are
 reported rather than linked to an arbitrary page. Code blocks, tables, images,
 Chinese text, mathematics and the supported Mermaid families display natively.
@@ -67,6 +94,8 @@ its checks are described in the [build guide](../packaging/desktop/README.md).
 
 ## Ask questions and keep conversations
 
+**对话** (Conversations) separates **一次问答**, with an explicit **保存回答** option,
+from continuous **对话**, with session selection and **对话历史** management.
 Query produces a grounded answer using the current KB. Chat streams a turn and
 can resume existing CLI conversations. Completed turns retain the established
 session format and the session's model/language choices. Concurrent attempts to
@@ -79,7 +108,7 @@ an interrupted answer is not recorded as a completed conversation turn.
 
 ## Generate and export outputs
 
-Generate Skills, HTML slide decks and the existing HTML knowledge graph from
+Use **产物** (Artifacts) to generate Skills, HTML slide decks and the existing HTML knowledge graph from
 the KB. The artifact list provides access to saved files and export actions.
 An existing Skill or deck name requires a new name or explicit consent to archive
 and replace its output. Graph generation retains its established fixed path.
@@ -102,7 +131,9 @@ after obtaining access to the KB. A running task keeps that configuration;
 an entire batch shares its initial configuration across its documents. A new
 watch-triggered task or manual retry captures its own settings.
 
-The task list distinguishes waiting, processing, stopping and terminal results.
+The top bar shows running counts and results needing attention without changing
+your current page. Click it to open **任务**, where the task list distinguishes
+waiting, processing, stopping and terminal results.
 Inspect completed, skipped, failed and unprocessed items as well as retained
 outputs and quality diagnostics. Stopping prevents later units from starting
 and lets required recovery/commit work finish safely. It does not undo earlier
@@ -115,7 +146,7 @@ artifacts or conversation records.
 
 ## Watching and exit
 
-Enable directory watching explicitly for a KB's `raw/` directory. The native
+In **任务 → 目录监听**, enable directory watching explicitly for a KB's `raw/` directory. The native
 watcher first checks for files that have not been imported or have changed,
 then coalesces changes and waits for stable input. Atomic file replacements and
 nested directories are handled. Removing a raw file does not automatically
@@ -138,7 +169,7 @@ program files while background work is still running.
 
 ## Version, source and licenses
 
-Open **Help → About OpenKB · Source and licenses** to inspect and copy the
+Open **Application menu (⋯) → 关于 UrltraKB · 源码与许可** to inspect and copy the
 installed version, source commit, material filenames and SHA256 checksums. The
 license tab displays original copyright and license texts without opening a
 browser. The material-directory button locates the matching source archives,

@@ -1,0 +1,176 @@
+"""Responsive workbench navigation; page contents retain their own state."""
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QSizePolicy,
+    QStackedWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from openkb.desktop.brand import NAME, mark_icon
+from openkb.desktop.navigation_icons import navigation_icon
+
+PAGES = ("概览", "资料", "知识", "对话", "产物", "任务", "设置")
+
+
+def action(label, callback, parent=None):
+    button = QPushButton(label, parent)
+    button.setAccessibleName(label)
+    button.setToolTip(label)
+    button.clicked.connect(callback)
+    return button
+
+
+class WorkbenchShell(QWidget):
+    def __init__(self, window, preferences):
+        super().__init__(window)
+        self.window, self.preferences = window, preferences
+        self.expanded = preferences.value("navigation/expanded", True, type=bool)
+        self._compact = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.top = QFrame()
+        self.top.setObjectName("topbar")
+        top = QHBoxLayout(self.top)
+        top.setContentsMargins(16, 8, 16, 8)
+        mark = QLabel()
+        mark.setPixmap(mark_icon().pixmap(32, 32))
+        mark.setAccessibleName("UrltraKB 标志")
+        top.addWidget(mark)
+        name = QLabel(NAME)
+        name.setObjectName("brand")
+        top.addWidget(name)
+        top.addSpacing(20)
+        window.kbs = QComboBox()
+        window.kbs.setAccessibleName("当前知识库")
+        window.kbs.setPlaceholderText("选择知识库")
+        window.kbs.setMinimumWidth(160)
+        window.kbs.setMaximumWidth(480)
+        window.kbs.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        window.kbs.activated.connect(self._switch_kb)
+        top.addWidget(window.kbs, 1)
+        manage = action("管理", window._knowledge_bases)
+        manage.setAccessibleName("知识库管理")
+        top.addWidget(manage)
+        top.addStretch()
+        self.task_status = action("任务 · 0 运行", lambda: self.navigate("任务"))
+        self.task_status.setAccessibleName("查看任务")
+        top.addWidget(self.task_status)
+        more = QToolButton()
+        more.setText("⋯")
+        more.setAccessibleName("应用菜单")
+        more.setToolTip("应用菜单")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(more)
+        menu.addAction("新建知识库", window._create_kb)
+        menu.addAction("打开知识库", window._choose_kb)
+        menu.addAction("诊断指定知识库…", lambda: window._diagnose())
+        menu.addAction("关于 UrltraKB · 源码与许可…", window._about)
+        menu.addSeparator()
+        menu.addAction("退出", window.request_quit)
+        more.setMenu(menu)
+        top.addWidget(more)
+        layout.addWidget(self.top)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        self.navigation = QFrame()
+        self.navigation.setObjectName("navigation")
+        nav = QVBoxLayout(self.navigation)
+        nav.setContentsMargins(8, 16, 8, 12)
+        nav.setSpacing(8)
+        self.toggle = QToolButton()
+        self.toggle.setText("☰")
+        self.toggle.setMinimumHeight(36)
+        self.toggle.clicked.connect(self.toggle_navigation)
+        nav.addWidget(self.toggle)
+        self.buttons = {}
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for name in PAGES:
+            if name == "设置":
+                nav.addStretch()
+            button = QToolButton()
+            button.setText(name)
+            button.setIcon(navigation_icon(name))
+            button.setIconSize(QSize(20, 20))
+            button.setAccessibleName(name)
+            button.setToolTip(name)
+            button.setCheckable(True)
+            button.setMinimumHeight(40)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.clicked.connect(lambda checked=False, page=name: self.navigate(page))
+            group.addButton(button)
+            nav.addWidget(button)
+            self.buttons[name] = button
+        body.addWidget(self.navigation)
+        workspace = QWidget()
+        main = QVBoxLayout(workspace)
+        main.setContentsMargins(24, 20, 24, 20)
+        main.setSpacing(16)
+        self.title = QLabel("概览")
+        self.title.setObjectName("pageTitle")
+        self.title.setAccessibleName("当前工作区")
+        main.addWidget(self.title)
+        self.stack = QStackedWidget()
+        main.addWidget(self.stack, 1)
+        body.addWidget(workspace, 1)
+        layout.addLayout(body, 1)
+        self.update_navigation()
+
+    def _switch_kb(self):
+        from pathlib import Path
+
+        if value := self.window.kbs.currentData():
+            self.window.open_knowledge_base(Path(value))
+
+    def navigate(self, name):
+        if self.window._quitting and name != "任务":
+            return
+        self.title.setText(name)
+        self.buttons[name].setChecked(True)
+        self.stack.setCurrentIndex(PAGES.index(name))
+        self.window.workspaces.activate(name)
+
+    def toggle_navigation(self):
+        # A narrow-window override is temporary; it never writes the wide preference.
+        if self.width() < 1080:
+            self._compact = not self._compact
+        else:
+            self.expanded = not self.expanded
+            self.preferences.setValue("navigation/expanded", self.expanded)
+            self.preferences.sync()
+        self.update_navigation()
+
+    def update_navigation(self):
+        compact = self._compact if self.width() < 1080 else not self.expanded
+        self.navigation.setFixedWidth(60 if compact else 216)
+        label = "展开导航" if compact else "收起导航"
+        self.toggle.setAccessibleName(label)
+        self.toggle.setToolTip(label)
+        for button in self.buttons.values():
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonIconOnly
+                if compact
+                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            )
+
+    def resizeEvent(self, event):
+        if (event.oldSize().width() < 1080) != (event.size().width() < 1080):
+            self._compact = event.size().width() < 1080
+        self.update_navigation()
+        if hasattr(self.window, "workspaces"):
+            self.window.workspaces.resize_reading(event.size().width() < 1080)
+        super().resizeEvent(event)

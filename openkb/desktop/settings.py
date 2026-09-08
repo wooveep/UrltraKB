@@ -6,7 +6,6 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -24,6 +23,7 @@ from openkb.application.settings import (
     read_settings_view,
 )
 from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+from openkb.desktop.panels import ManagementPanel
 
 _SOURCES = {
     "kb": "本库",
@@ -91,13 +91,14 @@ class SettingField(QWidget):
         return text
 
 
-class SettingsDialog(QDialog):
+class SettingsDialog(ManagementPanel):
     def __init__(self, io, kb: Path | None, parent=None):
         super().__init__(parent)
         self.io, self.kb = io, kb
         self._closed = False
         self._saving = False
         self._loaded = False
+        self._loading = False
         self.setWindowTitle(f"知识库设置 · {kb.name}" if kb else "全局默认设置")
         self.resize(760, 460)
         layout = QVBoxLayout(self)
@@ -127,17 +128,32 @@ class SettingsDialog(QDialog):
         self.buttons.accepted.connect(self.save)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        self.reload()
+
+    def reload(self):
+        # Re-entering a scope updates inheritance, but never discards pending patches.
+        if (
+            self._closed
+            or self._saving
+            or self._loading
+            or any(field.action.currentIndex() != 0 for field in self.fields.values())
+        ):
+            return
+        self._loading = True
         self.form.setEnabled(False)
+        self.status.setText("正在读取设置…")
         self.io.submit(
-            lambda: read_settings_view(kb),
+            lambda: read_settings_view(self.kb),
             self.loaded,
-            kb=kb,
+            kb=self.kb,
             global_settings=True,
             obsolete=lambda: self._closed,
         )
 
     def loaded(self, view, error):
-        self._saving = False
+        if self._closed:
+            return
+        self._saving = self._loading = False
         self.buttons.setEnabled(True)
         if error:
             self.form.setEnabled(self._loaded)

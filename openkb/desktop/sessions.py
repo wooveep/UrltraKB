@@ -2,7 +2,6 @@
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -15,11 +14,12 @@ from PySide6.QtWidgets import (
 
 from openkb.agent.chat_session import list_sessions
 from openkb.application.conversations import read_conversation
+from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import DeleteConversation, ExportConversation
 
 
-class SessionsDialog(QDialog):
+class SessionsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
@@ -29,7 +29,9 @@ class SessionsDialog(QDialog):
         self.setWindowTitle(f"对话管理 · {kb.name}")
         self.resize(780, 540)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(str(kb)))
+        from openkb.desktop.location import LocationLabel
+
+        layout.addWidget(LocationLabel(str(kb)))
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["对话", "完整回合", "最近更新"])
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -67,7 +69,7 @@ class SessionsDialog(QDialog):
         row = self.table.currentRow()
         return self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) if row >= 0 else None
 
-    def reload(self):
+    def reload(self, *, preserve_result=False):
         self.invalidate()
         generation = self._generation
 
@@ -75,6 +77,10 @@ class SessionsDialog(QDialog):
             if error:
                 self.status.setText(f"读取对话失败（{type(error).__name__}）")
                 return
+            if not preserve_result:
+                self.status.setText(
+                    "选择会话以阅读、继续或导出。" if value else "暂无已保存的对话。"
+                )
             self.table.setRowCount(len(value))
             for row, session in enumerate(value):
                 item = QTableWidgetItem(session["title"] or session["id"])
@@ -102,7 +108,8 @@ class SessionsDialog(QDialog):
             index = self.window.sessions.count() - 1
         self.window.sessions.setCurrentIndex(index)
         self.window._load_conversation()
-        self.accept()
+        if not getattr(self, "embedded", False):
+            self.accept()
 
     def export(self):
         identity = self.selected()
@@ -163,7 +170,7 @@ class SessionsDialog(QDialog):
             if task.state == "completed"
             else "任务未完成，请查看结果。"
         )
-        self.reload()
+        self.reload(preserve_result=True)
         if self.window.kb == self.kb:
             self.window._refresh_current()
 

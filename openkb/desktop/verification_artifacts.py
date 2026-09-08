@@ -28,8 +28,9 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
         atomic_write_text(kb / reading_path, reading_source)
         for name, source in delimiter_cases.items():
             atomic_write_text(kb / "output/skills/native-reading" / name, source)
-    dialog = ArtifactsDialog(window, kb)
-    dialog.show()
+    from openkb.desktop.verification_workbench import management_page
+
+    dialog = management_page(window, kb, "产物", ArtifactsDialog, wait_until)
     tasks = SubmittedTasks(window.manager, wait_until)
 
     def finish():

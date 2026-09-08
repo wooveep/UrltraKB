@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -19,11 +18,12 @@ from PySide6.QtWidgets import (
 from openkb.application.knowledge_bases import get_kb_list
 from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
+from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import RecompileDocument, RemoveDocument
 
 
-class DocumentsDialog(QDialog):
+class DocumentsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
@@ -34,7 +34,9 @@ class DocumentsDialog(QDialog):
         self.setWindowTitle(f"资料管理 · {kb.name}")
         self.resize(880, 650)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(str(kb)))
+        from openkb.desktop.location import LocationLabel
+
+        layout.addWidget(LocationLabel(str(kb)))
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["资料", "类型"])
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -87,7 +89,7 @@ class DocumentsDialog(QDialog):
         self._confirmed = None
         self.confirm_button.setEnabled(False)
 
-    def reload(self):
+    def reload(self, *, preserve_result=False):
         self.invalidate()
 
         def loaded(value, error):
@@ -96,6 +98,12 @@ class DocumentsDialog(QDialog):
             if error:
                 self.status.setText(f"读取资料失败（{type(error).__name__}）")
                 return
+            if not preserve_result:
+                self.status.setText(
+                    f"{len(value['documents'])} 份资料。选择资料可预览删除或重编译。"
+                    if value["documents"]
+                    else "暂无资料。从上方导入文件、目录或网址。"
+                )
             self.table.setRowCount(len(value["documents"]))
             for row, doc in enumerate(value["documents"]):
                 item = QTableWidgetItem(doc["name"])
@@ -220,7 +228,7 @@ class DocumentsDialog(QDialog):
             if task.state == "completed"
             else "任务未全部完成。请查看逐项结果；确认最新资料后可手动重试。"
         )
-        self.reload()
+        self.reload(preserve_result=True)
 
     def done(self, result):
         self._closed = True

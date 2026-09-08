@@ -23,8 +23,9 @@ def verify_removal(window, kb, wait_until):
         atomic_write_text(kb / "raw/待删除资料.md", "保留原文。\n")
         atomic_write_text(kb / "wiki/sources/native-removal.md", "资料正文。\n")
         atomic_write_text(kb / "wiki/summaries/native-removal.md", "# 摘要\n")
-    dialog = DocumentsDialog(window, kb)
-    dialog.show()
+    from openkb.desktop.verification_workbench import management_page
+
+    dialog = management_page(window, kb, "资料", DocumentsDialog, wait_until)
     tasks = SubmittedTasks(window.manager, wait_until)
     try:
         wait_until(lambda: dialog.table.rowCount() == 1)

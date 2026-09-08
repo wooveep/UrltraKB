@@ -34,8 +34,9 @@ def verify_recompilation(window, kb, wait_until):
             kb / "wiki/summaries/native-long.md",
             "---\nsources: [raw/长资料.pdf]\n---\n# 既有长文摘要\n",
         )
-    dialog = DocumentsDialog(window, kb)
-    dialog.show()
+    from openkb.desktop.verification_workbench import management_page
+
+    dialog = management_page(window, kb, "资料", DocumentsDialog, wait_until)
     confirmer = QTimer()
     stale_confirmation = True
     tasks = SubmittedTasks(window.manager, wait_until)

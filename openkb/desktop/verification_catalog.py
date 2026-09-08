@@ -35,6 +35,7 @@ def verify_catalog(window, output, wait_until):
     window.open_page("concepts/笔记")
     wait_until(lambda: window.page is not None and window.page.path == "concepts/笔记")
     wait_until(lambda: "关联阅读" in window.reader.toPlainText())
+    window.workspaces.context_toggle.click()
     sources = window.page_context.topLevelItem(0)
     assert sources.childCount() == 2
     assert "未找到页面" in sources.child(1).text(0)

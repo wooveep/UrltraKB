@@ -126,9 +126,10 @@ class MarkdownView(QTextBrowser):
         )
 
     def set_presentation(self, *, dark: bool, scale: float):
+        changed = (dark, scale) != (self._dark, self._scale)
         self._dark, self._scale = dark, scale
         self._apply_presentation()
-        if self._has_source:
+        if changed and self._has_source:
             self.show_markdown(self._source, self._base)
 
     def show_temporary(self, text: str) -> None:

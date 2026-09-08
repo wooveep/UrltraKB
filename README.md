@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://openkb.ai">
-  <img src="https://docs.pageindex.ai/images/openkb.png" alt="OpenKB (by PageIndex)" />
+  <img src="openkb/desktop/assets/brand/openkb-mark.svg" alt="UrltraKB" width="88" />
 </a>
 
 <br />
@@ -11,7 +11,7 @@
 <a href="https://trendshift.io/repositories/26145" target="_blank"><img src="https://trendshift.io/api/badge/repositories/26145" alt="VectifyAI%2FOpenKB | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 </p>
 
-# OpenKB: Open LLM Knowledge Base
+# UrltraKB: Open LLM Knowledge Base
 
 <p align="center"><i>Scale to long documents  •  Reasoning-based retrieval  •  Native multi-modality  •  No Vector DB</i></p>
 
@@ -27,17 +27,17 @@
 
 ---
 
-# 📑 What is OpenKB
+# 📑 What is UrltraKB
 
-**OpenKB (Open Knowledge Base)** compiles raw documents into a structured, interlinked wiki using LLMs, powered by [**PageIndex**](https://github.com/VectifyAI/PageIndex)'s vectorless retrieval for long documents. This fork provides a native desktop workbench alongside the CLI and independent REST API, using the existing knowledge-base format.
+**UrltraKB** compiles raw documents into a structured, interlinked wiki using LLMs, powered by [**PageIndex**](https://github.com/VectifyAI/PageIndex)'s vectorless retrieval for long documents. This fork provides a native desktop workbench alongside the CLI and independent REST API, using the existing knowledge-base format. The desktop provides Overview, Documents, Knowledge, Conversations, Artifacts and Tasks pages, collapsible navigation, and persistent Light, Dark and Follow System themes. See the [desktop guide](docs/desktop.md).
 
 The idea is based on a [concept](https://x.com/karpathy/status/2039805659525644595) described by Andrej Karpathy: LLMs generate summaries, concept pages, and cross-references, all maintained automatically. Knowledge compounds over time instead of being re-derived on every query.
 
 ### Why not traditional RAG?
 
-Traditional RAG rediscovers knowledge from scratch on every query. Nothing accumulates. OpenKB compiles knowledge once into a persistent wiki, then keeps it current. Cross-references already exist, contradictions are flagged, and synthesis reflects everything consumed.
+Traditional RAG rediscovers knowledge from scratch on every query. Nothing accumulates. UrltraKB compiles knowledge once into a persistent wiki, then keeps it current. Cross-references already exist, contradictions are flagged, and synthesis reflects everything consumed.
 
-OpenKB has two layers: a **wiki foundation** that compiles and maintains your knowledge, and **generators** (query / chat / Skill Factory) that turn it into useful output. See [Usage](#️-usage) for the full command list.
+UrltraKB has two layers: a **wiki foundation** that compiles and maintains your knowledge, and **generators** (query / chat / Skill Factory) that turn it into useful output. See [Usage](#️-usage) for the full command list.
 
 ### Features
 
@@ -106,7 +106,7 @@ openkb deck new my-deck "An intro deck on <your-topic>"              # slides �
 
 ### Set up your LLM
 
-OpenKB supports [multiple LLM providers](https://docs.litellm.ai/docs/providers) (OpenAI, Claude, Gemini, etc.) via [LiteLLM](https://github.com/BerriAI/litellm) (pinned to a [safe version](https://docs.litellm.ai/blog/security-update-march-2026)).
+UrltraKB supports [multiple LLM providers](https://docs.litellm.ai/docs/providers) (OpenAI, Claude, Gemini, etc.) via [LiteLLM](https://github.com/BerriAI/litellm) (pinned to a [safe version](https://docs.litellm.ai/blog/security-update-march-2026)).
 
 Set your model during `openkb init` or in [`.openkb/config.yaml`](#configuration) using the `provider/model` LiteLLM format (e.g. `anthropic/claude-sonnet-4-6`). OpenAI models can omit the prefix (e.g. `gpt-5.4`).
 
@@ -116,7 +116,7 @@ Create a `.env` file with your LLM API key:
 LLM_API_KEY=your_llm_api_key
 ```
 
-Subscription-based providers that authenticate via OAuth device flow (e.g. `chatgpt/*`, `github_copilot/*`) need no API key; OpenKB skips the missing-key warning for them.
+Subscription-based providers that authenticate via OAuth device flow (e.g. `chatgpt/*`, `github_copilot/*`) need no API key; UrltraKB skips the missing-key warning for them.
 
 ### Native desktop workbench
 
@@ -134,7 +134,7 @@ Asset preparation needs Rust 1.95.0 and network access; it installs the pinned l
 
 See the [desktop guide](docs/desktop.md) for daily workflows, configuration, watching and safe exit, and the [build guide](packaging/desktop/README.md) for distribution and validation status. The old React interface, `openkb-web` command and `web` extra have been removed. HTTP clients use `openkb-api` and the `api` extra.
 
-# 🧩 How OpenKB Works
+# 🧩 How UrltraKB Works
 
 ### Architecture
 
@@ -167,7 +167,7 @@ A single source might touch 10--15 wiki pages. Knowledge accumulates: each docum
 
 # ⚙️ Usage
 
-OpenKB commands fall into two layers: the **wiki foundation** (compile + manage your knowledge) and **generators** (turn that wiki into useful output). Each links to a concrete walkthrough — a real artifact OpenKB generated from one sample paper (browse them all in [`examples/`](examples/)).
+UrltraKB commands fall into two layers: the **wiki foundation** (compile + manage your knowledge) and **generators** (turn that wiki into useful output). Each links to a concrete walkthrough — a real artifact UrltraKB generated from one sample paper (browse them all in [`examples/`](examples/)).
 
 ## Layer 1: 🧱 Wiki Foundation — compile and maintain
 
@@ -252,7 +252,7 @@ Inside a chat, type `/` to access slash commands (Tab to complete).
 
 ### Settings
 
-OpenKB settings are initialized by `openkb init` and stored in `.openkb/config.yaml`:
+UrltraKB settings are initialized by `openkb init` and stored in `.openkb/config.yaml`:
 
 ```yaml
 model: gpt-5.4                   # LLM model (any LiteLLM-supported provider)
@@ -303,7 +303,7 @@ The wiki is a directory of Markdown files with `[[wikilinks]]`. Obsidian renders
 
 ### Using with Claude Code / Codex / Gemini CLI
 
-OpenKB ships a `SKILL.md` so any agent can read your compiled wiki. No extra runtime, no MCP setup, just install the skill once.
+UrltraKB ships a `SKILL.md` so any agent can read your compiled wiki. No extra runtime, no MCP setup, just install the skill once.
 
 <details>
 <summary><i>Claude Code:</i></summary>
@@ -344,7 +344,7 @@ The skill is read-only. It won't run `openkb add`, `remove`, or `lint --fix` wit
 
 # REST API
 
-OpenKB ships an independent FastAPI service for HTTP clients. Install with `pip install -e ".[api]"`, then start with `openkb-api` (or `python -m openkb.api`). The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve an application. Authentication, SSE, CORS and generated HTML artifact endpoints remain available.
+UrltraKB ships an independent FastAPI service for HTTP clients. Install with `pip install -e ".[api]"`, then start with `openkb-api` (or `python -m openkb.api`). The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve an application. Authentication, SSE, CORS and generated HTML artifact endpoints remain available.
 
 See the [full REST API reference](examples/rest-api/README.md#rest-api) for endpoints, auth, and SSE streaming.
 
@@ -352,7 +352,7 @@ See the [full REST API reference](examples/rest-api/README.md#rest-api) for endp
 
 ### Compared to Karpathy's Approach
 
-|                   | Karpathy's workflow         | OpenKB                                            |
+|                   | Karpathy's workflow         | UrltraKB                                          |
 | ----------------- | --------------------------- | ------------------------------------------------- |
 | Short documents   | LLM reads directly          | markitdown → LLM reads                            |
 | Long documents    | Context limits, context rot | PageIndex tree index                              |
@@ -398,7 +398,7 @@ Other [open-source projects](https://docs.pageindex.ai/open-source) from the Pag
 
 ### Support Us
 
-If you find OpenKB useful, please give us a star 🌟 — and check out [**PageIndex**](https://github.com/VectifyAI/PageIndex) too!  
+If you find UrltraKB useful, please give us a star 🌟 — and check out [**PageIndex**](https://github.com/VectifyAI/PageIndex) too!  
 
 <div>
 

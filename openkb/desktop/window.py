@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QStyle,
     QSystemTrayIcon,
     QTableWidgetItem,
     QTreeWidgetItem,
@@ -22,10 +21,11 @@ from PySide6.QtWidgets import (
 from openkb.agent.chat_session import list_sessions
 from openkb.application.catalog import knowledge_bases
 from openkb.application.conversations import read_conversation
-from openkb.application.knowledge_bases import get_kb_list, initialize_kb, open_kb
+from openkb.application.knowledge_bases import get_kb_list, get_kb_status, initialize_kb, open_kb
 from openkb.application.pages import Page, read_page
 from openkb.application.reading import read_page_context
 from openkb.config import GLOBAL_CONFIG_DIR
+from openkb.desktop.brand import NAME, application_icon
 from openkb.desktop.editor import DraftDialog, PageDraft
 from openkb.desktop.io import LocalIO
 from openkb.desktop.reader import MarkdownView
@@ -76,7 +76,7 @@ _STAGES = {
 class Workbench(QMainWindow):
     def __init__(self, *, history_dir: Path | None = None):
         super().__init__()
-        self.setWindowTitle("OpenKB")
+        self.setWindowTitle(NAME)
         self.resize(1320, 900)
         self.kb: Path | None = None
         self.page: Page | None = None
@@ -105,15 +105,14 @@ class Workbench(QMainWindow):
         self.timer.start(150)
         self.io.submit(knowledge_bases, self._recent_loaded, global_settings=True)
         self.reader.show_markdown(
-            "# OpenKB\n\n打开已有知识库，或在您选择的位置创建一个。\n\n"
+            "# UrltraKB\n\n打开已有知识库，或在您选择的位置创建一个。\n\n"
             "资料、页面、对话和任务始终归属于各自的知识库。",
             Path.cwd(),
         )
 
     def _watch(self):
-        from openkb.desktop.watch import WatchDialog
-
-        WatchDialog(self.watch_registry, self.kb, self).exec()
+        self.shell.navigate("任务")
+        self.workspaces.task_tabs.setCurrentIndex(1)
 
     def _about(self):
         from openkb.desktop.about import AboutDialog
@@ -121,18 +120,11 @@ class Workbench(QMainWindow):
         AboutDialog(self.io, self).exec()
 
     def _settings(self, *, global_defaults=False):
-        from openkb.desktop.settings import SettingsDialog
-
-        if not global_defaults and self.kb is None:
-            return
-        dialog = SettingsDialog(self.io, None if global_defaults else self.kb, self)
-        dialog.exec()
+        self.shell.navigate("设置")
+        self.workspaces.settings_tabs.setCurrentIndex(0 if global_defaults else 1)
 
     def _documents(self):
-        if self.kb is not None:
-            from openkb.desktop.documents import DocumentsDialog
-
-            DocumentsDialog(self, self.kb).exec()
+        self.shell.navigate("资料")
 
     def _knowledge_bases(self):
         from openkb.desktop.knowledge_bases import KnowledgeBasesDialog
@@ -169,7 +161,8 @@ class Workbench(QMainWindow):
         self.reader.show_temporary("知识库已删除。请选择或创建另一个知识库。")
         self.chat.show_temporary("")
         self.location.setText("尚未打开知识库")
-        self.setWindowTitle("OpenKB")
+        self.setWindowTitle(NAME)
+        self.workspaces.reset()
 
     def _task_details(self):
         task_id = self._selected_task()
@@ -189,10 +182,7 @@ class Workbench(QMainWindow):
             MaintenanceDialog(self, self.kb).exec()
 
     def _manage_artifacts(self):
-        if self.kb is not None:
-            from openkb.desktop.artifacts import ArtifactsDialog
-
-            ArtifactsDialog(self, self.kb).exec()
+        self.shell.navigate("产物")
 
     def _diagnose(self, path=None):
         from openkb.desktop.diagnostics import DiagnosticsDialog
@@ -205,18 +195,17 @@ class Workbench(QMainWindow):
         DiagnosticsDialog(self, path).exec()
 
     def _manage_sessions(self):
-        if self.kb is not None:
-            from openkb.desktop.sessions import SessionsDialog
-
-            SessionsDialog(self, self.kb).exec()
+        self.shell.navigate("对话")
+        self.workspaces.history_toggle.setChecked(True)
+        self.workspaces.toggle_history()
 
     def _build_tray(self):
-        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon)
+        icon = application_icon()
         self.setWindowIcon(icon)
         self.tray = QSystemTrayIcon(icon, self)
-        self.tray.setToolTip("OpenKB")
+        self.tray.setToolTip(NAME)
         menu = QMenu(self)
-        menu.addAction("显示 OpenKB", self._show_window)
+        menu.addAction(f"显示 {NAME}", self._show_window)
         menu.addAction("退出", self.request_quit)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(lambda reason: self._show_window())
@@ -229,10 +218,8 @@ class Workbench(QMainWindow):
         self.activateWindow()
 
     def _presentation_changed(self):
-        for view in (self.reader, self.chat):
-            view.set_presentation(
-                dark=bool(self.theme.currentIndex()), scale=self.zoom.currentData()
-            )
+        if hasattr(self, "appearance"):
+            self.appearance.present_readers()
 
     def _error(self, error):
         if error:
@@ -245,7 +232,8 @@ class Workbench(QMainWindow):
             self.kbs.blockSignals(True)
             self.kbs.clear()
             for label, path in values:
-                self.kbs.addItem(f"{label} · {path}", str(path))
+                self.kbs.addItem(label, str(path))
+                self.kbs.setItemData(self.kbs.count() - 1, str(path), Qt.ItemDataRole.ToolTipRole)
             self.kbs.setCurrentIndex(self.kbs.findData(str(self.kb)) if self.kb else -1)
             self.kbs.blockSignals(False)
 
@@ -317,12 +305,15 @@ class Workbench(QMainWindow):
         self.editor.clear()
         self.editor.blockSignals(False)
         self.location.setText(str(root))
-        self.setWindowTitle(f"{root.name} — OpenKB")
+        self.setWindowTitle(f"{root.name} — {NAME}")
         index = self.kbs.findData(str(root))
         if index < 0:
-            self.kbs.addItem(f"{root.name} · {root}", str(root))
+            self.kbs.addItem(root.name, str(root))
+            self.kbs.setItemData(self.kbs.count() - 1, str(root), Qt.ItemDataRole.ToolTipRole)
             index = self.kbs.count() - 1
         self.kbs.setCurrentIndex(index)
+        self.kbs.setToolTip(str(root))
+        self.workspaces.reset()
         self._refresh()
 
     def _refresh(self):
@@ -343,12 +334,14 @@ class Workbench(QMainWindow):
                 ),
                 list_sessions(root),
                 get_kb_list(root),
+                get_kb_status(root),
             )
 
         def loaded(value, error):
             if obsolete() or self._error(error):
                 return
-            pages, sessions, info = value
+            pages, sessions, info, status = value
+            self.workspaces.overview_loaded(info, status)
             self.pages.clear()
             groups = {}
             for path in pages:
@@ -367,21 +360,21 @@ class Workbench(QMainWindow):
             self.sessions.setCurrentIndex(max(0, found))
             self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
             if self.page is None and (root / "wiki/index.md").exists():
-                self.open_page("index.md")
+                self.open_page("index.md", activate=False)
 
         self.io.submit(read, loaded, kb=root, global_settings=True, obsolete=obsolete)
 
     def _refresh_current(self):
         self._refresh()
         if self.page:
-            self.open_page(self.page.path)
+            self.open_page(self.page.path, activate=False)
 
     def _activate_page(self, item, column):
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if path:
             self.open_page(path)
 
-    def open_page(self, path: str, anchor: str = ""):
+    def open_page(self, path: str, anchor: str = "", *, activate=True):
         if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
@@ -404,7 +397,9 @@ class Workbench(QMainWindow):
             self.editor.blockSignals(False)
             self.location.setText(f"{root}  /  {page.path}.md")
             self.reader.show_markdown(page.body, (root / "wiki" / page.path).parent, anchor=anchor)
-            self.tabs.setCurrentIndex(0)
+            if activate:
+                self.tabs.setCurrentIndex(0)
+                self.shell.navigate("知识")
 
         self.io.submit(
             lambda: read_page_context(root, path),
@@ -556,7 +551,7 @@ class Workbench(QMainWindow):
         self._chat_task = task_id
         self._last_chat_text = None
         self.chat.show_temporary("已排队，等待执行…")
-        self.tabs.setCurrentIndex(2)
+        self.workspaces.show_answer()
         self.question.clear()
 
     def _load_conversation(self):
@@ -580,10 +575,11 @@ class Workbench(QMainWindow):
                 return
             self._chat_task = None
             text = "\n\n".join(
-                f"**你**\n\n{user}\n\n**OpenKB**\n\n{answer}" for user, answer in session.turns
+                f"**你**\n\n{user}\n\n**UrltraKB**\n\n{answer}" for user, answer in session.turns
             )
             self.chat.show_markdown(text, root / "wiki")
-            self.tabs.setCurrentIndex(2)
+            self.workspaces.show_answer()
+            self.shell.navigate("对话")
             self.mode.setCurrentIndex(1)
 
         self.io.submit(
@@ -605,7 +601,7 @@ class Workbench(QMainWindow):
         elif not url.scheme() and url.fragment():
             from openkb.rendering.markdown import heading_anchor
 
-            current = self.tabs.currentWidget()
+            current = self.chat if self.shell.title.text() == "对话" else self.tabs.currentWidget()
             if isinstance(current, MarkdownView):
                 current.scrollToAnchor(heading_anchor(url.fragment()))
         elif url.scheme() in {"http", "https"}:
@@ -636,11 +632,15 @@ class Workbench(QMainWindow):
     def _select_task(self):
         task_id = self._selected_task()
         self.artifacts.clear()
+        self.workspaces.task_owner.setText("选择任务以查看其所属知识库与保留产物。")
         if task_id:
             try:
                 task = self.manager.get(task_id)
             except KeyError:
                 return
+            self.workspaces.task_owner.setText(
+                f"所选任务：{task.id}\n所属知识库：{task.kb_dir}\n保留产物（不代表任务全部成功）"
+            )
             for result in task.results:
                 self.artifacts.addItems(list(result.resources))
 
@@ -653,6 +653,17 @@ class Workbench(QMainWindow):
 
     def _poll_tasks(self):
         tasks = self.manager.tasks()
+        running = sum(task.state not in TERMINAL for task in tasks)
+        attention = sum(
+            task.state in TERMINAL
+            and (
+                task.state != "completed"
+                or any(result.quality or result.unfinished for result in task.results)
+            )
+            for task in tasks
+        )
+        self.shell.task_status.setText(f"任务 · {running} 运行 · {attention} 需关注")
+        self.shell.task_status.setToolTip("查看任务详情、错误、保留产物与安全停止")
         self.task_table.blockSignals(True)
         self.task_table.setRowCount(len(tasks))
         for row, task in enumerate(tasks):
@@ -675,7 +686,7 @@ class Workbench(QMainWindow):
                     self.task_table.setItem(row, column, item)
                 item.setText(value)
                 item.setData(Qt.ItemDataRole.UserRole, task.id)
-                item.setToolTip(task.kb_dir)
+                item.setToolTip(task.kb_dir if column == 0 else value)
             if task.id == self._chat_task and self.kb and str(self.kb) == task.kb_dir:
                 if task.text != self._last_chat_text:
                     self._last_chat_text = task.text
@@ -738,8 +749,11 @@ class Workbench(QMainWindow):
                 session_id = task.results[-1].session_id
                 self.sessions.addItem(session_id, session_id)
                 self.sessions.setCurrentIndex(self.sessions.count() - 1)
+        if task.state != "completed":
+            self.statusBar().showMessage("任务未全部完成。点击顶部“任务”查看错误、保留成果与重试。")
         if self.kb and str(self.kb) == task.kb_dir and not self._quitting:
             self._refresh()
+            self.workspaces.refresh_inventory(task)
         self._select_task()
 
     def closeEvent(self, event):
@@ -763,7 +777,7 @@ class Workbench(QMainWindow):
         stop = False
         if any(task.state not in TERMINAL for task in self.manager.tasks()):
             box = QMessageBox(self)
-            box.setWindowTitle("退出 OpenKB")
+            box.setWindowTitle("退出 UrltraKB")
             box.setText("后台仍有任务。选择等待完成，或在安全边界停止。已完成成果会保留。")
             wait = box.addButton("等待完成并退出", QMessageBox.ButtonRole.AcceptRole)
             halt = box.addButton("安全停止并退出", QMessageBox.ButtonRole.DestructiveRole)

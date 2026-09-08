@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>OpenKB mark</title>
+  <defs>
+    <linearGradient id="left" x1="104" y1="122" x2="230" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#83D8D4"/>
+      <stop offset="1" stop-color="#5FC4CA"/>
+    </linearGradient>
+    <linearGradient id="right" x1="408" y1="120" x2="282" y2="394" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#91ACE8"/>
+      <stop offset="1" stop-color="#6E8CDA"/>
+    </linearGradient>
+    <linearGradient id="line" x1="194" y1="256" x2="318" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9EC7D4" stop-opacity="0.46"/>
+      <stop offset="0.5" stop-color="#A9B9CE" stop-opacity="0.82"/>
+      <stop offset="1" stop-color="#9BA9D5" stop-opacity="0.46"/>
+    </linearGradient>
+  </defs>
+  <path d="M202.5 133C151 145.5 118 192.5 118 251C118 315.5 160.5 364 222 378" stroke="url(#left)" stroke-width="72" stroke-linecap="round"/>
+  <path d="M309.5 133C361 145.5 394 192.5 394 251C394 315.5 351.5 364 290 378" stroke="url(#right)" stroke-width="72" stroke-linecap="round"/>
+  <path d="M194 256H318" stroke="url(#line)" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="24" fill="#F0B654"/>
+</svg>

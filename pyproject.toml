@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openkb"
 dynamic = ["version"]
-description = "OpenKB: Open LLM Knowledge Base, powered by PageIndex"
+description = "UrltraKB: Open LLM Knowledge Base, powered by PageIndex"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
@@ -91,6 +91,7 @@ exclude = ["/openkb/web"]
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples",
     "/docs/desktop.md", "/docs/golden-principles.md",
+    "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]
 exclude = ["/openkb/web", "/frontend"]
