@@ -114,6 +114,27 @@ def test_source_checkout_does_not_claim_complete_distribution_materials(monkeypa
         assert response.json()["files"] == []
 
 
+def test_runtime_package_keeps_licenses_and_identifies_separate_source(tmp_path, monkeypatch):
+    root, manifest = _release(tmp_path, monkeypatch)
+    source = manifest["files"][0]
+    (root / source["name"]).unlink()
+    manifest.update(schema=2, source_archive={**source, "name": "UrltraKB-materials.zip"})
+    manifest["files"] = [f for f in manifest["files"] if f["kind"] in {"licenses", "notice"}]
+    (root / "release.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("OPENKB_API_TOKEN", "private-test-token")
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/distribution")
+        assert response.status_code == 200
+        assert response.json()["source_archive"] == manifest["source_archive"]
+        assert {f["kind"] for f in response.json()["files"]} == {"licenses", "notice"}
+        for file in response.json()["files"]:
+            assert client.get(file["download"]).status_code == 200
+        assert client.get("/api/v1/distribution/files/UrltraKB-materials.zip").status_code == 404
+        manifest["source_archive"]["name"] = "../private.zip"
+        (root / "release.json").write_text(json.dumps(manifest), encoding="utf-8")
+        assert client.get("/api/v1/distribution").status_code == 503
+
+
 def test_distribution_requires_installed_commit_identity(tmp_path, monkeypatch):
     root, manifest = _release(tmp_path, monkeypatch)
     manifest["commit"] = "b" * 40

@@ -94,10 +94,13 @@ class AboutDialog(QDialog):
         self.info.setPlainText(text)
         self.folder.setEnabled(self.release.root is not None)
         if self.release.root:
-            self.status.setText(
-                f"发行材料：{self.release.root}\n"
-                "SHA256 来自发行清单。源码、构建资料及原始许可保存在该目录。"
+            location = (
+                "完整许可随程序提供。源码与构建资料单独提供：\n"
+                f"{self.release.source_archive.name}（校验信息见下方）。"
+                if self.release.source_archive
+                else "SHA256 来自发行清单。源码、构建资料及原始许可保存在该目录。"
             )
+            self.status.setText(f"发行材料：{self.release.root}\n{location}")
             self.info.appendPlainText(f"\n发行材料目录：{self.release.root}")
         else:
             self.status.setText("开发环境：尚未配置匹配的发行材料，不能据此声称发行验收通过。")

@@ -6,8 +6,11 @@ The CLI and independent REST API continue to work with the same data.
 
 ## Launch and data locations
 
-On Windows 11 x86_64, unpack the complete program directory and run `OpenKB.exe`.
-On Debian 13.6 x86_64 GNOME/X11, extract the program archive and run `OpenKB`.
+On Windows 11 x86_64, unpack the complete program directory and run `UrltraKB.exe`.
+On Debian 13.6 x86_64 GNOME/X11, extract the program archive and run `UrltraKB`.
+Runtime archives and their top-level directory are named **UrltraKB**. Full
+source/build materials are a separate `UrltraKB-VERSION-materials.zip` download;
+licenses and the companion archive checksum remain available in About.
 Keep the program's resources together. No developer Python, Node or Rust runtime
 is needed to run a complete portable build. Other Linux desktops, Wayland,
 macOS and ARM have not been accepted as distribution targets.

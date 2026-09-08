@@ -1,8 +1,9 @@
-# Native program-directory builds
+# UrltraKB desktop builds and split delivery
 
-These builds exercise the real application and shared operations. They are
-internal implementation checkpoints, not release distributions: the complete
-daily workflow and matching source/licence distribution gate remain pending.
+Build and package the actual UrltraKB desktop, CLI, REST and acceptance entry
+points. Runtime archives contain the program, original licenses and a reference
+to a separate matching source/build archive. Complete source materials are not
+bundled into the runtime archive.
 
 Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected
@@ -47,12 +48,12 @@ accidental collection of DLLs from developer utilities.
 `prepare_desktop_assets.py` verifies the Node and font downloads and builds
 the locked native renderer. `build_desktop.py` caches the pinned token
 vocabularies, then freezes the desktop and complete core dependency set.
-The resulting `dist/OpenKB` directory contains:
+The resulting `dist/UrltraKB` directory contains:
 
-- `OpenKB`: native Qt Widgets workbench.
-- `OpenKBCLI`: existing Click commands, without Qt initialization.
-- `OpenKBAPI`: independent REST service, without Qt initialization.
-- `OpenKBVerify`: explicit acceptance runner for this internal build.
+- `UrltraKB`: native Qt Widgets workbench.
+- `UrltraKBCLI`: existing Click commands, without Qt initialization.
+- `UrltraKBAPI`: independent REST service, without Qt initialization.
+- `UrltraKBVerify`: explicit acceptance runner for this build.
 
 Keep the program directory together. Data and settings use the existing
 user-selected KB directories and configured user profile, not this directory.
@@ -60,11 +61,11 @@ The acceptance runner requires a **new** output directory and isolates its
 generated KBs/settings there. It leaves evidence for inspection:
 
 ```sh
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/native-check
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/native-corpus \
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-check
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-corpus \
   --corpus tests/fixtures/native-render-corpus.json
 .venv/bin/python scripts/verify_desktop_model.py \
-  --program packaging/desktop/dist/OpenKB/OpenKBVerify \
+  --program packaging/desktop/dist/UrltraKB/UrltraKBVerify \
   --output /tmp/native-model --inputs /path/to/document-fixtures
 ```
 
@@ -80,10 +81,10 @@ a pending KB deletion. Each restart is a separate process using the previous
 run's KB and history. Use a new output directory for every command:
 
 ```sh
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-wait --lifecycle wait
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-stop --lifecycle stop
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/exit-delete --lifecycle delete
-packaging/desktop/dist/OpenKB/OpenKBVerify --output /tmp/restarted \
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-wait --lifecycle wait
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-stop --lifecycle stop
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-delete --lifecycle delete
+packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/restarted \
   --lifecycle restart --lifecycle-state /tmp/exit-wait
 ```
 
@@ -94,11 +95,44 @@ from an external observer. The `shutdown.png` and `lifecycle.json` files record
 the tested case and its scope; a restart checks KB/history retention, not the
 previous run's global settings.
 
-The native About dialog and `/api/v1/distribution` read fixed matching materials
-from `distribution/` beside the executable. A source/wheel REST deployment can
-set `OPENKB_DISTRIBUTION_DIR` to that directory, but must also install the matching
-exported package containing `_build_info.json`. The API advertises its public
-material endpoint in a `Link` header; it never exposes KB paths through it.
-Missing, damaged or mismatched materials are reported as unavailable. Creating
-an export or passing its inventory check alone does not complete the third-party
-source and license gate described above.
+## Delivery names and contents
+
+The public program directory and executable names always use **UrltraKB**:
+`UrltraKB`, `UrltraKBCLI`, `UrltraKBAPI`, `UrltraKBVerify` (with `.exe` on Windows).
+Internal Python imports, the `openkb` CLI installation command and existing user
+configuration paths remain compatible.
+
+After inventory and complete material assembly, create one separate source/build
+archive and one runtime archive per platform with the committed packaging tool:
+
+```sh
+.venv/bin/python scripts/package_desktop.py materials --source . \
+  --materials /path/to/complete-distribution --output /path/to/delivery
+.venv/bin/python scripts/package_desktop.py runtime --source . \
+  --program packaging/desktop/dist/UrltraKB --inventory /path/to/inventory.json \
+  --materials /path/to/complete-distribution \
+  --source-archive /path/to/delivery/UrltraKB-VERSION-materials.zip \
+  --output /path/to/delivery
+```
+
+Replace `VERSION` with the exported version. The names are
+`UrltraKB-VERSION-windows-x64.zip`, `UrltraKB-VERSION-debian13.6-x64.tar.gz`,
+and `UrltraKB-VERSION-materials.zip`. Each runtime archive has one `UrltraKB/`
+directory. The tool rejects stale identities, changed input bytes and existing
+output files, selects only inventoried program files, and rechecks every archive
+member. Keep all three downloads and their checksums together in the delivery
+location; do not duplicate the full source archive inside either runtime archive.
+
+The runtime's `distribution/` contains full licenses, a notice and a schema-2
+manifest identifying the separately provided source archive by name, size and
+SHA256. The native About dialog and `/api/v1/distribution` display this reference
+and serve only the actual bundled license/notice files. They do not advertise a
+local download endpoint for the separate archive.
+
+To install or serve all corresponding source materials, extract the materials
+archive at the same location as the runtime archive, merging
+`UrltraKB/distribution/`. Its complete schema-1 manifest replaces the compact
+manifest and enables the full material downloads. A source/wheel REST deployment
+can instead set `OPENKB_DISTRIBUTION_DIR` to that extracted directory, with the
+matching exported package containing `_build_info.json` installed. Private KB
+routes remain independent of this public material endpoint.

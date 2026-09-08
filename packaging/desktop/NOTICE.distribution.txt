@@ -1,8 +1,7 @@
-OpenKB native desktop distribution
-Program version: 0.1.dev42+g87bdcc7b6e33
-Program commit: 87bdcc7b6e3306b2f1981b80af5a705b258e0c35
+UrltraKB native desktop distribution
+Program version and commit: see the matching release.json manifest.
 
-This distribution contains OpenKB and independently licensed third-party
+This distribution contains UrltraKB and independently licensed third-party
 components. The original OpenKB source is Apache-2.0. The combined
 distribution including PyMuPDF/MuPDF follows the GNU Affero General Public
 License version 3 distribution arrangement. Original Apache copyright,
@@ -13,18 +12,18 @@ every component as Apache-only or AGPL-only.
 Matching source and build information
 ------------------------------------
 The complete matching material set is identified by release.json. All
-OpenKB-source-*-87bdcc7.zip assets in this directory form the source and
+UrltraKB-source-*-*.zip assets in this directory form the source and
 original-resource set. Extract them into one directory, keeping their paths.
-The OpenKB-build-87bdcc7.zip asset supplies building instructions and the
+The UrltraKB-build-*.zip asset supplies building instructions and the
 source/patch provenance notes; materials-plan.json supplies every assembly
-input's SHA256. OpenKB-components-87bdcc7.zip maps both actual program file
+input's SHA256. UrltraKB-components-*.zip maps both actual program file
 inventories to sources, licenses and nested components.
 
 The source set contains the exact program export, needed third-party sources,
 original patches and source-package recipes. Full upstream archives may also
 contain optional tools, tests or other-platform sources. Their inclusion as
 source is not a claim that those components are linked into either program.
-OpenKB's changes since the agreed baseline are recorded in the build asset's
+UrltraKB's changes since the agreed baseline are recorded in the build asset's
 OPENKB-CHANGES.patch and OPENKB-CHANGES.txt.
 
 On a published download page, offer the program and every matching source
@@ -41,7 +40,7 @@ directory available alongside the deployed program.
 
 Original third-party notices
 ---------------------------
-OpenKB-licenses-87bdcc7.zip contains original licenses, copyright and NOTICE
+UrltraKB-licenses-*.zip contains original licenses, copyright and NOTICE
 materials. Source archives also preserve original file headers and terms.
 Consult the component records and original texts for each component; the
 following identifies distinctions that a single package-level label omits:
@@ -72,4 +71,4 @@ There is no additional restriction on exercising the modification and
 debugging rights granted by the open-source component licenses. The original
 licenses include their respective warranty disclaimers. No third-party
 author or trademark owner is represented as endorsing this distribution or
-providing support for OpenKB's changes.
+providing support for UrltraKB's changes.
