@@ -2627,5 +2627,15 @@
         "watch_list_empty": true
       }
     }
+  },
+  "windows-production-profile-cleanup": {
+    "evidence_sha256": "b899c850157f5f00b0755ab189456b9fba00bd0547570e040fb5176dc10474b1",
+    "result": {
+      "schema": 1,
+      "owned_qa_kbs_unregistered": 2,
+      "original_global_yaml_sha256_restored": true,
+      "original_global_yaml_sha256": "e25678470c1a5011889e78b4e6b0fc45a01d5f4e6ec693220e43e91c783596fa",
+      "owned_qa_task_records_archived_and_cleared": 2
+    }
   }
 }
