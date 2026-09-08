@@ -1,0 +1,311 @@
+{
+  "schema": 1,
+  "date": "2026-09-08",
+  "scope": "Complete corresponding-source/license material and local platform-package delivery; external publication is not authorized or performed.",
+  "program_identity": {
+    "commit": "87bdcc7b6e3306b2f1981b80af5a705b258e0c35",
+    "version": "0.1.dev42+g87bdcc7b6e33"
+  },
+  "review_baseline": "0cec254bb2f37adff8b1af2e1bd2802ea56910ee",
+  "clean_system_acceptance": {
+    "status": "confirmed_by_maintainer",
+    "date": "2026-09-08",
+    "source": "User statement in implementation task",
+    "agent_scope": "Historical agent observations retain their original scope; no Sandbox run is asserted."
+  },
+  "assembly": {
+    "status": "passed",
+    "unresolved_source_license_entries": [],
+    "explicit_input_members": 8988,
+    "material_files": 13,
+    "total_material_bytes": 3075755229,
+    "primary_components": 228,
+    "about_license_entries": 7215,
+    "readable_license_conversions": 8,
+    "all_license_entries_strict_utf8": true,
+    "all_license_entries_below_10_mib": true,
+    "source_export_complete_and_identity_verified": true,
+    "member_hashes_verified_after_archive_creation": true,
+    "assembler_sha256": "6fe769f9144dafb83d50c4b703f4d4962f6264aeeaf427d5c14c97103d977af1",
+    "release_manifest_sha256": "64070b4b5988f0164a209d9a282f076ffb276955fcdf553bb2b6c4f4d3affca5",
+    "files": [
+      {
+        "name": "OpenKB-source-application-87bdcc7.zip",
+        "kind": "source",
+        "size": 1088258,
+        "sha256": "2eceb083d4024e62a8108e5c644813178a7a53a119850ddd124968b4bcc5f43d"
+      },
+      {
+        "name": "OpenKB-source-python-87bdcc7.zip",
+        "kind": "source",
+        "size": 261676009,
+        "sha256": "d966ba33234b25c8a29355ea83745bda6cb8604ab0223c818e63774500bb543f"
+      },
+      {
+        "name": "OpenKB-source-renderer-87bdcc7.zip",
+        "kind": "source",
+        "size": 198018697,
+        "sha256": "be2319f9a6cec1806a65735a6b81d2439b2a596cc459ba28c1dfd4f4902180a6"
+      },
+      {
+        "name": "OpenKB-source-debian-87bdcc7.zip",
+        "kind": "source",
+        "size": 328616794,
+        "sha256": "8bdd552194cd9f158bfc41f65648a5c04305b7e23f5bad961d64977bc788c195"
+      },
+      {
+        "name": "OpenKB-source-native-87bdcc7.zip",
+        "kind": "source",
+        "size": 914182058,
+        "sha256": "eb4d3bb65a302254c165c3a04c35c38669e9ee4bdd4418d0274cc8f798ff5e1c"
+      },
+      {
+        "name": "OpenKB-licenses-87bdcc7.zip",
+        "kind": "licenses",
+        "size": 18064288,
+        "sha256": "fbe0a27ac0fe4aee2f179c11d6d21bc7fd0bac887431fd34a5b686ff3ebeb254"
+      },
+      {
+        "name": "OpenKB-components-87bdcc7.zip",
+        "kind": "components",
+        "size": 4201187,
+        "sha256": "fcb98c53c29e3a21b9b8c91fdacff33b5cdbe1be1e88eb53fc5bb1918643421d"
+      },
+      {
+        "name": "OpenKB-source-qt-87bdcc7.zip",
+        "kind": "source",
+        "size": 1038333208,
+        "sha256": "6b8524f583ace3dc5e086d141a16ecb6fe4494d79c06043a080035d17220888d"
+      },
+      {
+        "name": "OpenKB-source-gcc-87bdcc7.zip",
+        "kind": "source",
+        "size": 216651699,
+        "sha256": "dba031414f5be937ee784dda4dc671d6c543d8ff894f26dfb2cca8edeaacf365"
+      },
+      {
+        "name": "OpenKB-source-runtime-87bdcc7.zip",
+        "kind": "source",
+        "size": 91293867,
+        "sha256": "70c0cccc9160b93bb33113fb9fdd5bd204210872e34cfc3a4e04cbc0dac1bb5c"
+      },
+      {
+        "name": "OpenKB-build-87bdcc7.zip",
+        "kind": "build",
+        "size": 299072,
+        "sha256": "1e85530d1613822dc0822fc4861b9308d0a73412a3a7e3f57a87b8200c3b8d26"
+      },
+      {
+        "name": "NOTICE-87bdcc7.txt",
+        "kind": "notice",
+        "size": 4526,
+        "sha256": "d3750570c6d809aa85be81115efaba2872047699782a3a47b191e1d8d91948fd"
+      },
+      {
+        "name": "materials-plan.json",
+        "kind": "build",
+        "size": 3325566,
+        "sha256": "5c5a6a9da3f439ca22c440d0738e59f4926350fae92ead61184dfa0627305026"
+      }
+    ]
+  },
+  "actual_program_checks": {
+    "debian": {
+      "native_about": "passed; visible/copied identity and complete original OFL text",
+      "rest": "passed; 13 complete downloads match manifest hashes",
+      "server_and_native_app_stopped": true
+    },
+    "windows": {
+      "native_about": "passed; visible/copied identity and complete original OFL text",
+      "rest": "passed; 13 complete downloads match manifest hashes",
+      "server_and_native_app_stopped": true,
+      "owned_scheduled_task_removed": true
+    },
+    "private_route": "401 with public material discovery link",
+    "unlisted_material_files": "404",
+    "live_provider_scope": "Prior DeepSeek execution remains bound to 6b7139e; 87bdcc7 presentation/verification changes and materials do not relabel that evidence."
+  },
+  "profiles": {
+    "windows": "original global profile byte-identical",
+    "debian": "14 temporary CLI-test registrations removed; exact pre-test global profile bytes restored after SHA256 confirmation"
+  },
+  "complete_program_archives": [
+    {
+      "platform": "windows",
+      "file": "OpenKB-0.1.dev42+g87bdcc7b6e33-windows-x64.zip",
+      "size": 3451593681,
+      "sha256": "e9646621cedc1b29c96150efe615038ca4b4bfbbd65ad333e18f78ae527e6344",
+      "program_files_verified": 11331,
+      "distribution_files_verified": 14,
+      "archive_members_verified": 11346,
+      "includes_complete_distribution": true
+    },
+    {
+      "platform": "linux",
+      "file": "OpenKB-0.1.dev42+g87bdcc7b6e33-debian13.6-x64.tar.gz",
+      "size": 3466695231,
+      "sha256": "4e3796c23c58ec5fd958c701a7c9919998d5edde7432c6d46ef13e88378044cb",
+      "program_files_verified": 10832,
+      "distribution_files_verified": 14,
+      "archive_members_verified": 10847,
+      "includes_complete_distribution": true
+    }
+  ],
+  "download_page": {
+    "path": "packaging/desktop/build/release-materials/87bdcc7/final/index.html",
+    "local_url": "http://127.0.0.1:8766/",
+    "html_sha256": "de2564b8842b5a8d79fc29211a7e5c0261dd13eeaeebcab07b0ded573ded025a",
+    "checked_links": 18,
+    "complete_downloads_hashed": 16,
+    "status": "passed; both complete programs, all 13 material files and release manifest",
+    "external_publication": false
+  },
+  "tests": {
+    "pytest": {
+      "command": ".venv/bin/pytest -q",
+      "passed": 1470,
+      "existing_warnings": 2,
+      "seconds": 49.24
+    },
+    "ruff_check": {
+      "command": ".venv/bin/ruff check .",
+      "status": "passed"
+    },
+    "ruff_format": {
+      "command": ".venv/bin/ruff format --check .",
+      "status": "passed",
+      "files": 249
+    },
+    "mypy": {
+      "command": ".venv/bin/mypy openkb",
+      "status": "passed",
+      "source_files": 141
+    }
+  },
+  "reviews": {
+    "standards": "No remaining actionable findings in the final material slice; six rejected boundary probes and valid source extraction verified",
+    "spec": "No remaining actionable findings in the final material slice; component references, originals/readable copies, source/build mapping and actual material downloads verified"
+  },
+  "evidence_root": "packaging/desktop/build/release-materials/87bdcc7/qa",
+  "evidence_files": [
+    {
+      "file": "checks.json",
+      "size": 436,
+      "sha256": "d18b14d1e91cbcb57c15cdf70146e2fb9a667f6b5c999daeedcbbd876150650c"
+    },
+    {
+      "file": "pytest.log",
+      "size": 2782,
+      "sha256": "4527594c8dfd5226702370310ef846c16b076c57fc8fe5727d943bcbae727dba"
+    },
+    {
+      "file": "assembler-boundary-checks.json",
+      "size": 1236,
+      "sha256": "7f38a790f66587a3bd4cef51428944004c436903972dbadcf0922ab0f40fc3c8"
+    },
+    {
+      "file": "helpers/assembler-boundary-probe.py",
+      "size": 2821,
+      "sha256": "9596b362afe36c221b497586eae801d5cd6d4d6d2d0537eb1f61308f07dc3c36"
+    },
+    {
+      "file": "helpers/verify-material-rest.py",
+      "size": 3454,
+      "sha256": "c8062b194a57c972a69e2671ad8809ba19fe98192f7940a7f6cdc4cd150800b3"
+    },
+    {
+      "file": "helpers/build-complete-bundles.py",
+      "size": 3911,
+      "sha256": "715e4178e254b6f5b39ed55b1b8b6ff489a7abf0865fb9f3d3eabe360f4e699e"
+    },
+    {
+      "file": "license-readable/manifest.json",
+      "size": 14344,
+      "sha256": "812b54f5d563b121a421a6da2a343d8d0d4cbec2a5a03fcc35f674686d74b1cd"
+    },
+    {
+      "file": "license-readable/verification.json",
+      "size": 2727,
+      "sha256": "b71df21d50b1f6d8278ea84d0da787b76e46c880c384bf6aeba02eec90d88cb9"
+    },
+    {
+      "file": "linux-rest/result.json",
+      "size": 3771,
+      "sha256": "29430d6aa6fc0b572c62016077ded9e76ed56e64fd494e769ae0d6655b5167fb"
+    },
+    {
+      "file": "windows/windows-rest/result.json",
+      "size": 3921,
+      "sha256": "50db145184f42ed1bfa6a268c94b582b28245d0c3767b7fcd804ae804644461e"
+    },
+    {
+      "file": "linux-profile-check.json",
+      "size": 378,
+      "sha256": "a7b232f4a3ea32910f4bacf5aba13a44b300b6f9b27201d6766cc97a35cba233"
+    },
+    {
+      "file": "windows/profile-check.json",
+      "size": 167,
+      "sha256": "440e953e44218d4830650b433a0ecf23dd4f560f49ab27bff090e2d826ebc05e"
+    },
+    {
+      "file": "local-downloads.json",
+      "size": 3342,
+      "sha256": "c97fdbd5ffbc14f4b0ba60223de54947055f7f1c548a299318fb9c50e6019388"
+    },
+    {
+      "file": "linux-about/result.json",
+      "size": 388,
+      "sha256": "3600908eae517ff51c88aac0d0ca904a4c2ada6bc2c06b9000483631c57051e5"
+    },
+    {
+      "file": "linux-about/about.png",
+      "size": 175260,
+      "sha256": "3b7836558feb554c20ea0d5152abc76f3c484586d5b9c181fd4aa00ee8446e65"
+    },
+    {
+      "file": "linux-about/licenses.png",
+      "size": 135617,
+      "sha256": "fc181ff10df83ad1c55436345103943422898601702df4030b0dc314d7de7f57"
+    },
+    {
+      "file": "linux-about/about-copy.txt",
+      "size": 7458,
+      "sha256": "925019279a9468005794d9beb283c2cf9a4928f052433d148a0befa926d360a3"
+    },
+    {
+      "file": "linux-about/license-copy.txt",
+      "size": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "file": "windows/windows-about/result.json",
+      "size": 352,
+      "sha256": "e324b3d6dcae9338d45eae829b4cca208516a4f1d4e5e65118ac394d28c76405"
+    },
+    {
+      "file": "windows/windows-about/about.png",
+      "size": 46824,
+      "sha256": "f6c9b71e0ffc1946670cc12337c97d97b7fc9c1dd5473b6151bf6168946e45b4"
+    },
+    {
+      "file": "windows/windows-about/licenses.png",
+      "size": 37558,
+      "sha256": "17b12059578679b21798cd64da811f1cd44f036d534a768166b5783bdf23574d"
+    },
+    {
+      "file": "windows/windows-about/about-copy.txt",
+      "size": 7599,
+      "sha256": "831596707475d14a1bbd2de32b1690127572f69058ede0b8b09337816625074b"
+    },
+    {
+      "file": "windows/windows-about/license-copy.txt",
+      "size": 4393,
+      "sha256": "88f117575237307bdd86a17ef15e21790fc9a662fe4dfb103ca1ca077f0d9982"
+    }
+  ],
+  "distribution_guide": "packaging/desktop/DISTRIBUTION.md",
+  "publication_performed": false,
+  "branch_push_performed": false,
+  "issue_closed": false
+}

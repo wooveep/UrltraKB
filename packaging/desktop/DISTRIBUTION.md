@@ -12,8 +12,10 @@ The material directory contains `release.json` and five kinds of materials:
 - **source**: the exact exported OpenKB source, third-party source archives,
   original patches, and the source-package/build recipes identified by the
   component records. Original archives are retained with their hashes.
-- **licenses**: a ZIP of complete original licenses, copyright and NOTICE
-  files, plus explicitly identified supplemental license texts.
+- **licenses**: a ZIP of complete licenses, copyright and NOTICE files, plus
+  explicitly identified supplemental texts. Legacy encodings and RTF have
+  identified UTF-8 reading copies; their unchanged originals and conversion
+  records are retained in the component materials and source archives.
 - **notice**: readable distribution terms and instructions for finding source.
 - **components**: both actual program inventories and the mappings from their
   components to sources, licenses and supporting provenance records.
@@ -99,20 +101,37 @@ affected library's operations and then the native acceptance runner.
 
 ## Assembling and verifying materials
 
-`scripts/assemble_distribution.py` consumes an explicit reviewed input plan.
+The included `build/tools/assemble_distribution.py` consumes an explicit reviewed input plan.
 It refuses unresolved source/license entries, missing material kinds, unsafe
 paths, duplicate archive paths, changed input bytes or an existing output
-directory. It copies only named inputs, re-reads every archived member to
+directory. It also requires the complete committed source export and rejects
+case-insensitive path collisions between ZIP assets. It copies only named inputs, re-reads every archived member to
 verify its hash, and creates `release.json` after all assets verify.
 
+For reassembly, extract **all** ZIP assets into one empty input directory.
+Copy the standalone `NOTICE-87bdcc7.txt` into that directory as
+`NOTICE.distribution.txt`, and retain the downloaded `materials-plan.json`.
+Run the following command from the extracted input directory:
+
 ```sh
-python scripts/assemble_distribution.py --plan materials-plan.json \
+python build/tools/assemble_distribution.py --plan materials-plan.json \
   --inputs /path/to/extracted-inputs --output /path/to/new-distribution
 ```
 
 The script checks integrity and assembly completeness; the component review
 supplies the substantive source/license mapping. Passing a hash check alone
 does not establish that an arbitrary archive is corresponding source.
+
+`components/COMPONENTS.json` uses paths relative to this merged input directory.
+Historical provenance records preserve their original build-machine paths:
+`packaging/desktop/build/source-cache/X` normally corresponds to `source-cache/X`.
+Some evidence and notices were relocated into `components/` or `licenses/`.
+For these, match the original record's SHA256 against `members[].sha256` in
+`materials-plan.json`: `members[].path` is the exact extracted location and
+the containing group's `name` is its download asset. This also locates readable
+license copies through their conversion manifest. Provenance-only binary
+downloads and rejected source candidates are intentionally not source inputs;
+the component records explain those distinctions.
 
 Place the complete `distribution/` directory beside the program executables.
 The native **About / Source and licenses** dialog loads the matching version,

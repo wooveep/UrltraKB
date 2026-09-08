@@ -55,12 +55,14 @@ def validate(plan: dict, root: Path) -> None:
     if not 5 <= len(groups) <= 255 or {g["kind"] for g in groups} != KINDS:
         raise ValueError("All five distribution material kinds are required")
     names = [group["name"] for group in groups]
+    folded_names = [name.casefold() for name in names]
     if (
-        bool({"release.json", "materials-plan.json"} & set(names))
-        or len(set(names)) != len(names)
+        bool({"release.json", "materials-plan.json"} & set(folded_names))
+        or len(set(folded_names)) != len(names)
         or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", name) for name in names)
     ):
         raise ValueError("Invalid or duplicate release filenames")
+    archive_paths: set[str] = set()
     for group in groups:
         members = group["members"]
         if not members or group["format"] not in {"zip", "copy"}:
@@ -70,6 +72,12 @@ def validate(plan: dict, root: Path) -> None:
         destinations = [relative_path(member["path"]).as_posix() for member in members]
         if len({name.casefold() for name in destinations}) != len(destinations):
             raise ValueError("Duplicate archive paths")
+        if group["format"] == "zip":
+            for name in destinations:
+                folded = name.casefold()
+                if folded in archive_paths:
+                    raise ValueError("Archive assets must not overwrite each other's members")
+                archive_paths.add(folded)
         for member in members:
             source = root / relative_path(member["input"])
             if source.is_symlink() or source.resolve() != source or not source.is_file():
@@ -80,6 +88,25 @@ def validate(plan: dict, root: Path) -> None:
                 or digest(source) != member["sha256"]
             ):
                 raise ValueError(f"Material input changed: {member['input']}")
+    if any(
+        parent.as_posix() in archive_paths
+        for name in archive_paths
+        for parent in PurePosixPath(name).parents
+        if parent.as_posix() != "."
+    ):
+        raise ValueError("An archived file conflicts with another member's directory")
+    exported = json.loads((root / "program-source/source-export.json").read_text("utf-8"))
+    required = {"program-source/" + name for name in exported["files"]}
+    required.add("program-source/source-export.json")
+    packaged_source = {
+        member["input"]
+        for group in groups
+        if group["kind"] == "source" and group["format"] == "zip"
+        for member in group["members"]
+        if member["input"] == member["path"]
+    }
+    if not required <= packaged_source:
+        raise ValueError("The source assets must contain the complete committed export")
 
 
 def assemble(plan: dict, root: Path, output: Path) -> dict:
