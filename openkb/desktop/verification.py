@@ -328,7 +328,11 @@ print("OpenKB")
             if args.url:
                 from PySide6.QtWidgets import QInputDialog
 
+                from openkb.desktop.documents import DocumentsDialog
+                from openkb.desktop.verification_workbench import management_page
                 from openkb.state import HashRegistry
+
+                documents = management_page(window, other, "资料", DocumentsDialog, wait_until)
 
                 def enter_urls():
                     dialog = QApplication.activeModalWidget()
@@ -343,9 +347,6 @@ print("OpenKB")
                 result = window.manager.get(task_id)
                 assert (result.failed, result.succeeded, result.skipped) == (1, 1, 1), result
                 assert result.processes_reaped
-                from openkb.desktop.documents import DocumentsDialog
-
-                documents = next(p for p in window.findChildren(DocumentsDialog) if p.isVisible())
                 wait_until(
                     lambda: documents.table.rowCount() == len(get_kb_list(other)["documents"])
                 )
