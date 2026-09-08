@@ -1,0 +1,75 @@
+OpenKB native desktop distribution
+Program version: 0.1.dev42+g87bdcc7b6e33
+Program commit: 87bdcc7b6e3306b2f1981b80af5a705b258e0c35
+
+This distribution contains OpenKB and independently licensed third-party
+components. The original OpenKB source is Apache-2.0. The combined
+distribution including PyMuPDF/MuPDF follows the GNU Affero General Public
+License version 3 distribution arrangement. Original Apache copyright,
+license and applicable NOTICE statements remain in force for those sources.
+Third-party file-level licenses are retained; this notice does not relicense
+every component as Apache-only or AGPL-only.
+
+Matching source and build information
+------------------------------------
+The complete matching material set is identified by release.json. All
+OpenKB-source-*-87bdcc7.zip assets in this directory form the source and
+original-resource set. Extract them into one directory, keeping their paths.
+The OpenKB-build-87bdcc7.zip asset supplies building instructions and the
+source/patch provenance notes; materials-plan.json supplies every assembly
+input's SHA256. OpenKB-components-87bdcc7.zip maps both actual program file
+inventories to sources, licenses and nested components.
+
+The source set contains the exact program export, needed third-party sources,
+original patches and source-package recipes. Full upstream archives may also
+contain optional tools, tests or other-platform sources. Their inclusion as
+source is not a claim that those components are linked into either program.
+OpenKB's changes since the agreed baseline are recorded in the build asset's
+OPENKB-CHANGES.patch and OPENKB-CHANGES.txt.
+
+On a published download page, offer the program and every matching source
+asset together, freely accessible from that same page, with checksums and
+this notice. A development-branch URL is not the matching source delivery.
+This local material set does not itself assert an external publication.
+
+Desktop users can open About / Source and licenses to view or copy the
+version, source identity and checksums, read the full license texts, and
+open this directory. REST users can obtain the same materials from
+/api/v1/distribution and its listed download endpoints, without knowledge-base
+access credentials. REST operators must keep the complete matching material
+directory available alongside the deployed program.
+
+Original third-party notices
+---------------------------
+OpenKB-licenses-87bdcc7.zip contains original licenses, copyright and NOTICE
+materials. Source archives also preserve original file headers and terms.
+Consult the component records and original texts for each component; the
+following identifies distinctions that a single package-level label omits:
+
+* PyMuPDF/MuPDF retain their original GPL/AGPL declarations and notices.
+* Qt/PySide, ICU, Mesa/LLVM and other native dependencies have distinct
+  original terms and source records. LGPL components remain replaceable and
+  the application source is supplied for rebuilding with modified versions.
+* Linux's separately shipped libgfortran and libquadmath have complete
+  corresponding source RPMs and original notices. Quadmath is not assigned
+  the GCC Runtime Library Exception merely because other GCC runtime files
+  carry that exception. Windows static GCC runtime treatment is documented
+  separately against its original exception and build records.
+* NewCM is distributed as the complete unchanged MathJax font package. Its
+  package-level Apache declaration accompanies the fonts' original GUST
+  copyright and license and referenced LPPL. Noto Sans CJK is an unchanged
+  independent font resource under OFL. These resources are not relabeled
+  AGPL, and no claim is made that the font author's entire generation system
+  has been reconstructed.
+* Microsoft Visual C runtime files are independently licensed Microsoft
+  Distributable Code. Their original runtime terms and redistribution
+  notices are supplied separately. No AGPL license or source-code right is
+  claimed over those DLLs. Protect them consistently with their applicable
+  Microsoft terms when redistributing this collection; do not apply such
+  restrictions to the separately licensed open-source application sources.
+
+There is no additional restriction on exercising the modification and
+debugging rights granted by the open-source component licenses. The original
+licenses include their respective warranty disclaimers. No third-party
+author or trademark owner is represented as endorsing this distribution or
+providing support for OpenKB's changes.
