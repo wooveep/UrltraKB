@@ -35,6 +35,16 @@ def main() -> None:
     )
 
     environment.update(LITELLM_LOCAL_MODEL_COST_MAP="True", OTEL_SDK_DISABLED="true")
+    if os.name == "nt":
+        # Windows 11 supplies API sets/UCRT. Do not discover downlevel shim
+        # DLLs from unrelated SDKs or developer utilities on the launch PATH.
+        windows = Path(os.environ["SystemRoot"])
+        environment["PATH"] = os.pathsep.join(
+            map(
+                str,
+                (Path(sys.executable).parent, Path(sys.base_prefix), windows / "System32", windows),
+            )
+        )
     subprocess.run(
         [
             sys.executable,

@@ -30,6 +30,20 @@ On Windows, use `.venv\Scripts\python.exe` instead of `.venv/bin/python`.
 version before freezing, and checks source files again afterwards. Source
 changes or additional application files require a new committed export.
 
+After freezing, run the inventory with that export's Python environment:
+
+```sh
+.venv/bin/python scripts/inventory_desktop.py --source . --output /path/to/new-inventory.json
+```
+
+The inventory verifies the four executable archives, embedded Python modules,
+base library and collected files against their actual build inputs. It records
+file hashes and primary Python, npm, runtime, font and Debian package owners;
+unmapped files or changed inputs fail the check. Nested native dependencies and
+their source/licence materials still require a separate audit. On Windows the
+freezer uses only its Python and Windows system directories in PATH, avoiding
+accidental collection of DLLs from developer utilities.
+
 `prepare_desktop_assets.py` verifies the Node and font downloads and builds
 the locked native renderer. `build_desktop.py` caches the pinned token
 vocabularies, then freezes the desktop and complete core dependency set.
