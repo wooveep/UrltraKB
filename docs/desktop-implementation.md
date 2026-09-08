@@ -400,3 +400,12 @@ and final portable archives have not yet been assembled or published.
 After the delimiter guard, full pytest passed 1,470 tests in 49.56 seconds with
 two existing unawaited-coroutine warnings. Ruff check/format passed for 248 files,
 mypy passed for 141 source files, and the module-size gate passed in pytest.
+
+The `1a13634` Debian frozen directory passed the 14 native checks, including the
+new artifact display cases; its inventory mapped 10,832 files and 7,228 Python
+modules. The Windows inventory mapped 11,331 files and 7,302 modules, but its
+native reading probe exposed a test-selection assumption: Windows sorts
+`closing.md` before `SKILL.md`, so selecting the folder alone did not select the
+intended file. The probe now explicitly selects `SKILL.md`. This correction
+changes verification only; the product reading code is unchanged. The failed
+probe is retained and is not counted as passing Windows native acceptance.

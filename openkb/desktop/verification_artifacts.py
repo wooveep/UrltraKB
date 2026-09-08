@@ -46,6 +46,8 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
             if item.data(Qt.ItemDataRole.UserRole) == "output/skills/native-reading":
                 dialog.items.setCurrentItem(item)
                 break
+        wait_until(lambda: dialog.files.findText(reading_path) >= 0)
+        dialog.files.setCurrentText(reading_path)
         wait_until(lambda: "原生 Skill 正文" in dialog.reader.toPlainText())
         assert dialog.reader.toPlainText().strip().startswith("原生 Skill 正文")
         assert "元数据应保留在源文件" not in dialog.reader.toPlainText()
