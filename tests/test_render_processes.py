@@ -2,15 +2,47 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
 ASSETS = Path(__file__).resolve().parents[1] / "openkb/rendering/assets"
+
+
+@pytest.mark.parametrize("timezone", ["UTC", "Asia/Shanghai"])
+@pytest.mark.parametrize("case", ["gantt-basic", "gantt-cn"])
+def test_gantt_dates_align_with_task_start_in_every_host_timezone(timezone, case):
+    executable = ASSETS / ("renderer.exe" if os.name == "nt" else "renderer")
+    if not executable.is_file():
+        pytest.skip("Prepare the pinned desktop rendering assets first")
+    corpus = json.loads(
+        (Path(__file__).parent / "fixtures/native-render-corpus.json").read_text(encoding="utf-8")
+    )
+    sample = next(row for row in corpus if row["id"] == case)
+    request = {
+        "kind": "mermaid",
+        "source": sample["markdown"].removeprefix("```mermaid\n").removesuffix("```"),
+        "svg_only": True,
+        "fonts": [str(ASSETS / "fonts" / f"NotoSansCJKsc-{w}.otf") for w in ("Regular", "Bold")],
+    }
+    output = subprocess.check_output(
+        [str(executable)],
+        input=json.dumps(request).encode(),
+        env=dict(os.environ, TZ=timezone),
+        timeout=30,
+    )
+    svg = ET.fromstring(json.loads(output)["svg"])
+    first_tick = next(node for node in svg.iter() if node.get("class") == "tick")
+    assert "".join(first_tick.itertext()) == "09-01"
+    # The September 1 tick belongs at the start of the September 1 task,
+    # including on Windows where Chrono ignores the TZ environment variable.
+    assert first_tick.get("transform") == "translate(0.5,0)"
 
 
 def test_real_formula_keeps_protocol_error_detail(tmp_path):

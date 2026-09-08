@@ -11,6 +11,36 @@ from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QImage, QPainter
 from openkb.desktop.reader import MarkdownView
 
 
+def _colored_top(image: QImage, color: str) -> int:
+    rgba = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = bytes(rgba.constBits())
+    ink = bytes.fromhex(color.removeprefix("#")) + b"\xff"
+    offset = pixels.find(ink)
+    while offset >= 0 and offset % 4:
+        offset = pixels.find(ink, offset + 1)
+    assert offset >= 0, "Formula ink is missing from the final Qt image"
+    return offset // rgba.bytesPerLine()
+
+
+def _inline_baseline(view, block, image: QImage, dark: bool, scale: float) -> float:
+    # MathJax's ink differs from the native prose color. Locate the actual
+    # raster in the painted document, then compare its declared mathematical
+    # baseline with the surrounding QTextLine; format properties alone are not
+    # evidence that Qt actually positioned an image correctly.
+    ink = "#e8edf5" if dark else "#1c2738"
+    raster = QImage(block.image)
+    top = _colored_top(image, ink) - _colored_top(raster, ink)
+    cursor = view.document().find("\ufffc")
+    text_block = cursor.block()
+    layout = text_block.layout()
+    line = layout.lineForTextPosition(cursor.selectionStart() - text_block.position())
+    baseline = layout.position().y() + line.y() + line.ascent()
+    rendered_baseline = top + raster.height() - block.depth * scale
+    error = rendered_baseline - baseline
+    assert abs(error) <= 1, f"Inline formula baseline differs from prose by {error:.2f}px"
+    return error
+
+
 def verify_corpus(corpus: Path, output: Path, wait_until) -> None:
     view = MarkdownView()
     view.resize(1280, 900)
@@ -37,6 +67,8 @@ def verify_corpus(corpus: Path, output: Path, wait_until) -> None:
                     value = rendered[-1]
                     assert len(value.objects) == 1, (sample["id"], value.html)
                     block = value.objects[0][1]
+                    if "display" in sample:
+                        assert block.display == sample["display"]
                     failed = bool(block.error)
                     assert failed == bool(sample.get("expected_error")), (sample["id"], block)
                     if failed:
@@ -57,6 +89,10 @@ def verify_corpus(corpus: Path, output: Path, wait_until) -> None:
                     context.palette = view.palette()
                     view.document().documentLayout().draw(painter, context)
                     painter.end()
+                    baseline_error = None
+                    if sample.get("display") is False and not failed:
+                        assert "行内 x" in view.toPlainText() and "正文基线" in view.toPlainText()
+                        baseline_error = _inline_baseline(view, block, image, dark, scale)
                     assert image.save(str(output / f"{prefix}.png"))
                     (output / f"{prefix}.md").write_text(source, encoding="utf-8")
                     rows.append(
@@ -68,6 +104,7 @@ def verify_corpus(corpus: Path, output: Path, wait_until) -> None:
                             "error": block.error,
                             "image": f"{prefix}.png",
                             "expectation": sample["expected"],
+                            "baseline_error_px": baseline_error,
                         }
                     )
             print(f"Native rendering: scale {scale:g}, {len(rows)} cases checked", flush=True)

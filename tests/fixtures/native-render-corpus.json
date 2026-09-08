@@ -238,9 +238,54 @@
     "kind": "math",
     "family": "公式",
     "title": "行内公式基线",
-    "markdown": "\\(\\frac{a_i}{b_j}+x^2\\)",
+    "markdown": "行内 x \\(\\frac{a_i}{b_j}+x^2\\) x 正文基线。",
     "display": false,
     "expected": "公式置于中文正文中，分母低于正文基线"
+  },
+  {
+    "id": "math-inline-simple",
+    "kind": "math",
+    "family": "公式",
+    "title": "行内基线 · 简单字母",
+    "markdown": "行内 x \\(x\\) x 正文基线。\n\n下一段中文保持完整。",
+    "display": false,
+    "expected": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞"
+  },
+  {
+    "id": "math-inline-superscript",
+    "kind": "math",
+    "family": "公式",
+    "title": "行内基线 · 上标",
+    "markdown": "行内 x \\(x^2\\) x 正文基线。\n\n下一段中文保持完整。",
+    "display": false,
+    "expected": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞"
+  },
+  {
+    "id": "math-inline-subscript",
+    "kind": "math",
+    "family": "公式",
+    "title": "行内基线 · 下标",
+    "markdown": "行内 x \\(x_i\\) x 正文基线。\n\n下一段中文保持完整。",
+    "display": false,
+    "expected": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞"
+  },
+  {
+    "id": "math-inline-tall",
+    "kind": "math",
+    "family": "公式",
+    "title": "行内基线 · 高矩阵",
+    "markdown": "行内 x \\(\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix}\\) x 正文基线。\n\n下一段中文保持完整。",
+    "display": false,
+    "expected": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞"
+  },
+  {
+    "id": "math-inline-raised",
+    "kind": "math",
+    "family": "公式",
+    "title": "行内基线 · 零深度",
+    "markdown": "行内 x \\(\\raise 2ex\\hbox{x}\\) x 正文基线。\n\n下一段中文保持完整。",
+    "display": false,
+    "expected": "公式的数学基线与正文 x 对齐；中文和下一段完整，无碰撞"
   },
   {
     "id": "math-macro",

@@ -26,6 +26,13 @@ def adapt_diagram(svg, dark):
         for node in root.iter():
             if node.tag == f"{{{SVG}}}text":
                 node.set("fill", "#e2e8f0" if dark else "#0f172a")
+                if node.get("textLength") and node.get("lengthAdjust") == "spacing":
+                    # C4 stereotype widths were measured with another font. Keep
+                    # their centers, but let the bundled font space its own glyphs.
+                    center = float(node.get("x", "0")) + float(node.attrib.pop("textLength")) / 2
+                    node.attrib.pop("lengthAdjust")
+                    node.set("x", str(center))
+                    node.set("text-anchor", "middle")
             if node.tag == f"{{{SVG}}}tspan":
                 node.attrib.pop("alignment-baseline", None)
             if "font-family" in node.attrib:
