@@ -9,6 +9,7 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
 
     from openkb.application.artifacts import export_artifact
     from openkb.desktop.artifacts import ArtifactsDialog
+    from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import atomic_write_text, kb_ingest_lock
 
     with kb_ingest_lock(kb / ".openkb"):
@@ -17,13 +18,13 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
         )
     dialog = ArtifactsDialog(window, kb)
     dialog.show()
+    tasks = SubmittedTasks(window.manager, wait_until)
 
     def finish():
-        wait_until(lambda: bool(dialog._tasks))
-        task_id = next(iter(dialog._tasks))
-        wait_until(lambda: not dialog._tasks)
-        task = window.manager.get(task_id)
-        assert task.processes_reaped, task
+        task = tasks.finish(lambda: not dialog._tasks)
+        assert "任务已结束" in dialog.status.text(), dialog.status.text()
+        assert f"任务结果：{task.state}" in dialog.results.toPlainText()
+        assert_result_text(task, dialog.results.toPlainText())
         return task
 
     try:
