@@ -11,17 +11,23 @@ from openkb.add_coordinator import AddMutationPlan, DirtyRollbackError, run_add_
 from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY, compile_long_doc
 from openkb.application.documents import (
     DocumentResult,
-    _run_compile_with_retry,
+    _run_compilation,
     _snapshot_add_paths,
 )
 from openkb.application.execution import ExecutionContext
-from openkb.compilation_report import collect_compile_report, report_compile_issue
+from openkb.compilation_report import (
+    collect_compile_report,
+    report_auxiliary_warning,
+    report_compile_issue,
+    require_complete_compilation,
+)
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, resolve_doc_name_from_key
 from openkb.indexer import _cloud_display_stem, _write_long_doc_artifacts, prepare_cloud_import
 from openkb.locks import LockCancelled, kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired
+from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
 from openkb.state import HashRegistry
 
 logger = logging.getLogger(__name__)
@@ -56,7 +62,16 @@ def import_cloud(
             else:
                 with context.begin(root) if context else nullcontext() as bundle:
                     try:
-                        status = _import(root, doc_id, source, digest, bundle, settings, report)
+                        config = (
+                            settings if settings is not None else resolve_effective_config(root)[0]
+                        )
+                        with processing_scope(config):
+                            status = _import(root, doc_id, source, digest, bundle, config, report)
+                        if status == "failed" and compilation.unfinished:
+                            status = "unfinished"
+                    except ProcessingIncomplete as exc:
+                        report_compile_issue(exc.reason, exc.stage)
+                        status = "unfinished"
                     except (RecoveryRequired, DirtyRollbackError, LockCancelled):
                         raise
                     except Exception as exc:
@@ -82,6 +97,12 @@ def import_cloud(
             tuple(compilation.quality),
             tuple(compilation.unfinished),
             digest,
+            source_intake="saved" if resources else "not_saved",
+            knowledge_compilation="completed" if status in {"added", "skipped"} else status,
+            stage="committed" if status in {"added", "skipped"} else "compiling",
+            reason=compilation.quality[0] if compilation.quality else None,
+            warnings=tuple(compilation.warnings),
+            usage=compilation.usage,
         )
 
 
@@ -103,7 +124,7 @@ def _import(root, doc_id, source, digest, bundle, settings, report) -> str:
             root,
             description=cloud.description,
         )
-        _run_compile_with_retry(
+        _run_compilation(
             lambda: compile_long_doc(
                 doc_name,
                 summary_path,
@@ -117,6 +138,8 @@ def _import(root, doc_id, source, digest, bundle, settings, report) -> str:
             label=f"Compiling imported doc (doc_id={doc_id})",
             report=report,
         )
+        processing_checkpoint()
+        require_complete_compilation()
         entries = HashRegistry(root / ".openkb/hashes.json")
         entries.remove_by_doc_name(doc_name)
         entries.add(
@@ -136,7 +159,7 @@ def _import(root, doc_id, source, digest, bundle, settings, report) -> str:
         try:
             append_log(root / "wiki", "ingest", doc_name)
         except Exception:
-            report_compile_issue("ingest-log-write-failed", "ingest-log")
+            report_auxiliary_warning("ingest-log-write-failed")
             raise  # Preserve the coordinator's existing diagnostic and added status.
 
     plan = AddMutationPlan(

@@ -112,7 +112,22 @@ def resolve_doc_name(
             registry.add(file_hash, meta)  # backfill + persist
         return name
 
-    return resolve_doc_name_from_key(src.stem, path_key, registry)
+    candidate = resolve_doc_name_from_key(src.stem, path_key, registry)
+    # An unregistered raw file may have been placed here by its owner. A new
+    # source has no authority to replace it, even when no hash entry exists.
+    raw = kb_dir / "raw" / f"{candidate}{src.suffix.lower()}"
+    if (
+        raw.exists()
+        and raw.resolve() != src.resolve()
+        and HashRegistry.hash_file(raw) != HashRegistry.hash_file(src)
+    ):
+        suffix = hashlib.sha256(path_key.encode("utf-8")).hexdigest()[:_SUFFIX_LEN]
+        candidate = f"{candidate}-{suffix}"
+        sequence = 1
+        while (kb_dir / "raw" / f"{candidate}{src.suffix.lower()}").exists():
+            candidate = f"{_sanitize_stem(src.stem)}-{suffix}-{sequence}"
+            sequence += 1
+    return candidate
 
 
 def resolve_doc_name_from_key(stem: str, path_key: str, registry: HashRegistry) -> str:

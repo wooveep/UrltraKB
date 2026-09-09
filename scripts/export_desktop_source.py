@@ -28,6 +28,7 @@ _FILES = {
     "docs/desktop-evidence/workbench/tasks.png",
     "docs/desktop-evidence/workbench/settings.png",
     "docs/golden-principles.md",
+    "docs/document-processing.md",
 }
 _GENERATED = {
     "openkb/rendering/assets",

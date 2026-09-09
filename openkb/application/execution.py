@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
+from openkb.cancellation import cancellation_scope
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
 from openkb.locks import LockCancelled
@@ -19,6 +20,7 @@ class ExecutionContext:
     on_event: Callable[[dict], None] = field(default=lambda event: None, repr=False)
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
+    _announced: bool = field(default=False, init=False, repr=False)
 
     def check_stop(self) -> None:
         if self.cancelled():
@@ -34,11 +36,13 @@ class ExecutionContext:
             self.snapshot = capture_config(kb_dir, cancelled=self.cancelled, on_wait=self.waiting)
             # The worker's control channel acknowledges this before any
             # business work, so later batch units cannot silently re-resolve.
+        if not self._announced:
             self.on_snapshot(self.snapshot)
+            self._announced = True
         if self.snapshot.kb_dir != str(kb_dir.resolve()):
             raise ValueError("Execution context belongs to another knowledge base")
         if self.install_process_settings:
             self.snapshot.install_worker_environment()
-        with self.snapshot.activate():
+        with self.snapshot.activate(), cancellation_scope(self.cancelled):
             self.check_stop()
             yield LlmCredentialBundle(**self.snapshot.values()["credentials"])

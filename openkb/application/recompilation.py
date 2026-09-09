@@ -14,7 +14,11 @@ from typing import Any, Literal
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.application.removal import _resolve_doc_identifier
-from openkb.compilation_report import collect_compile_report
+from openkb.compilation_report import (
+    IncompleteCompilation,
+    collect_compile_report,
+    require_complete_compilation,
+)
 from openkb.config import (
     DEFAULT_CONFIG,
     LlmCredentialBundle,
@@ -30,6 +34,7 @@ from openkb.locks import (
 )
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, mutation_scope
+from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
 from openkb.state import HashRegistry
 
 LONG_DOC_TYPES = frozenset({"long_pdf", "pageindex_cloud"})
@@ -136,7 +141,7 @@ def refresh_schema(kb_dir: Path) -> bool:
 
 @dataclass(frozen=True)
 class RecompileResult:
-    status: Literal["compiled", "skipped", "failed", "conflict"]
+    status: Literal["compiled", "skipped", "failed", "conflict", "unfinished"]
     name: str = ""
     kind: str = "short"
     message: str | None = None
@@ -147,6 +152,7 @@ class RecompileResult:
     unfinished: tuple[str, ...] = ()
     version: str | None = None
     quality: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
 
 async def recompile_document(
@@ -215,8 +221,8 @@ async def recompile_document(
         with context.begin(kb_dir) if context else nullcontext(bundle) as credentials:
             from openkb.agent import compiler
 
+            config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
             if model is None or context:
-                config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
                 model = model or config.get("model", DEFAULT_CONFIG["model"])
                 if context and max_concurrency is None:
                     max_concurrency = (
@@ -231,6 +237,7 @@ async def recompile_document(
             try:
                 with (
                     collect_compile_report() as report,
+                    processing_scope(config),
                     mutation_scope(kb_dir, paths, operation="recompile"),
                 ):
                     if kind == "long":
@@ -240,7 +247,8 @@ async def recompile_document(
                         )
                     else:
                         await compiler.compile_short_doc(name, source, kb_dir, model, **options)
-                    append_log(kb_dir / "wiki", "recompile", f"recompiled {name}")
+                    require_complete_compilation()
+                    processing_checkpoint()
                     # Compute the receipt before commit. A filesystem error here rolls
                     # back the whole unit; it cannot discard already committed facts.
                     changes = changed_files(kb_dir, paths, before)
@@ -253,6 +261,31 @@ async def recompile_document(
                     if summary.is_file():
                         resources.add(str(summary))
                     next_version = _version(kb_dir) if version is not None else None
+                try:
+                    append_log(kb_dir / "wiki", "recompile", f"recompiled {name}")
+                except Exception:
+                    report.warnings.append("post_commit_log_failed")
+            except ProcessingIncomplete as exc:
+                return RecompileResult(
+                    "unfinished",
+                    name,
+                    kind,
+                    message=exc.reason,
+                    unfinished=(exc.stage,),
+                    elapsed=time.monotonic() - start,
+                    version=version,
+                )
+            except IncompleteCompilation:
+                return RecompileResult(
+                    "unfinished",
+                    name,
+                    kind,
+                    message=", ".join(report.quality),
+                    unfinished=tuple(report.unfinished),
+                    quality=tuple(report.quality),
+                    elapsed=time.monotonic() - start,
+                    version=version,
+                )
             except (LockCancelled, RecoveryRequired):
                 raise
             except Exception as exc:
@@ -276,4 +309,5 @@ async def recompile_document(
                 version=next_version,
                 quality=tuple(report.quality),
                 unfinished=tuple(report.unfinished),
+                warnings=tuple(report.warnings),
             )

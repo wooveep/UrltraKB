@@ -1,6 +1,8 @@
 import json
 
 import pytest
+from http_model_fixture import model_service  # noqa: F401
+from processing_fixtures import configure_processing
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +42,7 @@ chunk_size: 512
 chunk_overlap: 64
 """
     (openkb_dir / "config.yaml").write_text(config_yaml)
+    configure_processing(tmp_path)
     (openkb_dir / "hashes.json").write_text(json.dumps({}))
 
     return tmp_path

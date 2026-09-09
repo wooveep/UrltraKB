@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from processing_fixtures import configure_processing
 
 from openkb.application.pages import read_page
 
@@ -51,6 +52,7 @@ def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monke
         "model: openai/initial\nlanguage: en\nextra_headers:\n  X-Profile: initial\n"
     )
     (kb_dir / ".env").write_text("LLM_API_KEY=initial-private-key\n")
+    configure_processing(kb_dir)
     source = kb_dir / "notes.md"
     source.write_text("# Notes\nOriginal knowledge.")
     calls = []

@@ -585,61 +585,9 @@ def add(ctx, path, from_pageindex_cloud):
         click.echo("Provide a PATH or use --from-pageindex-cloud <DOC_ID>.")
         return
 
-    from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path
+    from openkb.cli_import import import_path
 
-    if looks_like_url(path):
-        from tempfile import TemporaryDirectory
-
-        from openkb.application.uploads import published_input
-
-        # Acquisition owns private bytes outside the KB lease. Publish only a
-        # complete input, then retain ownership through compile/skip cleanup.
-        with TemporaryDirectory(prefix="openkb-url-") as temporary:
-            fetched = fetch_url_to_raw(path, Path(temporary), announce_saved=False)
-            if fetched is None:
-                return
-            with kb_ingest_lock(kb_dir / ".openkb"):
-                name = _unique_path(kb_dir / "raw" / fetched.name).name
-                with published_input(kb_dir, fetched, filename=name) as published:
-                    if published.path.suffix.lower() == ".pdf":
-                        size = published.path.stat().st_size / (1024 * 1024)
-                        description = f"{size:.1f} MB PDF"
-                    else:
-                        length = len(published.path.read_text(encoding="utf-8"))
-                        description = f"{length // 1024 or 1} KB clean markdown"
-                    click.echo(f"  Saved: raw/{published.path.name} ({description})")
-                    outcome = add_single_file(published.path, kb_dir)
-                    if outcome == "skipped":
-                        published.discard_if_unregistered()
-            return
-
-    target = Path(path)
-    if not target.exists():
-        click.echo(f"Path does not exist: {path}")
-        return
-
-    if target.is_dir():
-        files = [
-            f
-            for f in sorted(target.rglob("*"))
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-        ]
-        if not files:
-            click.echo(f"No supported files found in {path}.")
-            return
-        total = len(files)
-        click.echo(f"Found {total} supported file(s) in {path}.")
-        for i, f in enumerate(files, 1):
-            click.echo(f"\n[{i}/{total}] ", nl=False)
-            add_single_file(f, kb_dir)
-    else:
-        if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            click.echo(
-                f"Unsupported file type: {target.suffix}. "
-                f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-            )
-            return
-        add_single_file(target, kb_dir)
+    ctx.exit(import_path(kb_dir, path))
 
 
 def _stream_to_tty() -> bool:

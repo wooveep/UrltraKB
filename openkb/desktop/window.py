@@ -164,7 +164,7 @@ class Workbench(QMainWindow):
                 task = self.manager.get(task_id)
             except KeyError:
                 return
-            show_task_details(task, self)
+            show_task_details(task, self, manager=self.manager)
 
     def _maintenance(self):
         if self.kb is not None:

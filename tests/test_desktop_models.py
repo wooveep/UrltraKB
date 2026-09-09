@@ -96,6 +96,14 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         assert arrived.wait(30), manager.get(batch)
         independent = manager.submit(other, [AskQuestion("Independent")])
         assert manager.wait(independent, timeout=30).results[0].output == "unit-b"
+        # A real spawned worker publishes a model start before its HTTP response
+        # arrives, even when there is no console and no answer text yet.
+        waiting = manager.get(batch)
+        assert "LLM #1 开始" in waiting.diagnostics
+        assert "LLM #1 完成" not in waiting.diagnostics
+        assert waiting.last_activity_at and waiting.text == ""
+        log_files = list((manager.history_dir / "logs" / batch).glob("*.log"))
+        assert log_files and "LLM #1 开始" in log_files[0].read_text("utf-8")
         # An external editor changes settings after actual first execution.
         # Later batch units keep the acknowledged context; a new task gets it.
         configure(kb_dir, url, "unit-new")
@@ -119,6 +127,8 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         summaries = "".join(path.read_text() for path in (tmp_path / "history").rglob("*.json"))
         assert "synthetic-" not in summaries
         assert "First" not in summaries
+        logs = "".join(path.read_text("utf-8") for path in manager.history_dir.rglob("*.log"))
+        assert "synthetic-" not in logs and "First" not in logs
     finally:
         release.set()
         manager.shutdown(stop=True)

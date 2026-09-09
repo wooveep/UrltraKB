@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +35,11 @@ class WorkerChannel:
     def __init__(self, connection: Any, events: Any, identity: UnitIdentity) -> None:
         self.connection, self.events, self.identity = connection, events, identity
         self.stopped = threading.Event()
+        self.budget_expired = threading.Event()
         self.parent_gone = threading.Event()
         self.acknowledged = threading.Event()
         self.sequence = 0
+        self._event_lock = threading.Lock()
         self.truncated = False
         self.reader = threading.Thread(target=self._read_control, daemon=True)
         self.reader.start()
@@ -47,6 +49,9 @@ class WorkerChannel:
             while True:
                 message = self.connection.recv()
                 if message == "stop":
+                    self.stopped.set()
+                elif message == "budget":
+                    self.budget_expired.set()
                     self.stopped.set()
                 elif message == "snapshot-ack":
                     self.acknowledged.set()
@@ -75,13 +80,14 @@ class WorkerChannel:
     def event(self, value: dict) -> None:
         if value.get("stage") == "waiting":
             raise WaitingForLease()
-        self.sequence += 1
-        try:
-            self.events.put_nowait(
-                {"identity": asdict(self.identity), "sequence": self.sequence, "data": value}
-            )
-        except queue.Full:
-            self.truncated = True
+        with self._event_lock:
+            self.sequence += 1
+            try:
+                self.events.put_nowait(
+                    {"identity": asdict(self.identity), "sequence": self.sequence, "data": value}
+                )
+            except queue.Full:
+                self.truncated = True
 
 
 def _execute(
@@ -216,6 +222,7 @@ def _execute(
             unfinished=recompiled.unfinished,
             revision=recompiled.version,
             quality=recompiled.quality,
+            warnings=recompiled.warnings,
         )
     if isinstance(request, RemoveDocument):
         from openkb.application.removal import remove_document
@@ -269,6 +276,7 @@ def _execute(
             quality=result.quality,
             unfinished=result.unfinished,
             revision=result.input_version,
+            document=result,
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio
@@ -319,11 +327,15 @@ def run_unit(
     # configuration runs in the task manager's process.
     from openkb.add_coordinator import DirtyRollbackError
     from openkb.application.execution import ExecutionContext
+    from openkb.cancellation import OperationCancelled
     from openkb.inputs import InputChanged, preparation_directory
     from openkb.lifecycle import KnowledgeBaseIncomplete, KnowledgeBaseRemoved, expected_generation
     from openkb.locks import LockCancelled
     from openkb.mutation import RecoveryRequired
+    from openkb.processing import ProcessingIncomplete
+    from openkb.runtime.diagnostics import WorkerDiagnostics
     from openkb.runtime.input_store import child_preparation, reap_orphaned_inputs
+    from openkb.runtime.model_cancellation import DocumentCancellation
 
     channel = WorkerChannel(connection, events, identity)
     context = ExecutionContext(
@@ -332,14 +344,49 @@ def run_unit(
         on_event=channel.event,
         on_snapshot=channel.snapshot,
     )
+    business_result = None
     try:
         try:
             with (
+                DocumentCancellation(
+                    channel.stopped,
+                    enabled=isinstance(request, (ImportFile, ImportUrl, RecompileDocument)),
+                    budget_expired=channel.budget_expired,
+                ) as cancellation,
+                WorkerDiagnostics(
+                    receipt_dir.parent / "logs" / identity.task_id / f"{identity.unit_id}.log",
+                    channel.event,
+                ) as diagnostics,
                 child_preparation(prepared_dir),
                 preparation_directory(prepared_dir),
                 expected_generation(Path(identity.kb_dir), identity.generation),
             ):
+                if snapshot is not None:
+                    diagnostics.log.include_secrets(snapshot.values())
+
+                def observed_snapshot(value):
+                    diagnostics.log.include_secrets(value.values())
+                    channel.snapshot(value)
+
+                def observed_event(value):
+                    # These stages precede another expensive operation. A
+                    # committed event must still report the completed result.
+                    if value.get("stage") in {"converting", "indexing", "compiling"}:
+                        cancellation.check()
+                    diagnostics.stage(value)
+
+                context.on_snapshot = observed_snapshot
+                context.on_event = observed_event
+                diagnostics.emit(f"开始第 {int(identity.unit_id) + 1} 项：{type(request).__name__}")
                 result = _execute(request, identity, context, prepared_dir)
+                business_result = result
+                # Persist business facts before auxiliary log/client teardown.
+                # The parent still waits for exit and recovery before claiming
+                # stop or cleanup confirmation.
+                save_receipt(receipt_dir, identity, result)
+                channel.send(
+                    "result", result=result, truncated=channel.truncated, sequence=channel.sequence
+                )
         except WaitingForLease:
             channel.send("deferred")
             return
@@ -350,8 +397,14 @@ def run_unit(
                 channel.send("deferred", reason="input")
                 return
             result = UnitResult("failed", error="Input changed during preparation")
-        except LockCancelled:
-            result = UnitResult("stopped")
+        except ProcessingIncomplete as exc:
+            result = UnitResult("unfinished", error=exc.reason, unfinished=(exc.stage,))
+        except (LockCancelled, OperationCancelled):
+            result = (
+                UnitResult("unfinished", error="time_budget_exhausted", unfinished=("processing",))
+                if channel.budget_expired.is_set()
+                else UnitResult("stopped")
+            )
         except (KnowledgeBaseRemoved, KnowledgeBaseIncomplete):
             result = UnitResult(
                 "blocked", error="Knowledge base is unavailable; reopen or diagnose it", halt=True
@@ -362,6 +415,16 @@ def run_unit(
             # Provider exceptions may contain prompts, URLs, headers or keys.
             # Public summaries carry a category, never an unchecked repr.
             result = UnitResult("failed", error=f"Operation failed ({type(exc).__name__})")
+        if business_result is not None:
+            warnings = set(business_result.warnings) | diagnostics.warnings
+            if result != business_result:
+                warnings.add("worker_cleanup_failed")
+            document = business_result.document
+            if document is not None:
+                document = replace(
+                    document, warnings=tuple(sorted(set(document.warnings) | warnings))
+                )
+            result = replace(business_result, warnings=tuple(sorted(warnings)), document=document)
         try:
             save_receipt(receipt_dir, identity, result)
         except Exception:

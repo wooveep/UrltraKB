@@ -29,6 +29,42 @@ def import_url(
     context: ExecutionContext | None = None,
     prepared_dir: Path | None = None,
 ) -> DocumentResult:
+    from openkb.compilation_report import collect_compile_report
+    from openkb.config import resolve_effective_config
+    from openkb.locks import kb_ingest_lock
+    from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
+
+    url = validate_url(url)
+    context = context or ExecutionContext()
+    with (
+        kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting),
+        context.begin(kb_dir),
+        collect_compile_report() as compilation,
+    ):
+        try:
+            with processing_scope(resolve_effective_config(kb_dir)[0]):
+                processing_checkpoint("acquiring")
+                result = _import_url(kb_dir, url, context=context, prepared_dir=prepared_dir)
+        except ProcessingIncomplete as exc:
+            result = DocumentResult(
+                url,
+                "unfinished",
+                (),
+                unfinished=(exc.stage,),
+                stage=exc.stage,
+                reason=exc.reason,
+            )
+    return replace(result, usage=compilation.usage)
+
+
+def _import_url(
+    kb_dir: Path,
+    url: str,
+    *,
+    context: ExecutionContext,
+    prepared_dir: Path | None,
+) -> DocumentResult:
+    from openkb.processing import processing_checkpoint
     from openkb.url_ingest import fetch_url_to_raw
 
     url = validate_url(url)
@@ -38,8 +74,8 @@ def import_url(
     context.check_stop()
     context.on_event({"stage": "acquiring"})
     quality: list[str] = []
-    # Only the complete downloaded version enters the KB lease/snapshot. No
-    # watcher can claim, delete or compile a half-written acquisition file.
+    # Acquisition remains private while retaining this document's execution
+    # lease and budget through compilation. No half-written file is published.
     with (
         tempfile.TemporaryDirectory(prefix="openkb-url-")
         if prepared_dir is None
@@ -64,11 +100,16 @@ def import_url(
                 raise ValueError("Prepared URL input is invalid; submit a new import explicitly")
             quality = saved["quality"]
         else:
+
+            def cancelled():
+                processing_checkpoint()
+                return context.cancelled()
+
             source = fetch_url_to_raw(
                 url,
                 root,
                 report=lambda *args, **kwargs: None,
-                cancelled=context.cancelled,
+                cancelled=cancelled,
                 on_quality=quality.append,
             )
             if source is not None:
@@ -84,8 +125,18 @@ def import_url(
                     },
                 )
         context.check_stop()
+        processing_checkpoint()
         if source is None:
-            return DocumentResult(url, "failed", (), tuple(quality), ("acquisition",))
+            return DocumentResult(
+                url,
+                "failed",
+                (),
+                tuple(quality),
+                ("acquisition",),
+                stage="acquiring",
+                reason="acquisition_failed",
+                knowledge_compilation="not_started",
+            )
         result = import_document(kb_dir, source, context=context, origin_url=url)
         return replace(
             result,

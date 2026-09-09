@@ -32,7 +32,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 # returning empty Responses output (BerriAI/litellm#25429) and
 # auto-injects GitHub Copilot IDE-auth headers.
 dependencies = [
-    "pageindex==0.3.0.dev3",
+    "pageindex==0.3.0.dev3+openkb.1",
     "markitdown[docx,pptx,xlsx,xls]==0.1.5",
     "trafilatura==2.0.0",
     "click==8.4.0",
@@ -56,6 +56,9 @@ dependencies = [
 Repository = "https://github.com/VectifyAI/OpenKB"
 Homepage = "https://github.com/VectifyAI/OpenKB"
 Issues = "https://github.com/VectifyAI/OpenKB/issues"
+
+[tool.uv.sources]
+pageindex = { path = "packaging/pageindex/pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl" }
 
 [project.scripts]
 openkb = "openkb.cli:cli"
@@ -90,7 +93,7 @@ exclude = ["/openkb/web"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
-    "/docs/desktop.md", "/docs/golden-principles.md",
+    "/docs/desktop.md", "/docs/golden-principles.md", "/docs/document-processing.md",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]

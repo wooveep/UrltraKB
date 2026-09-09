@@ -71,6 +71,11 @@ class ConfigSnapshot:
         for key, value in settings.items():
             if hasattr(litellm, key) and not callable(getattr(litellm, key)):
                 setattr(litellm, key, value)
+        from openkb.runtime.diagnostics import install_llm_diagnostics
+        from openkb.runtime.model_cancellation import install_model_cancellation
+
+        install_model_cancellation(litellm)
+        install_llm_diagnostics(litellm)
 
 
 _ACTIVE: ContextVar[ConfigSnapshot | None] = ContextVar("openkb_config_snapshot", default=None)

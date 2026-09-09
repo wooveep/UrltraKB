@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openkb.cancellation import check_cancelled
 from openkb.locks import DelegatedWriteLease, _fsync_directory, _target_mode, atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -423,6 +424,7 @@ def mutation_scope(
     snapshot = snapshot_paths(kb_dir, paths, operation=operation)
     try:
         yield snapshot
+        check_cancelled()
         snapshot.mark_committed()
     except BaseException:
         if snapshot.rollback_best_effort() is not None:

@@ -2007,7 +2007,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.15.0" },
     { name = "openai", specifier = "==2.44.0" },
     { name = "openai-agents", specifier = "==0.17.3" },
-    { name = "pageindex", specifier = "==0.3.0.dev3" },
+    { name = "pageindex", path = "packaging/pageindex/pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl" },
     { name = "portalocker", specifier = "==3.2.0" },
     { name = "prompt-toolkit", specifier = "==3.0.52" },
     { name = "pyside6-essentials", marker = "extra == 'desktop'", specifier = "==6.11.2" },
@@ -2049,8 +2049,8 @@ wheels = [
 
 [[package]]
 name = "pageindex"
-version = "0.3.0.dev3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.3.0.dev3+openkb.1"
+source = { path = "packaging/pageindex/pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
     { name = "litellm" },
@@ -2064,9 +2064,23 @@ dependencies = [
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/58/92b159e86e73af3a61aedea05e9390181d83e4a6c717e37845a7cf1eedd5/pageindex-0.3.0.dev3.tar.gz", hash = "sha256:93174bbfcd261c5e7d6c7d47f1be371ae21c1fe977ce706cf3c021f4932693bd", size = 76083, upload-time = "2026-07-10T07:00:30.522Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/29/34a2a1eaed83be5aeb879bf85bff7be9f6faa76fe70718479d6426ce21aa/pageindex-0.3.0.dev3-py3-none-any.whl", hash = "sha256:5056969108785f5c9c31e03ce60f5fa1043be96ecffb5a06353375212027b258", size = 81956, upload-time = "2026-07-10T07:00:29.163Z" },
+    { filename = "pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl", hash = "sha256:3465581664836914d5c37f93440549a59ab7cc148f9201129d2be1da366a8439" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
+    { name = "litellm", specifier = ">=1.83.0" },
+    { name = "openai", specifier = ">=1.70.0" },
+    { name = "openai-agents", specifier = ">=0.1.0" },
+    { name = "pydantic", specifier = ">=2.5.0,<3.0.0" },
+    { name = "pymupdf", specifier = ">=1.26.0" },
+    { name = "pypdf2", specifier = ">=3.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "requests", specifier = ">=2.28.0" },
+    { name = "typing-extensions", specifier = ">=4.9.0" },
 ]
 
 [[package]]

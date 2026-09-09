@@ -42,9 +42,7 @@ from openkb.api_helpers import (
     _parse_stream_form,
     _reserve_add_uploads,
     _resolve_kb,
-    _run_add_uploads,
     _save_query_answer,
-    _stream_add_uploads,
     _stream_chat,
     _stream_deck,
     _stream_query,
@@ -59,7 +57,6 @@ from openkb.api_kbs import _list_knowledge_bases
 from openkb.api_kbs_router import kbs_router
 from openkb.api_lint import run_lint_report
 from openkb.api_models import (
-    AddResponse,
     ChatRequest,
     ChatResponse,
     ChatSessionDeleteRequest,
@@ -140,6 +137,10 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from openkb.api_tasks import ImportTasks
+        from openkb.config import GLOBAL_CONFIG_DIR
+
+        app.state.import_tasks = ImportTasks(GLOBAL_CONFIG_DIR / "api/tasks")
         # Auth is opt-in (see require_bearer_token). Warn once at server startup
         # when no token is configured, so an exposed deployment is never
         # silently world-open. Fires for every launch path (uvicorn/gunicorn/
@@ -154,6 +155,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            await app.state.import_tasks.close()
             await asyncio.to_thread(registry.stop_all)
 
     app = FastAPI(title="OpenKB API", lifespan=lifespan)
@@ -169,6 +171,9 @@ def create_app() -> FastAPI:
     app.include_router(kbs_router)
     app.include_router(pages_router)
     app.include_router(documents_router)
+    from openkb.api_tasks import router as tasks_router
+
+    app.include_router(tasks_router)
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(
@@ -240,15 +245,16 @@ def create_app() -> FastAPI:
             message=str(result["message"]),
         )
 
-    @app.post("/api/v1/add", response_model=AddResponse)
+    @app.post("/api/v1/add")
     async def add_endpoint(
+        request: Request,
         kb: str = Form(...),
         stream: str = Form("true"),
+        task_id: str | None = Form(None),
         files: list[UploadFile] = File(default=[]),
         _: None = Depends(require_bearer_token),
     ) -> Any:
         resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, resolved_kb_dir)
         if not files:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -258,15 +264,17 @@ def create_app() -> FastAPI:
         # together under the shared KB lease by the application adapter.
         reserved = await run_in_threadpool(_reserve_add_uploads, resolved_kb_dir, files)
         saved_uploads = await _write_add_uploads(reserved, files)
+        service = request.app.state.import_tasks
+        try:
+            accepted = await service.accept(resolved_kb_dir, saved_uploads, task_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         if _parse_stream_form(stream):
-            from openkb.api_uploads import UploadStreamingResponse
-
-            return UploadStreamingResponse(
-                _stream_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle),
-                uploads=saved_uploads,
+            return StreamingResponse(
+                service.events(kb, accepted),
                 media_type="text/event-stream",
             )
-        return await _run_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle)
+        return await service.result(kb, accepted)
 
     @app.post("/api/v1/query", response_model=QueryResponse)
     async def query_endpoint(

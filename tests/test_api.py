@@ -496,231 +496,90 @@ def test_add_endpoint_rejects_oversized_aggregate_request(monkeypatch, kb_dir):
     assert not (kb_dir / "raw" / "two.md").exists()
 
 
-def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-
-    from openkb.application.documents import AddFileResult
-
-    calls = []
-
-    def fake_add(path, target_kb, **kwargs):
-        calls.append((path, target_kb))
-        return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
-
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
-
-    response = client.post(
+def _post_document(client, kb, name="paper.md", content=b"# Paper", stream="false"):
+    return client.post(
         "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[("files", ("paper.md", b"# Paper", "text/markdown"))],
+        data={"kb": kb, "stream": stream},
+        files=[("files", (name, content, "text/markdown"))],
         headers=_auth(),
     )
 
-    assert response.status_code == 200
-    saved_path = kb_dir / "raw" / "paper.md"
-    assert saved_path.read_bytes() == b"# Paper"
-    assert calls == [(saved_path, kb_dir)]
-    assert response.json()["files"][0] == {
-        "original_name": "paper.md",
-        "saved_path": str(saved_path),
-        "status": "added",
-        "message": "paper.md added to knowledge base.",
-    }
-    assert response.json()["added_count"] == 1
 
-
-def test_add_endpoint_runs_real_add_helper_outside_event_loop(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
+def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
     kb = _use_named_kb(monkeypatch, kb_dir)
-
-    from openkb.converter import ConvertResult
-
-    def fake_convert(path, target_kb, *, staging_dir=None):
-        assert target_kb == kb_dir
-        return ConvertResult(
-            raw_path=path,
-            source_path=target_kb / "wiki" / "sources" / path.name,
-            is_long_doc=False,
-            file_hash="abc123",
-        )
-
-    async def fake_compile_short_doc(doc_name, source_path, target_kb, model, **kwargs):
-        assert doc_name == "paper"
-        assert target_kb == kb_dir
-
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.application.documents.convert_document", fake_convert)
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fake_compile_short_doc)
-
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[("files", ("paper.md", b"# Paper", "text/markdown"))],
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
+    with _client(monkeypatch) as client:
+        response = _post_document(client, kb)
+    assert response.status_code == 200, response.text
     payload = response.json()
+    assert (kb_dir / "raw/paper.md").read_bytes() == b"# Paper"
+    assert payload["files"][0]["original_name"] == "paper.md"
+    assert payload["files"][0]["saved_path"] == str(kb_dir / "raw/paper.md")
     assert payload["added_count"] == 1
-    assert payload["files"][0]["status"] == "added"
-    assert payload["files"][0]["saved_path"] == str(kb_dir / "raw" / "paper.md")
+    assert payload["processes_reaped"]
+    assert payload["files"][0]["document"]["knowledge_compilation"] == "completed"
 
 
-def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
+def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
     kb = _use_named_kb(monkeypatch, kb_dir)
-
-    from openkb.application.documents import AddFileResult
-
-    calls = []
-
-    def fake_add(path, target_kb, **kwargs):
-        calls.append((path, target_kb))
-        if path.name == "notes.txt":
-            return AddFileResult(
-                path.name,
-                None,
-                "skipped",
-                "Already in knowledge base: notes.txt",
-            )
-        return AddFileResult(
-            path.name,
-            str(path),
-            "added",
-            f"{path.name} added to knowledge base.",
+    with _client(monkeypatch) as client:
+        assert _post_document(client, kb, "notes.md", b"# Notes").status_code == 200
+        response = client.post(
+            "/api/v1/add",
+            data={"kb": kb, "stream": "false"},
+            files=[
+                ("files", ("paper.md", b"# Paper", "text/markdown")),
+                ("files", ("notes.md", b"# Notes", "text/markdown")),
+            ],
+            headers=_auth(),
         )
-
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
-
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[
-            ("files", ("paper.md", b"# Paper", "text/markdown")),
-            ("files", ("notes.txt", b"Notes", "text/plain")),
-        ],
-        headers=_auth(),
-    )
-
-    paper_path = kb_dir / "raw" / "paper.md"
-    notes_path = kb_dir / "raw" / "notes.txt"
-    assert response.status_code == 200
-    assert paper_path.read_bytes() == b"# Paper"
-    assert not notes_path.exists()
-    assert calls == [(paper_path, kb_dir), (notes_path, kb_dir)]
-    assert response.json() == {
-        "kb": kb,
-        "files": [
-            {
-                "original_name": "paper.md",
-                "saved_path": str(paper_path),
-                "status": "added",
-                "message": "paper.md added to knowledge base.",
-            },
-            {
-                "original_name": "notes.txt",
-                "saved_path": None,
-                "status": "skipped",
-                "message": "Already in knowledge base: notes.txt",
-            },
-        ],
-        "added_count": 1,
-        "skipped_count": 1,
-        "failed_count": 0,
-    }
-
-
-def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / "raw" / "paper.md").write_text("existing", encoding="utf-8")
-
-    from openkb.application.documents import AddFileResult
-
-    def fake_add(path, target_kb, **kwargs):
-        return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
-
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
-
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[("files", ("paper.md", b"# New", "text/markdown"))],
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
-    assert (kb_dir / "raw" / "paper.md").read_text(encoding="utf-8") == "existing"
-    assert (kb_dir / "raw" / "paper-1.md").read_bytes() == b"# New"
-    assert response.json()["files"][0]["original_name"] == "paper.md"
-    assert response.json()["files"][0]["saved_path"] == str(kb_dir / "raw" / "paper-1.md")
-
-
-def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-
-    from openkb.application.documents import AddFileResult
-
-    skipped_path = None
-
-    def fake_add(path, target_kb, **kwargs):
-        nonlocal skipped_path
-        skipped_path = path
-        return AddFileResult(path.name, None, "skipped", "Already in knowledge base: paper.md")
-
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
-
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[("files", ("paper.md", b"# Paper", "text/markdown"))],
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
-    assert skipped_path == kb_dir / "raw" / "paper.md"
-    assert not skipped_path.exists()
-    assert response.json()["files"][0] == {
-        "original_name": "paper.md",
-        "saved_path": None,
-        "status": "skipped",
-        "message": "Already in knowledge base: paper.md",
-    }
+    assert response.status_code == 200, response.text
+    assert response.json()["added_count"] == 1
     assert response.json()["skipped_count"] == 1
+    assert response.json()["failed_count"] == 0
+    assert len(model_service) == 4
+    assert len(list((kb_dir / "raw").iterdir())) == 2
 
 
-def test_add_endpoint_streams_events(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
+def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
     kb = _use_named_kb(monkeypatch, kb_dir)
+    (kb_dir / "raw/paper.md").write_text("existing")
+    with _client(monkeypatch) as client:
+        response = _post_document(client, kb, content=b"# New")
+    assert response.status_code == 200, response.text
+    assert (kb_dir / "raw/paper.md").read_text() == "existing"
+    saved = Path(response.json()["files"][0]["saved_path"])
+    assert saved.read_bytes() == b"# New"
+    assert response.json()["files"][0]["original_name"] == "paper.md"
 
-    from openkb.application.documents import AddFileResult
 
-    def fake_add(path, target_kb, **kwargs):
-        return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
+def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    with _client(monkeypatch) as client:
+        assert _post_document(client, kb).status_code == 200
+        response = _post_document(client, kb)
+        assert response.status_code == 200
+        assert response.json()["skipped_count"] == 1
+        assert len(model_service) == 2
+    assert len(list((kb_dir / "raw").iterdir())) == 1
+    source = response.json()["files"][0]["document"]["source"]
+    assert not Path(source).exists()
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
 
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "true"},
-        files=[("files", ("paper.md", b"# Paper", "text/markdown"))],
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
+def test_add_endpoint_streams_events(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    with _client(monkeypatch) as client:
+        response = _post_document(client, kb, stream="true")
+    assert response.status_code == 200, response.text
     events = _events_from_sse(response.text)
-    assert [event["event"] for event in events] == [
-        "start",
-        "uploaded",
-        "file_start",
-        "file_done",
-        "final",
-        "done",
-    ]
-    assert events[0]["data"]["kb"] == kb
+    assert events[0]["event"] == "start"
+    assert events[-2]["event"] == "result"
+    assert events[-1]["event"] == "done"
+    assert events[0]["data"]["task_id"] == events[-2]["data"]["task_id"]
     assert events[-2]["data"]["added_count"] == 1
 
 

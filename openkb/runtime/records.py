@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from openkb.application.documents import DocumentResult
 from openkb.application.pages import Page
 from openkb.locks import atomic_write_json
 from openkb.runtime.requests import UnitRequest
@@ -32,9 +33,18 @@ class UnitResult:
     page: Page | None = field(default=None, repr=False)
     changes: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    document: DocumentResult | None = None
+    warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.status not in {"completed", "skipped", "failed", "stopped", "blocked"}:
+        if self.status not in {
+            "completed",
+            "skipped",
+            "failed",
+            "stopped",
+            "blocked",
+            "unfinished",
+        }:
             raise ValueError("Invalid unit status")
         if self.output_state not in {"none", "available", "unavailable"}:
             raise ValueError("Invalid output availability")
@@ -44,7 +54,7 @@ class UnitResult:
             raise ValueError("Invalid resource references")
         if not isinstance(self.quality, tuple) or not all(isinstance(p, str) for p in self.quality):
             raise ValueError("Invalid quality notes")
-        for values in (self.changes, self.unfinished):
+        for values in (self.changes, self.unfinished, self.warnings):
             if not isinstance(values, tuple) or not all(isinstance(p, str) for p in values):
                 raise ValueError("Invalid result facts")
         if type(self.turn_count) is not int or self.turn_count < 0 or type(self.halt) is not bool:
@@ -69,7 +79,10 @@ class UnitResult:
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> UnitResult:
-        if any(not isinstance(value.get(key, []), list) for key in ("changes", "unfinished")):
+        if any(
+            not isinstance(value.get(key, []), list)
+            for key in ("changes", "unfinished", "warnings")
+        ):
             raise ValueError("Invalid result facts")
         if not isinstance(value.get("resources", []), list) or not isinstance(
             value.get("quality", []), list
@@ -87,6 +100,10 @@ class UnitResult:
             revision=value.get("revision"),
             changes=tuple(value.get("changes", ())),
             unfinished=tuple(value.get("unfinished", ())),
+            warnings=tuple(value.get("warnings", ())),
+            document=DocumentResult.from_summary(value["document"])
+            if value.get("document")
+            else None,
         )
 
 
@@ -106,6 +123,8 @@ class TaskView:
     text: str = field(default="", repr=False)
     text_truncated: bool = False
     retry_of: str | None = None
+    diagnostics: str = field(default="", repr=False)
+    last_activity_at: str | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):
@@ -125,6 +144,10 @@ class TaskView:
             raise ValueError("Invalid task flags")
         if any(v is not None and not isinstance(v, str) for v in (self.started_at, self.error)):
             raise ValueError("Invalid task details")
+        if not isinstance(self.diagnostics, str) or (
+            self.last_activity_at is not None and not isinstance(self.last_activity_at, str)
+        ):
+            raise ValueError("Invalid task diagnostics")
 
     @property
     def succeeded(self) -> int:
@@ -145,6 +168,7 @@ class TaskView:
     def summary(self) -> dict[str, Any]:
         value = asdict(self)
         value.pop("text")
+        value.pop("diagnostics")
         value["results"] = [result.summary() for result in self.results]
         return value
 

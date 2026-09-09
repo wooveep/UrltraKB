@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 
+from openkb.cancellation import OperationCancelled, check_cancelled
 from openkb.locks import kb_ingest_lock_held
 from openkb.mutation import MutationSnapshot, RecoveryRequired, mark_needs_repair, snapshot_paths
 
@@ -102,6 +103,7 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
             hardlink_dirs=plan.hardlink_dirs,
         )
         plan.body(snapshot)
+        check_cancelled()
         snapshot.mark_committed()
     except Exception as exc:
         dirty_journal = _rollback_snapshot(plan, snapshot)
@@ -115,12 +117,14 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
         click.echo(f"  [ERROR] {plan.operation} failed{_failure_target(plan.details)}: {exc}")
         logger.debug("%s mutation failed:", plan.operation, exc_info=True)
         return False
-    except BaseException:
+    except BaseException as exc:
         # Interrupt (KeyboardInterrupt / SystemExit): best-effort rollback for
         # its side-effects only. Do NOT raise DirtyRollbackError — propagate the
         # interrupt so the user's abort is honored. Any retained journal or
         # orphaned staging is recovered next run by the drain + reaper.
-        _rollback_snapshot(plan, snapshot)
+        dirty_journal = _rollback_snapshot(plan, snapshot)
+        if isinstance(exc, OperationCancelled) and dirty_journal is not None:
+            raise DirtyRollbackError(plan.operation, dirty_journal) from exc
         raise
     finally:
         _cleanup_staging_dirs(plan.staging_dirs)
@@ -129,9 +133,15 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
         try:
             hook()
         except Exception as exc:
+            from openkb.compilation_report import report_auxiliary_warning
+
+            report_auxiliary_warning("post_commit_hook_failed")
             logger.warning("Post-commit hook failed for %s: %s", plan.operation, exc)
 
     cleanup_error = snapshot.discard_best_effort()
     if cleanup_error is not None:
+        from openkb.compilation_report import report_auxiliary_warning
+
+        report_auxiliary_warning("journal_cleanup_failed")
         click.echo(f"  [WARN] mutation journal cleanup failed: {cleanup_error}")
     return True

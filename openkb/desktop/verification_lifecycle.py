@@ -147,7 +147,7 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
 
                 def inspect_details():
                     dialog = QApplication.activeModalWidget()
-                    text = dialog.findChild(QPlainTextEdit).toPlainText()
+                    text = dialog.findChild(QPlainTextEdit, "task-status").toPlainText()
                     observed.append(task_id in text and "阶段：" in text)
                     dialog.accept()
 

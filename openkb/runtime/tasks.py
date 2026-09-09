@@ -18,6 +18,7 @@ from typing import Any, Sequence
 
 from openkb.config_state import ConfigSnapshot
 from openkb.locks import atomic_write_json
+from openkb.processing import ProcessingIncomplete, RequestLimits
 from openkb.runtime.input_store import InputStore
 from openkb.runtime.records import TERMINAL, TaskView, UnitIdentity, UnitResult, read_receipt
 from openkb.runtime.requests import REQUEST_TYPES, RecompileDocument, UnitRequest
@@ -32,6 +33,8 @@ class _Task:
     snapshot: ConfigSnapshot | None = field(default=None, repr=False)
     ready_at: float = 0.0
     wait_delay: float = 0.25
+    progress_saved_at: float = 0.0
+    input_binding: str | None = None
 
 
 @dataclass
@@ -48,6 +51,14 @@ class _Attempt:
     eof: bool = False
     last_sequence: int = 0
     terminal_sequence: int | None = None
+    limits: RequestLimits | None = None
+    started: float = field(default_factory=time.monotonic)
+    stage_started: float = field(default_factory=time.monotonic)
+    stopping_at: float | None = None
+    terminated_at: float | None = None
+    recovery: bool = False
+    recovered: bool = False
+    budget_expired: bool = False
 
 
 class TaskManager:
@@ -99,7 +110,9 @@ class TaskManager:
                         stage="results-confirmed",
                         error="Business results confirmed; previous process cleanup is unverified",
                     )
-                self._tasks[view.id] = _Task(view, identities=identities)
+                self._tasks[view.id] = _Task(
+                    view, identities=identities, input_binding=saved.get("input_binding")
+                )
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
                 # Keep damaged evidence on disk; it must not become executable.
                 continue
@@ -107,7 +120,11 @@ class TaskManager:
     def _persist(self, task: _Task) -> None:
         atomic_write_json(
             self.history_dir / f"{task.view.id}.json",
-            {"view": task.view.summary(), "identities": [asdict(i) for i in task.identities]},
+            {
+                "view": task.view.summary(),
+                "identities": [asdict(i) for i in task.identities],
+                "input_binding": task.input_binding,
+            },
         )
 
     def _update(self, task: _Task, *, persist: bool = True, **values: Any) -> None:
@@ -124,7 +141,13 @@ class TaskManager:
         self._condition.notify_all()
 
     def submit(
-        self, kb_dir: Path, requests: Sequence[UnitRequest], *, retry_of: str | None = None
+        self,
+        kb_dir: Path,
+        requests: Sequence[UnitRequest],
+        *,
+        retry_of: str | None = None,
+        task_id: str | None = None,
+        input_binding: str | None = None,
     ) -> str:
         from openkb.lifecycle import current_generation
 
@@ -138,7 +161,16 @@ class TaskManager:
         with self._condition:
             if not self._accepting:
                 raise RuntimeError("Application is no longer accepting work")
-            task_id = uuid.uuid4().hex
+            task_id = task_id or uuid.uuid4().hex
+            if task_id in self._tasks:
+                previous = self._tasks[task_id]
+                if (
+                    input_binding is None
+                    or previous.input_binding != input_binding
+                    or previous.view.kb_dir != str(root)
+                ):
+                    raise ValueError("Task identifier is already bound to different input")
+                return task_id
             view = TaskView(
                 task_id,
                 str(root),
@@ -158,6 +190,7 @@ class TaskManager:
                     UnitIdentity.create(task_id, i, str(root), r, generation=generation)
                     for i, r in enumerate(units)
                 ),
+                input_binding=input_binding,
             )
             self._persist(task)  # A failed initial record means nothing was accepted.
             self._tasks[task_id] = task
@@ -212,6 +245,11 @@ class TaskManager:
                     receipts.unlink()
                 elif receipts.exists():
                     shutil.rmtree(receipts)
+                logs = self.history_dir / "logs" / task_id
+                if logs.is_symlink():
+                    logs.unlink()
+                elif logs.exists():
+                    shutil.rmtree(logs)
                 # Keep the summary if deleting receipts fails. After a crash,
                 # missing receipts prevent retry; summaries never replay work.
                 (self.history_dir / f"{task_id}.json").unlink(missing_ok=True)
@@ -326,12 +364,17 @@ class TaskManager:
         self._update(task, state="running", stage="preparing", processes_reaped=False)
 
     def _control(self, task: _Task, attempt: _Attempt) -> None:
-        if task.view.stop_requested and not attempt.stop_sent:
+        if (
+            (task.view.stop_requested or attempt.budget_expired)
+            and not attempt.stop_sent
+            and not attempt.recovery
+        ):
             try:
-                attempt.control.send("stop")
+                attempt.control.send("stop" if task.view.stop_requested else "budget")
             except (OSError, EOFError):
                 pass
             attempt.stop_sent = True
+            attempt.stopping_at = time.monotonic()
             self._update(task, state="stopping", stage="stopping")
         if attempt.eof:
             return
@@ -353,6 +396,12 @@ class TaskManager:
                     attempt.eof = True
                     continue
                 task.snapshot = snapshot
+                if task.view.operation in {"ImportFile", "ImportUrl", "RecompileDocument"}:
+                    try:
+                        attempt.limits = RequestLimits.from_config(snapshot.values()["effective"])
+                    except ProcessingIncomplete:
+                        pass  # The execution returns a structured configuration outcome.
+                attempt.started = attempt.stage_started = time.monotonic()
                 self._update(
                     task, started_at=task.view.started_at or datetime.now(timezone.utc).isoformat()
                 )
@@ -369,6 +418,8 @@ class TaskManager:
                 attempt.unconfirmed = kind == "unconfirmed"
                 if message.get("truncated"):
                     self._update(task, persist=False, text_truncated=True)
+            elif kind == "recovered":
+                attempt.recovered = True
 
     def _progress(self, task: _Task, attempt: _Attempt) -> None:
         for _ in range(128):
@@ -382,12 +433,32 @@ class TaskManager:
             attempt.last_sequence = event["sequence"]
             data = event["data"]
             stage = data.get("stage", task.view.stage)
+            if stage != task.view.stage:
+                attempt.stage_started = time.monotonic()
             text = task.view.text
+            diagnostics = task.view.diagnostics
+            last_activity = task.view.last_activity_at
+            if data.get("event") == "diagnostic":
+                diagnostics = (diagnostics + data["text"] + "\n")[-100_000:]
+                if data.get("activity", True):
+                    last_activity = data["at"]
             if data.get("event") == "delta":
                 text += data["data"]["text"]
                 if len(text) > 1_000_000:
                     text, truncated = text[-1_000_000:], True
-            self._update(task, persist=False, stage=stage, text=text, text_truncated=truncated)
+            now = time.monotonic()
+            persist = stage != task.view.stage or now - task.progress_saved_at >= 1
+            self._update(
+                task,
+                persist=persist,
+                stage=stage,
+                text=text,
+                text_truncated=truncated,
+                diagnostics=diagnostics,
+                last_activity_at=last_activity,
+            )
+            if persist:
+                task.progress_saved_at = now
 
     def _finish(self, task: _Task, attempt: _Attempt) -> None:
         attempt.process.join()
@@ -397,6 +468,22 @@ class TaskManager:
         attempt.events.join_thread()
         attempt.process.close()
         del self._active[task.view.id]
+        if attempt.recovery and not attempt.recovered:
+            receipt = read_receipt(self.receipt_dir, attempt.identity)
+            if receipt is not None:
+                self._update(task, results=(*task.view.results, receipt))
+            self._update(
+                task,
+                processes_reaped=True,
+                state="blocked",
+                stage="repair-required",
+                error="Execution exited; recovery requires attention",
+            )
+            self._discard_inputs(task.view.id)
+            return
+        if not attempt.recovery and (attempt.terminated_at is not None or exitcode != 0):
+            self._start_recovery(task, attempt)
+            return
         self._update(task, processes_reaped=True)
         if attempt.deferred and exitcode == 0:
             if task.view.stop_requested:
@@ -426,6 +513,8 @@ class TaskManager:
         result = receipt
         if attempt.result is not None and attempt.result.summary() == receipt.summary():
             result = attempt.result
+        if attempt.recovery:
+            result = replace(result, warnings=(*result.warnings, "worker_termination_recovered"))
         current = task.requests[len(task.view.results)]
         if isinstance(current, RecompileDocument) and result.revision and not result.halt:
             # Only a durable receipt advances this batch's confirmed state.
@@ -469,8 +558,13 @@ class TaskManager:
             )
         elif len(results) == task.view.total:
             failed = any(row.status == "failed" for row in results)
+            unfinished = any(row.status == "unfinished" for row in results)
             state = (
-                "partial" if failed and task.view.succeeded else "failed" if failed else "completed"
+                "partial"
+                if unfinished or (failed and task.view.succeeded)
+                else "failed"
+                if failed
+                else "completed"
             )
             if result.status == "stopped":
                 state = "stopped"
@@ -482,6 +576,63 @@ class TaskManager:
             self._update(task, state="queued", stage="queued", text="")
             self._pending.append(task.view.id)
 
+    def _supervise(self, task: _Task, attempt: _Attempt) -> None:
+        if not attempt.process.is_alive():
+            return
+        now = time.monotonic()
+        limits = attempt.limits
+        if limits and not attempt.recovery and not task.view.stop_requested:
+            if (
+                now - attempt.started >= limits.document_timeout
+                or now - attempt.stage_started >= limits.stage_timeout
+            ):
+                attempt.budget_expired = True
+        if attempt.result is not None and attempt.stopping_at is None:
+            # A receipt fixes the business result. Remaining process teardown
+            # has its own deadline and cannot wait for the document deadline.
+            attempt.stopping_at = now
+        # Before configuration has been acknowledged there are no model calls
+        # or official writes. This bounded grace only governs process shutdown.
+        grace = limits.cleanup_timeout if limits else 5.0
+        if attempt.recovery and now - attempt.started >= grace:
+            attempt.stopping_at = attempt.stopping_at or now - grace
+        if attempt.stopping_at is not None and now - attempt.stopping_at >= grace:
+            if attempt.terminated_at is None:
+                attempt.process.terminate()
+                attempt.terminated_at = now
+            elif now - attempt.terminated_at >= grace and attempt.process.is_alive():
+                attempt.process.kill()
+
+    def _start_recovery(self, task: _Task, previous: _Attempt) -> None:
+        from openkb.runtime.recovery import recover_worker
+
+        parent, child = self._context.Pipe()
+        events = self._context.Queue(maxsize=1)
+        timeout = previous.limits.cleanup_timeout if previous.limits else 5.0
+        process = self._context.Process(
+            target=recover_worker,
+            args=(previous.identity, child, timeout),
+            name=f"openkb-recovery-{task.view.id[:8]}",
+        )
+        try:
+            process.start()
+        except Exception:
+            parent.close()
+            events.close()
+            self._update(task, state="blocked", stage="repair-required", processes_reaped=True)
+            return
+        finally:
+            child.close()
+        self._active[task.view.id] = _Attempt(
+            process,
+            parent,
+            events,
+            previous.identity,
+            limits=previous.limits,
+            recovery=True,
+        )
+        self._update(task, state="stopping", stage="recovering", processes_reaped=False)
+
     def _run(self) -> None:
         with self._condition:
             while True:
@@ -489,6 +640,7 @@ class TaskManager:
                     task = self._tasks[task_id]
                     self._control(task, attempt)
                     self._progress(task, attempt)
+                    self._supervise(task, attempt)
                     if not attempt.process.is_alive():
                         self._control(task, attempt)
                         self._progress(task, attempt)

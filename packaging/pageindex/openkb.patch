@@ -1,0 +1,419 @@
+--- a/pageindex/backend/local.py
++++ b/pageindex/backend/local.py
+@@ -148,12 +148,12 @@
+             if existing_id:
+                 return existing_id
+             raise
+-        except Exception as e:
++        except BaseException as e:
+             managed_path.unlink(missing_ok=True)
+             doc_dir = col_dir / doc_id
+             if doc_dir.exists():
+                 shutil.rmtree(doc_dir)
+-            raise IndexingError(f"Failed to index {file_path}: {e}") from e
++            raise
+ 
+         return doc_id
+ 
+--- a/pageindex/client.py
++++ b/pageindex/client.py
+@@ -96,7 +96,7 @@
+         else:
+             opt = IndexConfig(**overrides) if overrides else IndexConfig()
+ 
+-        self._validate_llm_provider(opt.model)
++        self._validate_llm_provider(opt.model, opt.llm_params.get("api_key"))
+ 
+         storage_path = Path(storage_path or ".pageindex").resolve()
+         storage_path.mkdir(parents=True, exist_ok=True)
+@@ -113,7 +113,7 @@
+         )
+ 
+     @staticmethod
+-    def _validate_llm_provider(model: str) -> None:
++    def _validate_llm_provider(model: str, api_key: str | None = None) -> None:
+         """Validate the model string and require an API key for providers that
+         need one. Local / keyless providers (ollama, lm_studio, …) are skipped so
+         a keyless LiteLLM model isn't rejected at construction time."""
+@@ -138,7 +138,7 @@
+         if provider in keyless:
+             return
+ 
+-        key = litellm.get_api_key(llm_provider=provider, dynamic_api_key=None)
++        key = litellm.get_api_key(llm_provider=provider, dynamic_api_key=api_key)
+         if not key:
+             import os
+             common_var = f"{provider.upper()}_API_KEY"
+--- /dev/null
++++ b/pageindex/execution.py
+@@ -0,0 +1,39 @@
++"""Caller-owned request execution for the OpenKB-maintained distribution."""
++
++from contextlib import contextmanager
++from contextvars import ContextVar
++
++import litellm
++
++_HOOKS = ContextVar("pageindex_execution", default=None)
++
++
++@contextmanager
++def execution_scope(sync, asynchronous, checkpoint=lambda: None, close=None):
++    token = _HOOKS.set((sync, asynchronous, checkpoint, close))
++    try:
++        yield
++    finally:
++        _HOOKS.reset(token)
++
++
++def checkpoint():
++    hooks = _HOOKS.get()
++    if hooks:
++        hooks[2]()
++
++
++def completion(**kwargs):
++    hooks = _HOOKS.get()
++    return hooks[0](**kwargs) if hooks else litellm.completion(**kwargs)
++
++
++async def acompletion(**kwargs):
++    hooks = _HOOKS.get()
++    return await (hooks[1](**kwargs) if hooks else litellm.acompletion(**kwargs))
++
++
++async def close():
++    hooks = _HOOKS.get()
++    if hooks and hooks[3]:
++        await hooks[3]()
+--- a/pageindex/index/page_index.py
++++ b/pageindex/index/page_index.py
+@@ -98,6 +98,8 @@
+ 
+     results = await asyncio.gather(*tasks, return_exceptions=True)
+     for item, result in zip(valid_items, results):
++        if isinstance(result, BaseException):
++            raise result
+         if isinstance(result, Exception):
+             if logger:
+                 logger.error(f"Error checking start for {item['title']}: {result}")
+@@ -841,6 +843,8 @@
+     ]
+     results = await asyncio.gather(*tasks, return_exceptions=True)
+     for item, result in zip(incorrect_results, results):
++        if isinstance(result, BaseException):
++            raise result
+         if isinstance(result, Exception):
+             print(f"Processing item {item} generated an exception: {result}")
+             continue
+@@ -940,6 +944,8 @@
+     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+     results = []
+     for item, result in zip(indexed_sample_list, raw_results):
++        if isinstance(result, BaseException):
++            raise result
+         if isinstance(result, Exception):
+             results.append({'list_index': item.get('list_index'), 'answer': 'no',
+                             'title': item.get('title'), 'page_number': item.get('physical_index')})
+@@ -971,11 +977,11 @@
+     print(f'start_index: {start_index}')
+     
+     if mode == 'process_toc_with_page_numbers':
+-        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
++        toc_with_page_number = await asyncio.to_thread(process_toc_with_page_numbers, toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
+     elif mode == 'process_toc_no_page_numbers':
+-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
++        toc_with_page_number = await asyncio.to_thread(process_toc_no_page_numbers, toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+     else:
+-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
++        toc_with_page_number = await asyncio.to_thread(process_no_toc, page_list, start_index=start_index, model=opt.model, logger=logger)
+             
+     toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
+     
+@@ -1037,13 +1043,15 @@
+         # current boundaries instead.
+         results = await asyncio.gather(*tasks, return_exceptions=True)
+         for child_node, result in zip(node['nodes'], results):
++            if isinstance(result, BaseException):
++                raise result
+             if isinstance(result, Exception) and logger:
+                 logger.error(f"Failed to expand node '{child_node.get('title')}': {result}")
+ 
+     return node
+ 
+ async def tree_parser(page_list, opt, doc=None, logger=None):
+-    check_toc_result = check_toc(page_list, opt)
++    check_toc_result = await asyncio.to_thread(check_toc, page_list, opt)
+     logger.info(check_toc_result)
+ 
+     if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "yes":
+@@ -1078,6 +1086,8 @@
+     # must not abort indexing the whole document.
+     results = await asyncio.gather(*tasks, return_exceptions=True)
+     for node, result in zip(toc_tree, results):
++        if isinstance(result, BaseException):
++            raise result
+         if isinstance(result, Exception) and logger:
+             logger.error(f"Failed to expand node '{node.get('title')}': {result}")
+ 
+--- a/pageindex/index/pipeline.py
++++ b/pageindex/index/pipeline.py
+@@ -70,8 +70,21 @@
+ 
+ 
+ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
++    return _run_async(_owned_build_index(parsed, model, opt))
++
++
++async def _owned_build_index(parsed, model, opt):
++    from ..execution import close
++    try:
++        return await _build_index(parsed, model, opt)
++    finally:
++        await close()
++
++
++async def _build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
+     """Main entry point: ParsedDocument -> tree structure dict.
+     Routes to the appropriate strategy and runs enhancement."""
++    import asyncio
+     from .utils import (write_node_id, add_node_text, remove_structure_text,
+                         generate_summaries_for_structure, generate_doc_description,
+                         create_clean_structure_for_description)
+@@ -94,7 +107,7 @@
+         else:
+             # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
+             page_list = [(n.content, n.tokens) for n in nodes]
+-            structure = _run_async(_content_based_pipeline(page_list, opt))
++            structure = await _content_based_pipeline(page_list, opt)
+ 
+         # Unified enhancement
+         if opt.if_add_node_id:
+@@ -105,7 +118,7 @@
+                 add_node_text(structure, page_list)
+ 
+         if opt.if_add_node_summary:
+-            _run_async(generate_summaries_for_structure(structure, model=opt.model))
++            await generate_summaries_for_structure(structure, model=opt.model)
+ 
+         result = {
+             "doc_name": parsed.doc_name,
+@@ -114,8 +127,8 @@
+ 
+         if opt.if_add_doc_description:
+             clean_structure = create_clean_structure_for_description(structure)
+-            result["doc_description"] = generate_doc_description(
+-                clean_structure, model=opt.model
++            result["doc_description"] = await asyncio.to_thread(
++                generate_doc_description, clean_structure, model=opt.model
+             )
+ 
+         # 'text' is populated for level_based (Markdown, always) or for
+--- a/pageindex/index/utils.py
++++ b/pageindex/index/utils.py
+@@ -1,4 +1,5 @@
+ import litellm
++from .. import execution as _execution
+ import logging
+ import os
+ import textwrap
+@@ -89,6 +90,7 @@
+     # thread and there's no window for a background acquire to succeed after
+     # we've already given up on it.
+     while not ceiling_sem.acquire(False):
++        _execution.checkpoint()
+         await asyncio.sleep(0.05)
+     # Only set once the permit is actually held, so a cancellation while polling
+     # for it doesn't make the finally release a permit we never acquired (which
+@@ -101,6 +103,7 @@
+             candidate = _max_concurrency_scope_semaphore()
+             if candidate is not None:
+                 while not candidate.acquire(False):
++                    _execution.checkpoint()
+                     await asyncio.sleep(0.05)
+                 scoped_sem = candidate
+         yield
+@@ -112,134 +115,59 @@
+ 
+ @contextmanager
+ def _sync_llm_semaphore():
+-    """Synchronous companion to ``_llm_semaphore`` for ``llm_completion``.
+-
+-    It uses the same process-wide ceiling so sync and async LLM calls share one
+-    real cap. A scoped override can only narrow that cap for the active context.
+-
+-    A *blocking* ceiling acquire is only safe OFF the event-loop thread. Several
+-    sync LLM helpers (``check_toc`` → ``toc_detector_single_page``,
+-    ``process_no_toc`` → ``generate_toc_init``, ``toc_transformer``, …) are
+-    called synchronously from inside async coroutines (``meta_processor`` →
+-    ``process_large_node_recursively``), i.e. ON the running loop. There, the
+-    async ``_llm_semaphore`` holders own the ceiling permits and can only
+-    release them by resuming on that same loop — so a blocking acquire here
+-    would freeze the loop and *deadlock*: the permit it waits for can never be
+-    freed. When we detect a running loop we therefore take a slot only if one is
+-    immediately free (non-blocking) and otherwise proceed without it. That's
+-    safe: a sync call monopolizes the loop thread while it runs, so it's already
+-    serialized on this loop and can't multiply the in-flight count beyond one
+-    extra per loop.
+-    """
++    # Synchronous callers must run outside an event loop. Never bypass a permit.
+     try:
+         asyncio.get_running_loop()
+-        on_event_loop = True
+     except RuntimeError:
+-        on_event_loop = False
+-
+-    ceiling_sem = _process_ceiling_semaphore()
+-    # Blocking acquire() (off-loop) always returns True; acquire(False) (on-loop)
+-    # may return False, meaning "no free permit — proceed without one" rather
+-    # than block the loop into a deadlock.
+-    held_ceiling = ceiling_sem.acquire(False) if on_event_loop else ceiling_sem.acquire()
+-    # Only track a permit we actually hold (mirrors _llm_semaphore): guards
+-    # against releasing one we never acquired.
+-    scoped_sem = None
++        pass
++    else:
++        raise RuntimeError("Run synchronous PageIndex work outside the event loop")
++    ceiling = _process_ceiling_semaphore()
++    while not ceiling.acquire(timeout=0.05):
++        _execution.checkpoint()
++    scoped = None
+     try:
+-        effective = get_max_concurrency()
+-        ceiling = _process_wide_max_concurrency()
+-        if effective < ceiling:
++        if get_max_concurrency() < _process_wide_max_concurrency():
+             candidate = _max_concurrency_scope_semaphore()
+             if candidate is not None:
+-                # Same rule for the scoped cap: never block the loop for it.
+-                if on_event_loop:
+-                    if candidate.acquire(False):
+-                        scoped_sem = candidate
+-                else:
+-                    candidate.acquire()
+-                    scoped_sem = candidate
++                while not candidate.acquire(timeout=0.05):
++                    _execution.checkpoint()
++                scoped = candidate
++        _execution.checkpoint()
+         yield
+     finally:
+-        if scoped_sem is not None:
+-            scoped_sem.release()
+-        if held_ceiling:
+-            ceiling_sem.release()
++        if scoped is not None:
++            scoped.release()
++        ceiling.release()
+ 
+ 
+ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+-    if model:
+-        model = model.removeprefix("litellm/")
+-    max_retries = 10
+-    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
+-    for i in range(max_retries):
+-        try:
+-            # Hold a concurrency slot only around the actual network call, not
+-            # retry backoff, so sync completions obey the same cap as async ones.
+-            with _sync_llm_semaphore():
+-                response = litellm.completion(
+-                    model=model,
+-                    messages=messages,
+-                    # Per-call litellm kwargs (default temperature=0, drop_params=True);
+-                    # configure via config.set_llm_params(...) — never the litellm global.
+-                    **get_llm_params(),
+-                )
+-            content = response.choices[0].message.content
+-            if return_finish_reason:
+-                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
+-                return content, finish_reason
+-            return content
+-        except Exception as e:
+-            logger.warning("Retrying LLM completion (%d/%d)", i + 1, max_retries)
+-            logger.error(f"Error: {e}")
+-            if i < max_retries - 1:
+-                time.sleep(1)
+-            else:
+-                # Degrade gracefully instead of aborting the whole index: a single
+-                # persistently-failing call returns an empty result so callers can
+-                # skip that step (extract_json('') -> {} -> .get(default)) and the
+-                # rest of the document still gets indexed. Logged at WARNING so the
+-                # failure is visible, not silent.
+-                logger.warning(
+-                    "LLM completion failed after %d retries; degrading to an empty "
+-                    "result so the caller can skip this step. Last error: %s",
+-                    max_retries, e,
+-                )
+-                return ("", "error") if return_finish_reason else ""
+-
++    messages = list(chat_history or []) + [{"role": "user", "content": prompt}]
++    with _sync_llm_semaphore():
++        response = _execution.completion(
++            model=model.removeprefix("litellm/") if model else model,
++            messages=messages, **get_llm_params(),
++        )
++    content = response.choices[0].message.content
++    if response.choices[0].finish_reason == "length":
++        raise ValueError("Navigation response exceeded its output budget")
++    if not content:
++        raise ValueError("Empty navigation response")
++    return (content, "finished") if return_finish_reason else content
+ 
+ 
+ async def llm_acompletion(model, prompt):
+-    if model:
+-        model = model.removeprefix("litellm/")
+-    max_retries = 10
+-    messages = [{"role": "user", "content": prompt}]
+-    for i in range(max_retries):
+-        try:
+-            # Hold a concurrency slot only around the actual network call — not
+-            # across retry backoff — so the cap counts real in-flight requests.
+-            async with _llm_semaphore():
+-                response = await litellm.acompletion(
+-                    model=model,
+-                    messages=messages,
+-                    **get_llm_params(),  # per-call kwargs; never the litellm global
+-                )
+-            return response.choices[0].message.content
+-        except Exception as e:
+-            logger.warning("Retrying async LLM completion (%d/%d)", i + 1, max_retries)
+-            logger.error(f"Error: {e}")
+-            if i < max_retries - 1:
+-                await asyncio.sleep(1)
+-            else:
+-                # Degrade gracefully (see llm_completion): return an empty result
+-                # so the caller skips this step and the rest of the document still
+-                # indexes. The gather sites still keep return_exceptions=True to
+-                # absorb any non-LLM error. WARNING so it's visible, not silent.
+-                logger.warning(
+-                    "Async LLM completion failed after %d retries; degrading to an "
+-                    "empty result so the caller can skip this step. Last error: %s",
+-                    max_retries, e,
+-                )
+-                return ""
++    async with _llm_semaphore():
++        response = await _execution.acompletion(
++            model=model.removeprefix("litellm/") if model else model,
++            messages=[{"role": "user", "content": prompt}], **get_llm_params(),
++        )
++    content = response.choices[0].message.content
++    if response.choices[0].finish_reason == "length":
++        raise ValueError("Navigation response exceeded its output budget")
++    if not content:
++        raise ValueError("Empty navigation response")
++    return content
+ 
+ 
+ def extract_json(content):
+@@ -384,6 +312,9 @@
+     # error) must not abort summarization for the whole document — fall back
+     # to the node's own raw text so retrieval still has something usable.
+     raw_summaries = await asyncio.gather(*tasks, return_exceptions=True)
++    for result in raw_summaries:
++        if isinstance(result, BaseException):
++            raise result
+     summaries = [
+         node.get('text', '') if isinstance(s, Exception) else s
+         for node, s in zip(nodes, raw_summaries)

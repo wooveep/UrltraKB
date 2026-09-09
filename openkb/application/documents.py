@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from openkb.add_coordinator import _cleanup_staging_dirs
 from openkb.application.execution import ExecutionContext
-from openkb.compilation_report import collect_compile_report
+from openkb.compilation_report import collect_compile_report, require_complete_compilation
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
-from openkb.inputs import PreparedInput, prepared_input, validate_source_root
+from openkb.inputs import SUPPORTED_EXTENSIONS, PreparedInput, prepared_input, validate_source_root
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
-from openkb.mutation import RecoveryRequired, publish_staged_tree
+from openkb.mutation import publish_staged_tree
+from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
 
 logger = logging.getLogger(__name__)
 
@@ -74,22 +74,15 @@ def _snapshot_add_paths(
     return paths
 
 
-def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info) -> None:
+def _run_compilation(coro_factory, label: str, *, report=logger.info) -> None:
     report(f"  {label}...")
-    for attempt in range(2):
-        try:
-            asyncio.run(coro_factory())
-            return
-        except RecoveryRequired:
-            raise
-        except Exception as exc:
-            if attempt == 0:
-                report("  Retrying compilation in 2s...")
-                time.sleep(2)
-            else:
-                report(f"  [ERROR] Compilation failed: {exc}")
-                logger.debug("Compilation traceback:", exc_info=True)
-                raise
+    # Requests, including their retries, share the document execution budget.
+    try:
+        asyncio.run(coro_factory())
+    except Exception as exc:
+        with collect_compile_report() as compilation:
+            compilation.failure_reason = f"compilation_failed:{type(exc).__name__}"
+        raise
 
 
 def add_single_file(
@@ -102,19 +95,36 @@ def add_single_file(
     on_event: Callable[[dict], None] | None = None,
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
-) -> Literal["added", "skipped", "failed"]:
+) -> Literal["added", "skipped", "failed", "unfinished"]:
     """Convert, index, and compile a single document under the KB mutation lock."""
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        return _add_single_file_locked(
-            file_path,
-            kb_dir,
-            stage=stage,
-            bundle=bundle,
-            report=report,
-            on_event=on_event,
-            prepared=prepared,
-            origin_url=origin_url,
-        )
+    with kb_ingest_lock(kb_dir / ".openkb"), collect_compile_report() as compilation:
+        try:
+            with processing_scope(resolve_effective_config(kb_dir)[0]):
+
+                def progress(event):
+                    compilation.stage = event.get("stage", compilation.stage)
+                    if event.get("stage") != "committed":
+                        processing_checkpoint(event.get("stage"))
+                    if on_event:
+                        on_event(event)
+
+                outcome = _add_single_file_locked(
+                    file_path,
+                    kb_dir,
+                    stage=stage,
+                    bundle=bundle,
+                    report=report,
+                    on_event=progress,
+                    prepared=prepared,
+                    origin_url=origin_url,
+                )
+                return "unfinished" if outcome == "failed" and compilation.unfinished else outcome
+        except ProcessingIncomplete as exc:
+            from openkb.compilation_report import report_compile_issue
+
+            report_compile_issue(exc.reason, exc.stage)
+            report(f"  [UNFINISHED] {file_path.name}: {exc.reason}")
+            return "unfinished"
 
 
 def _add_single_file_locked(
@@ -169,6 +179,8 @@ def _add_single_file_locked(
         else:
             result = convert_document(file_path, kb_dir, staging_dir=staging_dir, prepared=prepared)
     except Exception as exc:
+        with collect_compile_report() as compilation:
+            compilation.failure_reason = f"conversion_failed:{type(exc).__name__}"
         report(f"  [ERROR] Conversion failed: {exc}")
         logger.debug("Conversion traceback:", exc_info=True)
         _cleanup_staging_dirs([staging_dir])
@@ -211,6 +223,8 @@ def _add_single_file_locked(
 
                 index_result = index_long_document(result.raw_path, kb_dir, doc_name=doc_name)
             except Exception as exc:
+                with collect_compile_report() as compilation:
+                    compilation.failure_reason = f"indexing_failed:{type(exc).__name__}"
                 report(f"  [ERROR] Indexing failed: {exc}")
                 logger.debug("Indexing traceback:", exc_info=True)
                 raise
@@ -234,7 +248,7 @@ def _add_single_file_locked(
             summary_path = kb_dir / "wiki" / "summaries" / f"{doc_name}.md"
             if on_event:
                 on_event({"stage": "compiling", "source": str(file_path)})
-            _run_compile_with_retry(
+            _run_compilation(
                 lambda: compile_long_doc(
                     doc_name,
                     summary_path,
@@ -254,7 +268,7 @@ def _add_single_file_locked(
             source_path = result.source_path
             if on_event:
                 on_event({"stage": "compiling", "source": str(file_path)})
-            _run_compile_with_retry(
+            _run_compilation(
                 lambda: compile_short_doc(
                     doc_name,
                     source_path,
@@ -267,6 +281,8 @@ def _add_single_file_locked(
                 report=report,
             )
 
+        processing_checkpoint()
+        require_complete_compilation()
         # Register hash only after successful compilation.
         if result.file_hash:
             registry = HashRegistry(openkb_dir / "hashes.json")
@@ -357,7 +373,7 @@ def _add_for_api(
     )
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
-    elif status_str == "failed":
+    elif status_str in {"failed", "unfinished"}:
         message = f"Failed to add: {file_path.name} (see server logs)"
     else:
         message = f"Added: {file_path.name}"
@@ -377,6 +393,49 @@ class DocumentResult:
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
     input_version: str | None = None
+    source_intake: str = "not_saved"
+    knowledge_compilation: str = "not_started"
+    stage: str = "preparing"
+    reason: str | None = None
+    resume: str | None = None
+    warnings: tuple[str, ...] = ()
+    usage: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, str) or not isinstance(self.stage, str):
+            raise ValueError("Invalid document source or stage")
+        if self.status not in {"added", "skipped", "failed", "unfinished", "stopped"}:
+            raise ValueError("Invalid document status")
+        if self.source_intake not in {"saved", "not_saved"}:
+            raise ValueError("Invalid source intake status")
+        if self.knowledge_compilation not in {
+            "completed",
+            "not_started",
+            "failed",
+            "unfinished",
+            "stopped",
+        }:
+            raise ValueError("Invalid knowledge compilation status")
+        for value in (self.reason, self.resume, self.input_version):
+            if value is not None and not isinstance(value, str):
+                raise ValueError("Invalid document result detail")
+        for values in (self.resources, self.quality, self.unfinished, self.warnings):
+            if not isinstance(values, tuple) or not all(isinstance(item, str) for item in values):
+                raise ValueError("Invalid document result list")
+        from openkb.processing import validate_usage
+
+        validate_usage(self.usage)
+
+    @classmethod
+    def from_summary(cls, value: dict[str, Any]) -> DocumentResult:
+        if not isinstance(value, dict):
+            raise ValueError("Invalid document result")
+        value = dict(value)
+        for key in ("resources", "quality", "unfinished", "warnings"):
+            if not isinstance(value.get(key, []), list):
+                raise ValueError("Invalid document result list")
+            value[key] = tuple(value.get(key, ()))
+        return cls(**value)
 
 
 def import_document(
@@ -401,11 +460,11 @@ def import_document(
         raise ValueError(f"Not a knowledge base: {root}")
     if not source.is_file():
         raise FileNotFoundError(source)
-    from contextlib import nullcontext
-
-    if context:
-        context.on_event({"stage": "preparing", "source": str(source)})
-        context.check_stop()
+    if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError("Unsupported document type")
+    context = context or ExecutionContext()
+    context.on_event({"stage": "preparing", "source": str(source)})
+    context.check_stop()
     with prepared_input(source) as ready:
         with kb_ingest_lock(
             root / ".openkb",
@@ -417,13 +476,13 @@ def import_document(
                 ready = ready.refresh()
             validate_source_root(requested_source, source_root)
             with (
-                context.begin(root) if context else nullcontext(bundle) as credentials,
+                context.begin(root) as credentials,
                 collect_compile_report() as compilation,
             ):
                 outcome = add_single_file(
                     source,
                     root,
-                    bundle=credentials,
+                    bundle=bundle or credentials,
                     prepared=ready,
                     on_event=on_event or (context.on_event if context else None),
                     origin_url=origin_url,
@@ -446,9 +505,27 @@ def import_document(
                 resources.append(str(source))
             return DocumentResult(
                 str(source),
-                outcome,
+                "unfinished" if outcome == "failed" and compilation.unfinished else outcome,
                 tuple(resources),
                 tuple(compilation.quality),
                 tuple(compilation.unfinished),
                 ready.digest,
+                source_intake="saved" if resources else "not_saved",
+                knowledge_compilation=(
+                    "completed"
+                    if outcome in {"added", "skipped"}
+                    else "unfinished"
+                    if compilation.unfinished
+                    else "failed"
+                ),
+                stage="committed"
+                if outcome in {"added", "skipped"}
+                else compilation.unfinished[0]
+                if compilation.unfinished
+                else compilation.stage,
+                reason=compilation.quality[0]
+                if compilation.quality
+                else compilation.failure_reason,
+                warnings=tuple(compilation.warnings),
+                usage=compilation.usage,
             )

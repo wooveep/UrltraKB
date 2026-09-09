@@ -1,0 +1,10 @@
+{
+  "upstream_version": "0.3.0.dev3",
+  "upstream_commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
+  "upstream_sha256": "5056969108785f5c9c31e03ce60f5fa1043be96ecffb5a06353375212027b258",
+  "patch_sha256": "95385e454b3469028c7b3db82e0798bed1a5587510dfadbe5457997df3693580",
+  "version": "0.3.0.dev3+openkb.1",
+  "wheel": "pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl",
+  "sha256": "3465581664836914d5c37f93440549a59ab7cc148f9201129d2be1da366a8439",
+  "license": "MIT; upstream notices retained in the wheel"
+}

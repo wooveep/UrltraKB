@@ -21,8 +21,8 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
     private = []
 
     def fetch(url, root, **options):
-        assert context.snapshot is None or len(private) == 1
-        assert not kb_ingest_lock_held(kb_dir / ".openkb")
+        assert context.snapshot is not None
+        assert kb_ingest_lock_held(kb_dir / ".openkb")
         target = root / "raw/article.md"
         target.parent.mkdir()
         target.write_text("# Article\nOriginal content.")
@@ -57,15 +57,42 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
     assert entry["origin"] == "url" and entry["path"] == url
 
 
-def test_failed_fetch_does_not_fix_snapshot_or_publish_raw(kb_dir):
+def test_failed_fetch_uses_fixed_snapshot_without_publishing_raw(kb_dir):
     from openkb.application.execution import ExecutionContext
 
     context = ExecutionContext()
     with patch("openkb.url_ingest.fetch_url_to_raw", return_value=None):
         result = import_url(kb_dir, "https://example.com/missing", context=context)
     assert result.status == "failed" and result.unfinished == ("acquisition",)
-    assert result.resources == () and context.snapshot is None
+    assert result.resources == () and context.snapshot is not None
     assert not list((kb_dir / "raw").iterdir())
+
+
+def test_url_acquisition_consumes_document_budget_without_starting_compilation(kb_dir):
+    import time
+
+    import yaml
+
+    config_path = kb_dir / ".openkb/config.yaml"
+    settings = yaml.safe_load(config_path.read_text())
+    settings["processing"]["document_timeout"] = 0.02
+    config_path.write_text(yaml.safe_dump(settings))
+
+    def slow_download(url, root, **options):
+        time.sleep(0.03)
+        options["cancelled"]()
+        raise AssertionError("Download must stop when its document budget expires")
+
+    with (
+        patch("openkb.url_ingest.fetch_url_to_raw", side_effect=slow_download),
+        patch("openkb.application.urls.import_document") as compile_document,
+    ):
+        result = import_url(kb_dir, "https://example.com/slow")
+    assert result.status == "unfinished" and result.stage == "acquiring"
+    assert result.reason == "time_budget_exhausted"
+    assert result.source_intake == "not_saved"
+    assert result.usage["observable_attempts"] == 0
+    compile_document.assert_not_called()
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "http:///missing-host", "not a URL"])

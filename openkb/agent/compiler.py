@@ -369,7 +369,10 @@ def _format_usage(elapsed: float, usage) -> str:
     cache_info = ""
     if cached and hasattr(cached, "cached_tokens") and cached.cached_tokens:
         cache_info = f", cached={cached.cached_tokens}"
-    return f"{elapsed:.1f}s (in={usage.prompt_tokens}, out={usage.completion_tokens}{cache_info})"
+    return (
+        f"{elapsed:.1f}s (in={getattr(usage, 'prompt_tokens', '?')}, "
+        f"out={getattr(usage, 'completion_tokens', '?')}{cache_info})"
+    )
 
 
 def _fmt_messages(messages: list[dict], max_content: int = 200) -> str:
@@ -427,11 +430,17 @@ def _llm_call(
     spinner.start()
     t0 = time.time()
 
-    response = litellm.completion(model=model, messages=messages, **kwargs)
+    from openkb.processing import model_call
+
+    try:
+        response = model_call(litellm.completion, model=model, messages=messages, **kwargs)
+    except BaseException:
+        spinner.stop("unfinished")
+        raise
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
-    spinner.stop(_format_usage(time.time() - t0, response.usage))
+    spinner.stop(_format_usage(time.time() - t0, getattr(response, "usage", None)))
     logger.debug(
         "LLM response [%s]:\n%s", step_name, content[:500] + ("..." if len(content) > 500 else "")
     )
@@ -468,12 +477,14 @@ async def _llm_call_async(
 
     t0 = time.time()
 
-    response = await litellm.acompletion(model=model, messages=messages, **kwargs)
+    from openkb.processing import model_acall
+
+    response = await model_acall(litellm.acompletion, model=model, messages=messages, **kwargs)
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
     elapsed = time.time() - t0
-    sys.stdout.write(f"    {step_name}... {_format_usage(elapsed, response.usage)}\n")
+    sys.stdout.write(f"    {step_name}... {_format_usage(elapsed, getattr(response, 'usage', None))}\n")
     sys.stdout.flush()
     logger.debug(
         "LLM response [%s]:\n%s", step_name, content[:500] + ("..." if len(content) > 500 else "")
@@ -511,10 +522,9 @@ async def _close_async_llm_clients() -> None:
     same loop that created them. Best-effort: never raises, so cleanup can't
     mask a real compilation error or break ingest.
     """
-    try:
-        await litellm.close_litellm_async_clients()
-    except Exception:
-        logger.debug("litellm async client cleanup failed", exc_info=True)
+    from openkb.model_lifecycle import close_model_resources
+
+    await close_model_resources()
 
 
 def _warn_if_truncated(response, step_name: str, max_tokens: int | None) -> bool:
@@ -1611,7 +1621,8 @@ async def _compile_concepts(
     # (system + doc + summary) for the plan call and every concept call.
     summary_msg = {"role": "assistant", "content": _cached_text(summary)}
 
-    plan_raw = _llm_call(
+    plan_raw = await asyncio.to_thread(
+        _llm_call,
         model,
         [
             system_msg,
@@ -1993,6 +2004,8 @@ async def _compile_concepts(
     if tasks:
         failure_types: list[str] = []
         for r in results:
+            if isinstance(r, BaseException) and not isinstance(r, Exception):
+                raise r
             if isinstance(r, Exception):
                 logger.warning("Concept generation failed: %s", r)
                 failure_types.append(type(r).__name__)
@@ -2019,6 +2032,8 @@ async def _compile_concepts(
     if entity_tasks:
         entity_failure_types: list[str] = []
         for r in entity_results:
+            if isinstance(r, BaseException) and not isinstance(r, Exception):
+                raise r
             if isinstance(r, Exception):
                 logger.warning("Entity generation failed: %s", r)
                 entity_failure_types.append(type(r).__name__)
@@ -2082,7 +2097,8 @@ async def _compile_concepts(
         try:
             # No max_tokens cap — matches the v1 summary call. The rewrite
             # prompt asks the model to keep length within ±20% of the v1.
-            rewrite_raw = _llm_call(
+            rewrite_raw = await asyncio.to_thread(
+                _llm_call,
                 model,
                 [
                     system_msg,
@@ -2205,58 +2221,59 @@ async def compile_short_doc(
     Step 1: Build base context A (schema + doc content), generate summary.
     Steps 2-4: Delegated to ``_compile_concepts``.
     """
-    from openkb.config import resolve_effective_config
-
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    language: str = config.get("language", "en")
-    entity_types = resolve_entity_types(config)
-
-    wiki_dir = kb_dir / "wiki"
-    schema_md = get_agents_md(wiki_dir)
-    content = source_path.read_text(encoding="utf-8")
-
-    # Base context A: system + document. cache_control marker on the doc
-    # message creates a cache breakpoint that covers (system + doc) for
-    # every downstream call (summary, concepts-plan, every concept page).
-    system_msg = {
-        "role": "system",
-        "content": _SYSTEM_TEMPLATE.format(
-            schema_md=schema_md,
-            language=language,
-        ),
-    }
-    doc_msg = {
-        "role": "user",
-        "content": _cached_text(
-            _SUMMARY_USER.format(
-                doc_name=doc_name,
-                content=content,
-            )
-        ),
-    }
-
-    # --- Step 1: Generate summary (v1, held in memory) ---
-    # The summary is NOT written to disk yet — it's used as cache context
-    # for the plan + concept-generation calls, then rewritten into a final
-    # v2 (with a whitelist of known wikilink targets) inside
-    # _compile_concepts before being written to disk.
-    summary_raw = _llm_call(
-        model,
-        [system_msg, doc_msg],
-        "summary",
-        response_format=_JSON_RESPONSE_FORMAT,
-        bundle=bundle,
-    )
     try:
-        summary_parsed = _parse_json(summary_raw)
-        doc_brief = summary_parsed.get("description", "")
-        summary = summary_parsed.get("content", summary_raw)
-    except (json.JSONDecodeError, ValueError):
-        doc_brief = ""
-        summary = summary_raw
+        from openkb.config import resolve_effective_config
 
-    # --- Steps 2-4: Concept plan → generate/update → summary rewrite → index ---
-    try:
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
+        language: str = config.get("language", "en")
+        entity_types = resolve_entity_types(config)
+
+        wiki_dir = kb_dir / "wiki"
+        schema_md = get_agents_md(wiki_dir)
+        content = source_path.read_text(encoding="utf-8")
+
+        # Base context A: system + document. cache_control marker on the doc
+        # message creates a cache breakpoint that covers (system + doc) for
+        # every downstream call (summary, concepts-plan, every concept page).
+        system_msg = {
+            "role": "system",
+            "content": _SYSTEM_TEMPLATE.format(
+                schema_md=schema_md,
+                language=language,
+            ),
+        }
+        doc_msg = {
+            "role": "user",
+            "content": _cached_text(
+                _SUMMARY_USER.format(
+                    doc_name=doc_name,
+                    content=content,
+                )
+            ),
+        }
+
+        # --- Step 1: Generate summary (v1, held in memory) ---
+        # The summary is NOT written to disk yet — it's used as cache context
+        # for the plan + concept-generation calls, then rewritten into a final
+        # v2 (with a whitelist of known wikilink targets) inside
+        # _compile_concepts before being written to disk.
+        summary_raw = await asyncio.to_thread(
+            _llm_call,
+            model,
+            [system_msg, doc_msg],
+            "summary",
+            response_format=_JSON_RESPONSE_FORMAT,
+            bundle=bundle,
+        )
+        try:
+            summary_parsed = _parse_json(summary_raw)
+            doc_brief = summary_parsed.get("description", "")
+            summary = summary_parsed.get("content", summary_raw)
+        except (json.JSONDecodeError, ValueError):
+            doc_brief = ""
+            summary = summary_raw
+
+        # --- Steps 2-4: Concept plan → generate/update → summary rewrite → index ---
         await _compile_concepts(
             wiki_dir,
             kb_dir,
@@ -2273,8 +2290,6 @@ async def compile_short_doc(
             bundle=bundle,
         )
     finally:
-        # Close per-loop litellm async clients before asyncio.run tears this
-        # loop down, to avoid the CLOSE-WAIT/FD leak across a long ingest.
         await _close_async_llm_clients()
 
 
@@ -2293,55 +2308,57 @@ async def compile_long_doc(
     The summary page is already written by the indexer. This function
     generates concept pages and updates the index.
     """
-    from openkb.config import resolve_effective_config
-
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    language: str = config.get("language", "en")
-    entity_types = resolve_entity_types(config)
-
-    wiki_dir = kb_dir / "wiki"
-    schema_md = get_agents_md(wiki_dir)
-    summary_content = summary_path.read_text(encoding="utf-8")
-
-    # Backfill OKF fields on the indexer-written summary. Idempotent: set
-    # description before type so that when both keys are missing the prepends
-    # leave `type` first (canonical order); only rewrite when content changed.
-    fm_parts = frontmatter.split(summary_content)
-    if fm_parts is not None:
-        fm_block, body = fm_parts
-        if doc_description:
-            fm_block = _set_fm_line(fm_block, "description", doc_description)
-        fm_block = _set_fm_line(fm_block, "type", "Summary")
-        updated = fm_block + body
-        if updated != summary_content:
-            summary_content = updated
-            atomic_write_text(summary_path, summary_content)
-
-    # Base context A. cache_control marker on the doc message creates a
-    # cache breakpoint covering (system + doc) for every concept call.
-    system_msg = {
-        "role": "system",
-        "content": _SYSTEM_TEMPLATE.format(
-            schema_md=schema_md,
-            language=language,
-        ),
-    }
-    doc_msg = {
-        "role": "user",
-        "content": _cached_text(
-            _LONG_DOC_SUMMARY_USER.format(
-                doc_name=doc_name,
-                doc_id=doc_id,
-                content=summary_content,
-            )
-        ),
-    }
-
-    # --- Step 1: Generate overview ---
-    overview = _llm_call(model, [system_msg, doc_msg], "overview", bundle=bundle)
-
-    # --- Steps 2-4: Concept plan → generate/update → index ---
     try:
+        from openkb.config import resolve_effective_config
+
+        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
+        language: str = config.get("language", "en")
+        entity_types = resolve_entity_types(config)
+
+        wiki_dir = kb_dir / "wiki"
+        schema_md = get_agents_md(wiki_dir)
+        summary_content = summary_path.read_text(encoding="utf-8")
+
+        # Backfill OKF fields on the indexer-written summary. Idempotent: set
+        # description before type so that when both keys are missing the prepends
+        # leave `type` first (canonical order); only rewrite when content changed.
+        fm_parts = frontmatter.split(summary_content)
+        if fm_parts is not None:
+            fm_block, body = fm_parts
+            if doc_description:
+                fm_block = _set_fm_line(fm_block, "description", doc_description)
+            fm_block = _set_fm_line(fm_block, "type", "Summary")
+            updated = fm_block + body
+            if updated != summary_content:
+                summary_content = updated
+                atomic_write_text(summary_path, summary_content)
+
+        # Base context A. cache_control marker on the doc message creates a
+        # cache breakpoint covering (system + doc) for every concept call.
+        system_msg = {
+            "role": "system",
+            "content": _SYSTEM_TEMPLATE.format(
+                schema_md=schema_md,
+                language=language,
+            ),
+        }
+        doc_msg = {
+            "role": "user",
+            "content": _cached_text(
+                _LONG_DOC_SUMMARY_USER.format(
+                    doc_name=doc_name,
+                    doc_id=doc_id,
+                    content=summary_content,
+                )
+            ),
+        }
+
+        # --- Step 1: Generate overview ---
+        overview = await asyncio.to_thread(
+            _llm_call, model, [system_msg, doc_msg], "overview", bundle=bundle
+        )
+
+        # --- Steps 2-4: Concept plan → generate/update → index ---
         await _compile_concepts(
             wiki_dir,
             kb_dir,
@@ -2357,6 +2374,4 @@ async def compile_long_doc(
             bundle=bundle,
         )
     finally:
-        # Close per-loop litellm async clients before asyncio.run tears this
-        # loop down, to avoid the CLOSE-WAIT/FD leak across a long ingest.
         await _close_async_llm_clients()

@@ -1,0 +1,3 @@
+
+# Preserve verbatim upstream context in the maintained source patch.
+packaging/pageindex/openkb.patch -whitespace

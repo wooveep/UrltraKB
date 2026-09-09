@@ -73,7 +73,7 @@ pip install openkb
   ```bash
   git clone https://github.com/VectifyAI/OpenKB.git
   cd OpenKB
-  pip install -e .
+  pip install --find-links packaging/pageindex -e .
   ```
 
 </details>
@@ -344,7 +344,7 @@ The skill is read-only. It won't run `openkb add`, `remove`, or `lint --fix` wit
 
 # REST API
 
-UrltraKB ships an independent FastAPI service for HTTP clients. Install with `pip install -e ".[api]"`, then start with `openkb-api` (or `python -m openkb.api`). The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve an application. Authentication, SSE, CORS and generated HTML artifact endpoints remain available.
+UrltraKB ships an independent FastAPI service for HTTP clients. Install with `pip install --find-links packaging/pageindex -e ".[api]"`, then start with `openkb-api` (or `python -m openkb.api`). The interactive API reference is at [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve an application. Authentication, SSE, CORS and generated HTML artifact endpoints remain available.
 
 See the [full REST API reference](examples/rest-api/README.md#rest-api) for endpoints, auth, and SSE streaming.
 
@@ -407,3 +407,5 @@ If you find UrltraKB useful, please give us a star 🌟 — and check out [**Pag
 [![Contact Us](https://img.shields.io/badge/Contact_Us-3B82F6?style=for-the-badge&logo=envelope&logoColor=white)](https://ii2abc2jejf.typeform.com/to/tK3AXl8T)
 
 </div>
+
+Document import budgets, task results and stopping are described in [Document execution](docs/document-processing.md).

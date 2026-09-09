@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json as json_mod
 import logging
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pageindex import IndexConfig, PageIndexClient
 
-from openkb.config import resolve_concurrency, resolve_effective_config
+from openkb.config import resolve_concurrency, resolve_credential_bundle, resolve_effective_config
+from openkb.processing import navigation_execution
 from openkb.tree_renderer import render_summary_md
 
 logger = logging.getLogger(__name__)
@@ -195,37 +197,42 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
     pageindex_api_key = execution_environment(kb_dir).get("PAGEINDEX_API_KEY", "")
 
     index_config = _build_index_config(config)
+    bundle = resolve_credential_bundle(kb_dir)
+    index_config.llm_params = {
+        "timeout": bundle.timeout,
+        "api_key": bundle.api_key,
+        "api_base": bundle.base_url,
+        "extra_headers": bundle.extra_headers,
+        "num_retries": 0,
+        "max_retries": 0,
+    }
 
-    client = PageIndexClient(
-        api_key=pageindex_api_key or None,
-        model=model,
-        storage_path=str(openkb_dir),
-        index_config=index_config,
-    )
-    col = client.collection()
+    # Own the local store explicitly. Exception tracebacks retain the client,
+    # so garbage collection cannot release SQLite before rollback on Windows.
+    with ExitStack() as stack:
+        stack.enter_context(navigation_execution())
+        storage = None
+        if not pageindex_api_key:
+            from pageindex.storage.sqlite import SQLiteStorage
 
-    # Add PDF (retry up to 3 times — PageIndex TOC accuracy is stochastic)
-    max_retries = 3
-    doc_id = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            doc_id = col.add(str(pdf_path))
-            logger.info(
-                "PageIndex added %s → doc_id=%s (attempt %d)", pdf_path.name, doc_id, attempt
-            )
-            break
-        except Exception as exc:
-            logger.warning(
-                "PageIndex attempt %d/%d failed for %s: %s",
-                attempt,
-                max_retries,
-                pdf_path.name,
-                exc,
-            )
-            if attempt == max_retries:
-                raise RuntimeError(
-                    f"Failed to index {pdf_path.name} after {max_retries} attempts: {exc}"
-                ) from exc
+            storage = stack.enter_context(SQLiteStorage(str(openkb_dir / "pageindex.db")))
+        client = PageIndexClient(
+            api_key=pageindex_api_key or None,
+            model=model,
+            storage_path=str(openkb_dir),
+            storage=storage,
+            index_config=index_config,
+        )
+        return _index_document(
+            client.collection(), pdf_path, kb_dir, source_name, cloud=bool(pageindex_api_key)
+        )
+
+
+def _index_document(
+    col: Any, pdf_path: Path, kb_dir: Path, source_name: str, *, cloud: bool
+) -> IndexResult:
+    doc_id = col.add(str(pdf_path))
+    logger.info("PageIndex added %s → doc_id=%s", pdf_path.name, doc_id)
 
     # The PageIndex blob for doc_id is now durably on disk. The add mutation no
     # longer eagerly snapshots .openkb/files — it registers the new blob via
@@ -256,7 +263,7 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
         images_dir = sources_dir / "images" / source_name
 
         all_pages: list[dict[str, Any]] = []
-        if pageindex_api_key:
+        if cloud:
             # Cloud mode: fetch OCR'd markdown from PageIndex. get_page_content
             # requires a page range, so pass "1-N".
             page_count = _get_pdf_page_count(pdf_path)
@@ -266,7 +273,7 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
                 logger.warning("Cloud get_page_content failed for %s: %s", pdf_path.name, exc)
 
         if not all_pages:
-            if pageindex_api_key:
+            if cloud:
                 logger.warning(
                     "Cloud returned no pages for %s; falling back to local pymupdf", pdf_path.name
                 )

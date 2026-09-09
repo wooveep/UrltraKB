@@ -6,8 +6,9 @@ import json
 from unittest.mock import patch
 
 from click.testing import CliRunner
+from processing_fixtures import configure_processing
 
-from openkb.cli import SUPPORTED_EXTENSIONS, _find_kb_dir, cli
+from openkb.cli import SUPPORTED_EXTENSIONS, _find_kb_dir, add_single_file, cli
 
 
 class TestSupportedExtensions:
@@ -77,6 +78,7 @@ class TestAddCommand:
         openkb_dir = tmp_path / ".openkb"
         openkb_dir.mkdir()
         (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+        configure_processing(tmp_path)
         (openkb_dir / "hashes.json").write_text(json.dumps({}))
         return tmp_path
 
@@ -89,18 +91,16 @@ class TestAddCommand:
             result = runner.invoke(cli, ["add", "somefile.pdf"])
             assert "No knowledge base found" in result.output
 
-    def test_add_single_file_calls_helper(self, tmp_path):
-        kb_dir = self._setup_kb(tmp_path)
+    def test_add_single_file_runs_isolated_task(self, kb_dir, tmp_path, monkeypatch, model_service):
         doc = tmp_path / "test.md"
         doc.write_text("# Hello")
-
-        runner = CliRunner()
-        with (
-            patch("openkb.cli.add_single_file") as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-        ):
-            runner.invoke(cli, ["add", str(doc)])
-            mock_add.assert_called_once_with(doc, kb_dir)
+        monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+        monkeypatch.setattr("openkb.cli._find_kb_dir", lambda *args: kb_dir)
+        result = CliRunner().invoke(cli, ["add", str(doc)])
+        assert result.exit_code == 0, result.output
+        assert "compilation=completed" in result.output
+        assert (kb_dir / "wiki/summaries/test.md").exists()
+        assert len(model_service) == 2
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
         from openkb.cli import add_single_file
@@ -112,7 +112,6 @@ class TestAddCommand:
 
         with (
             patch("openkb.agent.compiler.compile_short_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -131,6 +130,7 @@ class TestAddCommand:
         (kb_dir / ".openkb" / "config.yaml").write_text(
             "model: gpt-4o-mini\nconcurrency: 3\n", encoding="utf-8"
         )
+        configure_processing(kb_dir)
         doc = tmp_path / "notes.md"
         doc.write_text("# Notes\n\nBody", encoding="utf-8")
 
@@ -216,7 +216,6 @@ class TestAddCommand:
             patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -253,7 +252,6 @@ class TestAddCommand:
             patch("openkb.application.documents.convert_document", return_value=conv),
             patch("openkb.indexer.index_long_document", side_effect=fake_index_dedup),
             patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
@@ -261,53 +259,36 @@ class TestAddCommand:
         assert outcome == "failed"
         assert existing_blob.read_bytes() == b"pre-existing-do-not-delete"
 
-    def test_add_directory_calls_helper_for_each_file(self, tmp_path):
-        kb_dir = self._setup_kb(tmp_path)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir()
-        (docs_dir / "a.md").write_text("# A")
-        (docs_dir / "b.txt").write_text("B content")
-        (docs_dir / "ignore.xyz").write_text("skip me")
+    def test_add_directory_processes_supported_files(
+        self, kb_dir, tmp_path, monkeypatch, model_service
+    ):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "a.md").write_text("# A")
+        (docs / "b.md").write_text("# B")
+        (docs / "ignore.xyz").write_text("ignored")
+        monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+        monkeypatch.setattr("openkb.cli._find_kb_dir", lambda *args: kb_dir)
+        result = CliRunner().invoke(cli, ["add", str(docs)])
+        assert result.exit_code == 0, result.output
+        assert "2 document(s)" in result.output
+        assert {p.name for p in (kb_dir / "raw").iterdir()} == {"a.md", "b.md"}
+        assert len(model_service) == 4
 
-        runner = CliRunner()
-        with (
-            patch("openkb.cli.add_single_file") as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-        ):
-            runner.invoke(cli, ["add", str(docs_dir)])
-            # Should be called for .md and .txt but not .xyz
-            assert mock_add.call_count == 2
-            called_names = {call.args[0].name for call in mock_add.call_args_list}
-            assert "a.md" in called_names
-            assert "b.txt" in called_names
-            assert "ignore.xyz" not in called_names
-
-    def test_add_directory_stops_after_dirty_rollback(self, tmp_path):
-        import pytest
-
-        from openkb.add_coordinator import DirtyRollbackError
-
-        kb_dir = self._setup_kb(tmp_path)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir()
-        (docs_dir / "a.md").write_text("# A")
-        (docs_dir / "b.md").write_text("# B")
-        dirty_error = DirtyRollbackError(
-            "add",
-            kb_dir / ".openkb" / "journal" / "retained.json",
-        )
-
-        runner = CliRunner()
-        with (
-            patch("openkb.cli.add_single_file", side_effect=dirty_error) as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-        ):
-            with pytest.raises(DirtyRollbackError) as exc_info:
-                runner.invoke(cli, ["add", str(docs_dir)], catch_exceptions=False)
-
-        assert exc_info.value is dirty_error
-        mock_add.assert_called_once()
-        assert mock_add.call_args.args[0].name == "a.md"
+    def test_add_directory_stops_when_recovery_is_required(
+        self, kb_dir, tmp_path, monkeypatch, model_service
+    ):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "a.md").write_text("# A")
+        (docs / "b.md").write_text("# B")
+        (kb_dir / ".openkb/needs-repair.json").write_text("{}")
+        monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+        monkeypatch.setattr("openkb.cli._find_kb_dir", lambda *args: kb_dir)
+        result = CliRunner().invoke(cli, ["add", str(docs)])
+        assert result.exit_code == 1, result.output
+        assert not list((kb_dir / "wiki/summaries").iterdir())
+        assert model_service == []
 
     def test_add_unsupported_extension(self, tmp_path):
         kb_dir = self._setup_kb(tmp_path)
@@ -327,24 +308,17 @@ class TestAddCommand:
             result = runner.invoke(cli, ["add", str(tmp_path / "nonexistent.pdf")])
             assert "does not exist" in result.output
 
-    def test_add_skipped_file(self, tmp_path):
-        kb_dir = self._setup_kb(tmp_path)
+    def test_add_skipped_file(self, kb_dir, tmp_path, monkeypatch, model_service):
         doc = tmp_path / "test.md"
         doc.write_text("# Hello")
-
-        from openkb.converter import ConvertResult
-
-        mock_result = ConvertResult(skipped=True)
-
+        monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+        monkeypatch.setattr("openkb.cli._find_kb_dir", lambda *args: kb_dir)
         runner = CliRunner()
-        with (
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.application.documents.convert_document", return_value=mock_result),
-            patch("openkb.cli.asyncio.run") as mock_arun,
-        ):
-            result = runner.invoke(cli, ["add", str(doc)])
-            assert "SKIP" in result.output
-            mock_arun.assert_not_called()
+        assert runner.invoke(cli, ["add", str(doc)]).exit_code == 0
+        result = runner.invoke(cli, ["add", str(doc)])
+        assert result.exit_code == 0, result.output
+        assert "SKIP" in result.output
+        assert len(model_service) == 2
 
     def test_add_short_doc_runs_compiler(self, tmp_path):
         kb_dir = self._setup_kb(tmp_path)
@@ -377,15 +351,13 @@ class TestAddCommand:
         async def compile_noop(*args, **kwargs):
             compile_calls.append((args, kwargs))
 
-        runner = CliRunner()
         with (
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
             patch("openkb.application.documents.convert_document", return_value=mock_result),
             patch("openkb.agent.compiler.compile_short_doc", new=compile_noop),
         ):
-            result = runner.invoke(cli, ["add", str(doc)])
+            assert add_single_file(doc, kb_dir) == "added"
             assert len(compile_calls) == 1
-            assert "OK" in result.output
 
         import json as json_mod
 
@@ -423,13 +395,11 @@ class TestAddCommand:
             if hasattr(coro, "close"):
                 coro.close()
 
-        runner = CliRunner()
         with (
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
             patch("openkb.cli.asyncio.run", side_effect=close_coro),
         ):
-            result = runner.invoke(cli, ["add", str(doc)])
-            assert "OK" in result.output
+            assert add_single_file(doc, kb_dir) == "added"
 
         hashes = json_mod.loads((kb_dir / ".openkb" / "hashes.json").read_text(encoding="utf-8"))
         assert "old-hash" not in hashes  # stale entry replaced…
@@ -491,6 +461,7 @@ class TestImportFromPageindexCloud:
         openkb_dir = tmp_path / ".openkb"
         openkb_dir.mkdir()
         (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+        configure_processing(tmp_path)
         (openkb_dir / "hashes.json").write_text(json.dumps({}))
         return tmp_path
 
@@ -769,7 +740,6 @@ class TestImportFromPageindexCloud:
         with (
             patch("openkb.application.cloud.prepare_cloud_import", return_value=cloud),
             patch("openkb.application.cloud.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
             patch("openkb.cli._setup_llm_key"),
         ):
             outcome = import_from_pageindex_cloud("cloud-1", kb_dir)
