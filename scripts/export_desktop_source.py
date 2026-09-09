@@ -29,6 +29,8 @@ _FILES = {
     "docs/desktop-evidence/workbench/settings.png",
     "docs/golden-principles.md",
     "docs/document-processing.md",
+    "docs/document-provider-validation.md",
+    "docs/optional-ocr-runtime.md",
 }
 _GENERATED = {
     "openkb/rendering/assets",
