@@ -114,7 +114,7 @@ class SettingsDialog(ManagementPanel):
             form_layout.addRow(label, field)
         from PySide6.QtWidgets import QTabWidget
 
-        from openkb.desktop.processing_settings import OcrField, ProcessingField
+        from openkb.desktop.processing_settings import NavigationField, OcrField, ProcessingField
 
         tabs = QTabWidget()
         tabs.addTab(self.form, "基本设置")
@@ -122,6 +122,8 @@ class SettingsDialog(ManagementPanel):
         self.fields["parsing"] = OcrField()
         tabs.addTab(self.fields["processing"], "处理额度")
         tabs.addTab(self.fields["parsing"], "文档识别")
+        self.fields["navigation"] = NavigationField()
+        tabs.addTab(self.fields["navigation"], "原文导航")
         layout.addWidget(tabs)
         self.editors = tabs
         hint = QLabel(

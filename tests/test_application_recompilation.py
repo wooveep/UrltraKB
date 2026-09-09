@@ -2,9 +2,12 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
+
+from tests.http_model_fixture import evidence_response
 
 
 def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
@@ -54,14 +57,19 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     assert selection.status == "ready"
     source.write_text("Latest source")
     calls = []
-    responses = iter(
-        [{"description": "Note", "content": "# Compiled"}, {"create": [], "update": []}]
-    )
 
     def completion(**kwargs):
         calls.append(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(responses))))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            evidence_response(json.loads(kwargs["messages"][-1]["content"]))
+                        )
+                    )
+                )
+            ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         )
 
@@ -91,7 +99,7 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     )
     assert skipped.status == "skipped"
     assert context.snapshot is None
-    assert len(calls) == 2
+    assert len(calls) == 3
 
 
 def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
@@ -121,25 +129,32 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         )
 
-    replies = iter(
-        [
-            {"description": "Note", "content": "# Note"},
-            {"create": [{"name": name, "title": name} for name in ("one", "two", "three")]},
-            "# Rewritten note",
-        ]
-    )
-    monkeypatch.setattr(litellm, "completion", lambda **kwargs: response(next(replies)))
     active = peak = 0
 
-    async def complete(**kwargs):
+    def complete(**kwargs):
         nonlocal active, peak
         active += 1
         peak = max(active, peak)
-        await asyncio.sleep(0.03)
+        time.sleep(0.03)
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        value = evidence_response(payload)
+        if payload["stage"] == "facts":
+            for item, unit in zip(value["units"], payload["units"]):
+                item["facts"] = [
+                    {"topic": name, "statement": unit["text"], "quote": unit["text"]}
+                    for name in ("one", "two", "three")
+                ]
+        elif payload["stage"] == "planning":
+            value = {
+                "topics": [
+                    {"name": name, "title": name, "kind": "concept", "members": [name]}
+                    for name in payload["topics"]
+                ]
+            }
         active -= 1
-        return response({"description": "Concept", "content": "# Concept"})
+        return response(value)
 
-    monkeypatch.setattr(litellm, "acompletion", complete)
+    monkeypatch.setattr(litellm, "completion", complete)
     result = asyncio.run(recompile_document(kb_dir, "h", context=ExecutionContext()))
     assert result.status == "unfinished" and result.message == "needs_acceptance"
     from openkb.application.source_actions import continue_source, review_source_proposal
@@ -186,9 +201,9 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
 @pytest.mark.parametrize(
     "plan, code",
     [
-        ("not JSON", "concept_plan_unparseable"),
-        (json.dumps({"concepts": {"create": "not-a-list"}}), "malformed_plan_items"),
-        (json.dumps({"entities": {"create": "not-a-list"}}), "malformed_plan_items"),
+        ("not JSON", "topic_plan_invalid"),
+        (json.dumps({"topics": "not-a-list"}), "topic_plan_invalid"),
+        (json.dumps({"topics": [{"name": ["bad"]}]}), "topic_plan_invalid"),
     ],
 )
 def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
@@ -201,17 +216,18 @@ def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
     (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
     (kb_dir / "wiki/sources/note.md").write_text("Source")
     (kb_dir / "wiki/summaries/note.md").write_text("Previous summary")
-    responses = iter([json.dumps({"description": "Note", "content": "# Saved note"}), plan])
-    monkeypatch.setattr(
-        litellm,
-        "completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))],
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        content = json.dumps(evidence_response(payload)) if payload["stage"] == "facts" else plan
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
+        )
+
+    monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, "h"))
     assert result.status == "unfinished"
-    assert code in result.quality
-    assert result.unfinished == ("concepts", "entities")
+    assert result.message == code
+    assert result.unfinished == ("planning",)
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

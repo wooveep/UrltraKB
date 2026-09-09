@@ -93,8 +93,10 @@ class KnowledgeProposal:
                 "parse_id",
                 "input_hash",
             }
-            if set(self.document) != required or not all(
-                isinstance(value, str) for value in self.document.values()
+            if (
+                not required <= set(self.document)
+                or set(self.document) - required - {"compilation_profile"}
+                or not all(isinstance(value, str) for value in self.document.values())
             ):
                 raise ValueError("Invalid document projection fields")
             if (

@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from openkb.application.documents import import_document
+from tests.http_model_fixture import evidence_response
 
 
 @pytest.fixture
@@ -37,19 +38,16 @@ def test_unfinished_compilation_preserves_previously_committed_knowledge(
 ):
     import litellm
 
-    responses = iter(
-        [
-            json.dumps({"description": "Notes", "content": "# Notes\nCandidate summary."}),
-            "not a usable plan",
-        ]
-    )
-
     def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        content = (
+            json.dumps(evidence_response(payload))
+            if payload["stage"] == "facts"
+            else "not a usable plan"
+        )
         return SimpleNamespace(
             choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=next(responses)), finish_reason="stop"
-                )
+                SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")
             ],
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
         )
@@ -63,52 +61,49 @@ def test_unfinished_compilation_preserves_previously_committed_knowledge(
 
     assert result.status == "unfinished"
     assert result.knowledge_compilation == "unfinished"
-    assert result.reason == "concept_plan_unparseable"
+    assert result.reason == "topic_plan_invalid"
     assert previous.read_text() == "Previously committed knowledge"
     assert not (kb_dir / "wiki/summaries/notes.md").exists()
 
 
-def test_slow_summary_keeps_auxiliary_callbacks_responsive(kb_dir, monkeypatch, processing_config):
+def test_slow_compilation_keeps_async_recompile_callbacks_responsive(
+    kb_dir, monkeypatch, processing_config
+):
     import litellm
 
+    from openkb.application.recompilation import recompile_document
+
     callbacks = []
-    responses = iter(
-        [
-            json.dumps({"description": "Notes", "content": "# Notes\nKnowledge."}),
-            json.dumps({"create": [], "update": [], "related": []}),
-        ]
-    )
 
     def completion(**kwargs):
         time.sleep(0.15)
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=next(responses)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            evidence_response(json.loads(kwargs["messages"][-1]["content"]))
+                        )
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
         )
 
-    def observe(event):
-        # An independent callback on the compiler's real event loop. The
-        # network adapter schedules it, as SDK logging callbacks would.
-        callbacks.append(time.monotonic())
-
-    original = asyncio.BaseEventLoop.run_until_complete
-
-    def run_until_complete(loop, future):
-        if not callbacks:
-            loop.call_later(0.05, observe, None)
-        return original(loop, future)
-
     monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(asyncio.BaseEventLoop, "run_until_complete", run_until_complete)
-    source = kb_dir / "notes.md"
-    source.write_text("Original knowledge.")
+    (kb_dir / "wiki/sources/notes.md").write_text("Original knowledge.")
+    (kb_dir / ".openkb/hashes.json").write_text(
+        json.dumps({"h": {"doc_name": "notes", "type": "md"}})
+    )
+
+    async def compile_with_callback():
+        asyncio.get_running_loop().call_later(0.05, lambda: callbacks.append(time.monotonic()))
+        return await recompile_document(kb_dir, "h")
+
     started = time.monotonic()
-    result = import_document(kb_dir, source)
-    assert result.status == "added"
+    result = asyncio.run(compile_with_callback())
+    assert result.status == "unfinished" and result.message == "needs_acceptance"
     assert callbacks and callbacks[0] - started < 0.2
 
 
@@ -138,7 +133,7 @@ def test_full_request_over_budget_is_unfinished_without_a_model_attempt(
         source.write_text("Tiny document; the schema and output reserve still count.")
     result = import_document(kb_dir, source)
     assert result.status == "unfinished"
-    assert result.reason == "input_budget_exceeded"
+    assert result.reason == "evidence_context_exceeds_request_budget"
     assert not (kb_dir / "wiki/summaries/notes.md").exists()
 
 
@@ -167,23 +162,24 @@ def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, proce
     assert calls[0]["max_tokens"] == 1024
 
 
-def test_pdf_toc_fallback_keeps_same_loop_callbacks_live(kb_dir, monkeypatch, processing_config):
+def test_pdf_local_navigation_keeps_its_model_loop_callbacks_live(
+    kb_dir, monkeypatch, processing_config
+):
     import fitz
     import litellm
 
-    from openkb.processing import ProcessingIncomplete
+    from openkb.application.source_history import source_status
 
-    processing_config["pageindex_threshold"] = 1
-    processing_config["processing"]["max_requests"] = 30
+    processing_config["navigation"] = {
+        "enabled": True,
+        "processing": processing_config["processing"],
+    }
     (kb_dir / ".openkb/config.yaml").write_text(yaml.safe_dump(processing_config))
-    (kb_dir / ".env").write_text("LLM_API_KEY=synthetic-test\n")
     source = kb_dir / "manual.pdf"
     with fitz.open() as pdf:
-        pdf.new_page().insert_text((72, 72), "Contents. Chapter A .... 2")
+        pdf.new_page().insert_text((72, 72), "Contents. Chapter A .... 999")
         pdf.new_page().insert_text((72, 72), "Chapter A. Original knowledge.")
         pdf.save(source)
-    detections = 0
-    transforms = 0
     heartbeat = []
 
     def response(value):
@@ -197,41 +193,23 @@ def test_pdf_toc_fallback_keeps_same_loop_callbacks_live(kb_dir, monkeypatch, pr
         )
 
     def completion(**kwargs):
-        nonlocal detections, transforms
-        prompt = str(kwargs["messages"])
-        if "toc_detected" in prompt:
-            detections += 1
-            return response({"toc_detected": "yes" if detections == 1 else "no"})
-        if "page_index_given_in_toc" in prompt:
-            return response({"page_index_given_in_toc": "yes"})
-        if "transform the whole table" in prompt:
-            transforms += 1
-            if transforms == 2:
-                # First async verification rejected the numbered TOC. This is
-                # the real synchronous fallback, reached inside PageIndex.
-                time.sleep(0.15)
-                assert heartbeat, "TOC fallback blocked its event loop"
-                raise ProcessingIncomplete("stopped_after_verified_fallback", "indexing")
-            return response(
-                {"table_of_contents": [{"structure": "1", "title": "Chapter A", "page": 2}]}
-            )
-        if '"completed"' in prompt:
-            return response({"completed": "yes"})
-        return response(
-            [{"structure": "1", "title": "Chapter A", "physical_index": "<physical_index_2>"}]
-        )
+        return response(evidence_response(json.loads(kwargs["messages"][-1]["content"])))
 
     async def asynchronous(**kwargs):
         asyncio.get_running_loop().call_later(0.03, heartbeat.append, "responsive")
-        return response({"answer": "no"})
+        await asyncio.sleep(0.15)
+        assert heartbeat, "Navigation blocked its model event loop"
+        return response("Local navigation summary")
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", asynchronous)
     result = import_document(kb_dir, source)
-    assert result.status == "unfinished"
-    assert result.reason == "stopped_after_verified_fallback"
-    assert not (kb_dir / "wiki/summaries/manual.md").exists()
-    assert result.usage["observable_attempts"] >= 6
+    assert result.knowledge_compilation == "completed", result
+    navigation = source_status(kb_dir, result.source_id)["navigation"]
+    assert navigation["status"] == "enhanced", navigation
+    assert {position["location"]["page"] for position in navigation["positions"]} == {1, 2}
+    assert navigation["usage"]["observable_attempts"] > 0
+    assert heartbeat
 
 
 def test_client_cleanup_warning_does_not_change_committed_result(
@@ -239,19 +217,18 @@ def test_client_cleanup_warning_does_not_change_committed_result(
 ):
     import litellm
 
-    values = iter(
-        [
-            {"description": "Notes", "content": "# Notes"},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
     monkeypatch.setattr(
         litellm,
         "completion",
         lambda **kwargs: SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(next(values))), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            evidence_response(json.loads(kwargs["messages"][-1]["content"]))
+                        )
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=None,
@@ -268,5 +245,5 @@ def test_client_cleanup_warning_does_not_change_committed_result(
     assert result.status == "added"
     assert result.knowledge_compilation == "completed"
     assert result.warnings == ("model_client_cleanup_failed",)
-    assert result.usage["unknown_usage"] == 2
+    assert result.usage["unknown_usage"] == 3
     assert all(row["transport_attempts"] is None for row in result.usage["requests"])

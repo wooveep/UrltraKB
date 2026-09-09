@@ -187,7 +187,7 @@ def rss(pid):
         api.CloseHandle(handle)
 
 
-def main():
+def main(worker=run_case):
     from openkb.runtime.process_tree import ProcessTree, isolated_target
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -202,7 +202,7 @@ def main():
     (root / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     context = multiprocessing.get_context("spawn")
     ready = context.Event()
-    process = context.Process(target=isolated_target, args=(run_case, (plan,), ready))
+    process = context.Process(target=isolated_target, args=(worker, (plan,), ready))
     process.start()
     try:
         tree = ProcessTree(process, ready=ready)

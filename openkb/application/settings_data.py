@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, SecretStr
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, SecretStr
 
 from openkb.ocr.config import ParsingSettings
 
@@ -31,6 +31,12 @@ def _processing_settings(value):
 ProcessingSettings = Annotated[dict[str, Any], BeforeValidator(_processing_settings)]
 
 
+class NavigationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(default=False, strict=True)
+    processing: ProcessingSettings | None = None
+
+
 class _KbConfigWritable(BaseModel):
     """Typed schema for the writable ``config.yaml`` fields.
 
@@ -50,6 +56,7 @@ class _KbConfigWritable(BaseModel):
     entity_types: list[str] | None = None
     parsing: ParsingSettings | None = None
     processing: ProcessingSettings | None = None
+    navigation: NavigationSettings | None = None
 
 
 # Single source of truth for the writable config keys (derived from the model
@@ -66,12 +73,14 @@ class GlobalConfigValues(BaseModel):
     entity_types: list[str] | None = None
     parsing: ParsingSettings | None = None
     processing: ProcessingSettings | None = None
+    navigation: NavigationSettings | None = None
 
 
 class GlobalConfigResponse(BaseModel):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     processing: ProcessingSettings | None = None
+    navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     language: str
     pageindex_threshold: int
     # Effective global entity-type vocabulary (cleaned; always includes "other").
@@ -109,6 +118,7 @@ class KbConfigResponse(BaseModel):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     processing: ProcessingSettings | None = None
+    navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     language: str
     pageindex_threshold: int
     # Effective entity-type vocabulary (cleaned; always includes "other").

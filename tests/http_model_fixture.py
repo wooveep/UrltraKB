@@ -9,6 +9,43 @@ import pytest
 import yaml
 
 
+def evidence_response(payload):
+    if isinstance(payload, dict) and payload.get("stage") == "facts":
+        return {
+            "units": [
+                {
+                    "id": unit["id"],
+                    "facts": [
+                        {
+                            "topic": "Notes",
+                            "statement": "Confirmed knowledge.",
+                            "quote": unit["text"][:40],
+                        }
+                    ],
+                    "empty_reason": "",
+                }
+                for unit in payload["units"]
+            ]
+        }
+    elif isinstance(payload, dict) and payload.get("stage") == "planning":
+        return {
+            "topics": [
+                {
+                    "name": "notes",
+                    "title": "Notes",
+                    "kind": "concept",
+                    "members": payload["topics"],
+                }
+            ]
+        }
+    elif isinstance(payload, dict) and payload.get("stage") == "generation":
+        return {
+            "content": "# Notes\nConfirmed knowledge.",
+            "covered": [fact["id"] for fact in payload["facts"]],
+        }
+    return None
+
+
 class ModelService(list):
     def __init__(self):
         super().__init__()
@@ -16,6 +53,7 @@ class ModelService(list):
         self.release = threading.Event()
         self.release.set()
         self.drip_seconds = 0.0
+        self.respond = None
 
 
 @pytest.fixture
@@ -34,6 +72,13 @@ def model_service(kb_dir):
             value = {"description": "Notes", "content": "# Notes\nConfirmed knowledge."}
             if len(calls) % 2 == 0:
                 value = {"create": [], "update": [], "related": []}
+            try:
+                payload = json.loads(body["messages"][-1]["content"])
+            except (ValueError, TypeError):
+                payload = {}
+            value = evidence_response(payload) or value
+            if calls.respond is not None:
+                value = calls.respond(body)
             content = json.dumps(
                 {
                     "id": "offline",

@@ -55,6 +55,8 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         ("parses", store.root / "parses", "*.json"),
         ("proposals", knowledge / "proposals", "*.json"),
         ("blobs", store.root / "blobs", "*/*"),
+        ("compilation", store.root / "compilation", "*.json"),
+        ("navigation", store.root / "navigation", "*.json"),
     ):
         groups[kind] = set()
         for path in store.owned_path(directory).glob(pattern):
@@ -71,6 +73,12 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         current_versions.add(source.id)
         if parsed := ParseStore(kb_dir).selected(source):
             roots.add(parsed.id)
+        progress = store.owned_path(store.root / "compilation/latest" / f"{source.id}.json")
+        if progress.exists():
+            roots.update(_references(progress))
+        navigation = store.owned_path(store.root / "navigation/latest" / f"{source.id}.json")
+        if navigation.exists():
+            roots.update(_references(navigation))
     wiki = wiki_version(kb_dir)
     protected_paths = [kb_dir / "wiki" / path for path in wiki]
     protected_paths += [
@@ -115,6 +123,10 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
     for path in store.owned_path(knowledge / "accepted").glob("*.json"):
         if path.stem in unused:
             removable.add(store.owned_path(path))
+    for kind in ("compilation", "navigation"):
+        for path in store.owned_path(store.root / kind / "latest").glob("*.json"):
+            if path.stem in unused:
+                removable.add(store.owned_path(path))
     # Any state change after the preview invalidates authorization, including a
     # citation in an unrelated page or an intake that starts sharing a blob.
     state = {}

@@ -107,6 +107,35 @@ class ProcessingField(SettingsSection):
         return result
 
 
+class NavigationField(SettingsSection):
+    def __init__(self):
+        super().__init__(
+            "本地 PageIndex 可增强原文导航，额度独立于知识编译；关闭时仍可按原文位置查阅。"
+        )
+        self.enabled = QCheckBox("启用本地导航增强")
+        self.enabled.toggled.connect(self.changed)
+        self.budget = ProcessingField()
+        self.budget.action.hide()
+        self.budget.source.hide()
+        self.body.addWidget(self.enabled)
+        self.body.addWidget(self.budget)
+        for entry in self.budget.values.inputs.values():
+            entry.textEdited.connect(self.changed)
+
+    def load(self, value, source):
+        self.enabled.setChecked(value.enabled)
+        self.budget.load(value.processing, source)
+        self.loaded(source)
+
+    def value(self):
+        if self.action.currentIndex() == 2:
+            return None
+        return {
+            "enabled": self.enabled.isChecked(),
+            "processing": self.budget.value() if self.enabled.isChecked() else None,
+        }
+
+
 class OcrField(SettingsSection):
     def __init__(self):
         super().__init__(

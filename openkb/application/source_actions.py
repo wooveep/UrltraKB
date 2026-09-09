@@ -176,7 +176,9 @@ def continue_source(
             proposal = load_proposal(kb_dir, proposal_id)
             if proposal.source_id != source.source_id or proposal.version_id != source.id:
                 raise ValueError("Proposal does not belong to the selected source version")
-            config_id = content_id(settings)
+            from openkb.agent.evidence_checkpoints import publication_settings
+
+            config_id = content_id(publication_settings(settings, bundle))
             if accept_pages is not None:
                 accept_proposal(kb_dir, proposal.id, accept_pages, config_id=config_id)
             with collect_compile_report() as report, processing_scope(settings):
@@ -197,9 +199,9 @@ def continue_source(
                 resume=None if complete else proposal.id,
                 usage=report.usage,
             )
-            from openkb.application.source_history import finish_source_result
+            from openkb.application.document_pipeline import finish_compilation
 
-            return finish_source_result(kb_dir, result)
+            return finish_compilation(kb_dir, source, settings, result, bundle=bundle)
 
 
 def confirm_source_page(
@@ -306,4 +308,31 @@ def reparse_source(
                 on_event=context.on_event,
                 parse_only=True,
                 force_parse=True,
+            )
+
+
+def rebuild_source_navigation(
+    kb_dir: Path,
+    source_id: str,
+    *,
+    version_id: str,
+    parse_id: str,
+    context: ExecutionContext | None = None,
+) -> dict[str, Any]:
+    """Enhance one retained parse without OCR or changes to published knowledge."""
+    from openkb.navigation import build_navigation
+
+    kb_dir = kb_dir.resolve()
+    context = context or ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
+        with context.begin(kb_dir) as bundle:
+            source = SourceStore(kb_dir).version(version_id)
+            parsed = ParseStore(kb_dir).load(parse_id)
+            if source.source_id != source_id:
+                raise ValueError("Source version does not belong to the selected source")
+            if not ParseStore(kb_dir).complete(source, parsed):
+                raise ValueError("Navigation requires complete, reviewed source evidence")
+            context.on_event({"stage": "navigation"})
+            return build_navigation(
+                kb_dir, source, parsed, resolve_effective_config(kb_dir)[0], bundle=bundle
             )

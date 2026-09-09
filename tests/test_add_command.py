@@ -100,7 +100,7 @@ class TestAddCommand:
         assert result.exit_code == 0, result.output
         assert "compilation=completed" in result.output
         assert len(list((kb_dir / "wiki/summaries").glob("test-*.md"))) == 1
-        assert len(model_service) == 2
+        assert len(model_service) == 3
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
         from openkb.state import HashRegistry
@@ -138,7 +138,7 @@ class TestAddCommand:
         store = SourceStore(kb_dir)
         assert {v.name for v in store.list_sources()} == {"a.md", "b.md"}
         assert {store.original(v).read_text() for v in store.list_sources()} == {"# A", "# B"}
-        assert len(model_service) == 4
+        assert len(model_service) == 6
 
     def test_add_directory_stops_when_recovery_is_required(
         self, kb_dir, tmp_path, monkeypatch, model_service
@@ -183,7 +183,7 @@ class TestAddCommand:
         result = runner.invoke(cli, ["add", str(doc)])
         assert result.exit_code == 0, result.output
         assert "SKIP" in result.output
-        assert len(model_service) == 2
+        assert len(model_service) == 3
 
 
 class TestAddMutationCoordinator:

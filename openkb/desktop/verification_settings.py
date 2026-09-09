@@ -126,9 +126,21 @@ def verify_processing_settings(dialog, kb, wait_until):
     switched = read_settings_view(kb)
     assert switched.values.parsing.ocr.backend == "local"
     assert switched.values.parsing.ocr.cloud == saved.values.parsing.ocr.cloud
-    for field in (processing, ocr):
+    navigation = dialog.fields["navigation"]
+    navigation.enabled.setChecked(True)
+    for name, value in budgets.items():
+        navigation.budget.values.inputs[name].setText(str(value))
+    navigation.action.setCurrentIndex(1)
+    dialog.save()
+    wait_until(lambda: dialog.form.isEnabled())
+    saved_navigation = read_settings_view(kb)
+    assert saved_navigation.values.navigation.enabled
+    assert saved_navigation.values.navigation.processing == budgets
+    assert saved_navigation.values.processing == budgets
+    for field in (processing, ocr, navigation):
         field.action.setCurrentIndex(2)
     dialog.save()
     wait_until(lambda: dialog.form.isEnabled())
     cleared = read_settings_view(kb)
     assert cleared.sources["processing"] != "kb" and cleared.sources["parsing"] != "kb"
+    assert cleared.sources["navigation"] != "kb"

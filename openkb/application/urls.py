@@ -39,7 +39,7 @@ def import_url(
     context = context or ExecutionContext()
     with (
         kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting),
-        context.begin(kb_dir),
+        context.begin(kb_dir) as bundle,
         collect_compile_report() as compilation,
     ):
         try:
@@ -55,7 +55,19 @@ def import_url(
                 stage=exc.stage,
                 reason=exc.reason,
             )
-        return finish_source_result(kb_dir, replace(result, usage=compilation.usage))
+        result = replace(result, usage=compilation.usage)
+        if result.source_id is None or result.input_version is None:
+            return finish_source_result(kb_dir, result)
+        from openkb.application.document_pipeline import finish_compilation
+        from openkb.sources import SourceStore
+
+        return finish_compilation(
+            kb_dir,
+            SourceStore(kb_dir).version(result.input_version),
+            resolve_effective_config(kb_dir)[0],
+            result,
+            bundle=bundle,
+        )
 
 
 def _import_url(

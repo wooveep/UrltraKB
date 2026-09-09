@@ -149,6 +149,20 @@ class ReparseSource:
 
 
 @dataclass(frozen=True)
+class RebuildSourceNavigation:
+    source_id: str
+    version_id: str
+    parse_id: str
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.source_id, source=True)
+        valid_id(self.version_id)
+        valid_id(self.parse_id)
+
+
+@dataclass(frozen=True)
 class CleanupSourceHistory:
     preview_id: str
 
@@ -267,6 +281,7 @@ UnitRequest = (
     | RecompileDocument
     | ContinueSource
     | ReparseSource
+    | RebuildSourceNavigation
     | ReprocessSourcePage
     | CleanupSourceHistory
     | ConfirmSourcePage
@@ -286,6 +301,7 @@ REQUEST_TYPES = (
     RecompileDocument,
     ContinueSource,
     ReparseSource,
+    RebuildSourceNavigation,
     ReprocessSourcePage,
     CleanupSourceHistory,
     ConfirmSourcePage,

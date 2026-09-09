@@ -61,6 +61,7 @@ class _Attempt:
     recovery: bool = False
     recovered: bool = False
     budget_expired: bool = False
+    navigation_started: bool = False
 
 
 class TaskManager:
@@ -416,19 +417,35 @@ class TaskManager:
                     "ContinueSource",
                     "ReparseSource",
                     "ReprocessSourcePage",
+                    "RebuildSourceNavigation",
                 }:
                     try:
-                        attempt.limits = RequestLimits.from_config(snapshot.values()["effective"])
+                        settings = snapshot.values()["effective"]
+                        if task.view.operation == "RebuildSourceNavigation":
+                            settings = settings.get("navigation") or {}
+                        attempt.limits = RequestLimits.from_config(settings)
                     except ProcessingIncomplete:
                         pass  # The execution returns a structured configuration outcome.
                 attempt.started = attempt.stage_started = time.monotonic()
                 self._update(
                     task, started_at=task.view.started_at or datetime.now(timezone.utc).isoformat()
                 )
+                self._acknowledge(attempt, "snapshot-ack")
+            elif kind == "navigation" and not attempt.navigation_started:
+                # Only the single acknowledged post-publication handoff can
+                # start another budget. Progress messages cannot reset it.
+                receipt = read_receipt(self.receipt_dir, attempt.identity)
+                if receipt is None or receipt.status != "completed" or task.snapshot is None:
+                    continue
+                attempt.navigation_started = True
                 try:
-                    attempt.control.send("snapshot-ack")
-                except (OSError, EOFError):
-                    attempt.eof = True
+                    attempt.limits = RequestLimits.from_config(
+                        task.snapshot.values()["effective"].get("navigation") or {}
+                    )
+                except ProcessingIncomplete:
+                    pass
+                attempt.started = attempt.stage_started = time.monotonic()
+                self._acknowledge(attempt, "navigation-ack")
             elif kind == "deferred":
                 attempt.deferred = True
                 attempt.deferred_reason = "input" if message.get("reason") == "input" else "lease"
@@ -440,6 +457,13 @@ class TaskManager:
                     self._update(task, persist=False, text_truncated=True)
             elif kind == "recovered":
                 attempt.recovered = True
+
+    @staticmethod
+    def _acknowledge(attempt: _Attempt, message: str) -> None:
+        try:
+            attempt.control.send(message)
+        except (OSError, EOFError):
+            attempt.eof = True
 
     def _progress(self, task: _Task, attempt: _Attempt) -> None:
         for _ in range(128):

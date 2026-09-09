@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from openkb.cancellation import check_cancelled
 
@@ -111,6 +111,9 @@ class ExecutionBudget:
     observations: list[dict[str, Any]] = field(default_factory=list)
     incomplete: ProcessingIncomplete | None = field(default=None, repr=False)
     lock: Any = field(default_factory=threading.RLock, repr=False)
+    on_observation: Callable[[ExecutionBudget], None] = field(
+        default=lambda value: None, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.permits = threading.BoundedSemaphore(self.limits.concurrency)
@@ -163,6 +166,7 @@ class ExecutionBudget:
                 "transport_attempts": None,
             }
             self.observations.append(observation)
+            self.on_observation(self)
         return options, observation
 
     def settle(self, observation: dict[str, Any], response: Any) -> None:
@@ -177,6 +181,7 @@ class ExecutionBudget:
             ):
                 self.charged_tokens += input_tokens + output_tokens - observation["reserved_tokens"]
                 observation["usage"] = {"input": input_tokens, "output": output_tokens}
+            self.on_observation(self)
         self.checkpoint()
         if getattr(response.choices[0], "finish_reason", None) == "length":
             raise ProcessingIncomplete("output_budget_exhausted", self.stage)
@@ -304,6 +309,21 @@ def processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBudget]:
                 elapsed_seconds=time.monotonic() - budget.started,
                 requests=budget.observations,
             )
+        _ACTIVE.reset(token)
+
+
+@contextmanager
+def independent_processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBudget]:
+    """An optional post-publication operation owns a separate, finite allowance.
+
+    It cannot consume or poison the necessary compilation's request allowance.
+    Its caller records its usage separately instead of replacing the source report.
+    """
+    budget = ExecutionBudget(RequestLimits.from_config(config))
+    token = _ACTIVE.set(budget)
+    try:
+        yield budget
+    finally:
         _ACTIVE.reset(token)
 
 

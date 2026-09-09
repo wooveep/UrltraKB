@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from openkb.cancellation import cancellation_scope
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
 from openkb.locks import LockCancelled
+
+if TYPE_CHECKING:
+    from openkb.application.documents import DocumentResult
+
+_COMMITTED: ContextVar[Callable[[DocumentResult], None]] = ContextVar(
+    "document_committed", default=lambda result: None
+)
+
+
+def document_committed(result: DocumentResult) -> None:
+    """Fix the published business outcome before starting optional navigation."""
+    _COMMITTED.get()(result)
 
 
 @dataclass
@@ -19,6 +32,7 @@ class ExecutionContext:
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False)
     on_event: Callable[[dict], None] = field(default=lambda event: None, repr=False)
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
+    on_committed: Callable[[DocumentResult], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
     _announced: bool = field(default=False, init=False, repr=False)
 
@@ -45,4 +59,8 @@ class ExecutionContext:
             self.snapshot.install_worker_environment()
         with self.snapshot.activate(), cancellation_scope(self.cancelled):
             self.check_stop()
-            yield LlmCredentialBundle(**self.snapshot.values()["credentials"])
+            token = _COMMITTED.set(self.on_committed)
+            try:
+                yield LlmCredentialBundle(**self.snapshot.values()["credentials"])
+            finally:
+                _COMMITTED.reset(token)

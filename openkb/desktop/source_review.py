@@ -31,6 +31,7 @@ from openkb.application.source_actions import (
 from openkb.application.source_history import source_status
 from openkb.desktop.source_presentation import (
     KINDS,
+    REASONS,
     evidence_text,
     position_text,
     quality_text,
@@ -54,6 +55,7 @@ class SourceReview(QDialog):
         self._closed, self._generation = False, 0
         self._saved = self._review = self._task = None
         self._next = None
+        self._evidence_revision = 0
         self._offset = 0
         self.setWindowTitle("资料原文与处理结果")
         self.resize(940, 760)
@@ -67,13 +69,14 @@ class SourceReview(QDialog):
             ("导出原文…", self.export),
             ("继续处理", self.continue_saved),
             ("重新解析", self.reparse),
+            ("重建导航", self.rebuild_navigation),
             ("清理本库历史…", self.cleanup_history),
         ):
             button = QPushButton(label)
             button.clicked.connect(callback)
             row.addWidget(button)
         layout.addLayout(row)
-        tabs = QTabWidget()
+        tabs = self.tabs = QTabWidget()
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         tabs.addTab(self.details, "处理状态")
@@ -141,6 +144,27 @@ class SourceReview(QDialog):
         self.diff.setReadOnly(True)
         plan.addWidget(self.diff)
         tabs.addTab(proposed, "知识变更")
+        navigation = QWidget()
+        navigation_layout = QVBoxLayout(navigation)
+        self.navigation_status = QLabel()
+        self.navigation_status.setWordWrap(True)
+        navigation_layout.addWidget(self.navigation_status)
+        self.navigation_nodes = QComboBox()
+        self.navigation_nodes.activated.connect(self.open_navigation)
+        navigation_layout.addWidget(self.navigation_nodes)
+        navigation_controls = QHBoxLayout()
+        for label, step in (("上一组位置", -100), ("下一组位置", 100)):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda checked=False, step=step: self.load_navigation(
+                    max(0, self._navigation_offset + step)
+                )
+            )
+            navigation_controls.addWidget(button)
+        navigation_layout.addLayout(navigation_controls)
+        navigation_layout.addStretch()
+        tabs.addTab(navigation, "原文导航")
+        self._navigation_offset = 0
         layout.addWidget(tabs)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
@@ -167,6 +191,8 @@ class SourceReview(QDialog):
 
     def reload(self):
         self._generation += 1
+        self.blocks.clear()
+        self.navigation_nodes.clear()
         self._review = None
         self._viewed_page = None
         self.accept.setEnabled(False)
@@ -187,6 +213,7 @@ class SourceReview(QDialog):
             )
             self.details.setPlainText(status_text(value))
             self.load_parse(0)
+            self.load_navigation(0)
 
         self.read(lambda: source_status(self.kb, self.source_id), loaded)
 
@@ -195,6 +222,8 @@ class SourceReview(QDialog):
             self.content.setPlainText("暂无可读取的解析结果，原文仍已保存。")
             return
 
+        evidence_revision = self._evidence_revision
+
         def loaded(value):
             self._offset = offset
             self.blocks.clear()
@@ -202,7 +231,8 @@ class SourceReview(QDialog):
                 position = position_text(block["location"])
                 kind = KINDS.get(block["kind"], block["kind"])
                 self.blocks.addItem(f"{block['order'] + 1}. {kind} · {position}", block)
-            self.content.setPlainText(quality_text(value["quality"]))
+            if evidence_revision == self._evidence_revision:
+                self.content.setPlainText(quality_text(value["quality"]))
 
         self.read(
             lambda: inspect_source_parse(
@@ -233,8 +263,12 @@ class SourceReview(QDialog):
         reference = self._next
         if reference is None:
             return
+        self._evidence_revision += 1
+        revision = self._evidence_revision
 
         def loaded(value):
+            if revision != self._evidence_revision:
+                return
             self.content.setPlainText(evidence_text(value))
             self._next = replace(reference, start=value.next_start) if value.next_start else None
 
@@ -282,6 +316,60 @@ class SourceReview(QDialog):
     def reparse(self):
         if self._saved and self._task is None:
             self.submit(ReparseSource(self.source_id, self._saved["source"]["id"]))
+
+    def rebuild_navigation(self):
+        from openkb.runtime.requests import RebuildSourceNavigation
+
+        result = self._saved["result"] if self._saved else None
+        if result and result.get("parse_id") and self._task is None:
+            self.submit(
+                RebuildSourceNavigation(
+                    self.source_id, self._saved["source"]["id"], result["parse_id"]
+                )
+            )
+
+    def load_navigation(self, offset):
+        from openkb.navigation import read_navigation
+        from openkb.sources import SourceStore
+
+        if not self._saved:
+            return
+        version = self._saved["source"]["id"]
+
+        def loaded(value):
+            self._navigation_offset = offset
+            self.navigation_nodes.clear()
+            if not value:
+                self.navigation_status.setText("暂无导航；可在知识编译完成后单独重建。")
+                return
+            labels = {
+                "basic": "按原文位置导航",
+                "enhanced": "本地导航已增强",
+                "degraded": "导航增强未完成，按原文位置查阅",
+            }
+            self.navigation_status.setText(
+                labels[value["status"]]
+                + (" · " + REASONS.get(value["reason"], value["reason"]) if value["reason"] else "")
+            )
+            for node in value["positions"]:
+                self.navigation_nodes.addItem(
+                    node.get("title", KINDS.get(node["kind"], node["kind"]))
+                    + " · "
+                    + position_text(node["location"]),
+                    node,
+                )
+
+        self.read(
+            lambda: read_navigation(self.kb, SourceStore(self.kb).version(version), offset=offset),
+            loaded,
+        )
+
+    def open_navigation(self, *_):
+        node = self.navigation_nodes.currentData()
+        if node:
+            self._next = Evidence(**node["reference"])
+            self.tabs.setCurrentIndex(1)
+            self.read_next()
 
     def preview_page(self):
         if not self._saved:

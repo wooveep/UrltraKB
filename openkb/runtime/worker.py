@@ -23,6 +23,7 @@ from openkb.runtime.requests import (
     GenerateGraph,
     ImportFile,
     ImportUrl,
+    RebuildSourceNavigation,
     RecompileDocument,
     RemoveDocument,
     ReparseSource,
@@ -43,6 +44,7 @@ class WorkerChannel:
         self.budget_expired = threading.Event()
         self.parent_gone = threading.Event()
         self.acknowledged = threading.Event()
+        self.navigation_acknowledged = threading.Event()
         self.sequence = 0
         self._event_lock = threading.Lock()
         self.truncated = False
@@ -60,6 +62,8 @@ class WorkerChannel:
                     self.stopped.set()
                 elif message == "snapshot-ack":
                     self.acknowledged.set()
+                elif message == "navigation-ack":
+                    self.navigation_acknowledged.set()
         except (EOFError, OSError):
             self.parent_gone.set()
             self.stopped.set()
@@ -102,6 +106,27 @@ def _execute(
     from openkb.locks import kb_ingest_lock
 
     root = Path(identity.kb_dir)
+    if isinstance(request, RebuildSourceNavigation):
+        from openkb.application.source_actions import rebuild_source_navigation
+
+        navigation = rebuild_source_navigation(
+            root,
+            request.source_id,
+            version_id=request.version_id,
+            parse_id=request.parse_id,
+            context=context,
+        )
+        reason = navigation["reason"]
+        return UnitResult(
+            "stopped"
+            if reason == "navigation_stopped"
+            else "unfinished"
+            if navigation["status"] == "degraded"
+            else "completed",
+            error=reason,
+            unfinished=("navigation",) if reason else (),
+            changes=("source navigation",),
+        )
     if isinstance(request, SavePage):
         with kb_ingest_lock(root / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
             with context.begin(root):
@@ -333,15 +358,7 @@ def _execute(
                 source_root=root / "raw" if request.wait_for_stable else None,
                 source_origin=request.upload_origin,
             )
-        return UnitResult(
-            "completed" if result.status == "added" else result.status,
-            resources=result.resources,
-            error="Document import failed" if result.status == "failed" else None,
-            quality=result.quality,
-            unfinished=result.unfinished,
-            revision=result.input_version,
-            document=result,
-        )
+        return UnitResult.from_document(result)
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio
 
@@ -409,6 +426,22 @@ def run_unit(
         on_snapshot=channel.snapshot,
     )
     business_result = None
+
+    def committed(document):
+        nonlocal business_result
+        business_result = UnitResult.from_document(document)
+        if isinstance(request, RecompileDocument) and request.version is not None:
+            from openkb.application.recompilation import _version
+
+            business_result = replace(business_result, revision=_version(Path(identity.kb_dir)))
+        save_receipt(receipt_dir, identity, business_result)
+        if not channel.send("navigation"):
+            raise OperationCancelled("Parent disappeared after publication")
+        while not channel.navigation_acknowledged.wait(0.05):
+            if channel.parent_gone.is_set() or channel.stopped.is_set():
+                raise OperationCancelled("Stopped after publication")
+
+    context.on_committed = committed
     try:
         try:
             with (
@@ -423,6 +456,7 @@ def run_unit(
                             ContinueSource,
                             ReparseSource,
                             ReprocessSourcePage,
+                            RebuildSourceNavigation,
                         ),
                     ),
                     budget_expired=channel.budget_expired,

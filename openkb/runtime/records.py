@@ -78,6 +78,19 @@ class UnitResult:
         return value
 
     @classmethod
+    def from_document(cls, result: DocumentResult) -> UnitResult:
+        return cls(
+            "completed" if result.status == "added" else result.status,
+            resources=result.resources,
+            error="Document import failed" if result.status == "failed" else None,
+            quality=result.quality,
+            unfinished=result.unfinished,
+            revision=result.input_version,
+            document=result,
+            warnings=result.warnings,
+        )
+
+    @classmethod
     def from_summary(cls, value: dict[str, Any]) -> UnitResult:
         if any(
             not isinstance(value.get(key, []), list)

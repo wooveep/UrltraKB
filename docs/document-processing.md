@@ -128,10 +128,53 @@ query and stop use the ordinary task endpoints. PageIndex Cloud application
 features and old cloud-only formats have been removed. Local PageIndex remains
 available; old cloud environment variables cannot route OpenKB to that service.
 
-Automatic budget-based all-section evidence compilation and independent
-navigation rebuilding are the third delivery batch. Until that batch is
-implemented, oversized model requests remain explicitly unfinished; retained
-parsing alone is not knowledge-compilation success.
+## Whole-document evidence compilation
+
+Every nonempty structural block participates in fact extraction. Large blocks
+and batches split according to the complete request and a representative JSON
+output envelope. Spans keep their block identity and exact character positions;
+table headers, row/cell locations, surrounding spans and hierarchical heading
+evidence remain available. Each unit must return facts with verbatim quotes or
+an explicit reason for having no facts. Missing coverage, invalid quotes and
+truncated output leave the document unfinished.
+
+The compiler merges topic plans across sections and generates concept/entity
+contributions from reread original spans. Facts are a plan, not a replacement
+for the original's conditions. Large topics use bounded parts within one source
+contribution. The complete prior page is preserved outside model context; a
+bounded relevant window and link catalog guide generation. Required figures
+resolve to retained immutable assets. This source's previously generated
+contribution is replaced, and retired topics lose only its marked contribution.
+All changes remain private until the whole-source publication checks pass.
+
+Validated fact, plan and generation responses become checkpoints. Keys include
+source and parse identity, actual prompts/payloads, the model endpoint and
+relevant compiler code. Planning and generation also include their Wiki inputs.
+Changing the language can reuse independent facts; changing the source, model,
+prompt or affected implementation invalidates the corresponding work. Progress
+events expose checkpoint hits. Resuming starts a new bounded run while source
+history retains earlier usage. A completed version is skipped only when its
+compilation profile still matches.
+
+## Optional original navigation
+
+`navigation.enabled` defaults to false. Basic ordered positions remain readable
+after compilation. To enable the pinned local PageIndex enhancement, set
+`navigation.enabled: true` and provide a separate `navigation.processing` mapping
+using the execution fields above. These limits require explicit calibration;
+they do not borrow the document's compilation allowance.
+
+Knowledge publication, settled usage history and the runtime completion receipt
+precede navigation work. Navigation failure or stopping reports a warning and
+retains basic positions. Each navigation attempt records reservations and settled
+usage separately; an interrupted attempt keeps unknown usage visible.
+
+Rebuild with `openkb --kb-dir KB source rebuild-navigation SOURCE_ID --version VERSION_ID
+--parse PARSE_ID`, the desktop's **重建导航** action, or
+`POST /api/v1/source/rebuild-navigation`. This uses the retained parse without
+rerunning OCR or rewriting knowledge. `POST /api/v1/source/navigation` accepts
+`kb`, `source_id`, `version_id`, `offset` and `limit` (1–200) for ordered navigation
+windows. The desktop opens each position as original evidence.
 
 ## Maintained PageIndex distribution
 
@@ -213,3 +256,63 @@ These checks do not establish semantic compilation quality or long OCR throughpu
 Real model calibration, authenticated PaddleOCR jobs validation, representative
 user documents and broader OCR accuracy measurements remain outstanding. The
 second-batch code checkpoint is not final acceptance of those external gates.
+
+## Third-batch verification record
+
+The same two systems exercised complete source compilation with a deterministic
+model adapter through `scripts/benchmark_document_compilation.py`. Each case
+extracts the manifest's three prescribed facts, stops before planning, then
+continues from validated fact checkpoints. Every original block/span was
+accounted for, all three facts were reread during generation and present in
+published knowledge, and every worker was reaped. These are control-flow and
+evidence-coverage measurements, not real model accuracy or throughput estimates.
+
+| Fixed input | Blocks | Debian operation seconds | Windows operation seconds | Model-adapter attempts, Debian / Windows |
+| --- | ---: | ---: | ---: | ---: |
+| DOCX 100k characters | 92 | 2.44 | 4.97 | 157 / 157 |
+| DOCX 500k characters | 384 | 10.86 | 23.70 | 741 / 741 |
+| DOCX 1M characters | 750 | 21.44 | 42.70 | 1472 / 1473 |
+| Native PDF 100 pages | 353 | 4.91 | 14.11 | 122 / 122 |
+| Native PDF 500 pages | 1753 | 25.48 | 47.61 | 589 / 589 |
+| Native PDF 1000 pages | 3503 | 50.13 | 129.61 | 1172 / 1172 |
+
+The corpus manifest SHA-256 is
+`a4cf2deb4bf1c097af01baf11948ef4a96426209f4bf0b3eae2c0f01fa47afa9`.
+Per-case supervision allowed 180 seconds, 1 GiB worker memory and 512 MiB output;
+per-run execution allowed 150 seconds, 120 seconds per stage, 4000 attempts and
+10M reserved tokens. Requests used context 4096, output 1024 and concurrency 1.
+No budget was enlarged after a failed run. Peak sampled worker memory stayed
+below 273 MB. Other validation processes were active, so timings should not be
+treated as isolated platform comparisons or production defaults.
+
+Initial Windows probe isolation incorrectly blocked asyncio's own loopback
+socket; the probe was corrected and rerun within the same bounds. The final
+runner installs its external-network guard before third-party imports and uses
+LiteLLM's bundled cost map. A separate 100k-character bootstrap check passed on
+both systems (Linux also used an OS network namespace). Earlier corpus timings
+do not prove network isolation during dependency import. All knowledge responses
+were generated by the local deterministic adapter; no provider fee was incurred.
+
+Regression coverage includes small output budgets, large Wiki catalogs, distant
+heading prerequisites, DOCX table headers and row positions, long commands,
+retained figures, entity vocabulary, invalid-output continuation, whole-source
+manual review and navigation worker loss. Native Qt settings persistence and
+source review → acceptance → independent navigation rebuild → original evidence
+opening passed on both systems. The Windows renderer assets were rebuilt for the
+correct platform and passed 11 rendering checks.
+
+The final full-suite run collected 1550 tests: 1527 passed, 22 failed and one
+platform test was skipped. The failures used superseded compiler fixtures,
+two-call accounting or old URL/configuration contracts. After adapting those
+tests to the shared operation, the affected 239-test selection passed. The full
+suite was not repeated. A later malformed-navigation boundary regression and
+the navigation/source API selection passed nine tests. The final Windows
+CLI/REST/watch/recompile/URL/source-API regression passed all 244 tests in
+154.35 seconds. The final module-size/desktop-source selection passed 12 tests.
+Ruff, mypy (204 modules), wheel/sdist contents and both review axes were also
+checked.
+
+The three code batches do not close the real-model, authenticated PaddleOCR
+cloud, representative-document or long OCR quality gates described above.
+Explicit provider configuration and cost authorization are still required for
+those measurements.

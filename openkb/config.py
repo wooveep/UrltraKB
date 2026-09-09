@@ -488,6 +488,7 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "entity_types",
     "processing",
     "parsing",
+    "navigation",
 )
 
 

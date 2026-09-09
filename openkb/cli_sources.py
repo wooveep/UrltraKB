@@ -13,6 +13,7 @@ from openkb.runtime.requests import (
     CleanupSourceHistory,
     ConfirmSourcePage,
     ContinueSource,
+    RebuildSourceNavigation,
     ReparseSource,
     ReprocessSourcePage,
 )
@@ -136,6 +137,20 @@ def reparse(ctx, source_id, version_id):
         unit = ReparseSource(source_id, version_id)
     except ValueError as exc:
         raise click.ClickException("Invalid source or version identity") from exc
+    ctx.exit(run_requests(_root(ctx), [unit]))
+
+
+@sources.command("rebuild-navigation")
+@click.argument("source_id")
+@click.option("--version", "version_id", required=True)
+@click.option("--parse", "parse_id", required=True)
+@click.pass_context
+def rebuild_navigation(ctx, source_id, version_id, parse_id):
+    """Rebuild local navigation for saved evidence, with an independent budget."""
+    try:
+        unit = RebuildSourceNavigation(source_id, version_id, parse_id)
+    except ValueError as exc:
+        raise click.ClickException("Invalid source, version or parse identity") from exc
     ctx.exit(run_requests(_root(ctx), [unit]))
 
 

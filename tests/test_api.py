@@ -538,7 +538,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir, tmp_p
     assert response.json()["added_count"] == 2
     assert response.json()["skipped_count"] == 0
     assert response.json()["failed_count"] == 0
-    assert len(model_service) == 6
+    assert len(model_service) == 9
     assert len(list((kb_dir / "wiki/summaries").glob("*.md"))) == 3
 
 
@@ -565,7 +565,7 @@ def test_add_endpoint_preserves_independent_uploads_with_equal_content(
         second = _post_document(client, kb).json()
     assert first["files"][0]["document"]["source_id"] != second["files"][0]["document"]["source_id"]
     assert first["files"][0]["saved_path"] == second["files"][0]["saved_path"]
-    assert second["added_count"] == 1 and len(model_service) == 4
+    assert second["added_count"] == 1 and len(model_service) == 6
     assert Path(second["files"][0]["saved_path"]).read_bytes() == b"# Paper"
 
 
@@ -1128,7 +1128,7 @@ def test_recompile_non_stream_short_doc(monkeypatch, kb_dir, tmp_path, model_ser
         assert body["status"] == "partial"
         assert body["recompiled"] == 0 and body["unfinished_count"] == 1
         assert body["docs"][0]["document"]["reason"] == "needs_acceptance"
-        assert len(model_service) == 2
+        assert len(model_service) == 3
 
 
 def test_recompile_non_stream_long_doc(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1249,7 +1249,7 @@ def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir, tmp_path, model
         body = response.json()
         assert body["total"] == 2
         assert body["recompiled"] == 0 and body["unfinished_count"] == 2
-        assert len(model_service) == 4
+        assert len(model_service) == 6
 
 
 def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1292,7 +1292,7 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir, tmp_path, model_serv
         body = response.json()
         assert body["recompiled"] == 0
         assert body["unfinished_count"] == 2
-        assert len(model_service) == 2
+        assert len(model_service) == 3
         assert {row["message"] for row in body["docs"]} == {
             "needs_acceptance",
             "saved_original_missing",
@@ -2395,6 +2395,9 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "kb_root_env_pinned": False,
         "openai_api_base": None,
         "has_api_key": False,
+        "processing": None,
+        "parsing": {"ocr": {"backend": "local", "cloud": None, "local": None}},
+        "navigation": {"enabled": False, "processing": None},
     }
 
 

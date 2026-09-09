@@ -6,6 +6,78 @@ from openkb.api import create_app
 from openkb.application.documents import import_document
 
 
+def test_rest_rebuild_navigation_is_queryable_and_leaves_knowledge_unchanged(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    import yaml
+
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
+    monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+    source = tmp_path / "navigation.md"
+    source.write_text("# Instructions\n\nRequired version 7.")
+    imported = import_document(kb_dir, source)
+    before = {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()}
+    path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["navigation"] = {"enabled": True, "processing": config["processing"]}
+    path.write_text(yaml.safe_dump(config))
+    source.unlink()
+    with TestClient(create_app()) as client:
+        binding = {
+            "kb": "test",
+            "source_id": imported.source_id,
+            "version_id": imported.input_version,
+        }
+        started = client.post(
+            "/api/v1/source/rebuild-navigation",
+            json={
+                **binding,
+                "parse_id": imported.parse_id,
+                "task_id": "f" * 32,
+            },
+        )
+        assert started.status_code == 202, started.text
+        task = client.app.state.import_tasks.manager.wait(started.json()["task_id"], timeout=20)
+        assert task.state == "completed" and task.processes_reaped, task
+        navigation = client.post("/api/v1/source/navigation", json={**binding, "limit": 1})
+        assert navigation.status_code == 200, navigation.text
+        assert navigation.json()["status"] == "enhanced"
+        assert len(navigation.json()["positions"]) == 1
+        assert navigation.json()["next_offset"] == 1
+    assert {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()} == before
+
+
+def test_rest_navigation_rejects_malformed_saved_status(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    from openkb.locks import atomic_write_json
+    from openkb.sources import SourceStore, content_id, read_object
+
+    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
+    monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+    source = tmp_path / "navigation.md"
+    source.write_text("Required version 7.")
+    imported = import_document(kb_dir, source)
+    root = SourceStore(kb_dir).root / "navigation"
+    pointer = root / "latest" / f"{imported.input_version}.json"
+    record = read_object(root / f"{read_object(pointer)['navigation']}.json")
+    record["status"] = []
+    identity = content_id(record)
+    atomic_write_json(root / f"{identity}.json", record)
+    atomic_write_json(pointer, {"navigation": identity})
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/v1/source/navigation",
+            json={
+                "kb": "test",
+                "source_id": imported.source_id,
+                "version_id": imported.input_version,
+            },
+        )
+        assert response.status_code == 404
+
+
 def test_review_and_accept_saved_proposal_without_new_model_calls(
     kb_dir, tmp_path, monkeypatch, model_service
 ):

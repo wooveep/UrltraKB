@@ -12,55 +12,51 @@ from unittest.mock import patch
 import pytest
 
 
-def _url_worker(*args):
-    from openkb.runtime.worker import run_unit
-
-    def fetch(url, root, **kwargs):
-        path = root / "raw/article.md"
-        path.parent.mkdir()
-        path.write_text("# Privately downloaded source\n", encoding="utf-8")
-        return path
-
-    with patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch):
-        run_unit(*args)
-
-
 def _crash_with_fixed_input(*args):
     from openkb.runtime.worker import run_unit
 
-    def crash(source, kb, **options):
-        prepared = options["prepared"]
-        (kb / "crash-evidence.json").write_text(
-            json.dumps([str(prepared.path), *[str(i.path) for i in prepared.images.values()]]),
-            encoding="utf-8",
+    def crash(**kwargs):
+        prepared = Path(args[-1])
+        copies = [
+            path
+            for path in prepared.rglob("*")
+            if path.is_file()
+            and any(part.startswith("openkb-input-") for part in path.parts)
+            and path.suffix in {".md", ".png"}
+        ]
+        (Path(args[1].kb_dir) / "crash-evidence.json").write_text(
+            json.dumps([str(path) for path in copies]), encoding="utf-8"
         )
         os._exit(86)
 
-    with patch("openkb.application.documents.add_single_file", side_effect=crash):
+    with patch("litellm.completion", side_effect=crash):
         run_unit(*args)
 
 
 def _doomed_url_parent(kb, history, evidence):
-    import openkb.runtime.tasks as tasks
     from openkb.locks import kb_ingest_lock
+    from openkb.runtime.input_store import child_preparation
     from openkb.runtime.requests import ImportUrl
+    from openkb.runtime.tasks import TaskManager
 
-    with patch.object(tasks, "run_unit", _url_worker):
-        manager = tasks.TaskManager(history_dir=history, max_workers=1)
-        with kb_ingest_lock(kb / ".openkb"):
-            task = manager.submit(kb, [ImportUrl("https://example.invalid/article")])
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline:
-                with manager._condition:
-                    if manager.get(task).state == "waiting" and not manager._active:
-                        cached = list(Path(manager._preparations.name).rglob("article.md"))
-                        assert cached
-                        evidence.write_text(
-                            json.dumps({"copy": str(cached[0]), "task": task}), encoding="utf-8"
-                        )
-                        os._exit(87)
-                time.sleep(0.01)
-            raise AssertionError("URL preparation never deferred")
+    manager = TaskManager(history_dir=history, max_workers=1)
+    with kb_ingest_lock(kb / ".openkb"):
+        task = manager.submit(kb, [ImportUrl("https://example.invalid/article")])
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            with manager._condition:
+                if manager.get(task).state == "waiting" and not manager._active:
+                    break
+            time.sleep(0.01)
+        else:
+            raise TimeoutError("Worker did not release its waiting lease")
+        directory = Path(manager._preparations.name) / "orphaned-url" / "unit"
+        directory.mkdir(parents=True)
+        with child_preparation(directory):
+            cached = directory / "article.md"
+            cached.write_text("Privately acquired URL input", encoding="utf-8")
+            evidence.write_text(json.dumps({"copy": str(cached), "task": task}), encoding="utf-8")
+            os._exit(87)
 
 
 def test_restart_discards_orphaned_url_preparation_and_preserves_live_instance(kb_dir, tmp_path):
@@ -110,7 +106,10 @@ def test_worker_crash_reclaims_fixed_document_and_images(kb_dir, tmp_path):
     source = tmp_path / "source.md"
     image = tmp_path / "figure.png"
     source.write_text("# Input\n![figure](figure.png)\n", encoding="utf-8")
-    image.write_bytes(b"Private original figure")
+    from PIL import Image
+
+    Image.new("RGB", (80, 80), "blue").save(image)
+    image_bytes = image.read_bytes()
     with patch.object(tasks, "run_unit", _crash_with_fixed_input):
         manager = tasks.TaskManager(history_dir=tmp_path / "history")
         try:
@@ -121,7 +120,7 @@ def test_worker_crash_reclaims_fixed_document_and_images(kb_dir, tmp_path):
             assert len(copies) == 2
             assert not any(Path(p).exists() for p in copies)
             assert source.read_text("utf-8") == "# Input\n![figure](figure.png)\n"
-            assert image.read_bytes() == b"Private original figure"
+            assert image.read_bytes() == image_bytes
         finally:
             manager.shutdown(stop=True)
             assert manager.join(10)
@@ -158,9 +157,13 @@ assert not store.group.exists()
 def _holding_worker(*args):
     from openkb.runtime.worker import run_unit
 
-    def hold(source, kb, **options):
-        frozen = options["prepared"].path
-        root = kb.parent
+    def hold(**kwargs):
+        from types import SimpleNamespace
+
+        from tests.http_model_fixture import evidence_response
+
+        frozen = next(Path(args[-1]).rglob("original.md"))
+        root = Path(args[1].kb_dir).parent
         (root / "worker-ready.json").write_text(
             json.dumps({"copy": str(frozen), "group": str(args[-1].parents[2])}),
             encoding="utf-8",
@@ -171,9 +174,17 @@ def _holding_worker(*args):
                 raise TimeoutError("Worker release did not arrive")
             time.sleep(0.01)
         (root / "worker-read.txt").write_text(frozen.read_text("utf-8"), encoding="utf-8")
-        return "skipped"
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(evidence_response(payload)))
+                )
+            ],
+            usage=None,
+        )
 
-    with patch("openkb.application.documents.add_single_file", side_effect=hold):
+    with patch("litellm.completion", side_effect=hold):
         run_unit(*args)
 
 
@@ -215,6 +226,13 @@ def test_active_worker_retains_input_after_parent_crash(kb_dir, tmp_path):
             task = (kb_dir.parent / "task-id").read_text("utf-8")
             assert manager.get(task).state == "interrupted"
             assert not manager.has_work(kb_dir)
+            if sys.platform == "win32":
+                # The parent-owned Job Object kills its workers on close.
+                # Restart can reclaim their inputs immediately after that exit.
+                assert not Path(saved["copy"]).exists()
+                assert not Path(saved["group"]).exists()
+                assert not (kb_dir.parent / "worker-read.txt").exists()
+                return
             assert Path(saved["copy"]).read_text("utf-8") == source.read_text("utf-8")
             (kb_dir.parent / "release-worker").touch()
             deadline = time.monotonic() + 15

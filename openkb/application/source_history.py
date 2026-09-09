@@ -17,6 +17,10 @@ from openkb.sources import SourceStore, read_object, valid_id
 _DEFER: ContextVar[bool] = ContextVar("openkb_defer_source_result", default=False)
 
 
+def source_results_deferred() -> bool:
+    return _DEFER.get()
+
+
 @contextmanager
 def defer_source_results():
     """An enclosing operation owns the final outcome and settled budget."""
@@ -97,6 +101,9 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             totals["runs"] += 1
             for field in totals.keys() - {"runs"}:
                 totals[field] += result.usage.get(field, 0)
+        from openkb.navigation import read_navigation
+        from openkb.navigation_usage import navigation_usage
+
         return {
             "source": asdict(version),
             "original": str(store.original(version)),
@@ -104,6 +111,8 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             "cumulative_usage": totals,
             "cloud_jobs": _cloud_jobs(store, source_id),
             "local_ocr": local_ocr_usage(store, source_id),
+            "navigation": read_navigation(kb_dir, version),
+            "navigation_usage": navigation_usage(store, source_id),
         }
 
 

@@ -14,7 +14,8 @@ cli_module = importlib.import_module("openkb.cli")
 
 @pytest.mark.parametrize("failure", ["repair", "replacement"])
 def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypatch, failure):
-    import openkb.agent.compiler as compiler
+    import litellm
+
     import openkb.watcher as watcher
 
     first = kb_dir / "raw/first.md"
@@ -23,7 +24,7 @@ def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypa
     later.write_text("# Later\n", encoding="utf-8")
     calls = []
 
-    async def compile_document(*args, **kwargs):
+    def compile_document(*args, **kwargs):
         calls.append(args)
         raise RecoveryRequired(kb_dir)
 
@@ -37,7 +38,7 @@ def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypa
         # Late delivery cannot revive a stopped subscription.
         callback([str(later)])
 
-    monkeypatch.setattr(compiler, "compile_short_doc", compile_document)
+    monkeypatch.setattr(litellm, "completion", compile_document)
     monkeypatch.setattr(watcher, "watch_directory", observe)
     result = CliRunner().invoke(cli_module.cli, ["--kb-dir", str(kb_dir), "watch"])
     assert result.exception is None, result.output

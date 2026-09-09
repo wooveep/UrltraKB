@@ -22,6 +22,7 @@ from openkb.runtime.requests import (
     CleanupSourceHistory,
     ConfirmSourcePage,
     ContinueSource,
+    RebuildSourceNavigation,
     ReparseSource,
     ReprocessSourcePage,
 )
@@ -90,6 +91,40 @@ class PageDecision(SourceMutation):
     parse_id: VersionId
     page: int = Field(ge=1)
     reason: Literal["legitimate_blank", "legitimate_illustration"]
+
+
+class NavigationRebuild(SourceMutation):
+    parse_id: VersionId
+
+
+class NavigationQuery(SourceVersionQuery):
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+@router.post("/api/v1/source/rebuild-navigation", status_code=202)
+async def rebuild_navigation(query: NavigationRebuild, request: Request):
+    return await _submit(
+        query, request, RebuildSourceNavigation(query.source_id, query.version_id, query.parse_id)
+    )
+
+
+@router.post("/api/v1/source/navigation")
+async def navigation(query: NavigationQuery):
+    from openkb.navigation import read_navigation
+
+    root = await asyncio.to_thread(_resolve_kb, query.kb)
+
+    def read():
+        source = SourceStore(root).version(query.version_id)
+        if source.source_id != query.source_id:
+            raise ValueError("Source identity mismatch")
+        return read_navigation(root, source, offset=query.offset, limit=query.limit)
+
+    try:
+        return await asyncio.to_thread(read)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(404, "Source navigation is unavailable") from exc
 
 
 class PageReprocessing(SourceMutation):

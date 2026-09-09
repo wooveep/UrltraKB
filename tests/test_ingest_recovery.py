@@ -13,11 +13,11 @@ def test_import_does_not_retry_compilation_after_recovery_is_required(
     source.write_text("# New document\n")
     calls = []
 
-    async def fail(*args, **kwargs):
+    def fail(*args, **kwargs):
         calls.append(1)
         raise RecoveryRequired("Repair required during compilation")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fail)
+    monkeypatch.setattr("litellm.completion", fail)
     with pytest.raises(RecoveryRequired):
         import_document(kb_dir, source)
     assert len(calls) == 1
@@ -32,12 +32,12 @@ def test_rest_watch_stops_processing_on_required_repair(kb_dir, monkeypatch):
     started = threading.Event()
     calls = []
 
-    async def fail_compile(doc_name, *args, **kwargs):
-        calls.append(doc_name)
+    def fail_compile(**kwargs):
+        calls.append(kwargs["messages"][-1]["content"])
         started.set()
         raise RecoveryRequired("Explicit repair required")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fail_compile)
+    monkeypatch.setattr("litellm.completion", fail_compile)
     registry = WatchRegistry()
     state = registry.start("test", kb_dir, debounce=0.1)
     try:
@@ -46,22 +46,24 @@ def test_rest_watch_stops_processing_on_required_repair(kb_dir, monkeypatch):
         assert started.wait(5)
         state.worker_thread.join(5)
         assert not registry.status("test")["active"]
-        assert calls == ["bad"]
+        assert len(calls) == 1 and "# Bad" in calls[0]
         assert not (kb_dir / "wiki/sources/later.md").exists()
     finally:
         registry.stop_all()
 
 
-@pytest.mark.parametrize("moment", ["prepare", "staging"])
+@pytest.mark.parametrize("moment", ["prepare", "model"])
 def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     kb_dir, monkeypatch, moment
 ):
+    import json
     import time
-    from contextlib import contextmanager
+    from pathlib import Path
+    from types import SimpleNamespace
 
-    import openkb.application.documents as documents
     from openkb.state import HashRegistry
     from openkb.watch_service import WatchRegistry
+    from tests.http_model_fixture import evidence_response
 
     source = kb_dir / "raw/inbox/note.md"
     source.parent.mkdir()
@@ -75,37 +77,39 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     HashRegistry(kb_dir / ".openkb/hashes.json").add(
         "0" * 64, {"name": "note.md", "doc_name": "note", "path": "raw/other/note.md"}
     )
-    staging, prepare = documents._staging_dir_for, documents.prepared_input
     compiled = []
     replaced = False
+    original_open = Path.open
 
-    def replace_input(path):
+    def replace_input():
         nonlocal replaced
-        if path == source and not replaced:
+        if not replaced:
             source.unlink()
             source.symlink_to(outside)
             replaced = True
 
-    def during_staging(root, path):
-        result = staging(root, path)
-        replace_input(path)
-        return result
+    def open_file(path, mode="r", *args, **kwargs):
+        if path == source and mode == "rb" and moment == "prepare":
+            replace_input()
+        return original_open(path, mode, *args, **kwargs)
 
-    @contextmanager
-    def before_copy(path):
-        replace_input(path)
-        with prepare(path) as ready:
-            yield ready
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        if payload["stage"] == "facts":
+            compiled.extend(unit["text"] for unit in payload["units"])
+            if moment == "model":
+                replace_input()
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(evidence_response(payload)))
+                )
+            ],
+            usage=None,
+        )
 
-    async def compile_document(name, path, *args, **kwargs):
-        compiled.append(path.read_text())
-
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", compile_document)
-    monkeypatch.setattr(
-        documents,
-        "prepared_input" if moment == "prepare" else "_staging_dir_for",
-        before_copy if moment == "prepare" else during_staging,
-    )
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr(Path, "open", open_file)
     registry = WatchRegistry()
     registry.start("guarded", kb_dir, debounce=0.1)
     try:
@@ -119,26 +123,38 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     finally:
         registry.stop_all()
     assert replaced
-    assert compiled == (["# Original\n"] if moment == "staging" else [])
+    assert all("Outside" not in text for text in compiled)
+    if moment == "model":
+        assert compiled == ["# Original"]
     entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
     assert all(item.get("path") != outside.as_posix() for item in entries.values())
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
 @pytest.mark.parametrize("marker_failure", [False, True])
 def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
-    kb_dir, tmp_path, monkeypatch, marker_failure
+    kb_dir, tmp_path, monkeypatch, marker_failure, model_service
 ):
+    import openkb.knowledge_commit as knowledge
     import openkb.mutation as mutation
     from openkb.application.documents import import_document
-    from openkb.locks import atomic_write_text
     from openkb.mutation import RecoveryRequired, repair_marker
 
     source = tmp_path / "note.md"
+    source.write_text("# Previously retained source\n")
+    first = import_document(kb_dir, source)
+    assert first.knowledge_compilation == "completed"
+    old = kb_dir / "wiki/concepts/notes.md"
+    previous = old.read_bytes()
     source.write_text("# New document\n")
-    old = kb_dir / "wiki/sources/note.md"
-    atomic_write_text(old, "# Previously retained source\n")
     copy = mutation._copy_file_atomic
     write_json = mutation.atomic_write_json
+    write_knowledge = knowledge.atomic_write_json
+
+    def fail_commit(path, *args, **kwargs):
+        if path == kb_dir / ".openkb/knowledge/baselines.json":
+            raise OSError("Knowledge metadata write failed")
+        return write_knowledge(path, *args, **kwargs)
 
     def fail_marker(path, *args, **kwargs):
         if path == repair_marker(kb_dir):
@@ -146,16 +162,12 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
         return write_json(path, *args, **kwargs)
 
     def fail_restore(src, dest, **kwargs):
-        if dest == old and "staging" in src.parts:
+        if dest == old:
             raise OSError("Cannot restore source")
         return copy(src, dest, **kwargs)
 
-    async def fail_compile(*args, **kwargs):
-        raise ValueError("Compilation failed")
-
     with monkeypatch.context() as patch:
-        patch.setattr("openkb.agent.compiler.compile_short_doc", fail_compile)
-        patch.setattr("openkb.application.documents.time.sleep", lambda value: None)
+        patch.setattr(knowledge, "atomic_write_json", fail_commit)
         patch.setattr(mutation, "_copy_file_atomic", fail_restore)
         if marker_failure:
             patch.setattr(mutation, "atomic_write_json", fail_marker)
@@ -163,14 +175,12 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
             import_document(kb_dir, source)
     assert repair_marker(kb_dir).is_file() is not marker_failure
     assert list((kb_dir / ".openkb/journal").glob("*.json"))
-    # Recoverable I/O on the next call must not silently clear the explicit repair gate.
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fail_compile)
     with pytest.raises(RecoveryRequired):
         import_document(kb_dir, source)
     from openkb.application.repair import repair_knowledge_base
 
     assert repair_knowledge_base(kb_dir).repaired
-    assert old.read_text() == "# Previously retained source\n"
+    assert old.read_bytes() == previous
     assert not repair_marker(kb_dir).exists()
 
 

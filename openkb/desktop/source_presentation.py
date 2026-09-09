@@ -5,6 +5,21 @@ REASONS = {
     "needs_acceptance": "已有页面包含人工修改，请在“知识变更”中检查差异。",
     "input_version_conflict": "资料或知识页面已变化，请刷新后继续处理。",
     "input_budget_exceeded": "请求超过模型上下文容量，请检查处理额度。",
+    "section_coverage_incomplete": "模型未覆盖全部原文片段，本轮知识尚未发布。可继续处理。",
+    "section_empty_without_reason": "部分片段没有事实或空结果说明，需要继续处理。",
+    "fact_evidence_invalid": "提取事实的引文无法在对应原文中核对。",
+    "topic_coverage_incomplete": "主题规划未包含全部事实主题，本轮知识尚未发布。",
+    "topic_plan_invalid": "模型返回的主题规划不完整或格式不正确。",
+    "topic_generation_incomplete": "模型未完整生成本主题的知识内容。",
+    "topic_context_exceeds_request_budget": "单个主题及必要上下文超过请求额度，请检查模型容量。",
+    "topic_evidence_exceeds_request_budget": "必要证据及上下文超过请求额度，请检查模型容量。",
+    "generated_asset_evidence_invalid": "生成内容引用了无法核对的图像，本轮知识尚未发布。",
+    "request_budget_exhausted": "本轮模型请求额度已用完。",
+    "token_budget_exhausted": "本轮 token 额度已用完。",
+    "time_budget_exhausted": "本轮处理达到时限。",
+    "output_budget_exhausted": "模型输出达到上限，未完整结束。",
+    "navigation_interrupted": "导航处理被中断，可单独重建。",
+    "navigation_stopped": "导航处理已停止，可单独重建。",
     "quality_incomplete": "部分原文仍需检查，请打开“逐页检查”。",
     "blank_or_illustration": "需要确认空白或插图页",
     "ocr_blank_or_illustration": "识别后仍需确认空白或插图页",
@@ -75,8 +90,18 @@ def status_text(value):
             f"云 OCR 原文第 {job['page']} 页：{job['state']}；"
             f"提交 {job['submissions']} 次，请求 {job['requests']} 次。"
         )
-    if result.get("auxiliary_warnings"):
-        rows.extend(["", "辅助告警：", *result["auxiliary_warnings"]])
+    navigation = value.get("navigation_usage", {})
+    if navigation.get("runs"):
+        rows.append(
+            f"导航累计：{navigation['observable_attempts']} 次模型尝试，"
+            f"计入 {navigation['charged_tokens']:,} token；"
+            f"用量不明 {navigation['unknown_usage']} 次。"
+        )
+        if not navigation["accounting_complete"]:
+            rows.append("部分导航执行未正常结束，已知消耗保留，最终用量无法确认。")
+    warnings = result.get("warnings", result.get("auxiliary_warnings"))
+    if warnings:
+        rows.extend(["", "辅助告警：", *warnings])
     rows.extend(["", f"资料版本：{value['source']['id']}"])
     return "\n".join(rows)
 

@@ -287,50 +287,23 @@ class ParseStore:
         if self.sources.version(version.id) != version or parsed.input_key != version.input_key:
             raise ValueError("Parse input does not match the source version")
 
+    def reader(self, version: SourceVersion, parsed: ParseVersion) -> EvidenceReader:
+        """Validate a fixed parsing manifest once for many bounded evidence reads."""
+        with kb_read_lock(self.kb_dir / ".openkb"):
+            stored = self.load(parsed.id)
+            self._bind(version, stored)
+            if stored != parsed:
+                raise ValueError("Parse manifest changed")
+            self.sources.original(version)
+            return EvidenceReader(self.sources, version, stored)
+
     def read(self, reference: Evidence, *, max_chars: int) -> EvidenceSlice:
-        if type(max_chars) is not int or max_chars <= 0:
-            raise ValueError("Evidence reads require a positive bound")
         with kb_read_lock(self.kb_dir / ".openkb"):
             version = self.sources.version(reference.version_id)
-            if version.source_id != reference.source_id:
-                raise ValueError("Evidence source mismatch")
             parsed = self.load(reference.parse_id)
             self._bind(version, parsed)
-            block = next((row for row in parsed.blocks if row.id == reference.block_id), None)
-            if block is None:
-                raise ValueError("Evidence block is missing")
-            # Metadata is also output, not an escape hatch around bounded reads.
-            # A caller can explicitly request a larger window to include a long
-            # table header; do not silently drop required context.
-            context_size = (
-                len(block.context)
-                + len(json.dumps(block.location, ensure_ascii=False))
-                + 64 * len(block.assets)
-            )
-            if context_size > max(4096, max_chars):
-                raise ValueError("Evidence context exceeds the read bound; request a larger window")
-            end = reference.end if reference.end is not None else block.chars
-            if reference.start > end or end > block.chars:
-                raise ValueError("Evidence span exceeds its block")
-            with self.sources.asset(block.blob).open(encoding="utf-8") as source:
-                remaining = reference.start
-                while remaining:
-                    skipped = source.read(min(remaining, 8192))
-                    if not skipped:
-                        raise ValueError("Evidence span is missing")
-                    remaining -= len(skipped)
-                text = source.read(min(max_chars, end - reference.start))
-            following = reference.start + len(text)
-            for asset in block.assets:
-                self.sources.asset(asset)
-            return EvidenceSlice(
-                reference,
-                text,
-                block.location,
-                block.kind,
-                block.assets,
-                block.context,
-                following if following < end else None,
+            return EvidenceReader(self.sources, version, parsed).read(
+                reference, max_chars=max_chars
             )
 
     def _confirmation_path(self, version: SourceVersion, parsed: ParseVersion, page: int) -> Path:
@@ -408,3 +381,58 @@ class ParseStore:
             ]:
                 raise ValueError("Page confirmation input mismatch")
             return record["reason"]
+
+
+class EvidenceReader:
+    """Read an immutable validated manifest without rescanning it for every span."""
+
+    def __init__(self, sources: SourceStore, version: SourceVersion, parsed: ParseVersion):
+        self.sources, self.version, self.parsed = sources, version, parsed
+        self.blocks = {block.id: block for block in parsed.blocks}
+
+    def read(self, reference: Evidence, *, max_chars: int) -> EvidenceSlice:
+        if type(max_chars) is not int or max_chars <= 0:
+            raise ValueError("Evidence reads require a positive bound")
+        with kb_read_lock(self.sources.kb_dir / ".openkb"):
+            if (
+                reference.source_id != self.version.source_id
+                or reference.version_id != self.version.id
+                or reference.parse_id != self.parsed.id
+            ):
+                raise ValueError("Evidence source mismatch")
+            block = self.blocks.get(reference.block_id)
+            if block is None:
+                raise ValueError("Evidence block is missing")
+            # Metadata is also output, not an escape hatch around bounded reads.
+            # A caller can explicitly request a larger window to include a long
+            # table header; do not silently drop required context.
+            context_size = (
+                len(block.context)
+                + len(json.dumps(block.location, ensure_ascii=False))
+                + 64 * len(block.assets)
+            )
+            if context_size > max(4096, max_chars):
+                raise ValueError("Evidence context exceeds the read bound; request a larger window")
+            end = reference.end if reference.end is not None else block.chars
+            if reference.start > end or end > block.chars:
+                raise ValueError("Evidence span exceeds its block")
+            with self.sources.asset(block.blob).open(encoding="utf-8") as source:
+                remaining = reference.start
+                while remaining:
+                    skipped = source.read(min(remaining, 8192))
+                    if not skipped:
+                        raise ValueError("Evidence span is missing")
+                    remaining -= len(skipped)
+                text = source.read(min(max_chars, end - reference.start))
+            following = reference.start + len(text)
+            for asset in block.assets:
+                self.sources.asset(asset)
+            return EvidenceSlice(
+                reference,
+                text,
+                block.location,
+                block.kind,
+                block.assets,
+                block.context,
+                following if following < end else None,
+            )

@@ -30,17 +30,21 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
         options["on_quality"]("short_extraction")
         return target
 
-    values = iter(
-        [
-            {"description": "Article", "content": "# Article\nCompiled."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
+    from http_model_fixture import evidence_response
+
     monkeypatch.setattr(
         litellm,
         "completion",
         lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(values))))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            evidence_response(json.loads(kwargs["messages"][-1]["content"]))
+                        )
+                    )
+                )
+            ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         ),
     )
@@ -59,8 +63,8 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
 
     history = source_status(kb_dir, result.source_id)
     assert history["cumulative_usage"]["runs"] == 2
-    assert history["cumulative_usage"]["observable_attempts"] == 2
-    assert history["cumulative_usage"]["charged_tokens"] == 4
+    assert history["cumulative_usage"]["observable_attempts"] == 3
+    assert history["cumulative_usage"]["charged_tokens"] == 6
     assert history["result"]["usage"] == duplicate.usage
 
 
