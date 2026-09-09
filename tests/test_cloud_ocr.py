@@ -87,6 +87,7 @@ def test_known_job_resumes_download_without_repeating_ocr(
     source = tmp_path / "scan.pdf"
     scanned_pdf(source)
     calls = []
+    submitted_options = []
     downloads = 0
     images = 0
 
@@ -101,6 +102,7 @@ def test_known_job_resumes_download_without_repeating_ocr(
         nonlocal downloads, images
         calls.append((method.upper(), url))
         if method.upper() == "POST":
+            submitted_options.append(json.loads(kwargs["data"]["optionalPayload"]))
             return response({"code": 0, "data": {"jobId": "job-one"}})
         if url.endswith("/job-one"):
             return response(
@@ -160,6 +162,18 @@ def test_known_job_resumes_download_without_repeating_ocr(
     monkeypatch.setattr(requests.Session, "request", service)
     one = import_document(kb_dir, source)
     assert one.status == "unfinished"
+    assert submitted_options == [
+        {
+            "useDocOrientationClassify": False,
+            "useDocUnwarping": False,
+            "useLayoutDetection": True,
+            "useOcrForImageBlock": True,
+            "mergeTables": False,
+            "restructurePages": False,
+            "returnMarkdownImages": True,
+            "markdownIgnoreLabels": [],
+        }
+    ]
     from openkb.application.source_history import source_status
 
     observed = source_status(kb_dir, one.source_id)

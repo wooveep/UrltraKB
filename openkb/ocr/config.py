@@ -6,7 +6,8 @@ import re
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic.alias_generators import to_camel
 
 
 class Settings(BaseModel):
@@ -24,6 +25,8 @@ class CloudLimits(Settings):
 
 
 class CloudOptions(Settings):
+    model_config = ConfigDict(alias_generator=AliasGenerator(serialization_alias=to_camel))
+
     use_doc_orientation_classify: bool = False
     use_doc_unwarping: bool = False
     use_layout_detection: Literal[True] = True
@@ -62,7 +65,7 @@ class CloudSettings(Settings):
             "backend": "paddleocr-jobs-single-page-v2",
             "endpoint": self.endpoint,
             "model": self.model,
-            "options": self.options.model_dump(),
+            "options": self.options.model_dump(by_alias=True),
         }
 
 

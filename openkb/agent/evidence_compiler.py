@@ -12,6 +12,7 @@ from openkb.agent.evidence_units import (
     messages,
     source_units,
 )
+from openkb.config import compilation_model_options
 from openkb.evidence import ParseStore
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
 from openkb.sources import content_id
@@ -58,6 +59,7 @@ def compile_evidence(
                     "facts",
                     bundle=bundle,
                     response_format=JSON_FORMAT,
+                    **compilation_model_options(settings),
                 )
             )
         outputs = result.get("units")

@@ -2398,6 +2398,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "processing": None,
         "parsing": {"ocr": {"backend": "local", "cloud": None, "local": None}},
         "navigation": {"enabled": False, "processing": None},
+        "compilation_thinking": None,
     }
 
 

@@ -1,5 +1,6 @@
 """Validated compilation responses keyed by their actual immutable inputs."""
 
+from openkb.config import compilation_model_options
 from openkb.implementation import module_revision
 from openkb.locks import atomic_write_json
 from openkb.processing import processing_checkpoint
@@ -45,6 +46,7 @@ class CompilationCheckpoints:
             "parse": parsed.id,
             "compiler": "source-evidence-v1",
             "model": settings["model"],
+            "model_options": compilation_model_options(settings),
             "endpoint": content_id(getattr(bundle, "base_url", None)),
             "headers": content_id(getattr(bundle, "extra_headers", None)),
         }
@@ -63,6 +65,7 @@ class CompilationCheckpoints:
                 "payload": payload,
                 "dependencies": dependencies,
                 "implementation": module_revision("openkb.agent.compiler"),
+                "message_format": module_revision("openkb.agent.evidence_units"),
                 "stage_implementation": {
                     name: module_revision("openkb.agent." + name)
                     for name in stage_modules.get(payload.get("stage"), ())

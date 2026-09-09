@@ -237,7 +237,9 @@ class CloudJobs:
                         authenticated=True,
                         data={
                             "model": self.config.model,
-                            "optionalPayload": json.dumps(self.config.options.model_dump()),
+                            "optionalPayload": json.dumps(
+                                self.config.options.model_dump(by_alias=True)
+                            ),
                         },
                         files={"file": ("page.pdf", file, "application/pdf")},
                     )

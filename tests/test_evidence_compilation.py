@@ -8,6 +8,36 @@ import yaml
 from openkb.application.documents import import_document
 
 
+def test_compilation_thinking_mode_reaches_provider_and_invalidates_cached_facts(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.application.settings import apply_kb_config_patch, read_kb_config
+    from openkb.application.settings_data import KbConfigPatchRequest
+
+    original = tmp_path / "thinking.md"
+    original.write_text("Required version 7.", encoding="utf-8")
+    previous_calls = 0
+    versions = []
+    for mode in ("disabled", "enabled"):
+        apply_kb_config_patch(
+            kb_dir,
+            KbConfigPatchRequest(kb=str(kb_dir), config={"compilation_thinking": mode}),
+        )
+        assert read_kb_config(kb_dir).compilation_thinking == mode
+        result = import_document(kb_dir, original)
+        assert result.knowledge_compilation == "completed", result
+        versions.append((result.input_version, result.parse_id))
+        new_calls = model_service[previous_calls:]
+        assert {json.loads(call["messages"][-1]["content"])["stage"] for call in new_calls} == {
+            "facts",
+            "planning",
+            "generation",
+        }
+        assert all(call.get("thinking") == {"type": mode} for call in new_calls)
+        previous_calls = len(model_service)
+    assert versions[0] == versions[1]
+
+
 def test_all_sections_generate_from_original_evidence_with_bounded_requests(
     kb_dir, tmp_path, model_service
 ):

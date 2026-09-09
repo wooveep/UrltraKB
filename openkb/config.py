@@ -340,6 +340,17 @@ def resolve_per_request_overrides(
     return extra_headers, timeout, litellm_settings
 
 
+def compilation_model_options(config: dict[str, Any]) -> dict[str, Any]:
+    """Explicit compiler thinking mode; absence preserves provider defaults."""
+    mode = config.get("compilation_thinking")
+    if mode is None:
+        return {}
+    if not isinstance(mode, str) or mode not in {"enabled", "disabled"}:
+        raise ValueError("compilation_thinking must be enabled, disabled or null")
+    # extra_body bypasses older provider adapters that silently drop disabled.
+    return {"extra_body": {"thinking": {"type": mode}}}
+
+
 @dataclass(frozen=True)
 class LlmCredentialBundle:
     """Immutable per-request LLM credential + config bundle.
@@ -454,6 +465,7 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     resolvers in charge of optional overrides. Errors name fields, never
     credential-bearing values from user configuration.
     """
+    compilation_model_options(config)
     for key in ("model", "language"):
         value = config.get(key)
         if allow_inherited and value is None:
@@ -489,6 +501,7 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "processing",
     "parsing",
     "navigation",
+    "compilation_thinking",
 )
 
 

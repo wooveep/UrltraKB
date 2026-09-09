@@ -70,6 +70,25 @@ SDK retry settings are disabled at the request boundary. The execution controlle
 retries only transient transport/service errors within the configured limits.
 Observable attempts and unknown internal transport attempts are distinct fields.
 
+For providers that accept a `thinking.type` option, the optional top-level
+`compilation_thinking` setting selects `enabled` or `disabled`. For example:
+
+```yaml
+model: deepseek/deepseek-v4-flash
+compilation_thinking: disabled
+```
+
+Set it in global or library YAML, or through the existing configuration REST
+endpoints. It applies to evidence extraction, topic planning and page generation;
+navigation and chat have separate model behavior. An absent or effective null
+value sends no thinking override and preserves the provider default. Library
+overrides inherit global settings; a null REST patch removes the override.
+Changing this setting invalidates affected compilation checkpoints and completion
+profiles without changing the source or parse version. There is no automatic
+switch of thinking mode when a budget is exhausted. Explicit non-thinking mode
+is a provider option, not a guarantee of technical accuracy; see the
+[real-provider validation record](document-provider-validation.md).
+
 Every task retains its own usage observations. Each source also keeps cumulative
 LLM, local OCR and cloud job usage across explicit continuations. A continuation
 starts a new bounded run; it does not erase earlier cost or resubmit a known
@@ -253,7 +272,9 @@ finished within the fixed 30-second parsing bounds. Windows finished nine; the
 requiring OCR remain explicitly incomplete in these native-only measurements.
 These checks do not establish semantic compilation quality or long OCR throughput.
 
-Real model calibration, authenticated PaddleOCR jobs validation, representative
+Authenticated PaddleOCR and real-model synthetic checks were subsequently run;
+their outcomes and unresolved semantic failures are in the
+[provider validation record](document-provider-validation.md). Representative
 user documents and broader OCR accuracy measurements remain outstanding. The
 second-batch code checkpoint is not final acceptance of those external gates.
 
@@ -312,7 +333,8 @@ CLI/REST/watch/recompile/URL/source-API regression passed all 244 tests in
 Ruff, mypy (204 modules), wheel/sdist contents and both review axes were also
 checked.
 
-The three code batches do not close the real-model, authenticated PaddleOCR
-cloud, representative-document or long OCR quality gates described above.
-Explicit provider configuration and cost authorization are still required for
-those measurements.
+The subsequent [authenticated provider checks](document-provider-validation.md)
+validated two-page PaddleOCR jobs on both systems and found real-model semantic
+failures despite structurally complete generation. The three code batches do not
+close that semantic gate, representative-document calibration or long OCR quality
+acceptance. The provider checks do not establish a production processing profile.

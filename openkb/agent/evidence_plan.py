@@ -6,7 +6,7 @@ import json
 
 from openkb.agent.evidence_pages import _existing_window
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages
-from openkb.config import resolve_entity_types
+from openkb.config import compilation_model_options, resolve_entity_types
 from openkb.knowledge_commit import wiki_version
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
 from openkb.schema import get_agents_md
@@ -71,6 +71,7 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                         "planning",
                         bundle=bundle,
                         response_format=JSON_FORMAT,
+                        **compilation_model_options(settings),
                     )
                 )
             except (ValueError, TypeError):
