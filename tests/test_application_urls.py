@@ -55,6 +55,13 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
     assert all(not path.exists() for path in private)
     entry = next(iter(HashRegistry(kb_dir / ".openkb/hashes.json").all_entries().values()))
     assert entry["origin"] == "url" and entry["path"] == url
+    from openkb.application.source_history import source_status
+
+    history = source_status(kb_dir, result.source_id)
+    assert history["cumulative_usage"]["runs"] == 2
+    assert history["cumulative_usage"]["observable_attempts"] == 2
+    assert history["cumulative_usage"]["charged_tokens"] == 4
+    assert history["result"]["usage"] == duplicate.usage
 
 
 def test_failed_fetch_uses_fixed_snapshot_without_publishing_raw(kb_dir):

@@ -14,7 +14,7 @@ from openkb.schema import AGENTS_MD, INDEX_SEED
 
 
 def display_document_type(raw_type: str) -> str:
-    if raw_type in {"long_pdf", "pageindex_cloud"}:
+    if raw_type == "long_pdf":
         return "pageindex"
     if raw_type in {
         "pdf",
@@ -290,6 +290,37 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                     "display_type": display_document_type(raw_type),
                     "pages": pages if pages not in ("", 0) else None,
                 }
+            )
+
+        from openkb.application.source_history import source_status
+        from openkb.sources import SourceStore
+
+        by_identity = {row["hash"]: row for row in documents}
+        for source in SourceStore(kb_dir).list_sources():
+            details = source_status(kb_dir, source.source_id)
+            result = details["result"]
+            if source.source_id not in by_identity:
+                # Removing knowledge does not erase its historical evidence.
+                # Completed sources without a live registration stay in history.
+                if result and result["knowledge_compilation"] == "completed":
+                    continue
+                row = {
+                    "hash": source.source_id, "name": source.name,
+                    "type": source.suffix.lstrip("."), "display_type": source.suffix.lstrip("."),
+                    "pages": None,
+                }
+                documents.append(row)
+            else:
+                row = by_identity[source.source_id]
+            row.update(
+                source_id=source.source_id, source_version=source.id,
+                source_intake="saved",
+                knowledge_compilation=result["knowledge_compilation"] if result else "not_started",
+                stage=result["stage"] if result else "source_intake",
+                reason=result["reason"] if result else None,
+                parse_id=result["parse_id"] if result else None,
+                resume=result["resume"] if result else source.id,
+                original=details["original"], cumulative_usage=details["cumulative_usage"],
             )
 
         summaries_dir = kb_dir / "wiki" / "summaries"

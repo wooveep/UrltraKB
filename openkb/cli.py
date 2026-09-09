@@ -44,13 +44,11 @@ import litellm
 litellm.suppress_debug_info = True
 from dotenv import load_dotenv
 
-from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
 from openkb.config import (
     DEFAULT_CONFIG,
     resolve_effective_config,
     load_global_config,
     register_kb,
-    resolve_concurrency,
     set_extra_headers,
     resolve_parallel_tool_calls,
     set_parallel_tool_calls,
@@ -203,8 +201,7 @@ def _setup_llm_key(kb_dir: Path | None = None) -> None:
             if not os.environ.get(provider_env):
                 os.environ[provider_env] = api_key
 
-        # Fallback: also set common provider keys so multi-provider
-        # configs (e.g. PageIndex Cloud) still work
+        # Also set common provider keys for multi-provider configurations.
         for env_var in _KNOWN_PROVIDER_KEYS:
             if not os.environ.get(env_var):
                 os.environ[env_var] = api_key
@@ -215,13 +212,10 @@ from openkb.inputs import SUPPORTED_EXTENSIONS
 # Map raw doc types to display types
 _TYPE_DISPLAY_MAP = {
     "long_pdf": "pageindex",
-    "pageindex_cloud": "pageindex",
 }
 
 # Registry types that were compiled via the long-doc pipeline (tree + per-page
-# JSON source), as opposed to short docs (markdown source). Both the local
-# long-PDF type and cloud imports belong here — they share the long-doc
-# summary/source layout and recompile path.
+# JSON source), as opposed to short docs (markdown source).
 from openkb.application import recompilation as recompilation_use_cases
 
 _is_long_doc = recompilation_use_cases.is_long_doc
@@ -314,15 +308,6 @@ def add_single_file(file_path: Path, kb_dir: Path, *, stage: bool = True, bundle
         bundle=bundle,
         report=click.echo,
     )
-
-
-def import_from_pageindex_cloud(doc_id: str, kb_dir: Path) -> str:
-    """CLI output and credential precedence for the shared cloud import."""
-    from openkb.application.cloud import import_cloud
-
-    settings = resolve_effective_config(kb_dir)[0]
-    _setup_llm_key(kb_dir)
-    return import_cloud(kb_dir, doc_id, settings=settings, report=click.echo).status
 
 
 # ---------------------------------------------------------------------------
@@ -543,17 +528,9 @@ def init(model, language):
 
 
 @cli.command()
-@click.argument("path", required=False)
-@click.option(
-    "--from-pageindex-cloud",
-    "from_pageindex_cloud",
-    default=None,
-    metavar="DOC_ID",
-    help="Import an already-indexed PageIndex Cloud document by its doc-id "
-    "(no local file). Mutually exclusive with PATH.",
-)
+@click.argument("path")
 @click.pass_context
-def add(ctx, path, from_pageindex_cloud):
+def add(ctx, path):
     """Add a document or directory of documents at PATH to the knowledge base.
 
     PATH may be a local file, a local directory (which is walked
@@ -562,27 +539,10 @@ def add(ctx, path, from_pageindex_cloud):
     magic-byte sniff) are saved as ``.pdf``; HTML responses are run
     through trafilatura's main-content extractor and saved as ``.md``.
 
-    Alternatively, pass --from-pageindex-cloud <DOC_ID> to import a document
-    that is already indexed in PageIndex Cloud, with no local file. Requires
-    the PAGEINDEX_API_KEY environment variable.
     """
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
-        return
-
-    # Cloud import path — mutually exclusive with a local/URL PATH.
-    if from_pageindex_cloud is not None:
-        if path is not None:
-            click.echo("Provide either PATH or --from-pageindex-cloud, not both.")
-            return
-        outcome = import_from_pageindex_cloud(from_pageindex_cloud, kb_dir)
-        if outcome == "failed":
-            ctx.exit(1)
-        return
-
-    if path is None:
-        click.echo("Provide a PATH or use --from-pageindex-cloud <DOC_ID>.")
         return
 
     from openkb.cli_import import import_path
@@ -847,28 +807,21 @@ def delete_kb_cmd(name, yes):
 )
 @click.pass_context
 def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
-    """Re-run the current compile pipeline on already-indexed documents.
+    """Recompile saved originals through the shared document task runner.
 
-    Recompiling re-runs the same ``compile_short_doc`` / ``compile_long_doc``
-    that ``openkb add`` uses, so pre-feature KBs gain the ``entities/`` layer
-    and pages refresh to the current format. It does NOT re-run PageIndex or
-    re-convert raw files — it reuses the on-disk ``wiki/sources/`` and
-    ``wiki/summaries/`` content (and the registry's PageIndex ``doc_id``).
-
-    DOC_NAME recompiles one doc (resolved like ``openkb remove`` — filename,
-    slug, or unique substring). ``--all`` recompiles every indexed doc.
-    Exactly one of DOC_NAME or ``--all`` is required.
-
-    Side effect: this regenerates summaries (short docs) and rewrites concept
-    pages with the current logic — manual edits to those pages are overwritten.
+    DOC_NAME selects a filename, slug, or unique substring; --all selects all
+    indexed documents. Valid parsing is reused. Changes to manual or unknown
+    pages produce a reviewable proposal requiring explicit page acceptance.
     """
-    from openkb.application.recompilation import recompile_document, select_recompilation
+    from openkb.application.recompilation import select_recompilation
+    from openkb.cli_import import run_requests
+    from openkb.runtime.requests import RecompileDocument
 
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs)
+    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs, confirmation=True)
     targets = selection.targets
     if selection.status != "ready":
         if selection.status == "invalid":
@@ -893,8 +846,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         for target in targets:
             click.echo(f"  - {target.doc_name}  ({target.kind})")
         click.echo(
-            "\nNote: recompiling regenerates summaries (short docs) and rewrites "
-            "concept pages — manual edits would be overwritten."
+            "\nChanges to manual or unknown pages will require explicit review and acceptance."
         )
         click.echo("(dry-run — nothing modified)")
         return
@@ -902,33 +854,25 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         click.echo(
             f"This will recompile {len(targets)} document(s), regenerating "
             "summaries and rewriting concept pages with the current logic.\n"
-            "Manual edits to those pages will be overwritten."
+            "Changes to manual or unknown pages will require explicit review and acceptance."
         )
         if not click.confirm("Proceed?", default=False):
             click.echo("Aborted.")
             return
     if refresh_schema:
         _refresh_schema(kb_dir / "wiki")
-    _setup_llm_key(kb_dir)
-    config = resolve_effective_config(kb_dir)[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-    concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
-    recompiled = skipped = 0
-    for i, target in enumerate(targets, 1):
-        click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
-        result = asyncio.run(
-            recompile_document(kb_dir, target.file_hash, model=model, max_concurrency=concurrency)
+        selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs, confirmation=True)
+    if selection.version is None:
+        raise click.ClickException("Document selection changed; select the documents again")
+    ctx.exit(
+        run_requests(
+            kb_dir,
+            [
+                RecompileDocument(target.file_hash, selection.version)
+                for target in selection.targets
+            ],
         )
-        if result.status == "compiled":
-            recompiled += 1
-            click.echo(f"  [OK] {result.name} ({result.elapsed:.1f}s)")
-        else:
-            skipped += 1
-            label = "ERROR" if result.status == "failed" else "SKIP"
-            detail = f" ({result.error_type})" if result.error_type else ""
-            click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
-    click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}.")
-    append_log(kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}")
+    )
 
 
 # Temporary import compatibility for callers migrating to the REST adapter.
@@ -2135,6 +2079,9 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 
 from openkb.api_lint import fix_summary
+from openkb.cli_sources import sources
+
+cli.add_command(sources)
 
 _fix_summary = fix_summary
 

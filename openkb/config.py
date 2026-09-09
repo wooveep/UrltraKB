@@ -487,6 +487,7 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "pageindex_threshold",
     "entity_types",
     "processing",
+    "parsing",
 )
 
 

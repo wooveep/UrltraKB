@@ -523,6 +523,7 @@ async def _stream_recompile(
     fastapi_request: Request,
     *,
     bundle=None,
+    manager=None,
 ) -> AsyncIterator[str]:
     """SSE view of recompile: start, per-doc progress, final, done.
 
@@ -542,12 +543,11 @@ async def _stream_recompile(
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
                 refresh_schema=request.refresh_schema,
-                bundle=bundle,
+                manager=manager,
+                task_id=request.task_id,
             ):
-                # Cooperative stop: an aborting client (Stop / navigate-away)
-                # must let the generator exit so ``async with mutation_lock``
-                # releases the per-KB lock instead of holding it for the whole
-                # (unwatched) LLM recompile.
+                # Disconnect ends observation. The accepted task retains ownership;
+                # stopping execution uses the existing task stop endpoint.
                 if await fastapi_request.is_disconnected():
                     break
                 name = event.get("event")
@@ -564,6 +564,8 @@ async def _stream_recompile(
                     )
                 elif name == "plan":
                     yield _sse("plan", {"targets": event.get("targets", [])})
+                elif name in {"start", "progress"}:
+                    yield _sse(name, {k: v for k, v in event.items() if k != "event"})
                 elif name == "doc":
                     yield _sse("doc", {k: v for k, v in event.items() if k != "event"})
                 elif name == "final":

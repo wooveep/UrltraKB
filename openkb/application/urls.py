@@ -29,6 +29,7 @@ def import_url(
     context: ExecutionContext | None = None,
     prepared_dir: Path | None = None,
 ) -> DocumentResult:
+    from openkb.application.source_history import defer_source_results, finish_source_result
     from openkb.compilation_report import collect_compile_report
     from openkb.config import resolve_effective_config
     from openkb.locks import kb_ingest_lock
@@ -42,7 +43,7 @@ def import_url(
         collect_compile_report() as compilation,
     ):
         try:
-            with processing_scope(resolve_effective_config(kb_dir)[0]):
+            with processing_scope(resolve_effective_config(kb_dir)[0]), defer_source_results():
                 processing_checkpoint("acquiring")
                 result = _import_url(kb_dir, url, context=context, prepared_dir=prepared_dir)
         except ProcessingIncomplete as exc:
@@ -54,7 +55,7 @@ def import_url(
                 stage=exc.stage,
                 reason=exc.reason,
             )
-    return replace(result, usage=compilation.usage)
+        return finish_source_result(kb_dir, replace(result, usage=compilation.usage))
 
 
 def _import_url(

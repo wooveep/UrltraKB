@@ -133,6 +133,14 @@ def test_stop_import_during_model_wait_rolls_back_and_reaps_worker(
         except TimeoutError:
             pytest.fail("Safe stop is stuck waiting for the model response")
         assert result.state == "stopped" and result.processes_reaped
+        document = result.results[0].document
+        assert document is not None and document.source_intake == "saved"
+        assert document.knowledge_compilation == "stopped"
+        from openkb.application.source_history import source_status
+
+        saved = source_status(kb_dir, document.source_id)
+        assert saved["result"]["knowledge_compilation"] == "stopped"
+        assert saved["cumulative_usage"]["observable_attempts"] == 1
         assert result.succeeded == 0 and result.failed == 0 and result.unfinished == 2
         assert calls == ["stop-test"], "Cancellation started retries or another document"
         assert {

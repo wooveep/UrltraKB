@@ -228,7 +228,7 @@ def _build_remove_plan(
     # path that no longer exists must NOT fall through, or it could
     # delete a same-named raw file belonging to another document.
     raw_path = kept_raw = None
-    if meta.get("origin") != "cloud" and doc_type != "pageindex_cloud":
+    if not meta.get("source_id"):
         raw_dir = kb_dir / "raw"
         if meta.get("raw_path"):
             candidate = kb_dir / meta["raw_path"]

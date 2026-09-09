@@ -37,8 +37,9 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["资料", "类型"])
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["资料", "类型", "原文", "知识编译"])
+        self._documents = {}
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
@@ -73,6 +74,9 @@ class DocumentsDialog(ManagementPanel):
         recompilation.addWidget(self.recompile_selected)
         recompilation.addWidget(self.recompile_all)
         layout.addLayout(recompilation)
+        review_source = QPushButton("查看原文、证据与待接受的知识变更")
+        review_source.clicked.connect(self.review_source)
+        layout.addWidget(review_source)
         self.status = QLabel("正在读取资料…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -105,11 +109,28 @@ class DocumentsDialog(ManagementPanel):
                     else "暂无资料。从上方导入文件、目录或网址。"
                 )
             self.table.setRowCount(len(value["documents"]))
+            self._documents = {doc["hash"]: doc for doc in value["documents"]}
             for row, doc in enumerate(value["documents"]):
                 item = QTableWidgetItem(doc["name"])
                 item.setData(Qt.ItemDataRole.UserRole, doc["hash"])
                 self.table.setItem(row, 0, item)
                 self.table.setItem(row, 1, QTableWidgetItem(doc.get("display_type", doc["type"])))
+                self.table.setItem(
+                    row,
+                    2,
+                    QTableWidgetItem(
+                        "已保存" if doc.get("source_intake") == "saved" else "旧版资料"
+                    ),
+                )
+                labels = {
+                    "completed": "完成",
+                    "unfinished": "未完成",
+                    "failed": "失败",
+                    "stopped": "已停止",
+                }
+                self.table.setItem(
+                    row, 3, QTableWidgetItem(labels.get(doc.get("knowledge_compilation"), "待处理"))
+                )
 
         self.window.io.submit(
             lambda: get_kb_list(self.kb), loaded, kb=self.kb, obsolete=lambda: self._closed
@@ -147,6 +168,20 @@ class DocumentsDialog(ManagementPanel):
             obsolete=lambda: self._closed or generation != self._generation,
         )
 
+    def review_source(self):
+        if len(self.table.selectionModel().selectedRows()) != 1:
+            self.status.setText("请选择一份资料查看原文与处理结果。")
+            return
+        identifier = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
+        source_id = self._documents.get(identifier, {}).get("source_id")
+        if not source_id:
+            self.status.setText("这是旧版资料。重编译会保留已有来源，生成变更后可在这里审阅。")
+            return
+        from openkb.desktop.source_review import SourceReview
+
+        SourceReview(self.window, self.kb, source_id).exec()
+        self.reload()
+
     def confirm(self):
         if self._confirmed is None or self._task:
             return
@@ -181,8 +216,8 @@ class DocumentsDialog(ManagementPanel):
             question.setWindowTitle("确认重编译")
             question.setText(f"重编译 {len(targets)} 份资料？")
             question.setInformativeText(
-                "将使用已有来源与长文索引重新生成摘要、概念和实体页面。"
-                "这些页面的手工编辑可能被覆盖。每份资料完成后保留结果；停止任务不会撤销已完成项。"
+                "将使用已保存的原文重新生成摘要、概念和实体页面。"
+                "手工编辑的页面会保留，待你审阅并接受差异后更新。停止任务会保留已完成项。"
             )
             question.setDetailedText("\n".join(t.doc_name for t in targets))
             question.setStandardButtons(

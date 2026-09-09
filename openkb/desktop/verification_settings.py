@@ -36,6 +36,7 @@ def verify_settings(window, kb, wait_until):
         wait_until(lambda: dialog.form.isEnabled())
         cleared = read_settings_view(kb)
         assert cleared.sources["language"] != "kb" and cleared.sources["api_key"] != "kb"
+        verify_processing_settings(dialog, kb, wait_until)
     finally:
         dialog.reject()
 
@@ -69,3 +70,65 @@ def verify_settings(window, kb, wait_until):
         assert read_settings_view().sources["language"] == "default"
     finally:
         dialog.reject()
+
+
+def verify_processing_settings(dialog, kb, wait_until):
+    """Exercise budget persistence and independent backend settings without OCR calls."""
+    from openkb.application.settings import read_settings_view
+
+    processing = dialog.fields["processing"]
+    budgets = {
+        "context_tokens": 8192,
+        "output_tokens": 512,
+        "request_timeout": 5,
+        "stage_timeout": 30,
+        "document_timeout": 60,
+        "cleanup_timeout": 5,
+        "max_attempts": 1,
+        "max_requests": 5,
+        "max_tokens": 20000,
+        "concurrency": 1,
+    }
+    for name, value in budgets.items():
+        processing.values.inputs[name].setText(str(value))
+    processing.action.setCurrentIndex(1)
+    ocr = dialog.fields["parsing"]
+    ocr.backend.setCurrentIndex(1)
+    ocr.enabled["cloud"].setChecked(True)
+    for key, value in {
+        "endpoint": "https://ocr.example.test/api/v2/ocr/jobs",
+        "model": "PaddleOCR-VL-1.6",
+        "credential_env": "NATIVE_OCR_TEST_TOKEN",
+    }.items():
+        ocr.forms["cloud"]["identity"].inputs[key].setText(value)
+    cloud_limits = {
+        "seconds": 60,
+        "max_pages": 1,
+        "request_seconds": 5,
+        "poll_seconds": 1,
+        "max_requests": 3,
+        "max_page_bytes": 1000000,
+        "max_download_bytes": 1000000,
+    }
+    for key, value in cloud_limits.items():
+        ocr.forms["cloud"]["limits"].inputs[key].setText(str(value))
+    ocr.action.setCurrentIndex(1)
+    dialog.save()
+    wait_until(lambda: dialog.form.isEnabled())
+    saved = read_settings_view(kb)
+    assert saved.values.processing == budgets
+    assert saved.values.parsing.ocr.backend == "cloud"
+    assert saved.values.parsing.ocr.cloud.credential_env == "NATIVE_OCR_TEST_TOKEN"
+    ocr.backend.setCurrentIndex(0)
+    ocr.action.setCurrentIndex(1)
+    dialog.save()
+    wait_until(lambda: dialog.form.isEnabled())
+    switched = read_settings_view(kb)
+    assert switched.values.parsing.ocr.backend == "local"
+    assert switched.values.parsing.ocr.cloud == saved.values.parsing.ocr.cloud
+    for field in (processing, ocr):
+        field.action.setCurrentIndex(2)
+    dialog.save()
+    wait_until(lambda: dialog.form.isEnabled())
+    cleared = read_settings_view(kb)
+    assert cleared.sources["processing"] != "kb" and cleared.sources["parsing"] != "kb"

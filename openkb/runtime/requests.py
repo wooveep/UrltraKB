@@ -57,14 +57,22 @@ class ContinueConversation:
 class ImportFile:
     source: str
     wait_for_stable: bool = False
+    upload_origin: str | None = None
 
     def __post_init__(self) -> None:
+        import re
         from pathlib import Path
 
         if not Path(self.source).is_absolute():
             raise ValueError("Import source must be an absolute path")
         if type(self.wait_for_stable) is not bool:
             raise ValueError("Invalid input stability policy")
+        if self.upload_origin is not None and (
+            not isinstance(self.upload_origin, str)
+            or not re.fullmatch(r"upload:[0-9a-f]{32}/[0-9]+/[^/\\\x00]+", self.upload_origin)
+            or self.wait_for_stable
+        ):
+            raise ValueError("Invalid uploaded source identity")
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,98 @@ class RecompileDocument:
             or not self.version
         ):
             raise ValueError("Choose an indexed document to recompile")
+
+
+@dataclass(frozen=True)
+class ContinueSource:
+    source_id: str
+    version_id: str
+    proposal_id: str | None = None
+    accept_pages: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.source_id, source=True)
+        valid_id(self.version_id)
+        if self.proposal_id is not None:
+            valid_id(self.proposal_id)
+        if self.accept_pages is not None and (
+            self.proposal_id is None
+            or not isinstance(self.accept_pages, tuple)
+            or not all(isinstance(page, str) and page for page in self.accept_pages)
+        ):
+            raise ValueError("Acceptance requires the reviewed proposal and its exact pages")
+
+
+@dataclass(frozen=True)
+class ReparseSource:
+    source_id: str
+    version_id: str
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.source_id, source=True)
+        valid_id(self.version_id)
+
+
+@dataclass(frozen=True)
+class CleanupSourceHistory:
+    preview_id: str
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.preview_id)
+
+
+@dataclass(frozen=True)
+class ReprocessSourcePage:
+    source_id: str
+    version_id: str
+    parse_id: str
+    page: int
+    acknowledge_unknown: bool = False
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.source_id, source=True)
+        valid_id(self.version_id)
+        valid_id(self.parse_id)
+        if (
+            type(self.page) is not int
+            or self.page < 1
+            or type(self.acknowledge_unknown) is not bool
+        ):
+            raise ValueError("Choose the reviewed physical page for a new OCR attempt")
+
+
+@dataclass(frozen=True)
+class ConfirmSourcePage:
+    source_id: str
+    version_id: str
+    parse_id: str
+    page: int
+    reason: Literal["legitimate_blank", "legitimate_illustration"]
+
+    def __post_init__(self) -> None:
+        from openkb.sources import valid_id
+
+        valid_id(self.source_id, source=True)
+        valid_id(self.version_id)
+        valid_id(self.parse_id)
+        if (
+            type(self.page) is not int
+            or self.page < 1
+            or self.reason
+            not in {
+                "legitimate_blank",
+                "legitimate_illustration",
+            }
+        ):
+            raise ValueError("Choose the reviewed physical page and its quality decision")
 
 
 @dataclass(frozen=True)
@@ -165,6 +265,11 @@ UnitRequest = (
     | ImportUrl
     | RemoveDocument
     | RecompileDocument
+    | ContinueSource
+    | ReparseSource
+    | ReprocessSourcePage
+    | CleanupSourceHistory
+    | ConfirmSourcePage
     | DeleteConversation
     | ExportConversation
     | CheckKnowledge
@@ -179,6 +284,11 @@ REQUEST_TYPES = (
     ImportUrl,
     RemoveDocument,
     RecompileDocument,
+    ContinueSource,
+    ReparseSource,
+    ReprocessSourcePage,
+    CleanupSourceHistory,
+    ConfirmSourcePage,
     DeleteConversation,
     ExportConversation,
     CheckKnowledge,

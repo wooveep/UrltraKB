@@ -6,12 +6,13 @@ import json as json_mod
 import logging
 from contextlib import ExitStack
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
-from pageindex import IndexConfig, PageIndexClient
+from pageindex import IndexConfig, LocalClient
 
 from openkb.config import resolve_concurrency, resolve_credential_bundle, resolve_effective_config
+from openkb.locks import atomic_write_text
 from openkb.processing import navigation_execution
 from openkb.tree_renderer import render_summary_md
 
@@ -25,40 +26,6 @@ class IndexResult:
     doc_id: str
     description: str
     tree: dict
-
-
-@dataclass
-class CloudImportResult:
-    """Result of importing an existing PageIndex Cloud document."""
-
-    doc_id: str
-    doc_name: str  # collision-resistant wiki slug
-    name: str  # cloud display name (original filename in the cloud)
-    description: str
-
-
-@dataclass
-class CloudImportData:
-    """A fetched cloud doc + its resolved wiki name, before any KB write.
-
-    Returned by :func:`prepare_cloud_import` so the caller can snapshot this
-    doc's specific paths (O(1)) before :func:`_write_long_doc_artifacts` writes
-    them — instead of copying the whole summaries/sources trees on every import.
-    """
-
-    doc_id: str
-    doc_name: str  # collision-resistant wiki slug (resolved, not yet written)
-    cloud_name: str  # cloud display name (original filename in the cloud)
-    description: str
-    tree: dict
-    all_pages: list
-
-
-def _cloud_display_stem(cloud_name: str, fallback: str) -> str:
-    """Return a platform-independent stem for a PageIndex Cloud display name."""
-    normalized = cloud_name.replace("\\", "/").rstrip("/")
-    leaf = normalized.rsplit("/", 1)[-1] if normalized else ""
-    return PurePosixPath(leaf).stem or fallback
 
 
 def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
@@ -111,12 +78,6 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
     return pages
 
 
-def _get_pdf_page_count(pdf_path: Path) -> int:
-    from openkb.converter import get_pdf_page_count
-
-    return get_pdf_page_count(pdf_path)
-
-
 def _convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> list[dict[str, Any]]:
     from openkb.images import convert_pdf_to_pages
 
@@ -133,23 +94,19 @@ def _write_long_doc_artifacts(
 ) -> Path:
     """Write ``wiki/sources/<doc_name>.json`` + ``wiki/summaries/<doc_name>.md``.
 
-    Returns the summary path. Shared by :func:`index_long_document` (local)
-    and :func:`import_cloud_document` (cloud) so both produce identical
-    artifacts. Page images, when present, are written separately by the
-    caller's page extractor — this helper only persists page text + summary.
+    Returns the summary path. Page images are written by the local extractor.
     """
     sources_dir = kb_dir / "wiki" / "sources"
     sources_dir.mkdir(parents=True, exist_ok=True)
-    (sources_dir / f"{doc_name}.json").write_text(
-        json_mod.dumps(pages, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    atomic_write_text(
+        sources_dir / f"{doc_name}.json", json_mod.dumps(pages, ensure_ascii=False, indent=2)
     )
 
     summaries_dir = kb_dir / "wiki" / "summaries"
     summaries_dir.mkdir(parents=True, exist_ok=True)
     summary_path = summaries_dir / f"{doc_name}.md"
-    summary_path.write_text(
-        render_summary_md(tree, doc_name, doc_id, description=description), encoding="utf-8"
+    atomic_write_text(
+        summary_path, render_summary_md(tree, doc_name, doc_id, description=description)
     )
     return summary_path
 
@@ -192,9 +149,6 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
     config = resolve_effective_config(kb_dir)[0]
 
     model: str = config.get("model", "gpt-5.4")
-    from openkb.config_state import execution_environment
-
-    pageindex_api_key = execution_environment(kb_dir).get("PAGEINDEX_API_KEY", "")
 
     index_config = _build_index_config(config)
     bundle = resolve_credential_bundle(kb_dir)
@@ -211,26 +165,19 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
     # so garbage collection cannot release SQLite before rollback on Windows.
     with ExitStack() as stack:
         stack.enter_context(navigation_execution())
-        storage = None
-        if not pageindex_api_key:
-            from pageindex.storage.sqlite import SQLiteStorage
+        from pageindex.storage.sqlite import SQLiteStorage
 
-            storage = stack.enter_context(SQLiteStorage(str(openkb_dir / "pageindex.db")))
-        client = PageIndexClient(
-            api_key=pageindex_api_key or None,
+        storage = stack.enter_context(SQLiteStorage(str(openkb_dir / "pageindex.db")))
+        client = LocalClient(
             model=model,
             storage_path=str(openkb_dir),
             storage=storage,
             index_config=index_config,
         )
-        return _index_document(
-            client.collection(), pdf_path, kb_dir, source_name, cloud=bool(pageindex_api_key)
-        )
+        return _index_document(client.collection(), pdf_path, kb_dir, source_name)
 
 
-def _index_document(
-    col: Any, pdf_path: Path, kb_dir: Path, source_name: str, *, cloud: bool
-) -> IndexResult:
+def _index_document(col: Any, pdf_path: Path, kb_dir: Path, source_name: str) -> IndexResult:
     doc_id = col.add(str(pdf_path))
     logger.info("PageIndex added %s → doc_id=%s", pdf_path.name, doc_id)
 
@@ -262,24 +209,9 @@ def _index_document(
         sources_dir.mkdir(parents=True, exist_ok=True)
         images_dir = sources_dir / "images" / source_name
 
-        all_pages: list[dict[str, Any]] = []
-        if cloud:
-            # Cloud mode: fetch OCR'd markdown from PageIndex. get_page_content
-            # requires a page range, so pass "1-N".
-            page_count = _get_pdf_page_count(pdf_path)
-            try:
-                all_pages = _normalize_page_content(col.get_page_content(doc_id, f"1-{page_count}"))
-            except Exception as exc:
-                logger.warning("Cloud get_page_content failed for %s: %s", pdf_path.name, exc)
-
-        if not all_pages:
-            if cloud:
-                logger.warning(
-                    "Cloud returned no pages for %s; falling back to local pymupdf", pdf_path.name
-                )
-            all_pages = _normalize_page_content(
-                _convert_pdf_to_pages(pdf_path, source_name, images_dir)
-            )
+        all_pages = _normalize_page_content(
+            _convert_pdf_to_pages(pdf_path, source_name, images_dir)
+        )
 
         if not all_pages:
             raise RuntimeError(f"No page content extracted for {pdf_path.name}")
@@ -300,121 +232,3 @@ def _index_document(
                 "PageIndex cleanup of %s failed after error; blob may be orphaned", doc_id
             )
         raise
-
-
-# PageIndex's get_page_content rejects a single page range covering more than
-# this many pages (``parse_pages`` raises "Page range too large (max 1000)"),
-# so cloud page fetches are windowed in chunks of this size.
-_CLOUD_PAGE_WINDOW = 1000
-# Safety bound on the windowed fetch (in pages) in case a backend never returns
-# a short window — caps the loop at _CLOUD_PAGE_MAX / _CLOUD_PAGE_WINDOW calls.
-_CLOUD_PAGE_MAX = 1_000_000
-
-
-def _fetch_cloud_pages(col, doc_id: str) -> list[dict[str, Any]]:
-    """Fetch all OCR pages of a cloud doc, windowing around the 1000-page cap.
-
-    ``get_page_content`` returns the whole document and uses its ``pages`` arg
-    only as a client-side filter that ``parse_pages`` caps at 1000 pages — so a
-    single ``"1-<N>"`` request fails for any doc over 1000 pages. Request fixed
-    ``1000``-page windows and stop as soon as a window comes back SHORT (fewer
-    than a full window): PageIndex page numbers are sequential, so a short window
-    means we've passed the last page. This is what makes the common (≤1000-page)
-    doc a single request, while still fetching every page of a larger one — and,
-    unlike bounding the loop by the tree's max page index, it never truncates a
-    doc whose tree under-reports its page count (a real case: a paper whose tree
-    stops a couple pages short of the references). A wide safety bound guards
-    against a backend that never narrows the window.
-    """
-    pages: list[dict[str, Any]] = []
-    start = 1
-    while start <= _CLOUD_PAGE_MAX:
-        window = _normalize_page_content(
-            col.get_page_content(doc_id, f"{start}-{start + _CLOUD_PAGE_WINDOW - 1}")
-        )
-        pages.extend(window)
-        if len(window) < _CLOUD_PAGE_WINDOW:
-            break
-        start += _CLOUD_PAGE_WINDOW
-    return pages
-
-
-def prepare_cloud_import(doc_id: str, kb_dir: Path, path_key: str) -> CloudImportData:
-    """Fetch a PageIndex Cloud doc and resolve its wiki name WITHOUT writing.
-
-    Cloud fetch + collision-resistant name resolution only — no KB mutation —
-    so the caller knows ``doc_name`` before writing and can snapshot just this
-    doc's paths instead of copying the whole summaries/sources trees. Name
-    resolution reads the registry but does not mutate it.
-    """
-    from openkb.config_state import execution_environment
-    from openkb.converter import resolve_doc_name_from_key
-    from openkb.state import HashRegistry
-
-    pageindex_api_key = execution_environment(kb_dir).get("PAGEINDEX_API_KEY", "")
-    if not pageindex_api_key:
-        raise RuntimeError(
-            "Importing from PageIndex Cloud requires the PAGEINDEX_API_KEY environment variable."
-        )
-
-    client = PageIndexClient(api_key=pageindex_api_key)
-    col = client.collection()
-
-    doc = col.get_document(doc_id, include_text=True)
-    cloud_name: str = doc.get("doc_name") or doc_id
-    description: str = doc.get("doc_description", "")
-    structure: list = doc.get("structure", [])
-
-    registry = HashRegistry(kb_dir / ".openkb" / "hashes.json")
-    stem = _cloud_display_stem(cloud_name, doc_id)
-    doc_name = resolve_doc_name_from_key(stem, path_key, registry)
-
-    tree = {
-        "doc_name": cloud_name,
-        "doc_description": description,
-        "structure": structure,
-    }
-
-    all_pages = _fetch_cloud_pages(col, doc_id)
-    if not all_pages:
-        raise RuntimeError(f"No page content returned from PageIndex Cloud for doc_id={doc_id}")
-
-    return CloudImportData(
-        doc_id=doc_id,
-        doc_name=doc_name,
-        cloud_name=cloud_name,
-        description=description,
-        tree=tree,
-        all_pages=all_pages,
-    )
-
-
-def import_cloud_document(doc_id: str, kb_dir: Path, path_key: str) -> CloudImportResult:
-    """Import an already-indexed PageIndex Cloud document by ``doc_id``.
-
-    Fetches structure + OCR'd page content from the cloud (no local PDF) and
-    writes the same wiki artifacts as :func:`index_long_document`. Requires
-    ``PAGEINDEX_API_KEY``. ``path_key`` is the synthetic identity key
-    (``pageindex-cloud:<doc_id>``) used to resolve a collision-resistant
-    wiki name.
-
-    Writes immediately. Callers that need to snapshot before writing (e.g. the
-    crash-safe CLI path) should call :func:`prepare_cloud_import` then
-    :func:`_write_long_doc_artifacts`, so the snapshot can cover only this
-    doc's paths.
-    """
-    cloud = prepare_cloud_import(doc_id, kb_dir, path_key)
-    _write_long_doc_artifacts(
-        cloud.tree,
-        cloud.all_pages,
-        cloud.doc_name,
-        cloud.doc_id,
-        kb_dir,
-        description=cloud.description,
-    )
-    return CloudImportResult(
-        doc_id=cloud.doc_id,
-        doc_name=cloud.doc_name,
-        name=cloud.cloud_name,
-        description=cloud.description,
-    )

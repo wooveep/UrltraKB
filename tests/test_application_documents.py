@@ -34,10 +34,18 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     events = []
     result = import_document(kb_dir, source, on_event=events.append)
     assert result.status == "added"
-    assert read_page(kb_dir, "summaries/notes").body.strip() == "# Notes\n\nCompiled knowledge."
+    assert (
+        read_page(kb_dir, f"summaries/notes-{result.source_id}").body.strip()
+        == "# Notes\n\nCompiled knowledge."
+    )
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
-    assert [event["stage"] for event in events] == ["converting", "compiling", "committed"]
+    assert [event["stage"] for event in events] == [
+        "parsing",
+        "compiling",
+        "committing",
+        "committed",
+    ]
 
 
 def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monkeypatch):
@@ -123,12 +131,16 @@ def test_import_freezes_relative_images_at_the_business_boundary(
         ),
     )
     result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
-    assert result.status == "added"
-    assert next((kb_dir / "raw").iterdir()).read_bytes() == original
-    images = list((kb_dir / "wiki/sources/images").rglob("*.png"))
-    assert len(images) == 1 and images[0].read_bytes() == b"original image"
-    converted = next((kb_dir / "wiki/sources").glob("*.md")).read_text()
-    assert converted.count("图.png)") == 2 and "![missing](later.png)" in converted
+    from openkb.sources import SourceStore
+
+    assert result.status == "unfinished" and result.source_intake == "saved"
+    assert "missing_asset:later.png" in result.quality
+    store = SourceStore(kb_dir)
+    saved = store.version(result.input_version)
+    assert store.original(saved).read_bytes() == original
+    assert store.asset(saved.assets["图.png"]).read_bytes() == b"original image"
+    assert saved.assets["later.png"] is None
+    assert not list((kb_dir / "wiki/summaries").glob("*.md"))
 
 
 def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp_path, monkeypatch):
@@ -143,7 +155,9 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
     source = tmp_path / "notes.md"
     source.write_text("![figure](figure.png)")
     figure = tmp_path / "figure.png"
-    figure.write_bytes(b"old")
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), "red").save(figure)
     acquired, release = threading.Event(), threading.Event()
 
     def hold():
@@ -153,7 +167,7 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
 
     def waiting(event):
         if event["stage"] == "waiting":
-            figure.write_bytes(b"latest")
+            Image.new("RGB", (8, 8), "blue").save(figure)
             release.set()
 
     values = iter(
@@ -179,7 +193,8 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
         release.set()
         holder.join(10)
     assert result.status == "added"
-    assert next((kb_dir / "wiki/sources/images").rglob("*.png")).read_bytes() == b"latest"
+    saved_image = next((kb_dir / "wiki/sources/images").rglob("*.png"))
+    assert saved_image.read_bytes() == figure.read_bytes()
 
 
 def test_watched_source_replaced_with_external_symlink_while_waiting_never_starts(kb_dir, tmp_path):
@@ -237,7 +252,6 @@ def test_import_keeps_frozen_identity_when_original_path_changes_after_start(kb_
         pytest.skip("POSIX symlink fixture")
     source = kb_dir / "notes.md"
     source.write_text("# Original prepared input")
-    digest = HashRegistry.hash_file(source)
     other = kb_dir / "other.md"
     other.write_text("# Another document")
     registry = HashRegistry(kb_dir / ".openkb/hashes.json")
@@ -266,9 +280,11 @@ def test_import_keeps_frozen_identity_when_original_path_changes_after_start(kb_
         ),
     )
     result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
-    assert result.status == "added"
-    saved = HashRegistry(kb_dir / ".openkb/hashes.json").get(digest)
-    assert saved["path"] == "notes.md"
-    assert saved["doc_name"] == "notes"
-    assert (kb_dir / "raw/notes.md").read_text() == "# Original prepared input"
+    from openkb.sources import SourceStore
+
+    assert result.status == "unfinished" and result.reason == "input_conflict"
+    store = SourceStore(kb_dir)
+    saved = store.version(result.input_version)
+    assert saved.origin == "kb:notes.md"
+    assert store.original(saved).read_text() == "# Original prepared input"
     assert summary.read_text() == "# Keep this unrelated page"

@@ -362,7 +362,9 @@ def test_resolve_doc_name_from_key_clean(tmp_path):
     from openkb.state import HashRegistry
 
     registry = HashRegistry(tmp_path / "hashes.json")
-    name = resolve_doc_name_from_key("Attention Is All You Need", "pageindex-cloud:abc", registry)
+    name = resolve_doc_name_from_key(
+        "Attention Is All You Need", "https://example.test/document/abc", registry
+    )
     assert name == "Attention-Is-All-You-Need"
 
 
@@ -375,7 +377,7 @@ def test_resolve_doc_name_from_key_collision_suffix(tmp_path):
     registry = HashRegistry(tmp_path / "hashes.json")
     registry.add("hash1", {"name": "paper.pdf", "doc_name": "paper"})
 
-    path_key = "pageindex-cloud:xyz"
+    path_key = "https://example.test/document/xyz"
     name = resolve_doc_name_from_key("paper", path_key, registry)
     digest = hashlib.sha256(path_key.encode("utf-8")).hexdigest()[:8]
     assert name == f"paper-{digest}"
@@ -386,8 +388,8 @@ def test_resolve_doc_name_from_key_reuses_known_path(tmp_path):
     from openkb.state import HashRegistry
 
     registry = HashRegistry(tmp_path / "hashes.json")
-    registry.add("h", {"doc_name": "kept-name", "path": "pageindex-cloud:dup"})
-    name = resolve_doc_name_from_key("whatever", "pageindex-cloud:dup", registry)
+    registry.add("h", {"doc_name": "kept-name", "path": "https://example.test/document/dup"})
+    name = resolve_doc_name_from_key("whatever", "https://example.test/document/dup", registry)
     assert name == "kept-name"
 
 

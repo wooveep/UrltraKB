@@ -1,0 +1,173 @@
+"""Parse immutable input versions; navigation never substitutes for source content."""
+
+from __future__ import annotations
+
+from importlib.metadata import version as package_version
+from pathlib import Path
+from typing import Any
+
+from openkb.evidence import BlockDraft, ParseStore, ParseVersion
+from openkb.ocr.assembly import assembly_profile
+from openkb.ocr.config import parsing_settings
+from openkb.ocr.reprocessing import page_attempts
+from openkb.processing import processing_checkpoint
+from openkb.sources import SourceStore, SourceVersion
+
+
+def parse_document(
+    kb_dir: Path,
+    source: SourceVersion,
+    *,
+    options: dict[str, Any] | None = None,
+    force: bool = False,
+) -> ParseVersion:
+    selected = parsing_settings(options)
+    profile = {
+        "parser": "openkb-structured-v3",
+        "ocr": selected.ocr.profile(),
+        "ocr_assembly": assembly_profile(selected.ocr.backend),
+        "pymupdf": package_version("pymupdf"),
+        "mammoth": package_version("mammoth"),
+        "markitdown": package_version("markitdown"),
+    }
+    store = ParseStore(kb_dir)
+    originals = SourceStore(kb_dir)
+    retries = page_attempts(originals, source, selected.ocr.profile())
+    if retries:
+        profile["reprocessing"] = {str(page): attempt for page, attempt in retries.items()}
+    path = originals.original(source)
+    if source.suffix == ".pdf":
+        import pymupdf
+
+        with pymupdf.open(path) as pdf:
+            profile["physical_pages"] = pdf.page_count
+    if not force:
+        cached = store.find(source, profile)
+        if cached is not None and store.complete(source, cached):
+            store.select(source, cached)
+            return cached
+    processing_checkpoint("parsing")
+    if source.suffix == ".pdf":
+        from openkb.parsing_pdf import parse_pdf
+
+        ocr: Any = None
+        if selected.ocr.backend == "cloud" and selected.ocr.cloud is not None:
+            from openkb.ocr.cloud import CloudJobs
+
+            ocr = CloudJobs(originals, source, selected.ocr.cloud, retries=retries)
+        elif selected.ocr.backend == "local" and selected.ocr.local is not None:
+            from openkb.ocr.local import LocalOcr
+
+            ocr = LocalOcr(originals, source, selected.ocr.local, retries=retries)
+        previous = store.selected(source)
+        reuse = {}
+        if previous is not None and (
+            {k: v for k, v in previous.profile.items() if k != "reprocessing"}
+            == {k: v for k, v in profile.items() if k != "reprocessing"}
+        ):
+            changed_pages = {
+                page
+                for page, attempt in retries.items()
+                if previous.profile.get("reprocessing", {}).get(str(page)) != attempt
+            }
+            if changed_pages:
+                for row in previous.quality:
+                    page = row["page"]
+                    if page not in changed_pages:
+                        reuse[page] = (
+                            [
+                                BlockDraft(
+                                    originals.asset(b.blob).read_text(encoding="utf-8"),
+                                    b.kind,
+                                    b.location,
+                                    b.assets,
+                                    b.context,
+                                )
+                                for b in previous.blocks
+                                if b.location["page"] == page
+                            ],
+                            row,
+                        )
+        try:
+            blocks, quality = parse_pdf(
+                path, originals, ocr=ocr, force_pages=set(retries), reuse=reuse
+            )
+        finally:
+            if ocr is not None:
+                ocr.close()
+    elif source.suffix == ".docx":
+        from openkb.parsing_docx import parse_docx
+
+        blocks, quality = parse_docx(path, originals)
+    else:
+        blocks, quality = parse_text(path, source, originals)
+    processing_checkpoint()
+    parsed = store.save(source, profile, blocks, quality=quality)
+    store.select(source, parsed)
+    return parsed
+
+
+def parse_text(
+    path: Path, source: SourceVersion, store: SourceStore
+) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
+    kind = "text"
+    if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
+        text = path.read_text(encoding="utf-8")
+    elif source.suffix == ".json":
+        from openkb.legacy_pages import saved_pages_text
+
+        text = saved_pages_text(path)
+        kind = "converted"
+    else:
+        from markitdown import MarkItDown
+
+        with path.open("rb") as stream:
+            text = MarkItDown().convert_stream(stream, file_extension=source.suffix).text_content
+        kind = "converted"
+    quality: list[dict[str, Any]] = []
+    assets = []
+    for reference, digest in source.assets.items():
+        if digest is None:
+            quality.append({"status": "needs_review", "reason": "missing_asset:" + reference})
+        else:
+            store.asset(digest)
+            assets.append(digest)
+            text = text.replace("](" + reference + ")", "](asset:" + digest + ")")
+    blocks = []
+    paragraph: list[str] = []
+    start = 1
+    fence = False
+    block_kind = "paragraph"
+
+    def flush():
+        if paragraph:
+            blocks.append(
+                BlockDraft(
+                    "\n".join(paragraph), block_kind, {"kind": kind, "line": start}, tuple(assets)
+                )
+            )
+            paragraph.clear()
+
+    for line_number, line in enumerate(text.splitlines(), 1):
+        processing_checkpoint()
+        if not paragraph:
+            start = line_number
+            block_kind = "paragraph"
+        if line.startswith(("```", "~~~")):
+            fence = not fence
+            block_kind = "code"
+        if line.startswith("#") and not fence:
+            flush()
+            start, block_kind = line_number, "heading"
+            paragraph.append(line)
+            flush()
+        elif not line.strip() and not fence:
+            flush()
+        else:
+            paragraph.append(line)
+    flush()
+    if fence:
+        quality.append({"status": "needs_review", "reason": "unclosed_code_span"})
+    if not blocks:
+        quality.append({"status": "needs_review", "reason": "empty_content"})
+    return blocks, quality

@@ -726,76 +726,6 @@ def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_add_persists_doc_name_for_later_remove(tmp_path):
-    """End-to-end: `openkb add` writes a registry entry with `doc_name`,
-    and a subsequent `openkb remove` actually prunes that entry.
-    """
-    from openkb.converter import ConvertResult
-
-    # Minimal KB scaffolding (mirrors conftest.kb_dir but localised so we
-    # can fully control the add pipeline via mocks below).
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources" / "images").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "explorations").mkdir(parents=True)
-    (tmp_path / "wiki" / "reports").mkdir(parents=True)
-    (tmp_path / "wiki" / "index.md").write_text(
-        "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "wiki" / "log.md").write_text("# Log\n", encoding="utf-8")
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    (openkb_dir / "hashes.json").write_text("{}")
-
-    doc = tmp_path / "paper.md"
-    doc.write_text("# Hello", encoding="utf-8")
-    raw_path = tmp_path / "raw" / "paper.md"
-    raw_path.write_text("# Hello", encoding="utf-8")
-    source_path = tmp_path / "wiki" / "sources" / "paper.md"
-    source_path.write_text("# Hello converted", encoding="utf-8")
-    summary_path = tmp_path / "wiki" / "summaries" / "paper.md"
-    summary_path.write_text(
-        "---\nsources: [raw/paper.md]\nbrief: x\n---\n# Paper\n",
-        encoding="utf-8",
-    )
-
-    mock_result = ConvertResult(
-        raw_path=raw_path,
-        source_path=source_path,
-        is_long_doc=False,
-        file_hash="deadbeef" * 8,  # 64 hex chars
-    )
-
-    runner = CliRunner()
-    # Mock convert_document + asyncio.run to skip the LLM-driven compile.
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.application.documents.convert_document", return_value=mock_result),
-        patch("openkb.cli.asyncio.run"),
-    ):
-        add_res = runner.invoke(cli, ["add", str(doc)])
-    assert add_res.exit_code == 0, add_res.output
-
-    # The registry write contract: doc_name must be present.
-    hashes = json.loads((openkb_dir / "hashes.json").read_text())
-    assert len(hashes) == 1
-    ((_, meta),) = hashes.items()
-    assert meta["name"] == "paper.md"
-    assert meta["doc_name"] == "paper"
-    assert meta["type"] == "md"
-
-    # And the remove command must actually drop that entry — not silently no-op.
-    rm_res = runner.invoke(
-        cli,
-        ["--kb-dir", str(tmp_path), "remove", "paper.md", "--keep-raw", "--yes"],
-    )
-    assert rm_res.exit_code == 0, rm_res.output
-    assert json.loads((openkb_dir / "hashes.json").read_text()) == {}
-
-
 # ---------------------------------------------------------------------------
 # Regression: code-review issue #2
 # `_remove_section_entry` must match the canonical `- {link}` bullet form
@@ -975,63 +905,6 @@ def test_cli_remove_dry_run_does_not_touch_images(kb_dir):
 # Functional-completeness fix: `doc_id` is persisted for long PDFs so a
 # later `openkb remove` can call PageIndex's delete_document API.
 # ---------------------------------------------------------------------------
-
-
-def test_add_long_pdf_persists_doc_id_to_registry(tmp_path):
-    """Long-doc ingest must record `doc_id` in the registry. Without it,
-    the remove path has no handle to feed `Collection.delete_document`.
-    """
-    from openkb.converter import ConvertResult
-    from openkb.indexer import IndexResult
-
-    # Minimal KB
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources" / "images").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "explorations").mkdir(parents=True)
-    (tmp_path / "wiki" / "reports").mkdir(parents=True)
-    (tmp_path / "wiki" / "index.md").write_text(
-        "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "wiki" / "log.md").write_text("# Log\n", encoding="utf-8")
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    (openkb_dir / "hashes.json").write_text("{}")
-
-    pdf = tmp_path / "long.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n" + b"\x00" * 200)
-    raw_path = tmp_path / "raw" / "long.pdf"
-    raw_path.write_bytes(pdf.read_bytes())
-
-    convert_mock = ConvertResult(
-        raw_path=raw_path,
-        source_path=None,
-        is_long_doc=True,
-        file_hash="cafebabe" * 8,
-    )
-    index_mock = IndexResult(
-        doc_id="pi-doc-abc123",
-        description="A long PDF",
-        tree={},
-    )
-
-    runner = CliRunner()
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.application.documents.convert_document", return_value=convert_mock),
-        patch("openkb.indexer.index_long_document", return_value=index_mock),
-        patch("openkb.cli.asyncio.run"),
-    ):
-        result = runner.invoke(cli, ["add", str(pdf)])
-
-    assert result.exit_code == 0, result.output
-    hashes = json.loads((openkb_dir / "hashes.json").read_text())
-    ((_, meta),) = hashes.items()
-    assert meta["type"] == "long_pdf"
-    assert meta["doc_id"] == "pi-doc-abc123"
 
 
 # ---------------------------------------------------------------------------
@@ -1231,68 +1104,6 @@ def test_cli_remove_deletes_renamed_raw_copy(kb_dir):
 
 
 # ---------------------------------------------------------------------------
-# Cloud-imported docs (type=pageindex_cloud, origin=cloud) own no local raw
-# file and the user's cloud corpus is their asset — remove must clean up ONLY
-# local wiki artifacts and must NEVER contact PageIndex Cloud.
-# ---------------------------------------------------------------------------
-
-
-def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
-    """A pageindex_cloud doc removes only local artifacts; the cloud is
-    never contacted even when a pageindex.db happens to exist."""
-    from unittest.mock import patch
-
-    from click.testing import CliRunner
-
-    from openkb.cli import cli
-    from openkb.state import HashRegistry
-
-    # Minimal KB
-    (tmp_path / "raw").mkdir()
-    for sub in ("sources/images", "summaries", "concepts", "entities", "reports"):
-        (tmp_path / "wiki" / sub).mkdir(parents=True)
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    # A stray pageindex.db to prove the cloud path is gated by type, not just
-    # by the DB's absence.
-    (openkb_dir / "pageindex.db").write_bytes(b"")
-    (tmp_path / "wiki" / "index.md").write_text("# Index\n")
-
-    # Cloud artifacts + registry entry
-    (tmp_path / "wiki" / "summaries" / "cloud-doc.md").write_text("---\n---\n# s\n")
-    (tmp_path / "wiki" / "sources" / "cloud-doc.json").write_text("[]")
-    registry = HashRegistry(openkb_dir / "hashes.json")
-    registry.add(
-        "synthhash",
-        {
-            "name": "Cloud Paper.pdf",
-            "doc_name": "cloud-doc",
-            "type": "pageindex_cloud",
-            "origin": "cloud",
-            "path": "pageindex-cloud:cloud-1",
-            "source_path": "wiki/sources/cloud-doc.json",
-            "doc_id": "cloud-1",
-        },
-    )
-
-    runner = CliRunner()
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("pageindex.PageIndexClient") as mock_client,
-    ):
-        result = runner.invoke(cli, ["remove", "cloud-doc", "--yes"])
-
-    assert result.exit_code == 0, result.output
-    # The cloud client must never be constructed.
-    mock_client.assert_not_called()
-    # Local artifacts are gone and the registry entry is removed.
-    assert not (tmp_path / "wiki" / "summaries" / "cloud-doc.md").exists()
-    assert not (tmp_path / "wiki" / "sources" / "cloud-doc.json").exists()
-    assert HashRegistry(openkb_dir / "hashes.json").get("synthhash") is None
-
-
-# ---------------------------------------------------------------------------
 # run_remove_for_api (REST entry point, shares _build/_execute with the CLI)
 # ---------------------------------------------------------------------------
 
@@ -1388,3 +1199,19 @@ def test_run_remove_for_api_pageindex_failure_is_partial(kb_dir):
     hashes = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
     assert "h_paper" in hashes
     assert hashes["h_paper"]["doc_id"] == "pi-doc-xyz"
+
+
+def test_remove_generated_knowledge_retains_versioned_original(kb_dir, model_service):
+    from openkb.application.documents import import_document
+    from openkb.application.removal import run_remove_for_api
+    from openkb.application.source_history import source_status
+
+    original = kb_dir / "paper.md"
+    original.write_text("Original retained for existing evidence")
+    imported = import_document(kb_dir, original)
+    assert imported.knowledge_compilation == "completed"
+    result = run_remove_for_api(kb_dir, "paper.md")
+    assert result["status"] == "removed"
+    assert not list((kb_dir / "wiki/summaries").glob("paper-*.md"))
+    status = source_status(kb_dir, imported.source_id)
+    assert Path(status["original"]).read_text() == "Original retained for existing evidence"

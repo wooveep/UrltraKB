@@ -15,8 +15,6 @@ from openkb.url_ingest import looks_like_url
 
 
 def import_path(kb_dir: Path, path: str) -> int:
-    from openkb.config import GLOBAL_CONFIG_DIR
-
     requests: list[UnitRequest]
     if looks_like_url(path):
         requests = [ImportUrl(path)]
@@ -33,6 +31,13 @@ def import_path(kb_dir: Path, path: str) -> int:
         if not files:
             raise click.BadParameter("No supported documents found")
         requests = [ImportFile(str(file)) for file in files]
+    return run_requests(kb_dir, requests)
+
+
+def run_requests(kb_dir: Path, requests: list[UnitRequest]) -> int:
+    """Run explicit source work with the same stop and receipt behavior as imports."""
+    from openkb.config import GLOBAL_CONFIG_DIR
+
     manager = TaskManager(history_dir=GLOBAL_CONFIG_DIR / "cli/tasks")
     previous = None
     interrupted = False
@@ -62,6 +67,12 @@ def import_path(kb_dir: Path, path: str) -> int:
                 )
                 if document.reason:
                     click.echo(f"    {document.stage}: {document.reason}")
+                if document.source_id:
+                    click.echo(
+                        f"    Source: {document.source_id} · Version: {document.input_version}"
+                    )
+                if document.resume:
+                    click.echo(f"    Resume: {document.resume}")
             elif result.error:
                 click.echo(f"  {result.error}")
         if view.error:

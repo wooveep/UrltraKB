@@ -512,9 +512,9 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir, tmp_path
         response = _post_document(client, kb)
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert (kb_dir / "raw/paper.md").read_bytes() == b"# Paper"
+    assert Path(payload["files"][0]["saved_path"]).read_bytes() == b"# Paper"
     assert payload["files"][0]["original_name"] == "paper.md"
-    assert payload["files"][0]["saved_path"] == str(kb_dir / "raw/paper.md")
+    assert payload["files"][0]["document"]["source_intake"] == "saved"
     assert payload["added_count"] == 1
     assert payload["processes_reaped"]
     assert payload["files"][0]["document"]["knowledge_compilation"] == "completed"
@@ -535,11 +535,11 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir, tmp_p
             headers=_auth(),
         )
     assert response.status_code == 200, response.text
-    assert response.json()["added_count"] == 1
-    assert response.json()["skipped_count"] == 1
+    assert response.json()["added_count"] == 2
+    assert response.json()["skipped_count"] == 0
     assert response.json()["failed_count"] == 0
-    assert len(model_service) == 4
-    assert len(list((kb_dir / "raw").iterdir())) == 2
+    assert len(model_service) == 6
+    assert len(list((kb_dir / "wiki/summaries").glob("*.md"))) == 3
 
 
 def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir, tmp_path, model_service):
@@ -555,18 +555,18 @@ def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir, tmp_path, mo
     assert response.json()["files"][0]["original_name"] == "paper.md"
 
 
-def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir, tmp_path, model_service):
+def test_add_endpoint_preserves_independent_uploads_with_equal_content(
+    monkeypatch, kb_dir, tmp_path, model_service
+):
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
     kb = _use_named_kb(monkeypatch, kb_dir)
     with _client(monkeypatch) as client:
-        assert _post_document(client, kb).status_code == 200
-        response = _post_document(client, kb)
-        assert response.status_code == 200
-        assert response.json()["skipped_count"] == 1
-        assert len(model_service) == 2
-    assert len(list((kb_dir / "raw").iterdir())) == 1
-    source = response.json()["files"][0]["document"]["source"]
-    assert not Path(source).exists()
+        first = _post_document(client, kb).json()
+        second = _post_document(client, kb).json()
+    assert first["files"][0]["document"]["source_id"] != second["files"][0]["document"]["source_id"]
+    assert first["files"][0]["saved_path"] == second["files"][0]["saved_path"]
+    assert second["added_count"] == 1 and len(model_service) == 4
+    assert Path(second["files"][0]["saved_path"]).read_bytes() == b"# Paper"
 
 
 def test_add_endpoint_streams_events(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1112,47 +1112,40 @@ def _patch_recompile(monkeypatch):
     return short, long_
 
 
-def test_recompile_non_stream_short_doc(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    short, long_ = _patch_recompile(monkeypatch)
+def test_recompile_non_stream_short_doc(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_short(kb_dir)
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md"},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["status"] == "done"
-    assert body["recompiled"] == 1
-    assert body["skipped"] == 0
-    assert body["docs"][0]["status"] == "ok"
-    short.assert_called_once()
-    assert short.call_args.args[0] == "notes"  # doc_name
-    assert short.call_args.args[2] == kb_dir  # kb_dir
-    long_.assert_not_called()
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "notes.md"},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "partial"
+        assert body["recompiled"] == 0 and body["unfinished_count"] == 1
+        assert body["docs"][0]["document"]["reason"] == "needs_acceptance"
+        assert len(model_service) == 2
 
 
-def test_recompile_non_stream_long_doc(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_long(kb_dir)
-    short, long_ = _patch_recompile(monkeypatch)
+def test_recompile_non_stream_long_doc(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_long(kb_dir)
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "paper.pdf"},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    long_.assert_called_once()
-    args = long_.call_args.args
-    assert args[0] == "paper"  # doc_name
-    assert args[2] == "doc-abc123"  # doc_id
-    assert args[3] == kb_dir  # kb_dir
-    short.assert_not_called()
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "paper.pdf"},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["unfinished_count"] == 1
+        assert response.json()["docs"][0]["message"] == "saved_original_missing"
+        assert not model_service
 
 
 def test_recompile_not_found_404(monkeypatch, kb_dir):
@@ -1235,113 +1228,118 @@ def test_recompile_dry_run_returns_plan(monkeypatch, kb_dir):
     short.assert_not_called()
 
 
-def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir, slug="a", name="a.md")
-    (kb_dir / "wiki" / "sources" / "a.md").write_text("# A\n", encoding="utf-8")
-    # add a second short doc to the registry
-    data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
-    data["h2"] = {"name": "b.md", "doc_name": "b", "type": "md"}
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
-    (kb_dir / "wiki" / "sources" / "b.md").write_text("# B\n", encoding="utf-8")
-    short, _ = _patch_recompile(monkeypatch)
+def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_short(kb_dir, slug="a", name="a.md")
+        (kb_dir / "wiki" / "sources" / "a.md").write_text("# A\n", encoding="utf-8")
+        # add a second short doc to the registry
+        data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+        data["h2"] = {"name": "b.md", "doc_name": "b", "type": "md"}
+        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
+        (kb_dir / "wiki" / "sources" / "b.md").write_text("# B\n", encoding="utf-8")
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "all_docs": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["total"] == 2
-    assert body["recompiled"] == 2
-    assert short.call_count == 2
-
-
-def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    _patch_recompile(monkeypatch)
-    from openkb.schema import AGENTS_MD
-
-    schema = kb_dir / "wiki/AGENTS.md"
-    schema.write_text("Previous custom schema", encoding="utf-8")
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md", "refresh_schema": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    assert schema.read_text(encoding="utf-8") == AGENTS_MD
-    assert (kb_dir / "wiki/AGENTS.md.bak").read_text() == "Previous custom schema"
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "all_docs": True},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 2
+        assert body["recompiled"] == 0 and body["unfinished_count"] == 2
+        assert len(model_service) == 4
 
 
-def test_recompile_skip_missing_source(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir, slug="good", name="good.md")
-    (kb_dir / "wiki" / "sources" / "good.md").write_text("# Good\n", encoding="utf-8")
-    # second doc whose source file is absent -> should be skipped
-    data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
-    data["h2"] = {"name": "bad.md", "doc_name": "bad", "type": "md"}
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
-    short, _ = _patch_recompile(monkeypatch)
+def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_short(kb_dir)
+        from openkb.schema import AGENTS_MD
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "all_docs": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["recompiled"] == 1
-    assert body["skipped"] == 1
-    assert short.call_count == 1
+        schema = kb_dir / "wiki/AGENTS.md"
+        schema.write_text("Previous custom schema", encoding="utf-8")
+
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "notes.md", "refresh_schema": True},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        assert schema.read_text(encoding="utf-8") == AGENTS_MD
+        assert (kb_dir / "wiki/AGENTS.md.bak").read_text() == "Previous custom schema"
 
 
-def test_recompile_compile_error_counts_as_skipped(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    short = AsyncMock(side_effect=RuntimeError("boom"))
-    long_ = AsyncMock()
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", short)
-    monkeypatch.setattr("openkb.agent.compiler.compile_long_doc", long_)
+def test_recompile_skip_missing_source(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_short(kb_dir, slug="good", name="good.md")
+        (kb_dir / "wiki" / "sources" / "good.md").write_text("# Good\n", encoding="utf-8")
+        # second doc whose source file is absent -> should be skipped
+        data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+        data["h2"] = {"name": "bad.md", "doc_name": "bad", "type": "md"}
+        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md"},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["recompiled"] == 0
-    assert body["skipped"] == 1
-    assert body["docs"][0]["status"] == "error"
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "all_docs": True},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["recompiled"] == 0
+        assert body["unfinished_count"] == 2
+        assert len(model_service) == 2
+        assert {row["message"] for row in body["docs"]} == {
+            "needs_acceptance",
+            "saved_original_missing",
+        }
 
 
-def test_recompile_stream_per_doc_events(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    _patch_recompile(monkeypatch)
+def test_recompile_corrupt_original_is_failed_separately(
+    monkeypatch, kb_dir, tmp_path, model_service
+):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_long(kb_dir)
+        (kb_dir / "raw/paper.pdf").write_bytes(b"invalid pdf")
 
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md", "stream": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    events = _events_from_sse(response.text)
-    names = [e["event"] for e in events]
-    assert names[0] == "start"
-    assert names[-1] == "done"
-    assert "doc" in names and "final" in names
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "paper.pdf"},
+            headers=_auth(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["recompiled"] == 0
+        assert body["failed_count"] == 1 and body["skipped"] == 0
+        assert body["docs"][0]["status"] == "error"
+
+        assert not model_service
+
+
+def test_recompile_stream_per_doc_events(monkeypatch, kb_dir, tmp_path, model_service):
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    with _client(monkeypatch) as client:
+        kb = _use_named_kb(monkeypatch, kb_dir)
+        _seed_short(kb_dir)
+
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "notes.md", "stream": True},
+            headers=_auth(),
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        events = _events_from_sse(response.text)
+        names = [e["event"] for e in events]
+        assert names[0] == "start"
+        assert names[-1] == "done"
+        assert "doc" in names and "final" in names
 
 
 def test_recompile_stream_not_found(monkeypatch, kb_dir):
@@ -2210,14 +2208,14 @@ def test_kb_config_patch_api_key_rotation_preserves_other_env_lines(monkeypatch,
     ``.env`` entries intact, never leaking the key value in the GET response."""
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / ".env").write_text("LLM_API_KEY=old\nPAGEINDEX_API_KEY=pk-123\n", encoding="utf-8")
+    (kb_dir / ".env").write_text("LLM_API_KEY=old\nUNRELATED_SETTING=pk-123\n", encoding="utf-8")
 
     response = client.patch("/api/v1/kb/config", json={"kb": kb, "api_key": "new"}, headers=_auth())
 
     assert response.status_code == 200
     env_text = (kb_dir / ".env").read_text()
     assert "LLM_API_KEY=new" in env_text
-    assert "PAGEINDEX_API_KEY=pk-123" in env_text
+    assert "UNRELATED_SETTING=pk-123" in env_text
     assert "new" not in response.text
 
     follow_up = client.get("/api/v1/kb/config", params={"kb": kb}, headers=_auth())
@@ -2570,7 +2568,7 @@ def test_global_config_patch_credential_rotation_preserves_env_and_registry(monk
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(yaml.safe_dump({"known_kbs": ["/a"], "model": "global-model"}), encoding="utf-8")
-    (tmp_path / ".env").write_text("LLM_API_KEY=old\nPAGEINDEX_API_KEY=pk-123\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("LLM_API_KEY=old\nUNRELATED_SETTING=pk-123\n", encoding="utf-8")
     client = _client(monkeypatch)
 
     response = client.patch("/api/v1/config", json={"api_key": "new"}, headers=_auth())
@@ -2578,7 +2576,7 @@ def test_global_config_patch_credential_rotation_preserves_env_and_registry(monk
     assert response.status_code == 200
     env_text = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "LLM_API_KEY=new" in env_text
-    assert "PAGEINDEX_API_KEY=pk-123" in env_text
+    assert "UNRELATED_SETTING=pk-123" in env_text
     # The scalar merge is untouched and the KB registry survives.
     saved = yaml.safe_load(gp.read_text())
     assert saved["known_kbs"] == ["/a"]

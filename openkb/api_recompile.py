@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from pathlib import Path
 
-from openkb.application.recompilation import recompile_document, select_recompilation
 from openkb.application.recompilation import refresh_schema as refresh_kb_schema
-from openkb.config import DEFAULT_CONFIG, resolve_credential_bundle, resolve_effective_config
-from openkb.log import append_log
+from openkb.application.recompilation import select_recompilation
+from openkb.runtime.records import TERMINAL
+from openkb.runtime.requests import RecompileDocument
+from openkb.sources import content_id
 
 
 async def iter_recompile(
@@ -19,8 +21,14 @@ async def iter_recompile(
     dry_run=False,
     refresh_schema=False,
     bundle=None,
+    manager=None,
+    task_id=None,
 ):
-    selection = await asyncio.to_thread(select_recompilation, kb_dir, doc_name, all_docs=all_docs)
+    from openkb.api_tasks import task_payload
+
+    selection = await asyncio.to_thread(
+        select_recompilation, kb_dir, doc_name, all_docs=all_docs, confirmation=True
+    )
     targets = selection.targets
     if selection.status != "ready":
         messages = {
@@ -59,41 +67,65 @@ async def iter_recompile(
             "docs": [],
         }
         return
+    if manager is None:
+        raise RuntimeError("Recompilation requires the API task service")
     if refresh_schema:
         await asyncio.to_thread(refresh_kb_schema, kb_dir)
-    if bundle is None:
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-    docs = []
-    recompiled = skipped = 0
-    for target in targets:
-        result = await recompile_document(kb_dir, target.file_hash, bundle=bundle, model=model)
-        doc = {
-            "name": result.name or None,
-            "doc_name": result.name or None,
-            "type": result.kind,
-            "status": {"compiled": "ok", "failed": "error", "skipped": "skipped"}[result.status],
-            "elapsed": round(result.elapsed, 1) if result.elapsed is not None else None,
-            "message": result.message,
+        selection = await asyncio.to_thread(
+            select_recompilation, kb_dir, doc_name, all_docs=all_docs, confirmation=True
+        )
+    if selection.version is None:
+        raise ValueError("Document selection changed; select again")
+    binding = content_id(
+        {
+            "operation": "recompile",
+            "doc_name": doc_name,
+            "all_docs": all_docs,
+            "refresh_schema": refresh_schema,
         }
-        if result.error_type:
-            doc["message"] = f"Compilation failed ({result.error_type})"
-        docs.append(doc)
-        yield {"event": "doc", **doc}
-        if result.status == "compiled":
-            recompiled += 1
-        else:
-            # Historical REST totals fold ordinary failures into skipped.
-            skipped += 1
-    await asyncio.to_thread(
-        append_log, kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}"
     )
+    accepted = await asyncio.shield(
+        asyncio.to_thread(
+            manager.submit,
+            kb_dir,
+            [
+                RecompileDocument(target.file_hash, selection.version)
+                for target in selection.targets
+            ],
+            task_id=task_id,
+            input_binding=binding,
+        )
+    )
+    yield {"event": "start", "task_id": accepted, "total": total, "all_docs": all_docs}
+    count = 0
+    previous = None
+    while True:
+        view = manager.get(accepted)
+        if view.stage != previous:
+            yield {"event": "progress", **task_payload(view)}
+            previous = view.stage
+        for result in view.results[count:]:
+            yield {"event": "doc", **_document(result)}
+        count = len(view.results)
+        if view.state in TERMINAL and view.processes_reaped:
+            break
+        await asyncio.sleep(0.1)
     yield {
         "event": "final",
-        "status": "done",
+        **task_payload(view),
+        "status": "done" if view.state == "completed" else view.state,
         "total": total,
-        "recompiled": recompiled,
-        "skipped": skipped,
-        "docs": docs,
+        "recompiled": view.succeeded,
+        "skipped": sum(result.status == "skipped" for result in view.results),
+        "docs": [_document(result) for result in view.results],
+    }
+
+
+def _document(result):
+    document = result.document
+    return {
+        "name": Path(document.source).name if document else None,
+        "status": {"completed": "ok", "failed": "error"}.get(result.status, result.status),
+        "message": document.reason if document else result.error,
+        "document": asdict(document) if document else None,
     }

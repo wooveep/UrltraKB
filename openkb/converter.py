@@ -135,7 +135,7 @@ def resolve_doc_name_from_key(stem: str, path_key: str, registry: HashRegistry) 
 
     Same rules as :func:`resolve_doc_name` minus the legacy-by-stem
     backfill (a filesystem-migration concern that must not fire for sources
-    with no real path, e.g. cloud imports). A source already registered
+    with no local path, e.g. URL imports). A source already registered
     under ``path_key`` keeps its stored ``doc_name``; otherwise the
     sanitized ``stem`` is used, with a deterministic
     ``-{sha256(path_key)[:8]}`` suffix when another document owns it.

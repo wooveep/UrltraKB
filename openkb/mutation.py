@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -83,7 +84,9 @@ def _hardlink_or_copy(src: str, dst: str) -> None:
         shutil.copy2(src_path, dst_path)
 
 
-def _copy_file_atomic(src: Path, dest: Path, *, preserve_mode: bool = False) -> None:
+def _copy_file_atomic(
+    src: Path, dest: Path, *, preserve_mode: bool = False, expected_digest: str | None = None
+) -> None:
     """Stream ``src`` to ``dest`` through a temp file, then atomically replace.
 
     Streams (never buffers the whole file) so copying a large raw PDF does
@@ -104,7 +107,15 @@ def _copy_file_atomic(src: Path, dest: Path, *, preserve_mode: bool = False) -> 
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as out, src.open("rb") as inp:
-            shutil.copyfileobj(inp, out)
+            if expected_digest is None:
+                shutil.copyfileobj(inp, out)
+            else:
+                digest = hashlib.sha256()
+                while block := inp.read(1024 * 1024):
+                    out.write(block)
+                    digest.update(block)
+                if digest.hexdigest() != expected_digest:
+                    raise ValueError("Input changed before immutable publication")
             out.flush()
             os.fsync(out.fileno())
         _apply_mode(tmp_path, mode)

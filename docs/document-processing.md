@@ -70,12 +70,68 @@ SDK retry settings are disabled at the request boundary. The execution controlle
 retries only transient transport/service errors within the configured limits.
 Observable attempts and unknown internal transport attempts are distinct fields.
 
-Every task retains its own usage observations in its result history. An explicit
-retry starts a new task and budget; keep the earlier task history when reviewing
-cumulative consumption. This first batch does not provide persistent parse or
-partial compilation checkpoints. On failed compilation its existing transaction
-rolls back new raw and Wiki artifacts together. Durable independent source intake
-and selective continuation are later delivery gates in issue #13.
+Every task retains its own usage observations. Each source also keeps cumulative
+LLM, local OCR and cloud job usage across explicit continuations. A continuation
+starts a new bounded run; it does not erase earlier cost or resubmit a known
+cloud job merely because observation stopped.
+
+## Retained sources and reviewed publication
+
+Intake commits immutable originals and related assets before parsing or model
+work. A source has a persistent identity bound to its normalized origin; a
+changed input creates a new version. Different origins remain independent even
+when their bytes and parsing results are shared. Completed identical versions
+can be skipped; unfinished versions remain actionable. Old evidence keeps its
+source, input version, parse version, block and span.
+
+Reliable PDF text is parsed locally, with physical page and available coordinates.
+DOCX evidence uses headings, paragraphs and table cells, without invented Word
+page numbers. Uncertain bitmap, invisible text and uncovered vector content
+requires the selected OCR backend or explicit page review. Ruled table cells keep
+headers and coordinates. Missing required assets cannot be waived as a blank or
+illustration page. OCR output is checked before a complete parsing checkpoint is
+recorded. [Optional CPU deployment](optional-ocr-runtime.md) is separate from the
+main application; local failure never selects the cloud backend automatically.
+
+Generation uses a private Wiki copy and preserves independent input bytes. All
+knowledge changes for one source publish together only after parsing, version,
+evidence and manual-change checks pass. Failure keeps the original and the prior
+Wiki. Existing manual changes, including metadata, require review and explicit
+acceptance of exactly the proposed differences. Changed inputs invalidate that
+acceptance. External editors do not honor the application lock; the version
+checks, short publication window and journal recovery reduce conflicts without
+claiming an atomic whole-filesystem switch.
+
+The desktop document list opens source status, bounded original evidence,
+physical PDF page previews and proposed changes. Settings includes processing
+budgets and separately retained local/cloud OCR profiles, with global inheritance
+and per-library overrides. Cloud credentials are environment-variable references;
+never enter a key into a manifest or model name.
+
+The CLI `openkb source --help` lists source inspection, continuation, reparse,
+page confirmation, page reprocessing and explicit history cleanup commands.
+Mutating actions use the same task runtime as document import. Reprocessing one
+page requires the current source and parse versions. A cloud submission with an
+unknown outcome requires explicit acknowledgement before a new submission can
+be made; the new job may incur duplicate cost. Known job IDs are queried before
+any new work. Stopping local observation does not promise server cancellation.
+
+History cleanup first produces a preview of unreferenced versions, parsing
+artifacts and files. The cleanup action requires that exact preview identity;
+state changes invalidate it. Current sources, referenced historical versions,
+shared assets and OCR recovery records remain retained. Cleanup is never
+performed automatically and does not erase cumulative usage history.
+
+The `/api/v1/source` endpoints expose the same use cases. Source mutation
+requests accept an input-bound `task_id` and return 202 with that identifier;
+query and stop use the ordinary task endpoints. PageIndex Cloud application
+features and old cloud-only formats have been removed. Local PageIndex remains
+available; old cloud environment variables cannot route OpenKB to that service.
+
+Automatic budget-based all-section evidence compilation and independent
+navigation rebuilding are the third delivery batch. Until that batch is
+implemented, oversized model requests remain explicitly unfinished; retained
+parsing alone is not knowledge-compilation success.
 
 ## Maintained PageIndex distribution
 
@@ -127,8 +183,33 @@ not OCR or semantic accuracy measurements:
   and the manifest's SHA-256, including under Windows Git newline conversion.
 - Standards and Spec reviews reported no remaining findings after fixes.
 
-Real model calibration, representative long-document fact/evidence measurements,
-local PaddleOCR CPU/offline verification and PaddleOCR jobs validation are still
-required. No production budget, OCR throughput or content-coverage result is
-claimed by these control-flow tests. The full suite is reserved for the final
+No production budget, OCR throughput or content-coverage result is claimed by
+these first-batch control-flow tests. The full suite is reserved for the final
 three-batch integration check.
+
+## Second-batch verification record
+
+On 2026-09-10, the same Debian/Windows machines passed the retained-source,
+quality, history, transaction and OCR adapter checks. The final Windows selection
+passed 75 tests with one platform skip; subsequent OCR cache upgrade/recovery
+checks passed 10 tests on both systems. Ruff, mypy (196 application modules) and
+module-size checks passed. Standards and Spec reviews found no remaining
+implementation findings after their reported defects were fixed.
+
+Both systems completed the real optional CPU pipeline on one synthetic page
+under the original 8 GiB/180-second limits. Shared document imports recovered
+four prescribed facts through retained evidence, without calling a knowledge
+model. Exact runtime, resource and offline-install results are in the
+[optional runtime record](optional-ocr-runtime.md). Native settings and source
+review/acceptance dialogs also completed through the actual local task runtime.
+
+The fixed ten-document synthetic parsing corpus covers 100k/500k/1M-character
+DOCX, 100/500/1000-page native PDF and 8/32/128/500-page mixed PDF. All Linux runs
+finished within the fixed 30-second parsing bounds. Windows finished nine; the
+500-page mixed sample exceeded its bound and its worker was reaped. Mixed pages
+requiring OCR remain explicitly incomplete in these native-only measurements.
+These checks do not establish semantic compilation quality or long OCR throughput.
+
+Real model calibration, authenticated PaddleOCR jobs validation, representative
+user documents and broader OCR accuracy measurements remain outstanding. The
+second-batch code checkpoint is not final acceptance of those external gates.

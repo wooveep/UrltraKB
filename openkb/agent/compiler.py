@@ -484,7 +484,9 @@ async def _llm_call_async(
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
     elapsed = time.time() - t0
-    sys.stdout.write(f"    {step_name}... {_format_usage(elapsed, getattr(response, 'usage', None))}\n")
+    sys.stdout.write(
+        f"    {step_name}... {_format_usage(elapsed, getattr(response, 'usage', None))}\n"
+    )
     sys.stdout.flush()
     logger.debug(
         "LLM response [%s]:\n%s", step_name, content[:500] + ("..." if len(content) > 500 else "")
@@ -2215,6 +2217,7 @@ async def compile_short_doc(
     model: str,
     max_concurrency: int = DEFAULT_COMPILE_CONCURRENCY,
     bundle=None,
+    settings: dict | None = None,
 ) -> None:
     """Compile a short document using a multi-step LLM pipeline with caching.
 
@@ -2224,7 +2227,11 @@ async def compile_short_doc(
     try:
         from openkb.config import resolve_effective_config
 
-        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
+        config = (
+            settings
+            if settings is not None
+            else (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
+        )
         language: str = config.get("language", "en")
         entity_types = resolve_entity_types(config)
 

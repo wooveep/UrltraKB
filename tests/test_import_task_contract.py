@@ -299,6 +299,35 @@ def test_corrupt_pdf_reports_conversion_failure(kb_dir):
     source.write_bytes(b"not a PDF")
     result = import_document(kb_dir, source)
     assert result.status == "failed"
-    assert result.stage == "converting"
-    assert result.reason.startswith("conversion_failed:")
-    assert result.source_intake == "not_saved"
+    assert result.stage == "parsing"
+    assert result.reason.startswith("parsing_failed:")
+    assert result.source_intake == "saved"
+
+
+def test_cli_recompile_retains_manual_page_and_reports_reviewable_unfinished_result(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    from click.testing import CliRunner
+
+    from openkb.application.documents import import_document
+    from openkb.application.source_history import source_status
+    from openkb.cli import cli
+
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
+    source = kb_dir / "notes.md"
+    source.write_text("Saved source for recompilation")
+    original = import_document(kb_dir, source)
+    index = kb_dir / "wiki/index.md"
+    index.write_text("# Human-maintained index\nKeep this explanation.\n")
+    source.unlink()
+    result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "recompile", "notes.md"])
+    assert result.exit_code == 1, result.output
+    assert "intake=saved, compilation=unfinished" in result.output
+    assert "needs_acceptance" in result.output
+    assert index.read_text() == "# Human-maintained index\nKeep this explanation.\n"
+    status = source_status(kb_dir, original.source_id)
+    assert status["result"]["reason"] == "needs_acceptance"
+    records = list((tmp_path / "config/cli/tasks").glob("*.json"))
+    assert len(records) == 1
+    view = json.loads(records[0].read_text())["view"]
+    assert view["state"] == "partial" and view["processes_reaped"]

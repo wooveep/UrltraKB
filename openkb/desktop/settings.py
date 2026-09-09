@@ -112,7 +112,18 @@ class SettingsDialog(ManagementPanel):
             field = SettingField(key)
             self.fields[key] = field
             form_layout.addRow(label, field)
-        layout.addWidget(self.form)
+        from PySide6.QtWidgets import QTabWidget
+
+        from openkb.desktop.processing_settings import OcrField, ProcessingField
+
+        tabs = QTabWidget()
+        tabs.addTab(self.form, "基本设置")
+        self.fields["processing"] = ProcessingField()
+        self.fields["parsing"] = OcrField()
+        tabs.addTab(self.fields["processing"], "处理额度")
+        tabs.addTab(self.fields["parsing"], "文档识别")
+        layout.addWidget(tabs)
+        self.editors = tabs
         hint = QLabel(
             "清除仅移除此处覆盖，之后使用下一层设置。密钥值不会读回。\n"
             "已开始的任务保留原配置；新任务开始时读取最新设置。"
@@ -141,6 +152,7 @@ class SettingsDialog(ManagementPanel):
             return
         self._loading = True
         self.form.setEnabled(False)
+        self.editors.setEnabled(False)
         self.status.setText("正在读取设置…")
         self.io.submit(
             lambda: read_settings_view(self.kb),
@@ -157,10 +169,12 @@ class SettingsDialog(ManagementPanel):
         self.buttons.setEnabled(True)
         if error:
             self.form.setEnabled(self._loaded)
+            self.editors.setEnabled(self._loaded)
             self.status.setText(f"设置操作失败（{type(error).__name__}），原文件及恢复资料会保留。")
             return
         self._loaded = True
         self.form.setEnabled(True)
+        self.editors.setEnabled(True)
         self.status.setText(str(self.kb) if self.kb else "全局默认：知识库与启动环境可覆盖这些值。")
         for key, field in self.fields.items():
             value = view.values.has_api_key if key == "api_key" else getattr(view.values, key)
@@ -190,6 +204,7 @@ class SettingsDialog(ManagementPanel):
             return
         self._saving = True
         self.form.setEnabled(False)
+        self.editors.setEnabled(False)
         self.buttons.setEnabled(False)
         self.status.setText("正在等待并保存设置…")
 
@@ -210,6 +225,7 @@ class SettingsDialog(ManagementPanel):
             return
         self._saving = True
         self.form.setEnabled(False)
+        self.editors.setEnabled(False)
         self.buttons.setEnabled(False)
         self.status.setText("正在检查恢复资料及设置…")
 

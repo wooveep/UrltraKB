@@ -19,16 +19,19 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
     original = "---\nsources: [raw/paper.pdf]\n---\n# Previous paper\n"
     summary.write_text(original)
 
+    (kb_dir / "wiki/sources/paper.json").write_text(
+        json.dumps([{"page": 1, "content": "Original full text", "images": []}])
+    )
+
     def unavailable(**kwargs):
-        # Long compilation backfills metadata before contacting the model.
-        assert "Summary" in summary.read_text()
+        assert summary.read_text() == original
         raise ConnectionError("private provider detail")
 
     monkeypatch.setattr(litellm, "completion", unavailable)
     result = asyncio.run(recompile_document(kb_dir, "long-hash"))
     assert result.status == "failed"
     assert result.error_type == "ConnectionError"
-    assert result.unfinished == ("compilation",)
+    assert result.document.stage == "compiling"
     assert not result.changes
     assert "private provider detail" not in repr(result)
     assert summary.read_text() == original
@@ -64,10 +67,20 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, selection.targets[0].file_hash))
-    assert result.status == "compiled"
+    assert result.status == "unfinished" and result.message == "needs_acceptance"
+    from openkb.application.source_actions import continue_source, review_source_proposal
+
+    review = review_source_proposal(kb_dir, result.document.resume)
+    completed = continue_source(
+        kb_dir,
+        result.document.source_id,
+        version_id=result.document.input_version,
+        proposal_id=result.document.resume,
+        accept_pages=review["protected"],
+    )
+    assert completed.status == "added"
     assert "Latest source" in str(calls[0]["messages"])
-    assert str(kb_dir / "wiki/summaries/note.md") in result.resources
-    assert "updated: wiki/summaries/note.md" in result.changes
+    assert str(kb_dir / "wiki/summaries/note.md") in completed.resources
     # Reusing a filename must not redirect an already queued operation.
     registry.write_text(
         json.dumps({"replacement": {"name": "note.md", "doc_name": "note", "type": "md"}})
@@ -91,6 +104,12 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
     from processing_fixtures import configure_processing
 
     configure_processing(kb_dir)
+    import yaml
+
+    path = kb_dir / ".openkb/config.yaml"
+    settings = yaml.safe_load(path.read_text())
+    settings["processing"]["concurrency"] = 1
+    path.write_text(yaml.safe_dump(settings))
     (kb_dir / ".openkb/hashes.json").write_text(
         json.dumps({"h": {"doc_name": "note", "type": "md"}})
     )
@@ -122,7 +141,18 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
 
     monkeypatch.setattr(litellm, "acompletion", complete)
     result = asyncio.run(recompile_document(kb_dir, "h", context=ExecutionContext()))
-    assert result.status == "compiled"
+    assert result.status == "unfinished" and result.message == "needs_acceptance"
+    from openkb.application.source_actions import continue_source, review_source_proposal
+
+    review = review_source_proposal(kb_dir, result.document.resume)
+    completed = continue_source(
+        kb_dir,
+        result.document.source_id,
+        version_id=result.document.input_version,
+        proposal_id=result.document.resume,
+        accept_pages=review["protected"],
+    )
+    assert completed.status == "added"
     assert peak == 1
     assert len(list((kb_dir / "wiki/concepts").glob("*.md"))) == 3
 

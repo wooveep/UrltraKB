@@ -13,7 +13,10 @@ from openkb.runtime.records import UnitIdentity, UnitResult, save_receipt
 from openkb.runtime.requests import (
     AskQuestion,
     CheckKnowledge,
+    CleanupSourceHistory,
+    ConfirmSourcePage,
     ContinueConversation,
+    ContinueSource,
     DeleteConversation,
     ExportConversation,
     GenerateArtifact,
@@ -22,6 +25,8 @@ from openkb.runtime.requests import (
     ImportUrl,
     RecompileDocument,
     RemoveDocument,
+    ReparseSource,
+    ReprocessSourcePage,
     SavePage,
     UnitRequest,
 )
@@ -202,6 +207,30 @@ def _execute(
             if checked.error_type
             else None,
         )
+    if isinstance(request, CleanupSourceHistory):
+        from openkb.application.source_cleanup import cleanup_history
+
+        cleaned = cleanup_history(root, request.preview_id, context=context)
+        return UnitResult(
+            "completed",
+            changes=(
+                f"Cleaned {len(cleaned.files)} unreferenced history files ({cleaned.bytes} bytes)",
+            ),
+        )
+    if isinstance(request, ConfirmSourcePage):
+        from openkb.application.source_actions import confirm_source_page
+
+        context.check_stop()
+        confirm_source_page(
+            root,
+            request.source_id,
+            version_id=request.version_id,
+            parse_id=request.parse_id,
+            page=request.page,
+            reason=request.reason,
+            context=context,
+        )
+        return UnitResult("completed", changes=(f"Source page {request.page}: {request.reason}",))
     if isinstance(request, RecompileDocument):
         import asyncio
 
@@ -223,6 +252,7 @@ def _execute(
             revision=recompiled.version,
             quality=recompiled.quality,
             warnings=recompiled.warnings,
+            document=recompiled.document,
         )
     if isinstance(request, RemoveDocument):
         from openkb.application.removal import remove_document
@@ -255,10 +285,43 @@ def _execute(
             unfinished=removal.unfinished,
             halt=removal.status == "blocked",
         )
-    if isinstance(request, (ImportFile, ImportUrl)):
+    if isinstance(
+        request, (ImportFile, ImportUrl, ContinueSource, ReparseSource, ReprocessSourcePage)
+    ):
         from openkb.application.documents import import_document
 
-        if isinstance(request, ImportUrl):
+        if isinstance(request, ReprocessSourcePage):
+            from openkb.application.source_actions import reprocess_source_page
+
+            result = reprocess_source_page(
+                root,
+                request.source_id,
+                version_id=request.version_id,
+                parse_id=request.parse_id,
+                page=request.page,
+                acknowledge_unknown=request.acknowledge_unknown,
+                context=context,
+            )
+        elif isinstance(request, ReparseSource):
+            from openkb.application.source_actions import reparse_source
+
+            result = reparse_source(
+                root, request.source_id, version_id=request.version_id, context=context
+            )
+        elif isinstance(request, ContinueSource):
+            from openkb.application.source_actions import continue_source
+
+            result = continue_source(
+                root,
+                request.source_id,
+                version_id=request.version_id,
+                proposal_id=request.proposal_id,
+                accept_pages=list(request.accept_pages)
+                if request.accept_pages is not None
+                else None,
+                context=context,
+            )
+        elif isinstance(request, ImportUrl):
             from openkb.application.urls import import_url
 
             result = import_url(root, request.url, context=context, prepared_dir=prepared_dir)
@@ -268,6 +331,7 @@ def _execute(
                 Path(request.source),
                 context=context,
                 source_root=root / "raw" if request.wait_for_stable else None,
+                source_origin=request.upload_origin,
             )
         return UnitResult(
             "completed" if result.status == "added" else result.status,
@@ -350,7 +414,17 @@ def run_unit(
             with (
                 DocumentCancellation(
                     channel.stopped,
-                    enabled=isinstance(request, (ImportFile, ImportUrl, RecompileDocument)),
+                    enabled=isinstance(
+                        request,
+                        (
+                            ImportFile,
+                            ImportUrl,
+                            RecompileDocument,
+                            ContinueSource,
+                            ReparseSource,
+                            ReprocessSourcePage,
+                        ),
+                    ),
                     budget_expired=channel.budget_expired,
                 ) as cancellation,
                 WorkerDiagnostics(

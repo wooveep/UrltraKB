@@ -34,6 +34,7 @@ from openkb.config import (
 )
 from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
+from openkb.ocr.config import parsing_settings
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,8 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     global_config = load_global_config()
     return KbConfigResponse(
         model=effective["model"],
+        parsing=parsing_settings(effective.get("parsing")),
+        processing=effective.get("processing"),
         language=effective["language"],
         pageindex_threshold=effective["pageindex_threshold"],
         # Cleaned effective list (what the compiler will use), not the raw stored
@@ -149,6 +152,8 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         sources=sources,
         global_values=GlobalConfigValues(
             model=global_config.get("model"),
+            parsing=global_config.get("parsing"),
+            processing=global_config.get("processing"),
             language=global_config.get("language"),
             pageindex_threshold=global_config.get("pageindex_threshold"),
             entity_types=global_config.get("entity_types"),
@@ -252,6 +257,8 @@ def _read_global_config() -> GlobalConfigResponse:
         env_values = dict(dotenv_values(str(env_path)))
     return GlobalConfigResponse(
         model=gc.get("model", DEFAULT_CONFIG["model"]),
+        parsing=parsing_settings(gc.get("parsing")),
+        processing=gc.get("processing"),
         language=gc.get("language", DEFAULT_CONFIG["language"]),
         pageindex_threshold=gc.get("pageindex_threshold", DEFAULT_CONFIG["pageindex_threshold"]),
         # Effective global vocabulary (cleaned; defaults to DEFAULT_ENTITY_TYPES).

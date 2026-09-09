@@ -1,0 +1,308 @@
+{
+  "input_sha256": "3e1ca34c9a1ab48b62ca5fd56e2501675346aa2c57c2739fcfabb5ef948c7641",
+  "assets_sha256": "23f74e1632a69e562ab971fea25a85b8f9130d4aec9231e5427953471d7e4660",
+  "result": {
+    "page_index": null,
+    "page_count": null,
+    "width": 612,
+    "height": 792,
+    "model_settings": {
+      "use_doc_preprocessor": false,
+      "use_layout_detection": true,
+      "use_chart_recognition": false,
+      "use_seal_recognition": false,
+      "use_ocr_for_image_block": true,
+      "format_block_content": false,
+      "merge_layout_blocks": true,
+      "markdown_ignore_labels": [],
+      "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+      {
+        "block_label": "doc_title",
+        "block_content": "Synthetic installation manual",
+        "block_bbox": [
+          47,
+          64,
+          280,
+          85
+        ],
+        "block_id": 0,
+        "block_order": 1,
+        "group_id": 0,
+        "block_polygon_points": [
+          [
+            47.0,
+            64.0
+          ],
+          [
+            279.0,
+            64.0
+          ],
+          [
+            279.0,
+            84.0
+          ],
+          [
+            47.0,
+            84.0
+          ]
+        ]
+      },
+      {
+        "block_label": "text",
+        "block_content": "Pressure limit: 37 kPa. Required version: 7.",
+        "block_bbox": [
+          47,
+          117,
+          320,
+          134
+        ],
+        "block_id": 1,
+        "block_order": 2,
+        "group_id": 1,
+        "block_polygon_points": [
+          [
+            47.0,
+            117.0
+          ],
+          [
+            319.0,
+            117.0
+          ],
+          [
+            319.0,
+            133.0
+          ],
+          [
+            47.0,
+            133.0
+          ]
+        ]
+      },
+      {
+        "block_label": "text",
+        "block_content": "Command: start --timeout 42",
+        "block_bbox": [
+          47,
+          157,
+          231,
+          174
+        ],
+        "block_id": 2,
+        "block_order": 3,
+        "group_id": 2,
+        "block_polygon_points": [
+          [
+            47.0,
+            157.0
+          ],
+          [
+            230.0,
+            157.0
+          ],
+          [
+            230.0,
+            173.0
+          ],
+          [
+            47.0,
+            173.0
+          ]
+        ]
+      },
+      {
+        "block_label": "text",
+        "block_content": "Exception: Never retry authentication failures.",
+        "block_bbox": [
+          47,
+          197,
+          333,
+          215
+        ],
+        "block_id": 3,
+        "block_order": 4,
+        "group_id": 3,
+        "block_polygon_points": [
+          [
+            47.0,
+            197.0
+          ],
+          [
+            332.0,
+            197.0
+          ],
+          [
+            332.0,
+            214.0
+          ],
+          [
+            47.0,
+            214.0
+          ]
+        ]
+      }
+    ],
+    "layout_det_res": {
+      "input_path": null,
+      "page_index": null,
+      "boxes": [
+        {
+          "cls_id": 6,
+          "label": "doc_title",
+          "score": 0.72175532579422,
+          "coordinate": [
+            47,
+            64,
+            280,
+            85
+          ],
+          "order": 1,
+          "polygon_points": [
+            [
+              47.0,
+              64.0
+            ],
+            [
+              279.0,
+              64.0
+            ],
+            [
+              279.0,
+              84.0
+            ],
+            [
+              47.0,
+              84.0
+            ]
+          ]
+        },
+        {
+          "cls_id": 22,
+          "label": "text",
+          "score": 0.8267382383346558,
+          "coordinate": [
+            47,
+            117,
+            320,
+            134
+          ],
+          "order": 2,
+          "polygon_points": [
+            [
+              47.0,
+              117.0
+            ],
+            [
+              319.0,
+              117.0
+            ],
+            [
+              319.0,
+              133.0
+            ],
+            [
+              47.0,
+              133.0
+            ]
+          ]
+        },
+        {
+          "cls_id": 22,
+          "label": "text",
+          "score": 0.8051986694335938,
+          "coordinate": [
+            47,
+            157,
+            231,
+            174
+          ],
+          "order": 3,
+          "polygon_points": [
+            [
+              47.0,
+              157.0
+            ],
+            [
+              230.0,
+              157.0
+            ],
+            [
+              230.0,
+              173.0
+            ],
+            [
+              47.0,
+              173.0
+            ]
+          ]
+        },
+        {
+          "cls_id": 22,
+          "label": "text",
+          "score": 0.8349848985671997,
+          "coordinate": [
+            47,
+            197,
+            333,
+            215
+          ],
+          "order": 4,
+          "polygon_points": [
+            [
+              47.0,
+              197.0
+            ],
+            [
+              332.0,
+              197.0
+            ],
+            [
+              332.0,
+              214.0
+            ],
+            [
+              47.0,
+              214.0
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "assets": {},
+  "markdown": "# Synthetic installation manual\n\nPressure limit: 37 kPa. Required version: 7.\n\nCommand: start --timeout 42\n\nException: Never retry authentication failures.",
+  "elapsed_seconds": 68.56581258866936,
+  "versions": {
+    "paddleocr": "3.7.0",
+    "paddlex": "3.7.2",
+    "paddlepaddle": "3.3.1"
+  },
+  "usage": {
+    "regions": 4,
+    "reserved_output_tokens": 1024,
+    "calls": 1
+  },
+  "token_checks": [
+    {
+      "input_tokens": 173,
+      "output_tokens": 5,
+      "eos": true
+    },
+    {
+      "input_tokens": 160,
+      "output_tokens": 16,
+      "eos": true
+    },
+    {
+      "input_tokens": 173,
+      "output_tokens": 9,
+      "eos": true
+    },
+    {
+      "input_tokens": 205,
+      "output_tokens": 8,
+      "eos": true
+    }
+  ]
+}

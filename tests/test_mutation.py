@@ -596,15 +596,3 @@ def test_track_new_persists_to_journal_for_crash_recovery(tmp_path):
 
     assert not new_blob.exists()
     assert any("Rolled back" in m for m in messages)
-
-
-def test_snapshot_add_paths_excludes_blob_store(tmp_path):
-    """The blob store is registered lazily via track_new(), so it must NOT be
-    in the eager add snapshot path list (that was the O(total blobs)-per-add
-    cost this change removes)."""
-    from openkb.application.documents import _snapshot_add_paths
-
-    paths = _snapshot_add_paths(tmp_path, "doc", None, None)
-    assert (tmp_path / ".openkb" / "files") not in paths
-    # hashes.json / pageindex.db are still snapshotted eagerly.
-    assert (tmp_path / ".openkb" / "hashes.json") in paths

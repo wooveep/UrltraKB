@@ -20,6 +20,7 @@ from openkb.config_state import ConfigSnapshot
 from openkb.locks import atomic_write_json
 from openkb.processing import ProcessingIncomplete, RequestLimits
 from openkb.runtime.input_store import InputStore
+from openkb.runtime.process_tree import ProcessTree, isolated_target
 from openkb.runtime.records import TERMINAL, TaskView, UnitIdentity, UnitResult, read_receipt
 from openkb.runtime.requests import REQUEST_TYPES, RecompileDocument, UnitRequest
 from openkb.runtime.worker import run_unit
@@ -43,6 +44,7 @@ class _Attempt:
     control: Any
     events: Any
     identity: UnitIdentity
+    tree: ProcessTree | None = None
     result: UnitResult | None = None
     deferred: bool = False
     deferred_reason: str = "lease"
@@ -336,23 +338,34 @@ class TaskManager:
         parent, child = self._context.Pipe()
         events = self._context.Queue(maxsize=128)
         prepared_dir = Path(self._preparations.name) / identity.task_id / identity.unit_id
+        ready = self._context.Event()
         process = self._context.Process(
-            target=run_unit,
+            target=isolated_target,
             args=(
-                task.requests[index],
-                identity,
-                task.snapshot,
-                self.receipt_dir,
-                child,
-                events,
-                prepared_dir,
+                run_unit,
+                (
+                    task.requests[index],
+                    identity,
+                    task.snapshot,
+                    self.receipt_dir,
+                    child,
+                    events,
+                    prepared_dir,
+                ),
+                ready,
             ),
             name=f"openkb-unit-{identity.task_id[:8]}-{identity.unit_id}",
         )
         try:
             prepared_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             process.start()
+            tree = ProcessTree(process, ready=ready)
+            ready.set()
         except Exception:
+            if process.pid is not None:
+                process.terminate()
+                process.join(5)
+                process.close()
             parent.close()
             events.close()
             self._update(task, state="failed", stage="failed", error="Worker could not start")
@@ -360,7 +373,7 @@ class TaskManager:
             return
         finally:
             child.close()
-        self._active[task.view.id] = _Attempt(process, parent, events, identity)
+        self._active[task.view.id] = _Attempt(process, parent, events, identity, tree=tree)
         self._update(task, state="running", stage="preparing", processes_reaped=False)
 
     def _control(self, task: _Task, attempt: _Attempt) -> None:
@@ -396,7 +409,14 @@ class TaskManager:
                     attempt.eof = True
                     continue
                 task.snapshot = snapshot
-                if task.view.operation in {"ImportFile", "ImportUrl", "RecompileDocument"}:
+                if task.view.operation in {
+                    "ImportFile",
+                    "ImportUrl",
+                    "RecompileDocument",
+                    "ContinueSource",
+                    "ReparseSource",
+                    "ReprocessSourcePage",
+                }:
                     try:
                         attempt.limits = RequestLimits.from_config(snapshot.values()["effective"])
                     except ProcessingIncomplete:
@@ -466,6 +486,8 @@ class TaskManager:
         attempt.control.close()
         attempt.events.close()
         attempt.events.join_thread()
+        if attempt.tree is not None:
+            attempt.tree.close()
         attempt.process.close()
         del self._active[task.view.id]
         if attempt.recovery and not attempt.recovered:
@@ -577,10 +599,15 @@ class TaskManager:
             self._pending.append(task.view.id)
 
     def _supervise(self, task: _Task, attempt: _Attempt) -> None:
-        if not attempt.process.is_alive():
-            return
         now = time.monotonic()
         limits = attempt.limits
+        grace = limits.cleanup_timeout if limits else 5.0
+        if not attempt.process.is_alive():
+            if attempt.tree is None or not attempt.tree.alive():
+                return
+            # The owning worker has exited, so orphaned parser/model children
+            # cannot finish its cleanup. Reclaim them before journal recovery.
+            attempt.stopping_at = min(attempt.stopping_at or now, now - grace)
         if limits and not attempt.recovery and not task.view.stop_requested:
             if (
                 now - attempt.started >= limits.document_timeout
@@ -593,15 +620,20 @@ class TaskManager:
             attempt.stopping_at = now
         # Before configuration has been acknowledged there are no model calls
         # or official writes. This bounded grace only governs process shutdown.
-        grace = limits.cleanup_timeout if limits else 5.0
         if attempt.recovery and now - attempt.started >= grace:
             attempt.stopping_at = attempt.stopping_at or now - grace
         if attempt.stopping_at is not None and now - attempt.stopping_at >= grace:
             if attempt.terminated_at is None:
-                attempt.process.terminate()
+                if attempt.tree is not None:
+                    attempt.tree.terminate()
+                else:
+                    attempt.process.terminate()
                 attempt.terminated_at = now
-            elif now - attempt.terminated_at >= grace and attempt.process.is_alive():
-                attempt.process.kill()
+            elif now - attempt.terminated_at >= grace:
+                if attempt.tree is not None:
+                    attempt.tree.terminate(force=True)
+                elif attempt.process.is_alive():
+                    attempt.process.kill()
 
     def _start_recovery(self, task: _Task, previous: _Attempt) -> None:
         from openkb.runtime.recovery import recover_worker
@@ -609,14 +641,21 @@ class TaskManager:
         parent, child = self._context.Pipe()
         events = self._context.Queue(maxsize=1)
         timeout = previous.limits.cleanup_timeout if previous.limits else 5.0
+        ready = self._context.Event()
         process = self._context.Process(
-            target=recover_worker,
-            args=(previous.identity, child, timeout),
+            target=isolated_target,
+            args=(recover_worker, (previous.identity, child, timeout), ready),
             name=f"openkb-recovery-{task.view.id[:8]}",
         )
         try:
             process.start()
+            tree = ProcessTree(process, ready=ready)
+            ready.set()
         except Exception:
+            if process.pid is not None:
+                process.terminate()
+                process.join(5)
+                process.close()
             parent.close()
             events.close()
             self._update(task, state="blocked", stage="repair-required", processes_reaped=True)
@@ -628,6 +667,7 @@ class TaskManager:
             parent,
             events,
             previous.identity,
+            tree=tree,
             limits=previous.limits,
             recovery=True,
         )
@@ -641,7 +681,9 @@ class TaskManager:
                     self._control(task, attempt)
                     self._progress(task, attempt)
                     self._supervise(task, attempt)
-                    if not attempt.process.is_alive():
+                    if not attempt.process.is_alive() and (
+                        attempt.tree is None or not attempt.tree.alive()
+                    ):
                         self._control(task, attempt)
                         self._progress(task, attempt)
                         self._finish(task, attempt)

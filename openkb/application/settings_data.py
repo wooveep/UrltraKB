@@ -6,9 +6,29 @@ use SecretStr to keep accidental representations from exposing their values.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, BeforeValidator, Field, SecretStr
+
+from openkb.ocr.config import ParsingSettings
+
+
+def _processing_settings(value):
+    from dataclasses import asdict
+
+    from openkb.processing import ProcessingIncomplete, RequestLimits
+
+    if not isinstance(value, dict) or set(value) != set(RequestLimits.__dataclass_fields__):
+        raise ValueError("Provide all processing budget fields and no unknown fields")
+    try:
+        return asdict(RequestLimits.from_config({"processing": value}))
+    except ProcessingIncomplete:
+        raise ValueError(
+            "Processing limits must be finite, positive and fit the model context"
+        ) from None
+
+
+ProcessingSettings = Annotated[dict[str, Any], BeforeValidator(_processing_settings)]
 
 
 class _KbConfigWritable(BaseModel):
@@ -28,6 +48,8 @@ class _KbConfigWritable(BaseModel):
     # explicit null reverts to inherited. Values are cleaned/deduped and "other"
     # is always ensured at read time (config.resolve_entity_types).
     entity_types: list[str] | None = None
+    parsing: ParsingSettings | None = None
+    processing: ProcessingSettings | None = None
 
 
 # Single source of truth for the writable config keys (derived from the model
@@ -42,10 +64,14 @@ class GlobalConfigValues(BaseModel):
     language: str | None = None
     pageindex_threshold: int | None = None
     entity_types: list[str] | None = None
+    parsing: ParsingSettings | None = None
+    processing: ProcessingSettings | None = None
 
 
 class GlobalConfigResponse(BaseModel):
     model: str
+    parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    processing: ProcessingSettings | None = None
     language: str
     pageindex_threshold: int
     # Effective global entity-type vocabulary (cleaned; always includes "other").
@@ -81,6 +107,8 @@ class GlobalConfigPatchRequest(BaseModel):
 
 class KbConfigResponse(BaseModel):
     model: str
+    parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    processing: ProcessingSettings | None = None
     language: str
     pageindex_threshold: int
     # Effective entity-type vocabulary (cleaned; always includes "other").

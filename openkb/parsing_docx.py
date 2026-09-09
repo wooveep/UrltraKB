@@ -1,0 +1,132 @@
+"""Mammoth's document tree with original paragraph/table positions, never pages."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from openkb.evidence import BlockDraft
+from openkb.processing import processing_checkpoint
+from openkb.sources import SourceStore
+
+
+def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
+    import mammoth
+    from mammoth import documents as nodes
+
+    blocks: list[BlockDraft] = []
+    quality: list[dict[str, Any]] = []
+    headings: list[str] = []
+    paragraph_number, table_number = 0, 0
+    notes = None
+    comments: dict[str, Any] = {}
+    active_notes: set[tuple[str, str]] = set()
+
+    def inline(node, assets: list[str]) -> str:
+        if isinstance(node, nodes.Text):
+            return node.value
+        if isinstance(node, nodes.Tab):
+            return "\t"
+        if isinstance(node, nodes.Break):
+            return "\n"
+        if isinstance(node, nodes.NoteReference):
+            identity = (node.note_type, node.note_id)
+            if notes is None or identity in active_notes:
+                quality.append({"status": "needs_review", "reason": "unresolved_docx_note"})
+                return f"[{node.note_type} {node.note_id}: unresolved]"
+            active_notes.add(identity)
+            try:
+                note = notes.resolve(node)
+                text = "\n".join(inline(child, assets) for child in note.body)
+                return f" [{node.note_type} {node.note_id}: {text}]"
+            finally:
+                active_notes.remove(identity)
+        if isinstance(node, nodes.CommentReference):
+            comment = comments.get(node.comment_id)
+            if comment is None:
+                quality.append({"status": "needs_review", "reason": "unresolved_docx_comment"})
+                return "[unresolved comment]"
+            text = "\n".join(inline(child, assets) for child in comment.body)
+            return f" [Editorial comment {node.comment_id}: {text}]"
+        if isinstance(node, nodes.Image):
+            with node.open() as stream:
+                digest = store.put_bytes(stream.read())
+            assets.append(digest)
+            return f"![{node.alt_text or 'Original image'}](asset:{digest})"
+        return "".join(inline(child, assets) for child in getattr(node, "children", []))
+
+    def visit(children, position=None, header=""):
+        nonlocal paragraph_number, table_number
+        for node in children:
+            processing_checkpoint("parsing")
+            if isinstance(node, nodes.Paragraph):
+                paragraph_number += 1
+                assets: list[str] = []
+                text = inline(node, assets)
+                style = node.style_id or node.style_name or ""
+                heading = re.fullmatch(r"heading\s*([1-9])", style, re.IGNORECASE)
+                if heading:
+                    level = int(heading[1])
+                    headings[level - 1 :] = [text]
+                location = {
+                    "kind": "docx",
+                    "paragraph": paragraph_number,
+                    "headings": list(headings),
+                    **(position or {}),
+                }
+                if text.strip() or assets:
+                    kind = "table" if position else "heading" if heading else "paragraph"
+                    context = header
+                    if node.numbering:
+                        context += (
+                            f"\nList level {node.numbering.level_index}; "
+                            f"ordered={node.numbering.is_ordered}"
+                        )
+                    blocks.append(BlockDraft(text, kind, location, tuple(assets), context))
+            elif isinstance(node, nodes.Table):
+                table_number += 1
+                table = table_number
+                header = (
+                    " | ".join(inline(cell, []) for cell in node.children[0].children)
+                    if node.children
+                    else ""
+                )
+                for row_index, row in enumerate(node.children, 1):
+                    for cell_index, cell in enumerate(row.children, 1):
+                        context = (
+                            f"Table {table}; header: {header}; "
+                            f"colspan={cell.colspan}; rowspan={cell.rowspan}"
+                        )
+                        visit(
+                            cell.children,
+                            {"table": table, "row": row_index, "cell": cell_index},
+                            context,
+                        )
+
+    def capture(document):
+        nonlocal notes, comments
+        notes = document.notes
+        comments = {comment.comment_id: comment for comment in document.comments}
+        visit(document.children)
+        return document
+
+    def image_source(image):
+        with image.open() as stream:
+            return {"src": "asset:" + store.put_bytes(stream.read())}
+
+    with path.open("rb") as source:
+        result = mammoth.convert_to_html(
+            source,
+            transform_document=capture,
+            convert_image=mammoth.images.img_element(image_source),
+            external_file_access=False,
+        )
+    if not blocks:
+        quality.append({"status": "needs_review", "reason": "empty_content"})
+    for message in result.messages:
+        if "Unrecognised paragraph style" not in message.message:
+            quality.append(
+                {"status": "needs_review", "reason": "docx_conversion_warning:" + message.message}
+            )
+    return blocks, quality

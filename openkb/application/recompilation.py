@@ -6,38 +6,27 @@ import asyncio
 import hashlib
 import json
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
+from openkb.application.documents import DocumentResult
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.application.removal import _resolve_doc_identifier
-from openkb.compilation_report import (
-    IncompleteCompilation,
-    collect_compile_report,
-    require_complete_compilation,
-)
 from openkb.config import (
-    DEFAULT_CONFIG,
     LlmCredentialBundle,
-    resolve_concurrency,
     resolve_effective_config,
 )
 from openkb.locks import (
-    LockCancelled,
-    async_kb_lock,
     atomic_write_text,
     kb_ingest_lock,
     kb_read_lock,
 )
-from openkb.log import append_log
-from openkb.mutation import RecoveryRequired, mutation_scope
-from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
+from openkb.mutation import mutation_scope
 from openkb.state import HashRegistry
 
-LONG_DOC_TYPES = frozenset({"long_pdf", "pageindex_cloud"})
+LONG_DOC_TYPES = frozenset({"long_pdf"})
 
 
 def is_long_doc(meta: dict) -> bool:
@@ -153,6 +142,7 @@ class RecompileResult:
     version: str | None = None
     quality: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    document: DocumentResult | None = None
 
 
 async def recompile_document(
@@ -165,149 +155,112 @@ async def recompile_document(
     max_concurrency: int | None = None,
     version: str | None = None,
 ) -> RecompileResult:
-    """Reload the exact document under its lease; never convert or index again.
+    """Rebuild from saved input through the same protected document pipeline."""
+    return await asyncio.to_thread(
+        _recompile_saved,
+        kb_dir,
+        file_hash,
+        context=context,
+        bundle=bundle,
+        model=model,
+        max_concurrency=max_concurrency,
+        version=version,
+    )
 
-    Desktop passes an execution context. Legacy adapters keep their own model
-    and credential resolution, including REST request overrides.
-    """
+
+def _recompile_saved(kb_dir, file_hash, *, context, bundle, model, max_concurrency, version):
+    from openkb.application.document_pipeline import compile_version
+    from openkb.inputs import prepared_input
+    from openkb.sources import SourceStore
+
     kb_dir = kb_dir.resolve()
-    async with async_kb_lock(
-        kb_dir / ".openkb",
-        exclusive=True,
-        cancelled=context.cancelled if context else None,
-        on_wait=context.waiting if context else None,
-    ):
+    context = context or ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
         if version is not None and _version(kb_dir) != version:
             return RecompileResult(
                 "conflict",
-                message="Knowledge changed after confirmation; review and confirm again",
+                message="Knowledge changed; review the current version",
                 unfinished=("compilation",),
             )
-        meta = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries().get(file_hash)
+        meta = HashRegistry(kb_dir / ".openkb/hashes.json").get(file_hash)
         if meta is None:
             return RecompileResult(
                 "skipped", message="document is no longer indexed.", version=version
             )
         _validate_metadata(meta)
         name = meta.get("doc_name") or Path(meta.get("name") or "").stem
+        if not name or name in {".", ".."} or any(c in name for c in "/\\\0"):
+            return RecompileResult("failed", message="Invalid document name")
         kind = "long" if is_long_doc(meta) else "short"
-        reason = None
-        if not name:
-            reason = "registry entry has no doc_name."
-        elif not isinstance(name, str) or name in {".", ".."} or any(c in name for c in "/\\\0"):
-            reason = "invalid document name in registry."
-        doc_id = meta.get("doc_id")
-        if reason is None and kind == "long" and not doc_id:
-            reason = "legacy long-doc entry without a doc_id; re-add to refresh."
-        source = kb_dir / "wiki" / ("summaries" if kind == "long" else "sources") / f"{name}.md"
-        if reason is None:
-            contained_paths(kb_dir, [source])
-            if not source.is_file():
-                label = "summary" if kind == "long" else "source"
-                reason = f"missing {label} at {source.relative_to(kb_dir)}."
-        if reason:
-            return RecompileResult("skipped", name, kind, message=reason, version=version)
-        paths = contained_paths(
-            kb_dir,
-            [
-                kb_dir / "wiki/summaries" / f"{name}.md",
-                kb_dir / "wiki/concepts",
-                kb_dir / "wiki/entities",
-                kb_dir / "wiki/index.md",
-                kb_dir / "wiki/log.md",
-            ],
-        )
-        before = file_versions(kb_dir, paths)
-        with context.begin(kb_dir) if context else nullcontext(bundle) as credentials:
-            from openkb.agent import compiler
-
-            config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-            if model is None or context:
-                model = model or config.get("model", DEFAULT_CONFIG["model"])
-                if context and max_concurrency is None:
-                    max_concurrency = (
-                        resolve_concurrency(config) or compiler.DEFAULT_COMPILE_CONCURRENCY
-                    )
-            options: dict[str, Any] = {"bundle": credentials}
+        with context.begin(kb_dir) as credentials:
+            settings = resolve_effective_config(kb_dir)[0]
+            if model is not None:
+                settings["model"] = model
             if max_concurrency is not None:
-                options["max_concurrency"] = max_concurrency
+                settings["processing"] = {**settings["processing"], "concurrency": max_concurrency}
+            store = SourceStore(kb_dir)
+            if meta.get("source_id"):
+                source = store.current(meta["source_id"])
+            else:
+                candidate = _saved_legacy_input(kb_dir, meta, name)
+                if candidate is None:
+                    return RecompileResult(
+                        "unfinished",
+                        name,
+                        kind,
+                        message="saved_original_missing",
+                        unfinished=("source_intake",),
+                    )
+                with prepared_input(candidate) as ready:
+                    source = store.intake(ready)
             start = time.monotonic()
-            if context:
-                context.on_event({"stage": "compiling", "document": name})
-            try:
-                with (
-                    collect_compile_report() as report,
-                    processing_scope(config),
-                    mutation_scope(kb_dir, paths, operation="recompile"),
-                ):
-                    if kind == "long":
-                        assert isinstance(doc_id, str)  # validated before configuration capture
-                        await compiler.compile_long_doc(
-                            name, source, doc_id, kb_dir, model, **options
-                        )
-                    else:
-                        await compiler.compile_short_doc(name, source, kb_dir, model, **options)
-                    require_complete_compilation()
-                    processing_checkpoint()
-                    # Compute the receipt before commit. A filesystem error here rolls
-                    # back the whole unit; it cannot discard already committed facts.
-                    changes = changed_files(kb_dir, paths, before)
-                    resources = {
-                        str(kb_dir / change.split(": ", 1)[1])
-                        for change in changes
-                        if not change.startswith("deleted:")
-                    }
-                    summary = kb_dir / "wiki/summaries" / f"{name}.md"
-                    if summary.is_file():
-                        resources.add(str(summary))
-                    next_version = _version(kb_dir) if version is not None else None
-                try:
-                    append_log(kb_dir / "wiki", "recompile", f"recompiled {name}")
-                except Exception:
-                    report.warnings.append("post_commit_log_failed")
-            except ProcessingIncomplete as exc:
-                return RecompileResult(
-                    "unfinished",
-                    name,
-                    kind,
-                    message=exc.reason,
-                    unfinished=(exc.stage,),
-                    elapsed=time.monotonic() - start,
-                    version=version,
-                )
-            except IncompleteCompilation:
-                return RecompileResult(
-                    "unfinished",
-                    name,
-                    kind,
-                    message=", ".join(report.quality),
-                    unfinished=tuple(report.unfinished),
-                    quality=tuple(report.quality),
-                    elapsed=time.monotonic() - start,
-                    version=version,
-                )
-            except (LockCancelled, RecoveryRequired):
-                raise
-            except Exception as exc:
-                return RecompileResult(
-                    "failed",
-                    name,
-                    kind,
-                    message="Compilation failed",
-                    error_type=type(exc).__name__,
-                    elapsed=time.monotonic() - start,
-                    unfinished=("compilation",),
-                    version=version,
-                )
+            roots = [kb_dir / "wiki"]
+            before = file_versions(kb_dir, roots)
+            result = compile_version(
+                kb_dir,
+                source,
+                settings,
+                bundle=bundle or credentials,
+                on_event=context.on_event,
+                force=True,
+                document_name=name,
+                replaces=file_hash,
+            )
             return RecompileResult(
-                "compiled",
+                "compiled" if result.status == "added" else result.status,
                 name,
                 kind,
+                message=result.reason,
+                error_type=(
+                    result.reason.rsplit(":", 1)[-1]
+                    if result.status == "failed" and result.reason and ":" in result.reason
+                    else None
+                ),
                 elapsed=time.monotonic() - start,
-                resources=tuple(sorted(resources)),
-                changes=changes,
-                version=next_version,
-                quality=tuple(report.quality),
-                unfinished=tuple(report.unfinished),
-                warnings=tuple(report.warnings),
+                resources=result.resources,
+                changes=changed_files(kb_dir, roots, before),
+                unfinished=result.unfinished,
+                quality=result.quality,
+                warnings=result.warnings,
+                version=_version(kb_dir) if version is not None else None,
+                document=result,
             )
+
+
+def _saved_legacy_input(kb_dir: Path, meta: dict, name: str) -> Path | None:
+    from openkb.inputs import SUPPORTED_EXTENSIONS
+
+    if meta.get("type", "short") not in {
+        *[suffix[1:] for suffix in SUPPORTED_EXTENSIONS],
+        "short",
+        "long_pdf",
+    }:
+        return None
+    candidates = [
+        kb_dir / meta.get("raw_path", "raw/" + (meta.get("name") or name)),
+        kb_dir / "wiki/sources" / (name + (".json" if is_long_doc(meta) else ".md")),
+    ]
+    for candidate in contained_paths(kb_dir, candidates):
+        if candidate.is_file():
+            return candidate
+    return None

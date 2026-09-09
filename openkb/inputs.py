@@ -15,6 +15,16 @@ from openkb.state import HashRegistry
 _preparation_root: ContextVar[Path | None] = ContextVar("openkb_preparation_root", default=None)
 
 
+def processing_directory(*, prefix: str) -> tempfile.TemporaryDirectory[str]:
+    """Keep private processing artifacts under the worker's cleanup ownership."""
+    return tempfile.TemporaryDirectory(prefix=prefix, dir=_preparation_root.get())
+
+
+def processing_path(*, prefix: str) -> Path:
+    """Allocate explicit cleanup ownership when an external process may outlive an error."""
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=_preparation_root.get()))
+
+
 @contextmanager
 def preparation_directory(path: Path | None) -> Iterator[None]:
     """Place private copies in a caller-owned execution directory when provided."""
@@ -78,9 +88,9 @@ class PreparedInput:
             return False
         if HashRegistry.hash_file(self.source) != self.digest:
             return False
-        if self.source.suffix.lower() not in {".md", ".markdown"}:
+        if self.source.suffix.lower() not in {".md", ".markdown", ".json"}:
             return True
-        paths = relative_image_paths(self.path.read_text(encoding="utf-8"), self.source.parent)
+        paths = relative_image_paths(_related_text(self.path), self.source.parent)
         if paths.keys() != self.images.keys():
             return False
         for reference, path in paths.items():
@@ -107,9 +117,9 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
     if resources.exists():
         shutil.rmtree(resources)
     images = {}
-    if source.suffix.lower() in {".md", ".markdown"}:
+    if source.suffix.lower() in {".md", ".markdown", ".json"}:
         for index, (reference, original) in enumerate(
-            relative_image_paths(frozen.read_text(encoding="utf-8"), source.parent).items()
+            relative_image_paths(_related_text(frozen), source.parent).items()
         ):
             target = None
             image_digest = None
@@ -124,12 +134,18 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
     return ready
 
 
+def _related_text(path: Path) -> str:
+    if path.suffix.lower() == ".json":
+        from openkb.legacy_pages import saved_pages_text
+
+        return saved_pages_text(path)
+    return path.read_text(encoding="utf-8")
+
+
 @contextmanager
 def prepared_input(source: Path) -> Iterator[PreparedInput]:
     """Freeze primary bytes, image bytes and missing-image state before business."""
-    with tempfile.TemporaryDirectory(
-        prefix="openkb-input-", dir=_preparation_root.get()
-    ) as directory:
+    with processing_directory(prefix="openkb-input-") as directory:
         yield _prepare(source, Path(directory))
 
 

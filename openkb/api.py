@@ -81,7 +81,6 @@ from openkb.api_models import (
     QueryRequest,
     QueryResponse,
     RecompileRequest,
-    RecompileResponse,
     RemoveRequest,
     RemoveResponse,
     SkillListResponse,
@@ -174,6 +173,9 @@ def create_app() -> FastAPI:
     from openkb.api_tasks import router as tasks_router
 
     app.include_router(tasks_router)
+    from openkb.api_sources import router as sources_router
+
+    app.include_router(sources_router)
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(
@@ -502,18 +504,19 @@ def create_app() -> FastAPI:
             )
         return RemoveResponse(**result)
 
-    @app.post("/api/v1/recompile", response_model=RecompileResponse)
+    @app.post("/api/v1/recompile")
     async def recompile_endpoint(
         request: RecompileRequest,
         fastapi_request: Request,
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
+        service = getattr(fastapi_request.app.state, "import_tasks", None)
+        manager = service.manager if service else None
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
-                _stream_recompile(request, kb_dir, lock, fastapi_request, bundle=bundle),
+                _stream_recompile(request, kb_dir, lock, fastapi_request, manager=manager),
                 media_type="text/event-stream",
             )
         # Aggregate the async generator into a single JSON response. Terminal
@@ -530,7 +533,8 @@ def create_app() -> FastAPI:
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
                 refresh_schema=request.refresh_schema,
-                bundle=bundle,
+                manager=manager,
+                task_id=request.task_id,
             ):
                 name = event.get("event")
                 if name == "plan":
@@ -548,15 +552,11 @@ def create_app() -> FastAPI:
                     detail={"message": error_message, "candidates": candidates},
                 )
             raise HTTPException(status_code=error_code, detail=error_message)
-        return RecompileResponse(
-            status=result.get("status", "done"),
-            total=result.get("total", 0),
-            recompiled=result.get("recompiled", 0),
-            skipped=result.get("skipped", 0),
-            docs=result.get("docs", []),
-            targets=targets,
-            candidates=candidates,
-        )
+        return {
+            **{key: value for key, value in result.items() if key != "event"},
+            "targets": targets,
+            "candidates": candidates,
+        }
 
     @app.post("/api/v1/watch/start", response_model=WatchStatusResponse)
     async def watch_start_endpoint(

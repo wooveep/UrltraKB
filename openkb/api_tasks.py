@@ -71,7 +71,10 @@ class ImportTasks:
                 previous = None
             accepted = self.manager.submit(
                 kb,
-                [ImportFile(str(path)) for path, _ in uploads],
+                [
+                    ImportFile(str(path), upload_origin=f"upload:{task_id}/{index}/{name}")
+                    for index, (path, name) in enumerate(uploads)
+                ],
                 task_id=task_id,
                 input_binding=binding,
             )

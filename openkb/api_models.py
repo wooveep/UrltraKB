@@ -233,6 +233,7 @@ class RecompileRequest(BaseModel):
     dry_run: bool = False
     refresh_schema: bool = False
     stream: bool = False
+    task_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class RecompileTargetItem(BaseModel):
