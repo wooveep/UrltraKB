@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
@@ -60,6 +61,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # global/KB list overrides it wholesale; resolve_entity_types cleans the
     # effective value on read.
     "entity_types": list(DEFAULT_ENTITY_TYPES),
+    # Bounded operating defaults for existing and new KBs. Context/output are
+    # request caps, not a claim about an arbitrary provider's model capacity.
+    "processing": {
+        "context_tokens": 32768,
+        "output_tokens": 8192,
+        "request_timeout": 180,
+        "stage_timeout": 1800,
+        "document_timeout": 3600,
+        "cleanup_timeout": 10,
+        "max_attempts": 2,
+        "max_requests": 200,
+        "max_tokens": 2000000,
+        "concurrency": 2,
+    },
 }
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "openkb"
@@ -450,7 +465,7 @@ def load_config(config_path: Path) -> dict[str, Any]:
         captured = active_values(config_path.parent.parent)
         if captured is not None:
             return captured["raw"]
-    config = dict(DEFAULT_CONFIG)
+    config = deepcopy(DEFAULT_CONFIG)
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
@@ -534,7 +549,7 @@ def resolve_effective_config(kb_dir: Path) -> tuple[dict[str, Any], dict[str, st
     captured = active_values(kb_dir)
     if captured is not None:
         return captured["effective"], captured["sources"]
-    effective: dict[str, Any] = dict(DEFAULT_CONFIG)
+    effective: dict[str, Any] = deepcopy(DEFAULT_CONFIG)
     sources: dict[str, str] = {key: "default" for key in GLOBAL_SCALAR_KEYS}
 
     # A malformed global.yaml (bare list/scalar) is coerced to {} inside the

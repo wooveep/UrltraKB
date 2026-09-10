@@ -71,11 +71,12 @@ class SettingsSection(QWidget):
 class ProcessingField(SettingsSection):
     def __init__(self):
         super().__init__(
-            "填写模型支持的上下文容量，以及本轮处理允许使用的额度。所有上限必须为有限正数；输出额度必须小于上下文容量。"
+            "知识编译自动使用默认额度，无需填写。需要调整时选择“设置”；清除覆盖后恢复继承。"
+            "请求上限应在模型支持范围内，输出上限必须小于上下文上限。"
         )
         self.values = ValueForm(
             [
-                ("context_tokens", "模型上下文容量（token）", int),
+                ("context_tokens", "单次请求上下文上限（token）", int),
                 ("output_tokens", "单次输出上限（token）", int),
                 ("request_timeout", "单次请求时限（秒）", float),
                 ("stage_timeout", "单个阶段时限（秒）", float),

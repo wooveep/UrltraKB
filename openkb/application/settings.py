@@ -266,7 +266,9 @@ def _read_global_config() -> GlobalConfigResponse:
     return GlobalConfigResponse(
         model=gc.get("model", DEFAULT_CONFIG["model"]),
         parsing=parsing,
-        processing=gc.get("processing"),
+        processing=(
+            gc["processing"] if gc.get("processing") is not None else DEFAULT_CONFIG["processing"]
+        ),
         navigation=gc.get("navigation") or {},
         compilation_thinking=gc.get("compilation_thinking"),
         verification_thinking=gc.get("verification_thinking"),

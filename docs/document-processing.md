@@ -37,27 +37,33 @@ never automatically replayed from its summary. A confirmed business receipt
 survives failed auxiliary teardown; cleanup warnings are separate from knowledge
 completion.
 
-## Required execution profile
+## Default execution profile
 
-Set a `processing` mapping in `.openkb/config.yaml` or the global configuration.
-No production budgets have been calibrated for this implementation yet; missing
-limits produce `execution_budget_required` before a model request. A custom model
-must also supply its verified context and output capacities; unavailable values
-produce `model_capabilities_required`. These are configuration outcomes, not
-successful imports. Use the same measured profile when comparing documents.
+New and existing knowledge bases automatically inherit finite processing budgets;
+no manual setup or configuration migration is required. The desktop's
+**Settings → Processing budgets** shows the effective values. A complete
+`processing` mapping in global configuration overrides the built-in profile,
+and a knowledge-base mapping overrides the global profile. Clearing an override
+restores inheritance. Reading settings does not write defaults into a library.
 
-| Field | Meaning |
-| --- | --- |
-| `context_tokens` | Verified maximum total context for the selected model |
-| `output_tokens` | Positive output reserve, less than context capacity |
-| `request_timeout` | Finite positive seconds for a request without an explicit timeout |
-| `stage_timeout` | Finite positive seconds allowed for one processing stage |
-| `document_timeout` | Finite positive seconds for the whole document operation |
-| `cleanup_timeout` | Finite positive seconds for an auxiliary cleanup operation or shutdown grace |
-| `max_attempts` | Positive maximum attempts for one logical request |
-| `max_requests` | Positive maximum observable model attempts across the document |
-| `max_tokens` | Positive document token budget, including outstanding reservations |
-| `concurrency` | Positive maximum number of concurrent model calls |
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `context_tokens` | 32768 | Total context cap for one complete request |
+| `output_tokens` | 8192 | Output reserve within that context cap |
+| `request_timeout` | 180 | Seconds per request without an explicit timeout |
+| `stage_timeout` | 1800 | Seconds allowed for one processing stage |
+| `document_timeout` | 3600 | Seconds for the whole document operation |
+| `cleanup_timeout` | 10 | Seconds for auxiliary cleanup or shutdown grace |
+| `max_attempts` | 2 | Maximum attempts for one logical request |
+| `max_requests` | 200 | Maximum observable model attempts across the document |
+| `max_tokens` | 2000000 | Document token budget, including outstanding reservations |
+| `concurrency` | 2 | Maximum concurrent model calls |
+
+These are bounded starting allowances, not measured model capacities or a
+guarantee that every document will finish in one run. Models with smaller context
+or output capacities need lower request caps. Explicit malformed or incomplete
+overrides still produce configuration errors before a model request; they are
+never silently replaced by defaults. Use the same profile when comparing runs.
 
 A valid explicit per-request timeout retains existing configuration precedence;
 remaining stage and document time always bound it. The complete request includes
