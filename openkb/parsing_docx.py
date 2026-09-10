@@ -15,7 +15,14 @@ from openkb.sources import SourceStore
 
 
 def parse_docx(
-    path: Path, store: SourceStore, *, ocr=None, _budget=None, _depth=0
+    path: Path,
+    store: SourceStore,
+    *,
+    ocr=None,
+    _budget=None,
+    _depth=0,
+    _source=None,
+    _options=None,
 ) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
     import mammoth
     from mammoth import documents as nodes
@@ -35,6 +42,20 @@ def parse_docx(
         if isinstance(node, nodes.Text):
             attachment = prepared.attachments.get(node.value)
             if attachment is not None:
+                from openkb.docx_attachments import document_name
+
+                name = document_name(attachment)
+                if name is None:
+                    quality.append(
+                        {
+                            "status": "verified",
+                            "reason": "non_document_attachment_skipped:" + attachment.name,
+                        }
+                    )
+                    return f"[Skipped non-document attachment: {attachment.name}]"
+                from dataclasses import replace
+
+                attachment = replace(attachment, name=name)
                 pending_attachments.append(attachment)
                 assets.extend((attachment.container, attachment.blob))
                 return f"[Embedded attachment: {attachment.name}](asset:{attachment.blob})"
@@ -63,10 +84,24 @@ def parse_docx(
             text = "\n".join(inline(child, assets) for child in comment.body)
             return f" [Editorial comment {node.comment_id}: {text}]"
         if isinstance(node, nodes.Image):
-            with node.open() as stream:
-                digest = store.put_bytes(stream.read())
-            assets.append(digest)
-            return f"![{node.alt_text or 'Original image'}](asset:{digest})"
+            try:
+                with node.open() as stream:
+                    content = stream.read()
+            except (KeyError, OSError):
+                quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
+                return "[Original image unavailable]"
+            digest = store.put_bytes(content)
+            if digest in prepared.icons:
+                assets.append(digest)
+                return f"![{node.alt_text or 'Attachment icon'}](asset:{digest})"
+            from openkb.docx_images import read_image
+
+            text, images, checks = read_image(
+                content, store, ocr, alt_text=node.alt_text or "Original image"
+            )
+            assets.extend(images)
+            quality.extend(checks)
+            return text
         return "".join(inline(child, assets) for child in getattr(node, "children", []))
 
     def visit(children, position=None, header=""):
@@ -101,14 +136,31 @@ def parse_docx(
                     for attachment in pending_attachments:
                         from zipfile import BadZipFile
 
-                        from openkb.docx_attachments import attachment_quality, bind_blocks, parse_attachment
+                        from openkb.docx_attachments import (
+                            attachment_quality,
+                            bind_blocks,
+                            parse_attachment,
+                        )
 
                         try:
-                            drafts, checks = parse_attachment(attachment, store, budget, _depth + 1, ocr)
+                            drafts, checks = parse_attachment(
+                                attachment,
+                                store,
+                                budget,
+                                _depth + 1,
+                                ocr,
+                                source=_source,
+                                options=_options,
+                            )
                             blocks.extend(bind_blocks(drafts, attachment, location))
                             quality.extend(attachment_quality(checks, attachment))
                         except (ValueError, BadZipFile, UnicodeError):
-                            quality.append({"status": "needs_review", "reason": "docx_attachment_unparsed:" + attachment.part})
+                            quality.append(
+                                {
+                                    "status": "needs_review",
+                                    "reason": "docx_attachment_unparsed:" + attachment.part,
+                                }
+                            )
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
@@ -137,8 +189,12 @@ def parse_docx(
         return document
 
     def image_source(image):
-        with image.open() as stream:
-            return {"src": "asset:" + store.put_bytes(stream.read())}
+        try:
+            with image.open() as stream:
+                return {"src": "asset:" + store.put_bytes(stream.read())}
+        except (KeyError, OSError):
+            quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
+            return {"src": ""}
 
     with prepared.stream as source:
         result = mammoth.convert_to_html(

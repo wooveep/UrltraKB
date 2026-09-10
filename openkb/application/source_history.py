@@ -104,6 +104,33 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
         from openkb.navigation import read_navigation
         from openkb.navigation_usage import navigation_usage
 
+        # Embedded documents are imported during the parent's parse. Their
+        # selected evidence is readable before they have a compilation run.
+        if current is None and version.origin.startswith("attachment:"):
+            from openkb.evidence import ParseStore
+
+            parses = ParseStore(kb_dir)
+            parsed = parses.selected(version)
+            if parsed is not None:
+                complete = parses.complete(version, parsed)
+                current = DocumentResult(
+                    version.origin,
+                    "unfinished",
+                    (str(store.original(version)),),
+                    quality=tuple(
+                        q["reason"] for q in parsed.quality if q["status"] == "needs_review"
+                    ),
+                    input_version=version.id,
+                    source_intake="saved",
+                    knowledge_compilation="not_started",
+                    stage="parsed" if complete else "parsing",
+                    reason="knowledge_compilation_pending"
+                    if complete
+                    else "source_quality_needs_review",
+                    resume=version.id,
+                    source_id=source_id,
+                    parse_id=parsed.id,
+                )
         return {
             "source": asdict(version),
             "original": str(store.original(version)),

@@ -93,10 +93,14 @@ def _compile_version(
                     kb_dir, source, options=settings.get("parsing"), force=force_parse
                 )
                 for row in parsed.quality:
-                    if row["status"] == "verified" and row["reason"].startswith(
-                        "docx_conversion_warning:"
+                    if row["status"] == "verified" and (
+                        "docx_conversion_warning:" in row["reason"]
+                        or "non_document_attachment_skipped:" in row["reason"]
+                        or "docx_image_ocr_notice:" in row["reason"]
                     ):
                         report_auxiliary_warning(row["reason"])
+                if ParseStore(kb_dir).accepted_missing_images(source, parsed):
+                    report_auxiliary_warning("docx_missing_original_images_accepted")
                 if not ParseStore(kb_dir).complete(source, parsed):
                     raise ProcessingIncomplete("source_quality_needs_review", "parsing")
                 if parse_only:
@@ -266,11 +270,30 @@ def _materialize(
     from openkb.mutation import _copy_file_atomic
 
     destination = workspace / "wiki/sources" / f"{name}.md"
+    attachments = {}
+    for block in parsed.blocks:
+        position = block.location
+        while "attachment" in position:
+            attachment = position["attachment"]
+            attachments[attachment["blob"]] = Path(attachment["name"]).suffix.lower()
+            position = attachment["position"]
     text = []
     for block in parsed.blocks:
         processing_checkpoint()
         content = store.asset(block.blob).read_text(encoding="utf-8")
         for digest in block.assets:
+            if "asset:" + digest not in content:
+                continue
+            if digest in attachments:
+                from openkb.inputs import SUPPORTED_EXTENSIONS
+
+                attachment_extension = attachments[digest]
+                if attachment_extension not in SUPPORTED_EXTENSIONS:
+                    raise ValueError("Unrecognized embedded document format")
+                asset = workspace / "wiki/sources/attachments" / f"{digest}{attachment_extension}"
+                _copy_file_atomic(store.asset(digest), asset)
+                content = content.replace("asset:" + digest, "attachments/" + asset.name)
+                continue
             from PIL import Image
 
             with Image.open(store.asset(digest)) as picture:

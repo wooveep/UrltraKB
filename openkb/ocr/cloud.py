@@ -139,7 +139,9 @@ class CloudJobs:
                 self._save(self.path)
         return b"".join(chunks)
 
-    def page(self, document: pymupdf.Document, page: int) -> tuple[list[BlockDraft], str | None]:
+    def page(
+        self, document: pymupdf.Document, page: int, *, input_id=None
+    ) -> tuple[list[BlockDraft], str | None]:
         """The only output page belongs to this physically extracted original page."""
         self.path, self.record = None, {}
         try:

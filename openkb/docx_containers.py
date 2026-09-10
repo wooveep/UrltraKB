@@ -43,7 +43,9 @@ def package_path(part: str, target: str) -> str:
     if "\\" in target or "\x00" in target:
         raise ValueError("docx_attachment_path_invalid")
     name = posixpath.normpath(
-        target.lstrip("/") if target.startswith("/") else posixpath.join(posixpath.dirname(part), target)
+        target.lstrip("/")
+        if target.startswith("/")
+        else posixpath.join(posixpath.dirname(part), target)
     )
     if name == ".." or name.startswith("../") or name in {"", "."}:
         raise ValueError("docx_attachment_path_invalid")

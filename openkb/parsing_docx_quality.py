@@ -14,9 +14,9 @@ def conversion_quality(message: str) -> dict[str, str]:
     formatting = message.startswith(("Unrecognised paragraph style:", "Unrecognised run style:"))
     ignored = message.removeprefix("An unrecognised element was ignored: ")
     formatting = formatting or ignored in _FORMATTING_ELEMENTS
-    # The image node and its original bytes are retained by our image callback.
+    # The image callback independently checks missing bytes and OCR coverage.
     formatting = formatting or bool(
-        re.fullmatch(r"Image of type image/[^\s]+ is unlikely to display in web browsers", message)
+        re.fullmatch(r"Image of type [^\s]+ is unlikely to display in web browsers", message)
     )
     return {
         "status": "verified" if formatting else "needs_review",

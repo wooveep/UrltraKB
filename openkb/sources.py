@@ -52,6 +52,8 @@ def normalized_origin(path: Path, kb_dir: Path, origin: str | None = None) -> st
             )
         if origin.startswith("upload:") and len(origin) > len("upload:"):
             return origin
+        if re.fullmatch(r"attachment:[0-9a-f]{32}/[0-9a-f]{64}", origin):
+            return origin
         raise ValueError("Invalid source origin")
     # PreparedInput already resolved this identity with the captured bytes.
     # Resolving again here could bind those bytes to a replacement symlink.
@@ -225,6 +227,24 @@ class SourceStore:
                     atomic_write_json(path, asdict(version))
                 atomic_write_json(self.index, records)
             return version
+
+    def intake_attachment(
+        self, parent: SourceVersion, *, part: str, name: str, content: bytes
+    ) -> SourceVersion:
+        """Import a document attachment with a stable identity under its parent."""
+        from openkb.inputs import SUPPORTED_EXTENSIONS
+
+        self.original(parent)
+        if (
+            not part
+            or Path(name).name != name
+            or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS
+        ):
+            raise ValueError("Invalid document attachment")
+        blob = self.put_bytes(content)
+        path = self.asset(blob)
+        ready = PreparedInput(Path(name), path, blob, {}, path)
+        return self.intake(ready, origin=f"attachment:{parent.source_id}/{content_id(part)}")
 
     def version(self, version_id: str) -> SourceVersion:
         with kb_read_lock(self.kb_dir / ".openkb"):

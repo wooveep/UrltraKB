@@ -50,12 +50,14 @@ class LocalOcr:
     def close(self):
         pass  # Each optional worker is reaped before its page result returns.
 
-    def page(self, document, page):
+    def page(self, document, page, *, input_id=None):
         profile = {
             "ocr": self.config.profile(),
             "physical_page": page,
             "worker": HashRegistry.hash_file(Path(__file__).with_name("worker.py")),
         }
+        if input_id is not None:
+            profile["embedded_input"] = input_id
         if page in self.retries:
             profile["reprocessing"] = self.retries[page]
         execution = {"input_key": self.source.input_key, "profile": dict(profile)}

@@ -138,12 +138,33 @@ source, input version, parse version, block and span.
 
 Reliable PDF text is parsed locally, with physical page and available coordinates.
 DOCX evidence uses headings, paragraphs and table cells, without invented Word
-page numbers. Uncertain bitmap, invisible text and uncovered vector content
+page numbers. Embedded document attachments are imported as separate retained
+sources and included at their positions in the parent evidence. Supported document
+extensions follow the normal import formats; scripts, executables, generic ZIP
+archives and other non-document attachments are skipped, including those inside
+document attachments. Generic archives are not recursively expanded.
+
+DOCX pictures are retained. OCR is selective and advisory: small icons, narrow
+toolbars (short edge at most 48 pixels), images whose long edge is below 160 pixels,
+and almost uniform fills skip recognition. Other renderable images can receive OCR;
+empty or unavailable recognition produces a warning, not a document-wide failure.
+This size/contrast heuristic does not promise that every selected image has text
+or that every character is recognized. Original missing image data is explicitly
+marked; a recorded decision to proceed applies only to the exact source/parse and
+missing-image reasons, preserving other content-quality checks. Harmless Word
+formatting/style conversion warnings are advisory; unsupported document content
+still requires review.
+
+For PDF, uncertain bitmap, invisible text and uncovered vector content
 requires the selected OCR backend or explicit page review. Ruled table cells keep
 headers and coordinates. Missing required assets cannot be waived as a blank or
 illustration page. OCR output is checked before a complete parsing checkpoint is
 recorded. [Optional CPU deployment](optional-ocr-runtime.md) is separate from the
 main application; local failure never selects the cloud backend automatically.
+On Windows, the default local setting uses the installed Windows text recognition
+engine and language packs without configuration. An explicitly configured local
+PaddleOCR runtime or cloud backend takes precedence. Native Windows recognition
+retains the rendered image and text positions; it does not infer diagram semantics.
 
 Generation uses a private Wiki copy and preserves independent input bytes. All
 knowledge changes for one source publish together only after parsing, version,

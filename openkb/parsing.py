@@ -8,6 +8,7 @@ from typing import Any
 
 from openkb.evidence import BlockDraft, ParseStore, ParseVersion
 from openkb.ocr.assembly import assembly_profile
+from openkb.ocr.backend import create_ocr, default_local_profile
 from openkb.ocr.config import parsing_settings
 from openkb.ocr.reprocessing import page_attempts
 from openkb.processing import processing_checkpoint
@@ -20,18 +21,23 @@ def parse_document(
     *,
     options: dict[str, Any] | None = None,
     force: bool = False,
+    _budget=None,
+    _depth=0,
 ) -> ParseVersion:
     selected = parsing_settings(options)
+    native_profile = (
+        default_local_profile(selected.ocr) if source.suffix in {".pdf", ".docx"} else None
+    )
     profile = {
         "parser": "openkb-structured-v3",
-        "ocr": selected.ocr.profile(),
+        "ocr": native_profile or selected.ocr.profile(),
         "ocr_assembly": assembly_profile(selected.ocr.backend),
         "pymupdf": package_version("pymupdf"),
         "mammoth": package_version("mammoth"),
         "markitdown": package_version("markitdown"),
     }
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v2"
+        profile["docx"] = "openkb-docx-v4-selective-ocr"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
@@ -52,15 +58,9 @@ def parse_document(
     if source.suffix == ".pdf":
         from openkb.parsing_pdf import parse_pdf
 
-        ocr: Any = None
-        if selected.ocr.backend == "cloud" and selected.ocr.cloud is not None:
-            from openkb.ocr.cloud import CloudJobs
-
-            ocr = CloudJobs(originals, source, selected.ocr.cloud, retries=retries)
-        elif selected.ocr.backend == "local" and selected.ocr.local is not None:
-            from openkb.ocr.local import LocalOcr
-
-            ocr = LocalOcr(originals, source, selected.ocr.local, retries=retries)
+        ocr = create_ocr(
+            originals, source, selected.ocr, native_profile=native_profile, retries=retries
+        )
         previous = store.selected(source)
         reuse = {}
         if previous is not None and (
@@ -100,7 +100,20 @@ def parse_document(
     elif source.suffix == ".docx":
         from openkb.parsing_docx import parse_docx
 
-        blocks, quality = parse_docx(path, originals)
+        docx_ocr = create_ocr(originals, source, selected.ocr, native_profile=native_profile)
+        try:
+            blocks, quality = parse_docx(
+                path,
+                originals,
+                ocr=docx_ocr,
+                _budget=_budget,
+                _depth=_depth,
+                _source=source,
+                _options=options,
+            )
+        finally:
+            if docx_ocr is not None:
+                docx_ocr.close()
     else:
         blocks, quality = parse_text(path, source, originals)
     processing_checkpoint()

@@ -39,7 +39,7 @@ def test_table_formatting_warning_does_not_block_preserved_content(kb_dir, tmp_p
 @pytest.mark.parametrize(
     "unknown",
     [
-        '<w:unsupported><w:t>Required recovery instruction.</w:t></w:unsupported>',
+        "<w:unsupported><w:t>Required recovery instruction.</w:t></w:unsupported>",
         '<o:OLEObject xmlns:o="urn:schemas-microsoft-com:office:office" ProgID="Package"/>',
         '<v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:path/></v:shape>',
     ],

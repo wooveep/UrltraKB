@@ -25,7 +25,18 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "converted",
     }:
         raise ValueError("Invalid source location")
-    allowed = {"kind", "page", "paragraph", "table", "row", "cell", "line", "headings", "bbox", "attachment"}
+    allowed = {
+        "kind",
+        "page",
+        "paragraph",
+        "table",
+        "row",
+        "cell",
+        "line",
+        "headings",
+        "bbox",
+        "attachment",
+    }
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
     if "attachment" in location:
@@ -33,7 +44,9 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         if (
             not isinstance(attachment, dict)
             or set(attachment) != {"part", "name", "blob", "position"}
-            or not all(isinstance(attachment[key], str) and attachment[key] for key in ("part", "name"))
+            or not all(
+                isinstance(attachment[key], str) and attachment[key] for key in ("part", "name")
+            )
         ):
             raise ValueError("Invalid embedded source location")
         valid_id(attachment["blob"])
@@ -367,8 +380,11 @@ class ParseStore:
                     raise ValueError("Content block length mismatch")
                 for asset in block.assets:
                     self.sources.asset(asset)
+            accepted_missing = self.accepted_missing_images(version, parsed)
             for row in parsed.quality:
                 if row["status"] == "verified":
+                    continue
+                if row["reason"] in accepted_missing:
                     continue
                 page = row.get("page")
                 if page is None:
@@ -379,6 +395,67 @@ class ParseStore:
                 ):
                     return False
             return True
+
+    def _missing_images(self, version: SourceVersion, parsed: ParseVersion) -> list[str]:
+        if version.suffix != ".docx":
+            return []
+        return sorted(
+            {
+                row["reason"]
+                for row in parsed.quality
+                if row["status"] == "needs_review"
+                and (
+                    row["reason"] == "docx_image_asset_missing"
+                    or (
+                        row["reason"].startswith("docx_attachment:")
+                        and row["reason"].endswith(":docx_image_asset_missing")
+                    )
+                )
+            }
+        )
+
+    def _missing_image_decision(self, version: SourceVersion, parsed: ParseVersion) -> Path:
+        return self.sources.owned_path(
+            self.root
+            / "confirmations"
+            / f"{content_id([version.id, parsed.id, 'missing_images'])}.json"
+        )
+
+    def accept_missing_images(self, version: SourceVersion, parsed: ParseVersion) -> None:
+        """Record explicit permission to continue with named missing-image markers."""
+        with kb_ingest_lock(self.kb_dir / ".openkb"):
+            self._bind(version, parsed)
+            reasons = self._missing_images(version, parsed)
+            if self.load(parsed.id) != parsed or not reasons:
+                raise ValueError("No matching missing-image review")
+            path = self._missing_image_decision(version, parsed)
+            with mutation_scope(self.kb_dir, [path], operation="accept missing original images"):
+                atomic_write_json(
+                    path,
+                    {
+                        "source": version.id,
+                        "parse": parsed.id,
+                        "reasons": reasons,
+                        "decision": "continue_with_missing_original_images",
+                    },
+                )
+
+    def accepted_missing_images(self, version: SourceVersion, parsed: ParseVersion) -> list[str]:
+        with kb_read_lock(self.kb_dir / ".openkb"):
+            self._bind(version, parsed)
+            reasons = self._missing_images(version, parsed)
+            path = self._missing_image_decision(version, parsed)
+            if not reasons or not path.exists():
+                return []
+            record = read_object(path)
+            if record != {
+                "source": version.id,
+                "parse": parsed.id,
+                "reasons": reasons,
+                "decision": "continue_with_missing_original_images",
+            }:
+                raise ValueError("Missing-image decision does not match this parse")
+            return reasons
 
     def page_decision(self, version: SourceVersion, parsed: ParseVersion, page: int) -> str | None:
         with kb_read_lock(self.kb_dir / ".openkb"):

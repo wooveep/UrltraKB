@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import posixpath
 from dataclasses import dataclass
-from zipfile import ZIP_DEFLATED, ZipFile
+from xml.etree.ElementTree import Element, tostring
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from defusedxml import ElementTree as xml
-from xml.etree.ElementTree import Element, tostring
 
 from openkb.docx_containers import ExpansionBudget, package_path, read_member, unpack_ole
 from openkb.sources import SourceStore, content_id
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
-O = "{urn:schemas-microsoft-com:office:office}"
+OFFICE = "{urn:schemas-microsoft-com:office:office}"
 V = "{urn:schemas-microsoft-com:vml}"
 _PARTS = {"word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"}
 
@@ -37,7 +38,9 @@ class PreparedDocx:
     quality: list[dict[str, str]]
 
 
-def prepare_docx(data: bytes, store: SourceStore, budget: ExpansionBudget, depth: int) -> PreparedDocx:
+def prepare_docx(
+    data: bytes, store: SourceStore, budget: ExpansionBudget, depth: int
+) -> PreparedDocx:
     attachments: dict[str, Attachment] = {}
     icons: set[str] = set()
     quality: list[dict[str, str]] = []
@@ -51,10 +54,14 @@ def prepare_docx(data: bytes, store: SourceStore, budget: ExpansionBudget, depth
             raw = read_member(archive, part, budget, depth)
             tree = xml.fromstring(raw, forbid_dtd=True)
             parents = {child: parent for parent in tree.iter() for child in parent}
-            rel_path = posixpath.join(posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels")
+            rel_path = posixpath.join(
+                posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels"
+            )
             relationships = {}
             if rel_path in names:
-                rels = xml.fromstring(read_member(archive, rel_path, budget, depth), forbid_dtd=True)
+                rels = xml.fromstring(
+                    read_member(archive, rel_path, budget, depth), forbid_dtd=True
+                )
                 for rel in rels:
                     if rel.get("Id") in relationships:
                         raise ValueError("docx_duplicate_relationship")
@@ -71,12 +78,14 @@ def prepare_docx(data: bytes, store: SourceStore, budget: ExpansionBudget, depth
                 if image is None:
                     return None
                 try:
-                    return store.put_bytes(read_member(archive, internal(image.get(R + "id")), budget, depth))
+                    return store.put_bytes(
+                        read_member(archive, internal(image.get(R + "id")), budget, depth)
+                    )
                 except (ValueError, KeyError):
                     return None
 
             changed_part = False
-            for index, node in enumerate(list(tree.iter(O + "OLEObject")), 1):
+            for index, node in enumerate(list(tree.iter(OFFICE + "OLEObject")), 1):
                 try:
                     if node.get("Type") != "Embed":
                         raise ValueError("docx_linked_object_has_no_content")
@@ -84,11 +93,18 @@ def prepare_docx(data: bytes, store: SourceStore, budget: ExpansionBudget, depth
                     container = read_member(archive, member, budget, depth + 1)
                     name, content = unpack_ole(container)
                     budget.admit(len(content), depth + 1)
-                    original, blob = store.put_bytes(container), store.put_bytes(content)
+                    original = hashlib.sha256(container).hexdigest()
+                    blob = hashlib.sha256(content).hexdigest()
+                    attachment = Attachment(member, name, content, original, blob)
+                    from openkb.docx_attachments import document_name
+
+                    if document_name(attachment) is not None:
+                        store.put_bytes(container)
+                        store.put_bytes(content)
                     marker = "[openkb-attachment-" + content_id([part, index, original]) + "]"
                     if marker.encode() in raw:
                         raise ValueError("docx_attachment_marker_collision")
-                    attachments[marker] = Attachment(member, name, content, original, blob)
+                    attachments[marker] = attachment
                     parent = parents[node]
                     label = Element(W + "t")
                     label.text, label.tail = marker, node.tail
@@ -99,7 +115,7 @@ def prepare_docx(data: bytes, store: SourceStore, budget: ExpansionBudget, depth
                         if digest:
                             icons.add(digest)
                     changed_part = True
-                except (ValueError, KeyError) as exc:
+                except (ValueError, KeyError, BadZipFile) as exc:
                     reason = str(exc) if str(exc).startswith("docx_") else "docx_attachment_missing"
                     quality.append({"status": "needs_review", "reason": reason})
             # VML style/path properties only become advisory when their complete

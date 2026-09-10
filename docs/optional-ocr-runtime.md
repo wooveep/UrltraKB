@@ -1,9 +1,13 @@
 # Optional CPU OCR runtime
 
 Reliable native text parsing works without this package. Uncertain PDF pages use
-the explicitly selected OCR backend; a local failure never silently uploads a
-document. The local backend runs the full PaddleOCR-VL-1.6 layout, recognition and
-assembly pipeline in a separately supervised process.
+the selected OCR backend; a local failure never silently uploads a document.
+On Windows, an unconfigured local backend automatically uses the installed
+Windows OCR engine and language packs. It extracts text and retains page images;
+it does not provide PaddleOCR's document layout interpretation. DOCX OCR is
+selective and advisory as described in [document processing](document-processing.md).
+An explicitly configured local runtime uses the full PaddleOCR-VL-1.6 layout,
+recognition and assembly pipeline in a separately supervised process.
 
 The runtime is separate from the main application's Python environment:
 
