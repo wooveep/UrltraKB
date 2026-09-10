@@ -16,11 +16,11 @@ datas = collect_data_files(
     ],
 )
 datas += [(str(assets), "openkb/rendering/assets")]
-# The separate OCR interpreter executes these files and checks their byte hashes;
-# PYZ bytecode alone cannot serve that external process boundary.
+# OCR executes standalone sources and fingerprints workers/result adapters;
+# PYZ bytecode alone cannot serve these physical-file boundaries.
 datas += [
     (str(repo / "openkb/ocr" / name), "openkb/ocr")
-    for name in ("worker.py", "supervisor.py", "loading.py")
+    for name in ("worker.py", "supervisor.py", "loading.py", "cloud_result.py", "local_result.py")
 ]
 datas += [(str(repo / "openkb/runtime/process_tree.py"), "openkb/runtime")]
 # The manifest is the runtime whitelist; reference fonts stay in the source tree.
@@ -32,6 +32,8 @@ datas += [
 ]
 datas += [(str(packaging / "build/token-cache"), "openkb/token-cache")]
 datas += copy_metadata("openkb", recursive=True)
+# MarkItDown's optional DOCX dependency participates in every parser profile.
+datas += copy_metadata("mammoth")
 for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):
     datas.append((str(repo / "skills" / skill), "openkb/_skills/" + skill))
 hidden = ["openkb.cli", "openkb.api", "tiktoken_ext.openai_public"]
