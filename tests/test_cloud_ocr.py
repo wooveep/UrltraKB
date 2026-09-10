@@ -375,3 +375,85 @@ def test_stopped_page_reprocessing_invalidates_older_knowledge_proposal(
     )
     assert continued.reason == "input_conflict"
     assert (kb_dir / "wiki/index.md").read_text() == "# Human index\nKeep this page.\n"
+
+
+def test_cloud_import_uses_direct_saved_key_without_environment_setup(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    import os
+
+    from openkb.application.settings import apply_kb_config_patch, read_kb_config
+    from openkb.application.settings_data import KbConfigPatchRequest
+
+    cloud_settings(kb_dir)
+    path = kb_dir / ".openkb/config.yaml"
+    value = yaml.safe_load(path.read_text())
+    value["parsing"]["ocr"]["cloud"].pop("credential_env")
+    path.write_text(yaml.safe_dump(value))
+    monkeypatch.delenv("PADDLEOCR_API_KEY", raising=False)
+    apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb="kb", ocr_api_key="direct-ocr-test-key"))
+    source = tmp_path / "direct-key.pdf"
+    scanned_pdf(source)
+    authenticated = []
+
+    def reject_submission(self, method, url, **kwargs):
+        assert method == "POST"
+        authenticated.append(kwargs["headers"]["Authorization"])
+        result = requests.Response()
+        result.status_code = 401
+        result._content = b'{"code": 0, "data": {}}'
+        result._content_consumed = True
+        return result
+
+    monkeypatch.setattr(requests.Session, "request", reject_submission)
+    result = import_document(kb_dir, source)
+    assert authenticated == ["Bearer direct-ocr-test-key"]
+    assert result.status == "unfinished"
+    assert "PADDLEOCR_API_KEY" not in os.environ
+    assert "direct-ocr-test-key" not in read_kb_config(kb_dir).model_dump_json()
+    assert all(
+        "direct-ocr-test-key" not in p.read_text()
+        for p in (kb_dir / ".openkb/source-store").rglob("*.json")
+    )
+
+
+def test_running_cloud_import_keeps_key_captured_before_global_rotation(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    from openkb import config
+    from openkb.application.execution import ExecutionContext
+    from openkb.application.settings import apply_global_config_patch
+    from openkb.application.settings_data import GlobalConfigPatchRequest
+
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
+    monkeypatch.delenv("PADDLEOCR_API_KEY", raising=False)
+    cloud_settings(kb_dir)
+    apply_global_config_patch(GlobalConfigPatchRequest(ocr_api_key="first-ocr-key"))
+    source = tmp_path / "captured-key.pdf"
+    scanned_pdf(source)
+    received = []
+
+    def service(self, method, url, **kwargs):
+        received.append(kwargs["headers"]["Authorization"])
+        result = requests.Response()
+        result.status_code = 401
+        result._content = b'{"code": 0, "data": {}}'
+        result._content_consumed = True
+        return result
+
+    monkeypatch.setattr(requests.Session, "request", service)
+    context = ExecutionContext(
+        on_snapshot=lambda _: apply_global_config_patch(
+            GlobalConfigPatchRequest(ocr_api_key="next-ocr-key")
+        )
+    )
+    import_document(kb_dir, source, context=context)
+    assert received == ["Bearer first-ocr-key"]
+    assert "first-ocr-key" not in repr(context)
+    # A different input avoids reusing the durable failed submission.
+    with pymupdf.open(source) as pdf:
+        pdf[0].set_rotation(90)
+        pdf.save(tmp_path / "next-key.pdf")
+    import_document(kb_dir, tmp_path / "next-key.pdf")
+    assert received == ["Bearer first-ocr-key", "Bearer next-ocr-key"]

@@ -35,8 +35,11 @@ from openkb.config import (
 from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 from openkb.ocr.config import parsing_settings
+from openkb.ocr.credentials import OCR_API_KEY_ENV, resolve_ocr_credential
 
 logger = logging.getLogger(__name__)
+_SECRET_ENV_FIELDS = {"api_key": "LLM_API_KEY", "ocr_api_key": OCR_API_KEY_ENV}
+_CREDENTIAL_FIELDS = (*_SECRET_ENV_FIELDS, "openai_api_base")
 
 
 def _has_line_separator(value: str) -> bool:
@@ -67,12 +70,14 @@ def _reject_credential_newlines(
     (``model_fields_set``); an explicit ``null`` (clear) carries no value.
     """
     fields_set = request.model_fields_set
-    if (
-        "api_key" in fields_set
-        and request.api_key is not None
-        and _has_line_separator(request.api_key.get_secret_value())
-    ):
-        raise ValueError("api_key must not contain newline characters")
+    for field in _SECRET_ENV_FIELDS:
+        secret = getattr(request, field)
+        if (
+            field in fields_set
+            and secret is not None
+            and _has_line_separator(secret.get_secret_value())
+        ):
+            raise ValueError(f"{field} must not contain newline characters")
     if (
         "openai_api_base" in fields_set
         and request.openai_api_base is not None
@@ -138,9 +143,10 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     effective, sources = resolve_effective_config(kb_dir)
     bundle = resolve_credential_bundle(kb_dir)
     global_config = load_global_config()
+    parsing = parsing_settings(effective.get("parsing"))
     return KbConfigResponse(
         model=effective["model"],
-        parsing=parsing_settings(effective.get("parsing")),
+        parsing=parsing,
         processing=effective.get("processing"),
         navigation=effective.get("navigation") or {},
         compilation_thinking=effective.get("compilation_thinking"),
@@ -152,6 +158,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         entity_types=resolve_entity_types(effective, warn=False),
         openai_api_base=bundle.base_url,
         has_api_key=bundle.api_key is not None,
+        has_ocr_api_key=bool(resolve_ocr_credential(kb_dir, parsing.ocr.cloud).api_key),
         sources=sources,
         global_values=GlobalConfigValues(
             model=global_config.get("model"),
@@ -223,23 +230,17 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
                 config[key] = value
         save_config(config_path, config)
 
-    if "api_key" in fields_set or "openai_api_base" in fields_set:
+    if fields_set.intersection(_CREDENTIAL_FIELDS):
         # Reject newline/CR injection in credential VALUES before touching disk:
         # a value with \n/\r would inject extra KEY=VALUE lines into .env (400,
         # never persisted). The shared writer does the secure atomic 0o600 write.
         _reject_credential_newlines(request)
-        updates: dict[str, str | None] = {}
-        if "api_key" in fields_set:
-            updates["LLM_API_KEY"] = (
-                None if request.api_key is None else request.api_key.get_secret_value()
-            )
-        if "openai_api_base" in fields_set:
-            updates["OPENAI_API_BASE"] = request.openai_api_base
+        updates = _credential_updates(request)
         _merge_patch_env(kb_dir / ".env", updates)
         logger.info(
             "kb/config credential rotation: kb=%s fields=%s",
             request.kb,
-            sorted(f for f in ("api_key", "openai_api_base") if f in fields_set),
+            sorted(fields_set.intersection(_CREDENTIAL_FIELDS)),
         )
 
 
@@ -261,9 +262,10 @@ def _read_global_config() -> GlobalConfigResponse:
     env_values: dict[str, str | None] = {}
     if env_path.exists():
         env_values = dict(dotenv_values(str(env_path)))
+    parsing = parsing_settings(gc.get("parsing"))
     return GlobalConfigResponse(
         model=gc.get("model", DEFAULT_CONFIG["model"]),
-        parsing=parsing_settings(gc.get("parsing")),
+        parsing=parsing,
         processing=gc.get("processing"),
         navigation=gc.get("navigation") or {},
         compilation_thinking=gc.get("compilation_thinking"),
@@ -278,6 +280,7 @@ def _read_global_config() -> GlobalConfigResponse:
         kb_root_env_pinned=bool(os.environ.get("OPENKB_KB_ROOT")),
         openai_api_base=(env_values.get("OPENAI_API_BASE") or None),
         has_api_key=bool(env_values.get("LLM_API_KEY")),
+        has_ocr_api_key=bool(resolve_ocr_credential(cloud=parsing.ocr.cloud).api_key),
     )
 
 
@@ -291,7 +294,7 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
     never returned or logged.
     """
     fields_set = request.model_fields_set
-    write_env = "api_key" in fields_set or "openai_api_base" in fields_set
+    write_env = bool(fields_set.intersection(_CREDENTIAL_FIELDS))
     write_kb_root = "kb_root" in fields_set
 
     # Reject newline/CR injection in credential VALUES before the lock is touched
@@ -362,6 +365,17 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
             _write_global_env(request, fields_set)
 
 
+def _credential_updates(request: KbConfigPatchRequest | GlobalConfigPatchRequest):
+    updates: dict[str, str | None] = {}
+    for field, key in _SECRET_ENV_FIELDS.items():
+        if field in request.model_fields_set:
+            secret = getattr(request, field)
+            updates[key] = None if secret is None else secret.get_secret_value()
+    if "openai_api_base" in request.model_fields_set:
+        updates["OPENAI_API_BASE"] = request.openai_api_base
+    return updates
+
+
 def _write_global_env(request: GlobalConfigPatchRequest, fields_set: set[str]) -> None:
     """Read-modify-write the global ``.env`` credential file, mirroring the
     per-KB ``.env`` write in ``apply_kb_config_patch``.
@@ -373,18 +387,12 @@ def _write_global_env(request: GlobalConfigPatchRequest, fields_set: set[str]) -
     (:func:`_reject_credential_newlines`, before the lock). The shared writer
     does the secure atomic 0o600 write; the key VALUE is never logged.
     """
-    updates: dict[str, str | None] = {}
-    if "api_key" in fields_set:
-        updates["LLM_API_KEY"] = (
-            None if request.api_key is None else request.api_key.get_secret_value()
-        )
-    if "openai_api_base" in fields_set:
-        updates["OPENAI_API_BASE"] = request.openai_api_base
+    updates = _credential_updates(request)
     # Module object, not a by-name import: tests monkeypatch GLOBAL_CONFIG_DIR.
     _merge_patch_env(_config_module.GLOBAL_CONFIG_DIR / ".env", updates)
     logger.info(
         "global/config credential rotation: fields=%s",
-        sorted(f for f in ("api_key", "openai_api_base") if f in fields_set),
+        sorted(fields_set.intersection(_CREDENTIAL_FIELDS)),
     )
 
 
@@ -435,4 +443,5 @@ def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
         layers.append(("global", dotenv_values(_config_module.GLOBAL_CONFIG_DIR / ".env")))
         for field, key in (("api_key", "LLM_API_KEY"), ("openai_api_base", "OPENAI_API_BASE")):
             sources[field] = next((name for name, data in layers if data.get(key)), "unset")
+        sources["ocr_api_key"] = resolve_ocr_credential(kb_dir, values.parsing.ocr.cloud).source
         return SettingsView(values=values, sources=sources)

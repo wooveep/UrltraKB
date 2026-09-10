@@ -2395,6 +2395,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "kb_root_env_pinned": False,
         "openai_api_base": None,
         "has_api_key": False,
+        "has_ocr_api_key": False,
         "processing": None,
         "parsing": {"ocr": {"backend": "local", "cloud": None, "local": None}},
         "navigation": {"enabled": False, "processing": None},

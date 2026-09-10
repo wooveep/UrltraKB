@@ -98,7 +98,6 @@ def verify_processing_settings(dialog, kb, wait_until):
     for key, value in {
         "endpoint": "https://ocr.example.test/api/v2/ocr/jobs",
         "model": "PaddleOCR-VL-1.6",
-        "credential_env": "NATIVE_OCR_TEST_TOKEN",
     }.items():
         ocr.forms["cloud"]["identity"].inputs[key].setText(value)
     cloud_limits = {
@@ -113,12 +112,24 @@ def verify_processing_settings(dialog, kb, wait_until):
     for key, value in cloud_limits.items():
         ocr.forms["cloud"]["limits"].inputs[key].setText(str(value))
     ocr.action.setCurrentIndex(1)
+    key = dialog.fields["ocr_api_key"]
+    key.action.setCurrentIndex(1)
+    key.text.setText("native-ocr-key-fixture")
     dialog.save()
     wait_until(lambda: dialog.form.isEnabled())
     saved = read_settings_view(kb)
     assert saved.values.processing == budgets
     assert saved.values.parsing.ocr.backend == "cloud"
-    assert saved.values.parsing.ocr.cloud.credential_env == "NATIVE_OCR_TEST_TOKEN"
+    assert saved.values.has_ocr_api_key and saved.sources["ocr_api_key"] == "kb"
+    assert "native-ocr-key-fixture" not in saved.model_dump_json()
+    assert not key.text.text() and "已设置" in key.text.placeholderText()
+    assert key.text.echoMode() == key.text.EchoMode.Password
+    assert "credential_env" not in ocr.forms["cloud"]["identity"].inputs
+    key.action.setCurrentIndex(1)
+    key.text.setText("native-ocr-key-rotated")
+    dialog.save()
+    wait_until(lambda: dialog.form.isEnabled())
+    assert read_settings_view(kb).values.parsing == saved.values.parsing
     ocr.backend.setCurrentIndex(0)
     ocr.action.setCurrentIndex(1)
     dialog.save()
@@ -137,10 +148,12 @@ def verify_processing_settings(dialog, kb, wait_until):
     assert saved_navigation.values.navigation.enabled
     assert saved_navigation.values.navigation.processing == budgets
     assert saved_navigation.values.processing == budgets
-    for field in (processing, ocr, navigation):
+    assert switched.values.has_ocr_api_key
+    for field in (processing, ocr, navigation, key):
         field.action.setCurrentIndex(2)
     dialog.save()
     wait_until(lambda: dialog.form.isEnabled())
     cleared = read_settings_view(kb)
     assert cleared.sources["processing"] != "kb" and cleared.sources["parsing"] != "kb"
     assert cleared.sources["navigation"] != "kb"
+    assert not cleared.values.has_ocr_api_key

@@ -103,6 +103,7 @@ class GlobalConfigResponse(BaseModel):
     # key value is NEVER returned by the API. Mirrors KbConfigResponse.
     openai_api_base: str | None
     has_api_key: bool
+    has_ocr_api_key: bool = False
 
 
 class GlobalConfigPatchRequest(BaseModel):
@@ -112,6 +113,7 @@ class GlobalConfigPatchRequest(BaseModel):
     # explicit null CLEARS it. api_key is a SecretStr so its value never lands
     # in logs/reprs.
     api_key: SecretStr | None = None
+    ocr_api_key: SecretStr | None = None
     openai_api_base: str | None = None
     # RFC 7386 merge-patch (via model_fields_set): a string SETS global.yaml
     # `kb_root`, an explicit null REMOVES it (revert to the default root), and an
@@ -133,6 +135,7 @@ class KbConfigResponse(BaseModel):
     entity_types: list[str]
     openai_api_base: str | None
     has_api_key: bool
+    has_ocr_api_key: bool = False
     # Additive (non-breaking): which layer supplied each scalar's effective
     # value, and the raw global-layer values for the "继承 · 全局(値)" badge.
     sources: dict[str, Literal["kb", "global", "default"]]
@@ -143,6 +146,7 @@ class KbConfigPatchRequest(BaseModel):
     kb: str
     config: dict[str, Any] | None = None
     api_key: SecretStr | None = None
+    ocr_api_key: SecretStr | None = None
     openai_api_base: str | None = None
 
 

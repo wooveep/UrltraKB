@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic.alias_generators import to_camel
 
+from openkb.ocr.credentials import OCR_API_KEY_ENV
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -40,7 +42,8 @@ class CloudOptions(Settings):
 class CloudSettings(Settings):
     endpoint: str
     model: str
-    credential_env: str
+    # Existing custom references still load; editors accept a separate API key.
+    credential_env: str = OCR_API_KEY_ENV
     limits: CloudLimits
     options: CloudOptions = Field(default_factory=CloudOptions)
 

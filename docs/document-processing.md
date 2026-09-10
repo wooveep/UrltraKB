@@ -151,8 +151,19 @@ claiming an atomic whole-filesystem switch.
 The desktop document list opens source status, bounded original evidence,
 physical PDF page previews and proposed changes. Settings includes processing
 budgets and separately retained local/cloud OCR profiles, with global inheritance
-and per-library overrides. Cloud credentials are environment-variable references;
-never enter a key into a manifest or model name.
+and per-library overrides. Enter the cloud OCR API key directly in
+**Settings → Document recognition → Cloud configuration → Cloud API Key**.
+Like the model key, it supports replacement, clearing the current override and
+global inheritance. The password field never reads the saved key back.
+The application stores it in the same private credential file as model keys;
+users do not need to configure an environment variable. Existing custom
+`credential_env` profiles remain a compatibility fallback when no directly saved
+OCR key is available. A running task retains its captured key after rotation.
+
+REST settings patches accept a top-level `ocr_api_key` string, separately from
+`config.parsing`; omit it to retain the key or send `null` to clear the override.
+Settings responses expose only `has_ocr_api_key`. The key never becomes part of
+an OCR profile, parse identity, source manifest or model name.
 
 The CLI `openkb source --help` lists source inspection, continuation, reparse,
 page confirmation, page reprocessing and explicit history cleanup commands.

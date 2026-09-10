@@ -28,7 +28,8 @@ def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_p
     assert (incomplete / "unexpected").read_text() == "keep"
 
 
-def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("key_field", ["api_key", "ocr_api_key"])
+def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkeypatch, key_field):
     from openkb import config
     from openkb.application import settings
     from openkb.application.settings_data import GlobalConfigPatchRequest
@@ -36,7 +37,7 @@ def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkey
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     settings.apply_global_config_patch(
-        GlobalConfigPatchRequest(config={"model": "before"}, api_key="before-secret")
+        GlobalConfigPatchRequest(config={"model": "before"}, **{key_field: "before-secret"})
     )
     before = {path: path.read_bytes() for path in (tmp_path / "global.yaml", tmp_path / ".env")}
     write = settings._write_global_env
@@ -48,7 +49,7 @@ def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkey
     monkeypatch.setattr(settings, "_write_global_env", fail_after_write)
     with pytest.raises(OSError, match="disk failure"):
         settings.apply_global_config_patch(
-            GlobalConfigPatchRequest(config={"model": "after"}, api_key="after-secret")
+            GlobalConfigPatchRequest(config={"model": "after"}, **{key_field: "after-secret"})
         )
     assert {path: path.read_bytes() for path in before} == before
 
@@ -198,3 +199,35 @@ def test_settings_patch_preserves_three_states_and_hides_secret(kb_dir, tmp_path
     assert current.has_api_key
     apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb="kb", api_key=None))
     assert "LLM_API_KEY" not in (kb_dir / ".env").read_text()
+
+
+def test_ocr_key_uses_direct_secret_patch_and_kb_inheritance(kb_dir, tmp_path, monkeypatch):
+    from openkb import config
+    from openkb.application.settings import (
+        apply_global_config_patch,
+        apply_kb_config_patch,
+        read_settings_view,
+    )
+    from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
+    monkeypatch.delenv("PADDLEOCR_API_KEY", raising=False)
+    patch = GlobalConfigPatchRequest(ocr_api_key="global-ocr-secret")
+    assert "global-ocr-secret" not in repr(patch)
+    apply_global_config_patch(patch)
+    inherited = read_settings_view(kb_dir)
+    assert inherited.values.has_ocr_api_key
+    assert inherited.sources["ocr_api_key"] == "global"
+    apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb="kb", ocr_api_key="kb-ocr-secret"))
+    apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb="kb", config={"language": "Chinese"}))
+    current = read_settings_view(kb_dir)
+    assert current.values.has_ocr_api_key and current.sources["ocr_api_key"] == "kb"
+    assert "kb-ocr-secret" not in current.model_dump_json()
+    assert "global-ocr-secret" not in current.model_dump_json()
+    assert "kb-ocr-secret" not in (kb_dir / ".openkb/config.yaml").read_text()
+    apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb="kb", ocr_api_key=None))
+    assert read_settings_view(kb_dir).sources["ocr_api_key"] == "global"
+    apply_global_config_patch(GlobalConfigPatchRequest(ocr_api_key=None))
+    assert not read_settings_view(kb_dir).values.has_ocr_api_key
+    assert not read_settings_view().values.has_ocr_api_key

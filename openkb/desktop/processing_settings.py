@@ -139,8 +139,13 @@ class NavigationField(SettingsSection):
 class OcrField(SettingsSection):
     def __init__(self):
         super().__init__(
-            "可靠文字层直接读取；需要识别的页使用选定后端。本地与云配置分别保存。云凭证填写启动环境中的变量名；此处不填写密钥。"
+            "可靠文字层直接读取；需要识别的页使用选定后端。本地与云配置分别保存。"
+            "云端 API Key 可直接输入，保存后仅显示是否已设置。"
         )
+        from openkb.desktop.settings import SettingField
+
+        self.cloud_key = SettingField("ocr_api_key")
+        self.cloud_key.text.setAccessibleName("OCR 云端 API Key")
         self.backend = QComboBox()
         self.backend.addItem("本地 PaddleOCR-VL-1.6（CPU）", "local")
         self.backend.addItem("PaddleOCR 云 jobs 服务", "cloud")
@@ -160,7 +165,6 @@ class OcrField(SettingsSection):
         cloud = [
             ("endpoint", "云 jobs 端点", str),
             ("model", "云模型名称", str),
-            ("credential_env", "凭证环境变量名", str),
         ]
         for name, title, identity in (("local", "本地配置", local), ("cloud", "云配置", cloud)):
             panel = QWidget()
@@ -199,10 +203,13 @@ class OcrField(SettingsSection):
                     ("max_download_bytes", "本轮下载上限（字节）", int),
                 ]
             fields["limits"] = ValueForm(limits)
-            for form in fields.values():
+            for group, form in fields.items():
                 layout.addWidget(form)
                 for entry in form.inputs.values():
                     entry.textEdited.connect(self.changed)
+                if name == "cloud" and group == "identity":
+                    layout.addWidget(QLabel("云端 API Key"))
+                    layout.addWidget(self.cloud_key)
             if name == "cloud":
                 for key, label in (
                     ("use_doc_orientation_classify", "云端自动判断页面方向"),
@@ -253,4 +260,4 @@ class OcrField(SettingsSection):
         try:
             return ParsingSettings.model_validate({"ocr": result}).model_dump()
         except ValueError:
-            raise ValueError("请检查 OCR 路径、凭证变量名、像素范围与有限正数额度。") from None
+            raise ValueError("请检查 OCR 路径、模型、像素范围与有限正数额度。") from None

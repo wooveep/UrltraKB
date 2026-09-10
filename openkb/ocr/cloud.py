@@ -12,10 +12,10 @@ import pymupdf
 import requests
 
 from openkb.compilation_report import report_auxiliary_warning
-from openkb.config_state import execution_environment
 from openkb.evidence import BlockDraft, ParseStore
 from openkb.locks import atomic_write_json
 from openkb.ocr.config import CloudSettings
+from openkb.ocr.credentials import resolve_ocr_credential
 from openkb.processing import processing_checkpoint
 from openkb.sources import SourceStore, SourceVersion, content_id, read_object
 
@@ -33,7 +33,7 @@ class CloudJobs:
         self.requests = self.pages = self.downloaded = 0
         self.session = requests.Session()
         self.session.trust_env = False
-        self.token = execution_environment(store.kb_dir).get(config.credential_env)
+        self.token = resolve_ocr_credential(store.kb_dir, config).api_key
         self.record: dict = {}
         self.path: Path | None = None
         self.remote_may_continue = False

@@ -106,6 +106,8 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
 
     from openkb import config
     from openkb.locks import kb_ingest_lock_held
+    from openkb.ocr.config import parsing_settings
+    from openkb.ocr.credentials import resolve_ocr_credential
 
     kb_dir = kb_dir.resolve()
     if not kb_ingest_lock_held(kb_dir / ".openkb"):
@@ -135,6 +137,8 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                 if value:
                     environment[key] = value
             bundle = config.resolve_credential_bundle(kb_dir)
+            cloud = parsing_settings(effective.get("parsing")).ocr.cloud
+            ocr_credential = resolve_ocr_credential(kb_dir, cloud)
             if read_versions() != before:
                 continue
             if bundle.api_key:
@@ -151,6 +155,7 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                         "sources": sources,
                         "raw": raw,
                         "credentials": asdict(bundle),
+                        "ocr_credential": asdict(ocr_credential),
                         "environment": environment,
                     },
                     ensure_ascii=False,

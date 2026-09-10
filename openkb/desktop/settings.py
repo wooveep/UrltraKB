@@ -39,7 +39,9 @@ _FIELDS = {
     "entity_types": "实体类型（逗号分隔）",
     "openai_api_base": "API base URL",
     "api_key": "API Key",
+    "ocr_api_key": "OCR 云端 API Key",
 }
+_SECRET_FIELDS = {"api_key": "has_api_key", "ocr_api_key": "has_ocr_api_key"}
 
 
 class SettingField(QWidget):
@@ -51,7 +53,7 @@ class SettingField(QWidget):
         self.action = QComboBox()
         self.action.addItems(["不变", "设置", "清除覆盖"])
         self.text = QLineEdit()
-        if key == "api_key":
+        if key in _SECRET_FIELDS:
             self.text.setEchoMode(QLineEdit.EchoMode.Password)
         self.text.textEdited.connect(lambda: self.action.setCurrentIndex(1))
         self.source = QLabel()
@@ -62,7 +64,7 @@ class SettingField(QWidget):
     def load(self, value, source):
         self.action.setCurrentIndex(0)
         self.text.clear()
-        if self.key == "api_key":
+        if self.key in _SECRET_FIELDS:
             current = "已设置（输入可更换）" if value else "未设置"
         elif isinstance(value, list):
             current = ", ".join(value)
@@ -75,7 +77,7 @@ class SettingField(QWidget):
     def value(self):
         if self.action.currentIndex() == 2:
             return None
-        text = self.text.text().strip() if self.key != "api_key" else self.text.text()
+        text = self.text.text() if self.key in _SECRET_FIELDS else self.text.text().strip()
         if not text:
             raise ValueError(f"{_FIELDS[self.key]}：请输入值，或选择清除覆盖")
         if self.key == "pageindex_threshold":
@@ -109,6 +111,8 @@ class SettingsDialog(ManagementPanel):
         form_layout = QFormLayout(self.form)
         self.fields = {}
         for key, label in _FIELDS.items():
+            if key == "ocr_api_key":
+                continue  # This credential is edited inside the cloud OCR panel.
             field = SettingField(key)
             self.fields[key] = field
             form_layout.addRow(label, field)
@@ -120,6 +124,7 @@ class SettingsDialog(ManagementPanel):
         tabs.addTab(self.form, "基本设置")
         self.fields["processing"] = ProcessingField()
         self.fields["parsing"] = OcrField()
+        self.fields["ocr_api_key"] = self.fields["parsing"].cloud_key
         tabs.addTab(self.fields["processing"], "处理额度")
         tabs.addTab(self.fields["parsing"], "文档识别")
         self.fields["navigation"] = NavigationField()
@@ -179,7 +184,7 @@ class SettingsDialog(ManagementPanel):
         self.editors.setEnabled(True)
         self.status.setText(str(self.kb) if self.kb else "全局默认：知识库与启动环境可覆盖这些值。")
         for key, field in self.fields.items():
-            value = view.values.has_api_key if key == "api_key" else getattr(view.values, key)
+            value = getattr(view.values, _SECRET_FIELDS.get(key, key))
             field.load(value, view.sources[key])
 
     def save(self):
@@ -192,7 +197,9 @@ class SettingsDialog(ManagementPanel):
                 if field.action.currentIndex() != 0
             }
             credentials = {
-                key: changes.pop(key) for key in ("api_key", "openai_api_base") if key in changes
+                key: changes.pop(key)
+                for key in (*_SECRET_FIELDS, "openai_api_base")
+                if key in changes
             }
             if not changes and not credentials:
                 return
