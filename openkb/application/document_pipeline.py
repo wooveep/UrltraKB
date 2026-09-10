@@ -282,8 +282,6 @@ def _materialize(
         processing_checkpoint()
         content = store.asset(block.blob).read_text(encoding="utf-8")
         for digest in block.assets:
-            if "asset:" + digest not in content:
-                continue
             if digest in attachments:
                 from openkb.inputs import SUPPORTED_EXTENSIONS
 

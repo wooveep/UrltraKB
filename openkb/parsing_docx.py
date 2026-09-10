@@ -57,7 +57,7 @@ def parse_docx(
 
                 attachment = replace(attachment, name=name)
                 pending_attachments.append(attachment)
-                assets.extend((attachment.container, attachment.blob))
+                assets.append(attachment.blob)
                 return f"[Embedded attachment: {attachment.name}](asset:{attachment.blob})"
             return node.value
         if isinstance(node, nodes.Tab):

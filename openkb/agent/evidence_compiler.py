@@ -129,8 +129,9 @@ def compile_evidence(
     )
     used_assets = {asset for block in parsed.blocks for asset in block.assets}
     assets = {
-        path.stem: "../sources/images/" + path.name
-        for path in (wiki / "sources/images").glob("*")
+        path.stem: "../sources/" + directory + "/" + path.name
+        for directory in ("images", "attachments")
+        for path in (wiki / "sources" / directory).glob("*")
         if path.stem in used_assets and path.is_file()
     }
     if set(assets) != used_assets:

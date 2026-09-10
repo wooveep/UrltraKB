@@ -57,7 +57,7 @@ def bind_blocks(blocks, attachment: Attachment, position: dict) -> list[BlockDra
                     "position": block.location,
                 },
             },
-            assets=tuple(dict.fromkeys((attachment.container, attachment.blob, *block.assets))),
+            assets=tuple(dict.fromkeys((attachment.blob, *block.assets))),
             context=f"Embedded attachment: {attachment.name}\n{block.context}",
         )
         for block in blocks

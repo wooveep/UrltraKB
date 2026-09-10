@@ -145,6 +145,19 @@ def test_document_attachment_identity_survives_parent_updates(kb_dir, tmp_path):
     assert store.original(children[0]).is_file()
 
 
+def test_document_attachments_compile_and_publish_as_downloadable_sources(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.application.documents import import_document
+
+    child = tmp_path / "instructions.docx"
+    write_docx(child, "<w:p><w:r><w:t>Recovery requires port 9473.</w:t></w:r></w:p>")
+    parent = attached_docx(tmp_path / "manual.docx", child.read_bytes())
+    result = import_document(kb_dir, parent)
+    assert result.knowledge_compilation == "completed", result
+    assert list((kb_dir / "wiki/sources/attachments").glob("*.docx"))
+
+
 @pytest.mark.parametrize("mutation", ["outer_size", "inner_size", "truncated"])
 def test_ole_native_rejects_incomplete_payloads(mutation):
     payload = bytearray(native_package("note.txt", b"Original content"))
