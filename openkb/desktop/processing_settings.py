@@ -72,20 +72,23 @@ class SettingsSection(QWidget):
 class ProcessingField(SettingsSection):
     def __init__(self):
         super().__init__(
-            "知识编译自动使用默认额度，无需填写。需要调整时选择“设置”；清除覆盖后恢复继承。"
-            "请求上限应在模型支持范围内，输出上限必须小于上下文上限。"
+            "知识编译默认从 256K 上下文、128K 输出开始；截断后逐档增加到 1M／384K，"
+            "仍截断则拆小批次重试。单文档累计 token 默认不限。"
+            "可按模型能力调整；清除覆盖后恢复继承。"
         )
         self.values = ValueForm(
             [
-                ("context_tokens", "单次请求上下文上限（token）", int),
-                ("output_tokens", "单次输出上限（token）", int),
+                ("context_tokens", "初始上下文（token）", int),
+                ("output_tokens", "初始输出（token）", int),
+                ("max_context_tokens", "模型最大上下文（token）", int),
+                ("max_output_tokens", "模型最大输出（token）", int),
                 ("request_timeout", "单次请求时限（秒）", float),
                 ("stage_timeout", "单个阶段时限（秒）", float),
                 ("document_timeout", "整份资料时限（秒）", float),
                 ("cleanup_timeout", "任务收尾时限（秒）", float),
                 ("max_attempts", "单次操作最多尝试数", int),
                 ("max_requests", "整份资料最多请求数", int),
-                ("max_tokens", "整份资料累计 token 上限", int),
+                ("max_tokens", "累计 token 上限（0 表示不限）", lambda text: int(text) or None),
                 ("concurrency", "同时进行的模型请求上限", int),
             ]
         )
@@ -95,7 +98,12 @@ class ProcessingField(SettingsSection):
             entry.textEdited.connect(self.changed)
 
     def load(self, value, source):
-        self.values.load(value or {})
+        values = dict(value or {})
+        for key in ("context_tokens", "output_tokens"):
+            values.setdefault("max_" + key, values.get(key, ""))
+        if values.get("max_tokens") is None:
+            values["max_tokens"] = 0
+        self.values.load(values)
         self.loaded(source)
 
     def value(self):
@@ -105,7 +113,9 @@ class ProcessingField(SettingsSection):
         try:
             RequestLimits.from_config({"processing": result})
         except ProcessingIncomplete:
-            raise ValueError("处理额度必须为有限正数，输出上限必须小于模型上下文容量。") from None
+            raise ValueError(
+                "初始值不得超过模型最大值，输出须小于上下文；累计 token 可填 0，其余须为正数。"
+            ) from None
         return result
 
 

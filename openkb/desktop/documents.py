@@ -109,6 +109,7 @@ class DocumentsDialog(ManagementPanel):
         deletion = FlowLayout()
         self.preview_button = QPushButton("查看删除计划")
         self.confirm_button = QPushButton("确认删除")
+        self.confirm_button.setObjectName("dangerAction")
         self.confirm_button.setEnabled(False)
         for button, callback in (
             (self.preview_button, self.preview),

@@ -1,6 +1,6 @@
 """Page composition around the existing native controls and application interfaces."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTabWidget,
+    QToolButton,
     QTreeWidget,
     QVBoxLayout,
     QWidget,
@@ -24,6 +25,7 @@ from openkb.desktop.drawer import Drawer
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.fonts import text_font
 from openkb.desktop.location import LocationLabel
+from openkb.desktop.navigation_icons import navigation_icon
 from openkb.desktop.reader import MarkdownView
 from openkb.desktop.shell import PAGES, action
 
@@ -74,38 +76,80 @@ class Workspaces:
         outer = self.hosts["概览"]
         content, layout = page()
         content.setMaximumWidth(960)
-        row = QHBoxLayout()
+        canvas = QWidget()
+        row = QHBoxLayout(canvas)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addStretch()
         row.addWidget(content, 1)
         row.addStretch()
-        outer.addLayout(row, 1)
-        layout.setContentsMargins(20, 32, 20, 20)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        layout.setContentsMargins(12, 24, 12, 20)
+        eyebrow = QLabel("你的知识工作台")
+        eyebrow.setObjectName("eyebrow")
+        layout.addWidget(eyebrow)
         title = QLabel("知识，从这里开始")
         title.setObjectName("welcomeTitle")
         layout.addWidget(title)
-        layout.addWidget(path_label("将原始资料整理为相互关联的知识，继续阅读、提问与创作。"))
+        intro = path_label("将原始资料整理为相互关联的知识，继续阅读、提问与创作。")
+        intro.setObjectName("overviewIntro")
+        layout.addWidget(intro)
         row = FlowLayout()
         for label, callback in (
             ("新建知识库", self.window._create_kb),
             ("打开知识库", self.window._choose_kb),
         ):
-            row.addWidget(action(label, callback))
+            button = action(label, callback)
+            if label == "新建知识库":
+                button.setObjectName("primaryAction")
+            row.addWidget(button)
         layout.addLayout(row)
+        layout.addSpacing(8)
+        summary = QFrame()
+        summary.setObjectName("overviewSummary")
+        summary_body = QVBoxLayout(summary)
+        summary_body.setContentsMargins(22, 18, 22, 18)
+        summary_body.setSpacing(8)
+        summary_title = QLabel("当前知识库")
+        summary_title.setObjectName("sectionTitle")
+        summary_body.addWidget(summary_title)
         self.overview_location = LocationLabel("尚未打开知识库")
-        layout.addWidget(self.overview_location)
+        self.overview_location.setObjectName("muted")
+        summary_body.addWidget(self.overview_location)
         self.stats = QLabel("打开知识库后，在这里查看资料、知识与最近活动。")
         self.stats.setObjectName("overviewStats")
         self.stats.setWordWrap(True)
-        layout.addWidget(self.stats)
+        summary_body.addWidget(self.stats)
         self.recent = path_label("")
-        layout.addWidget(self.recent)
+        self.recent.setObjectName("muted")
+        summary_body.addWidget(self.recent)
+        layout.addWidget(summary)
+        layout.addSpacing(8)
+        next_title = QLabel("继续探索")
+        next_title.setObjectName("sectionTitle")
+        layout.addWidget(next_title)
         self.shortcuts = QWidget()
         quick = FlowLayout(self.shortcuts)
         quick.setContentsMargins(0, 0, 0, 0)
+        self.shortcut_buttons = {}
         for label, target in (("导入资料", "资料"), ("阅读知识", "知识"), ("开始对话", "对话")):
-            quick.addWidget(
-                action(label, lambda checked=False, name=target: self.window.shell.navigate(name))
+            button = QToolButton()
+            button.setObjectName("overviewShortcut")
+            button.setText(label)
+            button.setAccessibleName(label)
+            button.setToolTip(label)
+            button.setIcon(navigation_icon(target))
+            button.setIconSize(QSize(22, 22))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setMinimumWidth(136)
+            button.clicked.connect(
+                lambda checked=False, name=target: self.window.shell.navigate(name)
             )
+            quick.addWidget(button)
+            self.shortcut_buttons[target] = button
         layout.addWidget(self.shortcuts)
         layout.addStretch()
 
@@ -118,7 +162,10 @@ class Workspaces:
             ("导入目录", self.window._import_directory),
             ("导入网址", self.window._import_urls),
         ):
-            row.addWidget(action(label, callback))
+            button = action(label, callback)
+            if label == "导入文件":
+                button.setObjectName("primaryAction")
+            row.addWidget(button)
         self.hosts["资料"].addWidget(self.import_controls)
 
     def _knowledge(self):
@@ -161,6 +208,7 @@ class Workspaces:
         editor_layout.addWidget(w.editor, 1)
         buttons = FlowLayout()
         w.save_button = action("保存正文", w._save_page)
+        w.save_button.setObjectName("primaryAction")
         for button in (
             w.save_button,
             action("查看最新版本 / 处理冲突", w._review_draft),

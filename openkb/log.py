@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
 from openkb.locks import atomic_write_text, kb_ingest_lock
+
+logger = logging.getLogger(__name__)
 
 
 def append_log(wiki_dir: Path, operation: str, description: str) -> None:

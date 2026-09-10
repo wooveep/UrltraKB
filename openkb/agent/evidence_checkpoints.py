@@ -23,6 +23,7 @@ def compilation_profile(settings, bundle):
                     "evidence_checkpoints",
                     "evidence_compiler",
                     "evidence_units",
+                    "evidence_retry",
                     "evidence_pages",
                     "evidence_plan",
                     "evidence_verifier",
@@ -57,9 +58,14 @@ class CompilationCheckpoints:
 
     def key(self, system, payload, *, dependencies=None):
         stage_modules = {
-            "facts": ("evidence_compiler", "evidence_units"),
-            "planning": ("evidence_plan",),
-            "generation": ("evidence_pages", "evidence_verifier", "evidence_markup"),
+            "facts": ("evidence_compiler", "evidence_units", "evidence_retry"),
+            "planning": ("evidence_plan", "evidence_retry"),
+            "generation": (
+                "evidence_pages",
+                "evidence_verifier",
+                "evidence_markup",
+                "evidence_retry",
+            ),
         }
         return content_id(
             {

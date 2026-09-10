@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from openkb.agent.evidence_pages import _existing_window
+from openkb.agent.evidence_retry import retry_batches
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages
 from openkb.config import compilation_model_options, resolve_entity_types
 from openkb.knowledge_commit import wiki_version
@@ -45,7 +46,7 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
 
     def fits_batch(batch):
         # Reserve room for one complete row per topic as well as the request's
-        # full output allowance. A provider's actual length stop is still fatal.
+        # full output allowance. Unexpected expansion is retried before splitting.
         shape = {
             "topics": [
                 {"name": topic, "title": topic, "kind": "concept", "members": [topic]}
@@ -56,7 +57,7 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
             model=model, text=json.dumps(shape)
         ) <= limits.output_tokens and fits(limits, model, PLAN_SYSTEM, payload(batch))
 
-    def plan(batch):
+    def plan_once(batch):
         processing_checkpoint("planning")
         request = payload(batch)
         key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
@@ -86,6 +87,10 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                 planned[target]["members"].extend(group["members"])
             else:
                 planned[target] = group
+
+    def plan(batch):
+        for _ in retry_batches(batch, plan_once, stage="planning", on_event=on_event):
+            pass
 
     batch = []
     for topic in topics:

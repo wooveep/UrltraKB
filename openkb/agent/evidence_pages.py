@@ -7,6 +7,7 @@ import re
 from dataclasses import asdict
 
 from openkb import frontmatter
+from openkb.agent.evidence_retry import retry_batches, split_generation
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages, output_fits
 from openkb.config import compilation_model_options
 from openkb.evidence import Evidence
@@ -255,7 +256,8 @@ def generate_topic(
     batch, evidence = [], []
     contributions = []
 
-    def generate():
+    def generate_once(pairs):
+        batch, evidence = map(list, zip(*pairs))
         processing_checkpoint("generation")
         payload = {**base, "facts": _model_facts(batch), "evidence": list(evidence)}
         from openkb.sources import content_id
@@ -374,6 +376,16 @@ def generate_topic(
             contributions.append(content + "\n\n" + citations)
             on_event({"stage": "generated", "topic": group["title"]})
             return
+
+    def generate():
+        for _ in retry_batches(
+            list(zip(batch, evidence)),
+            generate_once,
+            stage="generation",
+            on_event=on_event,
+            split=split_generation,
+        ):
+            pass
 
     for fact in facts:
         for item in _evidence_windows(fact, reader, base, limits, model):

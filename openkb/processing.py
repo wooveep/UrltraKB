@@ -12,10 +12,26 @@ import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterator
 
 from openkb.cancellation import check_cancelled
+
+# Request capacities are configurable model ceilings, not provider discovery.
+DEFAULT_PROCESSING = {
+    "context_tokens": 262144,
+    "output_tokens": 131072,
+    "max_context_tokens": 1048576,
+    "max_output_tokens": 393216,
+    "request_timeout": 180,
+    "stage_timeout": 1800,
+    "document_timeout": 3600,
+    "cleanup_timeout": 10,
+    "max_attempts": 2,
+    "max_requests": 200,
+    "max_tokens": None,
+    "concurrency": 2,
+}
 
 
 class ProcessingIncomplete(BaseException):
@@ -24,6 +40,20 @@ class ProcessingIncomplete(BaseException):
     def __init__(self, reason: str, stage: str = "compiling") -> None:
         super().__init__(reason)
         self.reason, self.stage = reason, stage
+
+
+class OutputTruncated(ProcessingIncomplete):
+    """A settled response that may be retried with more room or less evidence."""
+
+    def __init__(self, stage: str) -> None:
+        super().__init__("output_budget_exhausted", stage)
+
+
+class InputTooLarge(ProcessingIncomplete):
+    """A measured request that has not been sent and can be safely resized."""
+
+    def __init__(self) -> None:
+        super().__init__("input_budget_exceeded")
 
 
 @dataclass(frozen=True)
@@ -36,8 +66,10 @@ class RequestLimits:
     cleanup_timeout: float
     max_attempts: int
     max_requests: int
-    max_tokens: int
+    max_tokens: int | None
     concurrency: int
+    max_context_tokens: int | None = None
+    max_output_tokens: int | None = None
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> RequestLimits:
@@ -61,10 +93,30 @@ class RequestLimits:
             numbers[key] = value
         for key in ("max_attempts", "max_requests", "max_tokens", "concurrency"):
             value = values.get(key)
+            if key == "max_tokens" and key in values and value is None:
+                numbers[key] = None
+                continue
             if type(value) is not int or value <= 0:
                 raise ProcessingIncomplete("execution_budget_required", "configuration")
             numbers[key] = value
+        for key, initial in (("max_context_tokens", context), ("max_output_tokens", output)):
+            value = values.get(key, initial)
+            if type(value) is not int or value < initial:
+                raise ProcessingIncomplete("model_capabilities_required", "configuration")
+            numbers[key] = value
+        if numbers["max_output_tokens"] >= numbers["max_context_tokens"]:
+            raise ProcessingIncomplete("model_capabilities_required", "configuration")
         return cls(context, output, **numbers)
+
+    def expanded(self) -> RequestLimits:
+        """Double each allowance up to its explicit model ceiling."""
+        return replace(
+            self,
+            context_tokens=min(
+                self.context_tokens * 2, self.max_context_tokens or self.context_tokens
+            ),
+            output_tokens=min(self.output_tokens * 2, self.max_output_tokens or self.output_tokens),
+        )
 
     def request(
         self, model: str, messages: list[dict], kwargs: dict[str, Any]
@@ -86,7 +138,7 @@ class RequestLimits:
 
             tokens += litellm.token_counter(model=model, text=json.dumps(kwargs["response_format"]))
         if tokens + output > self.context_tokens:
-            raise ProcessingIncomplete("input_budget_exceeded")
+            raise InputTooLarge()
         # These parameters are execution invariants, not optional provider hints.
         options = dict(kwargs)
         options.pop("max_completion_tokens", None)
@@ -133,9 +185,13 @@ class ExecutionBudget:
             self.stage, self.stage_started = stage, now
         return remaining
 
-    def reserve(self, kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def reserve(
+        self, kwargs: dict[str, Any], limits: RequestLimits | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         remaining = self.checkpoint()
-        options, tokens = self.limits.request(kwargs["model"], kwargs["messages"], kwargs)
+        options, tokens = (limits or self.limits).request(
+            kwargs["model"], kwargs["messages"], kwargs
+        )
         timeout = options.get("timeout")
         if timeout is None:
             timeout = self.limits.request_timeout
@@ -151,7 +207,10 @@ class ExecutionBudget:
         with self.lock:
             if self.attempts >= self.limits.max_requests:
                 raise ProcessingIncomplete("request_budget_exhausted", self.stage)
-            if self.charged_tokens + reserved > self.limits.max_tokens:
+            if (
+                self.limits.max_tokens is not None
+                and self.charged_tokens + reserved > self.limits.max_tokens
+            ):
                 raise ProcessingIncomplete("token_budget_exhausted", self.stage)
             self.attempts += 1
             self.charged_tokens += reserved
@@ -183,18 +242,59 @@ class ExecutionBudget:
                 observation["usage"] = {"input": input_tokens, "output": output_tokens}
             self.on_observation(self)
         self.checkpoint()
-        if getattr(response.choices[0], "finish_reason", None) == "length":
-            raise ProcessingIncomplete("output_budget_exhausted", self.stage)
-        if self.charged_tokens > self.limits.max_tokens:
+        if self.limits.max_tokens is not None and self.charged_tokens > self.limits.max_tokens:
             raise ProcessingIncomplete("token_budget_exhausted", self.stage)
+        if getattr(response.choices[0], "finish_reason", None) == "length":
+            raise OutputTruncated(self.stage)
 
     def call(self, function: Any, **kwargs: Any) -> Any:
+        while True:
+            limits = self.limits
+            try:
+                return self._call(function, limits, **kwargs)
+            except (OutputTruncated, InputTooLarge) as exc:
+                if not self.expand(limits, kwargs, exc.reason):
+                    raise
+
+    def expand(self, previous: RequestLimits, kwargs: dict[str, Any], reason: str) -> bool:
+        # Explicit per-operation output limits (e.g. navigation) remain binding.
+        if "max_tokens" in kwargs or "max_completion_tokens" in kwargs:
+            return False
+        if (
+            reason == "output_budget_exhausted"
+            and previous.output_tokens == previous.max_output_tokens
+        ):
+            return False
+        if (
+            reason == "input_budget_exceeded"
+            and previous.context_tokens == previous.max_context_tokens
+        ):
+            return False
+        with self.lock:
+            self.checkpoint()
+            expanded = previous.expanded()
+            if expanded == previous:
+                return False
+            if self.limits == previous:
+                self.limits = expanded
+            from openkb.log import logger
+
+            logger.info(
+                "%s [%s]; retrying with context=%s, output=%s",
+                reason,
+                self.stage,
+                self.limits.context_tokens,
+                self.limits.output_tokens,
+            )
+            return True
+
+    def _call(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
         for attempt in range(self.limits.max_attempts):
             while not self.permits.acquire(timeout=0.05):
                 self.checkpoint()
             observation = None
             try:
-                options, observation = self.reserve(kwargs)
+                options, observation = self.reserve(kwargs, limits)
                 # Only the transport runs here. It cannot publish Wiki changes.
                 # SDK timeout commonly means idle-read time, so also bound the
                 # elapsed request even when the provider keeps dripping bytes.
@@ -227,6 +327,8 @@ class ExecutionBudget:
                 response = values[0]
                 self.settle(observation, response)
                 return response
+            except (OutputTruncated, InputTooLarge):
+                raise  # Settled or never sent: the compiler can shrink the batch.
             except ProcessingIncomplete as exc:
                 self.incomplete = exc
                 raise
@@ -245,16 +347,27 @@ class ExecutionBudget:
         raise AssertionError("Positive attempt limit required")
 
     async def acall(self, function: Any, **kwargs: Any) -> Any:
+        while True:
+            limits = self.limits
+            try:
+                return await self._acall(function, limits, **kwargs)
+            except (OutputTruncated, InputTooLarge) as exc:
+                if not self.expand(limits, kwargs, exc.reason):
+                    raise
+
+    async def _acall(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
         for attempt in range(self.limits.max_attempts):
             while not self.permits.acquire(blocking=False):
                 self.checkpoint()
                 await asyncio.sleep(0.05)
             observation = None
             try:
-                options, observation = self.reserve(kwargs)
+                options, observation = self.reserve(kwargs, limits)
                 response = await asyncio.wait_for(function(**options), options["timeout"])
                 self.settle(observation, response)
                 return response
+            except (OutputTruncated, InputTooLarge):
+                raise
             except ProcessingIncomplete as exc:
                 self.incomplete = exc
                 raise

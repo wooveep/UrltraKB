@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QPlainTextEdit
 from openkb.agent.answer_text import visible_answer
 from openkb.desktop.fonts import text_font
 from openkb.desktop.reader import MarkdownView
+from openkb.desktop.theme import theme_colors
 
 
 class QuestionEdit(QPlainTextEdit):
@@ -58,7 +59,7 @@ class ConversationView(MarkdownView):
     def show_turns(self, turns, base, *, pending=None):
         self._turns = tuple(turns)
         self._pending = pending
-        background = "#30312e" if self._dark else "#f0f1ed"
+        background = theme_colors(self._dark).selection
         parts = []
         for question, answer in (*self._turns, *((pending,) if pending else ())):
             question = html.escape(question).replace("\n", "<br>")

@@ -39,7 +39,7 @@ completion.
 
 ## Default execution profile
 
-New and existing knowledge bases automatically inherit finite processing budgets;
+New and existing knowledge bases automatically inherit a processing profile;
 no manual setup or configuration migration is required. The desktop's
 **Settings → Processing budgets** shows the effective values. A complete
 `processing` mapping in global configuration overrides the built-in profile,
@@ -48,18 +48,20 @@ restores inheritance. Reading settings does not write defaults into a library.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `context_tokens` | 32768 | Total context cap for one complete request |
-| `output_tokens` | 8192 | Output reserve within that context cap |
+| `context_tokens` | 262144 (256K) | Initial total context cap for one complete request |
+| `output_tokens` | 131072 (128K) | Initial output reserve within that context cap |
+| `max_context_tokens` | 1048576 (1M) | Model context ceiling for adaptive retries |
+| `max_output_tokens` | 393216 (384K) | Model output ceiling for adaptive retries |
 | `request_timeout` | 180 | Seconds per request without an explicit timeout |
 | `stage_timeout` | 1800 | Seconds allowed for one processing stage |
 | `document_timeout` | 3600 | Seconds for the whole document operation |
 | `cleanup_timeout` | 10 | Seconds for auxiliary cleanup or shutdown grace |
-| `max_attempts` | 2 | Maximum attempts for one logical request |
+| `max_attempts` | 2 | Maximum transport attempts at each request size |
 | `max_requests` | 200 | Maximum observable model attempts across the document |
-| `max_tokens` | 2000000 | Document token budget, including outstanding reservations |
+| `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
 | `concurrency` | 2 | Maximum concurrent model calls |
 
-These are bounded starting allowances, not measured model capacities or a
+These are starting allowances and explicit ceilings, not measured model capacities or a
 guarantee that every document will finish in one run. Models with smaller context
 or output capacities need lower request caps. Explicit malformed or incomplete
 overrides still produce configuration errors before a model request; they are
@@ -73,8 +75,25 @@ sending. Available usage settles that reservation; missing usage remains charged
 at the reserved amount and is labeled unknown. Cached-token details do not imply
 free usage. No prompt is silently truncated and no alternate model is selected.
 SDK retry settings are disabled at the request boundary. The execution controller
-retries only transient transport/service errors within the configured limits.
+retries transient transport/service errors within the configured limits.
 Observable attempts and unknown internal transport attempts are distinct fields.
+
+A confirmed `finish_reason: length` discards that response and increases request
+allowances from 256K/128K to 512K/256K, then 1M/384K (K = 1024 tokens). The increased
+allowances remain in effect for the rest of that document operation; the next
+document starts at the initial values. At the ceiling, fact extraction, topic
+planning, generation and verification retry smaller batches. A single long
+source span can be split at exact character positions while retaining heading,
+neighbor and asset associations. An indivisible unit that still truncates remains
+unfinished. Partial JSON and unverified knowledge are never saved as completed
+checkpoints, and retries do not advance business progress. Every attempted request
+still records usage, including truncated responses and unknown reservations.
+Cancellation, elapsed time and request-count limits still apply across retries.
+If a generated candidate makes the next verification or correction request too
+large, the context allowance also grows before falling back to batch splitting.
+Explicit per-operation output caps remain binding. Older complete profiles that
+omit the two new ceiling fields retain their original request caps; clear their
+override to inherit this profile, or set explicit ceilings for that model.
 
 For providers that accept a `thinking.type` option, the optional top-level
 `compilation_thinking` setting selects `enabled` or `disabled`. For example:

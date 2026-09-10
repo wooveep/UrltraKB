@@ -56,6 +56,7 @@ class WorkbenchShell(QWidget):
         self.brand_name.setObjectName("brand")
         brand.addWidget(self.brand_name, 1)
         self.toggle = QToolButton()
+        self.toggle.setObjectName("navigationToggle")
         self.toggle.setText("☰")
         self.toggle.setFixedSize(32, 34)
         self.toggle.clicked.connect(self.toggle_navigation)
@@ -107,9 +108,11 @@ class WorkbenchShell(QWidget):
         top.addWidget(window.kbs)
         top.addStretch()
         self.task_status = action("任务 · 0 运行", lambda: self.navigate("任务"))
+        self.task_status.setObjectName("taskStatus")
         self.task_status.setAccessibleName("查看任务")
         top.addWidget(self.task_status)
         more = QToolButton()
+        more.setObjectName("applicationMenu")
         more.setText("⋯")
         more.setAccessibleName("应用菜单")
         more.setToolTip("应用菜单")
@@ -171,10 +174,17 @@ class WorkbenchShell(QWidget):
 
     def set_task_status(self, running, attention):
         self._task_counts = running, attention
+        description = f"任务 · {running} 运行 · {attention} 需关注"
+        self.task_status.setToolTip(description)
+        self.task_status.setAccessibleDescription(description)
+        status = "attention" if attention else "running" if running else "idle"
+        if self.task_status.property("status") != status:
+            self.task_status.setProperty("status", status)
+            self.task_status.style().unpolish(self.task_status)
+            self.task_status.style().polish(self.task_status)
+            self.task_status.update()
         self.task_status.setText(
-            f"任务 · {running + attention}"
-            if self.width() < 1000
-            else f"任务 · {running} 运行 · {attention} 需关注"
+            f"任务 · {running + attention}" if self.width() < 1000 else description
         )
 
     def resizeEvent(self, event):

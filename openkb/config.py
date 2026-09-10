@@ -37,6 +37,7 @@ from openkb.llm_runtime import (
     set_timeout as set_timeout,
 )
 from openkb.locks import atomic_write_text
+from openkb.processing import DEFAULT_PROCESSING
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "entity_types": list(DEFAULT_ENTITY_TYPES),
     # Bounded operating defaults for existing and new KBs. Context/output are
     # request caps, not a claim about an arbitrary provider's model capacity.
-    "processing": {
-        "context_tokens": 32768,
-        "output_tokens": 8192,
-        "request_timeout": 180,
-        "stage_timeout": 1800,
-        "document_timeout": 3600,
-        "cleanup_timeout": 10,
-        "max_attempts": 2,
-        "max_requests": 200,
-        "max_tokens": 2000000,
-        "concurrency": 2,
-    },
+    "processing": DEFAULT_PROCESSING,
 }
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "openkb"

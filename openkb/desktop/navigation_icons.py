@@ -4,6 +4,8 @@ from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from openkb.desktop.theme import theme_colors
+
 _PATHS = {
     "概览": '<path d="M3 11 12 3l9 8M5 10v11h5v-7h4v7h5V10"/>',
     "资料": '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/>',
@@ -18,21 +20,22 @@ _PATHS = {
 
 
 def navigation_icon(name, dark=False):
-    color = "#b8bab5" if dark else "#6c7069"
-    svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
-        f'fill="none" stroke="{color}" stroke-width="1.7" '
-        f'stroke-linecap="round" stroke-linejoin="round">{_PATHS[name]}</svg>'
-    )
-    renderer = QSvgRenderer(QByteArray(svg.encode()))
+    colors = theme_colors(dark)
     icon = QIcon()
     from PySide6.QtCore import Qt
 
-    for size in (20, 40, 60, 80):
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter)
-        painter.end()
-        icon.addPixmap(pixmap)
+    for state, color in ((QIcon.State.Off, colors.muted), (QIcon.State.On, colors.accent)):
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
+            f'fill="none" stroke="{color}" stroke-width="1.7" '
+            f'stroke-linecap="round" stroke-linejoin="round">{_PATHS[name]}</svg>'
+        )
+        renderer = QSvgRenderer(QByteArray(svg.encode()))
+        for size in (20, 40, 60, 80):
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
     return icon

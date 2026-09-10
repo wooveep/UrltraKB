@@ -11,10 +11,11 @@ Portable entry points and archive roots use `UrltraKB`; original third-party not
 
 - `brand.py` and bundled original SVGs separate display identity from compatibility
   identifiers. Asset provenance is in `openkb/desktop/assets/brand/README.md`.
-- `appearance.py` applies a shared palette and native control styling. Follow
+- `theme.py` defines shared semantic colors; `appearance.py` applies the palette
+  and native control styling. Follow
   System is the initial choice; explicit Light/Dark and sidebar preference are
   stored as application-local Qt settings, separately from credentials and KBs.
-- `shell.py` owns the compact top bar, 224/64 logical-pixel navigation and page
+- `shell.py` owns the compact top bar, 232/64 logical-pixel navigation and page
   selection. Automatic compact mode below 1080 logical pixels never persists over
   the wide-window preference; its toggle remains reachable.
 - `workspaces.py` composes Overview, Documents, Knowledge, Conversations, Artifacts,
@@ -32,7 +33,7 @@ Portable entry points and archive roots use `UrltraKB`; original third-party not
   Windows desktop entry points select Qt's bundled FreeType font engine for
   consistent variable-font rasterization. Explicit Qt platform arguments or the
   `QT_QPA_PLATFORM` environment setting take precedence; system settings are untouched.
-- The flat, neutral shell uses a full-height navigation rail and a quiet context
+- The flat shell uses a full-height navigation rail and a quiet context
   bar. Conversations use a centered readable column, distinct user messages and a
   bottom composer. Enter sends, Shift+Enter inserts a line, and IME confirmation
   does not send a message.
@@ -45,6 +46,52 @@ Portable entry points and archive roots use `UrltraKB`; original third-party not
 - Tasks and watches remain application-wide. Task submission does not change the
   current page. Global status leads to details and manual retry; shutdown selects
   Tasks and leaves observation and cooperative stop usable while disabling new work.
+
+## Black, white and blue gradients (2026-09-10)
+
+White and near-black surfaces now share a blue accent for selected navigation,
+active tabs, links and input focus. Light uses `#2454ce`; dark uses `#8ab4ff`.
+Primary buttons use white text over a `#2563eb` to `#1d4ed8` diagonal gradient,
+with deeper blue hover and pressed states. The overview summary fades from its
+neutral surface to pale blue in light mode and midnight blue in dark mode.
+Selected navigation fades into the rail, and shortcut hover and compact progress
+use matching blue gradients. These are native Qt gradients with no image assets.
+Secondary controls retain subtle borders. Amber identifies tasks needing attention,
+and the confirmed deletion action uses red text. Task counts remain readable in
+text, with the complete breakdown in the compact indicator's tooltip and accessible
+description.
+
+Overview separates the introduction, current KB summary and three icon shortcuts.
+Its content scrolls at short window heights without forcing the application larger.
+The conversation composer highlights its border on focus; keyboard focus also has
+a visible outline on primary buttons and navigation controls. Reading surfaces,
+code backgrounds and conversation messages use the same shared theme colors.
+
+Source validation on Linux with offscreen Qt: **26 focused tests passed**, including
+workbench/navigation, theme persistence, populated tables at 100/150% scale,
+task progress, source export and file-size rules. The seven-page appearance
+matrix passed at 1366, 1920, 900 and 720 logical pixels in both themes and at 150%
+device scaling. Supplemental native Qt checks
+confirmed composer/button focus, narrow-window shortcut access and task descriptions.
+Measured text contrast for primary gradient endpoints, selected navigation,
+secondary text (including the blue end of the summary gradient) and attention
+badges is at least 4.78:1 in light and 5.17:1 in dark; this is a bounded color
+check, not a full accessibility audit.
+
+Ruff lint and mypy passed, and all desktop files passed formatting checks. The
+repository-wide format check still reports pre-existing formatting in
+`openkb/application/knowledge_bases.py` and `openkb/compilation_report.py`.
+
+The following are unedited Qt captures of isolated fixtures, not model results or
+packaged-release validation. The overview attention counts come from intentional
+failure scenarios; document names are synthetic.
+
+| View | Native capture |
+| --- | --- |
+| Overview, light | [Light overview](desktop-evidence/workbench/blue-overview-light.png) |
+| Overview, dark | [Dark overview](desktop-evidence/workbench/blue-overview-dark.png) |
+| Focused conversation composer | [Composer](desktop-evidence/workbench/blue-composer-light.png) |
+| Populated document table | [Documents](desktop-evidence/workbench/blue-documents-light.png) |
 
 ## Reproduce source acceptance
 

@@ -19,10 +19,13 @@ def _processing_settings(value):
 
     from openkb.processing import ProcessingIncomplete, RequestLimits
 
-    if not isinstance(value, dict) or set(value) != set(RequestLimits.__dataclass_fields__):
+    fields = set(RequestLimits.__dataclass_fields__)
+    optional = {"max_context_tokens", "max_output_tokens"}
+    if not isinstance(value, dict) or not fields - optional <= set(value) <= fields:
         raise ValueError("Provide all processing budget fields and no unknown fields")
     try:
-        return asdict(RequestLimits.from_config({"processing": value}))
+        validated = asdict(RequestLimits.from_config({"processing": value}))
+        return {key: validated[key] for key in value}
     except ProcessingIncomplete:
         raise ValueError(
             "Processing limits must be finite, positive and fit the model context"

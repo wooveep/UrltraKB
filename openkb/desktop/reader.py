@@ -120,21 +120,22 @@ class MarkdownView(QTextBrowser):
         font = self.document().defaultFont()
         font.setPixelSize(round(18 * self._scale))
         self.document().setDefaultFont(font)
-        code_background = "#2a2a29" if self._dark else "#f4f4f2"
+        from openkb.desktop.theme import theme_colors
+
+        colors = theme_colors(self._dark)
         self.document().setDefaultStyleSheet(f"""
             body {{ font-family: '{SANS}'; font-size: {18 * self._scale}px; }}
             p {{ line-height: 150%; margin-top: 0; margin-bottom: 16px; }}
             h1, h2, h3 {{ font-weight: 700; margin-top: 24px; margin-bottom: 12px; }}
             pre, code {{ font-family: '{MONO}', '{SANS}'; font-size: {15 * self._scale}px;
-                background-color: {code_background}; }}
+                background-color: {colors.subtle}; }}
             pre {{ white-space: pre-wrap; margin-top: 12px; margin-bottom: 20px; }}
-            a {{ color: {"#add1bc" if self._dark else "#326f51"}; }}
+            a {{ color: {colors.accent}; }}
             th, td {{ padding: 8px; }}
         """)
-        background, foreground = ("#202020", "#eeeeec") if self._dark else ("#ffffff", "#262725")
         self.setStyleSheet(
-            f"QTextBrowser {{ padding: 18px; border: 0; background: {background}; "
-            f"color: {foreground}; }}"
+            f"QTextBrowser {{ padding: 18px; border: 0; background: {colors.surface}; "
+            f"color: {colors.text}; }}"
         )
 
     def set_presentation(self, *, dark: bool, scale: float):

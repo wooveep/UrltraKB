@@ -86,10 +86,6 @@ class TaskProgressCell(QWidget):
         self.bar.setObjectName("task-row-progress")
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        self.bar.setStyleSheet(
-            "QProgressBar {border: 0; border-radius: 3px; background: rgba(128,128,128,35);}"
-            "QProgressBar::chunk {border-radius: 3px; background: #249e87;}"
-        )
         layout.addWidget(self.label)
         layout.addWidget(self.bar)
 

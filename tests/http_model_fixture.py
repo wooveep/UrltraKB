@@ -59,6 +59,7 @@ class ModelService(list):
         self.release.set()
         self.drip_seconds = 0.0
         self.respond = None
+        self.finish_reason = "stop"
 
 
 @pytest.fixture
@@ -94,7 +95,7 @@ def model_service(kb_dir):
                         {
                             "index": 0,
                             "message": {"role": "assistant", "content": json.dumps(value)},
-                            "finish_reason": "stop",
+                            "finish_reason": calls.finish_reason,
                         }
                     ],
                     "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130},

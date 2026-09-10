@@ -77,9 +77,15 @@ def verify_processing_settings(dialog, kb, wait_until):
     from openkb.application.settings import read_settings_view
 
     processing = dialog.fields["processing"]
+    effective = read_settings_view(kb).values.processing
+    assert processing.value() == effective
+    if effective["max_tokens"] is None:
+        assert processing.values.inputs["max_tokens"].text() == "0"
     budgets = {
         "context_tokens": 8192,
         "output_tokens": 512,
+        "max_context_tokens": 8192,
+        "max_output_tokens": 512,
         "request_timeout": 5,
         "stage_timeout": 30,
         "document_timeout": 60,
