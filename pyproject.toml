@@ -49,6 +49,7 @@ dependencies = [
     "json-repair==0.59.10",
     "prompt_toolkit==3.0.52",
     "rich==15.0.0",
+    "markdown-it-py==4.2.0",
     "portalocker==3.2.0",
 ]
 
@@ -69,7 +70,7 @@ openkb-api = "openkb.api:main"
 testpaths = ["tests"]
 
 [project.optional-dependencies]
-desktop = ["PySide6-Essentials==6.11.2", "shiboken6==6.11.2", "markdown-it-py==4.2.0"]
+desktop = ["PySide6-Essentials==6.11.2", "shiboken6==6.11.2"]
 dev = [
     "pytest==9.0.3",
     "pytest-asyncio==1.3.0",

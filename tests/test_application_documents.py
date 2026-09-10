@@ -86,7 +86,7 @@ def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monke
     context = ExecutionContext()
     result = import_document(kb_dir, source, context=context)
     assert result.status == "added"
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert all(call["model"] == "openai/initial" for call in calls)
     assert all(call["api_key"] == "initial-private-key" for call in calls)
     assert all(call["extra_headers"]["X-Profile"] == "initial" for call in calls)

@@ -144,6 +144,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         processing=effective.get("processing"),
         navigation=effective.get("navigation") or {},
         compilation_thinking=effective.get("compilation_thinking"),
+        verification_thinking=effective.get("verification_thinking"),
         language=effective["language"],
         pageindex_threshold=effective["pageindex_threshold"],
         # Cleaned effective list (what the compiler will use), not the raw stored
@@ -158,6 +159,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
             processing=global_config.get("processing"),
             navigation=global_config.get("navigation"),
             compilation_thinking=global_config.get("compilation_thinking"),
+            verification_thinking=global_config.get("verification_thinking"),
             language=global_config.get("language"),
             pageindex_threshold=global_config.get("pageindex_threshold"),
             entity_types=global_config.get("entity_types"),
@@ -265,6 +267,7 @@ def _read_global_config() -> GlobalConfigResponse:
         processing=gc.get("processing"),
         navigation=gc.get("navigation") or {},
         compilation_thinking=gc.get("compilation_thinking"),
+        verification_thinking=gc.get("verification_thinking"),
         language=gc.get("language", DEFAULT_CONFIG["language"]),
         pageindex_threshold=gc.get("pageindex_threshold", DEFAULT_CONFIG["pageindex_threshold"]),
         # Effective global vocabulary (cleaned; defaults to DEFAULT_ENTITY_TYPES).

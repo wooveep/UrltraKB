@@ -23,6 +23,14 @@ Keep every restriction bound to the exact operation and version named in the sou
 A heading cannot extend a restriction to other operations. If layout and wording conflict,
 preserve the literal claim and state the ambiguity instead of resolving it by inference.
 Do not add plausible safety rationales, requirements, permissions or steps absent from evidence.
+If revision is supplied, correct that candidate using its review and the original evidence.
+You may also return "title" to correct a public title rejected by the review. Use a concise,
+faithful topic label; keep the page identity unchanged.
+When title_fixed is true, retain the supplied title exactly: earlier parts were verified
+under that public title. Make each restriction's operation explicit within this part.
+Repeated or overlapping parse blocks do not prove the physical document repeats text.
+Do not add commentary about extraction, duplication or layout artifacts.
+The review is feedback, not an instruction to invent information or omit required facts.
 Write in the requested language. This bounded part belongs to the same topic as all other parts."""
 
 
@@ -59,11 +67,12 @@ def _evidence_windows(fact, reader, base, limits, model):
     scope = Evidence(**fact["scope"])
     neighbors = []
     for value in fact.get("context_evidence", []):
-        reference = Evidence(**value)
+        reference = Evidence(**value["reference"])
         view = reader.read(reference, max_chars=max(4096, reference.end - reference.start))
         neighbors.append(
             {
-                "reference": value,
+                "reference": value["reference"],
+                "relation": value["relation"],
                 "text": view.text,
                 "location": view.location,
                 "context": view.context,
@@ -101,15 +110,46 @@ def _evidence_windows(fact, reader, base, limits, model):
         start += low
 
 
+def _model_facts(facts):
+    # Scope and context references already travel with the reread evidence.
+    return [{key: fact[key] for key in ("id", "statement", "quote", "reference")} for fact in facts]
+
+
 def _generation_fits(base, facts, evidence, limits, model):
-    return output_fits(
-        limits,
-        model,
-        {
-            "content": "\n\n".join(item["text"] for item in evidence),
-            "covered": [fact["id"] for fact in facts],
-        },
-    ) and fits(limits, model, PAGE_SYSTEM, {**base, "facts": facts, "evidence": evidence})
+    from openkb.agent.evidence_verifier import VERIFY_SYSTEM, verification_payload
+
+    content = "\n\n".join(item["text"] for item in evidence)
+    projected = _model_facts(facts)
+    payload = {**base, "facts": projected, "evidence": evidence}
+    # Plan the entire sequence with a lossless candidate and representative
+    # review feedback. Unexpected provider expansion is still checked against
+    # the actual request budget; it never authorizes a larger request.
+    revision = {
+        "title": base["title"],
+        "content": content,
+        "reason": (
+            "Correct unsupported claims in the title and body using the original evidence. "
+            "Keep exact actors, operations, versions, numerical limits, commands, negations, "
+            "prerequisites and exceptions. Preserve every supplied fact. A heading cannot "
+            "transfer a restriction to another operation. Describe ambiguity explicitly, "
+            "without inventing explanations, requirements, permissions or missing steps."
+        ),
+    }
+    return (
+        output_fits(
+            limits,
+            model,
+            {"title": base["title"], "content": content, "covered": [fact["id"] for fact in facts]},
+        )
+        and fits(limits, model, PAGE_SYSTEM, payload)
+        and fits(
+            limits,
+            model,
+            VERIFY_SYSTEM,
+            verification_payload(base["title"], content, projected, evidence),
+        )
+        and fits(limits, model, PAGE_SYSTEM, {**payload, "revision": revision})
+    )
 
 
 def _target_window(targets, topic, model, limits):
@@ -139,18 +179,6 @@ def _previous_contribution(existing, source_id):
     if end < start:
         raise ProcessingIncomplete("source_contribution_ambiguous", "generation")
     return body[:start] + body[end + len(closing) :], opening, closing
-
-
-def _figure_links(content, assets):
-    def resolve(match):
-        target = match[2]
-        if target.startswith("asset:"):
-            target = assets.get(target[6:])
-        if target not in assets.values():
-            raise ProcessingIncomplete("generated_asset_evidence_invalid", "generation")
-        return f"![{match[1]}]({target})"
-
-    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", resolve, content)
 
 
 def retract_retired_topics(wiki, source, source_file, planned):
@@ -204,6 +232,7 @@ def generate_topic(
     assets=None,
 ):
     from openkb.agent.compiler import _llm_call
+    from openkb.agent.evidence_verifier import verify_content
 
     model = settings["model"]
     from openkb.schema import get_agents_md
@@ -214,6 +243,7 @@ def generate_topic(
     base = {
         "stage": "generation",
         "title": group["title"],
+        "title_fixed": False,
         "language": settings.get("language", "en"),
         "existing": _existing_window(retained, group["title"], model, limits),
         "schema": get_agents_md(wiki),
@@ -224,50 +254,123 @@ def generate_topic(
 
     def generate():
         processing_checkpoint("generation")
-        payload = {**base, "facts": list(batch), "evidence": list(evidence)}
+        payload = {**base, "facts": _model_facts(batch), "evidence": list(evidence)}
         from openkb.sources import content_id
 
         key = checkpoints.key(PAGE_SYSTEM, payload, dependencies=content_id(existing))
         output = checkpoints.load(key)
-        on_event({"stage": "generation", "topic": group["title"], "cached": output is not None})
-        if output is None:
-            try:
-                output = json.loads(
-                    _llm_call(
-                        model,
-                        messages(PAGE_SYSTEM, payload),
-                        "generation",
-                        bundle=bundle,
-                        response_format=JSON_FORMAT,
-                        **compilation_model_options(settings),
+        cached = output is not None
+        revision = None
+        on_event({"stage": "generation", "topic": group["title"], "cached": cached})
+        # One evidence-based correction is allowed; each request and review is
+        # charged to the same document and generation-stage budgets.
+        for attempt in range(2):
+            if output is None:
+                request = {**payload, "revision": revision} if revision else payload
+                try:
+                    output = json.loads(
+                        _llm_call(
+                            model,
+                            messages(PAGE_SYSTEM, request),
+                            "generation",
+                            bundle=bundle,
+                            response_format=JSON_FORMAT,
+                            **compilation_model_options(settings),
+                        )
                     )
-                )
-            except (ValueError, TypeError):
-                raise ProcessingIncomplete("evidence_output_invalid", "generation") from None
-        if (
-            not isinstance(output, dict)
-            or not isinstance(output.get("content"), str)
-            or not output["content"].strip()
-            or not isinstance(output.get("covered"), list)
-            or any(not isinstance(item, str) for item in output["covered"])
-            or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
-            or "<!-- openkb-source:" in output["content"]
-            or "<!-- /openkb-source:" in output["content"]
-            or "<!-- source-evidence:" in output["content"]
-        ):
-            raise ProcessingIncomplete("topic_generation_incomplete", "generation")
-        citations = "\n".join(
-            "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
-            for passage in evidence
-            for item in [passage, *passage.get("neighbors", [])]
-        )
-        from openkb.lint import strip_ghost_wikilinks
+                except (ValueError, TypeError):
+                    raise ProcessingIncomplete("evidence_output_invalid", "generation") from None
+            if (
+                not isinstance(output, dict)
+                or not isinstance(output.get("content"), str)
+                or not output["content"].strip()
+                or not isinstance(output.get("covered"), list)
+                or any(not isinstance(item, str) for item in output["covered"])
+                or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
+            ):
+                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+            title = output.get("title", base["title"])
+            if not isinstance(title, str) or not title.strip():
+                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+            if contributions and title != base["title"]:
+                raise ProcessingIncomplete("topic_title_conflict", "generation")
+            citations = "\n".join(
+                "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
+                for passage in evidence
+                for item in [passage, *passage.get("neighbors", [])]
+            )
+            from openkb.agent.evidence_markup import normalize_links
 
-        content, _ = strip_ghost_wikilinks(output["content"], known_targets)
-        content = _figure_links(content, assets or {})
-        checkpoints.save(key, output)
-        contributions.append(content + "\n\n" + citations)
-        on_event({"stage": "generated", "topic": group["title"]})
+            content = normalize_links(output["content"], known_targets, assets or {})
+            if title != base["title"]:
+                # Propagate an explicit title correction to its matching opening
+                # heading before review; unrelated evidence headings are preserved.
+                content = re.sub(
+                    r"\A(#{1,6})[ \t]+" + re.escape(base["title"]) + r"[ \t]*(?=\n|$)",
+                    lambda match: f"{match[1]} {title}",
+                    content,
+                    count=1,
+                )
+            if any(
+                marker in title or marker in content
+                for marker in (
+                    "<!-- openkb-source:",
+                    "<!-- /openkb-source:",
+                    "<!-- source-evidence:",
+                )
+            ):
+                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+            publication_digest = content_id({"title": title, "content": content})
+            if cached:
+                receipt = output.get("_verification")
+                if (
+                    not isinstance(receipt, dict)
+                    or receipt.get("verdict") != "supported"
+                    or not isinstance(receipt.get("reason"), str)
+                    or not receipt["reason"].strip()
+                    or receipt.get("publication_digest") != publication_digest
+                ):
+                    raise ProcessingIncomplete("evidence_verification_invalid", "generation")
+            else:
+                on_event(
+                    {"stage": "generation", "operation": "verification", "topic": group["title"]}
+                )
+                review = verify_content(
+                    title, content, payload["facts"], payload["evidence"], settings, bundle=bundle
+                )
+                on_event(
+                    {
+                        "stage": "generation",
+                        "operation": "verification_result",
+                        "topic": group["title"],
+                        **review,
+                    }
+                )
+                if review["verdict"] != "supported":
+                    if review["verdict"] == "unsupported" and attempt == 0:
+                        revision = {"title": title, "content": content, "reason": review["reason"]}
+                        output = None
+                        on_event(
+                            {
+                                "stage": "generation",
+                                "operation": "correction",
+                                "topic": group["title"],
+                            }
+                        )
+                        continue
+                    raise ProcessingIncomplete("knowledge_evidence_mismatch", "generation")
+                output = {
+                    **output,
+                    "title": title,
+                    "_verification": {**review, "publication_digest": publication_digest},
+                    "_revision": revision,
+                }
+            checkpoints.save(key, output)
+            group["title"] = base["title"] = title
+            base["title_fixed"] = True
+            contributions.append(content + "\n\n" + citations)
+            on_event({"stage": "generated", "topic": group["title"]})
+            return
 
     for fact in facts:
         for item in _evidence_windows(fact, reader, base, limits, model):

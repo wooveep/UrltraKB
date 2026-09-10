@@ -100,10 +100,11 @@ def compile_evidence(
                 value = {
                     "topic": fact["topic"],
                     "statement": fact["statement"],
+                    "quote": fact["quote"],
                     "reference": reference,
                     "scope": unit["reference"],
                     "context_evidence": [
-                        item["reference"]
+                        {"reference": item["reference"], "relation": item["relation"]}
                         for item in [*unit["heading_evidence"], *unit["neighbors"]]
                     ],
                 }

@@ -1,0 +1,90 @@
+[
+  {
+    "id": "linux-real-scope-error",
+    "evidence": "# Pump controller version 7 - shutdown procedure\n\nWait 15 seconds after stopping the pump.\nOpen the drain valve only after pressure falls below 5 kPa.\nFor controller version 6, this startup procedure is unsupported.\nRecord the shutdown timestamp in the maintenance log.",
+    "fact": "For controller version 6, this startup procedure is unsupported.",
+    "content": "The shutdown procedure described in this document applies to pump controller version 7. The procedure is unsupported for controller version 6; a version 6 controller must not use this shutdown procedure.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "windows-real-scope-error",
+    "evidence": "# Pump controller version 7 - shutdown procedure\n\nWait 15 seconds after stopping the pump.\nOpen the drain valve only after pressure falls below 5 kPa.\nFor controller version 6, this startup procedure is unsupported.\nRecord the shutdown timestamp in the maintenance log.",
+    "fact": "Open the drain valve only after pressure falls below 5 kPa.",
+    "content": "Open the drain valve only after the system pressure falls below 5 kPa. This condition must be met after following the procedure step of waiting 15 seconds after stopping the pump. This sequence applies only to controllers that support this procedure; for controller version 6, the startup procedure is unsupported, so these steps do not apply.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "literal-scope-with-ambiguity",
+    "evidence": "# Pump controller version 7 - shutdown procedure\n\nWait 15 seconds after stopping the pump.\nOpen the drain valve only after pressure falls below 5 kPa.\nFor controller version 6, this startup procedure is unsupported.\nRecord the shutdown timestamp in the maintenance log.",
+    "fact": "For controller version 6, this startup procedure is unsupported.",
+    "content": "For controller version 6, this startup procedure is unsupported. Although the statement appears in a shutdown section, it names startup; the text does not explicitly extend this restriction to shutdown.",
+    "expected": "supported"
+  },
+  {
+    "id": "wrong-pressure",
+    "evidence": "The normal pressure limit is 37 kPa.",
+    "fact": "The normal pressure limit is 37 kPa.",
+    "content": "The normal pressure limit is 73 kPa.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "invented-reason",
+    "evidence": "If authentication fails, do not retry automatically.",
+    "fact": "If authentication fails, do not retry automatically.",
+    "content": "If authentication fails, do not retry automatically, because retries permanently damage the controller.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "correct-negation",
+    "evidence": "If authentication fails, do not retry automatically.",
+    "fact": "If authentication fails, do not retry automatically.",
+    "content": "If authentication fails, do not retry automatically.",
+    "expected": "supported"
+  },
+  {
+    "id": "reversed-negation",
+    "evidence": "If authentication fails, do not retry automatically.",
+    "fact": "If authentication fails, do not retry automatically.",
+    "content": "If authentication fails, retry automatically.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "exact-command",
+    "evidence": "Run: pumpctl start --timeout 42 --mode safe",
+    "fact": "Run: pumpctl start --timeout 42 --mode safe",
+    "content": "Run `pumpctl start --timeout 42 --mode safe`.",
+    "expected": "supported"
+  },
+  {
+    "id": "wrong-public-title",
+    "title": "Version 6 shutdown is unsupported",
+    "evidence": "For controller version 6, this startup procedure is unsupported.",
+    "fact": "For controller version 6, this startup procedure is unsupported.",
+    "content": "For controller version 6, this startup procedure is unsupported.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "invented-source-duplication",
+    "evidence": "Before startup, keep the isolation valve closed.",
+    "fact": "Before startup, keep the isolation valve closed.",
+    "content": "Before startup, keep the isolation valve closed. The original document repeats this requirement twice due to a layout artifact.",
+    "expected": "unsupported"
+  },
+  {
+    "id": "correct-source-over-faulty-plan",
+    "title": "Procedure headings",
+    "evidence": "Page 1 heading: Pump controller version 7 - startup procedure\nPage 2 heading: Pump controller version 7 - shutdown procedure",
+    "fact": "The document title is Pump controller version 7 - startup procedure.",
+    "quote": "Pump controller version 7 - startup procedure",
+    "content": "Page 1 is headed Pump controller version 7 - startup procedure; page 2 is headed Pump controller version 7 - shutdown procedure.",
+    "expected": "supported"
+  },
+  {
+    "id": "neutral-support-label",
+    "title": "Controller Version 6 Startup Procedure Support",
+    "evidence": "For controller version 6, this startup procedure is unsupported.",
+    "fact": "For controller version 6, this startup procedure is unsupported.",
+    "content": "For controller version 6, this startup procedure is unsupported.",
+    "expected": "supported"
+  }
+]

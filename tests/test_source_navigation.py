@@ -33,11 +33,11 @@ def test_url_publication_receipt_and_history_are_settled_before_navigation(
     assert len(observed) == 1
     result = observed[0]
     assert result.knowledge_compilation == "completed"
-    assert result.usage["observable_attempts"] == 3
+    assert result.usage["observable_attempts"] == 4
     saved = source_status(kb_dir, result.source_id)
     assert saved["result"]["knowledge_compilation"] == "completed"
-    assert saved["cumulative_usage"]["observable_attempts"] == 3
-    assert saved["cumulative_usage"]["charged_tokens"] == 390
+    assert saved["cumulative_usage"]["observable_attempts"] == 4
+    assert saved["cumulative_usage"]["charged_tokens"] == 520
 
 
 def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
@@ -45,7 +45,7 @@ def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
 ):
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
-    config["processing"]["max_requests"] = 3
+    config["processing"]["max_requests"] = 4
     config["navigation"] = {
         "enabled": True,
         "processing": {
@@ -67,7 +67,7 @@ def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
     assert {item["block_id"] for item in navigation["positions"]} == {
         block.id for block in ParseStore(kb_dir).load(result.parse_id).blocks
     }
-    assert result.usage["observable_attempts"] == 3
+    assert result.usage["observable_attempts"] == 4
     assert navigation["usage"]["observable_attempts"] == 1
 
 

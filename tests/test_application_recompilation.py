@@ -99,7 +99,7 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     )
     assert skipped.status == "skipped"
     assert context.snapshot is None
-    assert len(calls) == 3
+    assert len(calls) == 4
 
 
 def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):

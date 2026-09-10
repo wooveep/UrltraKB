@@ -4,9 +4,10 @@ On 2026-09-10, the shared document operation was exercised with the official
 PaddleOCR jobs service and `deepseek/deepseek-v4-flash` on Debian 13 x64 and
 Windows 11 x64 (build 26100), both using CPython 3.12.13. Two-page OCR, retained
 evidence, bounded stopping, continuation and publication completed on both
-systems. **Technical semantic acceptance failed:** generated prose broadened a
-startup restriction to shutdown. This is an outstanding issue #13 acceptance
-item, not a successful accuracy result.
+systems. Earlier prompt-only runs failed technical semantic acceptance: generated
+prose broadened a startup restriction to shutdown. The follow-up below adds an
+independent evidence review and records both failed and successful evaluations;
+the historical failures remain part of the evidence.
 
 Only synthetic documents and isolated knowledge bases were used. Credentials
 were supplied through private temporary files and environment variables, not
@@ -38,7 +39,7 @@ A native Markdown control carries the same claims. The first page is headed
 The startup restriction is deliberately placed under the shutdown heading.
 Acceptable generation preserves the literal operation and identifies the layout
 ambiguity where relevant; it must not turn it into a shutdown restriction. Both
-final compilations contained the nine claims somewhere, but also included
+prompt-only compilations contained the nine claims somewhere, but also included
 contradictory or unsupported prose. Counting claim presence alone would falsely
 pass this sample.
 
@@ -98,7 +99,7 @@ memory across all authenticated experiments stayed below 288 MB. Other processes
 were active; timings are not isolated platform comparisons or long-document
 throughput measurements.
 
-## Semantic counterexample and acceptance status
+## Historical semantic counterexamples
 
 The Debian response for “Procedure Applicability for Controller Version 6” said:
 
@@ -116,18 +117,17 @@ did not apply to version 6 because its startup procedure was unsupported. Other
 topics preserved the startup wording. General exception-handling guidance was
 also added beyond the source's authentication rule.
 
-The current publication checks validate evidence identities, verbatim extraction
-quotes, structural coverage, output completion and source/page versions. They do
-not prove that arbitrary generated prose is entailed by its evidence. Explicit
+Before independent model review, publication checks validated evidence identities, verbatim extraction
+quotes, structural coverage, output completion and source/page versions. These structural checks could
+not establish that generated prose was entailed by its evidence. Explicit
 prompt instructions to preserve operation/version restrictions did not prevent
-these failures. Neither a structural `added` result nor a later lucky model
-response closes this semantic gate. Representative technical documents and an
-effective semantic acceptance approach remain necessary; this profile must not
-be presented as a calibrated accurate compiler.
+these failures. A structural `added` result alone was insufficient. The follow-up below tests an
+explicit verification gate against retained counterexamples. Representative
+technical documents and broader budget calibration remain necessary.
 
-## Usage and code regression
+## Earlier usage and code regression
 
-All 64 observed DeepSeek calls returned usage: 251676 input tokens (28544 cached,
+The earlier 64 observed DeepSeek calls all returned usage: 251676 input tokens (28544 cached,
 223132 uncached) and 37419 output tokens, including reasoning. Summing each actual
 call once, including failed experiments and continuations, gives an estimated
 **CNY 0.505** using the request timestamps and the
@@ -151,3 +151,111 @@ The broader integration and full-suite history is recorded in
 [document execution](document-processing.md). This two-page experiment does not
 measure 100-page OCR quality, representative user-document accuracy, or complete
 production budget calibration.
+
+## Independent evidence review follow-up
+
+The follow-up adds a publication gate that reviews the exact public title and
+cleaned Markdown body against original quotes and reread evidence. Extraction
+statements remain useful for generation, but are omitted from the review so that
+an erroneous paraphrase cannot overrule the original quote. Heading and adjacent
+block relationships remain attached to the evidence. A rejected draft gets at
+most one correction with explicit feedback and must pass another review. Review,
+correction and generation consume the original stage/document/request budgets.
+Uncertain, malformed and still-unsupported results leave the whole source
+unfinished; they do not overwrite an earlier complete Wiki.
+
+A successful checkpoint includes a supported verdict, nonempty review reason and
+a digest of the public title and final body. Recovery checks all three. The first
+supported title is fixed for subsequent parts; a conflicting later title stops
+the proposal. A title correction also updates an exactly matching opening body
+heading before review. Reserved provenance markers are rejected after all such
+normalization, preventing a title from corrupting source contribution boundaries.
+
+Actual review exposed additional false positives and false negatives. Disabled
+thinking scored 9/10 on one fixed evaluation, then 8/11 after its input format
+was revised. It missed an incorrect title and an invented rationale, and rejected
+a faithful body that corrected a faulty extraction statement. Explicitly enabled
+review thinking passed a three-case diagnostic and an 11-case evaluation, but a
+later 12-case evaluation still rejected the faulty-plan case. The final input
+removes that non-evidence statement; all **12/12 fixed cases** then matched their
+expected verdicts. The cases are retained in
+[`tests/fixtures/evidence_verifier_cases.json`](../tests/fixtures/evidence_verifier_cases.json).
+Expected labels were not sent to the provider. Every evaluation, including the
+failed ones, is included in the usage totals below. This is a small diagnostic
+set, not a statistical accuracy estimate.
+
+The final real-provider profile explicitly sets `compilation_thinking: disabled`
+and `verification_thinking: enabled`, using the same requested DeepSeek model.
+The review override is optional; absence inherits the compiler setting. It changes
+only generation/review reuse, leaving independent facts and planning reusable.
+The earlier 8192 output reserve and all other time, token, concurrency and request
+limits remain unchanged. Thinking output is charged like other output; it is not
+an extra allowance or an automatic fallback.
+
+A controlled 100-page native PDF regression covered all 353 nonempty blocks,
+extracted and reread all three planted technical facts, reused facts after a
+planned stop, and completed in 125 local model-adapter calls. The supervisor
+elapsed time was 6.54 seconds and peak sampled worker memory was 240 MB. No
+provider requests or OCR charges occurred in that controlled experiment; it does
+not measure semantic quality or real-provider throughput.
+
+The Windows follow-up exposed a deterministic Markdown defect: global image-link
+rewriting changed an `asset:` example inside a fenced code block, and evidence
+review correctly refused the altered literal. Link normalization now follows
+actual Markdown inline blocks and table cells, preserving code examples and
+original line endings. Real images still require retained assets. Independent
+review also caught cross-paragraph backtick pairing, Unicode line-offset drift,
+table-cell pairing and JSON escaping of image titles; regression tests reproduce
+these failures through the shared document operation. The implementation uses
+the already pinned `markdown-it-py==4.2.0`, now an explicit core dependency.
+
+## Final follow-up observations
+
+With the final code and unchanged profile, both platforms completed the retained
+two-page sample. The first operations stopped at their request allowance and
+continued from supported checkpoints. Windows also encountered a review output
+limit before a later explicit continuation completed. These stops remain in the
+usage history; neither platform performed more OCR.
+
+| Platform | Explicit operations | Actual model calls | Supervisor seconds, summed | Peak sampled worker memory | Final result |
+| --- | --- | --- | --- | --- | --- |
+| Debian 13 x64 | `real-linux-v11` through `v13` | 26 | 187.11 | 245.6 MB | `added`, original retained |
+| Windows 11 x64 | `real-windows-v7` through `v9` | 28 | 255.97 | 233.0 MB | `added`, original retained |
+
+Inspection of all final pages found the nine seeded technical claims retained,
+including the exact command, both pressure thresholds, the waiting period,
+authentication exception and startup-only version restriction. The Windows
+published image resolves to the retained immutable asset and its content hash.
+The earlier startup-to-shutdown restriction error did not recur in these final
+outputs. This does not establish complete semantic accuracy: the Debian pressure
+page still links the isolation-valve prerequisite label to the drain-valve topic.
+Its displayed condition is correct, but the Wiki association is misleading.
+Source evidence remains readable; semantic quality of cross-topic links needs
+further calibration and must not be reported as fully accepted.
+
+Maximum provider-reported input in the final runs was 6421 tokens on Debian and
+5513 on Windows; both fit the 16384 configured context with the 8192 output
+reserve. Across earlier follow-up experiments, one request reported 8324 input
+tokens despite fitting the local estimator, exceeding that experiment's configured
+context allowance when combined with the reserve. The provider accepted it, but
+this exposes a tokenizer-estimation limitation. Local fit checks must not be
+presented as an exact guarantee of provider token counts; representative model
+budget calibration remains outstanding.
+
+All authenticated experiments together, including earlier failures, fixed-case
+evaluations and continuations, made **360 observed DeepSeek calls**. All returned
+usage: 950995 input tokens (272998 cached, 677997 uncached) and 305888 output tokens,
+including reasoning. Applying the same timestamped published prices gives
+**CNY 4.310 estimated**, or CNY 4.814 if every call used peak pricing. These are
+estimates, not billing receipts. OCR remained **6/100 cumulative submitted pages**.
+Run-local observations and the cumulative ledger retain unsuccessful attempts;
+duplicate copies of evaluation results are not counted twice.
+
+Final frozen-code checks passed **1587 tests with one skip** on Debian, and the
+58-test evidence/Markdown/budget selection passed on Windows. The Windows test
+initially decoded UTF-8 output using the system default encoding; the test now
+reads UTF-8 explicitly. Ruff and mypy over 206 modules passed. Standards and Spec
+reviews closed all implementation findings, including independent Markdown
+boundary probes. Controlled adapter tests, fixed-case model evaluation and
+whole-document observations are separate evidence; none substitutes for
+representative long-document semantic acceptance or a frozen desktop build.

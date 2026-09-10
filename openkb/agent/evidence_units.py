@@ -31,7 +31,8 @@ def messages(system: str, payload: dict) -> list[dict]:
         ),
         "planning": 'Return {"topics":[...]} accounting for every input topic exactly once.',
         "generation": (
-            'Return exactly {"content":"Markdown", "covered":["fact id", ...]}. '
+            'Return {"content":"Markdown", "covered":["fact id", ...]}; an optional '
+            '"title" may correct the public topic label. '
             "covered is a required top-level JSON array containing EVERY supplied fact id, "
             "even when facts repeat. A coverage section inside Markdown does not replace it."
         ),

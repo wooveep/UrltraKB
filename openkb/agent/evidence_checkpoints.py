@@ -25,6 +25,8 @@ def compilation_profile(settings, bundle):
                     "evidence_units",
                     "evidence_pages",
                     "evidence_plan",
+                    "evidence_verifier",
+                    "evidence_markup",
                     "compiler",
                 )
             },
@@ -38,6 +40,7 @@ def publication_settings(settings, bundle):
 
 class CompilationCheckpoints:
     def __init__(self, kb_dir, source, parsed, settings, bundle):
+        self.verification_options = compilation_model_options(settings, verification=True)
         self.store = SourceStore(kb_dir)
         self.root = self.store.owned_path(self.store.root / "compilation")
         self.input = {
@@ -56,7 +59,7 @@ class CompilationCheckpoints:
         stage_modules = {
             "facts": ("evidence_compiler", "evidence_units"),
             "planning": ("evidence_plan",),
-            "generation": ("evidence_pages",),
+            "generation": ("evidence_pages", "evidence_verifier", "evidence_markup"),
         }
         return content_id(
             {
@@ -64,6 +67,11 @@ class CompilationCheckpoints:
                 "system": system,
                 "payload": payload,
                 "dependencies": dependencies,
+                **(
+                    {"verification_options": self.verification_options}
+                    if payload.get("stage") == "generation"
+                    else {}
+                ),
                 "implementation": module_revision("openkb.agent.compiler"),
                 "message_format": module_revision("openkb.agent.evidence_units"),
                 "stage_implementation": {

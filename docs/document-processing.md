@@ -76,18 +76,45 @@ For providers that accept a `thinking.type` option, the optional top-level
 ```yaml
 model: deepseek/deepseek-v4-flash
 compilation_thinking: disabled
+verification_thinking: enabled
 ```
 
 Set it in global or library YAML, or through the existing configuration REST
-endpoints. It applies to evidence extraction, topic planning and page generation;
-navigation and chat have separate model behavior. An absent or effective null
-value sends no thinking override and preserves the provider default. Library
+endpoints. `compilation_thinking` applies to extraction, planning, generation and,
+unless separately set, verification. `verification_thinking` overrides only the
+independent evidence review; it accepts the same two values. Navigation and chat
+have separate model behavior. If neither mode is set, no override is sent and
+the provider default is preserved. Library
 overrides inherit global settings; a null REST patch removes the override.
 Changing this setting invalidates affected compilation checkpoints and completion
 profiles without changing the source or parse version. There is no automatic
 switch of thinking mode when a budget is exhausted. Explicit non-thinking mode
 is a provider option, not a guarantee of technical accuracy; see the
 [real-provider validation record](document-provider-validation.md).
+
+Before a contribution is published, an independent model request checks its
+public title and cleaned body against the retained original passages and quotes.
+The request preserves the roles of headings and neighboring blocks. Proposed
+fact statements are planning aids; the original evidence remains authoritative.
+Unsupported drafts receive at most one correction using the review feedback,
+followed by another review. Uncertain, malformed or still-unsupported results
+leave the entire source compilation unfinished. An earlier complete Wiki remains
+available, and the retained original can still be read.
+
+Link cleanup follows Markdown block and table-cell boundaries. Code examples
+retain their literal links and original line endings; real image links must
+resolve to retained source assets, with their titles preserved.
+
+Generation, verification and correction share the same generation-stage and
+document budgets. Batch planning includes all three complete request shapes,
+using a lossless candidate and representative review feedback. Unexpected output
+expansion is checked against the actual request limit and can still stop the
+operation; no text is truncated to make it fit. Successful checkpoints bind the
+review verdict to the final public title and body digest. The first accepted title
+is fixed for subsequent parts; changing it later requires a new coherent proposal.
+Changing only `verification_thinking` rechecks generation while retaining valid
+facts. Model review can make mistakes, including false positives and false
+negatives, so a completed result is not a proof of arbitrary technical accuracy.
 
 Every task retains its own usage observations. Each source also keeps cumulative
 LLM, local OCR and cloud job usage across explicit continuations. A continuation

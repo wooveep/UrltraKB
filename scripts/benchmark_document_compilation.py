@@ -105,6 +105,8 @@ def run_case(plan):
                     }
                 ]
             }
+        elif stage == "verification":
+            output = {"verdict": "supported", "reason": "Controlled ground truth is preserved."}
         else:
             assert stage == "generation"
             text = "\n".join(item["text"] for item in payload["evidence"])

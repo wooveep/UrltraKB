@@ -3,6 +3,7 @@
 import json
 
 import litellm
+import pytest
 import yaml
 
 from openkb.application.documents import import_document
@@ -32,6 +33,7 @@ def test_compilation_thinking_mode_reaches_provider_and_invalidates_cached_facts
             "facts",
             "planning",
             "generation",
+            "verification",
         }
         assert all(call.get("thinking") == {"type": mode} for call in new_calls)
         previous_calls = len(model_service)
@@ -68,6 +70,8 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":
             units = []
             for unit in payload["units"]:
@@ -151,6 +155,8 @@ def test_generation_reads_conditions_omitted_from_the_fact_statement(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":
             return {
                 "units": [
@@ -206,6 +212,8 @@ def test_continuation_keeps_facts_but_reads_current_wiki_before_generation(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":
             fact_requests.append(payload)
             return {
@@ -280,7 +288,7 @@ def test_continuation_keeps_facts_but_reads_current_wiki_before_generation(
     assert finished.knowledge_compilation == "completed"
     assert "Emergency override requires approval." in current_page.read_text()
     usage = source_status(kb_dir, first.source_id)["cumulative_usage"]
-    assert usage["observable_attempts"] == 3
+    assert usage["observable_attempts"] == 4
 
 
 def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publication(
@@ -300,6 +308,8 @@ def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publicati
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":
             return {
                 "units": [
@@ -355,6 +365,8 @@ def test_long_unbroken_block_is_automatically_split_again_for_generation(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "generation":
             scopes.extend(item["reference"] for item in payload["evidence"])
         return evidence_response(payload)
@@ -379,6 +391,8 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":
             return {
                 "units": [
@@ -462,6 +476,8 @@ def test_large_topic_plan_is_bounded_and_merges_one_topic_across_planning_parts(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         response = evidence_response(payload)
         if payload["stage"] == "facts":
             for output, unit in zip(response["units"], payload["units"]):
@@ -499,6 +515,8 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         response = evidence_response(payload)
         if payload["stage"] == "facts":
             for output, unit in zip(response["units"], payload["units"]):
@@ -533,6 +551,8 @@ def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_pa
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         response = evidence_response(payload)
         if payload["stage"] == "facts":
             for unit, output in zip(payload["units"], response["units"]):
@@ -551,11 +571,25 @@ def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_pa
     assert "Only on version 7." in json.dumps(generated)
 
 
+@pytest.mark.parametrize(
+    "wrapper,title",
+    [
+        ("{0}", ""),
+        ("A literal ` marker.\n\n{0}\n\nAnother ` marker.", ""),
+        ("- A ` marker.\n- {0}\n- Another ` marker.", ""),
+        ("| a | b | c |\n| --- | --- | --- |\n| ` | {0} | ` |", ""),
+        ("| a | b | c |\n| --- | --- | --- |\n| `{0}` | {0} | {0} |", "原图说明"),
+        ("{0}", "原图说明\n第二行"),
+        ("{0}", "Use &copy; literally"),
+    ],
+)
 def test_generated_figure_link_points_to_the_retained_immutable_asset(
-    kb_dir, tmp_path, model_service
+    kb_dir, tmp_path, model_service, wrapper, title
 ):
+    import html
     import re
 
+    from markdown_it import MarkdownIt
     from PIL import Image
 
     from tests.http_model_fixture import evidence_response
@@ -566,16 +600,29 @@ def test_generated_figure_link_points_to_the_retained_immutable_asset(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            response["content"] = "\n\n".join(item["text"] for item in payload["evidence"])
+            evidence = "\n\n".join(item["text"] for item in payload["evidence"])
+            figure = re.search(r"!\[[^\]]*\]\(asset:[^)]+\)", evidence)[0]
+            if title:
+                figure = figure[:-1] + ' "' + html.escape(title) + '")'
+            response["content"] = wrapper.format(figure) + "\n\nValve rated 37 kPa."
         return response
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
     page = kb_dir / "wiki/concepts/notes.md"
-    links = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", page.read_text())
+    tokens = (
+        MarkdownIt("commonmark")
+        .enable(["table", "strikethrough"])
+        .parse(page.read_text(encoding="utf-8"))
+    )
+    images = [child for token in tokens for child in token.children or [] if child.type == "image"]
+    assert all((item.attrGet("title") or "") == title for item in images)
+    links = [item.attrGet("src") for item in images]
     assert links
     assert all((page.parent / link).is_file() for link in links)
     assert all(

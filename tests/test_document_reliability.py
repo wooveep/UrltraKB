@@ -245,5 +245,5 @@ def test_client_cleanup_warning_does_not_change_committed_result(
     assert result.status == "added"
     assert result.knowledge_compilation == "completed"
     assert result.warnings == ("model_client_cleanup_failed",)
-    assert result.usage["unknown_usage"] == 3
+    assert result.usage["unknown_usage"] == 4
     assert all(row["transport_attempts"] is None for row in result.usage["requests"])

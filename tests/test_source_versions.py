@@ -237,7 +237,7 @@ def test_post_commit_observer_failure_keeps_completed_outcome(kb_dir, tmp_path, 
     assert len(list((kb_dir / "wiki/summaries").glob("observer-*.md"))) == 1
     again = import_document(kb_dir, original)
     assert again.status == "skipped" and again.knowledge_compilation == "completed"
-    assert len(model_service) == 3
+    assert len(model_service) == 4
 
 
 def test_document_parser_uses_global_settings_and_kb_override(

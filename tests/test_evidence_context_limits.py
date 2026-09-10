@@ -101,7 +101,7 @@ def test_invalid_figure_output_is_not_reused_after_model_correction(
     valid = True
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed
-    assert len(model_service) == 4
+    assert len(model_service) == 5
 
 
 def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_path, model_service):
@@ -140,6 +140,11 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
+    if result.reason == "request_budget_exhausted":
+        # Required semantic reviews share the fixed allowance. Continue from
+        # verified contributions without increasing the per-run request cap.
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+        result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     table = [item for item in generated if "table" in item["location"]]
     assert table

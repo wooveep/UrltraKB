@@ -43,6 +43,11 @@ def evidence_response(payload):
             "content": "# Notes\nConfirmed knowledge.",
             "covered": [fact["id"] for fact in payload["facts"]],
         }
+    elif isinstance(payload, dict) and payload.get("stage") == "verification":
+        return {
+            "verdict": "supported",
+            "reason": "The controlled contribution matches its evidence.",
+        }
     return None
 
 

@@ -58,6 +58,7 @@ class _KbConfigWritable(BaseModel):
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
     compilation_thinking: Literal["enabled", "disabled"] | None = None
+    verification_thinking: Literal["enabled", "disabled"] | None = None
 
 
 # Single source of truth for the writable config keys (derived from the model
@@ -76,6 +77,7 @@ class GlobalConfigValues(BaseModel):
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
     compilation_thinking: Literal["enabled", "disabled"] | None = None
+    verification_thinking: Literal["enabled", "disabled"] | None = None
 
 
 class GlobalConfigResponse(BaseModel):
@@ -84,6 +86,7 @@ class GlobalConfigResponse(BaseModel):
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     compilation_thinking: Literal["enabled", "disabled"] | None = None
+    verification_thinking: Literal["enabled", "disabled"] | None = None
     language: str
     pageindex_threshold: int
     # Effective global entity-type vocabulary (cleaned; always includes "other").
@@ -123,6 +126,7 @@ class KbConfigResponse(BaseModel):
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     compilation_thinking: Literal["enabled", "disabled"] | None = None
+    verification_thinking: Literal["enabled", "disabled"] | None = None
     language: str
     pageindex_threshold: int
     # Effective entity-type vocabulary (cleaned; always includes "other").
