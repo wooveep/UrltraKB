@@ -16,6 +16,13 @@ datas = collect_data_files(
     ],
 )
 datas += [(str(assets), "openkb/rendering/assets")]
+# The separate OCR interpreter executes these files and checks their byte hashes;
+# PYZ bytecode alone cannot serve that external process boundary.
+datas += [
+    (str(repo / "openkb/ocr" / name), "openkb/ocr")
+    for name in ("worker.py", "supervisor.py", "loading.py")
+]
+datas += [(str(repo / "openkb/runtime/process_tree.py"), "openkb/runtime")]
 # The manifest is the runtime whitelist; reference fonts stay in the source tree.
 fonts = json.loads((repo / "assets/fonts/manifest.json").read_text("utf-8"))
 font_files = {"manifest.json", "README.md"} | {f[k] for f in fonts for k in ("file", "license")}

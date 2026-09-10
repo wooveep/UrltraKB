@@ -75,6 +75,15 @@ it does not establish live model quality or a real provider connection.
 Corpus checks establish technical output/error handling; visual inspection
 of labels, relationships, baselines and clipping remains a separate check.
 
+The frozen program also carries the original `openkb/ocr/worker.py`,
+`supervisor.py`, `loading.py`, and `openkb/runtime/process_tree.py` files. The
+separately installed optional OCR Python runtime executes these scripts and
+verifies worker/loading hashes; Windows also loads the process-tree helper from
+its original relative path. Embedded Python
+bytecode is not a substitute. Check their presence and source hashes in both
+platform inventories, and exercise an import with local OCR configured. OCR
+dependencies and model weights remain in the separate optional runtime package.
+
 The lifecycle runner exercises actual Qt event loops and spawned workers. It
 checks waiting-batch completion, stopping before execution, and shutdown during
 a pending KB deletion. Each restart is a separate process using the previous
