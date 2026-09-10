@@ -99,7 +99,7 @@ def verify_processing_settings(dialog, kb, wait_until):
         processing.values.inputs[name].setText(str(value))
     processing.action.setCurrentIndex(1)
     ocr = dialog.fields["parsing"]
-    ocr.backend.setCurrentIndex(1)
+    ocr.backend.setCurrentIndex(ocr.backend.findData("cloud"))
     ocr.enabled["cloud"].setChecked(True)
     for key, value in {
         "endpoint": "https://ocr.example.test/api/v2/ocr/jobs",
@@ -136,7 +136,7 @@ def verify_processing_settings(dialog, kb, wait_until):
     dialog.save()
     wait_until(lambda: dialog.form.isEnabled())
     assert read_settings_view(kb).values.parsing == saved.values.parsing
-    ocr.backend.setCurrentIndex(0)
+    ocr.backend.setCurrentIndex(ocr.backend.findData("local"))
     ocr.action.setCurrentIndex(1)
     dialog.save()
     wait_until(lambda: dialog.form.isEnabled())
