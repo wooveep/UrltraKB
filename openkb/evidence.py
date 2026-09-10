@@ -15,7 +15,9 @@ from openkb.sources import SourceStore, SourceVersion, content_id, read_object, 
 _CONFIRMABLE = {"blank_or_illustration", "ocr_blank_or_illustration", "image_content_requires_ocr"}
 
 
-def validate_location(location: dict[str, Any]) -> None:
+def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
+    if _depth > 8:
+        raise ValueError("Source attachment nesting is too deep")
     if not isinstance(location, dict) or location.get("kind") not in {
         "pdf",
         "docx",
@@ -23,9 +25,19 @@ def validate_location(location: dict[str, Any]) -> None:
         "converted",
     }:
         raise ValueError("Invalid source location")
-    allowed = {"kind", "page", "paragraph", "table", "row", "cell", "line", "headings", "bbox"}
+    allowed = {"kind", "page", "paragraph", "table", "row", "cell", "line", "headings", "bbox", "attachment"}
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
+    if "attachment" in location:
+        attachment = location["attachment"]
+        if (
+            not isinstance(attachment, dict)
+            or set(attachment) != {"part", "name", "blob", "position"}
+            or not all(isinstance(attachment[key], str) and attachment[key] for key in ("part", "name"))
+        ):
+            raise ValueError("Invalid embedded source location")
+        valid_id(attachment["blob"])
+        validate_location(attachment["position"], _depth=_depth + 1)
     for key in ("page", "paragraph", "table", "row", "cell", "line"):
         if key in location and (type(location[key]) is not int or location[key] < 1):
             raise ValueError("Invalid source position")

@@ -5,7 +5,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
 from openkb.application.knowledge_bases import get_kb_list
 from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
+from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import RecompileDocument, RemoveDocument
@@ -34,55 +37,100 @@ class DocumentsDialog(ManagementPanel):
         self.setWindowTitle(f"资料管理 · {kb.name}")
         self.resize(880, 650)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
         from openkb.desktop.location import LocationLabel
 
-        layout.addWidget(LocationLabel(str(kb)))
+        location = LocationLabel(str(kb))
+        location.setObjectName("muted")
+        layout.addWidget(location)
+        inventory = QHBoxLayout()
+        self.selection_status = QLabel("正在读取资料…")
+        inventory.addWidget(self.selection_status, 1)
+        self.refresh_button = QPushButton("刷新资料")
+        self.refresh_button.clicked.connect(self.reload)
+        inventory.addWidget(self.refresh_button)
+        layout.addLayout(inventory)
         self.table = QTableWidget(0, 4)
+        self.table.setObjectName("documentTable")
+        self.table.setAccessibleName("资料列表")
         self.table.setHorizontalHeaderLabels(["资料", "类型", "原文", "知识编译"])
         self._documents = {}
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setMinimumSectionSize(88)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setMinimumHeight(220)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.itemSelectionChanged.connect(self.invalidate)
-        layout.addWidget(self.table)
-        options = QHBoxLayout()
+        self.table.itemActivated.connect(lambda _item: self.review_source())
+        layout.addWidget(self.table, 1)
+        actions = FlowLayout()
+        self.review_button = QPushButton("查看原文与处理结果")
+        self.review_button.setObjectName("primaryAction")
+        self.review_button.setToolTip("查看所选资料的原文、证据与待接受的知识变更")
+        self.review_button.clicked.connect(self.review_source)
+        self.recompile_selected = QPushButton("重编译所选资料")
+        self.recompile_all = QPushButton("重编译全部资料")
+        self.recompile_selected.clicked.connect(lambda: self.recompile(all_docs=False))
+        self.recompile_all.clicked.connect(lambda: self.recompile(all_docs=True))
+        self.removal_toggle = QPushButton("删除资料…")
+        self.removal_toggle.setCheckable(True)
+        for button in (
+            self.review_button,
+            self.recompile_selected,
+            self.recompile_all,
+            self.removal_toggle,
+        ):
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        self.removal_panel = QFrame()
+        self.removal_panel.setObjectName("documentRemoval")
+        removal = QVBoxLayout(self.removal_panel)
+        hint = QLabel("先查看所选资料的删除计划，再确认删除。")
+        hint.setWordWrap(True)
+        removal.addWidget(hint)
+        options = FlowLayout()
         self.keep_raw = QCheckBox("保留原文")
         self.keep_empty = QCheckBox("保留失去全部来源的概念 / 实体页面")
         for checkbox in (self.keep_raw, self.keep_empty):
             checkbox.toggled.connect(self.invalidate)
             options.addWidget(checkbox)
-        layout.addLayout(options)
-        actions = QHBoxLayout()
-        self.refresh_button = QPushButton("刷新资料")
+        removal.addLayout(options)
+        deletion = FlowLayout()
         self.preview_button = QPushButton("查看删除计划")
         self.confirm_button = QPushButton("确认删除")
         self.confirm_button.setEnabled(False)
         for button, callback in (
-            (self.refresh_button, self.reload),
             (self.preview_button, self.preview),
             (self.confirm_button, self.confirm),
         ):
             button.clicked.connect(callback)
-            actions.addWidget(button)
-        layout.addLayout(actions)
-        recompilation = QHBoxLayout()
-        self.recompile_selected = QPushButton("重编译所选资料")
-        self.recompile_all = QPushButton("重编译全部资料")
-        self.recompile_selected.clicked.connect(lambda: self.recompile(all_docs=False))
-        self.recompile_all.clicked.connect(lambda: self.recompile(all_docs=True))
-        recompilation.addWidget(self.recompile_selected)
-        recompilation.addWidget(self.recompile_all)
-        layout.addLayout(recompilation)
-        review_source = QPushButton("查看原文、证据与待接受的知识变更")
-        review_source.clicked.connect(self.review_source)
-        layout.addWidget(review_source)
-        self.status = QLabel("正在读取资料…")
+            deletion.addWidget(button)
+        removal.addLayout(deletion)
+        self.removal_panel.hide()
+        self.removal_toggle.toggled.connect(self.removal_panel.setVisible)
+        self.removal_toggle.toggled.connect(self.invalidate)
+        layout.addWidget(self.removal_panel)
+        self.status = QLabel("选择一份资料查看原文；按住 Ctrl 或 Shift 可选择多份资料。")
+        self.status.setObjectName("muted")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
+        self.details.setMaximumHeight(140)
+        self.details.hide()
         layout.addWidget(self.details)
+        self.table.itemSelectionChanged.connect(self.invalidate)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
@@ -90,8 +138,28 @@ class DocumentsDialog(ManagementPanel):
 
     def invalidate(self):
         self._generation += 1
+        if self._confirmed is not None:
+            self.details.clear()
+            self.details.hide()
+            self.status.setText("删除计划已失效，请重新查看。")
         self._confirmed = None
         self.confirm_button.setEnabled(False)
+        self.update_selection()
+
+    def update_selection(self):
+        count = len(self.table.selectionModel().selectedRows())
+        total = self.table.rowCount()
+        self.selection_status.setText(
+            f"{total} 份资料" + (f" · 已选择 {count} 份" if count else "")
+        )
+        available = self._task is None
+        self.review_button.setEnabled(count == 1)
+        self.preview_button.setEnabled(count == 1 and available)
+        self.removal_toggle.setEnabled(
+            self.removal_toggle.isChecked() or (count == 1 and available)
+        )
+        self.recompile_selected.setEnabled(count > 0 and available)
+        self.recompile_all.setEnabled(total > 0 and available)
 
     def reload(self, *, preserve_result=False):
         self.invalidate()
@@ -104,7 +172,7 @@ class DocumentsDialog(ManagementPanel):
                 return
             if not preserve_result:
                 self.status.setText(
-                    f"{len(value['documents'])} 份资料。选择资料可预览删除或重编译。"
+                    "选择一份资料查看原文；按住 Ctrl 或 Shift 可选择多份资料。"
                     if value["documents"]
                     else "暂无资料。从上方导入文件、目录或网址。"
                 )
@@ -112,9 +180,12 @@ class DocumentsDialog(ManagementPanel):
             self._documents = {doc["hash"]: doc for doc in value["documents"]}
             for row, doc in enumerate(value["documents"]):
                 item = QTableWidgetItem(doc["name"])
+                item.setToolTip(doc["name"])
                 item.setData(Qt.ItemDataRole.UserRole, doc["hash"])
                 self.table.setItem(row, 0, item)
-                self.table.setItem(row, 1, QTableWidgetItem(doc.get("display_type", doc["type"])))
+                kind = doc.get("display_type", doc["type"])
+                kind = {"short": "短文档", "long_pdf": "长篇 PDF"}.get(kind, kind)
+                self.table.setItem(row, 1, QTableWidgetItem(kind))
                 self.table.setItem(
                     row,
                     2,
@@ -131,6 +202,7 @@ class DocumentsDialog(ManagementPanel):
                 self.table.setItem(
                     row, 3, QTableWidgetItem(labels.get(doc.get("knowledge_compilation"), "待处理"))
                 )
+            self.update_selection()
 
         self.window.io.submit(
             lambda: get_kb_list(self.kb), loaded, kb=self.kb, obsolete=lambda: self._closed
@@ -158,6 +230,7 @@ class DocumentsDialog(ManagementPanel):
                 return
             self._confirmed = RemoveDocument(identifier, value.version, keep_raw, keep_empty)
             self.details.setPlainText("\n".join(f"{a.tag}  {a.target}" for a in value.plan.actions))
+            self.details.show()
             self.status.setText("确认后执行以上清理。若知识库已变化，将要求重新查看并确认计划。")
             self.confirm_button.setEnabled(True)
 
@@ -229,6 +302,7 @@ class DocumentsDialog(ManagementPanel):
             self._task = self.window.manager.submit(
                 self.kb, [RecompileDocument(t.file_hash, selection.version) for t in targets]
             )
+            self.update_selection()
             self.status.setText("重编译任务已提交，可在主窗口查看逐项结果或安全停止。")
 
         self.window.io.submit(
@@ -256,6 +330,7 @@ class DocumentsDialog(ManagementPanel):
         if task.error and not lines:
             lines.append(task.error)
         self.details.setPlainText("\n".join(lines))
+        self.details.setVisible(bool(lines))
         self.status.setText(
             "任务已执行，含质量提示或未完成阶段，请查看结果。"
             if any(result.quality or result.unfinished for result in task.results)

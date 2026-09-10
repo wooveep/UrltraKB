@@ -30,6 +30,8 @@ def verify_removal(window, kb, wait_until):
     try:
         wait_until(lambda: dialog.table.rowCount() == 1)
         dialog.table.selectRow(0)
+        if not dialog.removal_toggle.isChecked():
+            dialog.removal_toggle.click()
         dialog.keep_raw.setChecked(True)
         dialog.keep_empty.setChecked(True)
         dialog.preview_button.click()

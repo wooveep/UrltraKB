@@ -92,6 +92,11 @@ def _compile_version(
                 parsed = parse_document(
                     kb_dir, source, options=settings.get("parsing"), force=force_parse
                 )
+                for row in parsed.quality:
+                    if row["status"] == "verified" and row["reason"].startswith(
+                        "docx_conversion_warning:"
+                    ):
+                        report_auxiliary_warning(row["reason"])
                 if not ParseStore(kb_dir).complete(source, parsed):
                     raise ProcessingIncomplete("source_quality_needs_review", "parsing")
                 if parse_only:

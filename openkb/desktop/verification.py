@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
+    parser.add_argument("--tables", action="store_true", help="Populated native table layouts")
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
     parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
@@ -144,6 +145,12 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.tables:
+            from openkb.desktop.verification_tables import verify_tables
+
+            verify_tables(window, first, root, wait_until)
+            checks.append("populated native table geometry and document actions")
+            return 0
         if args.distribution:
             from openkb.desktop.verification_distribution import verify_distribution
 

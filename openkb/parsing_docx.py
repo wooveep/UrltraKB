@@ -6,17 +6,25 @@ import re
 from pathlib import Path
 from typing import Any
 
+from openkb.docx_containers import ExpansionBudget
+from openkb.docx_package import prepare_docx
 from openkb.evidence import BlockDraft
+from openkb.parsing_docx_quality import conversion_quality
 from openkb.processing import processing_checkpoint
 from openkb.sources import SourceStore
 
 
-def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
+def parse_docx(
+    path: Path, store: SourceStore, *, ocr=None, _budget=None, _depth=0
+) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
     import mammoth
     from mammoth import documents as nodes
 
+    budget = _budget or ExpansionBudget()
+    prepared = prepare_docx(path.read_bytes(), store, budget, _depth)
     blocks: list[BlockDraft] = []
-    quality: list[dict[str, Any]] = []
+    quality: list[dict[str, Any]] = list(prepared.quality)
+    pending_attachments: list[Any] = []
     headings: list[str] = []
     paragraph_number, table_number = 0, 0
     notes = None
@@ -25,6 +33,11 @@ def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[d
 
     def inline(node, assets: list[str]) -> str:
         if isinstance(node, nodes.Text):
+            attachment = prepared.attachments.get(node.value)
+            if attachment is not None:
+                pending_attachments.append(attachment)
+                assets.extend((attachment.container, attachment.blob))
+                return f"[Embedded attachment: {attachment.name}](asset:{attachment.blob})"
             return node.value
         if isinstance(node, nodes.Tab):
             return "\t"
@@ -62,6 +75,7 @@ def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[d
             processing_checkpoint("parsing")
             if isinstance(node, nodes.Paragraph):
                 paragraph_number += 1
+                pending_attachments.clear()
                 assets: list[str] = []
                 text = inline(node, assets)
                 style = node.style_id or node.style_name or ""
@@ -84,6 +98,17 @@ def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[d
                             f"ordered={node.numbering.is_ordered}"
                         )
                     blocks.append(BlockDraft(text, kind, location, tuple(assets), context))
+                    for attachment in pending_attachments:
+                        from zipfile import BadZipFile
+
+                        from openkb.docx_attachments import attachment_quality, bind_blocks, parse_attachment
+
+                        try:
+                            drafts, checks = parse_attachment(attachment, store, budget, _depth + 1, ocr)
+                            blocks.extend(bind_blocks(drafts, attachment, location))
+                            quality.extend(attachment_quality(checks, attachment))
+                        except (ValueError, BadZipFile, UnicodeError):
+                            quality.append({"status": "needs_review", "reason": "docx_attachment_unparsed:" + attachment.part})
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
@@ -115,7 +140,7 @@ def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[d
         with image.open() as stream:
             return {"src": "asset:" + store.put_bytes(stream.read())}
 
-    with path.open("rb") as source:
+    with prepared.stream as source:
         result = mammoth.convert_to_html(
             source,
             transform_document=capture,
@@ -125,8 +150,5 @@ def parse_docx(path: Path, store: SourceStore) -> tuple[list[BlockDraft], list[d
     if not blocks:
         quality.append({"status": "needs_review", "reason": "empty_content"})
     for message in result.messages:
-        if "Unrecognised paragraph style" not in message.message:
-            quality.append(
-                {"status": "needs_review", "reason": "docx_conversion_warning:" + message.message}
-            )
-    return blocks, quality
+        quality.append(conversion_quality(message.message))
+    return blocks, [dict(row) for row in dict.fromkeys(tuple(row.items()) for row in quality)]

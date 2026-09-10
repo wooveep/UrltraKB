@@ -139,9 +139,25 @@ class Appearance(QObject):
                 QAbstractItemView::item {{ padding: 8px; min-height: 22px; border: 0; }}
                 QAbstractItemView::item:selected {{ background: {selection}; color: {text}; }}
                 QAbstractItemView::item:hover {{ background: {surface}; }}
+                QHeaderView {{ padding: 0; }}
                 QHeaderView::section {{ background: {bg}; color: {muted};
                     border: 0; border-bottom: 1px solid {border}; padding: 10px 8px; }}
                 QTableView {{ gridline-color: {border}; }}
+                QTableView#documentTable {{ padding: 0; border: 1px solid {border};
+                    alternate-background-color: {surface}; }}
+                QTableView#documentTable::item {{ padding: 8px 12px;
+                    border-bottom: 1px solid {selection}; }}
+                QTableView#documentTable::item:selected {{ background: {selection}; }}
+                QTableView#documentTable::item:hover:!selected {{ background: {surface}; }}
+                QTableView#documentTable QHeaderView::section {{ background: {surface};
+                    padding: 10px 12px; font-weight: 500; }}
+                QFrame#documentRemoval {{ background: {surface};
+                    border: 1px solid {border}; border-radius: 8px; }}
+                QPushButton#primaryAction {{ background: {text}; color: {inverse};
+                    border-color: {text}; }}
+                QPushButton#primaryAction:hover {{ background: {accent}; }}
+                QPushButton#primaryAction:disabled {{ background: {surface};
+                    color: {muted}; border-color: {border}; }}
                 QTabWidget::pane {{ border: 0; }}
                 QTabBar::tab {{ background: transparent; color: {muted}; padding: 9px 14px;
                     border-bottom: 2px solid transparent; }}

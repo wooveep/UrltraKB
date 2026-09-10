@@ -155,3 +155,36 @@ rows wrap as space narrows. The layout capture matrix now includes 720 × 600
 logical pixels. Native chat acceptance covers saved multi-turn history, tagged
 reasoning exclusion, duplicate Enter prevention and a background result arriving
 after the user starts a different conversation.
+
+## Populated document tables
+
+Native headers explicitly reset the padding inherited from `QAbstractItemView`.
+That inherited padding shifted header sections six logical pixels away from their
+cells and clipped row numbers. The document inventory gives spare width to the
+document name, sizes status columns to their labels, hides row numbers and uses
+46-pixel rows with subtle separators. Full names remain available in tooltips.
+
+The document list takes the available height. Common actions wrap at narrow
+widths, selection counts and enabled actions reflect single/multiple selection,
+and deletion options expand on demand. Empty result panels are hidden. Deletion
+still requires a current preview; changing selection or retention options clears
+that preview and disables confirmation.
+
+Run the populated-table acceptance with a new output directory:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
+  --tables --output /tmp/urltrakb-tables
+.venv/bin/pytest -q tests/test_desktop_workbench.py
+```
+
+The tests cover light/dark themes at 1320×720, 900×650 and 720×600, repeat at
+150% device scaling, and check header/cell geometry, scrolling, full-name tooltips,
+selection, empty lists and actual deletion with stale-preview rejection.
+These captures use synthetic source names in an isolated KB, rendered by Qt on
+Linux; they do not certify the Windows portable build.
+
+| View | Native capture |
+| --- | --- |
+| Documents with a selection, light | [Document table](desktop-evidence/workbench/documents-table.png) |
+| Documents, dark, narrow window | [Narrow document table](desktop-evidence/workbench/documents-table-dark.png) |

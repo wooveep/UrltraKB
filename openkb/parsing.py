@@ -30,6 +30,8 @@ def parse_document(
         "mammoth": package_version("mammoth"),
         "markitdown": package_version("markitdown"),
     }
+    if source.suffix == ".docx":
+        profile["docx"] = "openkb-docx-v2"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
