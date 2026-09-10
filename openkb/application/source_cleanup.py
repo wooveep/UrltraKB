@@ -99,6 +99,7 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
     # associated versions are deliberately retained, even without Wiki citations.
     for name in ("cloud-jobs", "local-ocr-runs", "local-ocr-results", "ocr-reprocessing"):
         protected_paths += list(store.owned_path(store.root / name).rglob("*.json"))
+    protected_paths += list((kb_dir / ".openkb/visual-observations").glob("*.json"))
     for path in protected_paths:
         roots.update(_references(store.owned_path(path)))
     retained = set()

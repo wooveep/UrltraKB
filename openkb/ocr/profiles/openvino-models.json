@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "runtime": "openvino",
+  "model": "PaddleOCR-VL-1.5",
+  "revision": "43f60524b332ac2fc5f06aed8f015ad3d0dc000b",
+  "precision": "upstream-fp16",
+  "code_commit": "598857c1272c2b7224109ad4573974f7d4cc260f",
+  "files": {
+    "PaddleOCR-VL-1.5-ov/added_tokens.json": {
+      "bytes": 25435,
+      "sha256": "d6c4f5455c5a5f4fe27fc12fcb48e1823829ace3cf43c64fd9f08199e0c91a73",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/added_tokens.json"
+    },
+    "PaddleOCR-VL-1.5-ov/chat_template.jinja": {
+      "bytes": 1474,
+      "sha256": "2f27812dab7f333e471884e0c803d807f11953d5453140dfb1aaba234f872bc8",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/chat_template.jinja"
+    },
+    "PaddleOCR-VL-1.5-ov/config.json": {
+      "bytes": 2059,
+      "sha256": "16bba98aaeeedb7cfad1fb987523e61a0518034e4a1035045720de9b424c4da8",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/config.json"
+    },
+    "PaddleOCR-VL-1.5-ov/configuration_paddleocr_vl.py": {
+      "bytes": 8104,
+      "sha256": "753dd93654c3a9c8c85a3eaee1e3092dd12591b0f2dce0305e1abfb7a41ff160",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/configuration_paddleocr_vl.py"
+    },
+    "PP-DoclayoutV3-ov/DocLayoutV3.bin": {
+      "bytes": 64837612,
+      "sha256": "3057b3fb5c4f63dd6f458a0110a1ba6e2c69497543f9fd69c3a5aecceef0f1a6",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PP-DoclayoutV3-ov/DocLayoutV3.bin"
+    },
+    "PP-DoclayoutV3-ov/DocLayoutV3.xml": {
+      "bytes": 1486817,
+      "sha256": "69daededef50838773cbfb9dd39ac7a4376659f9d36c4b1245fa9e386b5e2aeb",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PP-DoclayoutV3-ov/DocLayoutV3.xml"
+    },
+    "PaddleOCR-VL-1.5-ov/llm_embd.bin": {
+      "bytes": 211812356,
+      "sha256": "40bc954b4b1d6441d703b6973e5c1924c5b25e47106e0d230ceb75ab4db6bcbc",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/llm_embd.bin"
+    },
+    "PaddleOCR-VL-1.5-ov/llm_embd.xml": {
+      "bytes": 2986,
+      "sha256": "6607bfa41f0e3bac929b54d1b718b9867c6402089e80254c23e0ae23284cf383",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/llm_embd.xml"
+    },
+    "PaddleOCR-VL-1.5-ov/llm_stateful.bin": {
+      "bytes": 721496502,
+      "sha256": "0d11f861590ed76789419fc5b743fe603b4b9a076b303e4efeeef8e396631adb",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/llm_stateful.bin"
+    },
+    "PaddleOCR-VL-1.5-ov/llm_stateful.xml": {
+      "bytes": 1782984,
+      "sha256": "df5fc9976cffd24e506072db7c3b4ba99240bc523c8ad8d9d0ffd4b0db7aa096",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/llm_stateful.xml"
+    },
+    "PaddleOCR-VL-1.5-ov/special_tokens_map.json": {
+      "bytes": 1152,
+      "sha256": "215bf3a1b155fafe3497f8790bedf280af92d29c2f0286c2f87a5c78baff8f7c",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/special_tokens_map.json"
+    },
+    "PaddleOCR-VL-1.5-ov/tokenizer.model": {
+      "bytes": 1614363,
+      "sha256": "34ef7db83df785924fb83d7b887b6e822a031c56e15cff40aaf9b982988180df",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/tokenizer.model"
+    },
+    "PaddleOCR-VL-1.5-ov/tokenizer_config.json": {
+      "bytes": 186948,
+      "sha256": "60a639c9e6933f4b4f14fa53a57bc15eb3d14ea6909637577582c27975d37c23",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/tokenizer_config.json"
+    },
+    "PaddleOCR-VL-1.5-ov/vision.bin": {
+      "bytes": 825974860,
+      "sha256": "0ffe334b3e054a9dd88a027fb9848082e28620de27bbb0bf1028ffbb7c5f34eb",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/vision.bin"
+    },
+    "PaddleOCR-VL-1.5-ov/vision.xml": {
+      "bytes": 1566440,
+      "sha256": "1f849a183c95c2690b958fa3be40a24358a72b7fc46943212821fb3b20ee6c8a",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/vision.xml"
+    },
+    "PaddleOCR-VL-1.5-ov/vision_mlp.bin": {
+      "bytes": 51920480,
+      "sha256": "f01ce1d2f74c99aba34c8bf58d8bafc4eaeb8d4182eae38278b6aabf6540e844",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/vision_mlp.bin"
+    },
+    "PaddleOCR-VL-1.5-ov/vision_mlp.xml": {
+      "bytes": 23975,
+      "sha256": "ec4e357eb73ae9764c231a01dea30b8bbe720a352f21700e0153a9599f6fb86d",
+      "url": "https://modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/43f60524b332ac2fc5f06aed8f015ad3d0dc000b/PaddleOCR-VL-1.5-ov/vision_mlp.xml"
+    }
+  },
+  "source": {
+    "url": "https://api.github.com/repos/zhaohb/paddleocr_vl_ov/tarball/598857c1272c2b7224109ad4573974f7d4cc260f",
+    "bytes": 43518197,
+    "sha256": "3624906c6c72b0240536c56674bb107c70cf9c1741423fe2ec59c3522f7e3be3"
+  }
+}

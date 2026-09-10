@@ -131,6 +131,7 @@ class PageReprocessing(SourceMutation):
     parse_id: VersionId
     page: int = Field(ge=1)
     acknowledge_unknown: bool = Field(default=False, strict=True)
+    engine: Literal["system", "local", "cloud"] | None = None
 
 
 async def _submit(query, request, unit):

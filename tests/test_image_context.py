@@ -138,7 +138,7 @@ def test_windows_ocr_probe_timeout_is_optional_but_document_deadline_is_not(monk
     from openkb.processing import ProcessingIncomplete
 
     monkeypatch.setattr(backend, "os", SimpleNamespace(name="nt"))
-    settings = SimpleNamespace(backend="local", local=None)
+    settings = SimpleNamespace(backend="system", policy="auto", local=None)
     reason = "windows_ocr_timeout"
 
     def unavailable():

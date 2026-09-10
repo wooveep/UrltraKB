@@ -36,9 +36,15 @@ from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 from openkb.ocr.config import parsing_settings
 from openkb.ocr.credentials import OCR_API_KEY_ENV, resolve_ocr_credential
+from openkb.vision.config import IMAGE_API_KEY_ENV, IMAGE_CONNECTION_ENV, vision_settings
+from openkb.vision.credentials import credential_binding, resolve_image_credential
 
 logger = logging.getLogger(__name__)
-_SECRET_ENV_FIELDS = {"api_key": "LLM_API_KEY", "ocr_api_key": OCR_API_KEY_ENV}
+_SECRET_ENV_FIELDS = {
+    "api_key": "LLM_API_KEY",
+    "ocr_api_key": OCR_API_KEY_ENV,
+    "image_api_key": IMAGE_API_KEY_ENV,
+}
 _CREDENTIAL_FIELDS = (*_SECRET_ENV_FIELDS, "openai_api_base")
 
 
@@ -147,6 +153,8 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     return KbConfigResponse(
         model=effective["model"],
         parsing=parsing,
+        image_understanding=vision_settings(effective.get("image_understanding")),
+        has_image_api_key=bool(resolve_image_credential(kb_dir).api_key),
         processing=effective.get("processing"),
         navigation=effective.get("navigation") or {},
         compilation_thinking=effective.get("compilation_thinking"),
@@ -163,6 +171,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         global_values=GlobalConfigValues(
             model=global_config.get("model"),
             parsing=global_config.get("parsing"),
+            image_understanding=global_config.get("image_understanding"),
             processing=global_config.get("processing"),
             navigation=global_config.get("navigation"),
             compilation_thinking=global_config.get("compilation_thinking"),
@@ -236,6 +245,10 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
         # never persisted). The shared writer does the secure atomic 0o600 write.
         _reject_credential_newlines(request)
         updates = _credential_updates(request)
+        if "image_api_key" in fields_set:
+            updates[IMAGE_CONNECTION_ENV] = (
+                credential_binding(kb_dir) if request.image_api_key else None
+            )
         _merge_patch_env(kb_dir / ".env", updates)
         logger.info(
             "kb/config credential rotation: kb=%s fields=%s",
@@ -266,6 +279,8 @@ def _read_global_config() -> GlobalConfigResponse:
     return GlobalConfigResponse(
         model=gc.get("model", DEFAULT_CONFIG["model"]),
         parsing=parsing,
+        image_understanding=vision_settings(gc.get("image_understanding")),
+        has_image_api_key=bool(resolve_image_credential().api_key),
         processing=(
             gc["processing"] if gc.get("processing") is not None else DEFAULT_CONFIG["processing"]
         ),
@@ -390,6 +405,8 @@ def _write_global_env(request: GlobalConfigPatchRequest, fields_set: set[str]) -
     does the secure atomic 0o600 write; the key VALUE is never logged.
     """
     updates = _credential_updates(request)
+    if "image_api_key" in fields_set:
+        updates[IMAGE_CONNECTION_ENV] = credential_binding(None) if request.image_api_key else None
     # Module object, not a by-name import: tests monkeypatch GLOBAL_CONFIG_DIR.
     _merge_patch_env(_config_module.GLOBAL_CONFIG_DIR / ".env", updates)
     logger.info(
@@ -446,4 +463,5 @@ def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
         for field, key in (("api_key", "LLM_API_KEY"), ("openai_api_base", "OPENAI_API_BASE")):
             sources[field] = next((name for name, data in layers if data.get(key)), "unset")
         sources["ocr_api_key"] = resolve_ocr_credential(kb_dir, values.parsing.ocr.cloud).source
+        sources["image_api_key"] = resolve_image_credential(kb_dir).source
         return SettingsView(values=values, sources=sources)

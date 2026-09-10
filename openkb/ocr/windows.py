@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import time
-from functools import lru_cache
 from pathlib import Path
 
 from openkb.evidence import BlockDraft, ParseStore
@@ -132,7 +131,6 @@ def _run(plan: dict, root: Path, *, seconds: float = 30) -> dict:
     return result
 
 
-@lru_cache(maxsize=1)
 def runtime_profile() -> dict:
     with processing_directory(prefix="openkb-windows-ocr-info-") as temporary:
         info = _run({"action": "info"}, Path(temporary), seconds=10)
@@ -152,9 +150,9 @@ def runtime_profile() -> dict:
 
 
 class WindowsOcr:
-    def __init__(self, store, source, *, retries=None):
+    def __init__(self, store, source, *, retries=None, profile=None):
         self.store, self.source = store, source
-        self.profile = runtime_profile()
+        self.profile = profile or runtime_profile()
         self.retries = retries or {}
 
     def close(self):
@@ -206,11 +204,28 @@ class WindowsOcr:
                 if exc.reason != "windows_ocr_timeout":
                     raise
                 return [], exc.reason
-        reason = (
-            None
-            if any(b.kind != "image" for b in blocks)
-            else "windows_ocr_no_text_requires_review"
-        )
+        text = "\n".join(b.text for b in blocks if b.kind != "image")
+        reason = None
+        if not text.strip():
+            reason = "windows_ocr_no_text_requires_review"
+        elif len(text.strip()) < 20 or "\ufffd" in text or "\x00" in text:
+            reason = "windows_ocr_sparse_or_unmapped_text_requires_review"
+        from dataclasses import replace
+
+        import pymupdf
+
+        blocks = [
+            replace(
+                b,
+                location={
+                    **b.location,
+                    "bbox": list(
+                        pymupdf.Rect(b.location["bbox"]) * document[page - 1].derotation_matrix
+                    ),
+                },
+            )
+            for b in blocks
+        ]
         parses.save(
             self.source,
             profile,
@@ -279,7 +294,19 @@ class WindowsOcr:
                     "paragraph",
                     {"kind": "pdf", "page": page, "bbox": bbox},
                     (image,),
-                    "Local Windows OCR text; original image retained.",
+                    json.dumps(
+                        {
+                            "origin": "ocr_transcription",
+                            "ocr": {
+                                **self.profile,
+                                "engine": "system",
+                                "device": "system_managed",
+                                "confidence": None,
+                            },
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
                 )
             )
         return blocks

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QTabWidget,
     QVBoxLayout,
@@ -138,7 +139,8 @@ class NavigationField(SettingsSection):
 
 
 class OcrField(SettingsSection):
-    def __init__(self):
+    def __init__(self, io=None, kb=None):
+        self.io, self.kb = io, kb
         super().__init__(
             "可靠文字层直接读取；需要识别的页使用选定后端。本地与云配置分别保存。"
             "云端 API Key 可直接输入，保存后仅显示是否已设置。"
@@ -147,14 +149,76 @@ class OcrField(SettingsSection):
 
         self.cloud_key = SettingField("ocr_api_key")
         self.cloud_key.text.setAccessibleName("OCR 云端 API Key")
+        self.policy = QComboBox()
+        self.policy.addItem("自动识别需要 OCR 的内容", "auto")
+        self.policy.addItem("关闭 OCR，保留原文和图片", "off")
+        self.policy.activated.connect(self.changed)
+        self.body.addWidget(self.policy)
         self.backend = QComboBox()
-        self.backend.addItem("本地 PaddleOCR-VL-1.6（CPU）", "local")
+        self.backend.addItem("系统 OCR（默认）", "system")
+        self.backend.addItem("本地飞桨模型", "local")
         self.backend.addItem("PaddleOCR 云 jobs 服务", "cloud")
         self.backend.setAccessibleName("需要 OCR 时使用")
         self.backend.activated.connect(self.changed)
         self.body.addWidget(self.backend)
+        self.device = QComboBox()
+        for label, value in (
+            ("自动：优先可用 GPU", "auto"),
+            ("只用 CPU", "cpu"),
+            ("指定 GPU，不回退", "gpu"),
+        ):
+            self.device.addItem(label, value)
+        self.device.activated.connect(self.changed)
+        self.body.addWidget(self.device)
+        self.gpu_device = QLineEdit()
+        self.gpu_device.setPlaceholderText("可选设备编号，例如 GPU.0（Intel）或 gpu:0（NVIDIA）")
+        self.gpu_device.textEdited.connect(self.changed)
+        self.body.addWidget(self.gpu_device)
+        from openkb.desktop.ocr_installation import OcrInstallationPanel, fill_installations
+
+        self.installation = QComboBox()
+        fill_installations(self.installation)
+        self.installation.activated.connect(self.changed)
+        self.body.addWidget(self.installation)
+        self.installer = OcrInstallationPanel(io) if io else None
+        if self.installer:
+            self.body.addWidget(self.installer)
+
+            def installed(identity):
+                fill_installations(self.installation, identity)
+                self.changed()
+
+            self.installer.installed.connect(installed)
+        self.execution = QComboBox()
+        self.execution.addItem("使用已安装运行环境", "runtime")
+        self.execution.addItem("连接已部署的飞桨服务", "service")
+        self.execution.activated.connect(self.changed)
+        self.body.addWidget(self.execution)
+        self.service_endpoint = QLineEdit()
+        self.service_endpoint.setPlaceholderText("http://127.0.0.1:8080（其他主机属于远端处理）")
+        self.service_endpoint.textEdited.connect(self.changed)
+        self.service_protocol = QComboBox()
+        self.service_protocol.addItem("完整解析服务 /layout-parsing", "pipeline")
+        self.service_protocol.addItem("仅 VLM（结果需要版面复核）", "vlm")
+        self.service_protocol.activated.connect(self.changed)
+        self.body.addWidget(self.service_endpoint)
+        self.body.addWidget(self.service_protocol)
+        self.check_button = QPushButton("检查已保存服务 / 所选运行环境（内置样本）")
+        self.check_button.clicked.connect(self.check_capability)
+        self.check_status = QLabel()
+        self.check_status.setWordWrap(True)
+        self.body.addWidget(self.check_button)
+        self.body.addWidget(self.check_status)
+        self.device.currentIndexChanged.connect(self.visibility)
+        self.execution.currentIndexChanged.connect(self.visibility)
+        self.backend.currentIndexChanged.connect(self.visibility)
+        self.policy.currentIndexChanged.connect(self.visibility)
+        self.advanced = QCheckBox("高级：已有运行环境、资源额度与云连接")
+        self.body.addWidget(self.advanced)
         self.tabs = QTabWidget()
         self.body.addWidget(self.tabs)
+        self.advanced.toggled.connect(self.tabs.setVisible)
+        self.tabs.hide()
         self.enabled, self.forms = {}, {}
         self.cloud_options = {}
         self._profiles = {}
@@ -229,7 +293,20 @@ class OcrField(SettingsSection):
     def load(self, value, source):
         settings = value or ParsingSettings()
         self._profiles = settings.ocr.model_dump()
-        self.backend.setCurrentIndex(0 if settings.ocr.backend == "local" else 1)
+        self.policy.setCurrentIndex(self.policy.findData(settings.ocr.policy))
+        self.backend.setCurrentIndex(self.backend.findData(settings.ocr.backend))
+        self.device.setCurrentIndex(self.device.findData(settings.ocr.device))
+        self.gpu_device.setText(settings.ocr.gpu_device or "")
+        from openkb.desktop.ocr_installation import fill_installations
+
+        fill_installations(self.installation, settings.ocr.installation)
+        self.execution.setCurrentIndex(self.execution.findData(settings.ocr.execution))
+        service = settings.ocr.service
+        self.service_endpoint.setText(service.endpoint if service else "")
+        self.service_protocol.setCurrentIndex(
+            self.service_protocol.findData(service.protocol if service else "pipeline")
+        )
+        self.visibility()
         for name, fields in self.forms.items():
             saved = self._profiles.get(name) or {}
             self.enabled[name].setChecked(bool(saved))
@@ -243,10 +320,24 @@ class OcrField(SettingsSection):
     def value(self):
         if self.action.currentIndex() == 2:
             return None
-        result = {"backend": self.backend.currentData()}
+        result = {
+            "backend": self.backend.currentData(),
+            "policy": self.policy.currentData(),
+            "device": self.device.currentData(),
+            "installation": self.installation.currentData(),
+            "gpu_device": self.gpu_device.text().strip() or None,
+        }
+        result["execution"] = self.execution.currentData()
+        result["service"] = self._profiles.get("service")
+        if self.service_endpoint.text().strip():
+            result["service"] = {
+                **(result["service"] or {}),
+                "endpoint": self.service_endpoint.text().strip(),
+                "protocol": self.service_protocol.currentData(),
+            }
         for name, fields in self.forms.items():
             profile = dict(self._profiles.get(name) or {})
-            if self.enabled[name].isChecked():
+            if self.enabled[name].isChecked() and not (name == "local" and result["installation"]):
                 profile.update(fields["identity"].value())
                 for group in fields.keys() - {"identity"}:
                     profile[group] = fields[group].value()
@@ -262,3 +353,57 @@ class OcrField(SettingsSection):
             return ParsingSettings.model_validate({"ocr": result}).model_dump()
         except ValueError:
             raise ValueError("请检查 OCR 路径、模型、像素范围与有限正数额度。") from None
+
+    def visibility(self, *_):
+        local = self.backend.currentData() == "local" and self.policy.currentData() != "off"
+        service = local and self.execution.currentData() == "service"
+        self.check_button.setVisible(local and self.io is not None)
+        self.check_status.setVisible(local)
+        self.execution.setVisible(local)
+        self.service_endpoint.setVisible(service)
+        self.service_protocol.setVisible(service)
+        local = local and not service
+        self.device.setVisible(local)
+        self.gpu_device.setVisible(local and self.device.currentData() != "cpu")
+        self.installation.setVisible(local)
+        if self.installer:
+            self.installer.setVisible(local)
+        self.backend.setEnabled(self.policy.currentData() != "off")
+
+    def check_capability(self):
+        from functools import partial
+
+        from openkb.application.ocr_capability import check_ocr_capability, check_ocr_service
+
+        self.installer.stop.clear()
+        cancelled = self.installer.stop.is_set
+        if self.execution.currentData() == "service":
+            if self.action.currentIndex():
+                self.check_status.setText("请先保存服务连接，再检查。")
+                return
+            operation = partial(check_ocr_service, self.kb, cancelled=cancelled)
+        else:
+            identity, device = self.installation.currentData(), self.device.currentData()
+            if not identity:
+                self.check_status.setText("请先安装并选择运行环境。")
+                return
+            operation = partial(
+                check_ocr_capability,
+                identity,
+                device,
+                gpu_device=self.gpu_device.text().strip() or None,
+                cancelled=cancelled,
+            )
+        self.check_button.setEnabled(False)
+        self.check_status.setText("正在检查完整管线与内置样本…")
+
+        def finished(result, error):
+            self.check_button.setEnabled(True)
+            if error:
+                self.check_status.setText("检查未完成；请核对安装或连接设置。")
+            else:
+                import json
+
+                self.check_status.setText(json.dumps(result, ensure_ascii=False))
+
+        self.io.submit(operation, finished, kb=self.kb, obsolete=cancelled)

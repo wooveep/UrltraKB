@@ -31,6 +31,10 @@ def decisions(store: SourceStore, source: SourceVersion, profile: dict) -> dict:
                 raise ValueError("Invalid acknowledged submission identities")
             for identity in unknown:
                 valid_id(identity)
+            if "ocr" in row:
+                from openkb.ocr.config import OcrSettings
+
+                OcrSettings.model_validate(row["ocr"])
     return records
 
 
@@ -49,6 +53,7 @@ def request_page_attempt(
     page: int,
     parse_id: str,
     acknowledge_unknown: bool,
+    ocr: dict | None = None,
 ) -> None:
     unknown = []
     for path in store.owned_path(store.root / "cloud-jobs").glob("*.json"):
@@ -72,6 +77,7 @@ def request_page_attempt(
             "attempt": uuid.uuid4().hex,
             "reviewed_parse": parse_id,
             "acknowledged_unknown_submissions": sorted(unknown),
+            **({"ocr": ocr} if ocr is not None else {}),
         }
     )
     path = _path(store, source, profile)

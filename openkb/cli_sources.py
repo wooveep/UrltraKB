@@ -117,11 +117,14 @@ def continue_saved(ctx, source_id, version_id, proposal_id, accept_page):
     help="Allow a new submission despite an unknown prior cloud outcome; "
     "duplicate charges are possible.",
 )
+@click.option("--engine", type=click.Choice(["system", "local", "cloud"]))
 @click.pass_context
-def reprocess_page(ctx, source_id, version_id, parse_id, page, acknowledge_unknown):
+def reprocess_page(ctx, source_id, version_id, parse_id, page, acknowledge_unknown, engine):
     """Run the selected OCR backend again for one reviewed physical page."""
     try:
-        unit = ReprocessSourcePage(source_id, version_id, parse_id, page, acknowledge_unknown)
+        unit = ReprocessSourcePage(
+            source_id, version_id, parse_id, page, acknowledge_unknown, engine
+        )
     except ValueError as exc:
         raise click.ClickException("Invalid source page reprocessing decision") from exc
     ctx.exit(run_requests(_root(ctx), [unit]))

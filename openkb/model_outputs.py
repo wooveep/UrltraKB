@@ -25,7 +25,7 @@ class _ToolWriter:
     guard: Lock = field(default_factory=Lock)
     failure: RecoveryRequired | None = None
 
-    def write(self, path: Path, content: str) -> None:
+    def write(self, path: Path, content: str, *, artifact: bool = True) -> None:
         # Some SDKs dispatch synchronous tools to threads. Serialize their
         # journal and facts updates without granting general KB reentrancy.
         with self.guard:
@@ -51,8 +51,9 @@ class _ToolWriter:
                 self.lease.revoke()
                 raise
             # Publish facts only after the journal's commit signal succeeds.
-            self.result.resources = tuple(dict.fromkeys((*self.result.resources, str(path))))
-            if before != after:
+            if artifact:
+                self.result.resources = tuple(dict.fromkeys((*self.result.resources, str(path))))
+            if artifact and before != after:
                 relative = path.relative_to(self.root).as_posix()
                 change = f"{'updated' if before else 'created'}: {relative}"
                 self.result.changes = tuple(dict.fromkeys((*self.result.changes, change)))
@@ -84,12 +85,12 @@ def model_output_scope(kb_dir: Path, result: ModelOutputs | None = None):
             raise writer.failure
 
 
-def write_model_output(root: Path, path: Path, content: str) -> bool:
+def write_model_output(root: Path, path: Path, content: str, *, artifact: bool = True) -> bool:
     """Use the current chat/review writer, or leave other coordinators in charge."""
     writer = _writer.get()
     if writer is None:
         return False
     if writer.root != root.resolve():
         raise RuntimeError("Model output belongs to another knowledge base")
-    writer.write(path, content)
+    writer.write(path, content, artifact=artifact)
     return True

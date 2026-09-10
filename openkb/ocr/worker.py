@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 EXPECTED = {"paddleocr": "3.7.0", "paddlex": "3.7.2", "paddlepaddle": "3.3.1"}
@@ -34,9 +35,23 @@ def run(plan: dict) -> None:
             if time.monotonic() >= deadline:
                 raise TimeoutError("OCR ownership was not established")
             time.sleep(0.01)
+    # Before any model execution, failed admission consumed no recognition tokens.
+    initial_usage = {"regions": 0, "reserved_output_tokens": 0, "calls": 0}
+    usage_path = Path(plan["output"]) / "usage.json"
+    temporary_usage = usage_path.with_suffix(".tmp")
+    temporary_usage.write_text(json.dumps(initial_usage), encoding="utf-8")
+    temporary_usage.replace(usage_path)
     if sys.version_info[:3] != (3, 12, 13):
         raise ValueError("OCR runtime requires CPython 3.12.13")
-    if any(importlib.metadata.version(name) != expected for name, expected in EXPECTED.items()):
+    expected = dict(EXPECTED)
+    try:
+        gpu_version = importlib.metadata.version("paddlepaddle-gpu")
+    except importlib.metadata.PackageNotFoundError:
+        gpu_version = None
+    if gpu_version:
+        expected.pop("paddlepaddle")
+        expected["paddlepaddle-gpu"] = "3.3.1"
+    if any(importlib.metadata.version(name) != version for name, version in expected.items()):
         raise ValueError("OCR runtime package versions differ from the locked profile")
     root, source, output = (Path(plan[key]).resolve() for key in ("assets", "input", "output"))
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
@@ -79,6 +94,8 @@ def run(plan: dict) -> None:
         if event in {"socket.connect", "socket.getaddrinfo"}:
             raise RuntimeError("OCR offline runtime attempted network access")
 
+    if plan.get("device", "cpu") == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     sys.addaudithook(offline)
     from paddleocr import PaddleOCRVL
 
@@ -91,10 +108,37 @@ def run(plan: dict) -> None:
         raise ValueError("OCR loading implementation is unavailable")
     loading = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loading)
-    with loading.native_cpu_loading():
+    device = "cpu"
+    device_name = "CPU"
+    if plan.get("device", "cpu") == "gpu":
+        if not gpu_version:
+            raise RecognitionIncomplete("ocr_runtime_gpu_incompatible")
+        import paddle
+
+        if not paddle.is_compiled_with_cuda() or paddle.device.cuda.device_count() <= 0:
+            raise RecognitionIncomplete("ocr_gpu_unavailable")
+        device = plan.get("gpu_device") or "gpu:0"
+        if not device.startswith("gpu:"):
+            raise RecognitionIncomplete("ocr_gpu_unavailable")
+        index = int(device.split(":")[1])
+        if index >= paddle.device.cuda.device_count():
+            raise RecognitionIncomplete("ocr_gpu_unavailable")
+        try:
+            paddle.set_device(device)
+            capability = paddle.device.cuda.get_device_capability(index)
+            if not (7 <= capability[0] < 10):
+                raise RecognitionIncomplete("ocr_runtime_gpu_incompatible")
+            if tuple(map(int, paddle.version.cuda().split(".")[:2])) < (12, 6):
+                raise RecognitionIncomplete("ocr_runtime_gpu_incompatible")
+            device_name = paddle.device.cuda.get_device_name(index)
+        except RuntimeError:
+            raise RecognitionIncomplete("ocr_device_initialization_failed") from None
+    usage = {"regions": 0, "reserved_output_tokens": 0, "calls": 0}
+    (output / "usage.json").write_text(json.dumps(usage), encoding="utf-8")
+    with loading.native_cpu_loading() if device == "cpu" else nullcontext():
         pipeline = PaddleOCRVL(
             pipeline_version="v1.6",
-            device="cpu",
+            device=device,
             cpu_threads=plan["threads"],
             layout_detection_model_dir=str(root / "PP-DocLayoutV3"),
             vl_rec_model_dir=str(root / "PaddleOCR-VL-1.6"),
@@ -199,7 +243,17 @@ def run(plan: dict) -> None:
             "assets": assets,
             "markdown": markdown.get("markdown_texts", ""),
             "elapsed_seconds": time.monotonic() - started,
-            "versions": EXPECTED,
+            "versions": expected,
+            "runtime": {
+                "engine": "paddleocr",
+                "runtime": "native",
+                "model": "PaddleOCR-VL-1.6",
+                "assets": plan["assets_sha256"],
+                "versions": expected,
+                "devices": {"layout": device, "language": device},
+                "device_name": device_name,
+                "gpu_memory_limit": None,
+            },
             "usage": usage,
             "token_checks": token_checks,
         }
@@ -214,9 +268,20 @@ if __name__ == "__main__":
     plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     try:
         run(plan)
-    except RecognitionIncomplete as exc:
+    except RuntimeError as exc:
+        # Restrict retries to explicit device failures. Unknown output and input
+        # errors never gain a second inference attempt.
+        reason = str(exc)
+        if plan.get("device") == "gpu" and not isinstance(exc, RecognitionIncomplete):
+            lower = reason.lower()
+            if "out of memory" in lower or "out_of_memory" in lower:
+                reason = "ocr_device_memory_exhausted"
+            elif any(word in lower for word in ("cuda error", "cuda driver", "device lost")):
+                reason = "ocr_device_initialization_failed"
+            else:
+                reason = "ocr_runtime_failed"
         target = Path(plan["output"]) / "failure.json"
         temporary = target.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"reason": str(exc)}), encoding="utf-8")
+        temporary.write_text(json.dumps({"reason": reason}), encoding="utf-8")
         temporary.replace(target)
         raise

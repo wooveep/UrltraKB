@@ -7,14 +7,13 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
+from agents import Agent, Runner, function_tool
 
 from openkb.agent.streaming import settled_stream
 from openkb.agent.tools import (
     artifact_event_from_write,
     get_wiki_page_content,
     read_wiki_file,
-    read_wiki_image,
     write_kb_file,
 )
 from openkb.config import LlmCredentialBundle, resolve_model_settings
@@ -46,13 +45,13 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    note-relative (e.g. ![image](images/doc/file.png), resolved from
    wiki/sources/); long-doc JSON page metadata lists them wiki-root-relative
    (e.g. sources/images/doc/file.png). Pass either form as seen to the
-   get_image tool — it accepts both.
+   available visual tool only when image understanding is enabled.
 7. Synthesize a clear, concise, well-cited answer grounded in wiki content.
 8. Include relevant original figures in the answer as Markdown images when they help explain
    the answer: ![description](sources/images/file.png). Use an existing wiki-root-relative
    path from the source image catalog. Keep the figure with its associated explanation and
    cite the source paragraph/page; never invent an image path or claim to have read missing
-   OCR text. Use get_image to inspect a figure before interpreting its visual content.
+   OCR text. Interpret visual content only from an explicitly obtained visual observation.
 
 Answer based only on wiki content. Be concise.
 Before each tool call, output one short sentence explaining the reason.
@@ -91,28 +90,15 @@ def build_query_agent(
         """
         return get_wiki_page_content(doc_name, pages, wiki_root)
 
-    @function_tool
-    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
-        """View an image from the wiki.
+    from openkb.vision.session import image_tools
 
-        Use when a question asks about a specific figure, chart, or diagram
-        you'd need to see to answer accurately.
-
-        Args:
-            image_path: Image path as it appears in the content — either
-                wiki-root-relative ('sources/images/doc/p1_img1.png') or
-                note-relative as used in sources/ .md pages
-                ('images/doc/p1_img1.png').
-        """
-        result = read_wiki_image(image_path, wiki_root)
-        if result["type"] == "image":
-            return ToolOutputImage(image_url=result["image_url"])
-        return ToolOutputText(text=result["text"])
+    visual_tools, visual_instructions = image_tools(Path(wiki_root).parent)
+    instructions += "\n\n" + visual_instructions
 
     from agents.model_settings import ModelSettings
 
     if bundle is not None:
-        model_settings = {
+        model_settings: dict[str, Any] = {
             "parallel_tool_calls": (
                 bundle.parallel_tool_calls if bundle.parallel_tool_calls_explicit else False
             ),
@@ -122,10 +108,18 @@ def build_query_agent(
     else:
         model_settings = resolve_model_settings()
 
+    from openkb.processing import request_budget_settings
+
+    if caps := request_budget_settings():
+        model_settings["max_tokens"] = caps["max_tokens"]
+        model_settings["extra_args"] = {
+            **(model_settings.get("extra_args") or {}),
+            "timeout": caps["timeout"],
+        }
     return Agent(
         name="wiki-query",
         instructions=instructions,
-        tools=[read_file, get_page_content, get_image],
+        tools=[read_file, get_page_content, *visual_tools],
         model=f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )
@@ -167,10 +161,18 @@ async def iter_agent_response_events(
     from agents import RawResponsesStreamEvent, RunItemStreamEvent
     from openai.types.responses import ResponseTextDeltaEvent
 
+    from openkb.agent.request_budget import RequestBudgetHooks
+    from openkb.vision.history import text_history
+
+    hooks = RequestBudgetHooks()
+    original_input = input_data
+    input_data = text_history(input_data)
     result = (
-        Runner.run_streamed(agent, input_data, max_turns=max_turns, run_config=run_config)
+        Runner.run_streamed(
+            agent, input_data, max_turns=max_turns, run_config=run_config, hooks=hooks
+        )
         if run_config
-        else Runner.run_streamed(agent, input_data, max_turns=max_turns)
+        else Runner.run_streamed(agent, input_data, max_turns=max_turns, hooks=hooks)
     )
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
@@ -209,10 +211,15 @@ async def iter_agent_response_events(
                         yield {"event": "artifact", "data": payload}
 
     finally:
-        await stream.aclose()
+        try:
+            await stream.aclose()
+        finally:
+            hooks.close()
 
     from openkb.agent.answer_text import visible_answer
+    from openkb.processing import processing_checkpoint
 
+    processing_checkpoint()
     # Deltas also contain assistant narration before tool calls. The SDK's
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
@@ -221,7 +228,11 @@ async def iter_agent_response_events(
         "event": "final",
         "data": {
             "answer": answer,
-            "history": result.to_input_list(),
+            "history": (
+                original_input + result.to_input_list()[len(original_input) :]
+                if isinstance(original_input, list)
+                else result.to_input_list()
+            ),
         },
     }
 

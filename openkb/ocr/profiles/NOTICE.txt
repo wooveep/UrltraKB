@@ -1,0 +1,13 @@
+OpenKB optional OCR components
+
+PaddleOCR / PaddleX / PaddleOCR-VL models: PaddlePaddle Authors.
+Native PaddleOCR-VL-1.6 models are redistributed from fixed PaddlePaddle revisions.
+OpenVINO PaddleOCR-VL-1.5 artifacts: zhaohb/PaddleOCR-VL-1.5-ov on ModelScope,
+revision 43f60524b332ac2fc5f06aed8f015ad3d0dc000b.
+Community inference source: zhaohb/paddleocr_vl_ov,
+commit 598857c1272c2b7224109ad4573974f7d4cc260f (declared Apache-2.0).
+The original source and license-bearing headers remain unmodified in code/.
+OpenKB supplies separate process supervision and result adapters.
+
+See LICENSE-Apache-2.0.txt. Runtime dependencies retain their individual wheel
+metadata and license files. The bundled font retains its OFL.txt license.

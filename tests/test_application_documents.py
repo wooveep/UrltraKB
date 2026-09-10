@@ -157,7 +157,7 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
     from openkb.locks import kb_ingest_lock
 
     source = tmp_path / "notes.md"
-    source.write_text("![figure](figure.png)")
+    source.write_text("Figure caption.\n\n![figure](figure.png)")
     figure = tmp_path / "figure.png"
     from PIL import Image
 
@@ -170,7 +170,7 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
             assert release.wait(10)
 
     def waiting(event):
-        if event["stage"] == "waiting":
+        if event.get("stage") == "waiting":
             Image.new("RGB", (8, 8), "blue").save(figure)
             release.set()
 

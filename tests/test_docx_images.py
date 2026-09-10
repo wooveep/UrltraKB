@@ -78,7 +78,10 @@ def test_native_ocr_cache_distinguishes_images_at_the_same_page_number(
     assert "Recognized image 1" in one[0]
     assert "Recognized image 2" in two[0]
     assert repeated == one and len(calls) == 2
-    assert not one[2] and not two[2]
+    assert all(
+        "windows_ocr_sparse_or_unmapped_text_requires_review" in q["reason"]
+        for q in one[2] + two[2]
+    )
     retry = WindowsOcr(store, source, retries={1: "explicit-retry"})
     assert "Recognized image 3" in read_image(_png("white"), store, retry)[0]
     assert len(calls) == 3

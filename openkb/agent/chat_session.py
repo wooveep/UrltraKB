@@ -132,6 +132,7 @@ class ChatSession:
     incomplete: list[dict[str, Any]] = field(default_factory=list)
     completed_attempts: list[str] = field(default_factory=list)
     _version: str | None = field(default=None, repr=False)
+    history_images: dict = field(default_factory=dict, repr=False)
 
     @classmethod
     def new(
@@ -169,6 +170,7 @@ class ChatSession:
             "assistant_traces": self.assistant_traces,
             "incomplete": self.incomplete,
             "completed_attempts": self.completed_attempts,
+            "history_images": self.history_images,
         }
 
     def save(self) -> None:
@@ -275,6 +277,9 @@ class ChatSession:
         new_history: list[dict[str, Any]],
         trace: list[dict[str, Any]] | None,
     ) -> None:
+        from openkb.vision.history import retain_images
+
+        self.history_images.update(retain_images(new_history))
         self.history = sanitize_history(new_history)
         self.user_turns.append(user_message)
         self.assistant_texts.append(assistant_text)
@@ -329,7 +334,13 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         not isinstance(item, str) for item in completed_attempts
     ):
         raise ValueError("Invalid completed submission identities")
+    from openkb.vision.history import retain_images
+
+    images = data.get("history_images", {})
+    if not isinstance(images, dict):
+        raise ValueError("Invalid retained conversation images")
     return ChatSession(
+        history_images={**images, **retain_images(data.get("history", []))},
         id=data["id"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],

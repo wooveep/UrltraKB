@@ -97,6 +97,8 @@ class LocalParameters(Settings):
 
 
 class LocalSettings(Settings):
+    runtime: Literal["native", "openvino"] = "native"
+    gpu_device: str | None = Field(default=None, pattern=r"^(GPU\.[0-9]+|gpu:[0-9]+)$")
     interpreter: str
     assets: str
     assets_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -117,26 +119,113 @@ class LocalSettings(Settings):
         from openkb.state import HashRegistry
 
         return {
-            "backend": "paddleocr-vl16-cpu-v2",
-            "worker": HashRegistry.hash_file(Path(__file__).with_name("worker.py")),
+            "backend": "paddleocr-vl15-openvino-v1"
+            if self.runtime == "openvino"
+            else "paddleocr-vl16-native-v3",
+            "runtime": self.runtime,
+            "gpu_device": self.gpu_device,
+            "worker": HashRegistry.hash_file(
+                Path(__file__).with_name(
+                    "openvino_worker.py" if self.runtime == "openvino" else "worker.py"
+                )
+            ),
             "loading": HashRegistry.hash_file(Path(__file__).with_name("loading.py")),
             "assets": self.assets_sha256,
             "parameters": self.parameters.model_dump(),
-            "paddleocr": "3.7.0",
-            "paddlex": "3.7.2",
-            "paddlepaddle": "3.3.1",
             "python": "3.12.13",
+            **(
+                {"openvino": "2025.4.1", "precision": "upstream-fp16"}
+                if self.runtime == "openvino"
+                else {"paddleocr": "3.7.0", "paddlex": "3.7.2", "paddlepaddle": "3.3.1"}
+            ),
+        }
+
+
+class ServiceSettings(Settings):
+    endpoint: str
+    protocol: Literal["pipeline", "vlm"] = "pipeline"
+    model: Literal["PaddleOCR-VL-1.6"] = "PaddleOCR-VL-1.6"
+    credential_env: str | None = Field(default=None, pattern=r"^[A-Z_][A-Z_0-9]*$")
+    seconds: float = Field(default=120.0, gt=0, le=3600, allow_inf_nan=False)
+    max_pages: int = Field(default=100, gt=0, le=10000)
+    output_bytes: int = Field(default=32_000_000, gt=0, le=64_000_000)
+    output_tokens: int = Field(default=2048, gt=0, le=16384)
+
+    @model_validator(mode="after")
+    def endpoint_valid(self):
+        url = urlsplit(self.endpoint)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError("OCR service requires an explicit HTTP(S) endpoint")
+        return self
+
+    def profile(self):
+        return {
+            "backend": "paddleocr-service-v1",
+            **self.model_dump(exclude={"credential_env"}),
+            "processing_location": "this_machine"
+            if urlsplit(self.endpoint).hostname in {"127.0.0.1", "::1", "localhost"}
+            else "remote_service",
         }
 
 
 class OcrSettings(Settings):
-    backend: Literal["local", "cloud"] = "local"
+    policy: Literal["auto", "off"] = "auto"
+    backend: Literal["system", "local", "cloud"] = "system"
+    device: Literal["auto", "cpu", "gpu"] = "auto"
+    gpu_device: str | None = Field(default=None, pattern=r"^(GPU\.[0-9]+|gpu:[0-9]+)$")
+    installation: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    execution: Literal["runtime", "service"] = "runtime"
+    service: ServiceSettings | None = None
     local: LocalSettings | None = None
     cloud: CloudSettings | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_local_default(cls, value):
+        if (
+            isinstance(value, dict)
+            and value.get("backend", "local") == "local"
+            and "policy" not in value
+            and not {"device", "installation", "execution", "service", "gpu_device"} & value.keys()
+        ):
+            value = dict(value)
+            if value.get("local") is None:
+                # Previously "local" without a runtime meant OS-provided OCR.
+                value["backend"] = "system"
+            else:
+                value["backend"] = "local"
+                value["device"] = "cpu"
+        return value
+
     def profile(self) -> dict:
+        if self.policy == "off":
+            return {"policy": "off"}
+        if self.backend == "local" and self.execution == "service":
+            return {
+                "policy": self.policy,
+                **(
+                    self.service.profile()
+                    if self.service
+                    else {"backend": "service", "configured": False}
+                ),
+            }
         selected = self.local if self.backend == "local" else self.cloud
-        return selected.profile() if selected else {"backend": self.backend, "configured": False}
+        if self.backend == "system":
+            selected = None
+        return {
+            "policy": self.policy,
+            "device": self.device if self.backend == "local" else "system-managed",
+            "installation": self.installation if self.backend == "local" else None,
+            **(selected.profile() if selected else {"backend": self.backend, "configured": False}),
+            "gpu_device": self.gpu_device or (self.local.gpu_device if self.local else None),
+        }
 
 
 class ParsingSettings(Settings):

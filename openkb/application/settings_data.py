@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, SecretStr
 
 from openkb.ocr.config import ParsingSettings
+from openkb.vision.config import VisionSettings
 
 
 def _processing_settings(value):
@@ -55,6 +56,7 @@ class _KbConfigWritable(BaseModel):
     # is always ensured at read time (config.resolve_entity_types).
     entity_types: list[str] | None = None
     parsing: ParsingSettings | None = None
+    image_understanding: VisionSettings | None = None
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
     compilation_thinking: Literal["enabled", "disabled"] | None = None
@@ -74,6 +76,7 @@ class GlobalConfigValues(BaseModel):
     pageindex_threshold: int | None = None
     entity_types: list[str] | None = None
     parsing: ParsingSettings | None = None
+    image_understanding: VisionSettings | None = None
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
     compilation_thinking: Literal["enabled", "disabled"] | None = None
@@ -83,6 +86,7 @@ class GlobalConfigValues(BaseModel):
 class GlobalConfigResponse(BaseModel):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    image_understanding: VisionSettings = Field(default_factory=VisionSettings)
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     compilation_thinking: Literal["enabled", "disabled"] | None = None
@@ -104,6 +108,7 @@ class GlobalConfigResponse(BaseModel):
     openai_api_base: str | None
     has_api_key: bool
     has_ocr_api_key: bool = False
+    has_image_api_key: bool = False
 
 
 class GlobalConfigPatchRequest(BaseModel):
@@ -114,6 +119,7 @@ class GlobalConfigPatchRequest(BaseModel):
     # in logs/reprs.
     api_key: SecretStr | None = None
     ocr_api_key: SecretStr | None = None
+    image_api_key: SecretStr | None = None
     openai_api_base: str | None = None
     # RFC 7386 merge-patch (via model_fields_set): a string SETS global.yaml
     # `kb_root`, an explicit null REMOVES it (revert to the default root), and an
@@ -125,6 +131,7 @@ class GlobalConfigPatchRequest(BaseModel):
 class KbConfigResponse(BaseModel):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    image_understanding: VisionSettings = Field(default_factory=VisionSettings)
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
     compilation_thinking: Literal["enabled", "disabled"] | None = None
@@ -136,6 +143,7 @@ class KbConfigResponse(BaseModel):
     openai_api_base: str | None
     has_api_key: bool
     has_ocr_api_key: bool = False
+    has_image_api_key: bool = False
     # Additive (non-breaking): which layer supplied each scalar's effective
     # value, and the raw global-layer values for the "继承 · 全局(値)" badge.
     sources: dict[str, Literal["kb", "global", "default"]]
@@ -147,6 +155,7 @@ class KbConfigPatchRequest(BaseModel):
     config: dict[str, Any] | None = None
     api_key: SecretStr | None = None
     ocr_api_key: SecretStr | None = None
+    image_api_key: SecretStr | None = None
     openai_api_base: str | None = None
 
 

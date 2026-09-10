@@ -260,9 +260,9 @@ def test_document_parser_uses_global_settings_and_kb_override(
     assert ParseStore(kb_dir).load(first.parse_id).profile["ocr"]["backend"] == "cloud"
     apply_kb_config_patch(
         kb_dir,
-        KbConfigPatchRequest(kb=str(kb_dir), config={"parsing": {"ocr": {"backend": "local"}}}),
+        KbConfigPatchRequest(kb=str(kb_dir), config={"parsing": {"ocr": {"backend": "system"}}}),
     )
     second = import_document(kb_dir, source)
     assert second.source_id == first.source_id and second.input_version == first.input_version
     assert second.parse_id != first.parse_id
-    assert ParseStore(kb_dir).load(second.parse_id).profile["ocr"]["backend"] == "local"
+    assert ParseStore(kb_dir).load(second.parse_id).profile["ocr"]["backend"] == "system"

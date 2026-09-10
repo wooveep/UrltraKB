@@ -31,7 +31,10 @@ def test_native_pdf_preserves_physical_pages_and_requests_only_uncertain_ocr(kb_
     assert len(result.quality) == 3
     assert result.quality[0]["status"] == "verified"
     assert [q["page"] for q in result.quality if q["status"] == "needs_review"] == [2]
-    assert result.quality[2]["reason"] == "pdf_image_ocr_notice:ocr_unavailable"
+    assert (
+        result.quality[2]["reason"]
+        == "pdf_image_ocr_notice:system_ocr_unavailable:open_ocr_settings"
+    )
     first = result.blocks[0]
     assert first.location["page"] == 1
     store = ParseStore(kb_dir)
@@ -139,6 +142,9 @@ def test_vector_diagram_with_readable_caption_is_retained_when_ocr_is_unavailabl
     assert result.knowledge_compilation == "completed"
     parsed = ParseStore(kb_dir).load(result.parse_id)
     assert parsed.quality[0]["status"] == "verified"
-    assert parsed.quality[0]["reason"] == "pdf_image_ocr_notice:ocr_unavailable"
+    assert (
+        parsed.quality[0]["reason"]
+        == "pdf_image_ocr_notice:system_ocr_unavailable:open_ocr_settings"
+    )
     assert any(block.assets for block in parsed.blocks)
     assert list((kb_dir / "wiki/summaries").glob("*.md"))

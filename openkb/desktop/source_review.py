@@ -66,6 +66,7 @@ class SourceReview(QDialog):
         row = QHBoxLayout()
         for label, callback in (
             ("刷新", self.reload),
+            ("识别设置", self.ocr_settings),
             ("导出原文…", self.export),
             ("继续处理", self.continue_saved),
             ("重新解析", self.reparse),
@@ -121,7 +122,17 @@ class SourceReview(QDialog):
             )
             controls.addWidget(button)
         visual.addLayout(controls)
-        retry = QPushButton("重新识别当前页")
+        self.retry_engine = QComboBox()
+        for label, value in (
+            ("当前引擎", None),
+            ("系统 OCR", "system"),
+            ("飞桨 OCR", "local"),
+            ("云端 OCR", "cloud"),
+        ):
+            self.retry_engine.addItem(label, value)
+        self.retry_engine.setAccessibleName("本次指定页 OCR 引擎")
+        visual.addWidget(self.retry_engine)
+        retry = QPushButton("强制重新识别当前页")
         retry.clicked.connect(self.reprocess_page)
         visual.addWidget(retry)
         scroll = QScrollArea()
@@ -170,6 +181,13 @@ class SourceReview(QDialog):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def ocr_settings(self):
+        from openkb.desktop.settings import SettingsDialog
+
+        panel = SettingsDialog(self.window.io, self.kb, self)
+        panel.editors.setCurrentIndex(2)
+        panel.exec()
 
     def read(self, function, callback):
         generation = self._generation
@@ -427,7 +445,7 @@ class SourceReview(QDialog):
             and job.get("state") in {"submitting", "submission_unknown"}
             for job in self._saved.get("cloud_jobs", [])
         )
-        message = f"使用当前 OCR 设置重新识别第 {page} 页，保留旧解析与证据。"
+        message = f"使用{self.retry_engine.currentText()}重新识别第 {page} 页，保留旧解析与证据。"
         if unknown:
             message += "\n先前云提交的结果不明。新提交可能重复处理并产生额外费用，是否继续？"
         else:
@@ -443,7 +461,14 @@ class SourceReview(QDialog):
             == QMessageBox.StandardButton.Yes
         ):
             self.submit(
-                ReprocessSourcePage(self.source_id, version_id, result["parse_id"], page, unknown)
+                ReprocessSourcePage(
+                    self.source_id,
+                    version_id,
+                    result["parse_id"],
+                    page,
+                    unknown,
+                    self.retry_engine.currentData(),
+                )
             )
 
     def cleanup_history(self):

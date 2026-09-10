@@ -378,7 +378,11 @@ async def _stream_tty_turn(
 
     new_input = session.history + [{"role": "user", "content": user_input}]
 
-    result = Runner.run_streamed(agent, new_input, max_turns=MAX_TURNS)
+    from openkb.agent.request_budget import RequestBudgetHooks
+    from openkb.vision.history import text_history
+
+    hooks = RequestBudgetHooks()
+    result = Runner.run_streamed(agent, text_history(new_input), max_turns=MAX_TURNS, hooks=hooks)
 
     print()
     collected: list[str] = []
@@ -451,7 +455,13 @@ async def _stream_tty_turn(
                     _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
                     need_blank_before_text = True
     finally:
-        await stream.aclose()
+        try:
+            await stream.aclose()
+        finally:
+            hooks.close()
+        from openkb.processing import processing_checkpoint
+
+        processing_checkpoint()
         if live:
             if segment:
                 live.update(_make_markdown("".join(segment)))
@@ -461,7 +471,7 @@ async def _stream_tty_turn(
     answer = "".join(collected).strip()
     if not answer:
         answer = (result.final_output or "").strip()
-    return answer, result.to_input_list()
+    return answer, new_input + result.to_input_list()[len(new_input) :]
 
 
 def _save_transcript(kb_dir: Path, session: ChatSession, name: str | None) -> Path:
@@ -989,7 +999,6 @@ async def run_chat(
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language = session.language or config.get("language", "en")
-    agent = build_chat_agent(kb_dir, session.model, language=language)
 
     _print_header(session, kb_dir, style)
     if session.turn_count > 0:
@@ -1029,7 +1038,6 @@ async def run_chat(
                 return
             if action == "new_session":
                 session = ChatSession.new(kb_dir, session.model, session.language)
-                agent = build_chat_agent(kb_dir, session.model, language=language)
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue
 
@@ -1040,7 +1048,19 @@ async def run_chat(
                 async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
                     session.reload()
                     append_log(kb_dir / "wiki", "query", user_input)
-                    await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
+                    from openkb.agent.request_budget import visual_task_budget
+                    from openkb.application.execution import ExecutionContext
+
+                    with ExecutionContext().begin(kb_dir) as bundle, visual_task_budget(kb_dir):
+                        agent = build_chat_agent(
+                            kb_dir, session.model, language=language, bundle=bundle
+                        )
+                        from openkb.agent.query import build_run_config_from_bundle
+
+                        agent.model = build_run_config_from_bundle(session.model, bundle).model
+                        await _run_turn(
+                            agent, session, user_input, style, use_color=use_color, raw=raw
+                        )
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))
         except Exception as exc:

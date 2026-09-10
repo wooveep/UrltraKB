@@ -75,6 +75,7 @@ def _compile_version(
     replaces: str | None = None,
     parse_only: bool = False,
     force_parse: bool = False,
+    page_overrides=None,
 ):
     from openkb.agent.evidence_checkpoints import publication_settings
     from openkb.application.documents import DocumentResult
@@ -91,10 +92,14 @@ def _compile_version(
             with processing_scope(settings):
                 on_event({"stage": stage})
                 parsed = parse_document(
-                    kb_dir, source, options=settings.get("parsing"), force=force_parse
+                    kb_dir,
+                    source,
+                    options=settings.get("parsing"),
+                    force=force_parse,
+                    page_overrides=page_overrides,
                 )
                 for row in parsed.quality:
-                    if row["status"] == "verified" and (
+                    if row["status"] == "needs_review" or (
                         "docx_conversion_warning:" in row["reason"]
                         or "non_document_attachment_skipped:" in row["reason"]
                         or "docx_image_ocr_notice:" in row["reason"]

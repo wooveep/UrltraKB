@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
 from openkb.evidence import BlockDraft, ParseStore, ParseVersion
 from openkb.ocr.assembly import assembly_profile
-from openkb.ocr.backend import create_ocr, default_local_profile
-from openkb.ocr.config import parsing_settings
-from openkb.ocr.reprocessing import page_attempts
+from openkb.ocr.backend import PageOcr, create_ocr
+from openkb.ocr.config import OcrSettings, parsing_settings
+from openkb.ocr.reprocessing import decisions, page_attempts
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion
@@ -24,11 +25,10 @@ def parse_document(
     force: bool = False,
     _budget=None,
     _depth=0,
+    page_overrides: dict[int, OcrSettings] | None = None,
 ) -> ParseVersion:
     selected = parsing_settings(options)
-    native_profile = (
-        default_local_profile(selected.ocr) if source.suffix in {".pdf", ".docx"} else None
-    )
+    native_profile = None
     profile = {
         "parser": "openkb-structured-v3",
         "ocr": native_profile or selected.ocr.profile(),
@@ -44,6 +44,15 @@ def parse_document(
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
+    overrides = page_overrides or {}
+    if selected.ocr.policy == "off":
+        retries = {page: attempt for page, attempt in retries.items() if page in overrides}
+    else:
+        overrides = {
+            int(page): OcrSettings.model_validate(history[-1]["ocr"])
+            for page, history in decisions(originals, source, selected.ocr.profile()).items()
+            if "ocr" in history[-1]
+        } | overrides
     if retries:
         profile["reprocessing"] = {str(page): attempt for page, attempt in retries.items()}
     path = originals.original(source)
@@ -52,7 +61,9 @@ def parse_document(
 
         with pymupdf.open(path) as pdf:
             profile["physical_pages"] = pdf.page_count
-    if not force:
+    if not force and not (
+        selected.ocr.policy == "auto" and selected.ocr.backend in {"system", "local"}
+    ):
         with progress_scope("parse_cache"):
             cached = store.find(source, profile)
             if cached is not None and store.complete(source, cached):
@@ -65,6 +76,14 @@ def parse_document(
         ocr = create_ocr(
             originals, source, selected.ocr, native_profile=native_profile, retries=retries
         )
+        if overrides:
+            ocr = PageOcr(
+                ocr,
+                {
+                    page: create_ocr(originals, source, settings, retries=retries)
+                    for page, settings in overrides.items()
+                },
+            )
         previous = store.selected(source)
         reuse = {}
         if previous is not None and (
@@ -121,6 +140,24 @@ def parse_document(
     else:
         blocks, quality = parse_text(path, source, originals)
     processing_checkpoint()
+    if selected.ocr.policy == "off":
+        quality = [
+            {**row, "reason": row["reason"].replace("ocr_unavailable", "ocr_disabled")}
+            if row.get("page") not in overrides
+            else row
+            for row in quality
+        ]
+    if blocks and not any(
+        block.kind != "image" and re.sub(r"!\[[^\]]*\]\([^)]*\)", "", block.text).strip()
+        for block in blocks
+    ):
+        if source.suffix == ".pdf":
+            quality = [
+                {**row, "status": "needs_review", "reason": row["reason"] + ";readable_text_absent"}
+                for row in quality
+            ]
+        else:
+            quality.append({"status": "needs_review", "reason": "readable_text_absent"})
     parsed = store.save(source, profile, blocks, quality=quality)
     from openkb.missing_image_reviews import inherit_missing_images
 

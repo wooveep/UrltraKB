@@ -185,3 +185,14 @@ def test_percentage_names_its_stage_and_does_not_claim_partial_success():
     assert "部分完成" in progress_presentation(partial)[1]
     assert "任务完成" not in progress_presentation(partial)[1]
     assert progress_presentation(replace(task, progress=()))[0] is None
+
+
+def test_observer_failure_does_not_leave_a_progress_scope_active():
+    def fail(event):
+        raise RuntimeError("observer failed")
+
+    with pytest.raises(RuntimeError), progress_reporting(fail), progress_scope("text", 1, "lines"):
+        pass
+    events = []
+    with progress_reporting(events.append), progress_scope("pdf", 2, "pages"):
+        assert read_progress(events[-1]["progress"]) == (ProgressStep("pdf", 0, 2, "pages"),)

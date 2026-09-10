@@ -40,8 +40,13 @@ _FIELDS = {
     "openai_api_base": "API base URL",
     "api_key": "API Key",
     "ocr_api_key": "OCR 云端 API Key",
+    "image_api_key": "图片理解 API Key",
 }
-_SECRET_FIELDS = {"api_key": "has_api_key", "ocr_api_key": "has_ocr_api_key"}
+_SECRET_FIELDS = {
+    "api_key": "has_api_key",
+    "ocr_api_key": "has_ocr_api_key",
+    "image_api_key": "has_image_api_key",
+}
 
 
 class SettingField(QWidget):
@@ -111,7 +116,7 @@ class SettingsDialog(ManagementPanel):
         form_layout = QFormLayout(self.form)
         self.fields = {}
         for key, label in _FIELDS.items():
-            if key == "ocr_api_key":
+            if key in {"ocr_api_key", "image_api_key"}:
                 continue  # This credential is edited inside the cloud OCR panel.
             field = SettingField(key)
             self.fields[key] = field
@@ -123,10 +128,20 @@ class SettingsDialog(ManagementPanel):
         tabs = QTabWidget()
         tabs.addTab(self.form, "基本设置")
         self.fields["processing"] = ProcessingField()
-        self.fields["parsing"] = OcrField()
+        self.fields["parsing"] = OcrField(self.io, kb)
         self.fields["ocr_api_key"] = self.fields["parsing"].cloud_key
         tabs.addTab(self.fields["processing"], "处理额度")
-        tabs.addTab(self.fields["parsing"], "文档识别")
+        from PySide6.QtWidgets import QScrollArea
+
+        ocr_scroll = QScrollArea()
+        ocr_scroll.setWidgetResizable(True)
+        ocr_scroll.setWidget(self.fields["parsing"])
+        tabs.addTab(ocr_scroll, "文档识别")
+        from openkb.desktop.image_settings import ImageField
+
+        self.fields["image_understanding"] = ImageField(io, kb)
+        self.fields["image_api_key"] = self.fields["image_understanding"].api_key
+        tabs.addTab(self.fields["image_understanding"], "图片理解")
         self.fields["navigation"] = NavigationField()
         tabs.addTab(self.fields["navigation"], "原文导航")
         layout.addWidget(tabs)
@@ -266,6 +281,7 @@ class SettingsDialog(ManagementPanel):
     def reject(self):
         if not self._saving:
             self._closed = True
+            self.fields["parsing"].installer.stop.set()
             super().reject()
 
     def closeEvent(self, event):
@@ -273,4 +289,5 @@ class SettingsDialog(ManagementPanel):
             event.ignore()
         else:
             self._closed = True
+            self.fields["parsing"].installer.stop.set()
             super().closeEvent(event)

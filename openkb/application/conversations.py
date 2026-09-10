@@ -13,13 +13,15 @@ from pathlib import Path
 from typing import Literal
 
 from openkb.agent.chat_session import ChatSession, load_session
+from openkb.agent.request_budget import visual_task_budget
 from openkb.application.answers import save_exploration
 from openkb.application.execution import ExecutionContext
 from openkb.config import resolve_effective_config
 from openkb.locks import async_kb_lock, async_session_lock
 from openkb.log import append_log
-from openkb.model_outputs import ModelOutputs
+from openkb.model_outputs import ModelOutputs, model_output_scope
 from openkb.mutation import RecoveryRequired
+from openkb.processing import ProcessingIncomplete
 
 
 @dataclass(frozen=True)
@@ -56,7 +58,7 @@ async def ask_question(
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
     ):
-        with context.begin(root) as bundle:
+        with context.begin(root) as bundle, model_output_scope(root), visual_task_budget(root):
             from openkb.agent.query import (
                 build_query_agent,
                 build_run_config_from_bundle,
@@ -97,7 +99,7 @@ async def ask_question(
                         if event["event"] == "delta":
                             parts.append(event["data"]["text"])
                         context.on_event(event)
-            except Exception as exc:
+            except (Exception, ProcessingIncomplete) as exc:
                 return AnswerResult(
                     "blocked" if isinstance(exc, RecoveryRequired) else "failed",
                     answer or "".join(parts),
@@ -136,7 +138,7 @@ async def continue_conversation(
                 session = load_session(root, session_id)
             elif new_session_id and session.path.exists():
                 session = load_session(root, new_session_id)
-            with context.begin(root) as bundle:
+            with context.begin(root) as bundle, visual_task_budget(root):
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
 
@@ -178,7 +180,7 @@ async def continue_conversation(
                             if event["event"] == "delta":
                                 parts.append(event["data"]["text"])
                             context.on_event(event)
-                except Exception as exc:
+                except (Exception, ProcessingIncomplete) as exc:
                     return AnswerResult(
                         "blocked" if isinstance(exc, RecoveryRequired) else "failed",
                         "".join(parts),

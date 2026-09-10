@@ -2,8 +2,9 @@
 
 Reliable native text parsing works without this package. Uncertain PDF pages use
 the selected OCR backend; a local failure never silently uploads a document.
-On Windows, an unconfigured local backend automatically uses the installed
-Windows OCR engine and language packs. It extracts text and retains page images;
+The default system engine uses installed Windows OCR language packs on Windows.
+See [OCR and image settings](ocr-and-images.md) for policy, one-click installation,
+OpenVINO 1.5, device selection and independent image understanding. It extracts text and retains page images;
 it does not provide PaddleOCR's document layout interpretation. DOCX OCR is
 selective and advisory as described in [document processing](document-processing.md).
 An explicitly configured local runtime uses the full PaddleOCR-VL-1.6 layout,
@@ -106,7 +107,7 @@ request. The synthetic result fixture records this adapter contract in tests.
 
 These minimum samples establish CPU pipeline viability on the tested hosts;
 they do not establish minimum RAM, representative recognition accuracy or
-long-document throughput. No larger-memory inference was run. GPU deployment
+long-document throughput. No larger-memory inference was run in that earlier validation. Advanced GPU deployment
 and real PaddleOCR jobs quality remain unverified. The supervisor's resource
 sampling can overshoot a threshold before termination and reports its observed
 peak. Do not infer a production budget from these single observations.

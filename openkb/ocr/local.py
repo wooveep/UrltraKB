@@ -39,9 +39,17 @@ def _workspace():
 
 class LocalOcr:
     def __init__(
-        self, store: SourceStore, source: SourceVersion, config: LocalSettings, *, retries=None
+        self,
+        store: SourceStore,
+        source: SourceVersion,
+        config: LocalSettings,
+        *,
+        retries=None,
+        device="cpu",
     ):
         self.store, self.source, self.config = store, source, config
+        self.device = device
+        self.fallback_reason = None
         self.started = time.monotonic()
         self.pages = 0
         self.usage = LocalUsage(store, source, config.limits)
@@ -51,10 +59,38 @@ class LocalOcr:
         pass  # Each optional worker is reaped before its page result returns.
 
     def page(self, document, page, *, input_id=None):
+        from openkb.ocr.devices import device_slot
+
+        if self.pages >= self.config.limits.max_pages:
+            return [], "ocr_page_budget_exhausted"
+        self.pages += 1
+        candidates = ["cpu"] if self.device == "cpu" else ["gpu"]
+        if self.device == "auto":
+            candidates.append("cpu")
+        for device in candidates:
+            with device_slot(device, self.config.limits.seconds, self.started):
+                blocks, reason = self._page(document, page, input_id=input_id, device=device)
+            if (
+                device == "gpu"
+                and self.device == "auto"
+                and reason
+                in {
+                    "ocr_gpu_unavailable",
+                    "ocr_runtime_gpu_incompatible",
+                    "ocr_device_initialization_failed",
+                    "ocr_device_memory_exhausted",
+                }
+            ):
+                self.fallback_reason = reason
+                continue
+            return blocks, reason
+        return [], "ocr_runtime_not_ready"
+
+    def _page(self, document, page, *, input_id=None, device="cpu"):
         profile = {
-            "ocr": self.config.profile(),
+            "ocr": {**self.config.profile(), "device": device},
             "physical_page": page,
-            "worker": HashRegistry.hash_file(Path(__file__).with_name("worker.py")),
+            "worker": self.config.profile()["worker"],
         }
         if input_id is not None:
             profile["embedded_input"] = input_id
@@ -66,7 +102,9 @@ class LocalOcr:
         )
         profile["assembly"] = assembly_profile("local")
         parses = ParseStore(self.store.kb_dir)
-        cached = parses.find(self.source, profile)
+        # A device ordinal alone cannot attest to current hardware or driver identity.
+        reusable = device == "cpu"
+        cached = parses.find(self.source, profile) if reusable else None
         if cached is not None:
             blocks = [
                 BlockDraft(
@@ -82,7 +120,7 @@ class LocalOcr:
                 (row["reason"] for row in cached.quality if row["status"] == "needs_review"), None
             )
             return blocks, reason
-        if raw_path.exists():
+        if reusable and raw_path.exists():
             record = read_object(raw_path)
             if record.get("input") != execution:
                 return [], "ocr_result_identity_mismatch"
@@ -91,12 +129,9 @@ class LocalOcr:
             return [], "ocr_runtime_not_installed"
         if not (Path(self.config.assets) / "manifest.json").is_file():
             return [], "ocr_model_package_missing"
-        if self.pages >= self.config.limits.max_pages:
-            return [], "ocr_page_budget_exhausted"
         regions, tokens = self.usage.remaining
         if regions <= 0 or tokens < self.config.parameters.max_new_tokens:
             return [], "ocr_recognition_budget_exhausted"
-        self.pages += 1
         remaining = self.config.limits.seconds - (time.monotonic() - self.started)
         if remaining <= 0:
             return [], "ocr_time_budget_exhausted"
@@ -112,8 +147,13 @@ class LocalOcr:
             # the enclosing worker's task and source time limits.
             input_path.write_bytes(pixmap.tobytes("png"))
             output.mkdir()
-            worker = Path(__file__).with_name("worker.py")
+            worker = Path(__file__).with_name(
+                "openvino_worker.py" if self.config.runtime == "openvino" else "worker.py"
+            )
             plan = {
+                "device": device,
+                "gpu_device": self.config.gpu_device,
+                "physical_page": page,
                 "input": str(input_path),
                 "input_sha256": HashRegistry.hash_file(input_path),
                 "output": str(output),
@@ -148,6 +188,12 @@ class LocalOcr:
                 if failure.is_file():
                     reason = read_object(failure).get("reason")
                     if reason in {
+                        "ocr_gpu_unavailable",
+                        "ocr_runtime_gpu_incompatible",
+                        "ocr_device_initialization_failed",
+                        "ocr_device_memory_exhausted",
+                        "ocr_model_package_missing",
+                        "ocr_time_budget_exhausted",
                         "ocr_input_contract_unknown",
                         "ocr_input_budget_exceeded",
                         "ocr_output_contract_unknown",
@@ -157,6 +203,8 @@ class LocalOcr:
                         return [], reason
                 return [], "ocr_runtime_failed"
             value = read_object(output / "result.json")
+            if self.fallback_reason and isinstance(value.get("runtime"), dict):
+                value["runtime"]["fallback_reason"] = self.fallback_reason
             if (
                 value.get("input_sha256") != plan["input_sha256"]
                 or value.get("assets_sha256") != plan["assets_sha256"]
@@ -201,7 +249,10 @@ class LocalOcr:
     def _assemble(self, record, document, page, profile):
         value = read_object(self.store.asset(record["result_blob"]))
         try:
-            blocks, reason = parse_local_page(
+            from openkb.ocr.openvino_result import parse_openvino_page
+
+            adapter = parse_openvino_page if self.config.runtime == "openvino" else parse_local_page
+            blocks, reason = adapter(
                 value,
                 document[page - 1],
                 page,
@@ -211,6 +262,22 @@ class LocalOcr:
             )
         except CloudIncomplete as exc:
             return [], str(exc).replace("cloud_", "ocr_")
+        if self.config.runtime == "native":
+            from dataclasses import replace
+
+            runtime = value.get(
+                "runtime",
+                {
+                    "engine": "paddleocr",
+                    "runtime": "native",
+                    "model": "PaddleOCR-VL-1.6",
+                    "devices": {"layout": "cpu", "language": "cpu"},
+                },
+            )
+            blocks = [
+                replace(b, context=json.dumps({"ocr": runtime, "detail": b.context}))
+                for b in blocks
+            ]
         quality = [
             {
                 "page": page,

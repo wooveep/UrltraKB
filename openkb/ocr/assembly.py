@@ -10,7 +10,7 @@ REVISION = "ocr-evidence-v1"
 def assembly_profile(backend: str) -> dict:
     names = ["cloud_result.py"]
     if backend == "local":
-        names.append("local_result.py")
+        names.extend(["local_result.py", "openvino_result.py"])
     return {
         "revision": REVISION,
         "adapters": {

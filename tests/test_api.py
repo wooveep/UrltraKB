@@ -2379,6 +2379,8 @@ def test_kb_config_patch_does_not_materialize_defaults(monkeypatch, kb_dir):
 
 def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
     from openkb.config import DEFAULT_CONFIG
+    from openkb.ocr.config import ParsingSettings
+    from openkb.vision.config import VisionSettings
 
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
@@ -2398,8 +2400,10 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "openai_api_base": None,
         "has_api_key": False,
         "has_ocr_api_key": False,
+        "has_image_api_key": False,
+        "image_understanding": VisionSettings().model_dump(),
         "processing": DEFAULT_CONFIG["processing"],
-        "parsing": {"ocr": {"backend": "local", "cloud": None, "local": None}},
+        "parsing": ParsingSettings().model_dump(),
         "navigation": {"enabled": False, "processing": None},
         "compilation_thinking": None,
         "verification_thinking": None,

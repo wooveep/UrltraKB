@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
+from agents import Agent, Runner, function_tool
 from agents.model_settings import ModelSettings
 
 from openkb.config import LlmCredentialBundle, resolve_model_settings
@@ -29,9 +29,6 @@ from openkb.skill.tools import (
 )
 from openkb.skill.tools import (
     list_wiki_dir as _list_wiki_dir_impl,
-)
-from openkb.skill.tools import (
-    read_skill_image as _read_image_impl,
 )
 from openkb.skill.tools import (
     read_wiki_file_for_skill as _read_wiki_file_impl,
@@ -103,23 +100,10 @@ def build_skill_create_agent(
         """
         return _get_page_content_impl(doc_name, pages, wiki_root)
 
-    @function_tool
-    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
-        """View an image from the wiki.
+    from openkb.vision.session import image_tools
 
-        Use when a wiki page references a figure, chart, or diagram you
-        need to see in order to distil it correctly into the skill.
-
-        Args:
-            image_path: Image path as it appears in the content — either
-                wiki-root-relative (``"sources/images/doc/p1_img1.png"``)
-                or note-relative as used in sources/ .md pages
-                (``"images/doc/p1_img1.png"``).
-        """
-        result = _read_image_impl(image_path, wiki_root)
-        if result["type"] == "image":
-            return ToolOutputImage(image_url=result["image_url"])
-        return ToolOutputText(text=result["text"])
+    visual_tools, visual_instructions = image_tools(Path(wiki_root).parent)
+    instructions += "\n\n" + visual_instructions
 
     @function_tool
     async def query_wiki(question: str) -> str:
@@ -174,7 +158,7 @@ def build_skill_create_agent(
             list_wiki_dir,
             read_wiki_file,
             get_page_content,
-            get_image,
+            *visual_tools,
             query_wiki,
             write_skill_file,
             done,

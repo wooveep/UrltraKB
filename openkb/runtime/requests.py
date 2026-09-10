@@ -179,6 +179,7 @@ class ReprocessSourcePage:
     parse_id: str
     page: int
     acknowledge_unknown: bool = False
+    engine: str | None = None
 
     def __post_init__(self) -> None:
         from openkb.sources import valid_id
@@ -190,6 +191,7 @@ class ReprocessSourcePage:
             type(self.page) is not int
             or self.page < 1
             or type(self.acknowledge_unknown) is not bool
+            or self.engine not in {None, "system", "local", "cloud"}
         ):
             raise ValueError("Choose the reviewed physical page for a new OCR attempt")
 

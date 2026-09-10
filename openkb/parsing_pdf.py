@@ -101,15 +101,21 @@ def parse_pdf(
                     original_reason = reason
                     recognized, ocr_reason = recognize(ocr, document, number)
                     if recognized:
-                        # Supplemental OCR never replaces readable native content.
-                        # Only a successful repair of an unreliable layer replaces it.
-                        native = (
-                            [*native, *recognized]
-                            if ocr_reason
-                            or original_reason
-                            in {"image_content_requires_ocr", "explicit_page_reprocessing"}
-                            else [*recognized, *(b for b in native if b.kind == "image")]
-                        )
+                        supplemental = bool(ocr_reason) or original_reason in {
+                            "image_content_requires_ocr",
+                            "explicit_page_reprocessing",
+                        }
+                        if supplemental:
+                            native_text = {
+                                " ".join(b.text.split()) for b in native if b.kind != "image"
+                            }
+                            native.extend(
+                                b
+                                for b in recognized
+                                if b.kind == "image" or " ".join(b.text.split()) not in native_text
+                            )
+                        else:
+                            native = [*recognized, *(b for b in native if b.kind == "image")]
                     reason = ocr_reason or (None if recognized else "ocr_missing_page")
                     if not reason:
                         verified_by = "ocr_layout_and_assets"
@@ -118,7 +124,18 @@ def parse_pdf(
                         "explicit_page_reprocessing",
                     }:
                         verified_by = "pdf_image_ocr_notice:" + reason
-                        reason = None
+                        if not any(
+                            part in reason
+                            for part in (
+                                "output_incomplete",
+                                "block_failed",
+                                "completion_unverified",
+                                "vlm_only",
+                                "windows_ocr_sparse",
+                                "windows_ocr_no_text",
+                            )
+                        ):
+                            reason = None
                 native.append(
                     BlockDraft(
                         f"![Original page {number}](asset:{digest})",

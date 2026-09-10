@@ -108,9 +108,9 @@ def progress_reporting(emit: Callable[[dict], None]) -> Iterator[None]:
 def progress_scope(phase: str, total: int | None = None, unit: str = "items"):
     counter = WorkCounter(phase, total, unit)
     token = _STACK.set((*_STACK.get(), counter))
-    _send()
     finished = False
     try:
+        _send()
         yield counter
         finished = True
     except BaseException:

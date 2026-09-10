@@ -2080,8 +2080,12 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 from openkb.api_lint import fix_summary
 from openkb.cli_sources import sources
+from openkb.cli_image import image_commands
+from openkb.cli_ocr import ocr_commands
 
 cli.add_command(sources)
+cli.add_command(image_commands)
+cli.add_command(ocr_commands)
 
 _fix_summary = fix_summary
 

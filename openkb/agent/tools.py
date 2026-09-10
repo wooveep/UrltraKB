@@ -147,7 +147,7 @@ _MIME_TYPES = {
 }
 
 
-def read_wiki_image(path: str, wiki_root: str) -> dict:
+def read_wiki_image(path: str, wiki_root: str, *, max_bytes: int | None = None) -> dict:
     """Read an image file from the wiki and return as base64 data URL.
 
     Args:
@@ -176,6 +176,8 @@ def read_wiki_image(path: str, wiki_root: str) -> dict:
             return {"type": "text", "text": f"Image not found: {path}"}
         full_path = alt_path
 
+    if not full_path.is_file() or (max_bytes is not None and full_path.stat().st_size > max_bytes):
+        return {"type": "text", "text": "Image unavailable or exceeds the request size limit."}
     mime = _MIME_TYPES.get(full_path.suffix.lower(), "image/png")
     b64 = base64.b64encode(full_path.read_bytes()).decode()
     return {"type": "image", "image_url": f"data:{mime};base64,{b64}"}

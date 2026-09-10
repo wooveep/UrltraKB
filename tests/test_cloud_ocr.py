@@ -68,11 +68,11 @@ def test_shared_import_never_reposts_an_uncertain_cloud_submission(
     monkeypatch.setattr(requests.Session, "request", lost_response)
     one = import_document(kb_dir, source)
     two = refresh(kb_dir, one)
-    assert one.knowledge_compilation == "completed" and two.stage == "parsed"
+    assert one.knowledge_compilation == "unfinished" and two.stage == "parsing"
     assert len(submissions) == 1
     assert any("cloud_submission_unknown" in warning for warning in two.warnings)
     assert any(
-        row["reason"] == "pdf_image_ocr_notice:cloud_submission_unknown"
+        row["reason"] == "pdf_image_ocr_notice:cloud_submission_unknown;readable_text_absent"
         for row in ParseStore(kb_dir).load(two.parse_id).quality
     )
     with pymupdf.open(stream=submissions[0], filetype="pdf") as part:
@@ -167,7 +167,7 @@ def test_known_job_resumes_download_without_repeating_ocr(
 
     monkeypatch.setattr(requests.Session, "request", service)
     one = import_document(kb_dir, source)
-    assert one.knowledge_compilation == "completed"
+    assert one.knowledge_compilation == "unfinished"
     assert submitted_options == [
         {
             "useDocOrientationClassify": False,
@@ -261,7 +261,7 @@ def test_required_image_omitted_from_markdown_is_still_checked(
 
     monkeypatch.setattr(requests.Session, "request", service)
     result = import_document(kb_dir, source)
-    assert result.knowledge_compilation == "completed"
+    assert result.knowledge_compilation == "unfinished"
     assert any("cloud_required_asset_missing" in warning for warning in result.warnings)
     assert any(block.assets for block in ParseStore(kb_dir).load(result.parse_id).blocks)
 
@@ -296,7 +296,7 @@ def test_explicit_page_reprocessing_requires_acknowledging_unknown_submission(
     assert any("cloud_submission_unknown" in warning for warning in second.warnings)
     assert (
         ParseStore(kb_dir).load(first.parse_id).quality[0]["reason"]
-        == "pdf_image_ocr_notice:cloud_submission_unknown"
+        == "pdf_image_ocr_notice:cloud_submission_unknown;readable_text_absent"
     )
     assert len(posts) == 2
     import_document(kb_dir, original)
@@ -415,7 +415,7 @@ def test_cloud_import_uses_direct_saved_key_without_environment_setup(
     monkeypatch.setattr(requests.Session, "request", reject_submission)
     result = import_document(kb_dir, source)
     assert authenticated == ["Bearer direct-ocr-test-key"]
-    assert result.knowledge_compilation == "completed"
+    assert result.knowledge_compilation == "unfinished"
     assert "PADDLEOCR_API_KEY" not in os.environ
     assert "direct-ocr-test-key" not in read_kb_config(kb_dir).model_dump_json()
     assert all(

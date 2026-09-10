@@ -1,0 +1,14 @@
+[project]
+name = "openkb-paddleocr-nvidia-runtime"
+version = "0.1.0"
+requires-python = "==3.12.13"
+dependencies = ["paddleocr[doc-parser]==3.7.0", "paddlex==3.7.2", "paddlepaddle-gpu==3.3.1"]
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' or sys_platform == 'win32'"]
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle-cu126" }
+[[tool.uv.index]]
+name = "paddle-cu126"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true

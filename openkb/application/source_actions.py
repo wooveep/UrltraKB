@@ -237,10 +237,11 @@ def reprocess_source_page(
     page: int,
     acknowledge_unknown: bool = False,
     context: ExecutionContext | None = None,
+    engine: str | None = None,
 ) -> DocumentResult:
     """Create one explicit page attempt and refresh parsing with other pages reused."""
     from openkb.application.document_pipeline import compile_version
-    from openkb.ocr.config import parsing_settings
+    from openkb.ocr.config import OcrSettings, parsing_settings
     from openkb.ocr.reprocessing import request_page_attempt
 
     if type(page) is not int or page < 1 or type(acknowledge_unknown) is not bool:
@@ -265,8 +266,17 @@ def reprocess_source_page(
             ocr = parsing_settings(settings.get("parsing")).ocr
             if ocr.profile() != parsed.profile.get("ocr"):
                 raise ValueError("OCR settings changed; reparse the source before selecting a page")
-            selected = ocr.local if ocr.backend == "local" else ocr.cloud
-            if selected is None:
+            override = OcrSettings.model_validate(
+                {**ocr.model_dump(), "policy": "auto", "backend": engine or ocr.backend}
+            )
+            selected = override.local if override.backend == "local" else override.cloud
+            if override.backend == "local" and override.execution == "service":
+                selected = override.service
+            if (
+                override.backend != "system"
+                and selected is None
+                and not (override.backend == "local" and override.installation)
+            ):
                 raise ValueError("Configure the selected OCR runtime before reprocessing")
             request_page_attempt(
                 sources,
@@ -275,6 +285,7 @@ def reprocess_source_page(
                 page=page,
                 parse_id=parse_id,
                 acknowledge_unknown=acknowledge_unknown,
+                ocr=override.model_dump(),
             )
             return compile_version(
                 kb_dir,
@@ -284,6 +295,7 @@ def reprocess_source_page(
                 on_event=context.on_event,
                 parse_only=True,
                 force_parse=True,
+                page_overrides={page: override},
             )
 
 

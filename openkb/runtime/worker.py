@@ -321,6 +321,7 @@ def _execute(
             result = reprocess_source_page(
                 root,
                 request.source_id,
+                engine=request.engine,
                 version_id=request.version_id,
                 parse_id=request.parse_id,
                 page=request.page,
