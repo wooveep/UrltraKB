@@ -6,6 +6,7 @@ import io
 import re
 
 from openkb.processing import processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import SourceStore, content_id
 
 
@@ -69,7 +70,8 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                     identity = content_id(
                         {"docx_image": original, "frame": index, "rendered": preview}
                     )
-                    blocks, reason = ocr.page(document, 1, input_id=identity)
+                    with progress_scope("image_ocr"):
+                        blocks, reason = ocr.page(document, 1, input_id=identity)
                 previous_context = None
                 for block in blocks:
                     assets.extend(asset for asset in block.assets if asset not in assets)

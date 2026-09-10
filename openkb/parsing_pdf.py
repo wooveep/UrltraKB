@@ -10,6 +10,7 @@ import pymupdf
 from openkb.evidence import BlockDraft
 from openkb.parsing_pdf_tables import table_cells
 from openkb.processing import processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import SourceStore
 
 
@@ -18,7 +19,10 @@ def parse_pdf(
 ) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
     blocks: list[BlockDraft] = []
     quality: list[dict[str, Any]] = []
-    with pymupdf.open(path) as document:
+    with (
+        pymupdf.open(path) as document,
+        progress_scope("pdf", document.page_count, "pages") as progress,
+    ):
         if document.needs_pass:
             raise ValueError("Encrypted PDF requires an unlocked input copy")
         for number, page in enumerate(document, 1):
@@ -27,6 +31,7 @@ def parse_pdf(
                 previous_blocks, previous_quality = reuse[number]
                 blocks.extend(previous_blocks)
                 quality.append(previous_quality)
+                progress.advance()
                 continue
             reason = None
             verified_by = "native_text_layer"
@@ -106,6 +111,7 @@ def parse_pdf(
                     "reason": reason or verified_by,
                 }
             )
+            progress.advance()
     return blocks, quality
 
 

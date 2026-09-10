@@ -12,6 +12,7 @@ from openkb.cancellation import cancellation_scope
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
 from openkb.locks import LockCancelled
+from openkb.progress import progress_reporting
 
 if TYPE_CHECKING:
     from openkb.application.documents import DocumentResult
@@ -57,7 +58,11 @@ class ExecutionContext:
             raise ValueError("Execution context belongs to another knowledge base")
         if self.install_process_settings:
             self.snapshot.install_worker_environment()
-        with self.snapshot.activate(), cancellation_scope(self.cancelled):
+        with (
+            self.snapshot.activate(),
+            cancellation_scope(self.cancelled),
+            progress_reporting(self.on_event),
+        ):
             self.check_stop()
             token = _COMMITTED.set(self.on_committed)
             try:

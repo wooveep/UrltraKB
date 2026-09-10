@@ -375,7 +375,7 @@ class TaskManager:
         finally:
             child.close()
         self._active[task.view.id] = _Attempt(process, parent, events, identity, tree=tree)
-        self._update(task, state="running", stage="preparing", processes_reaped=False)
+        self._update(task, state="running", stage="preparing", processes_reaped=False, progress=())
 
     def _control(self, task: _Task, attempt: _Attempt) -> None:
         if (
@@ -482,6 +482,16 @@ class TaskManager:
             text = task.view.text
             diagnostics = task.view.diagnostics
             last_activity = task.view.last_activity_at
+            progress = task.view.progress
+            if data.get("event") == "progress":
+                from openkb.progress import read_progress
+
+                try:
+                    progress = read_progress(data["progress"])
+                except (KeyError, TypeError, ValueError):
+                    continue  # Malformed telemetry cannot kill the task scheduler.
+                if progress != task.view.progress:
+                    last_activity = datetime.now(timezone.utc).isoformat()
             if data.get("event") == "diagnostic":
                 diagnostics = (diagnostics + data["text"] + "\n")[-100_000:]
                 if data.get("activity", True):
@@ -500,6 +510,7 @@ class TaskManager:
                 text_truncated=truncated,
                 diagnostics=diagnostics,
                 last_activity_at=last_activity,
+                progress=progress,
             )
             if persist:
                 task.progress_saved_at = now

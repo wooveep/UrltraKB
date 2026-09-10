@@ -12,6 +12,7 @@ from openkb.ocr.backend import create_ocr, default_local_profile
 from openkb.ocr.config import parsing_settings
 from openkb.ocr.reprocessing import page_attempts
 from openkb.processing import processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion
 
 
@@ -50,10 +51,11 @@ def parse_document(
         with pymupdf.open(path) as pdf:
             profile["physical_pages"] = pdf.page_count
     if not force:
-        cached = store.find(source, profile)
-        if cached is not None and store.complete(source, cached):
-            store.select(source, cached)
-            return cached
+        with progress_scope("parse_cache"):
+            cached = store.find(source, profile)
+            if cached is not None and store.complete(source, cached):
+                store.select(source, cached)
+                return cached
     processing_checkpoint("parsing")
     if source.suffix == ".pdf":
         from openkb.parsing_pdf import parse_pdf
@@ -163,23 +165,26 @@ def parse_text(
             )
             paragraph.clear()
 
-    for line_number, line in enumerate(text.splitlines(), 1):
-        processing_checkpoint()
-        if not paragraph:
-            start = line_number
-            block_kind = "paragraph"
-        if line.startswith(("```", "~~~")):
-            fence = not fence
-            block_kind = "code"
-        if line.startswith("#") and not fence:
-            flush()
-            start, block_kind = line_number, "heading"
-            paragraph.append(line)
-            flush()
-        elif not line.strip() and not fence:
-            flush()
-        else:
-            paragraph.append(line)
+    lines = text.splitlines()
+    with progress_scope("text", len(lines), "lines") as progress:
+        for line_number, line in enumerate(lines, 1):
+            processing_checkpoint()
+            if not paragraph:
+                start = line_number
+                block_kind = "paragraph"
+            if line.startswith(("```", "~~~")):
+                fence = not fence
+                block_kind = "code"
+            if line.startswith("#") and not fence:
+                flush()
+                start, block_kind = line_number, "heading"
+                paragraph.append(line)
+                flush()
+            elif not line.strip() and not fence:
+                flush()
+            else:
+                paragraph.append(line)
+            progress.advance()
     flush()
     if fence:
         quality.append({"status": "needs_review", "reason": "unclosed_code_span"})

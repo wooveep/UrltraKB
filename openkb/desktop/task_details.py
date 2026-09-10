@@ -4,17 +4,29 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QLabel,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+)
 
+from openkb.desktop.task_progress import progress_presentation, update_progress_bar
 from openkb.runtime.records import TERMINAL
 
 
 def _status_text(task) -> str:
+    _, progress_text, progress_detail = progress_presentation(task)
     lines = [
         task.kb_dir,
         f"任务：{task.id}",
         f"状态：{task.state}",
         f"阶段：{task.stage}",
+        f"进度：{progress_text}",
+        progress_detail,
         f"成功：{task.succeeded} · 跳过：{task.skipped} · "
         f"失败：{task.failed} · 未处理：{task.unfinished}",
         f"错误：{task.error or '无'}",
@@ -71,6 +83,12 @@ def show_task_details(task, parent, *, manager=None):
     dialog.setWindowTitle("任务进度与日志")
     dialog.resize(900, 680)
     layout = QVBoxLayout(dialog)
+    progress_bar = QProgressBar()
+    progress_bar.setObjectName("task-detail-progress")
+    progress_label = QLabel()
+    progress_label.setWordWrap(True)
+    layout.addWidget(progress_bar)
+    layout.addWidget(progress_label)
     tabs = QTabWidget(dialog)
     status, logs = QPlainTextEdit(), QPlainTextEdit()
     status.setObjectName("task-status")
@@ -94,6 +112,9 @@ def show_task_details(task, parent, *, manager=None):
             except KeyError:
                 return
         status_text = _status_text(current)
+        update_progress_bar(progress_bar, current)
+        _, title, detail = progress_presentation(current)
+        progress_label.setText(title + "\n" + detail)
         if status.toPlainText() != status_text:
             status.setPlainText(status_text)
         content = current.diagnostics

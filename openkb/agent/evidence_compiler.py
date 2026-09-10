@@ -15,6 +15,7 @@ from openkb.agent.evidence_units import (
 from openkb.config import compilation_model_options
 from openkb.evidence import ParseStore
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import content_id
 
 
@@ -45,71 +46,77 @@ def compile_evidence(
     reader = ParseStore(kb_dir).reader(source, parsed)
     checkpoints = CompilationCheckpoints(kb_dir, source, parsed, settings, bundle)
     facts = []
-    for batch in fact_batches(source_units(kb_dir, source, parsed, limits, model), limits, model):
-        processing_checkpoint("facts")
-        payload = {"stage": "facts", "units": batch}
-        key = checkpoints.key(FACTS_SYSTEM, payload)
-        result = checkpoints.load(key)
-        on_event({"stage": "facts", "blocks": len(batch), "cached": result is not None})
-        if result is None:
-            result = _object(
-                _llm_call(
-                    model,
-                    messages(FACTS_SYSTEM, payload),
-                    "facts",
-                    bundle=bundle,
-                    response_format=JSON_FORMAT,
-                    **compilation_model_options(settings),
-                )
-            )
-        outputs = result.get("units")
-        if not isinstance(outputs, list) or len(outputs) != len(batch):
-            raise ProcessingIncomplete("section_coverage_incomplete", "facts")
-        expected = {unit["id"]: unit for unit in batch}
-        seen = set()
-        for item in outputs:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("id"), str)
-                or item["id"] not in expected
-                or item["id"] in seen
-            ):
-                raise ProcessingIncomplete("section_coverage_incomplete", "facts")
-            seen.add(item["id"])
-            unit = expected[item["id"]]
-            extracted = item.get("facts")
-            if (
-                not isinstance(extracted, list)
-                or (not extracted and not isinstance(item.get("empty_reason"), str))
-                or (not extracted and not item["empty_reason"].strip())
-            ):
-                raise ProcessingIncomplete("section_empty_without_reason", "facts")
-            for fact in extracted:
-                if (
-                    not isinstance(fact, dict)
-                    or not all(
-                        isinstance(fact.get(key), str) and fact[key].strip()
-                        for key in ("topic", "statement", "quote")
+    with progress_scope(
+        "facts", sum(block.chars for block in parsed.blocks), "characters"
+    ) as progress:
+        for batch in fact_batches(
+            source_units(kb_dir, source, parsed, limits, model), limits, model
+        ):
+            processing_checkpoint("facts")
+            payload = {"stage": "facts", "units": batch}
+            key = checkpoints.key(FACTS_SYSTEM, payload)
+            result = checkpoints.load(key)
+            on_event({"stage": "facts", "blocks": len(batch), "cached": result is not None})
+            if result is None:
+                result = _object(
+                    _llm_call(
+                        model,
+                        messages(FACTS_SYSTEM, payload),
+                        "facts",
+                        bundle=bundle,
+                        response_format=JSON_FORMAT,
+                        **compilation_model_options(settings),
                     )
-                    or fact["quote"] not in unit["text"]
+                )
+            outputs = result.get("units")
+            if not isinstance(outputs, list) or len(outputs) != len(batch):
+                raise ProcessingIncomplete("section_coverage_incomplete", "facts")
+            expected = {unit["id"]: unit for unit in batch}
+            seen = set()
+            for item in outputs:
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("id"), str)
+                    or item["id"] not in expected
+                    or item["id"] in seen
                 ):
-                    raise ProcessingIncomplete("fact_evidence_invalid", "facts")
-                reference = dict(unit["reference"])
-                reference["start"] += unit["text"].index(fact["quote"])
-                reference["end"] = reference["start"] + len(fact["quote"])
-                value = {
-                    "topic": fact["topic"],
-                    "statement": fact["statement"],
-                    "quote": fact["quote"],
-                    "reference": reference,
-                    "scope": unit["reference"],
-                    "context_evidence": [
-                        {"reference": item["reference"], "relation": item["relation"]}
-                        for item in [*unit["heading_evidence"], *unit["neighbors"]]
-                    ],
-                }
-                facts.append({"id": content_id(value), **value})
-        checkpoints.save(key, result)
+                    raise ProcessingIncomplete("section_coverage_incomplete", "facts")
+                seen.add(item["id"])
+                unit = expected[item["id"]]
+                extracted = item.get("facts")
+                if (
+                    not isinstance(extracted, list)
+                    or (not extracted and not isinstance(item.get("empty_reason"), str))
+                    or (not extracted and not item["empty_reason"].strip())
+                ):
+                    raise ProcessingIncomplete("section_empty_without_reason", "facts")
+                for fact in extracted:
+                    if (
+                        not isinstance(fact, dict)
+                        or not all(
+                            isinstance(fact.get(key), str) and fact[key].strip()
+                            for key in ("topic", "statement", "quote")
+                        )
+                        or fact["quote"] not in unit["text"]
+                    ):
+                        raise ProcessingIncomplete("fact_evidence_invalid", "facts")
+                    reference = dict(unit["reference"])
+                    reference["start"] += unit["text"].index(fact["quote"])
+                    reference["end"] = reference["start"] + len(fact["quote"])
+                    value = {
+                        "topic": fact["topic"],
+                        "statement": fact["statement"],
+                        "quote": fact["quote"],
+                        "reference": reference,
+                        "scope": unit["reference"],
+                        "context_evidence": [
+                            {"reference": item["reference"], "relation": item["relation"]}
+                            for item in [*unit["heading_evidence"], *unit["neighbors"]]
+                        ],
+                    }
+                    facts.append({"id": content_id(value), **value})
+            checkpoints.save(key, result)
+            progress.advance(sum(len(unit["text"]) for unit in batch))
     from openkb.agent.evidence_plan import plan_topics
 
     wiki = workspace / "wiki"
@@ -141,36 +148,38 @@ def compile_evidence(
         | {group["path"] for group in groups}
         | {f"summaries/{name}"}
     )
-    for group in groups:
-        selected = list(
-            {fact["id"]: fact for fact in facts if fact["topic"] in group["members"]}.values()
-        )
-        from openkb.agent.evidence_pages import generate_topic
+    with progress_scope("generation", len(groups), "topics") as progress:
+        for group in groups:
+            selected = list(
+                {fact["id"]: fact for fact in facts if fact["topic"] in group["members"]}.values()
+            )
+            from openkb.agent.evidence_pages import generate_topic
 
-        content = generate_topic(
-            group,
-            selected,
-            reader,
-            checkpoints,
-            wiki,
-            source,
-            settings,
-            limits,
-            bundle=bundle,
-            on_event=on_event,
-            known_targets=known_targets,
-            assets=assets,
-        )
-        writer = _write_entity if group["kind"] == "entity" else _write_concept
-        writer(
-            wiki,
-            group["name"],
-            content,
-            f"summaries/{name}.md",
-            (wiki / f"{group['path']}.md").exists(),
-            brief=group["title"],
-            **({"type_": group["type"]} if group["kind"] == "entity" else {}),
-        )
+            content = generate_topic(
+                group,
+                selected,
+                reader,
+                checkpoints,
+                wiki,
+                source,
+                settings,
+                limits,
+                bundle=bundle,
+                on_event=on_event,
+                known_targets=known_targets,
+                assets=assets,
+            )
+            writer = _write_entity if group["kind"] == "entity" else _write_concept
+            writer(
+                wiki,
+                group["name"],
+                content,
+                f"summaries/{name}.md",
+                (wiki / f"{group['path']}.md").exists(),
+                brief=group["title"],
+                **({"type_": group["type"]} if group["kind"] == "entity" else {}),
+            )
+            progress.advance()
     _write_summary(
         wiki,
         name,

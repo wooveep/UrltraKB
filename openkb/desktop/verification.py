@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
     parser.add_argument("--tables", action="store_true", help="Populated native table layouts")
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
+    parser.add_argument("--progress", action="store_true", help="Measured task progress UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
     parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
     parser.add_argument("--lifecycle-state", type=Path, help="Previous lifecycle run for restart")
@@ -145,6 +146,12 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.progress:
+            from openkb.desktop.verification_progress import verify_progress
+
+            verify_progress(window, first, root, wait_until)
+            checks.append("measured nested task progress, unknown waits and live detail refresh")
+            return 0
         if args.tables:
             from openkb.desktop.verification_tables import verify_tables
 

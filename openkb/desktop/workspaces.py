@@ -324,14 +324,15 @@ class Workspaces:
         layout = self.hosts["任务"]
         self.task_tabs = QTabWidget()
         task_page, tasks = page()
-        w.task_table = QTableWidget(0, 5)
+        w.task_table = QTableWidget(0, 6)
         w.task_table.setHorizontalHeaderLabels(
-            ["知识库", "操作", "状态", "逐项结果", "阶段 / 错误"]
+            ["知识库", "操作", "状态", "逐项结果", "阶段 / 错误", "阶段进度"]
         )
         w.task_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         w.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         w.task_table.horizontalHeader().setStretchLastSection(True)
         w.task_table.setColumnWidth(3, 230)
+        w.task_table.setColumnWidth(5, 240)
         w.task_table.itemSelectionChanged.connect(w._select_task)
         tasks.addWidget(w.task_table, 2)
         row = FlowLayout()

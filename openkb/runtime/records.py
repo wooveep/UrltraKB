@@ -12,6 +12,7 @@ from typing import Any
 from openkb.application.documents import DocumentResult
 from openkb.application.pages import Page
 from openkb.locks import atomic_write_json
+from openkb.progress import ProgressStep, read_progress
 from openkb.runtime.requests import UnitRequest
 
 PROTOCOL_VERSION = 1
@@ -138,6 +139,7 @@ class TaskView:
     retry_of: str | None = None
     diagnostics: str = field(default="", repr=False)
     last_activity_at: str | None = None
+    progress: tuple[ProgressStep, ...] = ()
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):
@@ -161,6 +163,12 @@ class TaskView:
             self.last_activity_at is not None and not isinstance(self.last_activity_at, str)
         ):
             raise ValueError("Invalid task diagnostics")
+        if (
+            not isinstance(self.progress, tuple)
+            or len(self.progress) > 32
+            or any(not isinstance(step, ProgressStep) for step in self.progress)
+        ):
+            raise ValueError("Invalid task progress")
 
     @property
     def succeeded(self) -> int:
@@ -183,12 +191,14 @@ class TaskView:
         value.pop("text")
         value.pop("diagnostics")
         value["results"] = [result.summary() for result in self.results]
+        value["progress"] = [asdict(step) for step in self.progress]
         return value
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> TaskView:
         value = dict(value)
         value["results"] = tuple(UnitResult.from_summary(row) for row in value["results"])
+        value["progress"] = read_progress(value.get("progress", []))
         if value["state"] not in TERMINAL:
             value.update(state="interrupted", stage="interrupted", error="Previous run interrupted")
         return cls(**value)

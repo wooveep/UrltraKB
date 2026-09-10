@@ -17,6 +17,7 @@ from openkb.locks import atomic_write_json
 from openkb.ocr.config import CloudSettings
 from openkb.ocr.credentials import resolve_ocr_credential
 from openkb.processing import processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion, content_id, read_object
 
 
@@ -160,6 +161,7 @@ class CloudJobs:
             if self.record.get("state") in {"submitting", "submission_unknown", "submitted"}:
                 self.remote_may_continue = True
 
+    @progress_scope("cloud_ocr")
     def _page(self, document, page):
         self._checkpoint()
         with pymupdf.open() as sliced:

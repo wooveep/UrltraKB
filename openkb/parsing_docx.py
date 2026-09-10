@@ -11,6 +11,7 @@ from openkb.docx_package import prepare_docx
 from openkb.evidence import BlockDraft
 from openkb.parsing_docx_quality import conversion_quality
 from openkb.processing import processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.sources import SourceStore
 
 
@@ -37,6 +38,7 @@ def parse_docx(
     notes = None
     comments: dict[str, Any] = {}
     active_notes: set[tuple[str, str]] = set()
+    progress = None
 
     def inline(node, assets: list[str]) -> str:
         if isinstance(node, nodes.Text):
@@ -161,6 +163,7 @@ def parse_docx(
                                     "reason": "docx_attachment_unparsed:" + attachment.part,
                                 }
                             )
+                progress.advance()
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
@@ -182,10 +185,20 @@ def parse_docx(
                         )
 
     def capture(document):
-        nonlocal notes, comments
+        nonlocal notes, comments, progress
         notes = document.notes
         comments = {comment.comment_id: comment for comment in document.comments}
-        visit(document.children)
+
+        def paragraph_count(children):
+            return sum(
+                1
+                if isinstance(node, nodes.Paragraph)
+                else paragraph_count(getattr(node, "children", []))
+                for node in children
+            )
+
+        with progress_scope("docx", paragraph_count(document.children), "paragraphs") as progress:
+            visit(document.children)
         return document
 
     def image_source(image):

@@ -62,9 +62,21 @@ _OPERATIONS = {
     "DeleteConversation": "删除对话",
     "ExportConversation": "导出对话",
     "CheckKnowledge": "知识检查与修复",
+    "ReparseSource": "重新解析",
+    "ContinueSource": "继续编译",
+    "ReprocessSourcePage": "重新识别页面",
+    "RebuildSourceNavigation": "重建资料导航",
 }
 
 _STAGES = {
+    "parsing": "解析资料",
+    "facts": "提取知识",
+    "planning": "规划知识页面",
+    "generation": "生成知识页面",
+    "verification": "核对知识",
+    "compiling": "知识编译",
+    "committing": "保存结果",
+    "committed": "已保存",
     "waiting-input": "等待文件稳定",
     "input-returned-to-watch": "输入仍在变化，已交回监听补查",
 }
@@ -586,6 +598,8 @@ class Workbench(QMainWindow):
                 pass  # A concurrent summary cleanup can remove selected rows.
 
     def _poll_tasks(self):
+        from openkb.desktop.task_progress import progress_presentation, update_task_progress
+
         tasks = self.manager.tasks()
         running = sum(task.state not in TERMINAL for task in tasks)
         attention = sum(
@@ -612,15 +626,17 @@ class Workbench(QMainWindow):
                 f"成功 {task.succeeded} · 跳过 {task.skipped} · "
                 f"失败 {task.failed} · 未处理 {task.unfinished}",
                 task.error or _STAGES.get(task.stage, task.stage),
+                progress_presentation(task)[1],
             ]
             for column, value in enumerate(values):
                 item = self.task_table.item(row, column)
                 if item is None:
                     item = QTableWidgetItem()
                     self.task_table.setItem(row, column, item)
-                item.setText(value)
+                item.setText("" if column == 5 else value)
                 item.setData(Qt.ItemDataRole.UserRole, task.id)
                 item.setToolTip(task.kb_dir if column == 0 else value)
+            update_task_progress(self.task_table, row, task)
             self.conversations.observe(task)
             if task.state in TERMINAL and task.id not in self._seen_terminal:
                 self._seen_terminal.add(task.id)

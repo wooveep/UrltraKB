@@ -403,3 +403,15 @@ validated two-page PaddleOCR jobs on both systems and found real-model semantic
 failures despite structurally complete generation. The three code batches do not
 close that semantic gate, representative-document calibration or long OCR quality
 acceptance. The provider checks do not establish a production processing profile.
+
+### 任务进度
+
+任务列表和详情显示可核对的阶段百分比：DOCX 按段落、PDF 按物理页、
+文本按行、知识提取按已验证并保存的原文字符、知识页面生成按篇数计数。
+父文档和嵌入附件保留各自的计数，详情可同时查看。缓存复用与跳过检查计入
+已处理工作；这个比例表示当前阶段的工作量，不是成功率或剩余时间估计。
+
+云端 OCR 和缓存完整性校验等无法确定总量的工作显示等待状态，不用耗时或
+进程心跳填充百分比。失败、中断及部分完成保留独立状态，只有任务成功结束
+才显示“任务完成 · 100%”。旧任务没有计数记录时显示“等待进度信息”，
+新版本开始执行的任务会保存进度快照并通过任务 API 返回 `progress`。
