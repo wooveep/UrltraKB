@@ -9,6 +9,7 @@ from typing import Any
 from openkb.docx_containers import ExpansionBudget
 from openkb.docx_package import prepare_docx
 from openkb.evidence import BlockDraft
+from openkb.ocr.image_session import image_ocr_scope
 from openkb.parsing_docx_quality import conversion_quality
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
@@ -99,7 +100,7 @@ def parse_docx(
             from openkb.docx_images import read_image
 
             text, images, checks = read_image(
-                content, store, ocr, alt_text=node.alt_text or "Original image"
+                content, store, image_ocr, alt_text=node.alt_text or "Original image"
             )
             assets.extend(images)
             quality.extend(checks)
@@ -209,13 +210,15 @@ def parse_docx(
             quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
             return {"src": ""}
 
-    with prepared.stream as source:
+    with image_ocr_scope(ocr) as image_ocr, prepared.stream as source:
         result = mammoth.convert_to_html(
             source,
             transform_document=capture,
             convert_image=mammoth.images.img_element(image_source),
             external_file_access=False,
         )
+        if image_ocr is not None:
+            quality.extend(image_ocr.notices())
     if not blocks:
         quality.append({"status": "needs_review", "reason": "empty_content"})
     for message in result.messages:

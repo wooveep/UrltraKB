@@ -358,7 +358,14 @@ def _execute(
                 source_root=root / "raw" if request.wait_for_stable else None,
                 source_origin=request.upload_origin,
             )
-        return UnitResult.from_document(result)
+        unit = UnitResult.from_document(result)
+        if isinstance(request, (ReparseSource, ReprocessSourcePage)) and result.stage == "parsed":
+            from dataclasses import replace
+
+            # This operation completed its parsing goal; knowledge compilation is
+            # a separate action and remains not_started in the document result.
+            return replace(unit, status="completed")
+        return unit
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio
 

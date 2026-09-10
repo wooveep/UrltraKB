@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -161,9 +162,21 @@ class CloudJobs:
             if self.record.get("state") in {"submitting", "submission_unknown", "submitted"}:
                 self.remote_may_continue = True
 
+    def cached_page(self, document, page, *, input_id=None):
+        """Read a validated result without submission, polling, download or checkpoint writes."""
+        previous_path, previous_record = self.path, self.record
+        try:
+            return self._page(document, page, cache_only=True)
+        except CloudIncomplete:
+            return None
+        finally:
+            self.path, self.record = previous_path, previous_record
+
     @progress_scope("cloud_ocr")
-    def _page(self, document, page):
-        self._checkpoint()
+    def _page(self, document, page, *, cache_only=False):
+        # Local reuse must remain possible after the remote waiting budget is
+        # exhausted. Cancellation and the enclosing document deadline still apply.
+        processing_checkpoint("ocr")
         with pymupdf.open() as sliced:
             sliced.insert_pdf(document, from_page=page - 1, to_page=page - 1)
             content = sliced.tobytes(garbage=4, deflate=True, no_new_id=True)
@@ -172,13 +185,17 @@ class CloudJobs:
         with pymupdf.open(stream=content, filetype="pdf") as sliced:
             if sliced.page_count != 1 or sliced[0].rect != document[page - 1].rect:
                 raise CloudIncomplete("cloud_slice_mapping_invalid")
-        digest = self.store.put_bytes(content)
+        digest = (
+            hashlib.sha256(content).hexdigest() if cache_only else self.store.put_bytes(content)
+        )
         profile = {"ocr": self.config.profile(), "physical_page": page, "slice": digest}
         if page in self.retries:
             profile["reprocessing"] = self.retries[page]
         intent = {"source": self.source.id, "page": page, "slice": digest, "profile": profile}
         identity = content_id(intent)
         path = self.store.owned_path(self.store.root / "cloud-jobs" / f"{identity}.json")
+        if cache_only and not path.exists():
+            return None
         self.path = path
         self.record = (
             read_object(path)
@@ -204,6 +221,8 @@ class CloudJobs:
             } != profile or parsed.input_key != self.source.input_key:
                 raise CloudIncomplete("cloud_checkpoint_input_mismatch")
             if parsed.profile != parsed_profile:
+                if cache_only:
+                    return None
                 return self._assemble(page, parsed_profile)
             drafts = [
                 BlockDraft(
@@ -216,9 +235,12 @@ class CloudJobs:
                 for block in parsed.blocks
             ]
             for draft in drafts:
+                processing_checkpoint()
                 for asset in draft.assets:
                     self.store.asset(asset)
             return drafts, self.record.get("quality_reason")
+        if cache_only:
+            return None
         if state == "raw_downloaded":
             return self._assemble(page, parsed_profile)
         if state in {"submitting", "submission_unknown"}:
@@ -227,6 +249,7 @@ class CloudJobs:
             raise CloudIncomplete(self.record["reason"])
         if state not in {"planned", "submitted"}:
             raise CloudIncomplete("cloud_checkpoint_invalid")
+        self._checkpoint()
         if not self.token:
             raise CloudIncomplete("cloud_credentials_missing")
         if state == "planned":

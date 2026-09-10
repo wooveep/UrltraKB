@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
@@ -97,6 +98,7 @@ def _compile_version(
                         "docx_conversion_warning:" in row["reason"]
                         or "non_document_attachment_skipped:" in row["reason"]
                         or "docx_image_ocr_notice:" in row["reason"]
+                        or "pdf_image_ocr_notice:" in row["reason"]
                     ):
                         report_auxiliary_warning(row["reason"])
                 if ParseStore(kb_dir).accepted_missing_images(source, parsed):
@@ -277,11 +279,13 @@ def _materialize(
             attachment = position["attachment"]
             attachments[attachment["blob"]] = Path(attachment["name"]).suffix.lower()
             position = attachment["position"]
-    text = []
+    asset_paths = {}
+    unrenderable = set()
     for block in parsed.blocks:
         processing_checkpoint()
-        content = store.asset(block.blob).read_text(encoding="utf-8")
         for digest in block.assets:
+            if digest in asset_paths:
+                continue
             if digest in attachments:
                 from openkb.inputs import SUPPORTED_EXTENSIONS
 
@@ -290,22 +294,53 @@ def _materialize(
                     raise ValueError("Unrecognized embedded document format")
                 asset = workspace / "wiki/sources/attachments" / f"{digest}{attachment_extension}"
                 _copy_file_atomic(store.asset(digest), asset)
-                content = content.replace("asset:" + digest, "attachments/" + asset.name)
+                asset_paths[digest] = "attachments/" + asset.name
                 continue
             from PIL import Image
 
-            with Image.open(store.asset(digest)) as picture:
-                suffix = Image.registered_extensions()
-                extension = next(
-                    (key for key, value in suffix.items() if value == picture.format), None
-                )
-                if extension is None:
-                    raise ValueError("Unrecognized source image format")
-                picture.verify()
+            try:
+                with Image.open(store.asset(digest)) as picture:
+                    extension = {
+                        "PNG": ".png",
+                        "JPEG": ".jpg",
+                        "GIF": ".gif",
+                        "WEBP": ".webp",
+                        "BMP": ".bmp",
+                    }.get(picture.format or "")
+                    if extension is None:
+                        raise ValueError("Unrecognized source image format")
+                    picture.verify()
+            except (OSError, ValueError):
+                # Some original drawing formats have no renderable preview. They
+                # remain downloadable without preventing compilation of the text.
+                asset = workspace / "wiki/sources/attachments" / f"{digest}.bin"
+                _copy_file_atomic(store.asset(digest), asset)
+
+                asset_paths[digest] = "attachments/" + asset.name
+                unrenderable.add(digest)
+                report_auxiliary_warning("source_image_preview_unavailable:" + digest)
+                continue
             asset = workspace / "wiki/sources/images" / f"{digest}{extension}"
             _copy_file_atomic(store.asset(digest), asset)
-            content = content.replace("asset:" + digest, "images/" + asset.name)
+            asset_paths[digest] = "images/" + asset.name
+
+    def original_link(match: re.Match[str]) -> str:
+        if match[2] not in unrenderable:
+            return match[0]
+        return f"[Original image; preview unavailable: {match[1]}](asset:{match[2]})"
+
+    def asset_link(match: re.Match[str]) -> str:
+        return asset_paths.get(match[1], match[0])
+
+    text = []
+    for block in parsed.blocks:
+        processing_checkpoint()
+        # Shared headers may refer to a figure owned by a different block. Map
+        # context and body through the same validated source-wide asset catalog.
+        content = block.context + "\n" + store.asset(block.blob).read_text(encoding="utf-8")
+        content = re.sub(r"!\[([^\]]*)\]\(asset:([0-9a-f]{64})\)", original_link, content)
+        content = re.sub(r"asset:([0-9a-f]{64})", asset_link, content)
         reference = Evidence(source.source_id, source.id, parsed.id, block.id)
-        text.append(f"<!-- source-evidence: {asdict(reference)} -->\n{block.context}\n{content}")
+        text.append(f"<!-- source-evidence: {asdict(reference)} -->\n{content}")
     atomic_write_text(destination, "\n\n".join(text))
     return destination

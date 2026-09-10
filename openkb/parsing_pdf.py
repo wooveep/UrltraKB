@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
 
 import pymupdf
 
 from openkb.evidence import BlockDraft
+from openkb.ocr.eligibility import decorative_path, ocr_candidate
+from openkb.ocr.optional import recognize
 from openkb.parsing_pdf_tables import table_cells
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
@@ -36,6 +39,7 @@ def parse_pdf(
             reason = None
             verified_by = "native_text_layer"
             native = []
+            image_candidate = False
             try:
                 cells, tables = table_cells(page, number)
             except Exception:
@@ -43,7 +47,7 @@ def parse_pdf(
                 reason = "native_table_structure_uncertain"
             graphics = _uncovered_graphics(page, tables)
             if graphics:
-                reason = "image_content_requires_ocr"
+                reason = reason or "image_content_requires_ocr"
             for block in page.get_text("dict", sort=True)["blocks"]:
                 location = {"kind": "pdf", "page": number, "bbox": list(block["bbox"])}
                 if block["type"] == 0:
@@ -73,34 +77,59 @@ def parse_pdf(
                             f"![Original image](asset:{digest})", "image", location, (digest,)
                         )
                     )
-                    reason = "image_content_requires_ocr"
+                    from PIL import Image
+
+                    with Image.open(io.BytesIO(pixmap.tobytes("png"))) as picture:
+                        image_candidate |= ocr_candidate(picture)
             native.extend(cells)
             native.sort(key=lambda block: (block.location["bbox"][1], block.location["bbox"][0]))
+            readable_text = any(block.kind != "image" and block.text.strip() for block in native)
+            if image_candidate or (native and not readable_text):
+                reason = reason or "image_content_requires_ocr"
             if not native:
-                reason = "blank_or_illustration"
+                reason = reason or "blank_or_illustration"
             elif any(trace.get("type") == 3 for trace in page.get_texttrace()):
                 reason = "invisible_text_layer"
-            if number in (force_pages or set()):
+            optional_reasons = {None, "image_content_requires_ocr", "blank_or_illustration"}
+            if number in (force_pages or set()) and reason in optional_reasons:
                 reason = "explicit_page_reprocessing"
             # A bitmap/empty/invisible text layer is not evidence of a reliable
             # extraction. Preserve the original visual for OCR or human review.
-            if reason:
+            if reason or page.get_drawings():
                 digest = store.put_bytes(page.get_pixmap().tobytes("png"))
-                if ocr is not None:
-                    recognized, ocr_reason = ocr.page(document, number)
+                if reason and (reason != "blank_or_illustration" or ocr is not None):
+                    original_reason = reason
+                    recognized, ocr_reason = recognize(ocr, document, number)
                     if recognized:
-                        native = recognized
+                        # Supplemental OCR never replaces readable native content.
+                        # Only a successful repair of an unreliable layer replaces it.
+                        native = (
+                            [*native, *recognized]
+                            if ocr_reason
+                            or original_reason
+                            in {"image_content_requires_ocr", "explicit_page_reprocessing"}
+                            else [*recognized, *(b for b in native if b.kind == "image")]
+                        )
                     reason = ocr_reason or (None if recognized else "ocr_missing_page")
                     if not reason:
                         verified_by = "ocr_layout_and_assets"
-                        if graphics and not any(block.assets for block in recognized):
-                            reason = "image_content_requires_ocr"
+                    elif original_reason in {
+                        "image_content_requires_ocr",
+                        "explicit_page_reprocessing",
+                    }:
+                        verified_by = "pdf_image_ocr_notice:" + reason
+                        reason = None
                 native.append(
                     BlockDraft(
                         f"![Original page {number}](asset:{digest})",
                         "image",
                         {"kind": "pdf", "page": number},
                         (digest,),
+                        (
+                            "Original visual for this physical page; associated text appears "
+                            "in the same page's source blocks. OCR is supplementary; "
+                            "unrecognized image text is unknown. " + verified_by
+                        ),
                     )
                 )
             blocks.extend(native)
@@ -118,6 +147,8 @@ def parse_pdf(
 def _uncovered_graphics(page, tables):
     """Only an extracted table's unfilled grid is accounted for by text cells."""
     for path in page.get_drawings():
+        if decorative_path(path, page.rect):
+            continue
         grid = path.get("fill") is None and all(
             item[0] == "re"
             or (item[0] == "l" and (item[1].x == item[2].x or item[1].y == item[2].y))

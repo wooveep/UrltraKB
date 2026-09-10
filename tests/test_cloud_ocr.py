@@ -11,6 +11,12 @@ from openkb.application.documents import import_document
 from openkb.evidence import ParseStore
 
 
+def refresh(kb, result):
+    from openkb.application.source_actions import reparse_source
+
+    return reparse_source(kb, result.source_id, version_id=result.input_version)
+
+
 def cloud_settings(kb):
     path = kb / ".openkb/config.yaml"
     settings = yaml.safe_load(path.read_text())
@@ -61,12 +67,12 @@ def test_shared_import_never_reposts_an_uncertain_cloud_submission(
 
     monkeypatch.setattr(requests.Session, "request", lost_response)
     one = import_document(kb_dir, source)
-    two = import_document(kb_dir, source)
-    assert one.status == two.status == "unfinished"
+    two = refresh(kb_dir, one)
+    assert one.knowledge_compilation == "completed" and two.stage == "parsed"
     assert len(submissions) == 1
-    assert "cloud_submission_unknown" in two.quality
+    assert any("cloud_submission_unknown" in warning for warning in two.warnings)
     assert any(
-        row["reason"] == "cloud_submission_unknown"
+        row["reason"] == "pdf_image_ocr_notice:cloud_submission_unknown"
         for row in ParseStore(kb_dir).load(two.parse_id).quality
     )
     with pymupdf.open(stream=submissions[0], filetype="pdf") as part:
@@ -161,7 +167,7 @@ def test_known_job_resumes_download_without_repeating_ocr(
 
     monkeypatch.setattr(requests.Session, "request", service)
     one = import_document(kb_dir, source)
-    assert one.status == "unfinished"
+    assert one.knowledge_compilation == "completed"
     assert submitted_options == [
         {
             "useDocOrientationClassify": False,
@@ -179,11 +185,11 @@ def test_known_job_resumes_download_without_repeating_ocr(
     observed = source_status(kb_dir, one.source_id)
     assert observed["cloud_jobs"][0]["requests"] == 3
     assert observed["cloud_jobs"][0]["job_id"] == "job-one"
-    two = import_document(kb_dir, source)
+    two = refresh(kb_dir, one)
     if corrupt_image_once:
-        assert two.status == "unfinished" and "cloud_required_asset_invalid" in two.quality
-        two = import_document(kb_dir, source)
-    assert two.status == "added", two
+        assert any("cloud_required_asset_invalid" in warning for warning in two.warnings)
+        two = refresh(kb_dir, two)
+    assert two.stage == "parsed", two
     assert downloads == 2 and sum(method == "POST" for method, _ in calls) == 1
     assert all(
         block.location["page"] == 1 for block in ParseStore(kb_dir).load(two.parse_id).blocks
@@ -255,9 +261,9 @@ def test_required_image_omitted_from_markdown_is_still_checked(
 
     monkeypatch.setattr(requests.Session, "request", service)
     result = import_document(kb_dir, source)
-    assert result.status == "unfinished"
-    assert "cloud_required_asset_missing" in result.quality
-    assert not model_service
+    assert result.knowledge_compilation == "completed"
+    assert any("cloud_required_asset_missing" in warning for warning in result.warnings)
+    assert any(block.assets for block in ParseStore(kb_dir).load(result.parse_id).blocks)
 
 
 def test_explicit_page_reprocessing_requires_acknowledging_unknown_submission(
@@ -287,9 +293,10 @@ def test_explicit_page_reprocessing_requires_acknowledging_unknown_submission(
     second = reprocess_source_page(kb_dir, first.source_id, **binding, acknowledge_unknown=True)
     assert second.input_version == first.input_version
     assert second.parse_id != first.parse_id
-    assert "cloud_submission_unknown" in second.quality
+    assert any("cloud_submission_unknown" in warning for warning in second.warnings)
     assert (
-        ParseStore(kb_dir).load(first.parse_id).quality[0]["reason"] == "cloud_submission_unknown"
+        ParseStore(kb_dir).load(first.parse_id).quality[0]["reason"]
+        == "pdf_image_ocr_notice:cloud_submission_unknown"
     )
     assert len(posts) == 2
     import_document(kb_dir, original)
@@ -297,7 +304,7 @@ def test_explicit_page_reprocessing_requires_acknowledging_unknown_submission(
 
 
 def test_page_reprocessing_leaves_other_unfinished_pages_and_their_jobs_untouched(
-    kb_dir, tmp_path, monkeypatch
+    kb_dir, tmp_path, monkeypatch, model_service
 ):
     from openkb.application.source_actions import reprocess_source_page
 
@@ -408,7 +415,7 @@ def test_cloud_import_uses_direct_saved_key_without_environment_setup(
     monkeypatch.setattr(requests.Session, "request", reject_submission)
     result = import_document(kb_dir, source)
     assert authenticated == ["Bearer direct-ocr-test-key"]
-    assert result.status == "unfinished"
+    assert result.knowledge_compilation == "completed"
     assert "PADDLEOCR_API_KEY" not in os.environ
     assert "direct-ocr-test-key" not in read_kb_config(kb_dir).model_dump_json()
     assert all(

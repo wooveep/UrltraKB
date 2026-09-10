@@ -151,20 +151,61 @@ empty or unavailable recognition produces a warning, not a document-wide failure
 This size/contrast heuristic does not promise that every selected image has text
 or that every character is recognized. Original missing image data is explicitly
 marked; a recorded decision to proceed applies only to the exact source/parse and
-missing-image reasons, preserving other content-quality checks. Harmless Word
+missing-image reasons. Reprocessing the same source version carries that decision
+forward only when the missing markers have identical physical positions and counts,
+including their attachment identities. It records a new exact decision and preserves
+the old evidence. Changed original bytes, new missing locations and other content
+failures are not waived. Harmless Word
 formatting/style conversion warnings are advisory; unsupported document content
 still requires review.
 
-For PDF, uncertain bitmap, invisible text and uncovered vector content
-requires the selected OCR backend or explicit page review. Ruled table cells keep
-headers and coordinates. Missing required assets cannot be waived as a blank or
-illustration page. OCR output is checked before a complete parsing checkpoint is
+Optional DOCX image recognition stops after its resource budget is exhausted or
+credentials/quota prevent further work. This stop is shared with nested document
+attachments within the current parse and resets for the next document operation.
+Subsequent candidate images reuse available validated cloud results, or retain their
+bytes and previews without new OCR calls; each document reports one count of skipped
+frames. An empty individual image
+or a failed image download does not prevent attempts on later images. PDF page OCR
+remains independent because a scan may have no other readable text.
+
+For PDF, bitmap and uncovered vector content can use the selected OCR backend.
+OCR exceptions, timeouts and missing service-side assets are advisory when the original
+page is retained. They do not block compilation of available document content; an
+image-only page may have no known textual facts. The original visual remains available
+for later inspection. Corrupt native content, unresolved source assets and uncertain
+text/table extraction remain independent source-quality checks. Ruled table cells keep
+headers and coordinates. With readable native text, full-page flat backgrounds,
+simple thin rules at the page edge and small/flat raster icons can skip OCR while
+retaining their visuals. Meaningful diagrams and image-only pages remain OCR candidates.
+Successful supplemental OCR retains readable native text alongside the
+original images and page preview; the cloud service need not return a duplicate
+picture. Incomplete OCR preserves native text and keeps its explicit failure reason
+as an advisory. OCR output is checked before its own successful checkpoint is
 recorded. [Optional CPU deployment](optional-ocr-runtime.md) is separate from the
 main application; local failure never selects the cloud backend automatically.
 On Windows, the default local setting uses the installed Windows text recognition
 engine and language packs without configuration. An explicitly configured local
 PaddleOCR runtime or cloud backend takes precedence. Native Windows recognition
 retains the rendered image and text positions; it does not infer diagram semantics.
+An unavailable or timed-out Windows engine probe leaves native document parsing
+available; cancellation and the overall document deadline still stop the operation.
+Already validated cloud results can be read after the remote waiting budget expires;
+task cancellation and the enclosing document deadline still apply to cache reads.
+
+Source evidence binds figures to their paragraph, heading, physical page or attachment
+position and neighboring text. The Q&A file reader exposes a source-image catalog with
+the source line, adjacent text and validated wiki-relative image paths. Agents can
+inspect those figures with `get_image` and embed them next to the relevant explanation
+in an answer; unavailable OCR does not authorize guessing image text. Native chat renders
+these images inline and fits them to the available width. An unsupported original image
+format remains downloadable when a displayable preview is unavailable.
+Publication resolves shared table-header figures through the same validated asset
+catalog as body figures, including references from later cells. Each unique original
+is copied once per publication; malformed Q&A image links do not prevent reading text.
+
+A successful reparse task reports completion of parsing while leaving knowledge
+compilation explicitly `not_started`. Existing task history and cited parse versions
+are preserved.
 
 Generation uses a private Wiki copy and preserves independent input bytes. All
 knowledge changes for one source publish together only after parsing, version,

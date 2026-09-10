@@ -2,7 +2,8 @@
 
 import html
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QTextCursor, QTextDocument
 from PySide6.QtWidgets import QPlainTextEdit
 
 from openkb.agent.answer_text import visible_answer
@@ -79,7 +80,49 @@ class ConversationView(MarkdownView):
         following = bar.maximum() - previous < 40
         super()._apply_rendered(generation, value)
         if generation == self._generation:
+            self._fit_source_images()
             bar.setValue(bar.maximum() if following else previous)
+
+    def _fit_source_images(self):
+        document = self.document()
+        images = []
+        block = document.begin()
+        while block.isValid():
+            fragment = block.begin()
+            while not fragment.atEnd():
+                value = fragment.fragment()
+                if value.charFormat().isImageFormat():
+                    images.append(
+                        (value.position(), value.length(), value.charFormat().toImageFormat())
+                    )
+                fragment += 1
+            block = block.next()
+        for position, length, format_ in images:
+            url = document.baseUrl().resolved(QUrl(format_.name()))
+            if not url.isLocalFile():
+                continue
+            from pathlib import Path
+
+            if not Path(url.toLocalFile()).resolve().is_relative_to(self._base.resolve()):
+                continue  # Formula/diagram rendering has its own size and baseline.
+            picture = document.resource(QTextDocument.ResourceType.ImageResource, url)
+            if picture is None or picture.isNull() or picture.width() <= 0:
+                continue
+            width = min(picture.width(), max(120, self.viewport().width() - 48))
+            height = picture.height() * width / picture.width()
+            if format_.width() == width and format_.height() == height:
+                continue
+            format_.setWidth(width)
+            format_.setHeight(height)
+            cursor = QTextCursor(document)
+            cursor.setPosition(position)
+            cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+            cursor.setCharFormat(format_)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._has_source:
+            self._fit_source_images()
 
     def show_temporary(self, text):
         # MarkdownView calls this while scheduling rendering. Keep the semantic

@@ -5,21 +5,12 @@ from __future__ import annotations
 import io
 import re
 
+from openkb.ocr.eligibility import ocr_candidate
+from openkb.ocr.image_session import ImageOcrSession
+from openkb.ocr.optional import recognize
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import SourceStore, content_id
-
-
-def ocr_candidate(image) -> bool:
-    """Skip tiny icons, narrow toolbars and flat fills before invoking OCR.
-
-    This is a cheap size/contrast heuristic, not a claim that every remaining
-    image contains text. Empty recognition is an advisory result.
-    """
-    if min(image.size) <= 48 or max(image.size) < 160:
-        return False
-    low, high = image.convert("L").getextrema()
-    return high - low >= 24
 
 
 def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Original image"):
@@ -64,6 +55,8 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                         }
                     )
                     continue
+                if isinstance(ocr, ImageOcrSession) and ocr.skip_optional():
+                    continue
                 with pymupdf.open() as document:
                     page = document.new_page(width=image.width, height=image.height)
                     page.insert_image(page.rect, stream=rendered)
@@ -71,7 +64,7 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                         {"docx_image": original, "frame": index, "rendered": preview}
                     )
                     with progress_scope("image_ocr"):
-                        blocks, reason = ocr.page(document, 1, input_id=identity)
+                        blocks, reason = recognize(ocr, document, 1, input_id=identity)
                 previous_context = None
                 for block in blocks:
                     assets.extend(asset for asset in block.assets if asset not in assets)
@@ -83,6 +76,8 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                         text += f"\n[Image frame {index + 1}; {block.context}]"
                         previous_context = block.context
                     text += "\n" + block.text
+                if reason == "ocr_optional_image_skipped" and isinstance(ocr, ImageOcrSession):
+                    continue
                 if reason or not blocks:
                     quality.append(
                         {

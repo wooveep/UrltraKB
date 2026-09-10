@@ -2,6 +2,8 @@
 
 import os
 
+from openkb.processing import ProcessingIncomplete, processing_checkpoint
+
 
 def default_local_profile(settings):
     if settings.backend != "local" or settings.local is not None or os.name != "nt":
@@ -11,6 +13,11 @@ def default_local_profile(settings):
     try:
         return dict(runtime_profile())
     except (OSError, ValueError):
+        return None
+    except ProcessingIncomplete as exc:
+        if exc.reason != "windows_ocr_timeout":
+            raise
+        processing_checkpoint()
         return None
 
 

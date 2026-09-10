@@ -65,6 +65,9 @@ def normalize_links(content, known_targets, assets):
                 target = assets.get(target[6:])
             if target not in assets.values():
                 raise ProcessingIncomplete("generated_asset_evidence_invalid", "generation")
+            if target.endswith(".bin"):
+                replacements.append((start, state.pos, f"[{token.content}]({target})"))
+                return True
             title = token.attrGet("title") or ""
             if title:
                 title = ' "' + html.escape(title).replace("\\", "\\\\") + '"'

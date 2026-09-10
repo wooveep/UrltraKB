@@ -30,7 +30,8 @@ def test_native_pdf_preserves_physical_pages_and_requests_only_uncertain_ocr(kb_
     result = parse_document(kb_dir, version)
     assert len(result.quality) == 3
     assert result.quality[0]["status"] == "verified"
-    assert [q["page"] for q in result.quality if q["status"] == "needs_review"] == [2, 3]
+    assert [q["page"] for q in result.quality if q["status"] == "needs_review"] == [2]
+    assert result.quality[2]["reason"] == "pdf_image_ocr_notice:ocr_unavailable"
     first = result.blocks[0]
     assert first.location["page"] == 1
     store = ParseStore(kb_dir)
@@ -120,7 +121,7 @@ def test_docx_footnote_exceptions_are_bound_to_the_referencing_paragraph(kb_dir,
     assert content.location["paragraph"] == 1 and "page" not in content.location
 
 
-def test_vector_diagram_with_readable_caption_still_requires_visual_review(
+def test_vector_diagram_with_readable_caption_is_retained_when_ocr_is_unavailable(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.documents import import_document
@@ -135,8 +136,9 @@ def test_vector_diagram_with_readable_caption_still_requires_visual_review(
         pdf.save(file)
     result = import_document(kb_dir, file)
     assert result.source_intake == "saved"
-    assert result.knowledge_compilation == "unfinished"
+    assert result.knowledge_compilation == "completed"
     parsed = ParseStore(kb_dir).load(result.parse_id)
-    assert parsed.quality[0]["status"] == "needs_review"
+    assert parsed.quality[0]["status"] == "verified"
+    assert parsed.quality[0]["reason"] == "pdf_image_ocr_notice:ocr_unavailable"
     assert any(block.assets for block in parsed.blocks)
-    assert not list((kb_dir / "wiki/summaries").glob("*.md"))
+    assert list((kb_dir / "wiki/summaries").glob("*.md"))

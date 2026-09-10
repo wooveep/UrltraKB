@@ -38,7 +38,9 @@ def parse_document(
         "markitdown": package_version("markitdown"),
     }
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v5-selective-ocr"
+        profile["docx"] = "openkb-docx-v6-resilient-ocr"
+    if source.suffix == ".pdf":
+        profile["pdf"] = "openkb-pdf-v2-retained-visuals"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
@@ -120,6 +122,9 @@ def parse_document(
         blocks, quality = parse_text(path, source, originals)
     processing_checkpoint()
     parsed = store.save(source, profile, blocks, quality=quality)
+    from openkb.missing_image_reviews import inherit_missing_images
+
+    inherit_missing_images(store, source, parsed)
     store.select(source, parsed)
     return parsed
 

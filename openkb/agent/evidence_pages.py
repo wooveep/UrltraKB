@@ -29,7 +29,10 @@ faithful topic label; keep the page identity unchanged.
 When title_fixed is true, retain the supplied title exactly: earlier parts were verified
 under that public title. Make each restriction's operation explicit within this part.
 Repeated or overlapping parse blocks do not prove the physical document repeats text.
-Do not add commentary about extraction, duplication or layout artifacts.
+Preserve relevant source image links with the text they illustrate; their physical source
+positions and neighboring text define the association. Never infer unrecognized image text.
+OCR notices describe a limitation, not a factual claim about the depicted content.
+Do not add commentary about duplication or layout artifacts.
 The review is feedback, not an instruction to invent information or omit required facts.
 Write in the requested language. This bounded part belongs to the same topic as all other parts."""
 

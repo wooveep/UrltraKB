@@ -54,7 +54,9 @@ def read_wiki_file(path: str, wiki_root: str) -> str:
         return "Access denied: path escapes wiki root."
     if not full_path.exists():
         return f"File not found: {path}"
-    return full_path.read_text(encoding="utf-8")
+    from openkb.agent.source_images import image_catalog
+
+    return image_catalog(full_path.read_text(encoding="utf-8"), full_path, root)
 
 
 def parse_pages(pages: str) -> list[int]:

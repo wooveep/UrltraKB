@@ -17,6 +17,9 @@ Return JSON {"units":[{"id":"input id","facts":[{"topic":"specific reusable topi
 "empty_reason":"explicit reason if no facts"}]}. Account for EVERY input unit.
 If facts is empty, empty_reason MUST be a nonempty string explaining why; never omit it.
 Quote only that unit's text. Context and positions explain table headers and span continuity.
+Images are retained evidence associated with their paragraph, heading, page and neighboring
+text; OCR is supplementary and may be unavailable. Do not infer unseen image text or facts
+from an asset path or OCR failure notice. An image-only unit may have no textual facts.
 Do not infer information absent from the evidence. Return complete JSON, never an ellipsis."""
 
 JSON_FORMAT = {"type": "json_object"}
