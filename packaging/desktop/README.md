@@ -5,6 +5,43 @@ points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
 bundled into the runtime archive.
 
+## Makefile entry points
+
+From a Git checkout, use GNU Make, Python 3.12+ and `uv`:
+
+```sh
+make help
+make package             # wheel, sdist, local PageIndex wheel and SHA256SUMS.txt
+make desktop             # install locked dependencies, build assets, freeze, inventory
+make verify              # run the frozen acceptance runner
+# On a headless Linux build host:
+QT_QPA_PLATFORM=offscreen make verify
+make release MATERIALS=/absolute/path/to/matching/full-distribution
+```
+
+All targets select committed source (`COMMIT=HEAD` by default). Commit changes
+before building them. `COMMIT=<tag-or-sha>` selects another revision. Exports and
+desktop output live in `build/packages/COMMIT12/PLATFORM/source/`; the portable
+program is its `packaging/desktop/dist/UrltraKB/` directory. Python packages go to
+`dist/COMMIT12/python/`, final desktop archives to `dist/COMMIT12/`. Install the
+wheel with `pip install --find-links /path/to/python /path/to/python/openkb-*.whl`
+so the matching PageIndex fork can be resolved.
+
+`make desktop` requires Rust 1.95.0 and the platform's native build tools; its
+first run downloads the pinned build/runtime resources. OCR inference runtimes
+and model weights remain separate optional installations. `make release` requires
+the matching, reviewed materials assembled as described below; it does not
+create or claim a source/license audit. Existing release archives are preserved
+and rejected as outputs; choose a fresh `DIST_DIR` to repeat archive creation.
+These commands build locally and do not publish or upload anything.
+
+Override `PYTHON`, `UV`, `BUILD_DIR`, and `DIST_DIR` as needed. Windows builds use
+native Windows Python (`make desktop PYTHON=python`) with GNU Make and the
+MSVC/Windows SDK tools installed. Make is a convenience entry from a Git checkout;
+the commands below also rebuild an extracted source archive without Git.
+
+## Individual build stages
+
 Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected
 committed source to a new directory:
@@ -75,7 +112,7 @@ it does not establish live model quality or a real provider connection.
 Corpus checks establish technical output/error handling; visual inspection
 of labels, relationships, baselines and clipping remains a separate check.
 
-The frozen program also carries the original `openkb/ocr/worker.py`,
+The frozen program also carries the original `openkb/ocr/worker.py`, `openvino_worker.py`,
 `supervisor.py`, `loading.py`, `cloud_result.py`, `local_result.py`, and
 `openkb/runtime/process_tree.py` files. The
 separately installed optional OCR Python runtime executes these scripts and

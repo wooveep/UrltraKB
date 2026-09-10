@@ -97,7 +97,7 @@ include = [
     "/docs/desktop.md", "/docs/golden-principles.md", "/docs/document-processing.md",
     "/docs/ocr-and-images.md", "/docs/optional-ocr-runtime.md", "/docs/document-provider-validation.md",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
-    "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
+    "/README.md", "/Makefile", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]
 exclude = ["/openkb/web", "/frontend"]
 

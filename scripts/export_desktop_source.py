@@ -15,6 +15,7 @@ _TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "asse
 _FILES = {
     ".gitignore",
     "README.md",
+    "Makefile",
     "LICENSE",
     "pyproject.toml",
     "uv.lock",
@@ -35,6 +36,7 @@ _FILES = {
     "docs/document-processing.md",
     "docs/document-provider-validation.md",
     "docs/optional-ocr-runtime.md",
+    "docs/ocr-and-images.md",
 }
 _GENERATED = {
     "openkb/rendering/assets",

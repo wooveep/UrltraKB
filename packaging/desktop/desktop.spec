@@ -20,7 +20,10 @@ datas += [(str(assets), "openkb/rendering/assets")]
 # PYZ bytecode alone cannot serve these physical-file boundaries.
 datas += [
     (str(repo / "openkb/ocr" / name), "openkb/ocr")
-    for name in ("worker.py", "supervisor.py", "loading.py", "cloud_result.py", "local_result.py")
+    for name in (
+        "worker.py", "openvino_worker.py", "supervisor.py", "loading.py",
+        "cloud_result.py", "local_result.py",
+    )
 ]
 datas += [(str(repo / "openkb/runtime/process_tree.py"), "openkb/runtime")]
 # The manifest is the runtime whitelist; reference fonts stay in the source tree.

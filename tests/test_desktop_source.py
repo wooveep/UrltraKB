@@ -19,6 +19,8 @@ def _repository(tmp_path):
         "openkb/web/index.html": "retired browser bundle",
         "pyproject.toml": "[project]\nname = 'openkb'\n",
         "LICENSE": "original license",
+        "Makefile": "help:\n\t@echo build\n",
+        "docs/ocr-and-images.md": "OCR setup guide",
         "CLAUDE.md": "private working notes",
         ".env": "PRIVATE_TEST_VALUE=do-not-export",
         "docs/internal/private.md": "private design history",
@@ -55,6 +57,8 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
     identity = export_source(repo, output)
     assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
     assert (output / "openkb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
+    assert (output / "Makefile").read_text("utf-8") == "help:\n\t@echo build\n"
+    assert (output / "docs/ocr-and-images.md").read_text("utf-8") == "OCR setup guide"
     assert (
         output / "assets/fonts/SourceCodePro-Regular.ttf"
     ).read_text() == "committed font fixture"
