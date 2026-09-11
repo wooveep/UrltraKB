@@ -5,13 +5,37 @@ from __future__ import annotations
 import io
 from dataclasses import replace
 from pathlib import PurePosixPath
-from zipfile import ZipFile
+from xml.etree.ElementTree import ParseError
+from xml.parsers.expat import ExpatError
+from zipfile import BadZipFile, ZipFile
+
+from markitdown import (
+    FileConversionException,
+    MissingDependencyException,
+    UnsupportedFormatException,
+)
+from pymupdf import FileDataError
 
 from openkb.docx_containers import ExpansionBudget, decode_text
 from openkb.docx_package import Attachment
 from openkb.evidence import BlockDraft
 from openkb.inputs import SUPPORTED_EXTENSIONS
 from openkb.sources import SourceStore
+
+# Only document-format/converter failures are local omissions. Cancellation,
+# document deadlines, storage I/O and failed mutations must still propagate.
+ATTACHMENT_CONTENT_ERRORS = (
+    ValueError,
+    KeyError,
+    BadZipFile,
+    UnicodeError,
+    ParseError,
+    ExpatError,
+    FileConversionException,
+    MissingDependencyException,
+    UnsupportedFormatException,
+    FileDataError,
+)
 
 
 class BoundOcr:

@@ -30,6 +30,7 @@ def compilation_profile(settings, bundle):
             },
             "endpoint": content_id(getattr(bundle, "base_url", None)),
             "headers": content_id(getattr(bundle, "extra_headers", None)),
+            "source_omissions": module_revision("openkb.source_omissions"),
             "implementation": {
                 name: module_revision("openkb.agent." + name)
                 for name in (

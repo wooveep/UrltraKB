@@ -40,7 +40,7 @@ def parse_document(
     if source.suffix == ".docx":
         profile["docx"] = "openkb-docx-v6-resilient-ocr"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v2-retained-visuals"
+        profile["pdf"] = "openkb-pdf-v3-optional-image-ocr"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
@@ -61,12 +61,12 @@ def parse_document(
 
         with pymupdf.open(path) as pdf:
             profile["physical_pages"] = pdf.page_count
-    if not force and not (
-        selected.ocr.policy == "auto" and selected.ocr.backend in {"system", "local"}
-    ):
+    if not force:
         with progress_scope("parse_cache"):
             cached = store.find(source, profile)
-            if cached is not None and store.complete(source, cached):
+            # find validates immutable blocks and assets. Quality warnings do not
+            # make these bytes stale; explicit reparse/OCR changes request new work.
+            if cached is not None:
                 store.select(source, cached)
                 return cached
     processing_checkpoint("parsing")

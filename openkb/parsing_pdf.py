@@ -124,7 +124,7 @@ def parse_pdf(
                         "explicit_page_reprocessing",
                     }:
                         verified_by = "pdf_image_ocr_notice:" + reason
-                        if not any(
+                        if readable_text or not any(
                             part in reason
                             for part in (
                                 "output_incomplete",

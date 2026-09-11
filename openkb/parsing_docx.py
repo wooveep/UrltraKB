@@ -74,7 +74,11 @@ def parse_docx(
                 return f"[{node.note_type} {node.note_id}: unresolved]"
             active_notes.add(identity)
             try:
-                note = notes.resolve(node)
+                try:
+                    note = notes.resolve(node)
+                except KeyError:
+                    quality.append({"status": "needs_review", "reason": "unresolved_docx_note"})
+                    return f"[{node.note_type} {node.note_id}: unresolved]"
                 text = "\n".join(inline(child, assets) for child in note.body)
                 return f" [{node.note_type} {node.note_id}: {text}]"
             finally:
@@ -137,9 +141,8 @@ def parse_docx(
                         )
                     blocks.append(BlockDraft(text, kind, location, tuple(assets), context))
                     for attachment in pending_attachments:
-                        from zipfile import BadZipFile
-
                         from openkb.docx_attachments import (
+                            ATTACHMENT_CONTENT_ERRORS,
                             attachment_quality,
                             bind_blocks,
                             parse_attachment,
@@ -157,7 +160,21 @@ def parse_docx(
                             )
                             blocks.extend(bind_blocks(drafts, attachment, location))
                             quality.extend(attachment_quality(checks, attachment))
-                        except (ValueError, BadZipFile, UnicodeError):
+                        except ATTACHMENT_CONTENT_ERRORS:
+                            blocks.extend(
+                                bind_blocks(
+                                    [
+                                        BlockDraft(
+                                            "[Embedded document could not be parsed; "
+                                            "original retained]",
+                                            "paragraph",
+                                            {"kind": "converted", "line": 1},
+                                        )
+                                    ],
+                                    attachment,
+                                    location,
+                                )
+                            )
                             quality.append(
                                 {
                                     "status": "needs_review",
@@ -200,6 +217,11 @@ def parse_docx(
 
         with progress_scope("docx", paragraph_count(document.children), "paragraphs") as progress:
             visit(document.children)
+        if any(row["reason"] == "unresolved_docx_note" for row in quality):
+            # HTML is not our evidence. Avoid a second, unused renderer resolving
+            # the same missing/cyclic note after structured body capture succeeded.
+            # Mammoth's document-reader diagnostics still flow into result.messages.
+            return document.copy(children=[], notes=nodes.Notes({}), comments=[])
         return document
 
     def image_source(image):

@@ -201,14 +201,25 @@ and almost uniform fills skip recognition. Other renderable images can receive O
 empty or unavailable recognition produces a warning, not a document-wide failure.
 This size/contrast heuristic does not promise that every selected image has text
 or that every character is recognized. Original missing image data is explicitly
-marked; a recorded decision to proceed applies only to the exact source/parse and
-missing-image reasons. Reprocessing the same source version carries that decision
-forward only when the missing markers have identical physical positions and counts,
-including their attachment identities. It records a new exact decision and preserves
-the old evidence. Changed original bytes, new missing locations and other content
-failures are not waived. Harmless Word
-formatting/style conversion warnings are advisory; unsupported document content
-still requires review.
+marked. With usable body text, local DOCX omissions no longer block knowledge
+compilation: unreadable document attachments, missing pictures or notes, malformed
+optional comment/note parts and unsupported objects remain `needs_review` in the
+immutable parse. The task retains their diagnostics and the published summary names
+the omissions. A failed attachment retains its original document download and parent
+position; later content continues normally. A wholly unreadable/empty document,
+storage failure, cancellation or document deadline still stops processing. Historical
+missing-image decisions remain bound to their exact source and positions; local
+omissions are not relabeled as verified extraction.
+
+Ordinary continuation reuses validated parse artifacts even if they contain local
+warnings and even with automatic system/local OCR. It does not open the Word
+container, unpack embedded OLE objects or run OCR again. Changed original bytes,
+parsing/OCR configuration or parser profile select a different cache; an explicit
+reparse bypasses the parent cache. Unchanged, already parsed child documents can
+still reuse their own artifacts. A previously unreadable child without a parse is
+attempted again during parent reparse. Installing/updating an OCR runtime under the
+same configuration requires explicit reparse to refresh previously retained results.
+These rules preserve source/parse identities and existing fact checkpoints.
 
 Optional DOCX image recognition stops after its resource budget is exhausted or
 credentials/quota prevent further work. This stop is shared with nested document

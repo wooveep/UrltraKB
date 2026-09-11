@@ -165,8 +165,8 @@ class KnowledgeWorkspace:
 
     def __enter__(self) -> KnowledgeWorkspace:
         with kb_ingest_lock(self.kb_dir / ".openkb"):
-            if not ParseStore(self.kb_dir).complete(self.source, self.parsed):
-                raise ValueError("Source parsing is not complete")
+            if not ParseStore(self.kb_dir).compilable(self.source, self.parsed):
+                raise ValueError("Source parsing has no usable evidence")
             self.before = wiki_version(self.kb_dir)
             self.baselines = _baselines(self.kb_dir)
             registry = self.kb_dir / ".openkb/hashes.json"
@@ -264,7 +264,7 @@ def _inputs_match(kb_dir: Path, proposal: KnowledgeProposal) -> bool:
                 store.sources, source, parsed.profile.get("ocr", {})
             ).items()
         }
-        and store.complete(source, parsed)
+        and store.compilable(source, parsed)
     )
 
 

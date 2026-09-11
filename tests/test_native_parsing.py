@@ -13,7 +13,10 @@ def source_version(kb, source):
         return SourceStore(kb).intake(ready)
 
 
-def test_native_pdf_preserves_physical_pages_and_requests_only_uncertain_ocr(kb_dir, tmp_path):
+def test_native_pdf_preserves_physical_pages_and_requests_only_uncertain_ocr(
+    kb_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("openkb.ocr.backend.default_local_profile", lambda settings: None)
     file = tmp_path / "mixed.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
@@ -125,9 +128,11 @@ def test_docx_footnote_exceptions_are_bound_to_the_referencing_paragraph(kb_dir,
 
 
 def test_vector_diagram_with_readable_caption_is_retained_when_ocr_is_unavailable(
-    kb_dir, tmp_path, model_service
+    kb_dir, tmp_path, model_service, monkeypatch
 ):
     from openkb.application.documents import import_document
+
+    monkeypatch.setattr("openkb.ocr.backend.default_local_profile", lambda settings: None)
 
     file = tmp_path / "circuit.pdf"
     with pymupdf.open() as pdf:

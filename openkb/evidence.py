@@ -396,6 +396,20 @@ class ParseStore:
                     return False
             return True
 
+    def compilable(self, version: SourceVersion, parsed: ParseVersion) -> bool:
+        """Validate evidence, permitting explicit local omissions beside readable text."""
+        from openkb.source_omissions import has_readable_content, local_omissions
+
+        with kb_read_lock(self.kb_dir / ".openkb"):
+            if self.complete(version, parsed):
+                return True
+            # A missing input asset is distinct from an unsupported embedded object.
+            if any(asset is None for asset in version.assets.values()):
+                return False
+            return bool(local_omissions(version, parsed)) and has_readable_content(
+                self.sources, parsed
+            )
+
     def _missing_images(self, version: SourceVersion, parsed: ParseVersion) -> list[str]:
         if version.suffix != ".docx":
             return []

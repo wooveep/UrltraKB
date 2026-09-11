@@ -108,7 +108,7 @@ def _compile_version(
                         report_auxiliary_warning(row["reason"])
                 if ParseStore(kb_dir).accepted_missing_images(source, parsed):
                     report_auxiliary_warning("docx_missing_original_images_accepted")
-                if not ParseStore(kb_dir).complete(source, parsed):
+                if not ParseStore(kb_dir).compilable(source, parsed):
                     raise ProcessingIncomplete("source_quality_needs_review", "parsing")
                 if parse_only:
                     return DocumentResult(
@@ -144,6 +144,7 @@ def _compile_version(
                         source_intake="saved",
                         knowledge_compilation="completed",
                         stage="committed",
+                        warnings=tuple(report.warnings),
                         source_id=source.source_id,
                         parse_id=parsed.id,
                         usage=report.usage,
@@ -186,6 +187,9 @@ def _compile_version(
                         "title": source.name,
                     }.items():
                         metadata = frontmatter.set_line(metadata, key, value)
+                    from openkb.source_omissions import omission_notice
+
+                    body += omission_notice(source, parsed)
                     atomic_write_text(summary, metadata + body)
                     document = {
                         "name": source.name,

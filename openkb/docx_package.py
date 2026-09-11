@@ -6,10 +6,11 @@ import hashlib
 import io
 import posixpath
 from dataclasses import dataclass
-from xml.etree.ElementTree import Element, tostring
+from xml.etree.ElementTree import Element, ParseError, tostring
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from defusedxml import ElementTree as xml
+from defusedxml.common import DefusedXmlException
 
 from openkb.docx_containers import ExpansionBudget, package_path, read_member, unpack_ole
 from openkb.sources import SourceStore, content_id
@@ -52,7 +53,17 @@ def prepare_docx(
             raise ValueError("docx_duplicate_package_member")
         for part in sorted(_PARTS.intersection(names)):
             raw = read_member(archive, part, budget, depth)
-            tree = xml.fromstring(raw, forbid_dtd=True)
+            try:
+                tree = xml.fromstring(raw, forbid_dtd=True)
+            except (ParseError, DefusedXmlException):
+                if part == "word/document.xml":
+                    raise
+                # Keep the body readable if an optional comment/footnote part is
+                # malformed. The immutable original remains available for review.
+                root = posixpath.basename(part).removesuffix(".xml")
+                changed[part] = tostring(Element(W + root), encoding="utf-8", xml_declaration=True)
+                quality.append({"status": "needs_review", "reason": "docx_part_unparsed:" + part})
+                continue
             parents = {child: parent for parent in tree.iter() for child in parent}
             rel_path = posixpath.join(
                 posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels"

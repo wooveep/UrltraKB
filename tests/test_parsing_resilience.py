@@ -70,7 +70,15 @@ def test_decorative_background_border_and_small_icon_skip_ocr_but_keep_visuals(k
     assert any(b.assets for b in blocks)
 
 
-@pytest.mark.parametrize("reason", ["ocr_time_budget_exhausted", "cloud_required_asset_missing"])
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "ocr_time_budget_exhausted",
+        "cloud_required_asset_missing",
+        "windows_ocr_no_text",
+        "cloud_output_incomplete",
+    ],
+)
 def test_partial_ocr_keeps_native_text_and_reports_an_advisory(kb_dir, tmp_path, reason):
     source = _pdf(tmp_path / "partial.pdf")
     blocks, quality = parse_pdf(source, SourceStore(kb_dir), ocr=TextOcr(reason))
