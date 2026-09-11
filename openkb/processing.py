@@ -30,7 +30,7 @@ DEFAULT_PROCESSING = {
     "max_attempts": 2,
     "max_requests": 200,
     "max_tokens": None,
-    "concurrency": 2,
+    "concurrency": 8,
 }
 
 

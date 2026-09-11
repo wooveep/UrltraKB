@@ -78,14 +78,15 @@ def test_default_budgets_are_visible_overridable_and_restored_on_clear(legacy_kb
     default = read_settings_view(legacy_kb)
     limits = default.values.processing
     RequestLimits.from_config({"processing": limits})
+    assert limits["concurrency"] == 8
     assert default.sources["processing"] == "default"
     assert read_settings_view().values.processing == limits
-    global_limits = {**limits, "max_requests": 17}
+    global_limits = {**limits, "max_requests": 17, "concurrency": 4}
     apply_global_config_patch(GlobalConfigPatchRequest(config={"processing": global_limits}))
     inherited = read_settings_view(legacy_kb)
     assert inherited.values.processing == global_limits
     assert inherited.sources["processing"] == "global"
-    local_limits = {**limits, "max_requests": 9}
+    local_limits = {**limits, "max_requests": 9, "concurrency": 1}
     apply_kb_config_patch(
         legacy_kb, KbConfigPatchRequest(kb=str(legacy_kb), config={"processing": local_limits})
     )

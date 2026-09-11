@@ -76,16 +76,24 @@ def test_model_waits_are_visible_without_recording_prompts(tmp_path):
 
     async def completion(**kwargs):
         await asyncio.sleep(0)
-        return SimpleNamespace(usage=SimpleNamespace(prompt_tokens=12, completion_tokens=3))
+        return SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=3),
+            choices=[SimpleNamespace(finish_reason="stop")],
+        )
 
     sdk = SimpleNamespace(completion=lambda **kwargs: None, acompletion=completion)
     with WorkerDiagnostics(tmp_path / "0.log", events.append) as diagnostics:
         install_llm_diagnostics(sdk)
-        asyncio.run(sdk.acompletion(model="probe", messages=[{"content": "PRIVATE DOCUMENT"}]))
+        asyncio.run(
+            sdk.acompletion(
+                model="probe", messages=[{"content": "PRIVATE DOCUMENT"}], max_tokens=128000
+            )
+        )
         diagnostics.pulse()
     assert sdk.acompletion is completion
     text = (tmp_path / "0.log").read_text(encoding="utf-8")
     assert "LLM #1" in text and "in=12" in text
+    assert "output_limit=128000" in text and "finish_reason=stop" in text
     assert "PRIVATE DOCUMENT" not in text
     assert any(event.get("activity") is False for event in events)
 

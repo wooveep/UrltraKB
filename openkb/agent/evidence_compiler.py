@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
-from openkb.agent.evidence_retry import retry_batches, split_units
+from openkb.agent.evidence_coverage import require_unit_coverage
+from openkb.agent.evidence_parallel import parallel_batches
+from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches, split_units
 from openkb.agent.evidence_units import (
     FACTS_SYSTEM,
     JSON_FORMAT,
@@ -27,7 +30,7 @@ def _object(raw):
             return value
     except (ValueError, TypeError):
         pass
-    raise ProcessingIncomplete("evidence_output_invalid", "facts")
+    raise ResponseIncomplete("evidence_output_invalid", "facts")
 
 
 def compile_evidence(
@@ -66,19 +69,9 @@ def compile_evidence(
                 )
             )
         outputs = result.get("units")
-        if not isinstance(outputs, list) or len(outputs) != len(batch):
-            raise ProcessingIncomplete("section_coverage_incomplete", "facts")
         expected = {unit["id"]: unit for unit in batch}
-        seen = set()
+        require_unit_coverage(outputs, expected)
         for item in outputs:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("id"), str)
-                or item["id"] not in expected
-                or item["id"] in seen
-            ):
-                raise ProcessingIncomplete("section_coverage_incomplete", "facts")
-            seen.add(item["id"])
             unit = expected[item["id"]]
             extracted = item.get("facts")
             if (
@@ -86,7 +79,7 @@ def compile_evidence(
                 or (not extracted and not isinstance(item.get("empty_reason"), str))
                 or (not extracted and not item["empty_reason"].strip())
             ):
-                raise ProcessingIncomplete("section_empty_without_reason", "facts")
+                raise ResponseIncomplete("section_empty_without_reason", "facts")
             for fact in extracted:
                 if (
                     not isinstance(fact, dict)
@@ -96,7 +89,7 @@ def compile_evidence(
                     )
                     or fact["quote"] not in unit["text"]
                 ):
-                    raise ProcessingIncomplete("fact_evidence_invalid", "facts")
+                    raise ResponseIncomplete("fact_evidence_invalid", "facts")
                 reference = dict(unit["reference"])
                 reference["start"] += unit["text"].index(fact["quote"])
                 reference["end"] = reference["start"] + len(fact["quote"])
@@ -115,18 +108,36 @@ def compile_evidence(
         checkpoints.save(key, result)
         return extracted_facts
 
-    facts = []
+    progress_lock = threading.Lock()
+
+    def extract_batch(batch):
+        results = []
+        for completed, extracted in retry_batches(
+            batch,
+            extract,
+            stage="facts",
+            on_event=on_event,
+            split=split_units,
+            validation_attempts=limits.max_attempts,
+        ):
+            with progress_lock:
+                progress.advance(sum(len(unit["text"]) for unit in completed))
+            results.append((completed, extracted))
+        return results
+
+    batches = fact_batches(source_units(kb_dir, source, parsed, limits, model), limits, model)
+    extracted_batches = {}
     with progress_scope(
         "facts", sum(block.chars for block in parsed.blocks), "characters"
     ) as progress:
-        for batch in fact_batches(
-            source_units(kb_dir, source, parsed, limits, model), limits, model
-        ):
-            for completed, extracted in retry_batches(
-                batch, extract, stage="facts", on_event=on_event, split=split_units
-            ):
-                facts.extend(extracted)
-                progress.advance(sum(len(unit["text"]) for unit in completed))
+        for index, results in parallel_batches(batches, extract_batch, limits.concurrency):
+            extracted_batches[index] = results
+    facts = [
+        fact
+        for index in sorted(extracted_batches)
+        for _, extracted in extracted_batches[index]
+        for fact in extracted
+    ]
     from openkb.agent.evidence_plan import plan_topics
 
     wiki = workspace / "wiki"

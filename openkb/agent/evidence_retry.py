@@ -1,8 +1,21 @@
 """Retry completed length stops with strictly smaller, lossless evidence batches."""
 
 from openkb.log import logger
-from openkb.processing import InputTooLarge, OutputTruncated, processing_checkpoint
+from openkb.processing import (
+    InputTooLarge,
+    OutputTruncated,
+    ProcessingIncomplete,
+    processing_checkpoint,
+)
 from openkb.sources import content_id
+
+
+class ResponseIncomplete(ProcessingIncomplete):
+    """A complete response with an invalid evidence contract, safe to request again."""
+
+    def __init__(self, reason, stage, **details):
+        super().__init__(reason, stage)
+        self.details = details
 
 
 def halves(batch):
@@ -12,14 +25,41 @@ def halves(batch):
     return [batch[:middle], batch[middle:]]
 
 
-def retry_batches(batch, operation, *, stage, on_event, split=halves):
+def retry_batches(batch, operation, *, stage, on_event, split=halves, validation_attempts=2):
     """Recover capacity failures; never replay an uncertain transport."""
-    pending = [batch]
+    pending = [(batch, 1)]
     while pending:
         processing_checkpoint(stage)
-        current = pending.pop()
+        current, attempt = pending.pop()
         try:
             result = operation(current)
+        except ResponseIncomplete as exc:
+            on_event(
+                {
+                    "stage": stage,
+                    "operation": "response_invalid",
+                    "reason": exc.reason,
+                    "attempt": attempt,
+                    **exc.details,
+                }
+            )
+            logger.warning("Invalid model response [%s]: %s %s", stage, exc.reason, exc.details)
+            parts = halves(current)
+            if parts:
+                on_event(
+                    {
+                        "stage": stage,
+                        "operation": "split_batch",
+                        "items": len(current),
+                        "batches": len(parts),
+                        "reason": exc.reason,
+                    }
+                )
+                pending.extend((part, 1) for part in reversed(parts))
+            elif attempt < validation_attempts:
+                pending.append((current, attempt + 1))
+            else:
+                raise
         except (OutputTruncated, InputTooLarge) as exc:
             parts = split(current)
             if not parts:
@@ -34,7 +74,7 @@ def retry_batches(batch, operation, *, stage, on_event, split=halves):
                     "reason": exc.reason,
                 }
             )
-            pending.extend(reversed(parts))
+            pending.extend((part, 1) for part in reversed(parts))
         else:
             yield current, result
 

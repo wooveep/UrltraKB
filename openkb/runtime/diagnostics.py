@@ -171,7 +171,9 @@ class WorkerDiagnostics:
                 self._sequence += 1
                 call_id = self._sequence
                 self._active[call_id] = time.monotonic()
-            self.emit(f"LLM #{call_id} 开始：model={kwargs.get('model', 'unknown')}")
+            output = kwargs.get("max_completion_tokens", kwargs.get("max_tokens"))
+            limit = f" output_limit={output}" if type(output) is int else ""
+            self.emit(f"LLM #{call_id} 开始：model={kwargs.get('model', 'unknown')}{limit}")
             return call_id
 
         def finish(call_id, result=None, error=None, *, streaming=False):
@@ -194,7 +196,15 @@ class WorkerDiagnostics:
                 if streaming
                 else "完成"
             )
-            self.emit(f"LLM #{call_id} {status} {elapsed:.1f}s{tokens}")
+            choices = getattr(result, "choices", None)
+            reason = getattr(choices[0], "finish_reason", None) if choices else None
+            finish = (
+                f" finish_reason={reason}"
+                if isinstance(reason, str)
+                and reason in {"stop", "length", "tool_calls", "function_call", "content_filter"}
+                else ""
+            )
+            self.emit(f"LLM #{call_id} {status} {elapsed:.1f}s{tokens}{finish}")
 
         @functools.wraps(original_sync)
         def sync(*args, **kwargs):

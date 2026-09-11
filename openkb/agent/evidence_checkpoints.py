@@ -1,5 +1,7 @@
 """Validated compilation responses keyed by their actual immutable inputs."""
 
+import threading
+
 from openkb.config import compilation_model_options
 from openkb.implementation import module_revision
 from openkb.locks import atomic_write_json
@@ -22,6 +24,8 @@ def compilation_profile(settings, bundle):
                 for name in (
                     "evidence_checkpoints",
                     "evidence_compiler",
+                    "evidence_coverage",
+                    "evidence_parallel",
                     "evidence_units",
                     "evidence_retry",
                     "evidence_pages",
@@ -41,6 +45,7 @@ def publication_settings(settings, bundle):
 
 class CompilationCheckpoints:
     def __init__(self, kb_dir, source, parsed, settings, bundle):
+        self._write_lock = threading.RLock()
         self.verification_options = compilation_model_options(settings, verification=True)
         self.store = SourceStore(kb_dir)
         self.root = self.store.owned_path(self.store.root / "compilation")
@@ -58,7 +63,7 @@ class CompilationCheckpoints:
 
     def key(self, system, payload, *, dependencies=None):
         stage_modules = {
-            "facts": ("evidence_compiler", "evidence_units", "evidence_retry"),
+            "facts": ("evidence_compiler", "evidence_units", "evidence_retry", "evidence_coverage"),
             "planning": ("evidence_plan", "evidence_retry"),
             "generation": (
                 "evidence_pages",
@@ -102,6 +107,10 @@ class CompilationCheckpoints:
         return record["value"]
 
     def save(self, key, value):
+        with self._write_lock:
+            self._save(key, value)
+
+    def _save(self, key, value):
         processing_checkpoint()
         record = {
             "input": self.input,

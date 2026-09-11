@@ -59,7 +59,7 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `max_attempts` | 2 | Maximum transport attempts at each request size |
 | `max_requests` | 200 | Maximum observable model attempts across the document |
 | `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
-| `concurrency` | 2 | Maximum concurrent model calls |
+| `concurrency` | 8 | Maximum concurrent model calls within one document |
 
 These are starting allowances and explicit ceilings, not measured model capacities or a
 guarantee that every document will finish in one run. Models with smaller context
@@ -94,6 +94,28 @@ large, the context allowance also grows before falling back to batch splitting.
 Explicit per-operation output caps remain binding. Older complete profiles that
 omit the two new ceiling fields retain their original request caps; clear their
 override to inherit this profile, or set explicit ceilings for that model.
+
+Within one document, fact extraction now runs up to `concurrency` batches at a
+time (default 8). Each batch inherits the same model allowance, cancellation and
+elapsed-time controls. Only a bounded number of batches are admitted; a failure
+stops new work and cancels siblings. Completed source spans advance progress,
+including smaller spans completed before a later failure. Facts are restored to
+source order before topic planning, generation and publication. Checkpoint files
+and their catalogue are serialized so concurrent completion cannot lose entries.
+Small documents use only as many workers as they have batches. This setting limits
+simultaneous requests; it is not a requests-per-minute (RPM) quota. Raising it does
+not multiply the context/output caps or the document-wide request allowance. Topic
+planning, generation, verification and wiki publication still follow their dependency
+order, so end-to-end speedup is not proportional to the fact worker count. Explicit
+global or knowledge-base concurrency settings remain in effect until cleared.
+
+A complete model response can still omit or duplicate source IDs. These coverage
+errors now trigger smaller batches instead of immediately ending the document.
+An indivisible unit gets at most `max_attempts` validation attempts; persistent
+failure remains unfinished. Invalid source quotations and malformed fact results
+follow the same bounded recovery. No missing unit is silently accepted or skipped.
+Logs include expected/received/missing/duplicate/unexpected counts, the requested
+output limit and the provider finish reason, without recording document content.
 
 For providers that accept a `thinking.type` option, the optional top-level
 `compilation_thinking` setting selects `enabled` or `disabled`. For example:
