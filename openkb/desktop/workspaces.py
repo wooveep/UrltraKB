@@ -2,7 +2,6 @@
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 from openkb.desktop.drawer import Drawer
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.fonts import text_font
+from openkb.desktop.form_controls import FocusComboBox
 from openkb.desktop.location import LocationLabel
 from openkb.desktop.navigation_icons import navigation_icon
 from openkb.desktop.reader import MarkdownView
@@ -179,7 +179,7 @@ class Workspaces:
             row.addWidget(button)
         row.addWidget(action("检查与修复…", w._maintenance))
         row.addWidget(action("刷新", w._refresh_current))
-        w.zoom = QComboBox()
+        w.zoom = FocusComboBox()
         w.zoom.setAccessibleName("内容缩放")
         for scale in (0.75, 1, 1.5, 2, 4):
             w.zoom.addItem(f"{scale:.0%}", scale)
@@ -419,7 +419,7 @@ class Workspaces:
         layout = self.hosts["设置"]
         row = QHBoxLayout()
         row.addWidget(QLabel("外观"))
-        w.theme = QComboBox()
+        w.theme = FocusComboBox()
         w.theme.setAccessibleName("应用主题")
         for label, value in (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark")):
             w.theme.addItem(label, value)
@@ -440,17 +440,22 @@ class Workspaces:
                 if scroll is selected:
                     panel.reload()
 
-    def embed(self, key, panel, layout=None):
+    def embed(self, key, panel, layout=None, *, scrollable=True):
         panel.setWindowFlags(Qt.WindowType.Widget)
         panel.setMinimumSize(0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(panel)
+        if scrollable:
+            host = QScrollArea()
+            host.setWidgetResizable(True)
+            host.setFrameShape(QScrollArea.Shape.NoFrame)
+            host.setWidget(panel)
+        else:
+            # Panels with their own content scrolling keep actions outside it.
+            host, body = page()
+            body.addWidget(panel)
         if layout is not None:
-            layout.addWidget(scroll, 1)
-        self.panels[key] = (panel, scroll)
-        return scroll
+            layout.addWidget(host, 1)
+        self.panels[key] = (panel, host)
+        return host
 
     def reset(self):
         # Retire callbacks before changing the visible owner. Running tasks are independent.
@@ -501,7 +506,7 @@ class Workspaces:
                     continue
                 panel = SettingsDialog(w.io, kb, w)
                 panel.buttons.button(QDialogButtonBox.StandardButton.Close).hide()
-                self.settings_tabs.addTab(self.embed(key, panel), key)
+                self.settings_tabs.addTab(self.embed(key, panel, scrollable=False), key)
             self.refresh_settings()
         if w.kb is None:
             return
@@ -512,7 +517,7 @@ class Workspaces:
         elif name == "产物" and name not in self.panels:
             from openkb.desktop.artifacts import ArtifactsDialog
 
-            self.embed(name, ArtifactsDialog(w, w.kb), self.hosts[name])
+            self.embed(name, ArtifactsDialog(w, w.kb), self.hosts[name], scrollable=False)
             w._presentation_changed()
         elif name == "对话" and self.history_toggle.isChecked() and name not in self.panels:
             from openkb.desktop.sessions import SessionsDialog

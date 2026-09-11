@@ -5,9 +5,7 @@ from threading import Event
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -20,6 +18,8 @@ from openkb.application.ocr_installation import (
     prepare_ocr_install,
     read_ocr_installations,
 )
+from openkb.desktop.flow_layout import FlowLayout
+from openkb.desktop.form_controls import FocusComboBox
 from openkb.ocr.installations import NAMES, default_root
 
 
@@ -33,7 +33,7 @@ class OcrInstallationPanel(QWidget):
         self.stop = Event()
         self.busy = False
         body = QVBoxLayout(self)
-        self.profile = QComboBox()
+        self.profile = FocusComboBox()
         for name, label in NAMES.items():
             self.profile.addItem(label, name)
         self.directory = QLineEdit(str(default_root()))
@@ -45,7 +45,7 @@ class OcrInstallationPanel(QWidget):
         self.offline_button = QPushButton("导入离线包")
         self.cancel_button = QPushButton("停止安装")
         self.cancel_button.setEnabled(False)
-        buttons = QHBoxLayout()
+        buttons = FlowLayout()
         for b in (self.install_button, self.offline_button, self.cancel_button):
             buttons.addWidget(b)
         for w in (self.profile, self.directory, self.description, self.state):

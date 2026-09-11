@@ -5,10 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -30,6 +28,8 @@ from openkb.application.artifacts import (
     read_artifact,
 )
 from openkb.application.generators import GenerationOptions, preview_generation
+from openkb.desktop.flow_layout import FlowLayout
+from openkb.desktop.form_controls import FocusComboBox, scroll_form
 from openkb.desktop.panels import ManagementPanel
 from openkb.desktop.reader import MarkdownView
 from openkb.runtime.records import TERMINAL
@@ -47,12 +47,16 @@ class ArtifactsDialog(ManagementPanel):
         self._refresh_id = 0
         self.setWindowTitle(f"生成与产物 · {kb.name}")
         self.resize(1080, 800)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
         form = QFormLayout()
-        self.kind = QComboBox()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self.kind = FocusComboBox()
         self.kind.addItem("Skill", "skill")
         self.kind.addItem("HTML 幻灯片", "deck")
         self.name = QLineEdit()
@@ -64,7 +68,7 @@ class ArtifactsDialog(ManagementPanel):
         form.addRow("名称", self.name)
         form.addRow("生成要求", self.intent)
         layout.addLayout(form)
-        actions = QHBoxLayout()
+        actions = FlowLayout()
         self.generate_button = QPushButton("生成…")
         self.graph_button = QPushButton("生成知识图谱")
         refresh = QPushButton("刷新产物")
@@ -81,7 +85,7 @@ class ArtifactsDialog(ManagementPanel):
         layout.addWidget(self.status)
         self.items = QListWidget()
         self.items.currentItemChanged.connect(self.select)
-        self.files = QComboBox()
+        self.files = FocusComboBox()
         self.files.currentIndexChanged.connect(self.read)
         self.reader = MarkdownView()
         self.source = QPlainTextEdit()
@@ -101,7 +105,8 @@ class ArtifactsDialog(ManagementPanel):
         splitter.addWidget(content)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
-        outputs = QHBoxLayout()
+        outer.addWidget(scroll_form(body), 1)
+        outputs = FlowLayout()
         self.export_button = QPushButton("导出所选产物…")
         self.export_button.clicked.connect(self.export)
         self.preview_button = QPushButton("在外部浏览器预览 HTML")
@@ -109,7 +114,7 @@ class ArtifactsDialog(ManagementPanel):
         self.preview_button.clicked.connect(self.preview)
         outputs.addWidget(self.export_button)
         outputs.addWidget(self.preview_button)
-        layout.addLayout(outputs)
+        outer.addLayout(outputs)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)

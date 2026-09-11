@@ -2,8 +2,9 @@
 
 import asyncio
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QLabel, QLineEdit, QPushButton
+from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel, QLineEdit, QPushButton
 
+from openkb.desktop.form_controls import FocusComboBox
 from openkb.desktop.processing_settings import SettingsSection
 from openkb.vision.config import VisionSettings
 
@@ -21,19 +22,20 @@ class ImageField(SettingsSection):
         self.enabled = QCheckBox("启用图片理解")
         self.enabled.toggled.connect(self.changed)
         self.body.addWidget(self.enabled)
-        self.connection = QComboBox()
+        self.connection = FocusComboBox()
         self.connection.addItem("独立图片模型连接", "independent")
         self.connection.addItem("明确复用主模型完整连接", "reuse_main")
-        self.provider = QComboBox()
+        self.provider = FocusComboBox()
         for value in ("openai", "openai-compatible", "anthropic", "ollama"):
             self.provider.addItem(value, value)
         self.model, self.endpoint = QLineEdit(), QLineEdit()
         self.api_key = SettingField("image_api_key")
-        self.authentication = QComboBox()
+        self.authentication = FocusComboBox()
         self.authentication.addItem("使用此图片连接的 API Key", "api_key")
         self.authentication.addItem("服务无需鉴权", "none")
         self.supports_images = QCheckBox("此端点与模型支持图片输入（保存后测试确认）")
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         for label, entry in (
             ("连接方式", self.connection),
             ("提供商 / 协议", self.provider),

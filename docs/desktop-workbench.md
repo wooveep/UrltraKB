@@ -235,3 +235,37 @@ Linux; they do not certify the Windows portable build.
 | --- | --- |
 | Documents with a selection, light | [Document table](desktop-evidence/workbench/documents-table.png) |
 | Documents, dark, narrow window | [Narrow document table](desktop-evidence/workbench/documents-table-dark.png) |
+
+## Settings content and fixed actions
+
+Settings keep scope tabs, category tabs and Save outside the scrolling content.
+Each category owns one scroll area, so an inactive long navigation or processing
+form cannot force the entire settings panel taller than the window. OCR uses a
+bottom stretch to keep its source label and explanation compact when conditional
+controls disappear. Advanced local/cloud forms share the OCR page's scroll area.
+Form rows and installation actions wrap at narrow widths.
+
+The artifact page similarly scrolls its generation and reading content while
+keeping export/preview actions visible. Other management pages retain their
+existing embedding behavior. Native form choices ignore wheel events unless
+focused, allowing Qt to scroll their surrounding content; explicit keyboard and
+popup selection remain available. Appearance and reading-scale choices use the
+same control.
+
+The settings acceptance runner covers both scopes and themes at 1366×768,
+1920×1080, 900×650 and 720×600, including OCR off/system/local/service/cloud and
+both advanced profiles. It checks Save and category tabs before and after content
+scrolling, compact OCR labels, a single content scroll owner, artifact actions,
+standalone settings and native wheel/keyboard/popup input. Tests repeat these
+176 settings cases at 100% and 150% device scaling using isolated configurations.
+The window-level wheel test uses native pixel coordinates for QtTest, so its
+150% case exercises the intended control rather than a different widget.
+
+```bash
+.venv/bin/pytest -q tests/test_desktop_settings_layout.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
+  --settings-layout --output /tmp/urltrakb-settings-layout
+```
+
+The output directory must be new. This verifies source-run Qt behavior; it does
+not replace the currently running portable client or certify a rebuilt package.

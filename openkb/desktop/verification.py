@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
     parser.add_argument("--tables", action="store_true", help="Populated native table layouts")
+    parser.add_argument("--settings-layout", action="store_true", help="Settings layout and input")
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
     parser.add_argument("--progress", action="store_true", help="Measured task progress UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
@@ -146,6 +147,12 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.settings_layout:
+            from openkb.desktop.verification_settings_layout import verify_settings_layout
+
+            verify_settings_layout(window, first, root, wait_until)
+            checks.append("settings and artifact action visibility, compact OCR and safe scrolling")
+            return 0
         if args.progress:
             from openkb.desktop.verification_progress import verify_progress
 

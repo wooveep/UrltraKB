@@ -2,17 +2,16 @@
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from openkb.desktop.form_controls import FocusComboBox
 from openkb.ocr.config import ParsingSettings
 from openkb.processing import ProcessingIncomplete, RequestLimits
 
@@ -23,6 +22,7 @@ class ValueForm(QWidget):
         self.inputs = {}
         self.definitions = definitions
         form = QFormLayout(self)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         for key, label, kind in definitions:
             entry = QLineEdit()
             entry.setAccessibleName(label)
@@ -50,7 +50,7 @@ class SettingsSection(QWidget):
     def __init__(self, explanation):
         super().__init__()
         self.body = QVBoxLayout(self)
-        self.action = QComboBox()
+        self.action = FocusComboBox()
         self.action.addItems(["不变", "设置", "清除覆盖"])
         self.source = QLabel()
         hint = QLabel(explanation)
@@ -159,19 +159,19 @@ class OcrField(SettingsSection):
 
         self.cloud_key = SettingField("ocr_api_key")
         self.cloud_key.text.setAccessibleName("OCR 云端 API Key")
-        self.policy = QComboBox()
+        self.policy = FocusComboBox()
         self.policy.addItem("自动识别需要 OCR 的内容", "auto")
         self.policy.addItem("关闭 OCR，保留原文和图片", "off")
         self.policy.activated.connect(self.changed)
         self.body.addWidget(self.policy)
-        self.backend = QComboBox()
+        self.backend = FocusComboBox()
         self.backend.addItem("系统 OCR（默认）", "system")
         self.backend.addItem("本地飞桨模型", "local")
         self.backend.addItem("PaddleOCR 云 jobs 服务", "cloud")
         self.backend.setAccessibleName("需要 OCR 时使用")
         self.backend.activated.connect(self.changed)
         self.body.addWidget(self.backend)
-        self.device = QComboBox()
+        self.device = FocusComboBox()
         for label, value in (
             ("自动：优先可用 GPU", "auto"),
             ("只用 CPU", "cpu"),
@@ -186,7 +186,7 @@ class OcrField(SettingsSection):
         self.body.addWidget(self.gpu_device)
         from openkb.desktop.ocr_installation import OcrInstallationPanel, fill_installations
 
-        self.installation = QComboBox()
+        self.installation = FocusComboBox()
         fill_installations(self.installation)
         self.installation.activated.connect(self.changed)
         self.body.addWidget(self.installation)
@@ -199,7 +199,7 @@ class OcrField(SettingsSection):
                 self.changed()
 
             self.installer.installed.connect(installed)
-        self.execution = QComboBox()
+        self.execution = FocusComboBox()
         self.execution.addItem("使用已安装运行环境", "runtime")
         self.execution.addItem("连接已部署的飞桨服务", "service")
         self.execution.activated.connect(self.changed)
@@ -207,7 +207,7 @@ class OcrField(SettingsSection):
         self.service_endpoint = QLineEdit()
         self.service_endpoint.setPlaceholderText("http://127.0.0.1:8080（其他主机属于远端处理）")
         self.service_endpoint.textEdited.connect(self.changed)
-        self.service_protocol = QComboBox()
+        self.service_protocol = FocusComboBox()
         self.service_protocol.addItem("完整解析服务 /layout-parsing", "pipeline")
         self.service_protocol.addItem("仅 VLM（结果需要版面复核）", "vlm")
         self.service_protocol.activated.connect(self.changed)
@@ -295,10 +295,10 @@ class OcrField(SettingsSection):
                     self.cloud_options[key] = entry
                     layout.addWidget(entry)
             self.forms[name] = fields
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(panel)
-            self.tabs.addTab(scroll, title)
+            layout.addStretch()
+            self.tabs.addTab(panel, title)
+        # Keep short states compact; only the enclosing settings page scrolls.
+        self.body.addStretch()
 
     def load(self, value, source):
         settings = value or ParsingSettings()

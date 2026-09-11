@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +23,7 @@ from openkb.application.settings import (
     read_settings_view,
 )
 from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+from openkb.desktop.form_controls import FocusComboBox, scroll_form
 from openkb.desktop.panels import ManagementPanel
 
 _SOURCES = {
@@ -55,7 +56,7 @@ class SettingField(QWidget):
         self.key = key
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.action = QComboBox()
+        self.action = FocusComboBox()
         self.action.addItems(["不变", "设置", "清除覆盖"])
         self.text = QLineEdit()
         if key in _SECRET_FIELDS:
@@ -114,6 +115,7 @@ class SettingsDialog(ManagementPanel):
         layout.addWidget(self.status)
         self.form = QWidget()
         form_layout = QFormLayout(self.form)
+        form_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.fields = {}
         for key, label in _FIELDS.items():
             if key in {"ocr_api_key", "image_api_key"}:
@@ -121,30 +123,23 @@ class SettingsDialog(ManagementPanel):
             field = SettingField(key)
             self.fields[key] = field
             form_layout.addRow(label, field)
-        from PySide6.QtWidgets import QTabWidget
-
         from openkb.desktop.processing_settings import NavigationField, OcrField, ProcessingField
 
         tabs = QTabWidget()
-        tabs.addTab(self.form, "基本设置")
+        tabs.addTab(scroll_form(self.form), "基本设置")
         self.fields["processing"] = ProcessingField()
         self.fields["parsing"] = OcrField(self.io, kb)
         self.fields["ocr_api_key"] = self.fields["parsing"].cloud_key
-        tabs.addTab(self.fields["processing"], "处理额度")
-        from PySide6.QtWidgets import QScrollArea
-
-        ocr_scroll = QScrollArea()
-        ocr_scroll.setWidgetResizable(True)
-        ocr_scroll.setWidget(self.fields["parsing"])
-        tabs.addTab(ocr_scroll, "文档识别")
+        tabs.addTab(scroll_form(self.fields["processing"]), "处理额度")
+        tabs.addTab(scroll_form(self.fields["parsing"]), "文档识别")
         from openkb.desktop.image_settings import ImageField
 
         self.fields["image_understanding"] = ImageField(io, kb)
         self.fields["image_api_key"] = self.fields["image_understanding"].api_key
-        tabs.addTab(self.fields["image_understanding"], "图片理解")
+        tabs.addTab(scroll_form(self.fields["image_understanding"]), "图片理解")
         self.fields["navigation"] = NavigationField()
-        tabs.addTab(self.fields["navigation"], "原文导航")
-        layout.addWidget(tabs)
+        tabs.addTab(scroll_form(self.fields["navigation"]), "原文导航")
+        layout.addWidget(tabs, 1)
         self.editors = tabs
         hint = QLabel(
             "清除仅移除此处覆盖，之后使用下一层设置。密钥值不会读回。\n"
