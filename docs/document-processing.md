@@ -117,6 +117,16 @@ follow the same bounded recovery. No missing unit is silently accepted or skippe
 Logs include expected/received/missing/duplicate/unexpected counts, the requested
 output limit and the provider finish reason, without recording document content.
 
+Model quotations may replace Word's nonbreaking, figure or narrow nonbreaking
+space with an ordinary space. Outside code blocks, a unique match differing only
+by these one-character spaces resolves to the exact original spelling and
+character offsets. This does not collapse whitespace, fold punctuation/digits,
+accept neighboring text or choose an ambiguous match. Code quotations remain
+strict. Fact failures identify the unit, block and invalid field without logging
+source text. Completed batches from the preceding strict-quotation contract can
+be reused only with their exact request identity and after current validation;
+unrelated historical implementations and changed requests are not reused.
+
 For providers that accept a `thinking.type` option, the optional top-level
 `compilation_thinking` setting selects `enabled` or `disabled`. For example:
 

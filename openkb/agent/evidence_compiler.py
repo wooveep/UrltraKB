@@ -8,6 +8,7 @@ import threading
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.agent.evidence_coverage import require_unit_coverage
 from openkb.agent.evidence_parallel import parallel_batches
+from openkb.agent.evidence_quotes import fact_quote
 from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches, split_units
 from openkb.agent.evidence_units import (
     FACTS_SYSTEM,
@@ -56,6 +57,10 @@ def compile_evidence(
         payload = {"stage": "facts", "units": batch}
         key = checkpoints.key(FACTS_SYSTEM, payload)
         result = checkpoints.load(key)
+        if result is None:
+            previous = checkpoints.previous_fact_key(FACTS_SYSTEM, payload)
+            if previous is not None:
+                result = checkpoints.load(previous)
         on_event({"stage": "facts", "blocks": len(batch), "cached": result is not None})
         if result is None:
             result = _object(
@@ -81,22 +86,14 @@ def compile_evidence(
             ):
                 raise ResponseIncomplete("section_empty_without_reason", "facts")
             for fact in extracted:
-                if (
-                    not isinstance(fact, dict)
-                    or not all(
-                        isinstance(fact.get(key), str) and fact[key].strip()
-                        for key in ("topic", "statement", "quote")
-                    )
-                    or fact["quote"] not in unit["text"]
-                ):
-                    raise ResponseIncomplete("fact_evidence_invalid", "facts")
+                quote, start, end = fact_quote(unit, fact)
                 reference = dict(unit["reference"])
-                reference["start"] += unit["text"].index(fact["quote"])
-                reference["end"] = reference["start"] + len(fact["quote"])
+                reference["start"] += start
+                reference["end"] = unit["reference"]["start"] + end
                 value = {
                     "topic": fact["topic"],
                     "statement": fact["statement"],
-                    "quote": fact["quote"],
+                    "quote": quote,
                     "reference": reference,
                     "scope": unit["reference"],
                     "context_evidence": [
