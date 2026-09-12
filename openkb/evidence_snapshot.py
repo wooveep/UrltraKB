@@ -36,6 +36,18 @@ class EvidenceSnapshot:
                     raise ValueError("Evidence span is missing")
                 self._text[block.id] = view.text
 
+    def preceding(self, reference, *, max_blocks, max_chars):
+        from openkb.evidence_context import preceding_slices
+
+        return preceding_slices(
+            self,
+            reference,
+            self._identity,
+            self._blocks,
+            max_blocks=max_blocks,
+            max_chars=max_chars,
+        )
+
     def read(self, reference, *, max_chars):
         block, end = evidence_bounds(reference, self._identity, self._blocks, max_chars)
         text = self._text[block.id][reference.start : min(end, reference.start + max_chars)]

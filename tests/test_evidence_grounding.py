@@ -37,7 +37,11 @@ def test_semantic_rejection_keeps_original_and_blocks_knowledge_publication(
             }
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            response["content"] = incorrect
+            if "fragments" in response:
+                for fragment in response["fragments"]:
+                    fragment["content"] = incorrect
+            else:
+                response["content"] = incorrect
         return response
 
     model_service.respond = respond
@@ -319,6 +323,8 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
                 ]
         elif payload["stage"] == "generation":
             response["content"] = "\n\n".join(item["text"] for item in payload["evidence"])
+            if payload.get("revision"):
+                response["content"] = "## Pressure limit\n\n" + response["content"]
         elif payload["stage"] == "verification":
             reviews.append(payload)
             response = {
@@ -365,28 +371,30 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
     config["processing"].update(context_tokens=4096, output_tokens=1024, max_requests=100)
     config_path.write_text(yaml.safe_dump(config))
     generated = []
-    repaired = False
+    reviewed = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            title = "Startup support" if not generated or repaired else "Shutdown support"
+            title = "Version 6 operations" if not generated else "Shutdown support"
             generated.append(title)
             response.update(
                 title=title, content="\n\n".join(e["text"] for e in payload["evidence"])
             )
+        elif payload["stage"] == "verification":
+            reviewed.append(payload)
         return response
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.reason == "topic_title_conflict", result
-    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-    repaired = True
-    continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
-    assert continued.knowledge_compilation == "completed", continued
+    assert result.knowledge_compilation == "completed", result
+    assert len(generated) > 1
+    assert {p["title"] for p in reviewed} == {"Version 6 operations"}
+    assert all(p.get("title_context") for p in reviewed)
+    assert all(p["title_context"] == reviewed[0]["title_context"] for p in reviewed)
     content = (kb_dir / "wiki/concepts/notes.md").read_text()
-    assert 'description: "Startup support"' in content
+    assert 'description: "Version 6 operations"' in content
     assert "Shutdown support" not in content
 
 

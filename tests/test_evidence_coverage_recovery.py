@@ -80,7 +80,9 @@ def test_partial_batch_progress_survives_a_later_unrecoverable_unit(kb_dir, tmp_
     monkeypatch.setattr(litellm, "completion", completion)
     with progress_reporting(events.append):
         result = import_document(kb_dir, source)
-    assert result.knowledge_compilation == "unfinished"
+    assert result.knowledge_compilation == "completed"
+    assert result.omissions[0]["stage"] == "facts"
+    assert result.omissions[0]["reason"] == "section_coverage_incomplete"
     counters = [step for event in events for step in event["progress"] if step["phase"] == "facts"]
     assert counters[-1]["completed"] == len("Good evidence.")
     assert counters[-1]["completed"] < counters[-1]["total"]

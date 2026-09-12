@@ -63,7 +63,9 @@ def test_recompile_uses_saved_original_after_external_file_disappears(kb_dir, mo
     result = _invoke(kb_dir, ["recompile", "notes.md"])
     assert result.exit_code == 0, result.output
     assert "intake=saved, compilation=completed" in result.output
-    assert len(model_service) == 7
+    # Replanning sees the new catalogue; an unchanged topic reuses its complete
+    # verified receipt, without regenerating or rerolling its review.
+    assert len(model_service) == 5
 
 
 @pytest.mark.parametrize("doc_id", [None, "old-local-doc"])

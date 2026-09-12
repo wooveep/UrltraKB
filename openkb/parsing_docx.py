@@ -120,8 +120,9 @@ def parse_docx(
                 pending_attachments.clear()
                 assets: list[str] = []
                 text = inline(node, assets)
-                style = node.style_id or node.style_name or ""
-                heading = re.fullmatch(r"heading\s*([1-9])", style, re.IGNORECASE)
+                heading = re.fullmatch(
+                    r"heading\s*([1-9])", node.style_id or "", re.IGNORECASE
+                ) or re.fullmatch(r"heading\s*([1-9])", node.style_name or "", re.IGNORECASE)
                 if heading:
                     level = int(heading[1])
                     headings[level - 1 :] = [text]
@@ -185,7 +186,7 @@ def parse_docx(
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
-                header = (
+                table_header = (
                     " | ".join(inline(cell, []) for cell in node.children[0].children)
                     if node.children
                     else ""
@@ -193,7 +194,7 @@ def parse_docx(
                 for row_index, row in enumerate(node.children, 1):
                     for cell_index, cell in enumerate(row.children, 1):
                         context = (
-                            f"Table {table}; header: {header}; "
+                            f"Table {table}; header: {table_header}; "
                             f"colspan={cell.colspan}; rowspan={cell.rowspan}"
                         )
                         visit(

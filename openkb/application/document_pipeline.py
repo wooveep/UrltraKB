@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -71,6 +72,7 @@ def _compile_version(
     on_event: Callable[[dict], None] = lambda event: None,
     input_is_current: Callable[[], bool] = lambda: True,
     force: bool = False,
+    retry_omissions: bool = False,
     document_name: str | None = None,
     replaces: str | None = None,
     parse_only: bool = False,
@@ -128,8 +130,12 @@ def _compile_version(
                     )
                 registry = HashRegistry(kb_dir / ".openkb/hashes.json")
                 previous = registry.get(source.source_id)
+                from openkb.compilation_omissions import stored_omissions, validate_omissions
+
+                previous_omissions = stored_omissions(previous)
                 if (
                     not force
+                    and not (retry_omissions and previous_omissions)
                     and previous
                     and previous.get("source_version") == source.id
                     and previous.get("parse_id") == parsed.id
@@ -144,7 +150,10 @@ def _compile_version(
                         source_intake="saved",
                         knowledge_compilation="completed",
                         stage="committed",
-                        warnings=tuple(report.warnings),
+                        warnings=tuple(report.warnings)
+                        + (("knowledge_content_omitted",) if previous_omissions else ()),
+                        omissions=previous_omissions,
+                        resume=source.id if previous_omissions else None,
                         source_id=source.source_id,
                         parse_id=parsed.id,
                         usage=report.usage,
@@ -190,6 +199,13 @@ def _compile_version(
                     from openkb.source_omissions import omission_notice
 
                     body += omission_notice(source, parsed)
+                    from openkb.source_summary import finish_source_summary
+
+                    metadata, body = finish_source_summary(metadata, body, source.name)
+                    from openkb.compilation_omissions import omission_notice as compilation_notice
+
+                    omissions = validate_omissions(report.omissions)
+                    body += compilation_notice(omissions)
                     atomic_write_text(summary, metadata + body)
                     document = {
                         "name": source.name,
@@ -206,6 +222,7 @@ def _compile_version(
                         "parse_id": parsed.id,
                         "input_hash": source.blob,
                         "compilation_profile": bound_settings["_compilation_profile"],
+                        "compilation_omissions": json.dumps(omissions, ensure_ascii=False),
                     }
                     proposal = workspace.proposal(document, replaces=replaces)
                 stage = "committing"
@@ -231,6 +248,8 @@ def _compile_version(
                     knowledge_compilation="completed",
                     stage="committed",
                     warnings=tuple(report.warnings),
+                    omissions=omissions,
+                    resume=source.id if omissions else None,
                     usage=report.usage,
                     source_id=source.source_id,
                     parse_id=parsed.id,
@@ -265,6 +284,7 @@ def _compile_version(
             reason=reason,
             resume=proposal.id if proposal else source.id,
             warnings=tuple(report.warnings),
+            omissions=tuple(report.omissions),
             usage=report.usage,
             source_id=source.source_id,
             parse_id=parsed.id if parsed else None,

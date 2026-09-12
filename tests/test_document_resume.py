@@ -127,7 +127,9 @@ def test_markdown_usable_body_can_compile_with_omission_notice(
     assert result.knowledge_compilation == "completed"
 
 
-def test_persistent_local_fact_defect_keeps_publication_pending(kb_dir, tmp_path, monkeypatch):
+def test_persistent_local_fact_defect_publishes_verified_available_content(
+    kb_dir, tmp_path, monkeypatch
+):
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
@@ -139,8 +141,9 @@ def test_persistent_local_fact_defect_keeps_publication_pending(kb_dir, tmp_path
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert result.reason == "section_coverage_incomplete"
-    assert not pages
+    assert result.knowledge_compilation == "completed"
+    assert result.omissions[0]["reason"] == "section_coverage_incomplete"
+    assert pages
 
 
 def test_explicit_request_count_stops_even_with_unlimited_tokens():
@@ -168,7 +171,10 @@ def test_semantic_unsupported_still_prevents_publication(kb_dir, tmp_path, monke
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
     assert result.reason == "knowledge_evidence_mismatch"
-    assert calls["generation"] == calls["verification"] == 2
+    assert calls["generation"] == 2
+    # The mock correction returns the identical rejected candidate: reuse that
+    # exact rejection instead of paying for another stochastic decision.
+    assert calls["verification"] == 1
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
@@ -260,7 +266,7 @@ def test_planning_is_bounded_and_resume_skips_completed_plans(kb_dir, tmp_path, 
 
     def model(model, messages, *args, **kwargs):
         payload = json.loads(messages[-1]["content"])
-        calls.append(payload["topics"])
+        calls.append([payload["topic_labels"][member] for member in payload["topics"]])
         if not stopped and len(calls) == 2:
             raise ProcessingIncomplete("request_timeout", "planning")
         return json.dumps(evidence_response(payload))
@@ -371,8 +377,8 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_topic(
         elif payload["stage"] == "planning":
             value = {
                 "topics": [
-                    {"name": topic, "title": topic, "kind": "concept", "members": [topic]}
-                    for topic in payload["topics"]
+                    {"name": label, "title": label, "kind": "concept", "members": [member]}
+                    for member, label in payload["topic_labels"].items()
                 ]
             }
         elif payload["stage"] == "generation":
@@ -388,7 +394,8 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_topic(
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
-    assert result.reason == "topic_generation_incomplete", result
+    assert result.knowledge_compilation == "completed", result
+    assert result.omissions[0]["reason"] == "topic_generation_incomplete"
     assert set(calls) == {f"topic-{i}" for i in range(6)}
     first = False
     calls.clear()
@@ -468,8 +475,113 @@ def test_failed_fact_does_not_discard_or_prevent_later_valid_units(kb_dir, tmp_p
     result = import_document(
         kb_dir, document(tmp_path, "Alpha requirement.\n\nBeta requirement.\n\nGamma requirement.")
     )
-    assert result.reason == "section_coverage_incomplete", result
+    assert result.knowledge_compilation == "completed", result
+    assert result.omissions[0]["reason"] == "section_coverage_incomplete"
     first = False
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     assert resumed == ["Alpha requirement."]
+
+
+def test_changed_correction_contract_replaces_only_the_stale_correction(
+    kb_dir, tmp_path, monkeypatch
+):
+    from openkb.agent import evidence_pages
+    from openkb.agent.evidence_units import messages as old_messages
+
+    current_messages = evidence_pages.messages
+    phase, calls = 1, Counter()
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        stage = payload["stage"]
+        calls[phase, stage] += 1
+        value = evidence_response(payload)
+        if stage == "generation":
+            value["title"] = "Correct topic" if "title_instruction" in payload else "Wrong claim"
+        elif stage == "verification":
+            value = {"verdict": "supported", "reason": "Correct original quote."}
+            if payload["title"] == "Wrong claim":
+                value = {"verdict": "unsupported", "reason": "Correct the unsupported title."}
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(evidence_pages, "messages", old_messages)
+    source = document(tmp_path, "One required fact.")
+    first = import_document(kb_dir, source)
+    assert first.reason == "knowledge_evidence_mismatch"
+    assert calls[1, "generation"] == 2 and calls[1, "verification"] == 1
+    phase = 2
+    monkeypatch.setattr(evidence_pages, "messages", current_messages)
+    second = import_document(kb_dir, source)
+    assert second.knowledge_compilation == "completed", second
+    assert calls[2, "generation"] == 1 and calls[2, "verification"] == 1
+    assert calls[2, "facts"] == calls[2, "planning"] == 0
+
+
+def test_only_the_existing_correction_uses_explicit_deeper_mode(kb_dir, tmp_path, monkeypatch):
+    path = kb_dir / ".openkb/config.yaml"
+    settings = yaml.safe_load(path.read_text())
+    settings.update(compilation_thinking="disabled", correction_thinking="enabled")
+    path.write_text(yaml.safe_dump(settings))
+    generation_modes, review_modes = [], []
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        stage = payload["stage"]
+        value = evidence_response(payload)
+        mode = kwargs.get("extra_body", {}).get("thinking", {}).get("type")
+        if stage == "generation":
+            generation_modes.append(mode)
+            value["title"] = "Correct topic" if payload.get("revision") else "Wrong claim"
+        elif stage == "verification":
+            review_modes.append(mode)
+            value = {"verdict": "supported", "reason": "Original fact preserved."}
+            if payload["title"] == "Wrong claim":
+                value = {"verdict": "unsupported", "reason": "Title claims something absent."}
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, document(tmp_path, "One required fact."))
+    assert result.knowledge_compilation == "completed", result
+    assert generation_modes == ["disabled", "enabled"]
+    assert review_modes == ["disabled", "disabled"]
+
+
+def test_located_title_correction_preserves_the_previously_reviewed_body(
+    kb_dir, tmp_path, monkeypatch
+):
+    reviewed = []
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        value = evidence_response(payload)
+        if payload["stage"] == "generation":
+            value["title"] = "Wrong claim"
+            if payload.get("revision"):
+                value = {"title": "Correct topic"}
+        elif payload["stage"] == "verification":
+            reviewed.append(payload)
+            value = {"verdict": "supported", "reason": "Original body is faithful."}
+            if payload["title"] == "Wrong claim":
+                value = {
+                    "verdict": "unsupported",
+                    "reason": "Only the public title is unsupported.",
+                    "issues": [
+                        {
+                            "kind": "title",
+                            "candidate": "Wrong claim",
+                            "occurrences": ["e1"],
+                            "reason": "Unsupported public title.",
+                        }
+                    ],
+                }
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, document(tmp_path, "One required fact."))
+    assert result.knowledge_compilation == "completed", result
+    assert len(reviewed) == 2
+    assert (
+        reviewed[0]["content"].replace("# Wrong claim", "# Correct topic") == reviewed[1]["content"]
+    )

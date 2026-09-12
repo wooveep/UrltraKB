@@ -4,7 +4,9 @@ from pathlib import Path
 from zipfile import ZipFile
 
 
-def write_docx(path: Path, body: str, *, footnotes: str | None = None) -> None:
+def write_docx(
+    path: Path, body: str, *, footnotes: str | None = None, styles: str | None = None
+) -> None:
     with ZipFile(path, "w") as archive:
         archive.writestr(
             "[Content_Types].xml",
@@ -61,7 +63,8 @@ def write_docx(path: Path, body: str, *, footnotes: str | None = None) -> None:
             )
         archive.writestr(
             "word/styles.xml",
-            """
+            styles
+            or """
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>
   <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/></w:style>

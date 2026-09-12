@@ -90,6 +90,7 @@ class DocumentResult:
     usage: dict[str, Any] = field(default_factory=dict)
     source_id: str | None = None
     parse_id: str | None = None
+    omissions: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, str) or not isinstance(self.stage, str):
@@ -115,12 +116,20 @@ class DocumentResult:
         from openkb.processing import validate_usage
 
         validate_usage(self.usage)
+        from openkb.compilation_omissions import validate_omissions
+
+        if not isinstance(self.omissions, tuple):
+            raise ValueError("Invalid document omissions")
+        validate_omissions(self.omissions)
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> DocumentResult:
         if not isinstance(value, dict):
             raise ValueError("Invalid document result")
         value = dict(value)
+        from openkb.compilation_omissions import validate_omissions
+
+        value["omissions"] = validate_omissions(value.get("omissions", []))
         for key in ("resources", "quality", "unfinished", "warnings"):
             if not isinstance(value.get(key, []), list):
                 raise ValueError("Invalid document result list")

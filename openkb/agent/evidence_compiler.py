@@ -29,6 +29,7 @@ def compile_evidence(
     from openkb.agent.evidence_plan import plan_topics
 
     wiki = workspace / "wiki"
+    previous_targets = list_existing_wiki_targets(wiki)
     groups = plan_topics(
         sorted({fact["topic"] for fact in facts}),
         workspace,
@@ -69,24 +70,35 @@ def compile_evidence(
             {fact["id"]: fact for fact in facts if fact["topic"] in group["members"]}.values()
         )
         from openkb.agent.evidence_pages import generate_topic
+        from openkb.agent.evidence_topic_cache import verified_topic
 
-        content = generate_topic(
+        content = verified_topic(
             group,
             selected,
-            reader,
-            checkpoints,
             wiki,
             source,
             settings,
-            limits,
-            bundle=bundle,
-            on_event=on_event,
-            known_targets=known_targets,
-            assets=assets,
+            checkpoints,
+            known_targets,
+            lambda: generate_topic(
+                group,
+                selected,
+                reader,
+                checkpoints,
+                wiki,
+                source,
+                settings,
+                limits,
+                bundle=bundle,
+                on_event=on_event,
+                known_targets=known_targets,
+                assets=assets,
+            ),
         )
         return group, content
 
     failures = []
+    accepted = []
 
     def generate(group):
         try:
@@ -108,7 +120,7 @@ def compile_evidence(
             groups, generate, generation_concurrency, stage="generation"
         ):
             if isinstance(content, ProcessingIncomplete):
-                failures.append(content)
+                failures.append((group, content))
                 on_event(
                     {
                         "stage": "generation",
@@ -117,20 +129,40 @@ def compile_evidence(
                         "reason": content.reason,
                     }
                 )
+                progress.advance()
                 continue
-            writer = _write_entity if group["kind"] == "entity" else _write_concept
-            writer(
-                wiki,
-                group["name"],
-                content,
-                f"summaries/{name}.md",
-                (wiki / f"{group['path']}.md").exists(),
-                brief=group["title"],
-                **({"type_": group["type"]} if group["kind"] == "entity" else {}),
-            )
+            accepted.append((group, content))
             progress.advance()
-        if failures:
-            raise failures[0]
+        if failures and not accepted:
+            raise failures[0][1]
+
+    if failures:
+        from openkb.compilation_report import report_content_omission
+
+        for group, error in failures:
+            report_content_omission("generation", error.reason, [group["path"]])
+    # Excluded topics withdraw only this source's contribution. A page supported
+    # by another source remains intact; stale text from this source cannot stand
+    # in for a failed new version. All edits still belong to the private proposal.
+    groups = [group for group, _ in accepted]
+    retract_retired_topics(wiki, source, f"summaries/{name}.md", {g["path"] for g in groups})
+    from openkb.agent.evidence_markup import normalize_links
+
+    targets = list_existing_wiki_targets(wiki) | {g["path"] for g in groups} | {f"summaries/{name}"}
+    for group, content in accepted:
+        # Strip navigation to excluded targets while keeping the displayed
+        # verified text and code examples unchanged.
+        content = normalize_links(content, targets, assets, links_only=True)
+        writer = _write_entity if group["kind"] == "entity" else _write_concept
+        writer(
+            wiki,
+            group["name"],
+            content,
+            f"summaries/{name}.md",
+            (wiki / f"{group['path']}.md").exists(),
+            brief=group["title"],
+            **({"type_": group["type"]} if group["kind"] == "entity" else {}),
+        )
     _write_summary(
         wiki,
         name,
@@ -150,3 +182,6 @@ def compile_evidence(
             if group["kind"] == "entity"
         },
     )
+    from openkb.compilation_omissions import prune_withdrawn_links
+
+    prune_withdrawn_links(wiki, previous_targets - list_existing_wiki_targets(wiki))

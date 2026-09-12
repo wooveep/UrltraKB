@@ -105,6 +105,12 @@ def status_text(value):
         if not navigation["accounting_complete"]:
             rows.append("部分导航执行未正常结束，已知消耗保留，最终用量无法确认。")
     warnings = result.get("warnings", result.get("auxiliary_warnings"))
+    if result.get("omissions"):
+        rows.extend(["", "内容遗漏：已排除未通过处理或核验的内容，其余已验证内容可用。"])
+        stages = {"facts": "事实提取", "planning": "主题规划", "generation": "生成与校验"}
+        for row in result["omissions"]:
+            reason = REASONS.get(row["reason"], row["reason"]).partition("，本轮知识")[0]
+            rows.append(f"{stages[row['stage']]} · {len(row['items'])} 项 · {reason}")
     if warnings:
         rows.extend(["", "辅助告警：", *warnings])
     rows.extend(["", f"资料版本：{value['source']['id']}"])

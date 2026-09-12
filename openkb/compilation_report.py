@@ -18,6 +18,7 @@ class CompileReport:
     quality: list[str] = field(default_factory=list)
     unfinished: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    omissions: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     stage: str = "converting"
     failure_reason: str | None = None
@@ -33,15 +34,23 @@ class IncompleteCompilation(Exception):
 def require_complete_compilation() -> None:
     report = _ACTIVE.get()
     if report is not None and report.unfinished:
-        raise IncompleteCompilation(
-            ", ".join(report.quality) or ", ".join(report.unfinished)
-        )
+        raise IncompleteCompilation(", ".join(report.quality) or ", ".join(report.unfinished))
 
 
 def report_auxiliary_warning(code: str) -> None:
     report = _ACTIVE.get()
     if report is not None and code not in report.warnings:
         report.warnings.append(code)
+
+
+def report_content_omission(stage: str, reason: str, items: list[str]) -> None:
+    """Record excluded input identities, without treating unverified output as usable."""
+    report = _ACTIVE.get()
+    if report is not None:
+        row = {"stage": stage, "reason": reason, "items": sorted(set(items))}
+        if row not in report.omissions:
+            report.omissions.append(row)
+        report_auxiliary_warning("knowledge_content_omitted")
 
 
 @contextmanager

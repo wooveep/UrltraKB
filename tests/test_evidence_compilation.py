@@ -417,6 +417,7 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
             }
         if payload["stage"] == "planning":
             assert "product" in payload["entity_types"]
+            identifiers = {label: member for member, label in payload["topic_labels"].items()}
             return {
                 "topics": [
                     {
@@ -424,13 +425,13 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
                         "title": "AtlasDB",
                         "kind": "entity",
                         "type": "product",
-                        "members": ["AtlasDB"],
+                        "members": [identifiers["AtlasDB"]],
                     },
                     {
                         "name": "atomic-commits",
                         "title": "Atomic commits",
                         "kind": "concept",
-                        "members": ["Atomic commits"],
+                        "members": [identifiers["Atomic commits"]],
                     },
                 ]
             }
@@ -485,7 +486,7 @@ def test_large_topic_plan_is_bounded_and_merges_one_topic_across_planning_parts(
                     unit["text"] + " Detailed operating parameter and prerequisite"
                 )
         if payload["stage"] == "planning":
-            planned.extend(payload["topics"])
+            planned.extend(payload["topic_labels"].values())
         return response
 
     model_service.respond = respond
@@ -522,7 +523,8 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
             for output, unit in zip(response["units"], payload["units"]):
                 output["facts"][0]["topic"] = "retired" if "Retired" in unit["text"] else "current"
         if payload["stage"] == "planning":
-            response["topics"][0].update(name=payload["topics"][0], title=payload["topics"][0])
+            label = payload["topic_labels"][payload["topics"][0]]
+            response["topics"][0].update(name=label, title=label)
         return response
 
     model_service.respond = respond

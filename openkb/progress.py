@@ -113,6 +113,10 @@ def progress_scope(phase: str, total: int | None = None, unit: str = "items"):
     try:
         _send()
         yield counter
+        # A successfully settled scope can contain explicit omissions. Flush
+        # its measured count before removing it, even when it did not reach
+        # total and its last advance was suppressed by the UI throttle.
+        _send(force=True)
         finished = True
     except BaseException:
         _send(force=True)  # Preserve the actual stopping position, without claiming completion.

@@ -477,6 +477,10 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     """
     compilation_model_options(config)
     compilation_model_options(config, verification=True)
+    for key in ("verification_adjudication_thinking", "correction_thinking"):
+        mode = config.get(key)
+        if mode is not None and mode not in ("enabled", "disabled"):
+            raise ValueError(f"{key} must be enabled, disabled or null")
     for key in ("model", "language"):
         value = config.get(key)
         if allow_inherited and value is None:

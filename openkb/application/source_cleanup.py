@@ -8,6 +8,7 @@ even when an explicitly cleaned old input is no longer available.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,35 @@ def _references(path: Path) -> set[str]:
             result.update(match.decode("ascii") for match in _IDENTITY.findall(data))
             tail = data[-66:]
     return result
+
+
+def _compilation_references(path: Path) -> set[str]:
+    """Whole-topic receipts must not pin obsolete copies of other sources.
+
+    Reusing these receipts requires the other-source body to match the current
+    Wiki. That current body is already a root. The receipt's own contribution
+    and immutable input must remain reachable, including all its citations.
+    Unknown record shapes keep the conservative complete-file scan.
+    """
+    record = read_object(path)
+    value, identity = record.get("value"), record.get("input")
+    if (
+        isinstance(value, dict)
+        and set(value) == {"content", "title"}
+        and isinstance(value["content"], str)
+        and isinstance(identity, dict)
+        and re.fullmatch(r"[0-9a-f]{32}", str(identity.get("source", "")))
+        and content_id(value) == record.get("value_digest")
+    ):
+        source = identity["source"]
+        opening, closing = f"<!-- openkb-source:{source} -->", f"<!-- /openkb-source:{source} -->"
+        body = value["content"]
+        if body.count(opening) == body.count(closing) == 1:
+            start, end = body.index(opening), body.index(closing)
+            if start < end:
+                owned = json.dumps(identity) + body[start : end + len(closing)]
+                return {match.decode("ascii") for match in _IDENTITY.findall(owned.encode())}
+    return _references(path)
 
 
 def _preview(kb_dir: Path) -> HistoryCleanup:
@@ -109,7 +139,12 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         if identity in retained or identity not in nodes:
             continue
         retained.add(identity)
-        queue.extend(_references(nodes[identity]) - retained)
+        references = (
+            _compilation_references(nodes[identity])
+            if identity in groups["compilation"]
+            else _references(nodes[identity])
+        )
+        queue.extend(references - retained)
     unused = nodes.keys() - retained
     removable = {nodes[identity] for identity in unused}
     for lookup_kind, key in (("lookup", "parse_id"), ("selected", "parse_id")):

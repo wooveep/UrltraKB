@@ -12,6 +12,14 @@ _LEGACY_BASE = {
 }
 _LEGACY_CONTRACTS = (
     {
+        "evidence_facts": "30417286876bd6ea015ed4bf4d9470790fc8bccbfce79c16b0c6c747973db55c",
+        "evidence_fact_cache": "7f6317e159653b9b9b293c927ff330607446206d3db5855138bf03036a42bdea",
+        "evidence_units": _LEGACY_BASE["evidence_units"],
+        "evidence_retry": "5b3f7fd79ecf6e56c2d5de6d946eb0a70ca4f34d96d0d3b4bdf605b72cedc199",
+        "evidence_coverage": _LEGACY_BASE["evidence_coverage"],
+        "evidence_quotes": "de71f31b83cac612125d9c2417b83f45c4f82ee8ef10cbd1600d602abf261bcc",
+    },
+    {
         **_LEGACY_BASE,
         "evidence_compiler": "38b378aab4024e13bb00017353ab71669654be6748eb15e48aaccf81c5c3afc2",
         "evidence_quotes": "de71f31b83cac612125d9c2417b83f45c4f82ee8ef10cbd1600d602abf261bcc",

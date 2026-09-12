@@ -136,6 +136,37 @@ def test_keyboard_changes_stage_and_completed_source_disables_continue(window, k
     assert not window.io.errors
 
 
+def test_published_omissions_stay_visible_and_can_be_continued(window, kb_dir, source_run):
+    from dataclasses import replace
+
+    from openkb.application.source_history import record_source_result
+
+    result, _, _ = source_run()
+    record_source_result(
+        kb_dir,
+        replace(
+            result,
+            omissions=(
+                {
+                    "stage": "generation",
+                    "reason": "knowledge_evidence_mismatch",
+                    "items": ["concepts/excluded"],
+                },
+            ),
+        ),
+    )
+    panel = SourceReview(window, kb_dir, result.source_id)
+    panel.show()
+    assert panel.stage_buttons["continue"].isEnabled()
+    steps = {step.key: step for step in panel.flow._steps}
+    assert steps["generation"].state == "review"
+    assert "已排除 1 项" in steps["generation"].progress
+    assert steps["publication"].state == "completed"
+    panel.stage_buttons["continue"].click()
+    assert window.manager.requests[0].source_id == result.source_id
+    assert not window.io.errors
+
+
 def test_late_artifact_response_cannot_replace_the_newly_selected_stage(window, kb_dir, source_run):
     result, _, _ = source_run()
     panel = SourceReview(window, kb_dir, result.source_id)

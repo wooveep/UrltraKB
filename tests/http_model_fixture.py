@@ -39,6 +39,20 @@ def evidence_response(payload):
             ]
         }
     elif isinstance(payload, dict) and payload.get("stage") == "generation":
+        if payload.get("source_scopes"):
+            return {
+                "title": payload.get("title", payload.get("revision", {}).get("title", "Topic")),
+                "covered": [fact["id"] for fact in payload["facts"]],
+                "fragments": [
+                    {
+                        "scope": scope["id"],
+                        "occurrences": scope["occurrences"],
+                        "heading": "Notes",
+                        "content": "Confirmed knowledge.",
+                    }
+                    for scope in payload["source_scopes"]
+                ],
+            }
         return {
             "content": "# Notes\nConfirmed knowledge.",
             "covered": [fact["id"] for fact in payload["facts"]],

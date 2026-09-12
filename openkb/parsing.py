@@ -38,7 +38,7 @@ def parse_document(
         "markitdown": package_version("markitdown"),
     }
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v6-resilient-ocr"
+        profile["docx"] = "openkb-docx-v7-structural-context"
     if source.suffix == ".pdf":
         profile["pdf"] = "openkb-pdf-v4-page-recovery"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:

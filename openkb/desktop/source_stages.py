@@ -136,8 +136,8 @@ class SourceStages:
             if key == "continue":
                 available &= (
                     result.get("knowledge_compilation") != "completed"
-                    and result.get("reason") != "needs_acceptance"
-                )
+                    or bool(result.get("omissions"))
+                ) and result.get("reason") != "needs_acceptance"
             if key == "navigation":
                 available &= bool(result.get("parse_id"))
             if key == "stop":
@@ -165,7 +165,9 @@ class SourceStages:
             self.tabs.setTabVisible(index, index in visible)
         self.refresh_flow()
         if not load:
-            self.record_status.setText("正在读取资料与阶段记录，处理期间可先查看流程位置和任务日志。")
+            self.record_status.setText(
+                "正在读取资料与阶段记录，处理期间可先查看流程位置和任务日志。"
+            )
             return
         if key == "parsing":
             self.load_parse(0)

@@ -280,7 +280,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
         hashes_file = openkb_dir / "hashes.json"
         hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
 
-        documents = []
+        documents: list[dict[str, Any]] = []
         for file_hash, meta in hashes.items():
             raw_type = meta.get("type", "unknown")
             pages = meta.get("pages")
@@ -302,6 +302,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
         for source in SourceStore(kb_dir).list_sources():
             details = source_status(kb_dir, source.source_id)
             result = details["result"]
+            row: dict[str, Any]
             if source.source_id not in by_identity:
                 # Removing knowledge does not erase its historical evidence.
                 # Completed sources without a live registration stay in history.
@@ -323,6 +324,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 reason=result["reason"] if result else None,
                 parse_id=result["parse_id"] if result else None,
                 resume=result["resume"] if result else source.id,
+                omissions=result.get("omissions", []) if result else [],
                 original=details["original"], cumulative_usage=details["cumulative_usage"],
             )
 

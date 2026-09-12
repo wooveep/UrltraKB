@@ -64,7 +64,14 @@ def source_snapshot(document):
         "original": document.get("original"),
         "result": {
             key: document.get(key)
-            for key in ("source_intake", "knowledge_compilation", "stage", "reason", "parse_id")
+            for key in (
+                "source_intake",
+                "knowledge_compilation",
+                "stage",
+                "reason",
+                "parse_id",
+                "omissions",
+            )
         },
         "cumulative_usage": document.get("cumulative_usage", {}),
     }
@@ -126,13 +133,18 @@ def flow_steps(saved, activity=None):
         ):
             status = "unknown"
         counter = next((p for p in progress if PHASES.get(p.phase) == key and p.total), None)
+        omitted = [row for row in (result.get("omissions") or ()) if row["stage"] == key]
+        if committed and omitted:
+            status = "review"
         rows.append(
             FlowStep(
                 key,
                 title,
                 status,
                 key == current,
-                f"{counter.percent}% · {counter.completed}/{counter.total}" if counter else "",
+                f"{counter.percent}% · {counter.completed}/{counter.total}"
+                if counter
+                else (f"已排除 {sum(len(row['items']) for row in omitted)} 项" if omitted else ""),
             )
         )
     return tuple(rows)

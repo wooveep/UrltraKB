@@ -498,6 +498,18 @@ class EvidenceReader:
         self.sources, self.version, self.parsed = sources, version, parsed
         self.blocks = {block.id: block for block in parsed.blocks}
 
+    def preceding(self, reference, *, max_blocks, max_chars):
+        from openkb.evidence_context import preceding_slices
+
+        return preceding_slices(
+            self,
+            reference,
+            (self.version.source_id, self.version.id, self.parsed.id),
+            self.blocks,
+            max_blocks=max_blocks,
+            max_chars=max_chars,
+        )
+
     def read(self, reference: Evidence, *, max_chars: int) -> EvidenceSlice:
         if type(max_chars) is not int or max_chars <= 0:
             raise ValueError("Evidence reads require a positive bound")

@@ -75,7 +75,7 @@ def extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle,
 
     def failed(batch, error):
         with progress_lock:
-            failures.append(error)
+            failures.append((batch, error))
         on_event(
             {
                 "stage": "facts",
@@ -165,9 +165,20 @@ def extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle,
         results = dict(
             parallel_batches(fact_batches(units, limits, model), run_batch, limits.concurrency)
         )
-        if failures:
-            raise failures[0]
     facts = [fact for index in sorted(results) for fact in results[index]]
+    if failures:
+        from openkb.compilation_report import report_content_omission
+
+        # A split sibling from a failed block must not turn an incomplete
+        # extraction into an apparently complete source contribution.
+        excluded = {unit["reference"]["block_id"] for batch, _ in failures for unit in batch}
+        facts = [fact for fact in facts if fact["scope"]["block_id"] not in excluded]
+        if not facts:
+            raise failures[0][1]
+        for batch, error in failures:
+            report_content_omission(
+                "facts", error.reason, [unit["reference"]["block_id"] for unit in batch]
+            )
     if not facts and any(unit["kind"] not in {"image", "heading"} for unit in units):
         raise ProcessingIncomplete("source_facts_missing", "facts")
     return facts

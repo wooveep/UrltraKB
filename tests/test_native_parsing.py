@@ -2,7 +2,7 @@
 
 import pymupdf
 
-from openkb.evidence import Evidence, ParseStore
+from openkb.evidence import BlockDraft, Evidence, ParseStore
 from openkb.inputs import prepared_input
 from openkb.parsing import parse_document
 from openkb.sources import SourceStore
@@ -73,7 +73,66 @@ def test_docx_maps_headings_paragraphs_table_cells_and_merged_header(kb_dir, tmp
     assert any(b.location["row"] == 2 and b.location["cell"] == 1 for b in table_blocks)
     assert any("Command parameters" in b.context for b in table_blocks)
     assert parsed.blocks[-1].location["headings"] == ["Installation", "Exceptions"]
+    assert parsed.blocks[-1].context == ""
     assert ParseStore(kb_dir).complete(version, parsed)
+
+
+def test_docx_previous_host_table_does_not_label_next_host_paragraph(kb_dir, tmp_path):
+    from tests.document_fixtures import write_docx
+
+    file = tmp_path / "hosts.docx"
+    write_docx(
+        file,
+        "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Host 1 router_id node01</w:t>"
+        "</w:r></w:p></w:tc></w:tr></w:tbl>"
+        "<w:p><w:r><w:t>Configure Host 2</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>unicast_peer 192.0.2.1</w:t></w:r></w:p>",
+    )
+    parsed = parse_document(kb_dir, source_version(kb_dir, file))
+    assert "Host 1" in parsed.blocks[0].context
+    assert parsed.blocks[-1].location["paragraph"] == 3
+    assert parsed.blocks[-1].context == ""
+
+
+def test_docx_numeric_style_id_preserves_named_heading_scope(kb_dir, tmp_path):
+    from tests.document_fixtures import write_docx
+
+    file = tmp_path / "numeric-headings.docx"
+    write_docx(
+        file,
+        '<w:p><w:pPr><w:pStyle w:val="2"/></w:pPr>'
+        "<w:r><w:t>Host 2</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>unicast_peer 192.0.2.1</w:t></w:r></w:p>",
+        styles='<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:style w:type="paragraph" w:styleId="2"><w:name w:val="heading 1"/>'
+        "</w:style></w:styles>",
+    )
+    parsed = parse_document(kb_dir, source_version(kb_dir, file))
+    assert parsed.blocks[0].kind == "heading"
+    assert parsed.blocks[-1].location["headings"] == ["Host 2"]
+
+
+def test_docx_context_fix_selects_new_profile_and_preserves_old_evidence(kb_dir, tmp_path):
+    from tests.document_fixtures import write_docx
+
+    file = tmp_path / "versioned.docx"
+    write_docx(file, "<w:p><w:r><w:t>Host 2</w:t></w:r></w:p>")
+    source = source_version(kb_dir, file)
+    current = parse_document(kb_dir, source)
+    store = ParseStore(kb_dir)
+    old = store.save(
+        source,
+        {**current.profile, "docx": "openkb-docx-v6-resilient-ocr"},
+        [BlockDraft("Host 2", "paragraph", {"kind": "docx", "paragraph": 1}, context="Host 1")],
+    )
+    store.select(source, old)
+    parsed = parse_document(kb_dir, source)
+    assert parsed.id != old.id
+    assert parsed.blocks[0].context == ""
+    assert store.selected(source) == parsed
+    assert parse_document(kb_dir, source).id == parsed.id
+    reference = Evidence(source.source_id, source.id, old.id, old.blocks[0].id)
+    assert store.read(reference, max_chars=100).context == "Host 1"
 
 
 def test_native_pdf_table_cells_retain_headers_and_physical_coordinates(

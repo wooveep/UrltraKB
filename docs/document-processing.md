@@ -7,9 +7,10 @@ for the rest of its batch. Updating settings applies to a new task.
 ## Results and stopping
 
 Each document reports `source_intake`, `knowledge_compilation`, `stage`, `reason`,
-`quality`, `unfinished`, `resources`, `warnings` and `usage`. A completed or
-previously completed identical document is successful. Invalid plans, partial
-model output and exhausted budgets cannot publish knowledge. An ordinary failed
+`quality`, `unfinished`, `resources`, `warnings`, `omissions` and `usage`. A completed or
+previously completed identical document is successful. Exhausted local content
+attempts can exclude that content and publish verified siblings; invalid model
+output never becomes published knowledge. Global execution budgets still stop the run. An ordinary failed
 or unfinished document allows the batch to continue; stopping ends the current
 item and remaining items. Already committed documents remain committed.
 
@@ -36,6 +37,93 @@ An interrupted process with an unconfirmed result is reported explicitly and is
 never automatically replayed from its summary. A confirmed business receipt
 survives failed auxiliary teardown; cleanup warnings are separate from knowledge
 completion.
+
+## Accepted publication policy — 2026-09-12
+
+The user explicitly approved normal import and publication despite ordinary
+errors and missing content. This revises the publication requirements in
+[document ingestion specification #13](https://github.com/wooveep/UrltraKB/issues/13)
+and [OCR specification #22](https://github.com/wooveep/UrltraKB/issues/22).
+
+After the original is retained, ordinary conversion, parsing or OCR failures and
+local omissions must not block publication of usable, source-verifiable content.
+This includes missing body sections or appendices, tables, images, related assets,
+notes and embedded documents in DOCX, PDF and other supported formats. Users do
+not need to repair or individually confirm these ordinary problems before the
+available knowledge can be published.
+
+Successful publication may retain `warnings` and `needs_review` diagnostics.
+`knowledge_compilation: completed` means the available content was compiled and
+committed; it does not claim that the entire original was parsed. Task results
+and the published summary identify known omissions. Missing material must not be
+invented or treated as proof that a fact does not exist. Review and reprocessing
+remain available afterward, with original bytes and evidence identities retained.
+
+The selected knowledge changes still commit through one managed transaction.
+No usable content, unverifiable source identity, service/account failures, exhausted
+execution budgets, unaccepted manual overwrites, user stopping and failed transaction
+recovery retain their existing outcomes. Unsupported generated claims are excluded,
+never published. This is an accepted specification revision; it does not
+claim that every format and error path has already passed implementation checks.
+
+
+### Conservative compilation omissions — accepted revision
+
+The latest acceptance rule is “可以少，不能错误”: uncertain content may be
+excluded instead of requiring document-specific debugging. Existing bounded
+validation retries, splitting, one correction and configured adjudication remain
+in place. A valid rejection is retained; repeated import must not reroll it into
+acceptance.
+
+- Fact extraction excludes the entire original block if an isolated unit still
+  fails, including otherwise successful split siblings from that block.
+- Planning excludes only exhausted isolated input members. It never repairs a
+  plan by inventing membership or silently accepting missing members.
+- Generation excludes the entire failed topic, so partially verified steps do
+  not appear as a complete task. Retained content still requires original
+  evidence, full coverage of its selected facts and semantic verification.
+- If no usable facts, plan or verified topic remains, the document stays
+  unfinished. Transport/account failures, cancellation, identity corruption and
+  global budgets are not content omissions.
+
+`omissions` contains stage, fixed reason and excluded identities. The original
+source/version/parse identifies the evidence; rejected text is not copied into
+the summary. The summary explains the coverage limit, and the publication
+transaction stores the same omissions with its document registration. Navigation
+links to excluded or withdrawn pages become plain display text; code examples
+remain unchanged. Older contributions from this source are withdrawn when no
+longer verified for the new version; other sources and manual-change protection
+remain effective.
+
+An ordinary identical import returns the prior publication and omissions without
+new model calls. Explicit **Continue** retries excluded work, reusing valid
+extraction and whole-topic receipts when their evidence, grouping, other-source
+content and verification contract are unchanged. A new parse, model or contract
+may invalidate reuse. Desktop stages show exclusions while publication remains
+completed, and Continue remains available. Success describes the available
+verified content, not full original-document coverage.
+
+## General import optimization contract
+
+Production import decisions must follow document structure, source identity,
+available evidence and explicit runtime budgets. Validation filenames, source
+hashes, paragraph numbers, vendor names and expected page counts must not select
+special processing paths. Format adapters may handle structural differences;
+semantic examples and regression fixtures do not become document-specific rules.
+
+Publication and source-link audits do not establish complete semantic recall or
+perfect accuracy. Performance comparisons must also report source-grounded
+coverage and known omissions. Excluding a prerequisite must not make a retained
+procedure or conclusion misleading; broader cross-block dependency handling
+remains a validation and implementation requirement beyond the current
+whole-block and whole-topic exclusions.
+
+Measure cold import, identical reimport and interrupted continuation separately.
+Compare the same enabled features and quality scope, including all failed,
+retried, corrected and verified requests in actual token usage. Keep production
+defaults separate from validation overrides. A successful large-document test
+does not establish general throughput; independent documents and fixed semantic
+anchors are required to evaluate general improvements.
 
 ## Default execution profile
 
@@ -117,6 +205,24 @@ and output capacity checks. Completed batches advance a topic counter; retries d
 not inflate it. Planning remains ordered because later batches reuse earlier page
 identities. This reduces large response bursts but does not guarantee a provider
 will respond within a particular time.
+
+Semantic review responses are recorded separately from accepted page checkpoints.
+The record binds the exact candidate, evidence, prompt, model options, endpoint
+identity and attempt. On resume, the current validator rechecks the recorded
+response; a valid rejection cannot become approval merely because the same draft
+was sent to the model again. Changed content or evidence receives a new review.
+Still-invalid and uncertain responses retain bounded retries. A raw response
+record is never sufficient for publication: coverage, located feedback and the
+supported publication receipt must still validate.
+
+Planning groups parameters, prerequisites, steps and exceptions into stable
+functional or deployment-task pages while retaining independent central entities.
+Requests separate short batch-local member IDs from their full topic labels.
+The model returns those IDs; the compiler maps them back to exact labels and
+rejects unknown, missing or duplicate members. Existing page names and titles
+can guide identity reuse but cannot enlarge the batch's membership. Accepted
+results from the precisely identified preceding functional planner can be resumed
+only with identical inputs and catalogue dependencies and full current validation.
 
 A complete model response can still omit or duplicate source IDs. These coverage
 errors now trigger smaller batches instead of immediately ending the document.
@@ -291,8 +397,10 @@ For PDF, bitmap and uncovered vector content can use the selected OCR backend.
 OCR exceptions, timeouts and missing service-side assets are advisory when the original
 page is retained. They do not block compilation of available document content; an
 image-only page may have no known textual facts. The original visual remains available
-for later inspection. Corrupt native content, unresolved source assets and uncertain
-text/table extraction remain independent source-quality checks. Ruled table cells keep
+for later inspection. Local native-content errors, unresolved source assets and
+uncertain text/table extraction retain independent quality diagnostics. Under the
+accepted publication policy, these ordinary issues do not block publication of
+other usable content. Ruled table cells keep
 headers and coordinates. With readable native text, full-page flat backgrounds,
 simple thin rules at the page edge and small/flat raster icons can skip OCR while
 retaining their visuals. Meaningful diagrams and image-only pages remain OCR candidates.
@@ -575,3 +683,64 @@ acceptance. The provider checks do not establish a production processing profile
 进程心跳填充百分比。失败、中断及部分完成保留独立状态，只有任务成功结束
 才显示“任务完成 · 100%”。旧任务没有计数记录时显示“等待进度信息”，
 新版本开始执行的任务会保存进度快照并通过任务 API 返回 `progress`。
+
+### 来源片段与有界复核
+
+同一知识主题可以包含正文不同任务和文档附件中的事实。生成请求明确列出来源范围，
+每个原文窗口具有独立 occurrence ID（同一个事实被分为多个窗口时也保留各自身份）。
+混合来源响应按片段返回对应关系；缺失、重复、未知编号及越范围分配不能进入发布。
+程序组装的内容及片段对应关系一起交给语义核对。来源片段仍属于同一个知识页面，
+中性公共标题和合理任务归类不构成自动拒绝理由。
+
+原文完整窗口能放入请求时只测量一次预算；只有放不下才搜索切分边界。
+生成时最多提供 64 个标题词相关链接候选，完整目录仍用于本地目标校验。
+这两项减少本地准备和模型输入，不裁掉必需原文或前提、例外。
+
+可在知识库 YAML 中显式启用失败时的深度复核（模型端点需支持该 thinking 选项）：
+
+```yaml
+compilation_thinking: disabled
+verification_adjudication_thinking: enabled
+```
+
+这是知识库级高级设置，默认不启用，不改变事实提取、规划或正常生成的思考模式。
+普通核对未通过时，同一候选最多增加一次指定思考模式的独立复核；复核仍拒绝则
+继续有限纠正或报告未完成。不会循环重试直到通过。所有调用共用原请求、token、
+时间和取消预算，恢复与生成缓存键包含这项设置。改变该设置不使已验证的事实和
+规划失效，但旧生成校验记录不能冒充新设置下的结果。
+
+
+有效的肯定或否定语义响应按完整请求持久化：候选、原文、提示、模型参数、连接和
+重试位置共同决定身份。恢复时用当前规则重新验证记录；同一份已拒绝的候选不会
+因为重新导入就再次抽签。格式无效或仍不确定的响应继续走已有的有界恢复路径。
+
+DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生成阶段会在相同章节及
+附件中回读最小完整配置片段，最多向前 32 段、8192 字符；引号或注释中的括号不参与
+匹配，无法确定配对时不补造上下文。附加段落带精确原文引用，进入原有请求预算和
+语义核对。并发工作从已验证的只读快照读取，避免在工作线程中访问持有写锁的知识库。
+
+
+知识库还可显式设置 `correction_thinking: enabled`，使原有的一次纠正请求使用深度模式。
+未设置时沿用正常生成模式；此选项不改变初次生成、事实提取、规划或语义核对。
+它不会增加纠正轮数，仍使用相同输出、累计 token、时间和取消预算。失败稿的恢复记录
+绑定实际纠正消息及模式，修改纠正策略后重新处理旧纠正稿；有效语义拒绝仍绑定原候选。
+
+
+当有效的定位审查仅指出公共标题错误时，纠正只请求新标题。程序保留原正文、事实覆盖
+和来源片段对应关系，只同步修改与旧公共标题完全匹配的开头标题，然后重新核对完整
+候选。涉及正文或缺失覆盖的审查继续使用完整纠正，不能借标题修正绕过事实检查。
+
+同一主题拆成多个请求时，子请求的校验另带从整主题原文选择的标题依据，只用于共同标题。
+它不替代当前正文的原文证据或片段对应关系，也不能将不同任务变成前置依赖。
+标题依据最多占可用输入预算的 1/12，且不超过 4096 tokens；保留完整上下文片段，
+空间不足时可仅保留原文章节标题。整主题一次完成的请求不增加该字段。
+首部分通过后，程序固定共同标题；后续模型提出改名时仍按固定标题核对其正文。
+正文生成与完整纠正不接收这些其他片段的原文，避免将标题依据误写入当前正文。
+只有程序保证正文不变的标题专用纠正可以读取它们。
+
+可精确定位到候选正文或标题的无依据声明，允许其拒绝反馈没有来源 occurrence。
+应用保留该否定结论；缺失覆盖与缺失来源路径仍要求引用，未知编号仍然无效。
+
+若模型将 verdict/reason 与 issues 分别返回为两个 JSON 对象，仅在字段严格互不冲突、
+第二个对象只有 issues 时无损合并，再执行完整校验。矛盾结论、额外文本和其他对象
+不会被丢弃后当作成功。保存的原响应可直接重放恢复，无需再次请求同一判断。

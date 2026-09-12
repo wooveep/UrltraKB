@@ -8,6 +8,14 @@ select another engine. Original text and images remain available. An image-only
 source with no readable transcription stays unfinished and identifies the missing
 readable text. A local failure never submits a cloud job.
 
+The [publication policy revised on 2026-09-12](document-processing.md#accepted-publication-policy--2026-09-12)
+allows ordinary parsing/OCR errors and local omissions to coexist with successful
+import and knowledge publication. Missing text, tables, images or attachments
+remain visible diagnostics; users need not confirm each issue before publishing
+the usable content. Knowledge publication does not imply complete transcription.
+The original, available evidence and omission details remain available for later
+review or reprocessing. This policy also covers native parsing errors, not only OCR.
+
 Set `policy: off` to avoid OCR runtime initialization, hardware detection and
 network submissions, including embedded documents. This creates a distinct parse
 without earlier OCR transcription. Existing versions and citations are retained.

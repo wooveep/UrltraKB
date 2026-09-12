@@ -171,7 +171,12 @@ def continue_source(
                 if accept_pages is not None:
                     raise ValueError("Acceptance requires the reviewed proposal identity")
                 return compile_version(
-                    kb_dir, source, settings, bundle=bundle, on_event=context.on_event
+                    kb_dir,
+                    source,
+                    settings,
+                    bundle=bundle,
+                    on_event=context.on_event,
+                    retry_omissions=True,
                 )
             proposal = load_proposal(kb_dir, proposal_id)
             if proposal.source_id != source.source_id or proposal.version_id != source.id:
@@ -184,6 +189,9 @@ def continue_source(
             with collect_compile_report() as report, processing_scope(settings):
                 publication = publish_proposal(kb_dir, proposal.id, config_id=config_id)
             complete = publication.status == "completed"
+            from openkb.compilation_omissions import stored_omissions
+
+            omissions = stored_omissions(proposal.document)
             result = DocumentResult(
                 source.origin,
                 "added" if complete else "unfinished",
@@ -196,7 +204,9 @@ def continue_source(
                 knowledge_compilation="completed" if complete else "unfinished",
                 stage="committed" if complete else "committing",
                 reason=None if complete else publication.status,
-                resume=None if complete else proposal.id,
+                resume=(source.id if omissions else None) if complete else proposal.id,
+                omissions=omissions,
+                warnings=("knowledge_content_omitted",) if omissions else (),
                 usage=report.usage,
             )
             from openkb.application.document_pipeline import finish_compilation

@@ -32,7 +32,7 @@ def _inline_positions(token, lines, offsets, *, cell, columns):
     return positions
 
 
-def normalize_links(content, known_targets, assets):
+def normalize_links(content, known_targets, assets, *, links_only=False):
     markdown = MarkdownIt("commonmark").enable(["table", "strikethrough"])
     environment = {}
     tokens = markdown.parse(content, environment)
@@ -77,7 +77,8 @@ def normalize_links(content, known_targets, assets):
     # Inline parser dispatch naturally excludes escaped syntax and code spans.
     # Nested image-label parsing has its own source; only outer offsets are used.
     markdown.inline.ruler.before("escape", "wiki_link", wiki_link)
-    markdown.inline.ruler.at("image", figure)
+    if not links_only:
+        markdown.inline.ruler.at("image", figure)
     edits, columns = [], {}
     for index, token in enumerate(tokens):
         if token.type != "inline" or not token.map:

@@ -95,10 +95,13 @@ class KnowledgeProposal:
             }
             if (
                 not required <= set(self.document)
-                or set(self.document) - required - {"compilation_profile"}
+                or set(self.document) - required - {"compilation_profile", "compilation_omissions"}
                 or not all(isinstance(value, str) for value in self.document.values())
             ):
                 raise ValueError("Invalid document projection fields")
+            from openkb.compilation_omissions import stored_omissions
+
+            stored_omissions(self.document)
             if (
                 self.document["source_id"] != self.source_id
                 or self.document["parse_id"] != self.parse_id
