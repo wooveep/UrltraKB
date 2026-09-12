@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -9,6 +10,28 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def published_images(wiki: Path, assets: set[str]) -> dict[str, dict[str, str]]:
+    """Capture existing images whose published bytes match the source asset identity."""
+    catalog: dict[str, dict[str, str]] = {}
+    root = wiki.resolve()
+    for path in sorted((wiki / "sources/images").glob("*")):
+        if path.stem not in assets or path.suffix.lower() not in _IMAGE_SUFFIXES:
+            continue
+        try:
+            if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file():
+                continue
+            if hashlib.sha256(path.read_bytes()).hexdigest() != path.stem:
+                continue
+        except (OSError, RuntimeError):
+            continue
+        relative = path.relative_to(wiki).as_posix()
+        catalog.setdefault(
+            path.stem,
+            {"asset": path.stem, "path": relative, "markdown": f"![原图]({relative})"},
+        )
+    return catalog
 
 
 def _resolve_image(target: str, source: Path, wiki: Path) -> Path | None:

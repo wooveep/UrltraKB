@@ -23,6 +23,17 @@ def local_omissions(source, parsed):
             if all(row["reason"].startswith("pdf_page_unparsed:") for row in pending)
             else []
         )
+    if source.suffix in {".xlsx", ".pptx"}:
+        prefix = (
+            "xlsx_chart_original_only:"
+            if source.suffix == ".xlsx"
+            else "pptx_object_original_only:"
+        )
+        return (
+            [row["reason"] for row in pending]
+            if all(row["reason"].startswith(prefix) for row in pending)
+            else []
+        )
     if source.suffix != ".docx":
         return []
     prefixes = (

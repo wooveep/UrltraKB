@@ -416,11 +416,10 @@ def test_cli_remove_dry_run_does_nothing(kb_dir):
 
 
 def test_cli_remove_preview_lists_entity_actions(kb_dir):
-    """The dry-run preview must enumerate entity-page DELETE/MODIFY actions
-    and report an 'N entity(s) will be DELETED' summary line."""
+    """The preview preserves entity pages without a known generated baseline."""
     _seed_two_doc_kb(kb_dir)
     (kb_dir / "wiki" / "entities").mkdir(parents=True)
-    # Single-source entity (only attention) -> will be DELETED
+    # Single-source entity without a baseline -> retained, source link removed.
     (kb_dir / "wiki" / "entities" / "vaswani.md").write_text(
         "---\nsources: [summaries/attention-h_a.md]\ntype: person\nbrief: V\n---\n"
         "# Vaswani\n\n## Related Documents\n- [[summaries/attention-h_a]]\n",
@@ -436,9 +435,9 @@ def test_cli_remove_preview_lists_entity_actions(kb_dir):
     result = _invoke(kb_dir, ["remove", "attention.pdf", "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "DELETE   wiki/entities/vaswani.md" in result.output
+    assert "MODIFY   wiki/entities/vaswani.md" in result.output
     assert "MODIFY   wiki/entities/google.md" in result.output
-    assert "1 entity(s) will be DELETED" in result.output
+    assert "entity(s) will be DELETED" not in result.output
     # Nothing actually removed in dry-run.
     assert (kb_dir / "wiki" / "entities" / "vaswani.md").exists()
 
@@ -450,7 +449,7 @@ def test_cli_remove_preview_handles_json_quoted_sources(kb_dir):
     reported 0 affected pages even though the executor would delete/edit them."""
     _seed_two_doc_kb(kb_dir)
     (kb_dir / "wiki" / "entities").mkdir(parents=True)
-    # JSON-quoted single source (exactly how _yaml_list_line writes it) -> DELETE
+    # JSON-quoted single source is recognized; unknown ownership retains the page.
     (kb_dir / "wiki" / "entities" / "vaswani.md").write_text(
         '---\nsources: ["summaries/attention-h_a.md"]\ntype: person\nbrief: V\n---\n# Vaswani\n',
         encoding="utf-8",
@@ -464,7 +463,7 @@ def test_cli_remove_preview_handles_json_quoted_sources(kb_dir):
     result = _invoke(kb_dir, ["remove", "attention.pdf", "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "DELETE   wiki/entities/vaswani.md" in result.output
+    assert "MODIFY   wiki/entities/vaswani.md" in result.output
     assert "MODIFY   wiki/concepts/quoted-concept.md" in result.output
 
 
@@ -474,9 +473,10 @@ def test_cli_remove_yes_executes_full_plan(kb_dir):
 
     assert result.exit_code == 0, result.output
 
-    # Summary + single-source concept gone
-    assert not (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
-    assert not (kb_dir / "wiki" / "concepts" / "transformer.md").exists()
+    # Unknown ownership retains the legacy summary and concept.
+    assert (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
+    transformer = kb_dir / "wiki/concepts/transformer.md"
+    assert transformer.exists() and "attention-h_a" not in transformer.read_text()
 
     # Multi-source concept kept, but source dropped
     attn = (kb_dir / "wiki" / "concepts" / "attention.md").read_text()
@@ -496,7 +496,7 @@ def test_cli_remove_yes_executes_full_plan(kb_dir):
     # Index updated
     index = (kb_dir / "wiki" / "index.md").read_text()
     assert "summaries/attention-h_a" not in index
-    assert "concepts/transformer" not in index
+    assert "concepts/transformer" in index
     assert "summaries/llm-h_l" in index
     assert "concepts/attention" in index
 
@@ -510,7 +510,7 @@ def test_cli_remove_keep_raw_preserves_file(kb_dir):
 
     assert result.exit_code == 0, result.output
     assert (kb_dir / "raw" / "attention.pdf").exists()
-    assert not (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
+    assert (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
 
 
 def test_cli_remove_keep_empty_concepts(kb_dir):
@@ -556,7 +556,7 @@ def test_cli_remove_by_doc_name_slug(kb_dir):
     result = _invoke(kb_dir, ["remove", "attention-h_a", "--yes"])
 
     assert result.exit_code == 0, result.output
-    assert not (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
+    assert (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
 
 
 def test_cli_remove_unknown_identifier(kb_dir):
@@ -653,14 +653,14 @@ def test_cli_remove_prunes_legacy_registry_entry_without_doc_name(kb_dir):
     # Sibling legacy entry is untouched.
     assert "h_keep" in remaining
 
-    # Wiki side-effects of the remove still happened (sanity).
-    assert not (kb_dir / "wiki" / "summaries" / "ollama.md").exists()
+    # Unclassified legacy summary stays; the raw copy is removed.
+    assert (kb_dir / "wiki" / "summaries" / "ollama.md").exists()
     assert not (kb_dir / "raw" / "ollama.md").exists()
 
 
 def test_cli_remove_lint_cleans_dangling_links_in_modified_page(kb_dir):
     """`openkb remove` must auto-run a scoped lint --fix so wikilinks
-    pointing at the just-deleted summary get stripped from concept
+    pointing at the just-deleted source view get stripped from concept
     pages that this removal modified.
 
     Scope (issue #58 / Bug 2): only files in ``concept_result["modified"]``
@@ -668,6 +668,8 @@ def test_cli_remove_lint_cleans_dangling_links_in_modified_page(kb_dir):
     for the complementary contract.
     """
     _seed_two_doc_kb(kb_dir)
+    source_view = kb_dir / "wiki/sources/attention-h_a.md"
+    source_view.write_text("Derived source view")
     # Plant a stray free-text reference in the body of the MULTI-source
     # concept page — `concepts/attention.md` has both attention-h_a and
     # llm-h_l as sources, so the remove flow modifies it (drops
@@ -675,15 +677,16 @@ def test_cli_remove_lint_cleans_dangling_links_in_modified_page(kb_dir):
     # strip the dangling free-text link.
     attn_path = kb_dir / "wiki" / "concepts" / "attention.md"
     attn_path.write_text(
-        attn_path.read_text() + "\nSee also [[summaries/attention-h_a]] for background.\n",
+        attn_path.read_text() + "\nSee also [[sources/attention-h_a]] for background.\n",
         encoding="utf-8",
     )
 
     result = _invoke(kb_dir, ["remove", "attention.pdf", "--yes"])
 
     assert result.exit_code == 0, result.output
+    assert not source_view.exists()
     cleaned = attn_path.read_text()
-    assert "[[summaries/attention-h_a]]" not in cleaned
+    assert "[[sources/attention-h_a]]" not in cleaned
 
 
 def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
@@ -992,7 +995,7 @@ def test_cli_remove_pageindex_fallback_skips_on_ambiguous_match(kb_dir):
     assert result.exit_code == 0, result.output
     assert _index_ids(kb_dir) == {"pi-a", "pi-b"}
     assert "skipping" in result.output
-    assert not (kb_dir / "wiki/summaries/paper.md").exists()
+    assert (kb_dir / "wiki/summaries/paper.md").exists()
     assert "h_paper" in json.loads((kb_dir / ".openkb/hashes.json").read_text())
 
 
@@ -1050,8 +1053,8 @@ def test_cli_remove_pageindex_failure_preserves_registry_for_retry(kb_dir):
     assert "h_paper" in hashes
     assert hashes["h_paper"]["doc_id"] == "pi-doc-xyz"
 
-    # Wiki side was cleaned (idempotent on retry).
-    assert not (kb_dir / "wiki" / "summaries" / "paper.md").exists()
+    # Unknown summary ownership stays protected across retries.
+    assert (kb_dir / "wiki" / "summaries" / "paper.md").exists()
     assert not (kb_dir / "wiki" / "sources" / "paper.json").exists()
 
 
@@ -1069,7 +1072,7 @@ def test_cli_remove_retry_after_pageindex_failure_completes(kb_dir):
     assert second.exit_code == 0, second.output
     assert _index_ids(kb_dir) == set()
     assert json.loads((kb_dir / ".openkb/hashes.json").read_text()) == {}
-    assert not (kb_dir / "wiki/summaries/paper.md").exists()
+    assert (kb_dir / "wiki/summaries/paper.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1155,7 +1158,7 @@ def test_run_remove_for_api_removes_doc(kb_dir):
     result = run_remove_for_api(kb_dir, "paper.pdf", dry_run=False)
 
     assert result["status"] == "removed"
-    assert not (kb_dir / "wiki" / "summaries" / "paper.md").exists()
+    assert (kb_dir / "wiki" / "summaries" / "paper.md").exists()
     assert not (kb_dir / "raw" / "paper.pdf").exists()
     assert json.loads((kb_dir / ".openkb" / "hashes.json").read_text()) == {}
 

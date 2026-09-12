@@ -16,6 +16,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterator
 
 from openkb.cancellation import check_cancelled
+from openkb.execution_allowance import active_allowance
+from openkb.execution_measurement import Measurement, measurement_scope, validate_measurement
 
 # Request capacities are configurable model ceilings, not provider discovery.
 DEFAULT_PROCESSING = {
@@ -111,14 +113,18 @@ class RequestLimits:
             raise ProcessingIncomplete("model_capabilities_required", "configuration")
         return cls(context, output, **numbers)
 
-    def expanded(self) -> RequestLimits:
-        """Double each allowance up to its explicit model ceiling."""
+    def expanded(self, *, reason: str | None = None) -> RequestLimits:
+        """Grow within explicit ceilings without enlarging an already sufficient output."""
         return replace(
             self,
             context_tokens=min(
                 self.context_tokens * 2, self.max_context_tokens or self.context_tokens
             ),
-            output_tokens=min(self.output_tokens * 2, self.max_output_tokens or self.output_tokens),
+            output_tokens=(
+                self.output_tokens
+                if reason == "input_budget_exceeded"
+                else min(self.output_tokens * 2, self.max_output_tokens or self.output_tokens)
+            ),
         )
 
     def request(
@@ -164,6 +170,7 @@ class ExecutionBudget:
     charged_tokens: int = 0
     unknown_usage: int = 0
     observations: list[dict[str, Any]] = field(default_factory=list)
+    measurement: Measurement = field(default_factory=Measurement, repr=False)
     incomplete: ProcessingIncomplete | None = field(default=None, repr=False)
     lock: Any = field(default_factory=threading.RLock, repr=False)
     on_observation: Callable[[ExecutionBudget], None] = field(
@@ -191,6 +198,8 @@ class ExecutionBudget:
         )
         if remaining <= 0:
             raise ProcessingIncomplete("time_budget_exhausted", self.stage)
+        if allowance := active_allowance():
+            remaining = min(remaining, allowance.remaining())
         if stage and stage != self.stage:
             self.stage, self.stage_started = stage, now
         return remaining
@@ -222,6 +231,8 @@ class ExecutionBudget:
                 and self.charged_tokens + reserved > self.limits.max_tokens
             ):
                 raise ProcessingIncomplete("token_budget_exhausted", self.stage)
+            if allowance := active_allowance():
+                allowance.before_reserve(options, reserved)
             self.attempts += 1
             self.charged_tokens += reserved
             observation = {
@@ -282,7 +293,7 @@ class ExecutionBudget:
             return False
         with self.lock:
             self.checkpoint()
-            expanded = previous.expanded()
+            expanded = previous.expanded(reason=reason)
             if expanded == previous:
                 return False
             if self.limits == previous:
@@ -300,11 +311,18 @@ class ExecutionBudget:
 
     def _call(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
         for attempt in range(self.limits.max_attempts):
+            waiting = time.monotonic()
             while not self.permits.acquire(timeout=0.05):
-                self.checkpoint()
+                self._check_queue(waiting)
+            acquired = time.monotonic()
             observation = None
+            measured = None
+            done = None
             try:
                 options, observation = self.reserve(kwargs, limits)
+                measured = self.measurement.begin_request(
+                    observation, acquired - waiting, time.monotonic() - acquired
+                )
                 # Only the transport runs here. It cannot publish Wiki changes.
                 # SDK timeout commonly means idle-read time, so also bound the
                 # elapsed request even when the provider keeps dripping bytes.
@@ -319,6 +337,7 @@ class ExecutionBudget:
                     except BaseException as exc:
                         errors.append(exc)
                     finally:
+                        self.measurement.finish_request(measured)
                         done.set()
 
                 threading.Thread(target=request, name="openkb-budgeted-model", daemon=True).start()
@@ -328,14 +347,22 @@ class ExecutionBudget:
                     if time.monotonic() >= deadline:
                         # Transport outcome is unknown. End this item; do not
                         # overlap another attempt with an outstanding request.
+                        if allowance := active_allowance():
+                            allowance.request_timed_out(options)
                         raise ProcessingIncomplete("request_timeout", self.stage)
                 self.checkpoint()
                 if time.monotonic() >= deadline:
+                    if allowance := active_allowance():
+                        allowance.request_timed_out(options)
                     raise ProcessingIncomplete("request_timeout", self.stage)
                 if errors:
                     raise errors[0]
                 response = values[0]
+                self.measurement.provider_usage(measured, getattr(response, "usage", None))
                 self.settle(observation, response)
+                from openkb.execution_receipt import dispatched_output
+
+                dispatched_output(options)
                 return response
             except (OutputTruncated, InputTooLarge):
                 raise  # Settled or never sent: the compiler can shrink the batch.
@@ -346,15 +373,34 @@ class ExecutionBudget:
                 if not _transient(exc) or attempt + 1 == self.limits.max_attempts:
                     raise
             finally:
+                if measured is not None and done is not None and not done.is_set():
+                    self.measurement.observe_pending(measured)
                 if observation is not None and observation["usage"] is None:
                     with self.lock:
                         self.unknown_usage += 1
-                self.permits.release()
+                if done is not None and not done.is_set():
+                    # A degraded optional request may still be on the wire. Keep
+                    # its global concurrency slot until that transport settles.
+                    def release_when_done(event=done):
+                        event.wait()
+                        self.permits.release()
+
+                    threading.Thread(target=release_when_done, daemon=True).start()
+                else:
+                    self.permits.release()
             deadline = time.monotonic() + min(0.25 * 2**attempt, self.checkpoint())
             while time.monotonic() < deadline:
                 self.checkpoint()
                 time.sleep(min(0.05, max(0, deadline - time.monotonic())))
         raise AssertionError("Positive attempt limit required")
+
+    def _check_queue(self, waiting):
+        self.checkpoint()
+        # A timed-out optional transport still owns its slot. Even profiles
+        # without stage/document ceilings must eventually stop waiting for it.
+        if time.monotonic() - waiting >= self.limits.request_timeout:
+            self.incomplete = ProcessingIncomplete("request_queue_timeout", self.stage)
+            raise self.incomplete
 
     async def acall(self, function: Any, **kwargs: Any) -> Any:
         while True:
@@ -367,14 +413,24 @@ class ExecutionBudget:
 
     async def _acall(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
         for attempt in range(self.limits.max_attempts):
+            waiting = time.monotonic()
             while not self.permits.acquire(blocking=False):
-                self.checkpoint()
+                self._check_queue(waiting)
                 await asyncio.sleep(0.05)
+            acquired = time.monotonic()
             observation = None
+            measured = None
             try:
                 options, observation = self.reserve(kwargs, limits)
+                measured = self.measurement.begin_request(
+                    observation, acquired - waiting, time.monotonic() - acquired
+                )
                 response = await asyncio.wait_for(function(**options), options["timeout"])
+                self.measurement.provider_usage(measured, getattr(response, "usage", None))
                 self.settle(observation, response)
+                from openkb.execution_receipt import dispatched_output
+
+                dispatched_output(options)
                 return response
             except (OutputTruncated, InputTooLarge):
                 raise
@@ -385,6 +441,8 @@ class ExecutionBudget:
                 if not _transient(exc) or attempt + 1 == self.limits.max_attempts:
                     raise
             finally:
+                if measured is not None:
+                    self.measurement.finish_request(measured)
                 if observation is not None and observation["usage"] is None:
                     with self.lock:
                         self.unknown_usage += 1
@@ -420,7 +478,8 @@ def processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBudget]:
     budget = ExecutionBudget(RequestLimits.from_config(config))
     token = _ACTIVE.set(budget)
     try:
-        yield budget
+        with measurement_scope(budget.measurement):
+            yield budget
     finally:
         from openkb.compilation_report import collect_compile_report
 
@@ -431,6 +490,7 @@ def processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBudget]:
                 unknown_usage=budget.unknown_usage,
                 elapsed_seconds=time.monotonic() - budget.started,
                 requests=budget.observations,
+                measurement=budget.measurement.value,
             )
         _ACTIVE.reset(token)
 
@@ -456,11 +516,17 @@ def cleanup_limit() -> float | None:
 
 
 def model_call(function: Any, **kwargs: Any) -> Any:
+    from openkb.execution_receipt import dispatched_output
+
+    dispatched_output(kwargs)
     active = _ACTIVE.get()
     return active.call(function, **kwargs) if active else function(**kwargs)
 
 
 async def model_acall(function: Any, **kwargs: Any) -> Any:
+    from openkb.execution_receipt import dispatched_output
+
+    dispatched_output(kwargs)
     active = _ACTIVE.get()
     return await active.acall(function, **kwargs) if active else await function(**kwargs)
 
@@ -471,6 +537,11 @@ def processing_checkpoint(stage: str | None = None) -> None:
         active.checkpoint(stage)
     else:
         check_cancelled()
+
+
+def processing_wait_limit() -> float:
+    active = _ACTIVE.get()
+    return active.limits.request_timeout if active else 180.0
 
 
 @contextmanager
@@ -496,7 +567,7 @@ def validate_usage(value: Any) -> None:
         raise ValueError("Invalid execution usage")
     if not value:
         return
-    if set(value) != {
+    if set(value) - {"measurement"} != {
         "observable_attempts",
         "charged_tokens",
         "unknown_usage",
@@ -504,6 +575,8 @@ def validate_usage(value: Any) -> None:
         "requests",
     }:
         raise ValueError("Invalid execution usage fields")
+    if "measurement" in value:
+        validate_measurement(value["measurement"])
     for key in ("observable_attempts", "charged_tokens", "unknown_usage"):
         if type(value[key]) is not int or value[key] < 0:
             raise ValueError("Invalid execution usage count")
@@ -545,7 +618,7 @@ def validate_usage(value: Any) -> None:
         usage = row["usage"]
         if usage is not None and (
             not isinstance(usage, dict)
-            or set(usage) != {"input", "output"}
+            or set(usage) not in ({"input", "output"}, {"total"})
             or any(type(count) is not int or count < 0 for count in usage.values())
         ):
             raise ValueError("Invalid model usage observation")
@@ -577,18 +650,31 @@ def external_request_usage(reservation: int, stage: str = "external"):
             "stage": stage,
             "reserved_tokens": reservation,
             "usage": None,
-            "transport_attempts": 1,
+            "transport_attempts": None,
+            "input_estimate": reservation,
+            "output_reserve": 0,
+            "timeout": min(active.checkpoint(), active.limits.request_timeout),
         }
         active.observations.append(observation)
         active.on_observation(active)
+    measured = active.measurement.begin_request(observation, 0.0, 0.0)
     try:
         yield receipt
     finally:
+        active.measurement.finish_request(measured)
+        for field in ("cache_read_tokens", "cache_write_tokens"):
+            value = receipt.get(field)
+            if type(value) is int and value >= 0:
+                measured[field] = value
         with active.lock:
             tokens = receipt.get("tokens")
             if type(tokens) is int and tokens >= 0:
                 active.charged_tokens += tokens - reservation
-                observation["usage"] = {"total": tokens}
+                observation["usage"] = (
+                    {"input": receipt["input"], "output": receipt["output"]}
+                    if type(receipt.get("input")) is int and type(receipt.get("output")) is int
+                    else {"total": tokens}
+                )
             else:
                 active.unknown_usage += 1
             active.on_observation(active)

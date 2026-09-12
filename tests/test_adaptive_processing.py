@@ -120,7 +120,11 @@ def test_compilation_splits_at_capacity_and_publishes_only_complete_batches(
     failures = [call for call in calls if call[2]]
     assert [call[1] for call in failures[:3]] == [1024, 2048, 3072]
     assert all(call[1] <= 3072 for call in calls)
-    assert len(completed) == 3 and len({unit["id"] for unit in completed}) == 3
+    assert len(completed) == 3 and {unit["text"].strip() for unit in completed} == {
+        "Alpha condition.",
+        "Beta condition.",
+        "Gamma condition.",
+    }
     assert result.usage["observable_attempts"] == len(calls)
     for page in (kb_dir / "wiki/concepts").glob("*.md"):
         assert '"partial":' not in page.read_text()
@@ -239,8 +243,9 @@ def test_invalid_limits_rejected_before_dispatch(changes):
         RequestLimits.from_config(profile(**changes))
 
 
-def test_larger_candidate_can_use_context_ceiling_before_verification(monkeypatch):
-    monkeypatch.setattr(litellm, "token_counter", lambda **_: 5000)
+@pytest.mark.parametrize("input_tokens", [5000, 14500])
+def test_larger_candidate_can_use_context_ceiling_before_verification(monkeypatch, input_tokens):
+    monkeypatch.setattr(litellm, "token_counter", lambda **_: input_tokens)
     budget = ExecutionBudget(
         RequestLimits.from_config(
             profile(
@@ -259,8 +264,9 @@ def test_larger_candidate_can_use_context_ceiling_before_verification(monkeypatc
 
     budget.call(completion, model="openai/offline-test", messages=[])
     assert len(calls) == 1
-    assert calls[0]["max_tokens"] == 2048
-    assert budget.attempts == 1 and budget.limits.context_tokens == 8192
+    assert calls[0]["max_tokens"] == 1024
+    assert budget.attempts == 1
+    assert budget.limits.context_tokens == (8192 if input_tokens == 5000 else 16384)
 
 
 def test_deepseek_transport_sends_full_limits_and_recovers_from_length(

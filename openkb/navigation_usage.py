@@ -11,7 +11,7 @@ from openkb.sources import read_object, valid_id
 
 
 class NavigationRun:
-    def __init__(self, store, source, parsed, profile):
+    def __init__(self, store, source, parsed, profile, *, included_in_compilation=False):
         self.store = store
         self.path = store.owned_path(
             store.root / "navigation-runs" / source.source_id / f"{uuid.uuid4().hex}.json"
@@ -23,6 +23,7 @@ class NavigationRun:
             "profile": profile,
             "usage": {},
             "accounting_complete": False,
+            "included_in_compilation": included_in_compilation,
         }
         atomic_write_json(self.path, self.record)
 
@@ -34,7 +35,14 @@ class NavigationRun:
             "charged_tokens": budget.charged_tokens,
             "unknown_usage": sum(row["usage"] is None for row in budget.observations),
             "elapsed_seconds": time.monotonic() - budget.started,
-            "requests": budget.observations,
+            "requests": list(budget.observations),
+            "measurement": {
+                **budget.measurement.value,
+                "spans": [],
+                "requests": [
+                    {**row, "parent": None} for row in budget.measurement.value["requests"]
+                ],
+            },
         }
         atomic_write_json(self.path, self.record)
 
@@ -55,13 +63,27 @@ def navigation_usage(store, source_id):
         "elapsed_seconds": 0.0,
         "accounting_complete": True,
     }
+    included = {
+        key: 0 if key != "elapsed_seconds" else 0.0
+        for key in (
+            "runs",
+            "observable_attempts",
+            "charged_tokens",
+            "unknown_usage",
+            "elapsed_seconds",
+        )
+    }
+    standalone = dict(included)
     for path in root.glob("*.json"):
         record = read_object(store.owned_path(path))
         if record.get("source") != source_id or type(record.get("accounting_complete")) is not bool:
             raise ValueError("Invalid navigation accounting identity")
         validate_usage(record["usage"])
+        group = included if record.get("included_in_compilation", False) else standalone
+        group["runs"] += 1
         totals["runs"] += 1
         totals["accounting_complete"] &= record["accounting_complete"]
         for key in ("observable_attempts", "charged_tokens", "unknown_usage", "elapsed_seconds"):
             totals[key] += record["usage"].get(key, 0)
-    return totals
+            group[key] += record["usage"].get(key, 0)
+    return {**totals, "included_in_compilation": included, "standalone": standalone}

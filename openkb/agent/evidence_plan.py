@@ -7,10 +7,8 @@ import json
 from openkb.agent.evidence_pages import _existing_window
 from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches
 from openkb.agent.evidence_units import JSON_FORMAT
-from openkb.agent.evidence_units import fits as legacy_fits
 from openkb.agent.evidence_units import messages as base_messages
 from openkb.config import compilation_model_options, resolve_entity_types
-from openkb.knowledge_commit import wiki_version
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.schema import get_agents_md
@@ -50,6 +48,12 @@ def messages(system, payload):
     """Use batch-local identities; labels and page identities are only context."""
     labels = {f"t{i}": topic for i, topic in enumerate(payload["topics"], 1)}
     wire = {**payload, "topics": list(labels), "topic_labels": labels}
+    if "candidates" in payload:
+        identities = {value: key for key, value in labels.items()}
+        wire["candidates"] = [
+            {**group, "members": [identities[member] for member in group["members"]]}
+            for group in payload["candidates"]
+        ]
     result = base_messages(system, wire)
     body = json.loads(result[-1]["content"])
     body["output_contract"] = (
@@ -78,7 +82,9 @@ def decode_members(value, topics):
     return {**value, "topics": groups}
 
 
-def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_event):
+def plan_topics(
+    topics, workspace, settings, limits, checkpoints, *, bundle, on_event, navigation=None
+):
     import litellm
 
     from openkb.agent.compiler import _llm_call, _read_concept_briefs, _read_entity_briefs
@@ -86,24 +92,44 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
     wiki, model = workspace / "wiki", settings["model"]
     entity_types = resolve_entity_types(settings)
     catalog = _read_concept_briefs(wiki) + "\n" + _read_entity_briefs(wiki)
-    dependencies = wiki_version(workspace)
+    existing_targets = {
+        path.relative_to(wiki).with_suffix("").as_posix()
+        for folder in ("concepts", "entities")
+        for path in (wiki / folder).glob("*.md")
+    }
     planned = {}
     failures = []
     schema = get_agents_md(wiki)
 
     def payload(batch):
-        previous = "\n".join(f"{path}: {group['title']}" for path, group in planned.items())
         return {
             "stage": "planning",
             "topics": batch,
+            **(
+                {
+                    "navigation": {
+                        "hints": [
+                            {key: node[key] for key in ("title", "summary", "summary_origin")}
+                            for node in navigation["nodes"]
+                            if any(
+                                word.casefold()
+                                in (node["title"] + " " + node["summary"]).casefold()
+                                for topic in batch
+                                for word in topic.split()
+                                if len(word) > 2
+                            )
+                        ][:8],
+                    }
+                }
+                if navigation
+                else {}
+            ),
             "entity_types": entity_types,
             "schema": schema,
-            "existing_pages": _existing_window(
-                catalog + "\n" + previous, " ".join(batch), model, limits
-            ),
+            "existing_pages": _existing_window(catalog, " ".join(batch), model, limits),
         }
 
-    def fits_batch(batch):
+    def fits_batch(batch, *, candidates=None):
         # Reserve room for one complete row per topic as well as the request's
         # full output allowance. Unexpected expansion is retried before splitting.
         shape = {
@@ -113,11 +139,9 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
             ]
         }
         request = payload(batch)
-        # Keep the prior conservative partition so accepted plans can be resumed.
-        if not (
-            litellm.token_counter(model=model, text=json.dumps(shape)) <= limits.output_tokens
-            and legacy_fits(limits, model, PLAN_SYSTEM, request)
-        ):
+        if candidates is not None:
+            request.update(mode="coordination", candidates=candidates)
+        if litellm.token_counter(model=model, text=json.dumps(shape)) > limits.output_tokens:
             return False
         try:
             limits.request(model, messages(PLAN_SYSTEM, request), {"response_format": JSON_FORMAT})
@@ -127,9 +151,12 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                 raise
             return False
 
-    def plan_once(batch):
+    def plan_once(batch, *, candidates=None):
         processing_checkpoint("planning")
         request = payload(batch)
+        if candidates is not None:
+            request.update(mode="coordination", candidates=candidates)
+        dependencies = {"catalog_window": request["existing_pages"], "schema": schema}
         key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
         value = checkpoints.load(key)
         if value is None:
@@ -139,37 +166,36 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
             value = checkpoints.load(previous) if previous else None
         on_event({"stage": "planning", "topics": len(batch), "cached": value is not None})
         if value is None:
+            from openkb.agent.request_analysis import RequestAnalysis
+
+            request_messages = messages(PLAN_SYSTEM, request)
+            options = {"response_format": JSON_FORMAT, **compilation_model_options(settings)}
+            if candidates is not None:
+                limits.request(model, request_messages, options)
+            analysis = RequestAnalysis(
+                checkpoints, "planning", request_messages, options, rules=(__name__,)
+            )
             try:
-                value = json.loads(
-                    _llm_call(
+                value = analysis.run(
+                    lambda: _llm_call(
                         model,
-                        messages(PLAN_SYSTEM, request),
-                        "planning",
+                        request_messages,
+                        "planning_coordination" if candidates else "planning",
                         bundle=bundle,
-                        response_format=JSON_FORMAT,
-                        **compilation_model_options(settings),
-                    )
+                        **options,
+                    ),
+                    lambda value: _validate(decode_members(value, batch), batch, entity_types),
                 )
                 value = decode_members(value, batch)
             except (ValueError, TypeError):
                 raise ResponseIncomplete("topic_plan_invalid", "planning") from None
         groups = _validate(value, batch, entity_types)
-        for group in groups:
-            prior = planned.get(group["path"])
-            if prior and group.get("type") != prior.get("type"):
-                raise ResponseIncomplete("topic_type_conflict", "planning")
         checkpoints.save(key, value)
-        for group in groups:
-            target = group["path"]
-            if target in planned:
-                if group.get("type") != planned[target].get("type"):
-                    raise ProcessingIncomplete("topic_type_conflict", "planning")
-                planned[target]["members"].extend(group["members"])
-            else:
-                planned[target] = group
+        return groups
 
     def recovery_key(batch):
         request = payload(batch)
+        dependencies = {"catalog_window": request["existing_pages"], "schema": schema}
         key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
         if checkpoints.load_recovery(key, "split") is None:
             previous = checkpoints.previous_plan_key(
@@ -182,7 +208,8 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
         return key
 
     def plan(batch):
-        for completed, _ in retry_batches(
+        groups = []
+        for completed, result in retry_batches(
             batch,
             plan_once,
             stage="planning",
@@ -191,10 +218,12 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
             recovery_key=recovery_key,
             on_unrecoverable=lambda batch, error: failures.append((batch, error)),
         ):
-            progress.advance(len(completed))
+            groups.extend(result)
+        return groups
 
     processing_checkpoint("planning")
     with progress_scope("planning", len(topics), "topics") as progress:
+        batches = []
         offset = 0
         while offset < len(topics):
             processing_checkpoint("planning")
@@ -203,8 +232,24 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                 size //= 2
             if not size:
                 raise ProcessingIncomplete("topic_context_exceeds_request_budget", "planning")
-            plan(topics[offset : offset + size])
+            batches.append(topics[offset : offset + size])
             offset += size
+        from openkb.agent.evidence_parallel import parallel_batches
+        from openkb.agent.planning_candidates import reconcile_candidates
+
+        candidates = dict(parallel_batches(batches, plan, limits.concurrency, stage="planning"))
+        ordered = [group for index in sorted(candidates) for group in candidates[index]]
+        groups = reconcile_candidates(
+            ordered,
+            plan_once,
+            lambda groups: fits_batch(
+                sorted(member for group in groups for member in group["members"]), candidates=groups
+            ),
+            MAX_PLAN_TOPICS,
+            existing=existing_targets,
+        )
+        planned = {group["path"]: group for group in groups}
+        progress.advance(sum(len(group["members"]) for group in groups))
     if failures:
         from openkb.compilation_report import report_content_omission
         from openkb.sources import content_id
@@ -234,6 +279,7 @@ def _validate(value, topics, entity_types):
     for group in value["topics"]:
         if (
             not isinstance(group, dict)
+            or set(group) - {"name", "title", "kind", "members", "type", "aliases", "scope"}
             or not all(
                 isinstance(group.get(key), str) and group[key].strip() for key in ("name", "title")
             )
@@ -242,6 +288,22 @@ def _validate(value, topics, entity_types):
             or not isinstance(group.get("members"), list)
             or not group["members"]
             or not all(isinstance(member, str) for member in group["members"])
+            or len(group["title"]) > 512
+            or (
+                "scope" in group
+                and (not isinstance(group["scope"], str) or len(group["scope"]) > 1000)
+            )
+            or (
+                "aliases" in group
+                and (
+                    not isinstance(group["aliases"], list)
+                    or len(group["aliases"]) > 16
+                    or any(
+                        not isinstance(alias, str) or not 0 < len(alias) <= 320
+                        for alias in group["aliases"]
+                    )
+                )
+            )
         ):
             raise ResponseIncomplete("topic_plan_invalid", "planning")
         name = group["name"]

@@ -106,6 +106,7 @@ class RemovePlan:
     source_json: Path
     images_dir: Path
     kept_raw: Path | None = None
+    kept_summary: bool = False
 
 
 @dataclass
@@ -142,10 +143,12 @@ def _build_remove_plan(
 ) -> RemovePlan:
     """Scan the KB and predict every file remove will touch (no writes).
 
-    Only frontmatter ``sources:`` membership drives the delete/edit
-    classification so the plan reflects what the executor will actually do.
+    Frontmatter membership and explicit source ownership markers identify
+    affected pages, including marked contributions whose metadata was edited.
     """
-    from openkb.source_refs import scan_affected_pages
+    from openkb.source_refs import SourceOwnership, scan_affected_pages
+
+    ownership = SourceOwnership(kb_dir, meta.get("source_id"))
 
     name = meta.get("name", "?")
     doc_name = meta.get("doc_name") or Path(name).stem
@@ -163,8 +166,14 @@ def _build_remove_plan(
     actions: list[RemoveAction] = []
 
     summary_path = wiki_dir / "summaries" / f"{doc_name}.md"
+    kept_summary = False
     if summary_path.exists():
-        actions.append(RemoveAction("DELETE", str(summary_path.relative_to(kb_dir))))
+        kept_summary = not ownership.can_delete(summary_path)
+        actions.append(
+            RemoveAction(
+                "KEEP" if kept_summary else "DELETE", str(summary_path.relative_to(kb_dir))
+            )
+        )
 
     source_md = wiki_dir / "sources" / f"{doc_name}.md"
     source_json = wiki_dir / "sources" / f"{doc_name}.json"
@@ -183,7 +192,12 @@ def _build_remove_plan(
         )
 
     source_file_marker = f"summaries/{doc_name}.md"
-    affected_concepts = scan_affected_pages(wiki_dir / "concepts", source_file_marker)
+    affected_concepts = scan_affected_pages(
+        wiki_dir / "concepts",
+        source_file_marker,
+        source_id=meta.get("source_id"),
+        ownership=ownership,
+    )
     concept_deletes = [s for s, r in affected_concepts if r == 0 and not keep_empty]
     concept_edits = [s for s, r in affected_concepts if r > 0 or keep_empty]
     for slug in concept_deletes:
@@ -193,7 +207,12 @@ def _build_remove_plan(
             RemoveAction("MODIFY", f"wiki/concepts/{slug}.md  (drop this doc from sources)")
         )
 
-    affected_entities = scan_affected_pages(wiki_dir / "entities", source_file_marker)
+    affected_entities = scan_affected_pages(
+        wiki_dir / "entities",
+        source_file_marker,
+        source_id=meta.get("source_id"),
+        ownership=ownership,
+    )
     entity_deletes = [s for s, r in affected_entities if r == 0 and not keep_empty]
     entity_edits = [s for s, r in affected_entities if r > 0 or keep_empty]
     for slug in entity_deletes:
@@ -268,6 +287,7 @@ def _build_remove_plan(
         source_json=source_json,
         images_dir=images_dir,
         kept_raw=kept_raw,
+        kept_summary=kept_summary,
     )
 
 
@@ -293,6 +313,7 @@ def _execute_remove_plan(
         remove_doc_from_index,
     )
     from openkb.lint import fix_broken_links
+    from openkb.source_refs import SourceOwnership
 
     wiki_dir = kb_dir / "wiki"
     openkb_dir = kb_dir / ".openkb"
@@ -303,15 +324,22 @@ def _execute_remove_plan(
         raise RuntimeError("Document removal requires the KB write lease")
     tracked = _wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan)
     before = _file_versions(kb_dir, tracked)
+    source_id = (registry.get(plan.file_hash) or {}).get("source_id")
+    ownership = SourceOwnership(kb_dir, source_id)
     with mutation_scope(kb_dir, _wiki_paths(kb_dir, plan), operation="remove-wiki"):
-        plan.summary_path.unlink(missing_ok=True)
+        if not plan.kept_summary:
+            plan.summary_path.unlink(missing_ok=True)
         plan.source_md.unlink(missing_ok=True)
         plan.source_json.unlink(missing_ok=True)
         if plan.images_dir.is_dir():
             shutil.rmtree(plan.images_dir)
 
-        concept_result = remove_doc_from_concept_pages(wiki_dir, doc_name, keep_empty=keep_empty)
-        entity_result = remove_doc_from_entity_pages(wiki_dir, doc_name, keep_empty=keep_empty)
+        concept_result = remove_doc_from_concept_pages(
+            wiki_dir, doc_name, keep_empty=keep_empty, source_id=source_id, ownership=ownership
+        )
+        entity_result = remove_doc_from_entity_pages(
+            wiki_dir, doc_name, keep_empty=keep_empty, source_id=source_id, ownership=ownership
+        )
         remove_doc_from_index(
             wiki_dir,
             doc_name,
@@ -493,9 +521,13 @@ def _commit_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
 
 
 def _plan_version(kb_dir: Path, plan: RemovePlan) -> str:
+    from openkb.knowledge_commit import _directory
+
     digest = hashlib.sha256()
     digest.update(repr(plan).encode())
-    for root in sorted(set(_wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan))):
+    roots = _wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan)
+    roots += [_directory(kb_dir, "baselines.json"), _directory(kb_dir, "completed")]
+    for root in sorted(set(roots)):
         paths = sorted(root.rglob("*")) if root.is_dir() else [root]
         # Include the directory itself so adding its first child changes the view.
         digest.update(str(root.relative_to(kb_dir)).encode())
@@ -587,6 +619,8 @@ def remove_document(
         ]
         if preview.plan.kept_raw is not None:
             retained_paths.append(preview.plan.kept_raw)
+        if preview.plan.kept_summary:
+            retained_paths.append(preview.plan.summary_path)
         if result.status == "partial":
             retained_paths += _commit_paths(kb_dir, preview.plan)
         retained = tuple(

@@ -21,9 +21,9 @@ def test_missing_unit_in_complete_response_recovers(kb_dir, tmp_path, monkeypatc
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "facts":
-            calls.append([unit["id"] for unit in payload["units"]])
+            calls.append([unit["text"] for unit in payload["units"]])
             if len(calls) == 1:
-                dropped.append(value["units"][-1]["id"])
+                dropped.append(payload["units"][-1]["text"])
                 if defect == "missing":
                     value["units"].pop()
                 elif defect == "duplicate":

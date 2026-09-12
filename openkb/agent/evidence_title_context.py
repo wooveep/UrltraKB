@@ -25,7 +25,7 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
     evidence = []
     for fact in facts:
         scope = Evidence(**fact["scope"])
-        view = reader.read(scope, max_chars=max(4096, scope.end - scope.start))
+        view = reader.read(scope, max_chars=reader.complete_bound(scope))
         if view.next_start is not None:
             raise ValueError("Incomplete original title evidence")
         contextual = {}
@@ -34,7 +34,7 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         neighbors = []
         for item in fact.get("context_evidence", []):
             ref = Evidence(**item["reference"])
-            neighbor = reader.read(ref, max_chars=max(4096, ref.end - ref.start))
+            neighbor = reader.read(ref, max_chars=reader.complete_bound(ref))
             neighbors.append(
                 {
                     "relation": item["relation"],

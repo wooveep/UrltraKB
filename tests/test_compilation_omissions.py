@@ -133,3 +133,75 @@ def test_new_version_withdraws_old_contribution_for_excluded_topic(kb_dir, setup
     assert second.omissions
     assert not (kb_dir / "wiki/concepts/beta.md").exists()
     assert "See Beta." in (kb_dir / "wiki/concepts/alpha.md").read_text()
+
+
+@pytest.mark.parametrize("position", ["outside", "inside"])
+@pytest.mark.parametrize("operation", ["remove", "update"])
+@pytest.mark.parametrize("identity", ["intact", "no_metadata", "unmarked"])
+def test_accepted_cross_source_link_cleanup_keeps_manual_summary(
+    kb_dir, tmp_path, setup, position, operation, identity
+):
+    from openkb.application.removal import remove_document
+    from openkb.application.source_actions import review_source_proposal
+
+    source, state, _ = setup
+    state["broken"] = False
+    first_source = tmp_path / "first.md"
+    first_source.write_text("Alpha requirement.")
+    first = import_document(kb_dir, first_source)
+    assert first.knowledge_compilation == "completed", first
+    second = import_document(kb_dir, source)
+    assert second.knowledge_compilation == "completed", second
+    summary = next(
+        p for p in (kb_dir / "wiki/summaries").glob("*.md") if first.source_id in p.read_text()
+    )
+    note = "\nHuman note: retain this interpretation of [[concepts/beta|Beta]].\n"
+    text = summary.read_text()
+    closing = f"<!-- /openkb-source:{first.source_id} -->"
+    summary.write_text(
+        text + note if position == "outside" else text.replace(closing, note + closing)
+    )
+    if identity != "intact":
+        from openkb import frontmatter
+
+        text = frontmatter.drop_line(summary.read_text(), "source_id")
+        if identity == "unmarked":
+            text = text.replace(f"<!-- openkb-source:{first.source_id} -->", "").replace(
+                closing, ""
+            )
+        summary.write_text(text)
+    source.write_text("Alpha requirement updated.")
+    updated = import_document(kb_dir, source)
+    assert updated.reason == "needs_acceptance", updated
+    review = review_source_proposal(kb_dir, updated.resume)
+    accepted = continue_source(
+        kb_dir,
+        updated.source_id,
+        version_id=updated.input_version,
+        proposal_id=updated.resume,
+        accept_pages=review["protected"],
+    )
+    assert accepted.knowledge_compilation == "completed", accepted
+    assert "Human note: retain this interpretation of Beta." in summary.read_text()
+    before = summary.read_bytes()
+    if operation == "remove":
+        removed = remove_document(kb_dir, first.source_id)
+        assert removed.status == "removed", removed
+        assert summary.read_bytes() == before
+        assert summary.relative_to(kb_dir).as_posix() in removed.retained
+    else:
+        first_source.write_text("Alpha requirement revised.")
+        updated = import_document(kb_dir, first_source)
+        assert updated.reason == "needs_acceptance", updated
+        assert summary.read_bytes() == before
+        review = review_source_proposal(kb_dir, updated.resume)
+        assert summary.relative_to(kb_dir / "wiki").as_posix() in review["protected"]
+        accepted = continue_source(
+            kb_dir,
+            updated.source_id,
+            version_id=updated.input_version,
+            proposal_id=updated.resume,
+            accept_pages=review["protected"],
+        )
+        assert accepted.knowledge_compilation == "completed", accepted
+        assert "Human note" not in summary.read_text()

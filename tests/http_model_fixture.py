@@ -19,7 +19,11 @@ def evidence_response(payload):
                         {
                             "topic": "Notes",
                             "statement": "Confirmed knowledge.",
-                            "quote": unit["text"][:40],
+                            "quote": (
+                                unit["text"][:40]
+                                if unit["text"].find(unit["text"][:40], 1) < 0
+                                else unit["text"]
+                            ),
                         }
                     ],
                     "empty_reason": "",
@@ -62,6 +66,34 @@ def evidence_response(payload):
             "verdict": "supported",
             "reason": "The controlled contribution matches its evidence.",
         }
+    elif isinstance(payload, dict) and payload.get("stage") == "index_summary":
+        return {
+            "summaries": [
+                {"id": row["id"], "summary": "Source navigation."} for row in payload["nodes"]
+            ]
+        }
+    elif isinstance(payload, dict) and payload.get("stage") == "index_structure":
+        return {
+            "sections": [
+                {
+                    "start": payload["blocks"][0]["id"],
+                    "end": payload["blocks"][-1]["id"],
+                    "level": 1,
+                    "title": "Source range",
+                }
+            ]
+        }
+    elif isinstance(payload, dict) and payload.get("stage") == "dependencies":
+        return {
+            "topics": [
+                {
+                    "path": candidate["path"],
+                    "status": "independent",
+                    "reason": "The fixture topics express independent requirements.",
+                }
+                for candidate in payload["candidates"]
+            ]
+        }
     return None
 
 
@@ -73,7 +105,9 @@ class ModelService(list):
         self.release.set()
         self.drip_seconds = 0.0
         self.respond = None
+        self.chat_response = None
         self.finish_reason = "stop"
+        self.usage = {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}
 
 
 @pytest.fixture
@@ -97,8 +131,46 @@ def model_service(kb_dir):
             except (ValueError, TypeError):
                 payload = {}
             value = evidence_response(payload) or value
-            if calls.respond is not None:
+            if calls.respond is not None and not (
+                calls.chat_response is not None and body.get("tools")
+            ):
                 value = calls.respond(body)
+            if calls.chat_response is not None and body.get("tools"):
+                message = calls.chat_response(body)
+                finish = "tool_calls" if message.get("tool_calls") else "stop"
+                if body.get("stream"):
+                    delta = {**message}
+                    if "tool_calls" in delta:
+                        delta["tool_calls"] = [
+                            {"index": i, **tool} for i, tool in enumerate(delta["tool_calls"])
+                        ]
+                    chunks = [
+                        {
+                            "id": "offline",
+                            "object": "chat.completion.chunk",
+                            "created": 1,
+                            "model": body["model"],
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                        },
+                        {
+                            "id": "offline",
+                            "object": "chat.completion.chunk",
+                            "created": 1,
+                            "model": body["model"],
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+                            "usage": calls.usage,
+                        },
+                    ]
+                    content = (
+                        "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
+                        + "data: [DONE]\n\n"
+                    ).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
             content = json.dumps(
                 {
                     "id": "offline",
@@ -112,7 +184,7 @@ def model_service(kb_dir):
                             "finish_reason": calls.finish_reason,
                         }
                     ],
-                    "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130},
+                    "usage": calls.usage,
                 }
             ).encode()
             self.send_response(200)
@@ -136,6 +208,7 @@ def model_service(kb_dir):
     config = {
         "model": "openai/offline-test",
         "language": "en",
+        "navigation": {"enabled": False},
         "processing": {
             "request_timeout": 3,
             "stage_timeout": 15,
@@ -160,3 +233,46 @@ def model_service(kb_dir):
         server.shutdown()
         server.server_close()
         thread.join(5)
+
+
+def original_source_answer(inspect):
+    """A deterministic external model that browses a published source before answering."""
+
+    def tool(name, arguments, index):
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": f"read_{index}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+            ],
+        }
+
+    def respond(body):
+        results = [row for row in body["messages"] if row["role"] == "tool"]
+        if not results:
+            return tool("list_sources", {"offset": 0, "limit": 20}, 0)
+        listing = json.loads(results[0]["content"])
+        source = listing["sources"][0]["source_id"]
+        if len(results) == 1:
+            return tool("read_source_tree", {"source_id": source, "offset": 0, "limit": 20}, 1)
+        tree = json.loads(results[1]["content"])
+        if len(results) == 2:
+            return tool(
+                "read_source_node",
+                {
+                    "source_id": source,
+                    "node_id": tree["nodes"][0]["id"],
+                    "offset": 0,
+                    "start": 0,
+                    "max_chars": 16000,
+                },
+                2,
+            )
+        evidence = json.loads(results[-1]["content"])
+        return {"role": "assistant", "content": inspect(tree, evidence)}
+
+    return respond

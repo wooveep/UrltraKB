@@ -74,11 +74,13 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
     assert result.knowledge_compilation == "completed", result
     assert generated and all("Linux version 7" in json.dumps(item) for item in generated)
     assert any(
-        "Linux version 7" in context["text"] and context["reference"]["parse_id"] == result.parse_id
+        "Linux version 7" in context["text"] and context["reference"]["parse_id"]
         for call in generated
         for passage in call["evidence"]
         for context in passage["neighbors"]
     )
+    pages = "\n".join(path.read_text() for path in (kb_dir / "wiki/concepts").glob("*.md"))
+    assert result.parse_id in pages  # Wire identities are rebound before publication.
 
 
 def test_invalid_figure_output_is_not_reused_after_model_correction(
@@ -149,5 +151,11 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
     table = [item for item in generated if "table" in item["location"]]
     assert table
     assert all("page" not in item["location"] for item in table)
-    assert all("Required value" in item["context"] for item in table)
+    assert all(
+        "Required value" in item["context"] for item in table if item["location"]["row"] != 1
+    )
+    for item in table:
+        if item["location"]["row"] == 1:
+            expected = "Parameter" if item["location"]["cell"] == 1 else "Required value"
+            assert expected in item["text"]
     assert len({item["location"]["row"] for item in table}) == 61

@@ -40,26 +40,9 @@ def finish_compilation(kb_dir, source, settings, result, *, bundle=None):
         return result
     result = finish_source_result(kb_dir, result)
     if result.knowledge_compilation == "completed" and result.status != "skipped":
-        from dataclasses import replace
-
         from openkb.application.execution import document_committed
-        from openkb.navigation import build_navigation
 
-        try:
-            document_committed(result)
-            navigation = build_navigation(
-                kb_dir,
-                source,
-                ParseStore(kb_dir).load(result.parse_id),
-                settings,
-                bundle=bundle,
-            )
-            if navigation["status"] == "degraded":
-                result = replace(result, warnings=(*result.warnings, "navigation_degraded"))
-        except (OperationCancelled, LockCancelled):
-            result = replace(result, warnings=(*result.warnings, "navigation_stopped"))
-        except Exception:
-            result = replace(result, warnings=(*result.warnings, "navigation_unavailable"))
+        document_committed(result)
     return result
 
 
@@ -162,11 +145,24 @@ def _compile_version(
                 name = name or f"{_sanitize_stem(Path(source.name).stem)[:100]}-{source.source_id}"
                 if name != _sanitize_stem(name) or len(name) > 200:
                     raise ValueError("Invalid document name")
+                from openkb.navigation import prepare_navigation
+
+                navigation = prepare_navigation(kb_dir, source, parsed, settings, bundle=bundle)
+                if navigation["status"] == "degraded":
+                    report_auxiliary_warning("navigation_degraded")
                 stage = "compiling"
                 on_event({"stage": stage})
                 processing_checkpoint(stage)
                 with KnowledgeWorkspace(kb_dir, source, parsed, bound_settings) as workspace:
                     _materialize(workspace.path, store, source, parsed, name)
+                    from openkb.navigation_tree import snapshot_markdown, snapshot_name
+
+                    atomic_write_text(
+                        workspace.path / "wiki" / snapshot_name(source, parsed),
+                        snapshot_markdown(
+                            kb_dir, source, parsed, asset_root=workspace.path / "wiki/sources"
+                        ),
+                    )
                     from openkb.agent.compiler import _close_async_llm_clients
                     from openkb.agent.evidence_compiler import compile_evidence
 
@@ -180,6 +176,7 @@ def _compile_version(
                             {**settings, "model": settings.get("model", DEFAULT_CONFIG["model"])},
                             bundle=bundle,
                             on_event=on_event,
+                            navigation=navigation,
                         )
                     finally:
                         asyncio.run(_close_async_llm_clients())
@@ -206,6 +203,13 @@ def _compile_version(
 
                     omissions = validate_omissions(report.omissions)
                     body += compilation_notice(omissions)
+                    # Only this newly generated summary is owned by the source.
+                    # Later cross-source link cleanup must not absorb manual text.
+                    body = (
+                        f"<!-- openkb-source:{source.source_id} -->\n"
+                        + body
+                        + f"\n<!-- /openkb-source:{source.source_id} -->"
+                    )
                     atomic_write_text(summary, metadata + body)
                     document = {
                         "name": source.name,
@@ -221,6 +225,8 @@ def _compile_version(
                         "source_version": source.id,
                         "parse_id": parsed.id,
                         "input_hash": source.blob,
+                        "navigation_id": navigation["id"],
+                        "compilation_navigation_id": navigation["id"],
                         "compilation_profile": bound_settings["_compilation_profile"],
                         "compilation_omissions": json.dumps(omissions, ensure_ascii=False),
                     }

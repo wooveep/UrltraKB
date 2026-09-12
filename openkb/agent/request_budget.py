@@ -16,9 +16,6 @@ from openkb.processing import (
 @contextmanager
 def visual_task_budget(kb_dir):
     config = resolve_effective_config(kb_dir)[0]
-    if not config.get("image_understanding", {}).get("enabled", False):
-        yield
-        return
     with processing_scope(config):
         yield
 
@@ -40,9 +37,20 @@ class RequestBudgetHooks(RunHooks):
         if not self.pending:
             return
         usage, receipt = self.pending.pop()
+        inputs = getattr(response.usage, "input_tokens", None)
+        outputs = getattr(response.usage, "output_tokens", None)
+        if type(inputs) is int and type(outputs) is int:
+            receipt.update(input=inputs, output=outputs)
         tokens = getattr(response.usage, "total_tokens", None)
-        if type(tokens) is int and tokens > 0:
+        if type(tokens) is int and tokens >= 0:
             receipt["tokens"] = tokens
+        cached = getattr(
+            getattr(response.usage, "input_tokens_details", None), "cached_tokens", None
+        )
+        # The SDK normalizes missing details to zero. Preserve that as unknown;
+        # a positive provider count is still an observable cache hit.
+        if type(cached) is int and cached > 0:
+            receipt["cache_read_tokens"] = cached
         usage.__exit__(None, None, None)
 
     def close(self):

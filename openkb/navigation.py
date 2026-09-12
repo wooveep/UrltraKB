@@ -5,14 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from importlib.metadata import version as package_version
 
-from openkb.cancellation import OperationCancelled
 from openkb.evidence import Evidence, ParseStore
 from openkb.implementation import module_revision
-from openkb.locks import LockCancelled, atomic_write_json
+from openkb.locks import atomic_write_json
 from openkb.processing import (
-    ProcessingIncomplete,
-    independent_processing_scope,
-    navigation_execution,
     processing_checkpoint,
     validate_usage,
 )
@@ -32,23 +28,30 @@ def _location_rows(source, parsed):
     ]
 
 
-def read_navigation(kb_dir, source, *, offset=0, limit=100):
+def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 200:
         raise ValueError("Invalid navigation window")
     store = SourceStore(kb_dir)
     root = store.owned_path(store.root / "navigation")
-    pointer = store.owned_path(root / "latest" / f"{source.id}.json")
-    if not pointer.exists():
-        return None
-    selected = read_object(pointer)
-    if set(selected) != {"navigation"}:
-        raise ValueError("Invalid navigation pointer")
-    identity = selected["navigation"]
+    if identity is None:
+        from openkb.state import HashRegistry
+
+        published = HashRegistry(kb_dir / ".openkb/hashes.json").get(source.source_id)
+        if published and published.get("source_version") == source.id:
+            identity = published.get("navigation_id")
+        if identity is None:
+            pointer = store.owned_path(root / "latest" / f"{source.id}.json")
+            if not pointer.exists():
+                return None
+            selected = read_object(pointer)
+            if set(selected) != {"navigation"}:
+                raise ValueError("Invalid navigation pointer")
+            identity = selected["navigation"]
     from openkb.sources import valid_id
 
     record = read_object(store.owned_path(root / f"{valid_id(identity)}.json"))
     if (
-        set(record)
+        set(record) - {"nodes", "schema"}
         != {"source_id", "version", "parse", "profile", "status", "reason", "positions", "usage"}
         or content_id(record) != identity
         or record.get("version") != source.id
@@ -79,142 +82,169 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100):
             )
         ):
             raise ValueError("Invalid navigation position")
+    if "nodes" in record:
+        from openkb.navigation_tree import validate_nodes
+
+        if type(record.get("schema")) is not int or record["schema"] != 2:
+            raise ValueError("Invalid navigation schema")
+        validate_nodes(record["nodes"], len(rows))
     validate_usage(record["usage"])
     return {
         **record,
         "id": identity,
         "positions": rows[offset : offset + limit],
         "total_positions": len(rows),
+        "capabilities": navigation_capabilities(record),
         "next_offset": offset + limit if offset + limit < len(rows) else None,
     }
 
 
 def build_navigation(kb_dir, source, parsed, settings, *, bundle=None):
-    """Run only after mandatory publication, or as an explicit separate rebuild."""
+    """Rebuild a saved parse and atomically switch only a matching published view."""
+    from openkb.compilation_report import collect_compile_report
+    from openkb.locks import kb_ingest_lock
+    from openkb.mutation import mutation_scope
+    from openkb.navigation_usage import NavigationRun
+    from openkb.processing import processing_scope
+    from openkb.state import HashRegistry
+
     store = SourceStore(kb_dir)
-    positions = _location_rows(source, parsed)
-    options = settings.get("navigation") or {}
-    record = {
-        "source_id": source.source_id,
-        "version": source.id,
-        "parse": parsed.id,
-        "profile": content_id(
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        registry_path = kb_dir / ".openkb/hashes.json"
+        registry = HashRegistry(registry_path)
+        published = registry.get(source.source_id)
+        if published and (
+            published.get("source_version") != source.id or published.get("parse_id") != parsed.id
+        ):
+            raise ValueError(
+                "Rebuild parsing differs from published knowledge; compile and publish first"
+            )
+        with collect_compile_report() as report, processing_scope(settings) as budget:
+            run = NavigationRun(store, source, parsed, content_id(settings.get("navigation")))
+            budget.on_observation = run.observe
+            try:
+                result = prepare_navigation(
+                    kb_dir, source, parsed, settings, bundle=bundle, reserve_compilation=False
+                )
+                if published:
+                    with mutation_scope(
+                        kb_dir, [registry_path], operation="publish source navigation"
+                    ):
+                        registry.add(source.source_id, {**published, "navigation_id": result["id"]})
+            finally:
+                run.finish(budget)
+        return {**result, "usage": report.usage}
+
+
+def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve_compilation=True):
+    """Build and save immutable compiler input without publishing a retrieval pointer."""
+    from openkb.config import compilation_model_options
+    from openkb.execution_measurement import measure_span
+    from openkb.navigation_tree import basic_tree
+
+    with measure_span("indexing"):
+        processing_checkpoint("indexing")
+        store = SourceStore(kb_dir)
+        profile = content_id(
             {
-                "options": options,
+                "options": settings.get("navigation"),
+                "limits": settings.get("processing")
+                if (settings.get("navigation") or {}).get("enabled", True)
+                else None,
                 "model": settings.get("model"),
-                "pageindex": package_version("pageindex"),
+                "model_options": compilation_model_options(settings),
                 "adapter": module_revision(__name__),
+                "tree": module_revision("openkb.navigation_tree"),
+                "enhancement": module_revision("openkb.navigation_enhancement"),
+                "structure": module_revision("openkb.navigation_structure"),
+                "wire": module_revision("openkb.agent.evidence_wire"),
+                "analysis": module_revision("openkb.agent.request_analysis"),
+                "shared": module_revision("openkb.agent.shared_analysis"),
+                "dispatch": module_revision("openkb.execution_receipt"),
+                "budget": module_revision("openkb.processing"),
+                "pageindex": package_version("pageindex"),
                 "endpoint": content_id(getattr(bundle, "base_url", None)),
                 "headers": content_id(getattr(bundle, "extra_headers", None)),
             }
-        ),
-        "status": "basic",
-        "reason": None,
-        "positions": positions,
-        "usage": {},
-    }
-    budget = None
-    run = None
-    if options.get("enabled") is True:
-        record.update(status="degraded", reason="navigation_interrupted")
-    _save_navigation(store, source, record)
-    try:
-        if options.get("enabled") is True:
-            with independent_processing_scope(options) as budget, navigation_execution():
-                from openkb.navigation_usage import NavigationRun
-
-                run = NavigationRun(store, source, parsed, record["profile"])
-                budget.on_observation = run.observe
-                processing_checkpoint("navigation")
-                _enhance(positions, kb_dir, source, parsed, settings, bundle, budget.limits)
-                record["status"] = "enhanced"
-                record["reason"] = None
-    except (OperationCancelled, LockCancelled):
-        record.update(status="degraded", reason="navigation_stopped")
-    except ProcessingIncomplete as exc:
-        record.update(status="degraded", reason=exc.reason)
-    except Exception as exc:
-        record.update(status="degraded", reason=f"navigation_failed:{type(exc).__name__}")
-    if budget is not None and run is not None:
-        record["usage"] = run.finish(budget)
-    _save_navigation(store, source, record)
-    return record
-
-
-def _save_navigation(store, source, record):
-    identity = content_id(record)
-    root = store.owned_path(store.root / "navigation")
-    atomic_write_json(store.owned_path(root / f"{identity}.json"), record)
-    atomic_write_json(
-        store.owned_path(root / "latest" / f"{source.id}.json"), {"navigation": identity}
-    )
-
-
-def _enhance(positions, kb_dir, source, parsed, settings, bundle, limits):
-    from pageindex import IndexConfig
-    from pageindex.index.pipeline import build_index
-    from pageindex.parser.protocol import ContentNode, ParsedDocument
-    from pageindex.tokens import count_tokens
-
-    reader = ParseStore(kb_dir).reader(source, parsed)
-    nodes = []
-    for number, block in enumerate(parsed.blocks, 1):
-        processing_checkpoint()
-        view = reader.read(
-            Evidence(source.source_id, source.id, parsed.id, block.id),
-            max_chars=max(block.chars, len(block.context), 1),
         )
-        level = max(1, len(block.location.get("headings", [])))
-        nodes.append(
-            ContentNode(
-                content=view.text,
-                tokens=count_tokens(view.text, settings["model"]),
-                title=view.text if block.kind == "heading" else f"Block {number}",
-                index=number,
-                level=level if block.kind == "heading" else level + 1,
+        cache = store.owned_path(
+            store.root
+            / "navigation"
+            / "prepared"
+            / f"{content_id([source.id, parsed.id, profile])}.json"
+        )
+        if cache.exists():
+            try:
+                identity = read_object(cache)["navigation"]
+                saved = read_navigation(kb_dir, source, identity=identity, limit=200)
+                # Compiler receives the full range map even when public reads paginate.
+                saved["positions"] = _location_rows(source, parsed)
+                return saved
+            except (FileNotFoundError, KeyError, ValueError):
+                # This lookup is disposable. Rebuild from validated immutable parsing.
+                pass
+        record = {
+            "schema": 2,
+            "source_id": source.source_id,
+            "version": source.id,
+            "parse": parsed.id,
+            "profile": profile,
+            "status": "basic",
+            "reason": None,
+            "positions": _location_rows(source, parsed),
+            "usage": {},
+            "nodes": basic_tree(kb_dir, source, parsed),
+        }
+        from openkb.navigation_enhancement import enhance_ranges
+        from openkb.navigation_usage import NavigationRun
+        from openkb.processing import processing_scope
+
+        with processing_scope(settings) as budget:
+            run = (
+                NavigationRun(store, source, parsed, profile, included_in_compilation=True)
+                if reserve_compilation
+                else None
             )
-        )
-    config = IndexConfig(
-        model=settings["model"],
-        max_concurrency=limits.concurrency,
-        if_add_node_text=False,
-        if_add_doc_description=False,
-        llm_params={
-            "api_key": getattr(bundle, "api_key", None),
-            "api_base": getattr(bundle, "base_url", None),
-            "extra_headers": getattr(bundle, "extra_headers", None),
-            "timeout": limits.request_timeout,
+            previous_observer = budget.on_observation
+            if run is not None:
+
+                def observe(value):
+                    previous_observer(value)
+                    run.observe(value)
+
+                budget.on_observation = observe
+            try:
+                enhance_ranges(
+                    kb_dir,
+                    source,
+                    parsed,
+                    record,
+                    settings,
+                    bundle,
+                    reserve_compilation=reserve_compilation,
+                )
+            finally:
+                if run is not None:
+                    record["usage"] = run.finish(budget)
+                budget.on_observation = previous_observer
+        identity = content_id(record)
+        atomic_write_json(store.owned_path(store.root / "navigation" / f"{identity}.json"), record)
+        atomic_write_json(cache, {"navigation": identity})
+        return {**record, "id": identity}
+
+
+def navigation_capabilities(record):
+    nodes = record.get("nodes", [])
+    return {
+        "original_ranges": "complete",
+        "structure": {
+            "native": sum(node["structure_origin"] == "native" for node in nodes),
+            "inferred": sum(node["structure_origin"] == "inferred" for node in nodes),
+            "basic": sum(node["structure_origin"] == "basic" for node in nodes),
         },
-    )
-    # This is the pinned local pipeline, with our validated parser output. It
-    # neither uploads originals nor invokes SDK backend auto-selection.
-    tree = build_index(ParsedDocument(source.name, nodes), model=settings["model"], opt=config)
-    seen = set()
-    enhancements = {}
-
-    def map_nodes(values, parents):
-        if not isinstance(values, list):
-            raise ValueError("Invalid local navigation nodes")
-        for node in values:
-            if not isinstance(node, dict) or type(node.get("line_num")) is not int:
-                raise ValueError("Invalid local navigation position")
-            number = node["line_num"]
-            if not 1 <= number <= len(positions) or number in seen:
-                raise ValueError("Invalid local navigation coverage")
-            seen.add(number)
-            if not isinstance(node.get("title"), str) or not isinstance(
-                node.get("summary", ""), str
-            ):
-                raise ValueError("Invalid local navigation description")
-            enhancements[number - 1] = {
-                "title": node["title"],
-                "summary": node.get("summary", ""),
-                "parents": list(parents),
-            }
-            map_nodes(node.get("nodes", []), [*parents, number])
-
-    map_nodes(tree["structure"], [])
-    if seen != set(range(1, len(positions) + 1)):
-        raise ValueError("Incomplete local navigation coverage")
-    for index, value in enhancements.items():
-        positions[index].update(value)
+        "summaries": {
+            "model": sum(node["summary_origin"] == "model" for node in nodes),
+            "preview": sum(node["summary_origin"] == "preview" for node in nodes),
+            "unavailable": sum(node["summary_origin"] == "unavailable" for node in nodes),
+        },
+    }

@@ -433,13 +433,48 @@ def test_verification_thinking_override_rechecks_pages_but_reuses_facts(
     assert result.knowledge_compilation == "completed", result
     calls = model_service[before:]
     assert [json.loads(c["messages"][-1]["content"])["stage"] for c in calls] == [
-        "generation",
         "verification",
     ]
-    assert [c.get("thinking") for c in calls] == [{"type": "disabled"}, {"type": "enabled"}]
+    assert [c.get("thinking") for c in calls] == [{"type": "enabled"}]
     with pytest.raises(ValueError):
         update("invalid")
     assert read_kb_config(kb_dir).verification_thinking == "enabled"
+
+
+def test_generation_thinking_change_reuses_unchanged_explicit_verification(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+
+    source = tmp_path / "independent-thinking.md"
+    source.write_text("Pressure must remain below 37 kPa.")
+
+    def update(mode):
+        apply_kb_config_patch(
+            kb_dir,
+            KbConfigPatchRequest(
+                kb=str(kb_dir),
+                config={"compilation_thinking": mode, "verification_thinking": "enabled"},
+            ),
+        )
+
+    def stop(event):
+        if event.get("stage") == "generated":
+            raise OperationCancelled()
+
+    update("disabled")
+    first = import_document(kb_dir, source, context=ExecutionContext(on_event=stop))
+    assert first.knowledge_compilation == "stopped"
+    before = len(model_service)
+    update("enabled")
+    result = continue_source(kb_dir, first.source_id, version_id=first.input_version)
+    assert result.knowledge_compilation == "completed", result
+    stages = [
+        json.loads(call["messages"][-1]["content"])["stage"] for call in model_service[before:]
+    ]
+    assert "generation" in stages
+    assert "verification" not in stages
 
 
 @pytest.mark.parametrize(

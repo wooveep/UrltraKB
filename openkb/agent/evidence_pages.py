@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import nullcontext
 from dataclasses import asdict
 
 from openkb import frontmatter
@@ -96,7 +97,7 @@ def _evidence_windows(fact, reader, base, limits, model):
     neighbors = []
     for value in fact.get("context_evidence", []):
         reference = Evidence(**value["reference"])
-        view = reader.read(reference, max_chars=max(4096, reference.end - reference.start))
+        view = reader.read(reference, max_chars=reader.complete_bound(reference))
         neighbors.append(
             {
                 "reference": value["reference"],
@@ -114,7 +115,7 @@ def _evidence_windows(fact, reader, base, limits, model):
     )
     start = scope.start
     while start < scope.end:
-        view = reader.read(replace(scope, start=start), max_chars=scope.end - start)
+        view = reader.read(replace(scope, start=start), max_chars=reader.complete_bound(scope))
 
         def window(size):
             return {
@@ -189,6 +190,7 @@ def _generation_fits(base, facts, evidence, limits, model):
             limits,
             model,
             representative,
+            payload=payload,
         )
         and fits(limits, model, PAGE_SYSTEM, payload)
         and fits(
@@ -245,23 +247,22 @@ def _target_window(targets, topic, model, limits):
 
 
 def _previous_contribution(existing, source_id):
+    from openkb.source_refs import withdraw_contribution
+
     parts = frontmatter.split(existing)
     body = parts[1] if parts else existing
     opening, closing = f"<!-- openkb-source:{source_id} -->", f"<!-- /openkb-source:{source_id} -->"
-    if not body.count(opening) and not body.count(closing):
-        return body, opening, closing
-    if body.count(opening) != 1 or body.count(closing) != 1:
-        raise ProcessingIncomplete("source_contribution_ambiguous", "generation")
-    start, end = body.index(opening), body.index(closing)
-    if end < start:
-        raise ProcessingIncomplete("source_contribution_ambiguous", "generation")
-    return body[:start] + body[end + len(closing) :], opening, closing
+    try:
+        return withdraw_contribution(body, source_id), opening, closing
+    except ValueError:
+        raise ProcessingIncomplete("source_contribution_ambiguous", "generation") from None
 
 
 def retract_retired_topics(wiki, source, source_file, planned):
     """Withdraw only this source's delimited contribution in the private proposal."""
     from openkb.agent.compiler import _remove_source_from_frontmatter
     from openkb.locks import atomic_write_text
+    from openkb.source_refs import has_unowned_metadata
 
     removed = set()
     for folder in ("concepts", "entities"):
@@ -274,7 +275,7 @@ def retract_retired_topics(wiki, source, source_file, planned):
             if f"<!-- openkb-source:{source.source_id} -->" not in existing:
                 continue
             retained, _, _ = _previous_contribution(existing, source.source_id)
-            if not retained.strip():
+            if not retained.strip() and not has_unowned_metadata(existing):
                 path.unlink()
                 removed.add(target)
             else:
@@ -380,65 +381,94 @@ def generate_topic(
         # charged to the same document and generation-stage budgets.
         for attempt in range(correction, 2):
             request = {**payload, "revision": revision} if revision else payload
-            if output is None:
-                try:
-                    output = json.loads(
-                        _llm_call(
-                            model,
-                            messages(PAGE_SYSTEM, request),
-                            "generation",
-                            bundle=bundle,
-                            response_format=JSON_FORMAT,
-                            **generation_options(settings, correction=bool(revision)),
-                        )
-                    )
-                except (ValueError, TypeError):
-                    raise ResponseIncomplete("evidence_output_invalid", "generation") from None
-            output = normalize_output(apply_title_correction(output, request), payload)
-            if (
-                not isinstance(output, dict)
-                or not isinstance(output.get("content"), str)
-                or not output["content"].strip()
-                or not isinstance(output.get("covered"), list)
-                or any(not isinstance(item, str) for item in output["covered"])
-                or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
-            ):
-                raise ResponseIncomplete("topic_generation_incomplete", "generation")
-            title = output.get("title", base["title"])
-            if not isinstance(title, str) or not title.strip():
-                raise ResponseIncomplete("topic_generation_incomplete", "generation")
-            if contributions:
-                # The coordinator owns the shared public title. A later model
-                # suggestion cannot rename already verified parts. Its body is
-                # still reviewed under this fixed title and its own source.
-                title = base["title"]
-            citations = "\n".join(
-                "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
-                for passage in evidence
-                for item in [passage, *passage.get("neighbors", [])]
-            )
-            from openkb.agent.evidence_markup import normalize_links
+            from openkb.agent.request_analysis import RequestAnalysis
 
-            content = normalize_links(output["content"], known_targets, assets or {})
-            if title != base["title"]:
-                # Propagate an explicit title correction to its matching opening
-                # heading before review; unrelated evidence headings are preserved.
-                content = re.sub(
-                    r"\A(#{1,6})[ \t]+" + re.escape(base["title"]) + r"[ \t]*(?=\n|$)",
-                    lambda match: f"{match[1]} {title}",
-                    content,
-                    count=1,
+            request_messages = messages(PAGE_SYSTEM, request)
+            options = {
+                "response_format": JSON_FORMAT,
+                **generation_options(settings, correction=bool(revision)),
+            }
+            analysis = RequestAnalysis(
+                checkpoints,
+                "generation",
+                request_messages,
+                options,
+                rules=(
+                    __name__,
+                    "openkb.agent.evidence_generation_protocol",
+                    "openkb.agent.evidence_markup",
+                ),
+            )
+            dispatched = None
+            with analysis.pending() if output is None else nullcontext(None) as shared_response:
+                if output is None:
+                    try:
+                        dispatched = shared_response
+                        if dispatched is None:
+                            dispatched = _llm_call(
+                                model,
+                                request_messages,
+                                "generation",
+                                bundle=bundle,
+                                **options,
+                            )
+                        output = json.loads(dispatched)
+                    except (ValueError, TypeError):
+                        raise ResponseIncomplete("evidence_output_invalid", "generation") from None
+                response_candidate = output
+                output = normalize_output(apply_title_correction(output, request), payload)
+                if (
+                    not isinstance(output, dict)
+                    or not isinstance(output.get("content"), str)
+                    or not output["content"].strip()
+                    or not isinstance(output.get("covered"), list)
+                    or any(not isinstance(item, str) for item in output["covered"])
+                    or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
+                ):
+                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                title = output.get("title", base["title"])
+                if not isinstance(title, str) or not title.strip():
+                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                if contributions:
+                    # The coordinator owns the shared public title. A later model
+                    # suggestion cannot rename already verified parts. Its body is
+                    # still reviewed under this fixed title and its own source.
+                    title = base["title"]
+                citations = "\n".join(
+                    "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
+                    for passage in evidence
+                    for item in [passage, *passage.get("neighbors", [])]
                 )
-            if any(
-                marker in title or marker in content
-                for marker in (
-                    "<!-- openkb-source:",
-                    "<!-- /openkb-source:",
-                    "<!-- source-evidence:",
-                )
-            ):
-                raise ResponseIncomplete("topic_generation_incomplete", "generation")
-            publication_digest = content_id({"title": title, "content": content})
+                from openkb.agent.evidence_markup import normalize_links
+
+                content = normalize_links(output["content"], known_targets, assets or {})
+                if title != base["title"]:
+                    # Propagate an explicit title correction to its matching opening
+                    # heading before review; unrelated evidence headings are preserved.
+                    content = re.sub(
+                        r"\A(#{1,6})[ \t]+" + re.escape(base["title"]) + r"[ \t]*(?=\n|$)",
+                        lambda match: f"{match[1]} {title}",
+                        content,
+                        count=1,
+                    )
+                if any(
+                    marker in title or marker in content
+                    for marker in (
+                        "<!-- openkb-source:",
+                        "<!-- /openkb-source:",
+                        "<!-- source-evidence:",
+                    )
+                ):
+                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                publication_digest = content_id({"title": title, "content": content})
+                if not cached:
+                    analysis.save(
+                        json.dumps(
+                            {k: v for k, v in response_candidate.items() if k != "_verification"},
+                            ensure_ascii=False,
+                        ),
+                        receipt=dispatched,
+                    )
             if cached:
                 receipt = output.get("_verification")
                 if (

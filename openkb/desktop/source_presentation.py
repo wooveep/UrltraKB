@@ -46,6 +46,14 @@ def position_text(location):
     parts = []
     if location.get("page"):
         parts.append(f"原文第 {location['page']} 页")
+    if location.get("slide"):
+        parts.append(f"幻灯片 {location['slide']}")
+    if location.get("object_id"):
+        parts.append(f"对象 {location['object_id']}")
+    if location.get("sheet"):
+        parts.append(f"工作表 {location['sheet']}")
+    if location.get("cell_address"):
+        parts.append(f"单元格 {location.get('cell_range', location['cell_address'])}")
     if location.get("headings"):
         parts.append(" › ".join(location["headings"]))
     for field, label in (("paragraph", "段落"), ("table", "表"), ("row", "行"), ("cell", "单元格")):

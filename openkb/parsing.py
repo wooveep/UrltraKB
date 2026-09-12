@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.evidence import BlockDraft, ParseStore, ParseVersion
+from openkb.execution_measurement import measure_span
 from openkb.ocr.assembly import assembly_profile
 from openkb.ocr.backend import PageOcr, create_ocr
 from openkb.ocr.config import OcrSettings, parsing_settings
@@ -17,6 +18,7 @@ from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion
 
 
+@measure_span("parsing")
 def parse_document(
     kb_dir: Path,
     source: SourceVersion,
@@ -37,12 +39,18 @@ def parse_document(
         "mammoth": package_version("mammoth"),
         "markitdown": package_version("markitdown"),
     }
+    if source.suffix == ".pptx":
+        profile["pptx"] = "openkb-pptx-v2-notes-and-omissions"
+        profile["python-pptx"] = package_version("python-pptx")
+    if source.suffix == ".xlsx":
+        profile["xlsx"] = "openkb-xlsx-v2-row-relations"
+        profile["openpyxl"] = package_version("openpyxl")
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v7-structural-context"
+        profile["docx"] = "openkb-docx-v9-native-outline"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v4-page-recovery"
+        profile["pdf"] = "openkb-pdf-v5-conservative-table-context"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
-        profile["text"] = "openkb-text-v2-encoding-and-local-omissions"
+        profile["text"] = "openkb-text-v3-heading-markers"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
@@ -139,6 +147,14 @@ def parse_document(
         finally:
             if docx_ocr is not None:
                 docx_ocr.close()
+    elif source.suffix == ".pptx":
+        from openkb.parsing_office import parse_pptx
+
+        blocks, quality = parse_pptx(path, originals)
+    elif source.suffix == ".xlsx":
+        from openkb.parsing_office import parse_xlsx
+
+        blocks, quality = parse_xlsx(path, originals)
     else:
         blocks, quality = parse_text(path, source, originals)
     processing_checkpoint()
@@ -221,7 +237,7 @@ def parse_text(
             if line.startswith(("```", "~~~")):
                 fence = not fence
                 block_kind = "code"
-            if line.startswith("#") and not fence:
+            if source.suffix != ".txt" and re.match(r"^#{1,6}\s+", line) and not fence:
                 flush()
                 start, block_kind = line_number, "heading"
                 paragraph.append(line)

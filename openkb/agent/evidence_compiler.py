@@ -9,7 +9,16 @@ from openkb.progress import progress_scope
 
 
 def compile_evidence(
-    kb_dir, workspace, source, parsed, name, settings, *, bundle=None, on_event=lambda event: None
+    kb_dir,
+    workspace,
+    source,
+    parsed,
+    name,
+    settings,
+    *,
+    bundle=None,
+    on_event=lambda event: None,
+    navigation=None,
 ):
     from openkb.agent.compiler import (
         _update_index,
@@ -25,7 +34,17 @@ def compile_evidence(
 
     from openkb.agent.evidence_facts import extract_facts
 
-    facts = extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle, on_event)
+    facts = extract_facts(
+        kb_dir,
+        source,
+        parsed,
+        settings,
+        limits,
+        checkpoints,
+        bundle,
+        on_event,
+        navigation=navigation,
+    )
     from openkb.agent.evidence_plan import plan_topics
 
     wiki = workspace / "wiki"
@@ -38,6 +57,7 @@ def compile_evidence(
         checkpoints,
         bundle=bundle,
         on_event=on_event,
+        navigation=navigation,
     )
     from openkb.agent.evidence_pages import retract_retired_topics
 
@@ -141,6 +161,11 @@ def compile_evidence(
 
         for group, error in failures:
             report_content_omission("generation", error.reason, [group["path"]])
+    from openkb.agent.evidence_dependencies import protect_dependencies
+
+    accepted = protect_dependencies(
+        kb_dir, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
+    )
     # Excluded topics withdraw only this source's contribution. A page supported
     # by another source remains intact; stale text from this source cannot stand
     # in for a failed new version. All edits still belong to the private proposal.

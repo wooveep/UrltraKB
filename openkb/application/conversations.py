@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +16,7 @@ from openkb.agent.chat_session import ChatSession, load_session
 from openkb.agent.request_budget import visual_task_budget
 from openkb.application.answers import save_exploration
 from openkb.application.execution import ExecutionContext
+from openkb.compilation_report import collect_compile_report
 from openkb.config import resolve_effective_config
 from openkb.locks import async_kb_lock, async_session_lock
 from openkb.log import append_log
@@ -35,6 +36,7 @@ class AnswerResult:
     changes: tuple[str, ...] = ()
     error: str | None = None
     unfinished: tuple[str, ...] = ()
+    usage: dict = field(default_factory=dict)
 
 
 def _validate_question(kb_dir: Path, question: str) -> Path:
@@ -58,7 +60,12 @@ async def ask_question(
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
     ):
-        with context.begin(root) as bundle, model_output_scope(root), visual_task_budget(root):
+        with (
+            context.begin(root) as bundle,
+            model_output_scope(root),
+            collect_compile_report() as report,
+            visual_task_budget(root),
+        ):
             from openkb.agent.query import (
                 build_query_agent,
                 build_run_config_from_bundle,
@@ -90,6 +97,7 @@ async def ask_question(
                                 answer,
                                 str(path) if path else None,
                                 resources=(str(path),) if path else (),
+                                usage=report.usage,
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
                                 if path
                                 else (),
@@ -108,8 +116,9 @@ async def ask_question(
                     changes=(f"created: {path.relative_to(root).as_posix()}",) if path else (),
                     error=f"Question did not complete ({type(exc).__name__})",
                     unfinished=(unfinished_stage,),
+                    usage=report.usage,
                 )
-            return AnswerResult("stopped", "".join(parts))
+            return AnswerResult("stopped", "".join(parts), usage=report.usage)
 
 
 async def continue_conversation(
@@ -138,7 +147,11 @@ async def continue_conversation(
                 session = load_session(root, session_id)
             elif new_session_id and session.path.exists():
                 session = load_session(root, new_session_id)
-            with context.begin(root) as bundle, visual_task_budget(root):
+            with (
+                context.begin(root) as bundle,
+                collect_compile_report() as report,
+                visual_task_budget(root),
+            ):
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
 
@@ -152,7 +165,9 @@ async def continue_conversation(
                 attempt_id = session.begin_attempt(
                     message, identity=attempt_id, submission_order=submission_order
                 )
-                agent = await asyncio.to_thread(build_chat_session_agent, root, session, bundle)
+                # Snapshot source evidence on the execution lease owner. SDK tool
+                # workers receive detached readers and cannot reacquire this lock.
+                agent = build_chat_session_agent(root, session, bundle)
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(
                     agent,
@@ -171,6 +186,7 @@ async def continue_conversation(
                                     "completed",
                                     event["data"]["answer"],
                                     session_id=session.id,
+                                    usage=report.usage,
                                     turn_count=session.turn_count,
                                     resources=(*outputs.resources, str(session.path)),
                                     changes=(*outputs.changes, f"saved turn: {session.id}"),
@@ -185,6 +201,7 @@ async def continue_conversation(
                         "blocked" if isinstance(exc, RecoveryRequired) else "failed",
                         "".join(parts),
                         session_id=session.id,
+                        usage=report.usage,
                         turn_count=session.turn_count,
                         resources=(*outputs.resources, str(session.path)),
                         changes=outputs.changes,
@@ -195,6 +212,7 @@ async def continue_conversation(
                     "stopped",
                     "".join(parts),
                     session_id=session.id,
+                    usage=report.usage,
                     turn_count=session.turn_count,
                     resources=(*outputs.resources, str(session.path)),
                     changes=outputs.changes,

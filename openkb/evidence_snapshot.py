@@ -3,7 +3,7 @@
 import copy
 import json
 
-from openkb.evidence import Evidence, EvidenceSlice, evidence_bounds
+from openkb.evidence import Evidence, EvidenceSlice, complete_read_bound, evidence_bounds
 from openkb.locks import kb_read_lock
 from openkb.processing import processing_checkpoint
 
@@ -47,6 +47,9 @@ class EvidenceSnapshot:
             max_blocks=max_blocks,
             max_chars=max_chars,
         )
+
+    def complete_bound(self, reference):
+        return complete_read_bound(self._blocks[reference.block_id])
 
     def read(self, reference, *, max_chars):
         block, end = evidence_bounds(reference, self._identity, self._blocks, max_chars)

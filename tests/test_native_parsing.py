@@ -88,8 +88,12 @@ def test_docx_previous_host_table_does_not_label_next_host_paragraph(kb_dir, tmp
         "<w:p><w:r><w:t>Configure Host 2</w:t></w:r></w:p>"
         "<w:p><w:r><w:t>unicast_peer 192.0.2.1</w:t></w:r></w:p>",
     )
-    parsed = parse_document(kb_dir, source_version(kb_dir, file))
-    assert "Host 1" in parsed.blocks[0].context
+    version = source_version(kb_dir, file)
+    parsed = parse_document(kb_dir, version)
+    first = ParseStore(kb_dir).read(
+        Evidence(version.source_id, version.id, parsed.id, parsed.blocks[0].id), max_chars=100
+    )
+    assert "Host 1" in first.text
     assert parsed.blocks[-1].location["paragraph"] == 3
     assert parsed.blocks[-1].context == ""
 

@@ -412,6 +412,7 @@ def _llm_call(
     **kwargs,
 ) -> str:
     """Single LLM call with animated progress and debug logging."""
+    decode = getattr(messages, "decode_response", lambda raw: raw)
     messages = _prepare_messages(model, messages)
     extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
     if extra_headers:
@@ -430,10 +431,12 @@ def _llm_call(
     spinner.start()
     t0 = time.time()
 
+    from openkb.execution_measurement import request_operation
     from openkb.processing import model_call
 
     try:
-        response = model_call(litellm.completion, model=model, messages=messages, **kwargs)
+        with request_operation(step_name):
+            response = model_call(litellm.completion, model=model, messages=messages, **kwargs)
     except BaseException:
         spinner.stop("unfinished")
         raise
@@ -448,7 +451,9 @@ def _llm_call(
         raise TruncatedResponseError(
             f"LLM [{step_name}] hit the length limit; skipping to avoid a truncated page"
         )
-    return content.strip()
+    from openkb.execution_receipt import model_text
+
+    return model_text(decode(content.strip()))
 
 
 async def _llm_call_async(
@@ -461,6 +466,7 @@ async def _llm_call_async(
     **kwargs,
 ) -> str:
     """Async LLM call with timing output and debug logging."""
+    decode = getattr(messages, "decode_response", lambda raw: raw)
     messages = _prepare_messages(model, messages)
     extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
     if extra_headers:
@@ -477,9 +483,11 @@ async def _llm_call_async(
 
     t0 = time.time()
 
+    from openkb.execution_measurement import request_operation
     from openkb.processing import model_acall
 
-    response = await model_acall(litellm.acompletion, model=model, messages=messages, **kwargs)
+    with request_operation(step_name):
+        response = await model_acall(litellm.acompletion, model=model, messages=messages, **kwargs)
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
@@ -495,7 +503,9 @@ async def _llm_call_async(
         raise TruncatedResponseError(
             f"LLM [{step_name}] hit the length limit; skipping to avoid a truncated page"
         )
-    return content.strip()
+    from openkb.execution_receipt import model_text
+
+    return model_text(decode(content.strip()))
 
 
 async def _llm_call_page_async(
@@ -1342,19 +1352,21 @@ def _remove_doc_from_pages(
     *,
     page_dir: str,
     keep_empty: bool = False,
+    source_id: str | None = None,
+    ownership=None,
 ) -> dict[str, list[str]]:
     """Update or delete pages in ``page_dir`` affected by removing a document.
 
-    For each ``{page_dir}/*.md`` whose frontmatter ``sources:`` lists
-    ``summaries/{doc_name}``:
+    For each page whose metadata or explicit ownership markers identify this source:
 
+    - Withdraw its marked contribution; ambiguous ownership aborts the transaction.
     - Remove that source from the frontmatter list.
     - Remove any ``- [[summaries/{doc_name}]]`` entries from the
       ``## Related Documents`` section.
     - Remove any standalone ``See also: [[summaries/{doc_name}]]`` lines
       (left by ``_add_related_link``).
-    - If the ``sources:`` list becomes empty AND ``keep_empty`` is False,
-      delete the page entirely.
+    - Delete the last-source page only when the supplied ownership guard
+      confirms its generated baseline and ``keep_empty`` is False.
 
     Shared by the concept and entity removal wrappers so the cleanup (in
     particular the standalone ``See also:`` strip) can never drift between
@@ -1376,10 +1388,22 @@ def _remove_doc_from_pages(
     for path in sorted(pages_dir.glob("*.md")):
         text = path.read_text(encoding="utf-8")
         # Cheap filter: skip pages that don't reference the doc at all.
-        if source_file not in text and bare_source not in text:
+        marked = source_id and (
+            f"<!-- openkb-source:{source_id} -->" in text
+            or f"<!-- /openkb-source:{source_id} -->" in text
+        )
+        if source_file not in text and bare_source not in text and not marked:
             continue
 
         new_text, sources_empty = _remove_source_from_frontmatter(text, source_file)
+        if marked and source_id is not None:
+            from openkb.source_refs import withdraw_contribution
+
+            new_text = (
+                ownership.withdraw(path, new_text, source_id)
+                if ownership is not None
+                else withdraw_contribution(new_text, source_id)
+            )
 
         # Drop the doc's entry from the "## Related Documents" section.
         if link in new_text:
@@ -1409,7 +1433,7 @@ def _remove_doc_from_pages(
             flags=re.MULTILINE,
         )
 
-        if sources_empty and not keep_empty:
+        if sources_empty and not keep_empty and (ownership is None or ownership.can_delete(path)):
             path.unlink()
             deleted.append(path.stem)
         elif new_text != text:
@@ -1424,6 +1448,8 @@ def remove_doc_from_concept_pages(
     doc_name: str,
     *,
     keep_empty: bool = False,
+    source_id: str | None = None,
+    ownership=None,
 ) -> dict[str, list[str]]:
     """Update or delete concept pages affected by removing a document.
 
@@ -1437,6 +1463,8 @@ def remove_doc_from_concept_pages(
         doc_name,
         page_dir="concepts",
         keep_empty=keep_empty,
+        source_id=source_id,
+        ownership=ownership,
     )
 
 
@@ -1445,6 +1473,8 @@ def remove_doc_from_entity_pages(
     doc_name: str,
     *,
     keep_empty: bool = False,
+    source_id: str | None = None,
+    ownership=None,
 ) -> dict[str, list[str]]:
     """Update or delete entity pages affected by removing a document.
 
@@ -1456,6 +1486,8 @@ def remove_doc_from_entity_pages(
         doc_name,
         page_dir="entities",
         keep_empty=keep_empty,
+        source_id=source_id,
+        ownership=ownership,
     )
 
 

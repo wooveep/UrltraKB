@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict
 
-from openkb.evidence import Evidence, ParseStore
+from openkb.evidence import Evidence, ParseStore, complete_read_bound
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
 from openkb.sources import content_id
 
@@ -17,15 +17,21 @@ Return JSON {"units":[{"id":"input id","facts":[{"topic":"specific reusable topi
 "empty_reason":"explicit reason if no facts"}]}. Account for EVERY input unit.
 If facts is empty, empty_reason MUST be a nonempty string explaining why; never omit it.
 Quote only that unit's text. Context and positions explain table headers and span continuity.
+Quote enough contiguous text to identify exactly one occurrence inside that unit.
 Images are retained evidence associated with their paragraph, heading, page and neighboring
 text; OCR is supplementary and may be unavailable. Do not infer unseen image text or facts
 from an asset path or OCR failure notice. An image-only unit may have no textual facts.
+Navigation titles and summaries are selection hints, never factual evidence.
 Do not infer information absent from the evidence. Return complete JSON, never an ellipsis."""
 
 JSON_FORMAT = {"type": "json_object"}
 
 
-def messages(system: str, payload: dict) -> list[dict]:
+def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
+    from openkb.agent.evidence_wire import WireMessages, encode_payload, share_contexts
+
+    wire, identities = encode_payload(payload, identity_values)
+    wire = share_contexts(wire)
     contract = {
         "facts": (
             'Return {"units":[...]} with every input id exactly once. Every unit must have '
@@ -40,17 +46,20 @@ def messages(system: str, payload: dict) -> list[dict]:
             "even when facts repeat. A coverage section inside Markdown does not replace it."
         ),
     }.get(payload.get("stage", ""))
-    return [
-        {"role": "system", "content": system},
-        {
-            "role": "user",
-            "content": json.dumps(
-                {**payload, "output_contract": contract},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
-        },
-    ]
+    return WireMessages(
+        [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {**wire, "output_contract": contract},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            },
+        ],
+        identities,
+    )
 
 
 def fits(limits: RequestLimits, model: str, system: str, payload: dict) -> bool:
@@ -63,9 +72,14 @@ def fits(limits: RequestLimits, model: str, system: str, payload: dict) -> bool:
         return False
 
 
-def output_fits(limits, model, value):
+def output_fits(limits, model, value, *, payload=None):
     """Reserve a complete representative response, including identifiers and JSON."""
     import litellm
+
+    if payload is not None:
+        from openkb.agent.evidence_wire import projected_response
+
+        value = projected_response(value, payload)
 
     return litellm.token_counter(model=model, text=json.dumps(value)) <= limits.output_tokens
 
@@ -90,14 +104,17 @@ def facts_fit(units, limits, model):
             for unit in units
         ]
     }
-    return output_fits(limits, model, response) and fits(
-        limits, model, FACTS_SYSTEM, {"stage": "facts", "units": units}
-    )
+    return output_fits(
+        limits, model, response, payload={"stage": "facts", "units": units}
+    ) and fits(limits, model, FACTS_SYSTEM, {"stage": "facts", "units": units})
 
 
-def source_units(kb_dir, source, parsed, limits, model):
+def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     """Every nonempty block is covered in order; large blocks retain exact spans."""
     reader = ParseStore(kb_dir).reader(source, parsed)
+    from openkb.navigation_tree import block_hints
+
+    hints = block_hints(navigation) if navigation else {}
     heading = []
     levels = []
     bridge = min(128, max(1, limits.context_tokens // 32))
@@ -106,7 +123,7 @@ def source_units(kb_dir, source, parsed, limits, model):
         if end <= start:
             return None
         ref = Evidence(source.source_id, source.id, parsed.id, block.id, start, end)
-        view = reader.read(ref, max_chars=max(4096, end - start))
+        view = reader.read(ref, max_chars=complete_read_bound(block))
         return {
             "reference": asdict(ref),
             "text": view.text,
@@ -119,7 +136,7 @@ def source_units(kb_dir, source, parsed, limits, model):
         if block.kind == "heading":
             title = reader.read(
                 Evidence(source.source_id, source.id, parsed.id, block.id),
-                max_chars=256,
+                max_chars=complete_read_bound(block),
             ).text
             match = re.match(r"^(#{1,6})\s+(.*)", title)
             level, title = (
@@ -158,7 +175,9 @@ def source_units(kb_dir, source, parsed, limits, model):
                 start,
                 min(block.chars, start + available + bridge),
             )
-            view = reader.read(reference, max_chars=max(available + bridge, len(block.context)))
+            view = reader.read(
+                reference, max_chars=max(available + bridge, complete_read_bound(block))
+            )
             before = (
                 neighbor(block, max(0, start - bridge), start, "previous_span")
                 if start
@@ -187,6 +206,8 @@ def source_units(kb_dir, source, parsed, limits, model):
                     }
                 )
                 value = {
+                    "document": source.name,
+                    **({"navigation": hints[index]} if hints else {}),
                     "reference": asdict(
                         Evidence(source.source_id, source.id, parsed.id, block.id, start, end)
                     ),

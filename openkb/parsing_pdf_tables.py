@@ -19,8 +19,14 @@ def table_cells(page, number: int):
         headers = table.header.names
         if len(headers) != table.col_count:
             raise ValueError("Native table header does not match its columns")
-        context = f"Physical page {number}, table {table_number}. Columns: " + " | ".join(
-            str(header or "(empty)") for header in headers
+        context = (
+            f"Physical page {number}, table {table_number}. "
+            + (
+                "Detected external column labels: "
+                if table.header.external
+                else "First row (header role unconfirmed): "
+            )
+            + " | ".join(str(header or "(empty)") for header in headers)
         )
         for row_index, (row, positions) in enumerate(zip(values, table.rows), 1):
             for column, (text, bbox) in enumerate(zip(row, positions.cells), 1):

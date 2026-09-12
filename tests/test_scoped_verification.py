@@ -175,7 +175,7 @@ def test_explicit_stronger_review_is_once_per_draft_and_keeps_real_rejections(
     assert settings["compilation_thinking"] == "disabled"
 
 
-def test_adjudication_setting_rechecks_generation_but_reuses_facts_and_plan(
+def test_adjudication_setting_reuses_generation_and_unchanged_supported_review(
     kb_dir, tmp_path, model_service
 ):
     import yaml
@@ -201,11 +201,9 @@ def test_adjudication_setting_rechecks_generation_but_reuses_facts_and_plan(
     config_path.write_text(yaml.safe_dump(config))
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed"
-    assert [json.loads(c["messages"][-1]["content"])["stage"] for c in model_service[count:]] == [
-        "generation",
-    ]
-    # The regenerated body and ordinary review mode are unchanged; its exact
-    # supported response is revalidated from the separate review record.
+    assert len(model_service) == count
+    # No rejected draft needs adjudication. The unchanged body and ordinary
+    # supported review are validated from their independent records.
 
 
 @pytest.mark.parametrize("key", ["verification_adjudication_thinking", "correction_thinking"])

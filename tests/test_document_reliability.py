@@ -162,7 +162,7 @@ def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, proce
     assert calls[0]["max_tokens"] == 1024
 
 
-def test_pdf_local_navigation_keeps_its_model_loop_callbacks_live(
+def test_small_pdf_uses_native_ranges_without_paid_navigation(
     kb_dir, monkeypatch, processing_config
 ):
     import fitz
@@ -180,7 +180,7 @@ def test_pdf_local_navigation_keeps_its_model_loop_callbacks_live(
         pdf.new_page().insert_text((72, 72), "Contents. Chapter A .... 999")
         pdf.new_page().insert_text((72, 72), "Chapter A. Original knowledge.")
         pdf.save(source)
-    heartbeat = []
+    stages = []
 
     def response(value):
         return SimpleNamespace(
@@ -193,13 +193,12 @@ def test_pdf_local_navigation_keeps_its_model_loop_callbacks_live(
         )
 
     def completion(**kwargs):
-        return response(evidence_response(json.loads(kwargs["messages"][-1]["content"])))
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        stages.append(payload["stage"])
+        return response(evidence_response(payload))
 
     async def asynchronous(**kwargs):
-        asyncio.get_running_loop().call_later(0.03, heartbeat.append, "responsive")
-        await asyncio.sleep(0.15)
-        assert heartbeat, "Navigation blocked its model event loop"
-        return response("Local navigation summary")
+        pytest.fail("Native short ranges need no asynchronous model enhancement")
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", asynchronous)
@@ -208,8 +207,8 @@ def test_pdf_local_navigation_keeps_its_model_loop_callbacks_live(
     navigation = source_status(kb_dir, result.source_id)["navigation"]
     assert navigation["status"] == "enhanced", navigation
     assert {position["location"]["page"] for position in navigation["positions"]} == {1, 2}
-    assert navigation["usage"]["observable_attempts"] > 0
-    assert heartbeat
+    assert navigation["usage"]["observable_attempts"] == 0
+    assert not any(stage.startswith("index_") for stage in stages)
 
 
 def test_client_cleanup_warning_does_not_change_committed_result(

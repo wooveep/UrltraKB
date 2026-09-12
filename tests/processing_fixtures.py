@@ -20,4 +20,5 @@ def configure_processing(kb):
     path = kb / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text()) or {}
     config.setdefault("processing", OFFLINE_PROCESSING)
+    config.setdefault("navigation", {"enabled": False})
     path.write_text(yaml.safe_dump(config), encoding="utf-8")

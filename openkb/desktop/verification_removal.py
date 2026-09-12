@@ -51,11 +51,13 @@ def verify_removal(window, kb, wait_until):
         dialog.confirm_button.click()
         result = finished_document(tasks, dialog)
         assert result.state == "completed" and result.processes_reaped, result
-        assert not (kb / "wiki/summaries/native-removal.md").exists()
+        assert (kb / "wiki/summaries/native-removal.md").read_text() == "# 摘要\n"
+        assert not (kb / "wiki/sources/native-removal.md").exists()
         assert (kb / "raw/待删除资料.md").exists()
         assert (kb / "wiki/concepts/native-removal.md").exists()
         assert str(kb / "raw/待删除资料.md") in result.results[0].resources
-        assert "deleted: wiki/summaries/native-removal.md" in result.results[0].changes
+        assert "deleted: wiki/sources/native-removal.md" in result.results[0].changes
+        assert str(kb / "wiki/summaries/native-removal.md") in result.results[0].resources
         assert "保留页面" not in str(result.summary())
     finally:
         dialog.reject()

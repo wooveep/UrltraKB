@@ -11,6 +11,7 @@ from typing import Any, Callable
 import yaml
 
 from openkb.evidence import ParseStore, ParseVersion
+from openkb.execution_measurement import measure_span
 from openkb.inputs import processing_directory
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import _copy_file_atomic, mutation_scope
@@ -95,7 +96,14 @@ class KnowledgeProposal:
             }
             if (
                 not required <= set(self.document)
-                or set(self.document) - required - {"compilation_profile", "compilation_omissions"}
+                or set(self.document)
+                - required
+                - {
+                    "compilation_profile",
+                    "compilation_omissions",
+                    "navigation_id",
+                    "compilation_navigation_id",
+                }
                 or not all(isinstance(value, str) for value in self.document.values())
             ):
                 raise ValueError("Invalid document projection fields")
@@ -172,6 +180,9 @@ class KnowledgeWorkspace:
                 raise ValueError("Source parsing has no usable evidence")
             self.before = wiki_version(self.kb_dir)
             self.baselines = _baselines(self.kb_dir)
+            from openkb.source_refs import SourceOwnership
+
+            self.ownership = SourceOwnership(self.kb_dir, self.source.source_id)
             registry = self.kb_dir / ".openkb/hashes.json"
             self.registry_revision = HashRegistry.hash_file(registry) if registry.exists() else None
             self.temporary = processing_directory(prefix="openkb-knowledge-")
@@ -217,7 +228,11 @@ class KnowledgeWorkspace:
             protected = []
             for name in changes:
                 previous = self.before.get(name)
-                if previous is None or self.baselines.get(name) == previous:
+                if previous is None:
+                    continue
+                if self.baselines.get(name) == previous and not self.ownership.requires_review(
+                    name, previous
+                ):
                     continue
                 # The unedited initialization seed has a known project baseline.
                 if name == "index.md" and previous == self.store.put_bytes(
@@ -291,6 +306,7 @@ class Publication:
     pages: tuple[str, ...] = ()
 
 
+@measure_span("committing")
 def publish_proposal(
     kb_dir: Path,
     proposal_id: str,
@@ -323,6 +339,16 @@ def publish_proposal(
         for digest in proposal.changes.values():
             if digest is not None:
                 store.asset(digest)
+        if proposal.document and "navigation_id" in proposal.document:
+            from openkb.navigation import read_navigation
+
+            navigation = read_navigation(
+                kb_dir,
+                store.version(proposal.version_id),
+                identity=proposal.document["navigation_id"],
+            )
+            if navigation["parse"] != proposal.parse_id:
+                raise ValueError("Publication navigation does not match compiled parsing")
         processing_checkpoint("committing")
         with mutation_scope(
             kb_dir, [*paths, baseline_path, receipt], operation="publish source knowledge"

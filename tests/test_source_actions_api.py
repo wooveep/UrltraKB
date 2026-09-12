@@ -53,6 +53,7 @@ def test_rest_navigation_rejects_malformed_saved_status(
 ):
     from openkb.locks import atomic_write_json
     from openkb.sources import SourceStore, content_id, read_object
+    from openkb.state import HashRegistry
 
     monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
     monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
@@ -60,12 +61,13 @@ def test_rest_navigation_rejects_malformed_saved_status(
     source.write_text("Required version 7.")
     imported = import_document(kb_dir, source)
     root = SourceStore(kb_dir).root / "navigation"
-    pointer = root / "latest" / f"{imported.input_version}.json"
-    record = read_object(root / f"{read_object(pointer)['navigation']}.json")
+    registry = HashRegistry(kb_dir / ".openkb/hashes.json")
+    published = registry.get(imported.source_id)
+    record = read_object(root / f"{published['navigation_id']}.json")
     record["status"] = []
     identity = content_id(record)
     atomic_write_json(root / f"{identity}.json", record)
-    atomic_write_json(pointer, {"navigation": identity})
+    registry.add(imported.source_id, {**published, "navigation_id": identity})
     with TestClient(create_app()) as client:
         response = client.post(
             "/api/v1/source/navigation",
@@ -112,7 +114,7 @@ def test_review_and_accept_saved_proposal_without_new_model_calls(
         )
         assert started.status_code == 202, started.text
         task = client.app.state.import_tasks.manager.wait(started.json()["task_id"], timeout=20)
-        assert task.state == "completed" and task.processes_reaped
+        assert task.state == "completed" and task.processes_reaped, task
         assert task.results[0].document.knowledge_compilation == "completed"
         assert len(model_service) == calls
         assert client.get("/api/v1/tasks/" + task.id).status_code == 200

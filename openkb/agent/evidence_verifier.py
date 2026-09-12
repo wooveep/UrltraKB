@@ -161,31 +161,66 @@ def _verify_once(
         else None
     )
     saved = checkpoints.load_recovery(key, "review") if key else None
+    from openkb.agent.request_analysis import RequestAnalysis
+
+    analysis = (
+        RequestAnalysis(
+            checkpoints,
+            "verification",
+            request,
+            {"response_format": JSON_FORMAT, **options, "attempt": attempt},
+            rules=(__name__, "openkb.agent.evidence_generation_protocol"),
+        )
+        if checkpoints
+        else None
+    )
+    if saved is None and analysis is not None:
+        shared_response = analysis.load()
+        if shared_response is not None:
+            saved = {"response": shared_response}
     if saved is not None:
         if not isinstance(saved, dict) or not isinstance(saved.get("response"), str):
             raise ValueError("Invalid saved verification response")
         try:
             review = _parse_review(saved["response"], payload)
             if review["verdict"] != "uncertain":
+                if key:
+                    checkpoints.save_recovery(key, "review", saved)
                 return review
         except ProcessingIncomplete as exc:
             if exc.reason != "evidence_verification_invalid":
                 raise
             # Still-unusable format can get a bounded fresh request. A repaired
             # parser instead recovers the recorded result, including rejection.
-    try:
-        raw = _llm_call(
-            settings["model"],
-            request,
-            "verification",
-            bundle=bundle,
-            response_format=JSON_FORMAT,
-            **options,
+
+    def produce():
+        try:
+            raw = _llm_call(
+                settings["model"],
+                request,
+                "verification",
+                bundle=bundle,
+                response_format=JSON_FORMAT,
+                **options,
+            )
+            if key:
+                checkpoints.save_recovery(key, "review", {"response": raw})
+            _parse_review(raw, payload)
+            from openkb.execution_receipt import derived_text
+
+            return derived_text(json.dumps(_review_object(raw), ensure_ascii=False), raw)
+        except (ValueError, TypeError):
+            raise ProcessingIncomplete("evidence_verification_invalid", "generation") from None
+
+    if analysis is not None:
+        value = analysis.run(
+            produce,
+            lambda value: _parse_review(json.dumps(value), payload),
+            cacheable=lambda value: value.get("verdict") != "uncertain",
         )
-    except (ValueError, TypeError):
-        raise ProcessingIncomplete("evidence_verification_invalid", "generation") from None
-    if key:
-        checkpoints.save_recovery(key, "review", {"response": raw})
+        raw = json.dumps(value, ensure_ascii=False)
+    else:
+        raw = produce()
     return _parse_review(raw, payload)
 
 
@@ -217,10 +252,15 @@ def _parse_review(raw, payload):
         result = _review_object(raw)
     except (ValueError, TypeError):
         raise ProcessingIncomplete("evidence_verification_invalid", "generation") from None
-    if not isinstance(result, dict) or result.get("verdict") not in (
-        "supported",
-        "unsupported",
-        "uncertain",
+    if (
+        not isinstance(result, dict)
+        or set(result) - {"verdict", "reason", "issues"}
+        or result.get("verdict")
+        not in (
+            "supported",
+            "unsupported",
+            "uncertain",
+        )
     ):
         raise ProcessingIncomplete("evidence_verification_invalid", "generation")
     reason = result.get("reason")

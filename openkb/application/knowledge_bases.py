@@ -309,15 +309,19 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 if result and result["knowledge_compilation"] == "completed":
                     continue
                 row = {
-                    "hash": source.source_id, "name": source.name,
-                    "type": source.suffix.lstrip("."), "display_type": source.suffix.lstrip("."),
+                    "hash": source.source_id,
+                    "name": source.name,
+                    "type": source.suffix.lstrip("."),
+                    "display_type": source.suffix.lstrip("."),
                     "pages": None,
                 }
                 documents.append(row)
             else:
                 row = by_identity[source.source_id]
             row.update(
-                source_id=source.source_id, source_version=source.id, source_origin=source.origin,
+                source_id=source.source_id,
+                source_version=source.id,
+                source_origin=source.origin,
                 source_intake="saved",
                 knowledge_compilation=result["knowledge_compilation"] if result else "not_started",
                 stage=result["stage"] if result else "source_intake",
@@ -325,7 +329,8 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 parse_id=result["parse_id"] if result else None,
                 resume=result["resume"] if result else source.id,
                 omissions=result.get("omissions", []) if result else [],
-                original=details["original"], cumulative_usage=details["cumulative_usage"],
+                original=details["original"],
+                cumulative_usage=details["cumulative_usage"],
             )
 
         summaries_dir = kb_dir / "wiki" / "summaries"

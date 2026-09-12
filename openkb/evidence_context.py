@@ -3,7 +3,7 @@
 import re
 from dataclasses import asdict, replace
 
-from openkb.evidence import evidence_bounds
+from openkb.evidence import complete_read_bound, evidence_bounds
 
 
 def _scope(location):
@@ -34,7 +34,7 @@ def preceding_slices(reader, reference, identity, blocks, *, max_blocks, max_cha
             break
         view = reader.read(
             replace(reference, block_id=block.id, start=0, end=block.chars or None),
-            max_chars=max(4096, block.chars),
+            max_chars=complete_read_bound(block),
         )
         remaining -= len(view.text)
         yield view
@@ -73,7 +73,7 @@ def enclosing_code(reader, reference):
     preceding = getattr(reader, "preceding", None)
     if preceding is None:
         return []
-    view = reader.read(reference, max_chars=max(4096, (reference.end or 0) - reference.start))
+    view = reader.read(reference, max_chars=reader.complete_bound(reference))
     if not re.fullmatch(r"\s*}\s*;?\s*", view.text):
         return []
     depth, selected = 1, []

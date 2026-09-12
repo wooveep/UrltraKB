@@ -104,6 +104,10 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
         from openkb.navigation import read_navigation
         from openkb.navigation_usage import navigation_usage
 
+        indexed_usage = navigation_usage(store, source_id)
+        for field in totals:
+            totals[field] += indexed_usage["standalone"].get(field, 0)
+
         # Embedded documents are imported during the parent's parse. Their
         # selected evidence is readable before they have a compilation run.
         if current is None and version.origin.startswith("attachment:"):
@@ -139,7 +143,7 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             "cloud_jobs": _cloud_jobs(store, source_id),
             "local_ocr": local_ocr_usage(store, source_id),
             "navigation": read_navigation(kb_dir, version),
-            "navigation_usage": navigation_usage(store, source_id),
+            "navigation_usage": indexed_usage,
         }
 
 

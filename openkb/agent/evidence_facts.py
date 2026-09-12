@@ -63,12 +63,14 @@ def validate_unit(unit, item):
     return facts
 
 
-def extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle, on_event):
+def extract_facts(
+    kb_dir, source, parsed, settings, limits, checkpoints, bundle, on_event, *, navigation=None
+):
     from openkb.agent.compiler import _llm_call
 
     model = settings["model"]
     processing_checkpoint("facts")
-    units = list(source_units(kb_dir, source, parsed, limits, model))
+    units = list(source_units(kb_dir, source, parsed, limits, model, navigation=navigation))
     cache = FactCache(checkpoints, FACTS_SYSTEM, units, validate_unit)
     progress_lock = threading.Lock()
     failures = []
@@ -87,6 +89,7 @@ def extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle,
 
     def extract(batch):
         processing_checkpoint("facts")
+        cache.set_batch(batch)
         cached = {unit["id"]: cache.get(unit) for unit in batch}
         pending = [unit for unit in batch if cached[unit["id"]] is None]
         on_event(
@@ -95,48 +98,72 @@ def extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle,
                 "blocks": len(batch),
                 "cached": not pending,
                 "cached_blocks": len(batch) - len(pending),
+                "analysis_hits": sum(unit["id"] in cache.shared_hits for unit in batch),
             }
         )
-        if pending:
-            try:
-                result = json.loads(
-                    _llm_call(
+        from openkb.agent.analysis_flights import claimed
+        from openkb.agent.shared_analysis import fact_input
+
+        # Cache dependencies include every semantic row the model can see. When
+        # recovered rows leave a smaller request, compare that exact request too.
+        while pending:
+            cache.set_batch(pending)
+            missing = [unit for unit in pending if cache.get(unit) is None]
+            if len(missing) == len(pending):
+                break
+            pending = missing
+        claim_payload = {"request": [fact_input(unit) for unit in pending]}
+        with claimed(cache.shared, [claim_payload] if pending else []) as claims:
+            owned = pending if claims and claims[0] is not None and claims[0].owner else []
+            # A previous executor may have finished between the first lookup and claim.
+            if owned and all(cache.get(unit) is not None for unit in owned):
+                owned = []
+            if owned:
+                try:
+                    raw = _llm_call(
                         model,
-                        messages(FACTS_SYSTEM, {"stage": "facts", "units": pending}),
+                        messages(FACTS_SYSTEM, {"stage": "facts", "units": owned}),
                         "facts",
                         bundle=bundle,
                         response_format=JSON_FORMAT,
                         **compilation_model_options(settings),
                     )
-                )
-            except (ValueError, TypeError):
-                raise ResponseIncomplete("evidence_output_invalid", "facts") from None
-            outputs = result.get("units") if isinstance(result, dict) else None
-            expected = {unit["id"]: unit for unit in pending}
-            # Retain individually valid rows even if a different row is malformed.
-            if isinstance(outputs, list):
-                counts = {}
-                good = {}
+                    result = json.loads(raw)
+                except (ValueError, TypeError):
+                    raise ResponseIncomplete("evidence_output_invalid", "facts") from None
+                outputs = result.get("units") if isinstance(result, dict) else None
+                expected = {unit["id"]: unit for unit in owned}
+                # Retain individually valid rows even if a different row is malformed.
+                if isinstance(outputs, list):
+                    counts = {}
+                    good = {}
+                    for row in outputs:
+                        if isinstance(row, dict) and isinstance(row.get("id"), str):
+                            counts[row["id"]] = counts.get(row["id"], 0) + 1
+                    if any(uid not in expected or count != 1 for uid, count in counts.items()):
+                        require_unit_coverage(outputs, expected)
+                    for row in outputs:
+                        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                            continue
+                        uid = row["id"]
+                        if uid not in expected or counts[uid] != 1:
+                            continue
+                        try:
+                            validate_unit(expected[uid], row)
+                        except ResponseIncomplete:
+                            continue
+                        good[uid] = row
+                    if good:
+                        valid = [unit for unit in owned if unit["id"] in good]
+                        cache.save(valid, [good[unit["id"]] for unit in valid], receipt=raw)
+                require_unit_coverage(outputs, expected)
                 for row in outputs:
-                    if isinstance(row, dict) and isinstance(row.get("id"), str):
-                        counts[row["id"]] = counts.get(row["id"], 0) + 1
-                for row in outputs:
-                    if not isinstance(row, dict) or not isinstance(row.get("id"), str):
-                        continue
-                    uid = row["id"]
-                    if uid not in expected or counts[uid] != 1:
-                        continue
-                    try:
-                        validate_unit(expected[uid], row)
-                    except ResponseIncomplete:
-                        continue
-                    good[uid] = row
-                if good:
-                    valid = [unit for unit in pending if unit["id"] in good]
-                    cache.save(valid, [good[unit["id"]] for unit in valid])
-            require_unit_coverage(outputs, expected)
-            for row in outputs:
-                validate_unit(expected[row["id"]], row)
+                    validate_unit(expected[row["id"]], row)
+        for flight in claims:
+            if flight is not None and not flight.owner:
+                flight.wait("facts")
+        if any(cache.get(unit) is None for unit in batch):
+            raise ResponseIncomplete("evidence_output_invalid", "facts")
         return [fact for unit in batch for fact in validate_unit(unit, cache.get(unit))]
 
     def run_batch(batch):

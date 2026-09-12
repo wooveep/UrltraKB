@@ -42,7 +42,6 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkey
     from openkb.agent import compiler
     from openkb.agent.evidence_checkpoints import CompilationCheckpoints
     from openkb.config import DEFAULT_CONFIG
-    from openkb.knowledge_commit import wiki_version
     from openkb.processing import RequestLimits
     from openkb.schema import get_agents_md
 
@@ -62,7 +61,7 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkey
         "schema": get_agents_md(kb_dir / "wiki"),
         "existing_pages": "",
     }
-    dependencies = wiki_version(kb_dir)
+    dependencies = {"catalog_window": "", "schema": request["schema"]}
     previous = cp.previous_plan_key(plan.PLAN_SYSTEM, request, dependencies=dependencies)
     current = cp.key(plan.PLAN_SYSTEM, request, dependencies=dependencies)
     assert previous != current

@@ -31,10 +31,12 @@ def parse_docx(
 
     budget = _budget or ExpansionBudget()
     prepared = prepare_docx(path.read_bytes(), store, budget, _depth)
+    outline_levels = _outline_levels(prepared.stream)
     blocks: list[BlockDraft] = []
     quality: list[dict[str, Any]] = list(prepared.quality)
     pending_attachments: list[Any] = []
     headings: list[str] = []
+    heading_stack: list[tuple[int, str]] = []
     paragraph_number, table_number = 0, 0
     notes = None
     comments: dict[str, Any] = {}
@@ -123,17 +125,20 @@ def parse_docx(
                 heading = re.fullmatch(
                     r"heading\s*([1-9])", node.style_id or "", re.IGNORECASE
                 ) or re.fullmatch(r"heading\s*([1-9])", node.style_name or "", re.IGNORECASE)
-                if heading:
-                    level = int(heading[1])
-                    headings[level - 1 :] = [text]
+                level = outline_levels.get(node.style_id, int(heading[1]) if heading else None)
+                if level is not None:
+                    heading_stack[:] = [item for item in heading_stack if item[0] < level]
+                    heading_stack.append((level, text))
+                    headings[:] = [title for _, title in heading_stack]
                 location = {
                     "kind": "docx",
                     "paragraph": paragraph_number,
                     "headings": list(headings),
+                    **({"heading_level": level} if level is not None else {}),
                     **(position or {}),
                 }
                 if text.strip() or assets:
-                    kind = "table" if position else "heading" if heading else "paragraph"
+                    kind = "table" if position else "heading" if level is not None else "paragraph"
                     context = header
                     if node.numbering:
                         context += (
@@ -186,17 +191,24 @@ def parse_docx(
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
-                table_header = (
+                headers = [
+                    (number, " | ".join(inline(cell, []) for cell in row.children))
+                    for number, row in enumerate(node.children, 1)
+                    if row.is_header
+                ]
+                first_row = (
                     " | ".join(inline(cell, []) for cell in node.children[0].children)
                     if node.children
                     else ""
                 )
                 for row_index, row in enumerate(node.children, 1):
                     for cell_index, cell in enumerate(row.children, 1):
-                        context = (
-                            f"Table {table}; header: {table_header}; "
-                            f"colspan={cell.colspan}; rowspan={cell.rowspan}"
-                        )
+                        context = f"Table {table}; colspan={cell.colspan}; rowspan={cell.rowspan}"
+                        declared = [text for number, text in headers if number != row_index]
+                        if declared:
+                            context += "; declared header: " + " | ".join(declared)
+                        elif not headers and row_index > 1:
+                            context += "; first row (header role unconfirmed): " + first_row
                         visit(
                             cell.children,
                             {"table": table, "row": row_index, "cell": cell_index},
@@ -247,3 +259,35 @@ def parse_docx(
     for message in result.messages:
         quality.append(conversion_quality(message.message))
     return blocks, [dict(row) for row in dict.fromkeys(tuple(row.items()) for row in quality)]
+
+
+def _outline_levels(stream):
+    """Read explicit OOXML outline semantics, including inherited numeric styles."""
+    from zipfile import ZipFile
+
+    from defusedxml.ElementTree import fromstring
+
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with ZipFile(stream) as archive:
+        if "word/styles.xml" not in archive.namelist():
+            return {}
+        root = fromstring(archive.read("word/styles.xml"))
+    stream.seek(0)
+    styles = {node.get(namespace + "styleId"): node for node in root.findall(namespace + "style")}
+    result = {}
+    for identity, style in styles.items():
+        seen = set()
+        while style is not None and len(seen) < 32:
+            key = style.get(namespace + "styleId")
+            if key in seen:
+                break
+            seen.add(key)
+            outline = style.find(namespace + "pPr/" + namespace + "outlineLvl")
+            if outline is not None:
+                value = outline.get(namespace + "val", "")
+                if value.isdecimal() and 0 <= int(value) <= 8:
+                    result[identity] = int(value) + 1
+                break
+            base = style.find(namespace + "basedOn")
+            style = styles.get(base.get(namespace + "val")) if base is not None else None
+    return result

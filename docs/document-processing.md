@@ -114,9 +114,11 @@ semantic examples and regression fixtures do not become document-specific rules.
 Publication and source-link audits do not establish complete semantic recall or
 perfect accuracy. Performance comparisons must also report source-grounded
 coverage and known omissions. Excluding a prerequisite must not make a retained
-procedure or conclusion misleading; broader cross-block dependency handling
-remains a validation and implementation requirement beyond the current
-whole-block and whole-topic exclusions.
+procedure or conclusion misleading. Before partial publication, a bounded dependency
+review checks candidates against the complete available original and recorded parsing
+omissions. Dependent or unresolved candidates are also excluded, including transitive
+dependencies. If that full review does not fit its allowance, it cannot certify
+independence; no usable candidate means the source stays unfinished.
 
 Measure cold import, identical reimport and interrupted continuation separately.
 Compare the same enabled features and quality scope, including all failed,
@@ -124,6 +126,87 @@ retried, corrected and verified requests in actual token usage. Keep production
 defaults separate from validation overrides. A successful large-document test
 does not establish general throughput; independent documents and fixed semantic
 anchors are required to evaluate general improvements.
+
+## Source indexing and original citations
+
+Markdown, text, PDF, DOCX, XLSX and PPTX use the same import and Continue operations.
+Each parsed version gets a complete ordered source index before facts are extracted.
+Native Markdown/DOCX headings, PDF physical pages, spreadsheet sheets/cells and slide
+objects keep their own position types. Spreadsheet values retain formula text, merge
+relationships and declared table headers; formulas are not executed. Undeclared column
+roles remain uncertain. Unsupported slide objects and notes remain explicit omissions
+or original attachments; successful parsing does not prove semantic completeness.
+
+Source indexing is enabled by default without rewriting existing KB configuration.
+`navigation.enabled: false` keeps the complete basic range map and disables paid index
+enhancement. The historical `pageindex_threshold` still loads for compatibility but
+does not choose the new source processing path. Existing short-document Markdown and
+saved PageIndex exports remain readable without a paid migration. Internal range/node
+numbers never acquire physical page precision that the original export did not have.
+
+Native structure is preferred. Missing structure and long range summaries may use
+bounded model requests: at most 32 requests, 262144 tokens and 120 seconds for optional
+index work, further bounded by its configured allowance and the remaining import
+budget. Import reserves at least four requests for necessary compilation and limits
+indexing to at most 10% of remaining finite tokens. Small ranges retain an original-text
+preview. Exhausted optional allowance leaves a basic or degraded index; account,
+identity, cancellation and global budget failures still end the operation.
+
+Question and chat tools capture the published source/version/parse/index together.
+Use the returned original-range citations for details, prerequisites and exceptions;
+titles and summaries are navigation hints. Long original and Markdown reads paginate
+explicitly. A source-index rebuild reads saved parsing, changes only its retrieval
+index, and does not rewrite compiled knowledge or existing citations. Unpublished or
+mismatched parsing cannot silently replace published evidence.
+Navigation degradation describes the index hints, separately from parsing quality.
+Original-range tools provide exact image links tied to each block's validated published
+assets. Missing, damaged or symbolically linked images remain unavailable while text can
+still be read; image destinations must not be constructed from document names.
+
+## Reuse, continuation and measured cost
+
+Fact extraction, range structure, summaries, topic planning, generation and verification
+keep distinct reusable results. Sharing requires equal complete inputs, including
+ordered batch context, subjects, versions, headings, neighboring evidence, table roles,
+candidate metadata, model options and validation rules. Request-local short identities
+and repeated context references reduce transport size while original text and every
+occurrence retain their evidence identity. Each adopting source receives its own binding.
+
+Topic-planning batches read one frozen existing-knowledge catalogue. A bounded second
+pass coordinates ambiguous candidate identities; uncertain groups retain separate,
+stable names and complete membership. Planning runs concurrently within the existing
+document budget. Page writes stay serialized. Generation and verification reuse are
+independent: a verification change can recheck a valid draft without regenerating it.
+Current evidence, coverage, structure and publication checks still apply to every hit.
+
+The successful request's actual output cap is recorded separately from the configured
+adaptive policy. A concurrent expansion cannot relabel another response. One executor
+owns an equivalent analysis throughout its adaptive retries; waiters can stop without
+cancelling that executor. Unknown remote work after process loss is not claimed to have
+executed exactly once. Current-source completion receipts can resume under their
+unchanged policy; new shared requests must match actual effective request parameters.
+
+New checkpoints store complete contracts; local stage indexes can be rebuilt from
+immutable records. Bounded historical adapters may recover drafts, but an old draft
+cannot grant publication permission. Corrupt shared records become local misses and
+are retained when repaired. History cleanup accounts for source bindings, current
+publications, pending work and historical chat citations before removing unused data.
+Source updates retract withdrawn contributions while retaining contributions belonging
+to other sources and protecting manual edits.
+
+Usage includes failed requests, retries, indexing, corrections and verification.
+Source history adds standalone index rebuilds once; indexing already included in an
+import is not added twice. Question/chat usage is reported separately. Measurements
+include stage spans, preparation/queue/request time, request IDs, concurrency and
+shared-analysis hits/bindings. Overlapping spans are not summed as elapsed time.
+Provider cache tokens are separate from local reuse and do not imply free requests.
+Absent provider details remain unknown; SDK-normalized zero cache counts are also
+unknown when the original field cannot be distinguished from absence.
+
+Default correction remains bounded to one repair plus configured review. Valid
+rejections persist, title-only repair preserves body text, and uncertain local
+dependencies require full affected-candidate review. Additional concurrency within a
+single topic remains disabled pending repeatable evidence of a useful tail-latency gain.
 
 ## Default execution profile
 
@@ -706,8 +789,9 @@ verification_adjudication_thinking: enabled
 这是知识库级高级设置，默认不启用，不改变事实提取、规划或正常生成的思考模式。
 普通核对未通过时，同一候选最多增加一次指定思考模式的独立复核；复核仍拒绝则
 继续有限纠正或报告未完成。不会循环重试直到通过。所有调用共用原请求、token、
-时间和取消预算，恢复与生成缓存键包含这项设置。改变该设置不使已验证的事实和
-规划失效，但旧生成校验记录不能冒充新设置下的结果。
+时间和取消预算。普通核对与深度复核各自绑定实际请求和思考模式；改变深度复核设置
+不会使未改变的事实、规划或初次生成失效。已有普通肯定结论无需额外复核，旧深度
+复核记录不能冒充新模式下的结果。
 
 
 有效的肯定或否定语义响应按完整请求持久化：候选、原文、提示、模型参数、连接和
@@ -744,3 +828,25 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 若模型将 verdict/reason 与 issues 分别返回为两个 JSON 对象，仅在字段严格互不冲突、
 第二个对象只有 issues 时无损合并，再执行完整校验。矛盾结论、额外文本和其他对象
 不会被丢弃后当作成功。保存的原响应可直接重放恢复，无需再次请求同一判断。
+
+删除资料时，多来源页面同时撤回该资料明确标记的正文区间及证据。删除依据同时核对
+当前发布基线和该来源自己的发布收据；其他来源的一次链接清理不能把人工文字变成
+可删除的生成内容。区间外正文、自定义元数据和无法确认归属的旧摘要保留。已修改、
+缺失、交叉或嵌套的来源区间会使删除回滚；人工修改过的摘要显示为保留。
+历史清理继续保护当前引用、已保存对话引用和仍被其他来源采用的分析记录。
+人工改动的页面仍通过现有差异审阅和接受流程更新。更新时也核对该来源自己的
+历史发布内容：接受其他来源的链接清理，不代表允许以后覆盖这里保留的人工内容。
+摘要中可编辑的来源字段或正文标记被删除，不能绕过此检查；归属不明时要求审阅。
+
+仅增加总请求数、总 token 或总运行时间后继续，同一原件中已完成且上下文未变的
+事实单元可恢复，包括已确认不含独立事实的标题。索引的执行记录变化本身不使这些
+结果失效；原文、必要上下文、节点含义或核验规则改变时仍重新验证。空结果不跨资料共享。
+
+存在未解析内容时，发布前还要检查知识是否依赖缺失的前提、例外或表头。该检查保留
+完整原文与候选内容，在允许的上下文范围内压缩重复引用。有效判定后，省略依赖缺失
+内容或仍不确定的主题，发布其余独立主题；容量不足、协议无效或没有可保留主题时
+保持未完成。请求、token 与时间上限仍然生效，压缩本身不能证明知识独立或完整。
+
+本轮实现的测试范围、真实实验成本和未通过项目见[来源索引验收记录](source-index-validation.md)。
+
+依赖检查的返回若缺少候选、含未知路径或格式无效，导入保持未完成，并单独保存原始返回及协议诊断；继续可在原额度内重试。有效的依赖或未知判定保留原理由并复用。请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带索引制品 ID 的空事实收据升级后可能重做一次；新版本内仅调整总请求、token 或时限不使这类已完成单元失效。

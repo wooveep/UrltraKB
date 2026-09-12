@@ -38,9 +38,27 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
     assert generated
     for fact in generated:
         assert fact["quote"] == original
-        assert (
-            ParseStore(kb_dir).read(Evidence(**fact["reference"]), max_chars=100).text == original
+    from openkb.agent.evidence_units import source_units
+    from openkb.config import resolve_effective_config
+    from openkb.processing import RequestLimits
+    from openkb.sources import SourceStore
+
+    source_version = SourceStore(kb_dir).version(result.input_version)
+    parsed = ParseStore(kb_dir).load(result.parse_id)
+    settings = resolve_effective_config(kb_dir)[0]
+    unit = next(
+        source_units(
+            kb_dir, source_version, parsed, RequestLimits.from_config(settings), settings["model"]
         )
+    )
+    from openkb.agent.evidence_facts import validate_unit
+
+    facts = validate_unit(
+        unit, {"facts": [{"topic": "Example", "statement": original, "quote": "dpkg -i"}]}
+    )
+    assert (
+        ParseStore(kb_dir).read(Evidence(**facts[0]["reference"]), max_chars=100).text == original
+    )
 
 
 @pytest.mark.parametrize(

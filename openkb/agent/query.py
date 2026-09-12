@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -27,29 +28,28 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
 {schema_md}
 
 ## Search strategy
-1. Read index.md to see all documents and concepts with brief summaries.
-   Each document is marked (short) or (pageindex) to indicate its type.
-2. Read relevant summary pages (summaries/) for document overviews.
-   Summaries may omit details — if you need more, follow the summary's
-   `full_text` frontmatter field to the source (see step 4).
+1. Use list_sources to find the relevant published source when that tool is available.
+   Read index.md and relevant summaries/ pages for navigation and document overviews.
+   Titles and summaries may be incomplete or misleading; they are not original evidence.
+2. Use read_source_tree and read_source_node to check the original ranges for details,
+   prerequisites and exceptions. Follow their pagination and preserve the returned citation.
 3. Read concept pages (concepts/) for cross-document synthesis.
 4. For "who/what is X" questions about a specific named person, organization,
    place, or product, read the matching page in entities/ first.
-5. When you need detailed source document content, each summary page has a
-   `full_text` frontmatter field with the path to the original document content:
-   - Short documents (doc_type: short): read_file with that path.
-   - PageIndex documents (doc_type: pageindex): use get_page_content(doc_name, pages)
-     with tight page ranges. The summary shows document tree structure with page
-     ranges to help you target. Never fetch the whole document.
-6. Source content may reference images. Short-doc .md pages link them
-   note-relative (e.g. ![image](images/doc/file.png), resolved from
-   wiki/sources/); long-doc JSON page metadata lists them wiki-root-relative
-   (e.g. sources/images/doc/file.png). Pass either form as seen to the
-   available visual tool only when image understanding is enabled.
-7. Synthesize a clear, concise, well-cited answer grounded in wiki content.
+5. For legacy content without a source entry, follow the summary's `full_text` field.
+   Use read_file for saved Markdown, following next_offset for bounded windows;
+   use get_page_content(doc_name, pages) with tight physical page ranges only when
+   doc_type is pageindex. An internal node number is not a physical page number.
+6. Source content may reference images. Use the exact wiki-root-relative path returned
+   in images[].path or the source image catalog. Legacy note-relative links are resolved
+   by their catalog; never construct directories from the document name or asset ID.
+   Pass that existing path to the visual tool only when image understanding is enabled.
+7. Synthesize a clear, concise answer. Cite original facts using the exact Markdown
+   citation returned by read_source_node, preserving its version, parse and block anchor.
 8. Include relevant original figures in the answer as Markdown images when they help explain
    the answer: ![description](sources/images/file.png). Use an existing wiki-root-relative
-   path from the source image catalog. Keep the figure with its associated explanation and
+   path from images[].markdown or the source image catalog, copying its destination verbatim.
+   Keep the figure with its associated explanation and
    cite the source paragraph/page; never invent an image path or claim to have read missing
    OCR text. Interpret visual content only from an explicitly obtained visual observation.
 
@@ -72,12 +72,34 @@ def build_query_agent(
     instructions += f"\n\nIMPORTANT: Answer in {language} language."
 
     @function_tool
-    def read_file(path: str) -> str:
-        """Read a Markdown file from the wiki.
+    def read_file(path: str, offset: int = 0, max_chars: int = 16000) -> str:
+        """Read a bounded Markdown window. Follow next_offset when returned.
         Args:
             path: File path relative to wiki root (e.g. 'summaries/paper.md').
+            offset: Character offset, starting at zero.
+            max_chars: Maximum window size, from 1 to 16000 characters.
         """
-        return read_wiki_file(path, wiki_root)
+        if (
+            type(offset) is not int
+            or offset < 0
+            or type(max_chars) is not int
+            or not 1 <= max_chars <= 16000
+        ):
+            raise ValueError("Invalid wiki reading window")
+        text = read_wiki_file(path, wiki_root)
+        if offset == 0 and len(text) <= max_chars:
+            return text
+        end = min(offset + max_chars, len(text))
+        return json.dumps(
+            {
+                "path": path,
+                "offset": offset,
+                "text": text[offset:end],
+                "total_chars": len(text),
+                "next_offset": end if end < len(text) else None,
+            },
+            ensure_ascii=False,
+        )
 
     @function_tool
     def get_page_content(doc_name: str, pages: str) -> str:
@@ -90,7 +112,11 @@ def build_query_agent(
         """
         return get_wiki_page_content(doc_name, pages, wiki_root)
 
+    from openkb.agent.source_tools import source_tools
     from openkb.vision.session import image_tools
+
+    original_tools, original_instructions = source_tools(Path(wiki_root).parent)
+    instructions += "\n\n" + original_instructions
 
     visual_tools, visual_instructions = image_tools(Path(wiki_root).parent)
     instructions += "\n\n" + visual_instructions
@@ -108,6 +134,8 @@ def build_query_agent(
     else:
         model_settings = resolve_model_settings()
 
+    model_settings["include_usage"] = True
+
     from openkb.processing import request_budget_settings
 
     if caps := request_budget_settings():
@@ -119,7 +147,7 @@ def build_query_agent(
     return Agent(
         name="wiki-query",
         instructions=instructions,
-        tools=[read_file, get_page_content, *visual_tools],
+        tools=[read_file, get_page_content, *original_tools, *visual_tools],
         model=f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )

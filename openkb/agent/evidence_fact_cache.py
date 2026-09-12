@@ -3,7 +3,7 @@
 from openkb.agent.evidence_retry import ResponseIncomplete
 from openkb.implementation import module_revision
 from openkb.processing import processing_checkpoint
-from openkb.sources import content_id, read_object, valid_id
+from openkb.sources import content_id
 
 _LEGACY_BASE = {
     "evidence_units": "11b13587a64c24ed430ae1786bc805491b9b35952595126e1662dc267d9a42fe",
@@ -34,29 +34,44 @@ _LEGACY_COMPILER = "833ae7bc677a7b004b141e689a8ca67974aa39584da2e2791101eacef87f
 
 class FactCache:
     def __init__(self, checkpoints, system, units, validate):
+        from openkb.agent.shared_analysis import SharedAnalysis
+
+        self.shared = SharedAnalysis(checkpoints, "facts", system)
+        self.shared_hits = set()
         self.checkpoints, self.system, self.validate = checkpoints, system, validate
         self.units = {unit["id"]: unit for unit in units}
         self.order = {unit["id"]: index for index, unit in enumerate(units)}
         self.rows = {}
+        self.contexts = {}
         self._restore()
+
+    def set_batch(self, units):
+        from openkb.agent.shared_analysis import fact_input
+
+        context = [fact_input(unit) for unit in units]
+        identity = self.shared.input_reference(context)
+        for index, unit in enumerate(units):
+            self.contexts[unit["id"]] = {"input": identity, "occurrence": index}
+
+    def payload(self, unit):
+        from openkb.agent.shared_analysis import fact_input
+
+        return {"unit": fact_input(unit), "batch": self.contexts[unit["id"]]}
 
     def _key(self, units):
         return self.checkpoints.key(self.system, {"stage": "facts", "units": units})
 
     def _restore(self):
         cp = self.checkpoints
-        if not cp.latest.exists():
-            return
-        keys = read_object(cp.latest)["checkpoints"]
+        keys = cp.checkpoint_keys("facts")
         if not isinstance(keys, list):
             raise ValueError("Invalid fact checkpoint index")
         for key in keys:
             processing_checkpoint("facts")
-            path = cp.store.owned_path(cp.root / f"{valid_id(key)}.json")
-            record = read_object(path)
-            if record.get("input") != cp.input:
+            record = cp.record(key)
+            if record is None:
                 continue
-            value = cp.load(key)  # Validate input identity and immutable value digest first.
+            value = record["value"]
             rows = value.get("units") if isinstance(value, dict) else None
             if not isinstance(rows, list) or not rows:
                 continue
@@ -69,7 +84,10 @@ class FactCache:
                 continue
             units = [self.units[uid] for uid in sorted(ids, key=self.order.__getitem__)]
             contract = cp._key_record(self.system, {"stage": "facts", "units": units})
-            accepted = content_id(contract) == key
+            accepted = key in {
+                content_id(contract),
+                cp.previous_fact_key(self.system, {"stage": "facts", "units": units}),
+            }
             if (
                 not accepted
                 and contract["implementation"] == _LEGACY_COMPILER
@@ -104,10 +122,38 @@ class FactCache:
                 raise ValueError("Invalid single-unit checkpoint")
             self.validate(unit, rows[0])
             return rows[0]
+        payload = self.payload(unit)
+        output_tokens = self.shared.output_tokens()
+        shared = self.shared.load(payload, output_tokens=output_tokens)
+        if shared is not None:
+            row = {**shared, "id": unit["id"]}
+            try:
+                self.validate(unit, row)  # Rebind every quotation and context to current originals.
+            except ResponseIncomplete:
+                return None
+            self.shared.bind(payload, unit, output_tokens=output_tokens)
+            self.rows[unit["id"]] = row
+            self.shared_hits.add(unit["id"])
+            return row
         return None
 
-    def save(self, units, rows):
+    def save(self, units, rows, *, receipt=None):
         for unit, row in zip(units, rows, strict=True):
             self.validate(unit, row)
-        self.checkpoints.save(self._key(units), {"units": rows})
+        self.checkpoints.save(self._key(units), {"units": rows}, receipt=receipt)
         self.rows.update({row["id"]: row for row in rows})
+        actual = getattr(receipt, "output_tokens", None)
+        if type(actual) is not int or actual <= 0:
+            return
+        for unit, row in zip(units, rows, strict=True):
+            if not row["facts"]:
+                # An empty result can depend on another occurrence in its batch.
+                # It remains recoverable for this source, never proof for another.
+                continue
+            payload = self.payload(unit)
+            self.shared.save(
+                payload,
+                {key: value for key, value in row.items() if key != "id"},
+                output_tokens=actual,
+            )
+            self.shared.bind(payload, unit, output_tokens=actual)

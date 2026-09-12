@@ -53,3 +53,29 @@ def test_cleanup_refuses_a_preview_after_new_citations(kb_dir, tmp_path, model_s
     with pytest.raises(ValueError, match="changed"):
         cleanup_history(kb_dir, preview.id)
     assert SourceStore(kb_dir).version(first.input_version)
+
+
+def test_cleanup_protects_saved_conversation_citations_and_preview_races(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.agent.chat_session import ChatSession
+    from openkb.application.source_cleanup import cleanup_history, preview_history_cleanup
+
+    path = tmp_path / "chat-cited.md"
+    path.write_text("Old timeout: 42 seconds.")
+    old = import_document(kb_dir, path)
+    path.write_text("New timeout: 43 seconds.")
+    import_document(kb_dir, path)
+    before = preview_history_cleanup(kb_dir)
+    session = ChatSession.new(kb_dir, "offline", "en")
+    session.record_turn(
+        "What was the old timeout?",
+        f"[Original](sources/snapshots/{old.input_version}-{old.parse_id}.md)",
+        [],
+    )
+    with pytest.raises(ValueError, match="changed"):
+        cleanup_history(kb_dir, before.id)
+    after = preview_history_cleanup(kb_dir)
+    assert old.input_version not in after.versions
+    assert old.parse_id not in after.parses
+    assert not any(old.input_version in name for name in after.files)

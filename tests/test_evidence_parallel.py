@@ -23,7 +23,7 @@ def test_single_document_uses_bounded_parallel_batches_and_keeps_all_checkpoints
     path.write_text(yaml.safe_dump(settings))
     source = tmp_path / "parallel.md"
     source.write_text(
-        "\n\n".join(f"Condition {i}: pressure must remain below 37 kPa." for i in range(40))
+        "\n\n".join(f"Condition {i}: pressure must remain below 37 kPa." for i in range(160))
     )
     guard = threading.Lock()
     overlap = threading.Event()
@@ -52,7 +52,8 @@ def test_single_document_uses_bounded_parallel_batches_and_keeps_all_checkpoints
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert peak == concurrency
-    assert len(inputs) == len({unit["id"] for unit in inputs}) == 40
+    # Compact IDs are request-local; original unit text proves full batch coverage.
+    assert len(inputs) == len({unit["text"] for unit in inputs}) == 160
     root = kb_dir / ".openkb/source-store/compilation"
     saved = {path.stem for path in root.glob("*.json")}
     latest = json.loads(next((root / "latest").glob("*.json")).read_text())
@@ -70,7 +71,7 @@ def test_stop_cancels_all_inflight_batches_without_publishing(
     settings["processing"].update(context_tokens=4096, output_tokens=1024, concurrency=concurrency)
     path.write_text(yaml.safe_dump(settings))
     source = tmp_path / "cancel-parallel.md"
-    source.write_text("\n\n".join(f"Condition {i}: mandatory requirement." for i in range(40)))
+    source.write_text("\n\n".join(f"Condition {i}: mandatory requirement." for i in range(160)))
     all_started, release, stopped = threading.Event(), threading.Event(), threading.Event()
     guard = threading.Lock()
     calls = []

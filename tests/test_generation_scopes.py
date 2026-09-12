@@ -105,7 +105,7 @@ def test_generation_budget_uses_the_same_fragment_contract(monkeypatch):
     from openkb.agent.evidence_generation_protocol import messages
 
     seen = []
-    monkeypatch.setattr(evidence_pages, "output_fits", lambda *args: True)
+    monkeypatch.setattr(evidence_pages, "output_fits", lambda *args, **kwargs: True)
     monkeypatch.setattr(evidence_pages, "fits", lambda a, b, c, d: seen.append(d) or True)
     p = payload()
     assert evidence_pages._generation_fits(
@@ -154,9 +154,10 @@ def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(
     }
     fact = {"id": "fact", "scope": reference}
     reader = SimpleNamespace(
+        complete_bound=lambda reference: len(text),
         read=lambda ref, **kw: SimpleNamespace(
             text=text[ref.start : ref.end], context="", location={}
-        )
+        ),
     )
     checks = []
 

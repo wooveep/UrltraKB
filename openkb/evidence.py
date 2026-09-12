@@ -23,6 +23,8 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "docx",
         "text",
         "converted",
+        "xlsx",
+        "pptx",
     }:
         raise ValueError("Invalid source location")
     allowed = {
@@ -34,11 +36,35 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "cell",
         "line",
         "headings",
+        "heading_level",
         "bbox",
         "attachment",
+        "sheet",
+        "sheet_index",
+        "cell_address",
+        "cell_range",
+        "slide",
+        "object_id",
+        "coordinate_unit",
+        "group_ids",
+        "notes",
     }
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
+    if location["kind"] == "xlsx":
+        from openkb.office_locations import validate_spreadsheet_location
+
+        validate_spreadsheet_location(location)
+    elif set(location) & {"sheet", "sheet_index", "cell_address", "cell_range"}:
+        raise ValueError("Spreadsheet coordinates require a spreadsheet source")
+    if location["kind"] == "pptx":
+        from openkb.office_locations import validate_presentation_location
+
+        validate_presentation_location(location)
+        if "notes" in location and (location["notes"] is not True or "object_id" in location):
+            raise ValueError("Invalid speaker note position")
+    elif set(location) & {"slide", "object_id", "coordinate_unit", "group_ids", "notes"}:
+        raise ValueError("Slide coordinates require a presentation source")
     if "attachment" in location:
         attachment = location["attachment"]
         if (
@@ -63,6 +89,10 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         or not all(isinstance(item, str) for item in location["headings"])
     ):
         raise ValueError("Invalid heading path")
+    if "heading_level" in location and (
+        type(location["heading_level"]) is not int or not 1 <= location["heading_level"] <= 9
+    ):
+        raise ValueError("Invalid native heading level")
     if "bbox" in location and (
         not isinstance(location["bbox"], list)
         or len(location["bbox"]) != 4
@@ -201,6 +231,17 @@ class EvidenceSlice:
     assets: tuple[str, ...]
     context: str
     next_start: int | None
+
+
+def complete_read_bound(block):
+    """Allow exact text and required metadata through the public bounded reader."""
+    return max(
+        4096,
+        block.chars,
+        len(block.context)
+        + len(json.dumps(block.location, ensure_ascii=False))
+        + 64 * len(block.assets),
+    )
 
 
 class ParseStore:
@@ -374,7 +415,7 @@ class ParseStore:
                 self.sources.asset(asset)
             for block in parsed.blocks:
                 content = self.sources.asset(block.blob)
-                with content.open(encoding="utf-8") as stream:
+                with content.open(encoding="utf-8", newline="") as stream:
                     length = sum(len(chunk) for chunk in iter(lambda: stream.read(8192), ""))
                 if length != block.chars:
                     raise ValueError("Content block length mismatch")
@@ -510,6 +551,9 @@ class EvidenceReader:
             max_chars=max_chars,
         )
 
+    def complete_bound(self, reference):
+        return complete_read_bound(self.blocks[reference.block_id])
+
     def read(self, reference: Evidence, *, max_chars: int) -> EvidenceSlice:
         if type(max_chars) is not int or max_chars <= 0:
             raise ValueError("Evidence reads require a positive bound")
@@ -520,7 +564,7 @@ class EvidenceReader:
                 self.blocks,
                 max_chars,
             )
-            with self.sources.asset(block.blob).open(encoding="utf-8") as source:
+            with self.sources.asset(block.blob).open(encoding="utf-8", newline="") as source:
                 remaining = reference.start
                 while remaining:
                     skipped = source.read(min(remaining, 8192))

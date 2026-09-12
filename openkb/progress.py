@@ -8,6 +8,8 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Callable, Iterator
 
+from openkb.execution_measurement import measure_span
+
 
 @dataclass(frozen=True)
 class ProgressStep:
@@ -19,6 +21,8 @@ class ProgressStep:
     def __post_init__(self):
         if self.phase not in {
             "docx",
+            "xlsx",
+            "pptx",
             "pdf",
             "text",
             "image_ocr",
@@ -26,6 +30,7 @@ class ProgressStep:
             "facts",
             "planning",
             "generation",
+            "dependencies",
             "parse_cache",
         } or self.unit not in {"items", "paragraphs", "pages", "lines", "characters", "topics"}:
             raise ValueError("Invalid progress scope")
@@ -112,7 +117,8 @@ def progress_scope(phase: str, total: int | None = None, unit: str = "items"):
     finished = False
     try:
         _send()
-        yield counter
+        with measure_span(phase):
+            yield counter
         # A successfully settled scope can contain explicit omissions. Flush
         # its measured count before removing it, even when it did not reach
         # total and its last advance was suppressed by the UI throttle.

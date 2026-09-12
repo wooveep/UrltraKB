@@ -43,7 +43,8 @@ def test_changed_plan_requires_another_confirmation(kb_dir):
     latest = preview_removal(kb_dir, "hash-paper")
     assert latest.version != preview.version
     result = remove_document(kb_dir, "hash-paper", version=latest.version)
-    assert result.status == "removed" and not added.exists()
+    assert result.status == "removed" and added.exists()
+    assert "New work" in added.read_text() and "summaries/paper.md" not in added.read_text()
     assert not (kb_dir / "raw/paper.pdf").exists()
 
 
@@ -100,7 +101,8 @@ def test_registry_failure_restores_index_and_raw_for_manual_retry(kb_dir):
     assert result.unfinished and result.retained
     assert blob.read_bytes() == b"indexed original"
     assert (kb_dir / "raw/paper.pdf").exists()
-    assert not (kb_dir / "wiki/summaries/paper.md").exists()
+    assert (kb_dir / "wiki/summaries/paper.md").read_text() == "# Paper\n"
+    assert "wiki/summaries/paper.md" in result.retained
     with sqlite3.connect(kb_dir / ".openkb/pageindex.db") as db:
         assert db.execute("SELECT count(*) FROM documents").fetchone()[0] == 1
     assert remove_document(kb_dir, "hash-paper").status == "removed"
@@ -187,7 +189,8 @@ def test_failed_final_rollback_keeps_committed_wiki_facts_in_blocked_receipt(kb_
     ):
         result = remove_document(kb_dir, "hash-paper")
     assert result.status == "blocked" and repair_marker(kb_dir).exists()
-    assert "deleted: wiki/summaries/paper.md" in result.result.changes
+    assert "deleted: wiki/sources/paper.md" in result.result.changes
+    assert "wiki/summaries/paper.md" in result.retained
     assert "knowledge_base_repair" in result.unfinished
     with patch("openkb.application.removal.remove_document", return_value=result):
         receipt = _execute(

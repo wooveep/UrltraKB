@@ -65,6 +65,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Bounded operating defaults for existing and new KBs. Context/output are
     # request caps, not a claim about an arbitrary provider's model capacity.
     "processing": DEFAULT_PROCESSING,
+    "navigation": {"enabled": True},
 }
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "openkb"
@@ -477,6 +478,9 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     """
     compilation_model_options(config)
     compilation_model_options(config, verification=True)
+    from openkb.navigation_options import validate_navigation_options
+
+    validate_navigation_options(config.get("navigation"))
     for key in ("verification_adjudication_thinking", "correction_thinking"):
         mode = config.get(key)
         if mode is not None and mode not in ("enabled", "disabled"):
@@ -490,7 +494,7 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     threshold = config.get("pageindex_threshold")
     if threshold is None and allow_inherited:
         return
-    # Legacy zero/negative thresholds route every PDF through PageIndex.
+    # Retained for configuration compatibility. New imports always use one source tree.
     if isinstance(threshold, bool) or not isinstance(threshold, int):
         raise ValueError("Configuration field 'pageindex_threshold' must be an integer")
 

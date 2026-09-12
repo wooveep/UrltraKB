@@ -454,7 +454,7 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
     assert "entities/atlasdb" in summary
 
 
-def test_large_topic_plan_is_bounded_and_merges_one_topic_across_planning_parts(
+def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
     kb_dir, tmp_path, model_service
 ):
     from tests.http_model_fixture import evidence_response
@@ -492,8 +492,13 @@ def test_large_topic_plan_is_bounded_and_merges_one_topic_across_planning_parts(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert len(planned) == len(set(planned)) == 120
-    assert len(list((kb_dir / "wiki/concepts").glob("*.md"))) == 1
+    assert len(set(planned)) == 120
+    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert pages
+    text = "\n".join(page.read_text() for page in pages)
+    from openkb.evidence import ParseStore
+
+    assert all(block.id in text for block in ParseStore(kb_dir).load(result.parse_id).blocks)
     assert (
         sum(
             json.loads(call["messages"][-1]["content"])["stage"] == "planning"

@@ -19,7 +19,13 @@ class TestBuildQueryAgent:
 
     def test_agent_has_text_tools_when_images_are_disabled(self, tmp_path):
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
-        assert len(agent.tools) == 2
+        assert {tool.name for tool in agent.tools} == {
+            "read_file",
+            "get_page_content",
+            "list_sources",
+            "read_source_tree",
+            "read_source_node",
+        }
 
     def test_agent_tool_names(self, tmp_path):
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")

@@ -30,6 +30,8 @@ def fact_quote(unit, fact):
     text, quote = unit["text"], fact["quote"]
     details["quote_chars"] = len(quote)
     start = text.find(quote)
+    if start >= 0 and text.find(quote, start + 1) >= 0:
+        invalid("quote", "ambiguous_original_match")
     if start < 0 and unit["kind"] != "code":
         normalized_text = text.translate(_TYPESETTING_SPACES)
         normalized_quote = quote.translate(_TYPESETTING_SPACES)
