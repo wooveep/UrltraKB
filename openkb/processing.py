@@ -24,11 +24,11 @@ DEFAULT_PROCESSING = {
     "max_context_tokens": 1048576,
     "max_output_tokens": 393216,
     "request_timeout": 180,
-    "stage_timeout": 1800,
-    "document_timeout": 3600,
+    "stage_timeout": None,
+    "document_timeout": None,
     "cleanup_timeout": 10,
     "max_attempts": 2,
-    "max_requests": 200,
+    "max_requests": None,
     "max_tokens": None,
     "concurrency": 8,
 }
@@ -61,11 +61,11 @@ class RequestLimits:
     context_tokens: int
     output_tokens: int
     request_timeout: float
-    stage_timeout: float
-    document_timeout: float
+    stage_timeout: float | None
+    document_timeout: float | None
     cleanup_timeout: float
     max_attempts: int
-    max_requests: int
+    max_requests: int | None
     max_tokens: int | None
     concurrency: int
     max_context_tokens: int | None = None
@@ -83,6 +83,9 @@ class RequestLimits:
         numbers: dict[str, Any] = {}
         for key in ("request_timeout", "stage_timeout", "document_timeout", "cleanup_timeout"):
             value = values.get(key)
+            if key in {"stage_timeout", "document_timeout"} and key in values and value is None:
+                numbers[key] = None
+                continue
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
@@ -93,7 +96,7 @@ class RequestLimits:
             numbers[key] = value
         for key in ("max_attempts", "max_requests", "max_tokens", "concurrency"):
             value = values.get(key)
-            if key == "max_tokens" and key in values and value is None:
+            if key in {"max_tokens", "max_requests"} and key in values and value is None:
                 numbers[key] = None
                 continue
             if type(value) is not int or value <= 0:
@@ -176,8 +179,15 @@ class ExecutionBudget:
         check_cancelled()
         now = time.monotonic()
         remaining = min(
-            self.started + self.limits.document_timeout - now,
-            self.stage_started + self.limits.stage_timeout - now,
+            (
+                start + limit - now
+                for start, limit in (
+                    (self.started, self.limits.document_timeout),
+                    (self.stage_started, self.limits.stage_timeout),
+                )
+                if limit is not None
+            ),
+            default=math.inf,
         )
         if remaining <= 0:
             raise ProcessingIncomplete("time_budget_exhausted", self.stage)
@@ -205,7 +215,7 @@ class ExecutionBudget:
         options["timeout"] = min(timeout, remaining)
         reserved = tokens + options["max_tokens"]
         with self.lock:
-            if self.attempts >= self.limits.max_requests:
+            if self.limits.max_requests is not None and self.attempts >= self.limits.max_requests:
                 raise ProcessingIncomplete("request_budget_exhausted", self.stage)
             if (
                 self.limits.max_tokens is not None
@@ -551,7 +561,7 @@ def external_request_usage(reservation: int, stage: str = "external"):
         return
     active.checkpoint()
     with active.lock:
-        if active.attempts >= active.limits.max_requests:
+        if active.limits.max_requests is not None and active.attempts >= active.limits.max_requests:
             active.incomplete = ProcessingIncomplete("request_budget_exhausted", active.stage)
             raise active.incomplete
         if (

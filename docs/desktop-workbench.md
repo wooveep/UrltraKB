@@ -306,6 +306,15 @@ Pending drafts are distinguished from verified output and published pages.
 Late responses from a previously selected stage cannot replace the current view.
 Legacy entries without a retained source keep the existing recompile workflow.
 
+Recompilation submits from the displayed source selection without first waiting
+for a KB read lease. Each indexed target carries a digest of its registration;
+the worker rechecks that digest under its write lease. Unrelated changes in the
+same KB do not invalidate a queued source, while replacement of the selected
+registration requires a fresh selection. Sources already running or queued are
+omitted from duplicate submissions, and other sources can still be queued.
+Unfinished retained sources continue from their saved results. Actual KB writes
+remain serialized and manual page changes still require proposal acceptance.
+
 Verification: 68 related tests passed on Linux; the Windows source-run subset had
 57 passes and three POSIX-only symlink tests skipped. Ruff, mypy and the module
 size check passed. Native Qt captures below use synthetic documents in an

@@ -102,16 +102,23 @@ class ImportUrl:
 @dataclass(frozen=True)
 class RecompileDocument:
     file_hash: str
-    version: str
+    version: str | None
+    source_revision: str | None = None
 
     def __post_init__(self) -> None:
         if (
             not isinstance(self.file_hash, str)
             or not self.file_hash
-            or not isinstance(self.version, str)
-            or not self.version
+            or (self.version is None) == (self.source_revision is None)
+            or (
+                self.version is not None and (not isinstance(self.version, str) or not self.version)
+            )
         ):
             raise ValueError("Choose an indexed document to recompile")
+        if self.source_revision is not None:
+            from openkb.sources import valid_id
+
+            valid_id(self.source_revision)
 
 
 @dataclass(frozen=True)

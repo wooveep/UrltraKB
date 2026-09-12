@@ -653,8 +653,11 @@ class TaskManager:
             attempt.stopping_at = min(attempt.stopping_at or now, now - grace)
         if limits and not attempt.recovery and not task.view.stop_requested:
             if (
-                now - attempt.started >= limits.document_timeout
-                or now - attempt.stage_started >= limits.stage_timeout
+                limits.document_timeout is not None
+                and now - attempt.started >= limits.document_timeout
+            ) or (
+                limits.stage_timeout is not None
+                and now - attempt.stage_started >= limits.stage_timeout
             ):
                 attempt.budget_expired = True
         if attempt.result is not None and attempt.stopping_at is None:

@@ -143,8 +143,10 @@ def test_persistent_local_fact_defect_keeps_publication_pending(kb_dir, tmp_path
     assert not pages
 
 
-def test_default_request_count_stops_even_with_unlimited_tokens():
-    limits = RequestLimits.from_config(DEFAULT_CONFIG)
+def test_explicit_request_count_stops_even_with_unlimited_tokens():
+    limits = RequestLimits.from_config(
+        {**DEFAULT_CONFIG, "processing": {**DEFAULT_CONFIG["processing"], "max_requests": 200}}
+    )
     budget = ExecutionBudget(limits)
     budget.attempts = limits.max_requests
     with pytest.raises(ProcessingIncomplete) as failure:

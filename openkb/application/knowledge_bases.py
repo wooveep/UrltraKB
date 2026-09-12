@@ -273,6 +273,8 @@ def initialize_kb(
 
 def get_kb_list(kb_dir: Path) -> dict[str, Any]:
     """Return a structured inventory of the knowledge base (REST ``/list``)."""
+    from openkb.sources import content_id
+
     with kb_read_lock(kb_dir / ".openkb"):
         openkb_dir = kb_dir / ".openkb"
         hashes_file = openkb_dir / "hashes.json"
@@ -285,6 +287,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
             documents.append(
                 {
                     "hash": file_hash,
+                    "recompile_revision": content_id(meta),
                     "name": meta.get("name", "unknown"),
                     "type": raw_type,
                     "display_type": display_document_type(raw_type),

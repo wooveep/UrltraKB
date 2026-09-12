@@ -262,7 +262,13 @@ def _execute(
         from openkb.application.recompilation import recompile_document
 
         recompiled = asyncio.run(
-            recompile_document(root, request.file_hash, context=context, version=request.version)
+            recompile_document(
+                root,
+                request.file_hash,
+                context=context,
+                version=request.version,
+                source_revision=request.source_revision,
+            )
         )
         return UnitResult(
             {"compiled": "completed", "conflict": "failed"}.get(

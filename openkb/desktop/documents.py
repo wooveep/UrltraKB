@@ -18,14 +18,13 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.application.knowledge_bases import get_kb_list
-from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.panels import ManagementPanel
 from openkb.desktop.source_flow import SourceFlow
 from openkb.desktop.source_flow_state import source_snapshot
 from openkb.runtime.records import TERMINAL
-from openkb.runtime.requests import RecompileDocument, RemoveDocument
+from openkb.runtime.requests import ContinueSource, RecompileDocument, RemoveDocument
 
 
 class DocumentsDialog(ManagementPanel):
@@ -36,6 +35,7 @@ class DocumentsDialog(ManagementPanel):
         self._generation = 0
         self._confirmed = None
         self._task = None
+        self._recompile_tasks = {}
         self._flow_running = None
         self.setWindowTitle(f"资料管理 · {kb.name}")
         self.resize(880, 650)
@@ -166,9 +166,32 @@ class DocumentsDialog(ManagementPanel):
         self.removal_toggle.setEnabled(
             self.removal_toggle.isChecked() or (count == 1 and available)
         )
-        self.recompile_selected.setEnabled(count > 0 and available)
-        self.recompile_all.setEnabled(total > 0 and available)
+        self.recompile_selected.setEnabled(available and bool(self.recompile_targets(False)))
+        self.recompile_all.setEnabled(available and bool(self.recompile_targets(True)))
         self.update_source_flow()
+
+    def recompile_targets(self, all_docs):
+        selected = {
+            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
+            for index in self.table.selectionModel().selectedRows()
+        }
+        busy = set().union(*self._recompile_tasks.values()) if self._recompile_tasks else set()
+        observer = getattr(self.window.manager, "source_activity", None)
+        targets = []
+        for identifier, doc in self._documents.items():
+            if (not all_docs and identifier not in selected) or identifier in busy:
+                continue
+            if not doc.get("recompile_revision") and not doc.get("source_id"):
+                continue
+            if observer and observer(
+                self.kb,
+                doc.get("source_id", identifier),
+                doc.get("source_version"),
+                doc.get("source_origin"),
+            ):
+                continue
+            targets.append(doc)
+        return targets
 
     def update_source_flow(self):
         self._flow_running = None
@@ -315,60 +338,63 @@ class DocumentsDialog(ManagementPanel):
     def recompile(self, *, all_docs):
         if self._task:
             return
-        selected = {
-            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
-            for index in self.table.selectionModel().selectedRows()
-        }
-        if not all_docs and not selected:
-            self.status.setText("请先选择要重编译的资料。")
+        # The displayed snapshot already binds each selected source. Acquiring a
+        # KB read lease here would prevent submitting work behind an active writer.
+        targets = self.recompile_targets(all_docs)
+        if not targets:
+            self.status.setText("没有可提交的资料；已在运行或排队的资料不会重复提交。")
             return
         self.invalidate()
         generation = self._generation
-
-        def loaded(selection, error):
-            if self._closed or generation != self._generation or self._task:
-                return
-            if error:
-                self.status.setText(f"无法读取重编译资料（{type(error).__name__}）")
-                return
-            targets = [t for t in selection.targets if all_docs or t.file_hash in selected]
-            if not targets:
-                self.status.setText("没有可重编译的资料，请刷新列表。")
-                return
-            question = QMessageBox(self)
-            question.setWindowTitle("确认重编译")
-            question.setText(f"重编译 {len(targets)} 份资料？")
-            question.setInformativeText(
-                "将使用已保存的原文重新生成摘要、概念和实体页面。"
-                "手工编辑的页面会保留，待你审阅并接受差异后更新。停止任务会保留已完成项。"
-            )
-            question.setDetailedText("\n".join(t.doc_name for t in targets))
-            question.setStandardButtons(
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            question.setDefaultButton(QMessageBox.StandardButton.No)
-            if question.exec() != QMessageBox.StandardButton.Yes:
-                return
-            self._task = self.window.manager.submit(
-                self.kb, [RecompileDocument(t.file_hash, selection.version) for t in targets]
-            )
-            self.update_selection()
-            self.status.setText("重编译任务已提交，可在主窗口查看逐项结果或安全停止。")
-
-        self.window.io.submit(
-            lambda: select_recompilation(self.kb, all_docs=True, confirmation=True),
-            loaded,
-            kb=self.kb,
-            obsolete=lambda: self._closed or generation != self._generation,
+        question = QMessageBox(self)
+        question.setWindowTitle("确认重编译")
+        question.setText(f"提交 {len(targets)} 份资料进行重编译？")
+        question.setInformativeText(
+            "使用当前列表中选定的资料；知识库忙时先排队。执行时会核对资料身份，"
+            "尚未完成的资料复用已有结果。手工编辑的页面保留，审阅并接受差异后才更新。"
         )
+        question.setDetailedText("\n".join(t["name"] for t in targets))
+        question.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        question.setDefaultButton(QMessageBox.StandardButton.No)
+        if question.exec() != QMessageBox.StandardButton.Yes:
+            return
+        if self._closed or generation != self._generation:
+            self.status.setText("资料选择已变化，请重新确认。")
+            return
+        # A task may have been submitted elsewhere while the confirmation was open.
+        available = {t["hash"] for t in self.recompile_targets(all_docs)}
+        targets = [t for t in targets if t["hash"] in available]
+        if not targets:
+            self.status.setText("所选资料已在运行或排队，无需重复提交。")
+            return
+        requests = [
+            RecompileDocument(t["hash"], None, source_revision=t["recompile_revision"])
+            if t.get("recompile_revision")
+            else ContinueSource(t["source_id"], t["source_version"])
+            for t in targets
+        ]
+        task = self.window.manager.submit(self.kb, requests)
+        self._recompile_tasks[task] = {t["hash"] for t in targets}
+        self.update_selection()
+        self.status.setText("任务已提交；知识库忙时等待执行。可以继续选择其他资料提交任务。")
 
     def poll(self):
         previous = self._flow_running
-        self.update_source_flow()
+        self.update_selection()
         if previous and self._flow_running is None:
             self.reload(preserve_result=True)
         if self._task is None:
-            return
+            self._task = next(
+                (
+                    task
+                    for task in self._recompile_tasks
+                    if self.window.manager.get(task).state in TERMINAL
+                ),
+                None,
+            )
+            if self._task is None:
+                return
+            self._recompile_tasks.pop(self._task)
         task = self.window.manager.get(self._task)
         if task.state not in TERMINAL:
             return

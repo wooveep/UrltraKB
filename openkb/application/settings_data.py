@@ -28,7 +28,8 @@ def _processing_settings(value):
         return {key: validated[key] for key in value}
     except ProcessingIncomplete:
         raise ValueError(
-            "Processing limits must be finite, positive and fit the model context"
+            "Request limits must be finite, positive and fit the model context; "
+            "aggregate caps may be null"
         ) from None
 
 

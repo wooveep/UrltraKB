@@ -53,11 +53,11 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `max_context_tokens` | 1048576 (1M) | Model context ceiling for adaptive retries |
 | `max_output_tokens` | 393216 (384K) | Model output ceiling for adaptive retries |
 | `request_timeout` | 180 | Seconds per request without an explicit timeout |
-| `stage_timeout` | 1800 | Seconds allowed for one processing stage |
-| `document_timeout` | 3600 | Seconds for the whole document operation |
+| `stage_timeout` | `null` | Optional total seconds for one processing stage; no default cap |
+| `document_timeout` | `null` | Optional total seconds for the whole document; no default cap |
 | `cleanup_timeout` | 10 | Seconds for auxiliary cleanup or shutdown grace |
 | `max_attempts` | 2 | Maximum transport attempts at each request size |
-| `max_requests` | 200 | Maximum observable model attempts across the document |
+| `max_requests` | `null` | Optional cumulative model-attempt limit; no default cap |
 | `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
 | `concurrency` | 8 | Maximum concurrent model calls within one document |
 

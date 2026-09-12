@@ -154,6 +154,7 @@ async def recompile_document(
     model: str | None = None,
     max_concurrency: int | None = None,
     version: str | None = None,
+    source_revision: str | None = None,
 ) -> RecompileResult:
     """Rebuild from saved input through the same protected document pipeline."""
     return await asyncio.to_thread(
@@ -165,13 +166,16 @@ async def recompile_document(
         model=model,
         max_concurrency=max_concurrency,
         version=version,
+        source_revision=source_revision,
     )
 
 
-def _recompile_saved(kb_dir, file_hash, *, context, bundle, model, max_concurrency, version):
+def _recompile_saved(
+    kb_dir, file_hash, *, context, bundle, model, max_concurrency, version, source_revision
+):
     from openkb.application.document_pipeline import compile_version
     from openkb.inputs import prepared_input
-    from openkb.sources import SourceStore
+    from openkb.sources import SourceStore, content_id
 
     kb_dir = kb_dir.resolve()
     context = context or ExecutionContext()
@@ -188,6 +192,12 @@ def _recompile_saved(kb_dir, file_hash, *, context, bundle, model, max_concurren
                 "skipped", message="document is no longer indexed.", version=version
             )
         _validate_metadata(meta)
+        if source_revision is not None and content_id(meta) != source_revision:
+            return RecompileResult(
+                "conflict",
+                message="Selected source changed; refresh and reselect it",
+                unfinished=("compilation",),
+            )
         name = meta.get("doc_name") or Path(meta.get("name") or "").stem
         if not name or name in {".", ".."} or any(c in name for c in "/\\\0"):
             return RecompileResult("failed", message="Invalid document name")
