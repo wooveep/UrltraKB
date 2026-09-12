@@ -6,7 +6,24 @@ import re
 def local_omissions(source, parsed):
     """Return bounded source-content diagnostics, never waive unknown global failures."""
     pending = [row for row in parsed.quality if row["status"] == "needs_review"]
-    if source.suffix != ".docx" or not pending:
+    if not pending:
+        return []
+    if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
+        return (
+            [row["reason"] for row in pending]
+            if all(
+                row["reason"] == "unclosed_code_span" or row["reason"].startswith("missing_asset:")
+                for row in pending
+            )
+            else []
+        )
+    if source.suffix == ".pdf":
+        return (
+            [row["reason"] for row in pending]
+            if all(row["reason"].startswith("pdf_page_unparsed:") for row in pending)
+            else []
+        )
+    if source.suffix != ".docx":
         return []
     prefixes = (
         "docx_attachment:",

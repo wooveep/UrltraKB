@@ -183,9 +183,9 @@ def test_review_uses_existing_request_budget_and_verified_work_is_reusable(
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
-    assert len(model_service) == 5
+    assert len(model_service) == 4  # The completed draft only needs verification.
     again = import_document(kb_dir, original)
-    assert again.status == "skipped" and len(model_service) == 5
+    assert again.status == "skipped" and len(model_service) == 4
 
 
 @pytest.mark.parametrize("damage", ["missing", "verdict", "reason", "content"])

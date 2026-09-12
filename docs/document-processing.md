@@ -95,19 +95,28 @@ Explicit per-operation output caps remain binding. Older complete profiles that
 omit the two new ceiling fields retain their original request caps; clear their
 override to inherit this profile, or set explicit ceilings for that model.
 
-Within one document, fact extraction now runs up to `concurrency` batches at a
-time (default 8). Each batch inherits the same model allowance, cancellation and
-elapsed-time controls. Only a bounded number of batches are admitted; a failure
-stops new work and cancels siblings. Completed source spans advance progress,
-including smaller spans completed before a later failure. Facts are restored to
-source order before topic planning, generation and publication. Checkpoint files
-and their catalogue are serialized so concurrent completion cannot lose entries.
-Small documents use only as many workers as they have batches. This setting limits
-simultaneous requests; it is not a requests-per-minute (RPM) quota. Raising it does
-not multiply the context/output caps or the document-wide request allowance. Topic
-planning, generation, verification and wiki publication still follow their dependency
-order, so end-to-end speedup is not proportional to the fact worker count. Explicit
-global or knowledge-base concurrency settings remain in effect until cleared.
+Within one document, fact extraction runs up to `concurrency` batches at a
+time (default 8). Independent knowledge pages use at most four workers, bounded
+by that same setting and the number of pages. Each page's generation, correction
+and verification stay ordered. All workers share model allowances, cancellation
+and elapsed-time controls. The lease owner captures validated original evidence
+before parallel generation; worker reads use detached text and metadata, avoiding
+cross-thread KB lock waits. Wiki writes and final publication remain serialized.
+
+A persistent local response defect records pending work while other independent
+units or pages finish and save checkpoints. Cancellation, transport uncertainty,
+budget exhaustion and storage/integrity errors still stop admission and cancel
+siblings. Facts are restored to source order before planning. Checkpoint files and
+their catalogue are serialized so concurrent completion cannot lose entries.
+The setting limits simultaneous requests; it is not an RPM quota and does not
+multiply context caps or the document-wide request allowance. Explicit global or
+knowledge-base concurrency overrides remain in effect until cleared.
+
+Topic planning uses at most 128 candidate topics per batch, with additional input
+and output capacity checks. Completed batches advance a topic counter; retries do
+not inflate it. Planning remains ordered because later batches reuse earlier page
+identities. This reduces large response bursts but does not guarantee a provider
+will respond within a particular time.
 
 A complete model response can still omit or duplicate source IDs. These coverage
 errors now trigger smaller batches instead of immediately ending the document.
@@ -126,6 +135,54 @@ strict. Fact failures identify the unit, block and invalid field without logging
 source text. Completed batches from the preceding strict-quotation contract can
 be reused only with their exact request identity and after current validation;
 unrelated historical implementations and changed requests are not reused.
+
+## Resume saved work
+
+Continue the saved source after a stopped or unfinished task. With unchanged
+source bytes, parsing settings and parser profile, the parser reuses its validated
+saved result, including embedded document contents and image/OCR results. It does
+not expand the same Word attachments again. Explicit reparse, changed source or
+parsing configuration can request new parsing work.
+
+Compilation recovery has separate states:
+
+- Individually valid fact rows survive a malformed sibling row. Restore matches
+  the exact source/version/parse, model settings, endpoint and known executable
+  contract, then validates quotes and coverage again. Different transport batch
+  sizes do not require sending already validated units again.
+- Saved split decisions lead directly to smaller batches; a known failed parent
+  request is not resent simply to rediscover its split.
+- Completed planning batches and verified generated parts are reusable with
+  unchanged inputs and existing knowledge dependencies.
+- A structurally valid generated draft is saved before semantic verification.
+  Interruption during verification resumes from that draft. Correction state is
+  also retained. A draft is never a verified publication receipt.
+
+The currently unfinished request may need to be repeated if no complete usable
+response was received. Each new operation starts a fresh execution allowance;
+cumulative usage history remains visible. The request count and elapsed-time
+limits above still apply. Reaching one does not start another task automatically.
+Repeated semantic rejection remains pending; continuing does not authorize weaker
+verification or an unbounded retry loop.
+
+Empty extraction from a factual document cannot report successful compilation.
+An empty body unit containing recognized numerical limits, requirements or
+negations is retried instead of accepting an arbitrary `empty_reason`. This is a
+conservative omission check, not proof of complete factual recall. Exact quotation,
+source position, asset identity and title/body semantic checks remain in force.
+
+Known local parse defects can retain usable content with an omission notice:
+missing Markdown assets, an unclosed code fence, or a PDF page decoder failure.
+Text decoding accepts UTF-8, BOM-marked UTF-16 and the existing GB18030 fallback.
+Unreadable PDF pages retain their physical page position and an explicit unknown
+content marker; this change does not infer their text. Storage errors, corrupt
+checkpoints and unknown global quality failures are not treated as omissions.
+
+Persistent factual or semantic defects still prevent the source's final atomic
+knowledge publication. Other completed work remains checkpointed for continuation.
+A stage percentage measures processed units/topics, not factual recall or whole
+source publication. Desktop task details show the document's stopping reason and
+recovery hint near the top, separately from worker cleanup status.
 
 For providers that accept a `thinking.type` option, the optional top-level
 `compilation_thinking` setting selects `enabled` or `disabled`. For example:

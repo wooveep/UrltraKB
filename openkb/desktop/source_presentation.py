@@ -2,6 +2,8 @@
 
 KINDS = {"heading": "标题", "paragraph": "正文", "table": "表格", "code": "代码", "image": "图像"}
 REASONS = {
+    "request_timeout": "本轮模型请求等待超时，已完成内容已保留，可继续处理。",
+    "source_facts_missing": "部分原文的重要内容未被提取，需要补充处理。",
     "needs_acceptance": "已有页面包含人工修改，请在“知识变更”中检查差异。",
     "input_version_conflict": "资料或知识页面已变化，请刷新后继续处理。",
     "input_budget_exceeded": "请求超过模型上下文容量，请检查处理额度。",

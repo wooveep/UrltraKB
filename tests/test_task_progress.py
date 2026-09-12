@@ -155,7 +155,7 @@ def test_compilation_counts_validated_source_text_and_generated_topics(
         if e.get("event") == "progress"
         for step in read_progress(e["progress"])
     ]
-    for phase in ("text", "facts", "generation"):
+    for phase in ("text", "facts", "planning", "generation"):
         assert any(
             step.phase == phase and step.total and step.completed == step.total for step in steps
         )
@@ -196,3 +196,38 @@ def test_observer_failure_does_not_leave_a_progress_scope_active():
     events = []
     with progress_reporting(events.append), progress_scope("pdf", 2, "pages"):
         assert read_progress(events[-1]["progress"]) == (ProgressStep("pdf", 0, 2, "pages"),)
+
+
+@pytest.mark.parametrize("unfinished", [True, False])
+def test_task_details_distinguishes_document_stop_from_completed_skip(unfinished):
+    pytest.importorskip("PySide6")
+    from openkb.application.documents import DocumentResult
+    from openkb.desktop.task_details import _status_text
+    from openkb.runtime.records import UnitResult
+
+    document = DocumentResult(
+        "manual.docx",
+        "unfinished" if unfinished else "skipped",
+        (),
+        source_intake="saved",
+        knowledge_compilation="unfinished" if unfinished else "completed",
+        stage="planning" if unfinished else "completed",
+        reason="request_timeout" if unfinished else "already_completed",
+    )
+    task = TaskView(
+        "a" * 32,
+        "/kb",
+        "ContinueSource",
+        "partial" if unfinished else "completed",
+        "partial" if unfinished else "completed",
+        1,
+        (UnitResult.from_document(document),),
+        False,
+        True,
+    )
+    text = _status_text(task)
+    if unfinished:
+        assert text.splitlines()[1] == "停止原因：planning · request_timeout"
+        assert "复用已有解析、事实和生成检查点" in text.splitlines()[2]
+    else:
+        assert "停止原因：" not in text

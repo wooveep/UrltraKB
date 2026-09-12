@@ -31,11 +31,15 @@ def compilation_profile(settings, bundle):
             "endpoint": content_id(getattr(bundle, "base_url", None)),
             "headers": content_id(getattr(bundle, "extra_headers", None)),
             "source_omissions": module_revision("openkb.source_omissions"),
+            "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
+            "evidence_reader": module_revision("openkb.evidence"),
             "implementation": {
                 name: module_revision("openkb.agent." + name)
                 for name in (
                     "evidence_checkpoints",
                     "evidence_compiler",
+                    "evidence_facts",
+                    "evidence_fact_cache",
                     "evidence_coverage",
                     "evidence_parallel",
                     "evidence_quotes",
@@ -82,11 +86,7 @@ class CompilationCheckpoints:
         record = self._key_record(system, payload)
         if payload.get("stage") != "facts" or record["implementation"] != _PREVIOUS_COMPILER:
             return None
-        if any(
-            module_revision("openkb.agent." + name) != revision
-            for name, revision in _PREVIOUS_FACTS.items()
-            if name != "evidence_compiler"
-        ):
+        if record["message_format"] != _PREVIOUS_FACTS["evidence_units"]:
             return None
         record["stage_implementation"] = _PREVIOUS_FACTS
         return content_id(record)
@@ -94,7 +94,8 @@ class CompilationCheckpoints:
     def _key_record(self, system, payload, *, dependencies=None):
         stage_modules = {
             "facts": (
-                "evidence_compiler",
+                "evidence_facts",
+                "evidence_fact_cache",
                 "evidence_units",
                 "evidence_retry",
                 "evidence_coverage",
@@ -114,7 +115,11 @@ class CompilationCheckpoints:
             "payload": payload,
             "dependencies": dependencies,
             **(
-                {"verification_options": self.verification_options}
+                {
+                    "verification_options": self.verification_options,
+                    "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
+                    "evidence_reader": module_revision("openkb.evidence"),
+                }
                 if payload.get("stage") == "generation"
                 else {}
             ),
@@ -143,6 +148,41 @@ class CompilationCheckpoints:
     def save(self, key, value):
         with self._write_lock:
             self._save(key, value)
+
+    def load_recovery(self, key, kind):
+        """Mutable workflow state is never treated as a verified model result."""
+        processing_checkpoint()
+        if kind not in {"split", "draft"}:
+            raise ValueError("Invalid recovery checkpoint kind")
+        path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
+        if not path.exists():
+            return None
+        record = read_object(path)
+        if (
+            record.get("input") != self.input
+            or record.get("key") != key
+            or record.get("kind") != kind
+            or content_id(record.get("value")) != record.get("digest")
+        ):
+            raise ValueError("Recovery checkpoint identity mismatch")
+        return record["value"]
+
+    def save_recovery(self, key, kind, value):
+        processing_checkpoint()
+        if kind not in {"split", "draft"}:
+            raise ValueError("Invalid recovery checkpoint kind")
+        path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
+        with self._write_lock:
+            atomic_write_json(
+                path,
+                {
+                    "input": self.input,
+                    "key": key,
+                    "kind": kind,
+                    "value": value,
+                    "digest": content_id(value),
+                },
+            )
 
     def _save(self, key, value):
         processing_checkpoint()

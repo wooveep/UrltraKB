@@ -2,43 +2,16 @@
 
 from __future__ import annotations
 
-import json
-import threading
-
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
-from openkb.agent.evidence_coverage import require_unit_coverage
-from openkb.agent.evidence_parallel import parallel_batches
-from openkb.agent.evidence_quotes import fact_quote
-from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches, split_units
-from openkb.agent.evidence_units import (
-    FACTS_SYSTEM,
-    JSON_FORMAT,
-    fact_batches,
-    messages,
-    source_units,
-)
-from openkb.config import compilation_model_options
 from openkb.evidence import ParseStore
-from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
+from openkb.processing import ProcessingIncomplete, RequestLimits
 from openkb.progress import progress_scope
-from openkb.sources import content_id
-
-
-def _object(raw):
-    try:
-        value = json.loads(raw)
-        if isinstance(value, dict):
-            return value
-    except (ValueError, TypeError):
-        pass
-    raise ResponseIncomplete("evidence_output_invalid", "facts")
 
 
 def compile_evidence(
     kb_dir, workspace, source, parsed, name, settings, *, bundle=None, on_event=lambda event: None
 ):
     from openkb.agent.compiler import (
-        _llm_call,
         _update_index,
         _write_concept,
         _write_entity,
@@ -47,94 +20,12 @@ def compile_evidence(
     from openkb.lint import list_existing_wiki_targets
 
     limits = RequestLimits.from_config(settings)
-    model = settings["model"]
     reader = ParseStore(kb_dir).reader(source, parsed)
     checkpoints = CompilationCheckpoints(kb_dir, source, parsed, settings, bundle)
 
-    def extract(batch):
-        extracted_facts = []
-        processing_checkpoint("facts")
-        payload = {"stage": "facts", "units": batch}
-        key = checkpoints.key(FACTS_SYSTEM, payload)
-        result = checkpoints.load(key)
-        if result is None:
-            previous = checkpoints.previous_fact_key(FACTS_SYSTEM, payload)
-            if previous is not None:
-                result = checkpoints.load(previous)
-        on_event({"stage": "facts", "blocks": len(batch), "cached": result is not None})
-        if result is None:
-            result = _object(
-                _llm_call(
-                    model,
-                    messages(FACTS_SYSTEM, payload),
-                    "facts",
-                    bundle=bundle,
-                    response_format=JSON_FORMAT,
-                    **compilation_model_options(settings),
-                )
-            )
-        outputs = result.get("units")
-        expected = {unit["id"]: unit for unit in batch}
-        require_unit_coverage(outputs, expected)
-        for item in outputs:
-            unit = expected[item["id"]]
-            extracted = item.get("facts")
-            if (
-                not isinstance(extracted, list)
-                or (not extracted and not isinstance(item.get("empty_reason"), str))
-                or (not extracted and not item["empty_reason"].strip())
-            ):
-                raise ResponseIncomplete("section_empty_without_reason", "facts")
-            for fact in extracted:
-                quote, start, end = fact_quote(unit, fact)
-                reference = dict(unit["reference"])
-                reference["start"] += start
-                reference["end"] = unit["reference"]["start"] + end
-                value = {
-                    "topic": fact["topic"],
-                    "statement": fact["statement"],
-                    "quote": quote,
-                    "reference": reference,
-                    "scope": unit["reference"],
-                    "context_evidence": [
-                        {"reference": item["reference"], "relation": item["relation"]}
-                        for item in [*unit["heading_evidence"], *unit["neighbors"]]
-                    ],
-                }
-                extracted_facts.append({"id": content_id(value), **value})
-        checkpoints.save(key, result)
-        return extracted_facts
+    from openkb.agent.evidence_facts import extract_facts
 
-    progress_lock = threading.Lock()
-
-    def extract_batch(batch):
-        results = []
-        for completed, extracted in retry_batches(
-            batch,
-            extract,
-            stage="facts",
-            on_event=on_event,
-            split=split_units,
-            validation_attempts=limits.max_attempts,
-        ):
-            with progress_lock:
-                progress.advance(sum(len(unit["text"]) for unit in completed))
-            results.append((completed, extracted))
-        return results
-
-    batches = fact_batches(source_units(kb_dir, source, parsed, limits, model), limits, model)
-    extracted_batches = {}
-    with progress_scope(
-        "facts", sum(block.chars for block in parsed.blocks), "characters"
-    ) as progress:
-        for index, results in parallel_batches(batches, extract_batch, limits.concurrency):
-            extracted_batches[index] = results
-    facts = [
-        fact
-        for index in sorted(extracted_batches)
-        for _, extracted in extracted_batches[index]
-        for fact in extracted
-    ]
+    facts = extract_facts(kb_dir, source, parsed, settings, limits, checkpoints, bundle, on_event)
     from openkb.agent.evidence_plan import plan_topics
 
     wiki = workspace / "wiki"
@@ -166,27 +57,67 @@ def compile_evidence(
         | {group["path"] for group in groups}
         | {f"summaries/{name}"}
     )
-    with progress_scope("generation", len(groups), "topics") as progress:
-        for group in groups:
-            selected = list(
-                {fact["id"]: fact for fact in facts if fact["topic"] in group["members"]}.values()
-            )
-            from openkb.agent.evidence_pages import generate_topic
+    from openkb.agent.evidence_parallel import parallel_batches
+    from openkb.evidence_snapshot import EvidenceSnapshot
 
-            content = generate_topic(
-                group,
-                selected,
-                reader,
-                checkpoints,
-                wiki,
-                source,
-                settings,
-                limits,
-                bundle=bundle,
-                on_event=on_event,
-                known_targets=known_targets,
-                assets=assets,
-            )
+    generation_concurrency = max(1, min(4, limits.concurrency, len(groups)))
+    if generation_concurrency > 1:
+        reader = EvidenceSnapshot(reader)
+
+    def generate_once(group):
+        selected = list(
+            {fact["id"]: fact for fact in facts if fact["topic"] in group["members"]}.values()
+        )
+        from openkb.agent.evidence_pages import generate_topic
+
+        content = generate_topic(
+            group,
+            selected,
+            reader,
+            checkpoints,
+            wiki,
+            source,
+            settings,
+            limits,
+            bundle=bundle,
+            on_event=on_event,
+            known_targets=known_targets,
+            assets=assets,
+        )
+        return group, content
+
+    failures = []
+
+    def generate(group):
+        try:
+            return generate_once(group)
+        except ProcessingIncomplete as exc:
+            if exc.reason not in {
+                "topic_generation_incomplete",
+                "evidence_output_invalid",
+                "topic_title_conflict",
+                "evidence_verification_invalid",
+                "knowledge_evidence_mismatch",
+                "generated_asset_evidence_invalid",
+            }:
+                raise
+            return group, exc
+
+    with progress_scope("generation", len(groups), "topics") as progress:
+        for _, (group, content) in parallel_batches(
+            groups, generate, generation_concurrency, stage="generation"
+        ):
+            if isinstance(content, ProcessingIncomplete):
+                failures.append(content)
+                on_event(
+                    {
+                        "stage": "generation",
+                        "operation": "topic_pending",
+                        "topic": group["title"],
+                        "reason": content.reason,
+                    }
+                )
+                continue
             writer = _write_entity if group["kind"] == "entity" else _write_concept
             writer(
                 wiki,
@@ -198,6 +129,8 @@ def compile_evidence(
                 **({"type_": group["type"]} if group["kind"] == "entity" else {}),
             )
             progress.advance()
+        if failures:
+            raise failures[0]
     _write_summary(
         wiki,
         name,

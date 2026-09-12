@@ -7,11 +7,12 @@ import re
 from dataclasses import asdict
 
 from openkb import frontmatter
-from openkb.agent.evidence_retry import retry_batches, split_generation
+from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches, split_generation
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages, output_fits
 from openkb.config import compilation_model_options
 from openkb.evidence import Evidence
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
+from openkb.sources import content_id
 
 PAGE_SYSTEM = """Write a cohesive contribution to one knowledge topic using ORIGINAL evidence.
 Existing knowledge is context: the application preserves it, so do not reproduce it.
@@ -260,16 +261,33 @@ def generate_topic(
         batch, evidence = map(list, zip(*pairs))
         processing_checkpoint("generation")
         payload = {**base, "facts": _model_facts(batch), "evidence": list(evidence)}
-        from openkb.sources import content_id
-
         key = checkpoints.key(PAGE_SYSTEM, payload, dependencies=content_id(existing))
         output = checkpoints.load(key)
         cached = output is not None
         revision = None
+        correction = 0
+        if not cached:
+            draft = checkpoints.load_recovery(key, "draft")
+            if draft is not None:
+                if (
+                    not isinstance(draft, dict)
+                    or type(draft.get("correction")) is not int
+                    or draft.get("correction") not in (0, 1)
+                    or not {"output", "revision", "correction"} <= draft.keys()
+                ):
+                    raise ValueError("Invalid generation draft")
+                output, revision, correction = (
+                    draft["output"],
+                    draft["revision"],
+                    draft["correction"],
+                )
+                on_event(
+                    {"stage": "generation", "operation": "resume_draft", "topic": group["title"]}
+                )
         on_event({"stage": "generation", "topic": group["title"], "cached": cached})
         # One evidence-based correction is allowed; each request and review is
         # charged to the same document and generation-stage budgets.
-        for attempt in range(2):
+        for attempt in range(correction, 2):
             if output is None:
                 request = {**payload, "revision": revision} if revision else payload
                 try:
@@ -284,7 +302,7 @@ def generate_topic(
                         )
                     )
                 except (ValueError, TypeError):
-                    raise ProcessingIncomplete("evidence_output_invalid", "generation") from None
+                    raise ResponseIncomplete("evidence_output_invalid", "generation") from None
             if (
                 not isinstance(output, dict)
                 or not isinstance(output.get("content"), str)
@@ -293,12 +311,12 @@ def generate_topic(
                 or any(not isinstance(item, str) for item in output["covered"])
                 or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
             ):
-                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+                raise ResponseIncomplete("topic_generation_incomplete", "generation")
             title = output.get("title", base["title"])
             if not isinstance(title, str) or not title.strip():
-                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+                raise ResponseIncomplete("topic_generation_incomplete", "generation")
             if contributions and title != base["title"]:
-                raise ProcessingIncomplete("topic_title_conflict", "generation")
+                raise ResponseIncomplete("topic_title_conflict", "generation")
             citations = "\n".join(
                 "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
                 for passage in evidence
@@ -324,7 +342,7 @@ def generate_topic(
                     "<!-- source-evidence:",
                 )
             ):
-                raise ProcessingIncomplete("topic_generation_incomplete", "generation")
+                raise ResponseIncomplete("topic_generation_incomplete", "generation")
             publication_digest = content_id({"title": title, "content": content})
             if cached:
                 receipt = output.get("_verification")
@@ -337,6 +355,15 @@ def generate_topic(
                 ):
                     raise ProcessingIncomplete("evidence_verification_invalid", "generation")
             else:
+                checkpoints.save_recovery(
+                    key,
+                    "draft",
+                    {
+                        "output": output,
+                        "revision": revision,
+                        "correction": attempt,
+                    },
+                )
                 on_event(
                     {"stage": "generation", "operation": "verification", "topic": group["title"]}
                 )
@@ -355,6 +382,15 @@ def generate_topic(
                     if review["verdict"] == "unsupported" and attempt == 0:
                         revision = {"title": title, "content": content, "reason": review["reason"]}
                         output = None
+                        checkpoints.save_recovery(
+                            key,
+                            "draft",
+                            {
+                                "output": None,
+                                "revision": revision,
+                                "correction": 1,
+                            },
+                        )
                         on_event(
                             {
                                 "stage": "generation",
@@ -384,6 +420,16 @@ def generate_topic(
             stage="generation",
             on_event=on_event,
             split=split_generation,
+            checkpoints=checkpoints,
+            recovery_key=lambda pairs: checkpoints.key(
+                PAGE_SYSTEM,
+                {
+                    **base,
+                    "facts": _model_facts([pair[0] for pair in pairs]),
+                    "evidence": [pair[1] for pair in pairs],
+                },
+                dependencies=content_id(existing),
+            ),
         ):
             pass
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -22,6 +22,8 @@ from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.panels import ManagementPanel
+from openkb.desktop.source_flow import SourceFlow
+from openkb.desktop.source_flow_state import source_snapshot
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import RecompileDocument, RemoveDocument
 
@@ -34,6 +36,7 @@ class DocumentsDialog(ManagementPanel):
         self._generation = 0
         self._confirmed = None
         self._task = None
+        self._flow_running = None
         self.setWindowTitle(f"资料管理 · {kb.name}")
         self.resize(880, 650)
         layout = QVBoxLayout(self)
@@ -74,6 +77,10 @@ class DocumentsDialog(ManagementPanel):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemActivated.connect(lambda _item: self.review_source())
         layout.addWidget(self.table, 1)
+        self.source_flow = SourceFlow(self)
+        self.source_flow.activated.connect(lambda stage: self.review_source(stage=stage))
+        self.source_flow.hide()
+        layout.addWidget(self.source_flow)
         actions = FlowLayout()
         self.review_button = QPushButton("查看原文与处理结果")
         self.review_button.setObjectName("primaryAction")
@@ -161,8 +168,36 @@ class DocumentsDialog(ManagementPanel):
         )
         self.recompile_selected.setEnabled(count > 0 and available)
         self.recompile_all.setEnabled(total > 0 and available)
+        self.update_source_flow()
+
+    def update_source_flow(self):
+        self._flow_running = None
+        rows = self.table.selectionModel().selectedRows()
+        document = None
+        if len(rows) == 1:
+            item = self.table.item(rows[0].row(), 0)
+            document = self._documents.get(item.data(Qt.ItemDataRole.UserRole)) if item else None
+        self.source_flow.setVisible(bool(document and document.get("source_id")))
+        if document and document.get("source_id"):
+            observer = getattr(self.window.manager, "source_activity", None)
+            activity = (
+                observer(
+                    self.kb,
+                    document["source_id"],
+                    document["source_version"],
+                    document.get("source_origin"),
+                )
+                if observer
+                else None
+            )
+            self._flow_running = activity.task_id if activity else None
+            self.source_flow.display(source_snapshot(document), activity)
 
     def reload(self, *, preserve_result=False):
+        selected = {
+            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
+            for index in self.table.selectionModel().selectedRows()
+        }
         self.invalidate()
 
         def loaded(value, error):
@@ -203,6 +238,14 @@ class DocumentsDialog(ManagementPanel):
                 self.table.setItem(
                     row, 3, QTableWidgetItem(labels.get(doc.get("knowledge_compilation"), "待处理"))
                 )
+            self.table.clearSelection()
+            for row, doc in enumerate(value["documents"]):
+                if doc["hash"] in selected:
+                    self.table.selectionModel().select(
+                        self.table.model().index(row, 0),
+                        QItemSelectionModel.SelectionFlag.Select
+                        | QItemSelectionModel.SelectionFlag.Rows,
+                    )
             self.update_selection()
 
         self.window.io.submit(
@@ -242,7 +285,7 @@ class DocumentsDialog(ManagementPanel):
             obsolete=lambda: self._closed or generation != self._generation,
         )
 
-    def review_source(self):
+    def review_source(self, *, stage=None):
         if len(self.table.selectionModel().selectedRows()) != 1:
             self.status.setText("请选择一份资料查看原文与处理结果。")
             return
@@ -253,7 +296,13 @@ class DocumentsDialog(ManagementPanel):
             return
         from openkb.desktop.source_review import SourceReview
 
-        SourceReview(self.window, self.kb, source_id).exec()
+        SourceReview(
+            self.window,
+            self.kb,
+            source_id,
+            stage=stage,
+            saved=source_snapshot(self._documents[identifier]),
+        ).exec()
         self.reload()
 
     def confirm(self):
@@ -314,6 +363,10 @@ class DocumentsDialog(ManagementPanel):
         )
 
     def poll(self):
+        previous = self._flow_running
+        self.update_source_flow()
+        if previous and self._flow_running is None:
+            self.reload(preserve_result=True)
         if self._task is None:
             return
         task = self.window.manager.get(self._task)

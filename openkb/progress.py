@@ -24,6 +24,7 @@ class ProgressStep:
             "image_ocr",
             "cloud_ocr",
             "facts",
+            "planning",
             "generation",
             "parse_cache",
         } or self.unit not in {"items", "paragraphs", "pages", "lines", "characters", "topics"}:

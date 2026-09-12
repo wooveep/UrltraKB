@@ -48,7 +48,7 @@ def verification_payload(title, content, facts, evidence):
     }
 
 
-def verify_content(title, content, facts, evidence, settings, *, bundle=None):
+def _verify_once(title, content, facts, evidence, settings, *, bundle=None):
     from openkb.agent.compiler import _llm_call
 
     # Verification belongs to generation's elapsed budget; alternating the two
@@ -76,3 +76,18 @@ def verify_content(title, content, facts, evidence, settings, *, bundle=None):
     ):
         raise ProcessingIncomplete("evidence_verification_invalid", "generation")
     return {"verdict": result["verdict"], "reason": result["reason"]}
+
+
+def verify_content(title, content, facts, evidence, settings, *, bundle=None):
+    """Retry completed unusable reviews without discarding a received generation."""
+    attempts = settings.get("processing", {}).get("max_attempts", 2)
+    for attempt in range(attempts):
+        try:
+            review = _verify_once(title, content, facts, evidence, settings, bundle=bundle)
+        except ProcessingIncomplete as exc:
+            if exc.reason != "evidence_verification_invalid" or attempt + 1 >= attempts:
+                raise
+        else:
+            if review["verdict"] != "uncertain" or attempt + 1 >= attempts:
+                return review
+    raise AssertionError("Positive verification attempts required")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -37,6 +37,7 @@ from openkb.desktop.source_presentation import (
     quality_text,
     status_text,
 )
+from openkb.desktop.source_stages import SourceStages
 from openkb.evidence import Evidence
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import (
@@ -48,29 +49,28 @@ from openkb.runtime.requests import (
 )
 
 
-class SourceReview(QDialog):
-    def __init__(self, window, kb, source_id):
+class SourceReview(SourceStages, QDialog):
+    def __init__(self, window, kb, source_id, *, stage=None, saved=None):
         super().__init__(window)
         self.window, self.kb, self.source_id = window, kb, source_id
         self._closed, self._generation = False, 0
         self._saved = self._review = self._task = None
+        self._saved, self._initial_stage = saved, stage
         self._next = None
         self._evidence_revision = 0
         self._offset = 0
-        self.setWindowTitle("资料原文与处理结果")
-        self.resize(940, 760)
+        self.setWindowTitle("资料处理流程与结果")
+        self.resize(1040, 800)
         layout = QVBoxLayout(self)
         self.status = QLabel("正在读取资料…")
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.build_flow_header(layout)
         row = QHBoxLayout()
+        row.addStretch()
         for label, callback in (
             ("刷新", self.reload),
-            ("识别设置", self.ocr_settings),
-            ("导出原文…", self.export),
-            ("继续处理", self.continue_saved),
-            ("重新解析", self.reparse),
-            ("重建导航", self.rebuild_navigation),
             ("清理本库历史…", self.cleanup_history),
         ):
             button = QPushButton(label)
@@ -176,10 +176,14 @@ class SourceReview(QDialog):
         navigation_layout.addStretch()
         tabs.addTab(navigation, "原文导航")
         self._navigation_offset = 0
-        layout.addWidget(tabs)
+        self.build_stage_content()
+        layout.addWidget(tabs, 1)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
+        if self._saved:
+            self.refresh_flow()
+            self.show_stage(self._selected_stage, load=False)
         self.reload()
 
     def ocr_settings(self):
@@ -209,6 +213,11 @@ class SourceReview(QDialog):
 
     def reload(self):
         self._generation += 1
+        self._next = None
+        self._evidence_revision += 1
+        self._artifact_request += 1
+        self.content.clear()
+        self.record_text.clear()
         self.blocks.clear()
         self.navigation_nodes.clear()
         self._review = None
@@ -230,8 +239,8 @@ class SourceReview(QDialog):
                 + labels.get(result.get("knowledge_compilation"), "等待知识编译")
             )
             self.details.setPlainText(status_text(value))
-            self.load_parse(0)
-            self.load_navigation(0)
+            self.refresh_flow()
+            self.show_stage(self._selected_stage)
 
         self.read(lambda: source_status(self.kb, self.source_id), loaded)
 
@@ -386,7 +395,7 @@ class SourceReview(QDialog):
         node = self.navigation_nodes.currentData()
         if node:
             self._next = Evidence(**node["reference"])
-            self.tabs.setCurrentIndex(1)
+            self.show_stage("parsing")
             self.read_next()
 
     def preview_page(self):
@@ -499,9 +508,13 @@ class SourceReview(QDialog):
         self.read(lambda: preview_history_cleanup(self.kb), loaded)
 
     def submit(self, request):
+        if self._task or self.source_activity():
+            self.status.setText("此资料已有待执行或正在处理的任务，请先查看进度。")
+            return
         self._task = self.window.manager.submit(self.kb, [request])
         self.accept.setEnabled(False)
         self.status.setText("处理任务已提交，可在任务页查看进度或停止。")
+        self.refresh_flow()
 
     def export(self):
         if not self._saved:
@@ -526,6 +539,14 @@ class SourceReview(QDialog):
         self.read(copy, lambda _: self.status.setText("原文已导出。"))
 
     def poll(self):
+        previous = self._activity
+        current = self.source_activity()
+        if current != previous:
+            self.refresh_flow()
+            if previous and current is None:
+                self._task = None
+                self.reload()
+                return
         if self._task and self.window.manager.get(self._task).state in TERMINAL:
             self._task = None
             self.reload()

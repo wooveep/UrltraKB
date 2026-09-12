@@ -209,6 +209,14 @@ class TaskManager:
         with self._condition:
             return tuple(task.view for task in self._tasks.values())
 
+    def source_activity(self, kb_dir, source_id, version_id, origin=None):
+        """Observe only this source's live item, without taking a knowledge-base lease."""
+        from openkb.runtime.source_activity import find_source_activity
+
+        with self._condition:
+            snapshots = [(task.view, task.requests) for task in self._tasks.values()]
+        return find_source_activity(snapshots, kb_dir, source_id, version_id, origin)
+
     def has_work(self, kb_dir: Path) -> bool:
         """This instance's queued execution or live handles, excluding old summaries."""
         root = str(kb_dir.expanduser().resolve())

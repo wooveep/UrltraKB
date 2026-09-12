@@ -8,7 +8,7 @@ from openkb.cancellation import cancellation_scope
 from openkb.processing import processing_checkpoint
 
 
-def parallel_batches(batches, operation, concurrency):
+def parallel_batches(batches, operation, concurrency, *, stage="facts"):
     """Yield indexed results as completed, admitting only one batch per worker.
 
     A failure cancels siblings before joining them. Model transports run inside
@@ -25,13 +25,13 @@ def parallel_batches(batches, operation, concurrency):
 
     def run(batch):
         with cancellation_scope(stopped.is_set):
-            processing_checkpoint("facts")
+            processing_checkpoint(stage)
             return operation(batch)
 
-    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="openkb-facts") as pool:
+    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="openkb-" + stage) as pool:
 
         def submit():
-            processing_checkpoint("facts")
+            processing_checkpoint(stage)
             try:
                 index, batch = next(iterator)
             except StopIteration:
@@ -42,7 +42,7 @@ def parallel_batches(batches, operation, concurrency):
             for _ in range(concurrency):
                 submit()
             while pending:
-                processing_checkpoint("facts")
+                processing_checkpoint(stage)
                 finished, _ = wait(pending, timeout=0.05, return_when=FIRST_COMPLETED)
                 # Observe every ready failure before admitting further work.
                 results = [(future, future.result()) for future in finished]

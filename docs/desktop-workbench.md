@@ -269,3 +269,51 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
 
 The output directory must be new. This verifies source-run Qt behavior; it does
 not replace the currently running portable client or certify a rebuilt package.
+
+## Per-source processing flow
+
+Select one document in **资料** to reveal its processing flow. Click a stage to
+open the source inspector at that stage; double-clicking the document opens the
+inspector at its current position. Multiple selection retains the batch actions.
+
+| Stage | Available content and actions |
+| --- | --- |
+| 原文接入 | Retained source status and original-file export |
+| 内容解析 | Original evidence, PDF page inspection, recognition settings and reparse |
+| 事实提取 | Saved facts and supporting quotes; continue unfinished processing |
+| 主题规划 | Saved topic-to-page plans; continue unfinished processing |
+| 生成与校验 | Generated content, verification status and pending drafts |
+| 知识入库 | Published pages, proposed changes, acceptance and source navigation |
+
+The actual current stage and the selected inspection stage have separate visual
+markers. Positions come from the saved document outcome or the active processing
+item for the same KB and source version. Other documents in a batch stay queued.
+Measured progress appears on its corresponding stage when a total is available;
+a stage reaching 100% does not imply that knowledge has been published. Unknown
+historical positions are shown as unconfirmed instead of guessing a percentage.
+
+Stage clicks only inspect content. **继续处理（复用已完成内容）** submits the
+existing continuation operation at the real unfinished position; selecting a
+later stage cannot bypass its prerequisites. The inspector also exposes task logs
+and safe stop. A queued or running request disables duplicate processing actions.
+The flow can display already-loaded status while disk reads wait for an active
+KB mutation to release its lock.
+
+Saved-stage previews are bound to the source, input version and parse version.
+They show ten records at a time, with a 16,000-character limit per record.
+Historical attempts may coexist, so record counts are not coverage percentages.
+Pending drafts are distinguished from verified output and published pages.
+Late responses from a previously selected stage cannot replace the current view.
+Legacy entries without a retained source keep the existing recompile workflow.
+
+Verification: 68 related tests passed on Linux; the Windows source-run subset had
+57 passes and three POSIX-only symlink tests skipped. Ruff, mypy and the module
+size check passed. Native Qt captures below use synthetic documents in an
+isolated KB, with light/dark themes and narrow-window inspection; they do not
+represent a rebuilt or deployed Windows package.
+
+| View | Native capture |
+| --- | --- |
+| Selected source and current position | [Source flow](desktop-evidence/workbench/source-flow-inventory.png) |
+| Inspecting saved facts while planning is paused | [Stage content](desktop-evidence/workbench/source-flow-facts.png) |
+| Narrow, dark inspector with horizontal flow scrolling | [Narrow flow](desktop-evidence/workbench/source-flow-dark.png) |

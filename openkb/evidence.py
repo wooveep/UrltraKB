@@ -404,7 +404,12 @@ class ParseStore:
             if self.complete(version, parsed):
                 return True
             # A missing input asset is distinct from an unsupported embedded object.
-            if any(asset is None for asset in version.assets.values()):
+            if any(asset is None for asset in version.assets.values()) and version.suffix not in {
+                ".md",
+                ".markdown",
+                ".txt",
+                ".csv",
+            }:
                 return False
             return bool(local_omissions(version, parsed)) and has_readable_content(
                 self.sources, parsed
@@ -497,28 +502,12 @@ class EvidenceReader:
         if type(max_chars) is not int or max_chars <= 0:
             raise ValueError("Evidence reads require a positive bound")
         with kb_read_lock(self.sources.kb_dir / ".openkb"):
-            if (
-                reference.source_id != self.version.source_id
-                or reference.version_id != self.version.id
-                or reference.parse_id != self.parsed.id
-            ):
-                raise ValueError("Evidence source mismatch")
-            block = self.blocks.get(reference.block_id)
-            if block is None:
-                raise ValueError("Evidence block is missing")
-            # Metadata is also output, not an escape hatch around bounded reads.
-            # A caller can explicitly request a larger window to include a long
-            # table header; do not silently drop required context.
-            context_size = (
-                len(block.context)
-                + len(json.dumps(block.location, ensure_ascii=False))
-                + 64 * len(block.assets)
+            block, end = evidence_bounds(
+                reference,
+                (self.version.source_id, self.version.id, self.parsed.id),
+                self.blocks,
+                max_chars,
             )
-            if context_size > max(4096, max_chars):
-                raise ValueError("Evidence context exceeds the read bound; request a larger window")
-            end = reference.end if reference.end is not None else block.chars
-            if reference.start > end or end > block.chars:
-                raise ValueError("Evidence span exceeds its block")
             with self.sources.asset(block.blob).open(encoding="utf-8") as source:
                 remaining = reference.start
                 while remaining:
@@ -539,3 +528,32 @@ class EvidenceReader:
                 block.context,
                 following if following < end else None,
             )
+
+
+def evidence_bounds(reference, identity, blocks, max_chars):
+    """Apply the same identity, metadata and span bounds to live and snapshot reads."""
+    if type(max_chars) is not int or max_chars <= 0:
+        raise ValueError("Evidence reads require a positive bound")
+    if (
+        reference.source_id != identity[0]
+        or reference.version_id != identity[1]
+        or reference.parse_id != identity[2]
+    ):
+        raise ValueError("Evidence source mismatch")
+    block = blocks.get(reference.block_id)
+    if block is None:
+        raise ValueError("Evidence block is missing")
+    # Metadata is also output, not an escape hatch around bounded reads.
+    # A caller can explicitly request a larger window to include a long
+    # table header; do not silently drop required context.
+    context_size = (
+        len(block.context)
+        + len(json.dumps(block.location, ensure_ascii=False))
+        + 64 * len(block.assets)
+    )
+    if context_size > max(4096, max_chars):
+        raise ValueError("Evidence context exceeds the read bound; request a larger window")
+    end = reference.end if reference.end is not None else block.chars
+    if reference.start > end or end > block.chars:
+        raise ValueError("Evidence span exceeds its block")
+    return block, end

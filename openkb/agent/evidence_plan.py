@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 
 from openkb.agent.evidence_pages import _existing_window
-from openkb.agent.evidence_retry import retry_batches
+from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages
 from openkb.config import compilation_model_options, resolve_entity_types
 from openkb.knowledge_commit import wiki_version
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
+from openkb.progress import progress_scope
 from openkb.schema import get_agents_md
+
+MAX_PLAN_TOPICS = 128
 
 PLAN_SYSTEM = """Merge synonymous source topics before generating knowledge. Return JSON
 {"topics":[{"name":"safe-lowercase-slug","title":"human title","kind":"concept",
@@ -31,6 +34,7 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
     catalog = _read_concept_briefs(wiki) + "\n" + _read_entity_briefs(wiki)
     dependencies = wiki_version(workspace)
     planned = {}
+    schema = get_agents_md(wiki)
 
     def payload(batch):
         previous = "\n".join(f"{path}: {group['title']}" for path, group in planned.items())
@@ -38,7 +42,7 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
             "stage": "planning",
             "topics": batch,
             "entity_types": entity_types,
-            "schema": get_agents_md(wiki),
+            "schema": schema,
             "existing_pages": _existing_window(
                 catalog + "\n" + previous, " ".join(batch), model, limits
             ),
@@ -76,8 +80,12 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                     )
                 )
             except (ValueError, TypeError):
-                raise ProcessingIncomplete("topic_plan_invalid", "planning") from None
+                raise ResponseIncomplete("topic_plan_invalid", "planning") from None
         groups = _validate(value, batch, entity_types)
+        for group in groups:
+            prior = planned.get(group["path"])
+            if prior and group.get("type") != prior.get("type"):
+                raise ResponseIncomplete("topic_type_conflict", "planning")
         checkpoints.save(key, value)
         for group in groups:
             target = group["path"]
@@ -89,19 +97,30 @@ def plan_topics(topics, workspace, settings, limits, checkpoints, *, bundle, on_
                 planned[target] = group
 
     def plan(batch):
-        for _ in retry_batches(batch, plan_once, stage="planning", on_event=on_event):
-            pass
+        for completed, _ in retry_batches(
+            batch,
+            plan_once,
+            stage="planning",
+            on_event=on_event,
+            checkpoints=checkpoints,
+            recovery_key=lambda value: checkpoints.key(
+                PLAN_SYSTEM, payload(value), dependencies=dependencies
+            ),
+        ):
+            progress.advance(len(completed))
 
-    batch = []
-    for topic in topics:
-        if batch and not fits_batch([*batch, topic]):
-            plan(batch)
-            batch = []
-        if not fits_batch([topic]):
-            raise ProcessingIncomplete("topic_context_exceeds_request_budget", "planning")
-        batch.append(topic)
-    if batch:
-        plan(batch)
+    processing_checkpoint("planning")
+    with progress_scope("planning", len(topics), "topics") as progress:
+        offset = 0
+        while offset < len(topics):
+            processing_checkpoint("planning")
+            size = min(MAX_PLAN_TOPICS, len(topics) - offset)
+            while size and not fits_batch(topics[offset : offset + size]):
+                size //= 2
+            if not size:
+                raise ProcessingIncomplete("topic_context_exceeds_request_budget", "planning")
+            plan(topics[offset : offset + size])
+            offset += size
     return list(planned.values())
 
 
@@ -109,7 +128,7 @@ def _validate(value, topics, entity_types):
     from openkb.agent.compiler import _sanitize_concept_name
 
     if not isinstance(value, dict) or not isinstance(value.get("topics"), list):
-        raise ProcessingIncomplete("topic_plan_invalid", "planning")
+        raise ResponseIncomplete("topic_plan_invalid", "planning")
     groups, members, names = [], [], set()
     reserved = {
         "con",
@@ -130,7 +149,7 @@ def _validate(value, topics, entity_types):
             or not group["members"]
             or not all(isinstance(member, str) for member in group["members"])
         ):
-            raise ProcessingIncomplete("topic_plan_invalid", "planning")
+            raise ResponseIncomplete("topic_plan_invalid", "planning")
         name = group["name"]
         target = ("entities" if group["kind"] == "entity" else "concepts") + "/" + name
         if (
@@ -140,10 +159,10 @@ def _validate(value, topics, entity_types):
             or name.split(".")[0].casefold() in reserved
             or target in names
         ):
-            raise ProcessingIncomplete("topic_plan_invalid", "planning")
+            raise ResponseIncomplete("topic_plan_invalid", "planning")
         names.add(target)
         members.extend(group["members"])
         groups.append({**group, "members": list(group["members"]), "path": target})
     if sorted(members) != topics:
-        raise ProcessingIncomplete("topic_coverage_incomplete", "planning")
+        raise ResponseIncomplete("topic_coverage_incomplete", "planning")
     return groups

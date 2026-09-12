@@ -25,12 +25,47 @@ def halves(batch):
     return [batch[:middle], batch[middle:]]
 
 
-def retry_batches(batch, operation, *, stage, on_event, split=halves, validation_attempts=2):
+def retry_batches(
+    batch,
+    operation,
+    *,
+    stage,
+    on_event,
+    split=halves,
+    validation_attempts=2,
+    checkpoints=None,
+    recovery_key=None,
+    on_unrecoverable=None,
+):
     """Recover capacity failures; never replay an uncertain transport."""
     pending = [(batch, 1)]
     while pending:
         processing_checkpoint(stage)
         current, attempt = pending.pop()
+        key = recovery_key(current) if recovery_key else None
+        if checkpoints is not None and key is not None:
+            saved = checkpoints.load_recovery(key, "split")
+            if saved is not None:
+                if not isinstance(saved, dict) or saved.get("kind") not in {"response", "capacity"}:
+                    raise ValueError("Invalid saved batch split")
+                parts = halves(current) if saved.get("kind") == "response" else split(current)
+                if not parts or saved.get("parts") != [content_id(part) for part in parts]:
+                    raise ValueError("Invalid saved batch split")
+                on_event({"stage": stage, "operation": "resume_split", "items": len(current)})
+                pending.extend((part, 1) for part in reversed(parts))
+                continue
+
+        def remember(parts, kind):
+            if checkpoints is not None and key is not None:
+                checkpoints.save_recovery(
+                    key,
+                    "split",
+                    {
+                        "kind": kind,
+                        "parts": [content_id(part) for part in parts],
+                    },
+                )
+
         try:
             result = operation(current)
         except ResponseIncomplete as exc:
@@ -46,6 +81,7 @@ def retry_batches(batch, operation, *, stage, on_event, split=halves, validation
             logger.warning("Invalid model response [%s]: %s %s", stage, exc.reason, exc.details)
             parts = halves(current)
             if parts:
+                remember(parts, "response")
                 on_event(
                     {
                         "stage": stage,
@@ -58,12 +94,15 @@ def retry_batches(batch, operation, *, stage, on_event, split=halves, validation
                 pending.extend((part, 1) for part in reversed(parts))
             elif attempt < validation_attempts:
                 pending.append((current, attempt + 1))
+            elif on_unrecoverable is not None:
+                on_unrecoverable(current, exc)
             else:
                 raise
         except (OutputTruncated, InputTooLarge) as exc:
             parts = split(current)
             if not parts:
                 raise  # Smallest meaningful unit also exceeded the model ceiling.
+            remember(parts, "capacity")
             logger.info("%s [%s]; splitting batch of %s", exc.reason, stage, len(current))
             on_event(
                 {

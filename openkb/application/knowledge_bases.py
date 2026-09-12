@@ -313,7 +313,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
             else:
                 row = by_identity[source.source_id]
             row.update(
-                source_id=source.source_id, source_version=source.id,
+                source_id=source.source_id, source_version=source.id, source_origin=source.origin,
                 source_intake="saved",
                 knowledge_compilation=result["knowledge_compilation"] if result else "not_started",
                 stage=result["stage"] if result else "source_intake",

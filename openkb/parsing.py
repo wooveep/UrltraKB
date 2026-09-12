@@ -40,7 +40,9 @@ def parse_document(
     if source.suffix == ".docx":
         profile["docx"] = "openkb-docx-v6-resilient-ocr"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v3-optional-image-ocr"
+        profile["pdf"] = "openkb-pdf-v4-page-recovery"
+    if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
+        profile["text"] = "openkb-text-v2-encoding-and-local-omissions"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     retries = page_attempts(originals, source, selected.ocr.profile())
@@ -171,7 +173,9 @@ def parse_text(
 ) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
     kind = "text"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
-        text = path.read_text(encoding="utf-8")
+        from openkb.docx_containers import decode_text
+
+        text = decode_text(path.read_bytes())
     elif source.suffix == ".json":
         from openkb.legacy_pages import saved_pages_text
 

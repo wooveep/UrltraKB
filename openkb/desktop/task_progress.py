@@ -12,6 +12,7 @@ _PHASES = {
     "image_ocr": "图片 OCR",
     "cloud_ocr": "等待云端 OCR",
     "facts": "提取知识",
+    "planning": "规划知识主题",
     "generation": "生成知识页面",
     "parse_cache": "校验已保存解析",
 }

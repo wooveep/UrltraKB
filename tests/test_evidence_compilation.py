@@ -559,8 +559,12 @@ def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_pa
                 if "Enable cache" in unit["text"]:
                     assert unit["headings"] == ["Operations", "Linux"]
                     output["facts"][0]["topic"] = "Cache"
-                else:
+                elif unit["kind"] == "heading":
                     output.update(facts=[], empty_reason="Context for the cache instruction")
+                else:
+                    # A version restriction is a fact, even when it is also
+                    # carried as the next unit's neighboring context.
+                    output["facts"][0]["topic"] = "Cache"
         if payload["stage"] == "generation":
             generated.append(payload)
         return response
