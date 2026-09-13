@@ -22,10 +22,11 @@ matching-row completeness and exact figure associations. An image's page associa
 does not establish that the asset depicts the whole page. OCR and visual observations
 keep their distinct meanings; missing image understanding remains unknown.
 
-Streamed application answers allow one replacement for empty/truncated output or unobserved
-citation targets, and one for an evidence rejection or invalid review. Fixing a
-citation does not consume the evidence correction. Each allowance is used at most
-once, within the same task budget. The replacement retains the evidence, has no
+Streamed application answers allow separate corrections for empty/truncated output,
+unobserved citation targets, and an evidence rejection or invalid review. Each
+allowance is used at most once: at most three replacement drafts, within the same
+task budget. Recovering from truncation does not consume the citation correction;
+fixing a citation does not consume the evidence correction. Each replacement retains the evidence, has no
 tools and must pass review again. Review instructions, rejected
 drafts and review results never become completed conversation history. Invalid or
 truncated reviews cannot authorize completion. Legacy terminal paths also reject

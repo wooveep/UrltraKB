@@ -214,6 +214,7 @@ async def iter_agent_response_events(
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
     _replacement_attempts: int = 1,
+    _citation_attempts: int = 1,
     _evidence_attempts: int = 1,
     _rejected_answer: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
@@ -312,7 +313,13 @@ async def iter_agent_response_events(
             invalid_review = exc
     evidence_problem = bool(issues) or invalid_review is not None
     if truncated or empty or invalid_targets or evidence_problem:
-        allowance = _evidence_attempts if evidence_problem else _replacement_attempts
+        allowance = (
+            _evidence_attempts
+            if evidence_problem
+            else _citation_attempts
+            if invalid_targets
+            else _replacement_attempts
+        )
         if not allowance:
             if invalid_review is not None:
                 raise invalid_review
@@ -370,7 +377,8 @@ async def iter_agent_response_events(
             history,
             max_turns=1,
             run_config=run_config,
-            _replacement_attempts=_replacement_attempts - int(not evidence_problem),
+            _replacement_attempts=_replacement_attempts - int(truncated or empty),
+            _citation_attempts=_citation_attempts - int(bool(invalid_targets)),
             _evidence_attempts=_evidence_attempts - int(evidence_problem),
             _rejected_answer=result.final_output if issues else _rejected_answer,
         )

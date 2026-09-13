@@ -216,6 +216,67 @@ async def test_length_stop_reuses_evidence_for_one_bounded_replacement(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recovers", [False, True])
+@pytest.mark.parametrize("request_limit", [None, 3, 4])
+async def test_length_recovery_retains_one_separate_citation_repair(
+    kb_dir, model_service, recovers, request_limit
+):
+    import json
+
+    from openkb.locks import atomic_write_text
+
+    target = "sources/snapshots/version-parse.md#block-supported"
+    atomic_write_text(kb_dir / "wiki/index.md", f"Port is 4321. [Source]({target})")
+
+    def respond(body):
+        call = len(model_service)
+        if call == 1:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "read-evidence",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": "index.md"}),
+                        },
+                    }
+                ],
+            }
+        model_service.finish_reason = "length" if call == 2 else "stop"
+        if call >= 3:
+            assert not body.get("tools") and body.get("tool_choice") == "none"
+            assert any(m.get("role") == "tool" for m in body["messages"])
+        link = target if call == 4 and recovers else "sources/missing.md"
+        return {"role": "assistant", "content": f"Port is 4321. [Source]({link})"}
+
+    model_service.chat_response = respond
+    model_service.chat_without_tools = True
+    if request_limit is not None:
+        from openkb.config import load_config, save_config
+
+        config_path = kb_dir / ".openkb/config.yaml"
+        config = load_config(config_path)
+        config["processing"]["max_requests"] = request_limit
+        save_config(config_path, config)
+    result = await ask_question(kb_dir, "Which port?", save=True)
+    expected = 5 if recovers else 4
+    expected = min(expected, request_limit) if request_limit is not None else expected
+    assert len(model_service) == expected
+    assert result.usage["observable_attempts"] == expected
+    assert result.usage["charged_tokens"] == 130 * expected
+    if recovers and request_limit is None:
+        assert result.status == "completed", result
+        assert result.answer == f"Port is 4321. [Source]({target})"
+        assert result.saved_path
+    else:
+        assert result.status != "completed", result
+        assert result.saved_path is None
+
+
+@pytest.mark.asyncio
 async def test_truncated_tool_call_never_writes_even_when_arguments_are_valid(
     kb_dir, model_service
 ):
