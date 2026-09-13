@@ -48,7 +48,7 @@ def scanned_pdf(path):
         page.insert_text((40, 40), "Scanned: timeout 42 seconds.")
         page = pdf.new_page()
         page.insert_image(page.rect, stream=raster[0].get_pixmap().tobytes("png"))
-        pdf.save(path)
+        pdf.save(path, deflate=True)
 
 
 def test_explicit_queue_rejection_recovers_without_losing_attempts(
@@ -174,13 +174,25 @@ def test_shared_import_never_reposts_an_uncertain_cloud_submission(
 
 @pytest.mark.parametrize("corrupt_image_once", [False, True])
 @pytest.mark.parametrize("continuation", [False, True])
+@pytest.mark.parametrize("container", ["pdf", "page_override", "attachment", "nested_attachment"])
 def test_known_job_resumes_download_without_repeating_ocr(
-    kb_dir, tmp_path, monkeypatch, model_service, corrupt_image_once, continuation
+    kb_dir, tmp_path, monkeypatch, model_service, corrupt_image_once, continuation, container
 ):
     cloud_settings(kb_dir)
     monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
     source = tmp_path / "scan.pdf"
     scanned_pdf(source)
+    if container == "page_override":
+        settings_path = kb_dir / ".openkb/config.yaml"
+        settings = yaml.safe_load(settings_path.read_text())
+        settings["parsing"]["ocr"]["backend"] = "local"
+        settings_path.write_text(yaml.safe_dump(settings))
+    if "attachment" in container:
+        from tests.docx_attachment_fixtures import attached_docx
+
+        source = attached_docx(tmp_path / "parent.docx", source.read_bytes(), name="scan.pdf")
+        if container == "nested_attachment":
+            source = attached_docx(tmp_path / "outer.docx", source.read_bytes())
     calls = []
     submitted_options = []
     downloads = 0
@@ -256,7 +268,19 @@ def test_known_job_resumes_download_without_repeating_ocr(
 
     monkeypatch.setattr(requests.Session, "request", service)
     one = import_document(kb_dir, source)
-    assert one.knowledge_compilation == "unfinished"
+    if container == "page_override":
+        from openkb.application.source_actions import reprocess_source_page
+
+        one = reprocess_source_page(
+            kb_dir,
+            one.source_id,
+            version_id=one.input_version,
+            parse_id=one.parse_id,
+            page=1,
+            engine="cloud",
+        )
+    if "attachment" not in container:
+        assert one.knowledge_compilation == "unfinished"
     assert submitted_options == [
         {
             "useDocOrientationClassify": False,
@@ -271,7 +295,14 @@ def test_known_job_resumes_download_without_repeating_ocr(
     ]
     from openkb.application.source_history import source_status
 
-    observed = source_status(kb_dir, one.source_id)
+    job_source = one.source_id
+    if "attachment" in container:
+        from openkb.sources import SourceStore
+
+        job_source = next(
+            s.source_id for s in SourceStore(kb_dir).list_sources() if s.suffix == ".pdf"
+        )
+    observed = source_status(kb_dir, job_source)
     assert observed["cloud_jobs"][0]["requests"] == 3
     assert observed["cloud_jobs"][0]["job_id"] == "job-one"
 
@@ -288,9 +319,17 @@ def test_known_job_resumes_download_without_repeating_ocr(
         two = advance(two)
     assert two.stage == ("committed" if continuation else "parsed"), two
     assert downloads == 2 and sum(method == "POST" for method, _ in calls) == 1
-    assert all(
-        block.location["page"] == 1 for block in ParseStore(kb_dir).load(two.parse_id).blocks
-    )
+    parsed = ParseStore(kb_dir).load(two.parse_id)
+    if "attachment" not in container:
+        assert all(block.location["page"] == 1 for block in parsed.blocks)
+    else:
+        from openkb.sources import SourceStore
+
+        assert any(
+            "Scanned: timeout 42 seconds." in SourceStore(kb_dir).asset(b.blob).read_text()
+            for b in parsed.blocks
+            if "attachment" in b.location
+        )
 
     # Installing new result assembly rules must revalidate retained raw output,
     # while preserving the paid job and the old evidence version.

@@ -45,6 +45,24 @@ def page_attempts(store: SourceStore, source: SourceVersion, profile: dict) -> d
     }
 
 
+def effective_attempts(store, source, settings, overrides=None):
+    """Resolve the same per-page execution choices for parsing and accepted-job recovery."""
+    from openkb.ocr.config import OcrSettings
+
+    history = decisions(store, source, settings.profile())
+    retries = {int(page): rows[-1]["attempt"] for page, rows in history.items()}
+    overrides = overrides or {}
+    if settings.policy == "off":
+        retries = {page: attempt for page, attempt in retries.items() if page in overrides}
+    else:
+        overrides = {
+            int(page): OcrSettings.model_validate(rows[-1]["ocr"])
+            for page, rows in history.items()
+            if "ocr" in rows[-1]
+        } | overrides
+    return retries, overrides
+
+
 def request_page_attempt(
     store: SourceStore,
     source: SourceVersion,

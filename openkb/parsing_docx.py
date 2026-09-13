@@ -25,6 +25,7 @@ def parse_docx(
     _depth=0,
     _source=None,
     _options=None,
+    resume_ocr=False,
 ) -> tuple[list[BlockDraft], list[dict[str, Any]]]:
     import mammoth
     from mammoth import documents as nodes
@@ -163,6 +164,7 @@ def parse_docx(
                                 ocr,
                                 source=_source,
                                 options=_options,
+                                resume_ocr=resume_ocr,
                             )
                             blocks.extend(bind_blocks(drafts, attachment, location))
                             quality.extend(attachment_quality(checks, attachment))

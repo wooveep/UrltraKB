@@ -162,3 +162,58 @@ async def test_invalid_review_never_authorizes_a_completed_answer(kb_dir, model_
     assert result.status != "completed"
     assert result.saved_path is None
     assert result.usage["observable_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_uncited_claim_from_concept_page_cannot_skip_source_review(kb_dir, model_service):
+    bad = "All hosts may connect"
+    atomic_write_text(
+        kb_dir / "wiki/concepts/ports.md", "Generated summary without original proof."
+    )
+    reviews = []
+
+    def chat(body):
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return {"role": "assistant", "content": bad}
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "concept",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path":"concepts/ports.md"}',
+                    },
+                }
+            ],
+        }
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        return {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "verdict": "unsupported",
+                    "units": [{"id": "u1", "verdict": "unsupported", "support": []}],
+                    "issues": [
+                        {
+                            "kind": "unsupported",
+                            "claim": bad,
+                            "reason": "The concept summary has no original support for this claim.",
+                        }
+                    ],
+                }
+            ),
+        }
+
+    model_service.chat_response = chat
+    model_service.chat_without_tools = True
+    model_service.answer_review_response = review
+    result = await ask_question(kb_dir, "Who can connect?", save=True)
+    assert result.status != "completed"
+    assert result.saved_path is None
+    assert len(reviews) == 2

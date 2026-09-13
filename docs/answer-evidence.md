@@ -8,7 +8,7 @@ cursor. A match count describes that literal only; it does not establish aliases
 synonyms or actual network behavior. Follow incomplete context through the returned
 source node cursor before using a row.
 
-Answers that cite sources or use original-source tools receive independent model
+Answers that cite sources or read knowledge-base content receive independent model
 review after the terminal answer finishes. The reviewer receives the question,
 the observed tool outputs and every answer text unit. Each unit needs its own
 verdict; supported units require exact quotations from identified observations.

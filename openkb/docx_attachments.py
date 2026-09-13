@@ -111,6 +111,7 @@ def parse_attachment(
     *,
     source=None,
     options=None,
+    resume_ocr=False,
 ):
     from openkb.parsing import parse_document
     from openkb.parsing_docx import parse_docx
@@ -125,7 +126,14 @@ def parse_attachment(
         child = store.intake_attachment(
             source, part=attachment.part, name=name, content=attachment.content
         )
-        parsed = parse_document(store.kb_dir, child, options=options, _budget=budget, _depth=depth)
+        parsed = parse_document(
+            store.kb_dir,
+            child,
+            options=options,
+            _budget=budget,
+            _depth=depth,
+            resume_ocr=resume_ocr,
+        )
         return [
             BlockDraft(
                 store.asset(b.blob).read_text(encoding="utf-8"),

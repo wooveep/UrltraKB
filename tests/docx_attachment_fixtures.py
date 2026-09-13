@@ -59,7 +59,7 @@ def docx_with_parts(path, body, *, parts=None, relationships="", styles=""):
     return path
 
 
-def attached_docx(path, payload):
+def attached_docx(path, payload, *, name=None):
     return docx_with_parts(
         path,
         "<w:p><w:r><w:t>Follow the attached instructions.</w:t><w:object>"
@@ -67,7 +67,13 @@ def attached_docx(path, payload):
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
         'Type="Embed" ProgID="Word.Document.12" r:id="attachment1"/>'
         "</w:object></w:r></w:p>",
-        parts={"word/embeddings/object.bin": compound_file("Package", payload)},
+        parts={
+            "word/embeddings/object.bin": compound_file(
+                "\x01Ole10Native", native_package(name, payload)
+            )
+            if name
+            else compound_file("Package", payload)
+        },
         relationships='<Relationship Id="attachment1" '
         'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" '
         'Target="embeddings/object.bin"/>',

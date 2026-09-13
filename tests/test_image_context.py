@@ -60,7 +60,7 @@ def test_ocr_exception_does_not_block_compilation_and_figure_keeps_text_context(
     assert block.location["paragraph"] == 2
     source = next((kb_dir / "wiki/sources").glob("*.md"))
     text = read_wiki_file(source.relative_to(kb_dir / "wiki").as_posix(), str(kb_dir / "wiki"))
-    catalog = json.loads(text.split("contents):\n")[-1])
+    catalog = json.loads(text.rsplit("\n", 1)[-1])
     assert "port 9473" in catalog[0]["adjacent_text"]
     assert catalog[0]["path"].startswith("sources/images/")
     assert read_wiki_image(catalog[0]["path"], str(kb_dir / "wiki"))["type"] == "image"
@@ -77,7 +77,7 @@ def test_catalog_handles_note_relative_paths_without_exposing_outside_files(kb_d
         "![malformed](images/%00.png)\n\n![malformed-url](http://[invalid]/image.png)"
     )
     text = read_wiki_file("concepts/recovery.md", str(root))
-    catalog = json.loads(text.split("contents):\n")[-1])
+    catalog = json.loads(text.rsplit("\n", 1)[-1])
     assert len(catalog) == 1
     assert catalog[0]["path"] == "sources/images/panel.png"
     assert "Restart port 9473" in catalog[0]["adjacent_text"]

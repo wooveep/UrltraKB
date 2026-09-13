@@ -12,7 +12,7 @@ from openkb.execution_measurement import measure_span
 from openkb.ocr.assembly import assembly_profile
 from openkb.ocr.backend import PageOcr, create_ocr
 from openkb.ocr.config import OcrSettings, parsing_settings
-from openkb.ocr.reprocessing import decisions, page_attempts
+from openkb.ocr.reprocessing import effective_attempts
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion
@@ -54,16 +54,7 @@ def parse_document(
         profile["text"] = "openkb-text-v3-heading-markers"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
-    retries = page_attempts(originals, source, selected.ocr.profile())
-    overrides = page_overrides or {}
-    if selected.ocr.policy == "off":
-        retries = {page: attempt for page, attempt in retries.items() if page in overrides}
-    else:
-        overrides = {
-            int(page): OcrSettings.model_validate(history[-1]["ocr"])
-            for page, history in decisions(originals, source, selected.ocr.profile()).items()
-            if "ocr" in history[-1]
-        } | overrides
+    retries, overrides = effective_attempts(originals, source, selected.ocr, page_overrides)
     if retries:
         profile["reprocessing"] = {str(page): attempt for page, attempt in retries.items()}
     path = originals.original(source)
@@ -78,16 +69,12 @@ def parse_document(
             # find validates immutable blocks and assets. Quality warnings do not
             # make these bytes stale; explicit reparse/OCR changes request new work.
             pending = False
-            if (
-                cached is not None
-                and resume_ocr
-                and selected.ocr.policy != "off"
-                and selected.ocr.backend == "cloud"
-                and selected.ocr.cloud is not None
-            ):
-                from openkb.ocr.cloud import has_resumable_jobs
+            if cached is not None and resume_ocr:
+                from openkb.ocr.recovery import has_resumable_jobs
 
-                pending = has_resumable_jobs(originals, source, selected.ocr.cloud)
+                pending = has_resumable_jobs(
+                    originals, source, cached, selected.ocr, retries, overrides
+                )
             if cached is not None and not pending:
                 store.select(source, cached)
                 return cached
@@ -155,6 +142,7 @@ def parse_document(
                 _depth=_depth,
                 _source=source,
                 _options=options,
+                resume_ocr=resume_ocr or force,
             )
         finally:
             if docx_ocr is not None:

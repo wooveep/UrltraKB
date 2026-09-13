@@ -2,7 +2,7 @@
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agents import Agent, ModelSettings, Runner
 
@@ -105,12 +105,8 @@ def _payload(result):
             "search_source_text",
             "get_page_content",
             "get_image",
+            "read_file",
         }
-        or (
-            o.get("name") == "read_file"
-            and isinstance(o.get("arguments"), dict)
-            and "sources" in str(o["arguments"].get("path", "")).split("/")
-        )
         for o in observations
     )
     if not isinstance(answer, str) or not (original or source_targets(answer)):
@@ -148,7 +144,10 @@ async def review_answer(agent, result, *, run_config=None):
         instructions=INSTRUCTIONS,
         tools=[],
         handoffs=[],
-        model_settings=getattr(agent, "answer_review_settings", None) or agent.model_settings,
+        model_settings=replace(
+            getattr(agent, "answer_review_settings", None) or agent.model_settings,
+            tool_choice="none",
+        ),
     )
     hooks = RequestBudgetHooks()
     review = Runner.run_streamed(

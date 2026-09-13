@@ -222,8 +222,10 @@ def model_service(kb_dir):
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": json.dumps(value)},
-                            "finish_reason": calls.finish_reason,
+                            "message": message
+                            if chat
+                            else {"role": "assistant", "content": json.dumps(value)},
+                            "finish_reason": finish if chat else calls.finish_reason,
                         }
                     ],
                     "usage": calls.usage,

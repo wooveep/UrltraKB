@@ -180,6 +180,15 @@ async def test_text_only_question_uses_visual_observation_without_receiving_imag
                 ]
             }
         )
+        try:
+            payload = json.loads(body["messages"][-1]["content"])
+        except ValueError:
+            payload = {}
+        if payload.get("stage") == "answer_verification":
+            from tests.http_model_fixture import answer_review_response
+
+            delta = {"content": json.dumps(answer_review_response(payload))}
+            observed = True
         rows = [
             {
                 "id": "answer",

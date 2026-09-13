@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -170,8 +171,6 @@ def build_query_agent(
             **(model_settings.get("extra_args") or {}),
             "timeout": caps["timeout"],
         }
-    from dataclasses import replace
-
     from openkb.agent.answer_review import SourceAnswerAgent
     from openkb.config import compilation_model_options, resolve_effective_config
 
@@ -334,7 +333,11 @@ async def iter_agent_response_events(
         )
         recovery_position = len(history) - 1
         replacement_stream = iter_agent_response_events(
-            agent.clone(tools=[], handoffs=[]),
+            agent.clone(
+                tools=[],
+                handoffs=[],
+                model_settings=replace(agent.model_settings, tool_choice="none"),
+            ),
             history,
             max_turns=1,
             run_config=run_config,
@@ -521,6 +524,28 @@ async def run_query(
     run_config: Any = None,
     bundle: LlmCredentialBundle | None = None,
 ) -> str:
+    """Run the terminal query and its review within one configured task allowance."""
+    from openkb.agent.request_budget import visual_task_budget
+    from openkb.processing import processing_checkpoint
+
+    with visual_task_budget(kb_dir):
+        answer = await _run_query(
+            question, kb_dir, model, stream, raw=raw, run_config=run_config, bundle=bundle
+        )
+        processing_checkpoint()
+        return answer
+
+
+async def _run_query(
+    question: str,
+    kb_dir: Path,
+    model: str,
+    stream: bool = False,
+    *,
+    raw: bool = False,
+    run_config: Any = None,
+    bundle: LlmCredentialBundle | None = None,
+) -> str:
     """Run a Q&A query against the knowledge base.
 
     Args:
@@ -547,13 +572,17 @@ async def run_query(
     wiki_root = str(kb_dir / "wiki")
 
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    from openkb.agent.request_budget import RequestBudgetHooks
+
+    hooks = RequestBudgetHooks()
 
     if not stream:
-        result = (
-            await Runner.run(agent, question, max_turns=MAX_TURNS, run_config=run_config)
-            if run_config
-            else await Runner.run(agent, question, max_turns=MAX_TURNS)
-        )
+        try:
+            result = await Runner.run(
+                agent, question, max_turns=MAX_TURNS, run_config=run_config, hooks=hooks
+            )
+        finally:
+            hooks.close()
         from openkb.agent.completion_model import answer_truncated
         from openkb.processing import OutputTruncated
 
@@ -599,9 +628,11 @@ async def run_query(
     last_was_text = False
     need_blank_before_text = False
     result = (
-        Runner.run_streamed(agent, question, max_turns=MAX_TURNS, run_config=run_config)
+        Runner.run_streamed(
+            agent, question, max_turns=MAX_TURNS, run_config=run_config, hooks=hooks
+        )
         if run_config
-        else Runner.run_streamed(agent, question, max_turns=MAX_TURNS)
+        else Runner.run_streamed(agent, question, max_turns=MAX_TURNS, hooks=hooks)
     )
     collected: list[str] = []
     segment: list[str] = []
@@ -657,7 +688,10 @@ async def run_query(
                 elif item.type == "tool_call_output_item":
                     pass
     finally:
-        await stream_events.aclose()
+        try:
+            await stream_events.aclose()
+        finally:
+            hooks.close()
         if live:
             if segment:
                 live.update(_make_markdown("".join(segment)))

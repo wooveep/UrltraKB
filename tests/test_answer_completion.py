@@ -179,7 +179,7 @@ async def test_terminal_returns_final_answer_without_intermediate_bad_citation(
                 agent, session, "Question", _build_style(False), use_color=False
             )
     assert answer == "Final supported answer."
-    assert len(model_service) == 2
+    assert len(model_service) == 3
 
 
 @pytest.mark.asyncio
@@ -345,6 +345,7 @@ async def test_replacement_cannot_reopen_tool_work(kb_dir, model_service):
     assert result.status != "completed", result
     assert result.saved_path is None
     assert len(model_service) == 2
+    assert model_service[1].get("tool_choice") == "none"
 
 
 @pytest.mark.asyncio
