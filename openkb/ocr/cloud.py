@@ -26,6 +26,28 @@ class CloudIncomplete(Exception):
     pass
 
 
+def has_resumable_jobs(store: SourceStore, source: SourceVersion, config: CloudSettings) -> bool:
+    """Known accepted work can outlive a cached document parse; no network access here."""
+    for path in store.owned_path(store.root / "cloud-jobs").glob("*.json"):
+        processing_checkpoint("parsing")
+        record = read_object(store.owned_path(path))
+        intent = record.get("input", {})
+        if not isinstance(intent, dict) or intent.get("source") != source.id:
+            continue
+        profile = intent.get("profile", {})
+        if not isinstance(profile, dict) or profile.get("ocr") != config.profile():
+            continue
+        if record.get("identity") != content_id(intent) or path.stem != record["identity"]:
+            raise ValueError("Cloud OCR recovery identity mismatch")
+        if record.get("state") in {"submitted", "raw_downloaded"} and record.get("reason") not in {
+            "cloud_job_failed",
+            "cloud_job_expired",
+            "cloud_job_not_found",
+        }:
+            return True
+    return False
+
+
 class CloudJobs:
     def __init__(
         self, store: SourceStore, source: SourceVersion, config: CloudSettings, *, retries=None

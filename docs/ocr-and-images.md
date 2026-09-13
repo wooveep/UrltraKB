@@ -106,6 +106,14 @@ key. Stopping local waiting does not cancel the remote job; job identifiers and
 uncertain submission receipts remain recoverable. Neither service protocol is
 assumed to be the jobs API.
 
+Continuing a saved source checks for accepted cloud jobs that still need polling,
+download or assembly under the same source and OCR profile. Those jobs bypass the
+older cached document parse, resume by their saved job ID, and produce a new parse
+before knowledge compilation continues. Ordinary repeat imports still reuse the
+cached parse. Completed source references keep their original parse identity.
+Unknown submissions are never reposted by this continuation path. Resuming can
+also process the remaining images within the configured document limits.
+
 ## Independent image model
 
 Image understanding defaults off. Configure it in **图片理解**, save, and explicitly

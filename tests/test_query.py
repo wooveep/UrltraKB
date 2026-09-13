@@ -25,6 +25,7 @@ class TestBuildQueryAgent:
             "list_sources",
             "read_source_tree",
             "read_source_node",
+            "search_source_text",
         }
 
     def test_agent_tool_names(self, tmp_path):

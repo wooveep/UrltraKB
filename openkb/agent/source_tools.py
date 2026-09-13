@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from agents import function_tool
 
-from openkb.evidence import ParseStore
+from openkb.evidence import Evidence, ParseStore, complete_read_bound
 from openkb.evidence_snapshot import EvidenceSnapshot
 from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
@@ -29,6 +29,11 @@ original wording explicitly instead of silently equating directions, positions o
 Image rows include answer-ready images[].markdown links bound to that original block.
 Copy their destination verbatim: asset IDs are not paths, and source names must not be
 inserted into image destinations. Missing images are unavailable, not inferred from an ID.
+Use search_source_text to enumerate literal matches across a whole published source,
+including rows outside the first navigation range. Follow next_offset to exhaust matches.
+A search covers only its exact case-insensitive literal, not synonyms or inferred meanings.
+Search results carry their own row/header context; retain every matching row when asked
+which items satisfy a condition. A table category does not prove actual network access.
 """
 
 
@@ -186,4 +191,56 @@ def source_tools(kb_dir):
             {"index": nav["id"], "evidence": rows, "next": following}, ensure_ascii=False
         )
 
-    return [list_sources, read_source_tree, read_source_node], INSTRUCTIONS
+    @function_tool
+    def search_source_text(source_id: str, query: str, offset: int = 0, limit: int = 20) -> str:
+        """Find every original block containing a case-insensitive literal (not regex).
+        Search ignores navigation summaries and generated knowledge. Paginate next_offset.
+        Rows include original context; if context_complete is false, use read_source_node
+        with the returned node_id, node_offset and next_start to finish reading that row.
+        """
+        window(offset, limit)
+        if not isinstance(query, str) or not query.strip() or len(query) > 512:
+            raise ValueError("Invalid source search literal")
+        from openkb.processing import processing_checkpoint
+
+        source, parsed, nav = selected(source_id)
+        reader = readers[source_id]
+        matching = []
+        for index, block in enumerate(parsed.blocks):
+            processing_checkpoint()
+            reference = Evidence(source.source_id, source.id, parsed.id, block.id)
+            text = reader.read(reference, max_chars=complete_read_bound(block)).text
+            if query.casefold() in text.casefold():
+                matching.append(index)
+        rows = []
+        remaining = 16000
+        for index in matching[offset : offset + limit]:
+            block = parsed.blocks[index]
+            node = next(n for n in nav["nodes"] if n["start"] <= index < n["end"])
+            row = original_window(reader, source, parsed, block, 0, min(4000, remaining))
+            row.update(
+                node_id=node["id"],
+                node_offset=index - node["start"],
+                citation="[原文]("
+                + quote(snapshot_name(source, parsed), safe="/-.")
+                + f"#block-{block.id})",
+            )
+            row["analysis_coverage"] = coverage_window(coverages[source_id], row["reference"])
+            rows.append(row)
+            remaining -= len(row["text"]) + len(row["context"])
+            if remaining <= 0:
+                break
+        following = offset + len(rows)
+        return json.dumps(
+            {
+                "index": nav["id"],
+                "query": query,
+                "match_scope": "original_text_literal",
+                "total_matches": len(matching),
+                "evidence": rows,
+                "next_offset": following if following < len(matching) else None,
+            },
+            ensure_ascii=False,
+        )
+
+    return [list_sources, read_source_tree, read_source_node, search_source_text], INSTRUCTIONS

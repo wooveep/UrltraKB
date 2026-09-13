@@ -25,6 +25,7 @@ def parse_document(
     *,
     options: dict[str, Any] | None = None,
     force: bool = False,
+    resume_ocr: bool = False,
     _budget=None,
     _depth=0,
     page_overrides: dict[int, OcrSettings] | None = None,
@@ -76,7 +77,18 @@ def parse_document(
             cached = store.find(source, profile)
             # find validates immutable blocks and assets. Quality warnings do not
             # make these bytes stale; explicit reparse/OCR changes request new work.
-            if cached is not None:
+            pending = False
+            if (
+                cached is not None
+                and resume_ocr
+                and selected.ocr.policy != "off"
+                and selected.ocr.backend == "cloud"
+                and selected.ocr.cloud is not None
+            ):
+                from openkb.ocr.cloud import has_resumable_jobs
+
+                pending = has_resumable_jobs(originals, source, selected.ocr.cloud)
+            if cached is not None and not pending:
                 store.select(source, cached)
                 return cached
     processing_checkpoint("parsing")

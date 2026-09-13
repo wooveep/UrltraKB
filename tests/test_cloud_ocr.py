@@ -173,8 +173,9 @@ def test_shared_import_never_reposts_an_uncertain_cloud_submission(
 
 
 @pytest.mark.parametrize("corrupt_image_once", [False, True])
+@pytest.mark.parametrize("continuation", [False, True])
 def test_known_job_resumes_download_without_repeating_ocr(
-    kb_dir, tmp_path, monkeypatch, model_service, corrupt_image_once
+    kb_dir, tmp_path, monkeypatch, model_service, corrupt_image_once, continuation
 ):
     cloud_settings(kb_dir)
     monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
@@ -273,11 +274,19 @@ def test_known_job_resumes_download_without_repeating_ocr(
     observed = source_status(kb_dir, one.source_id)
     assert observed["cloud_jobs"][0]["requests"] == 3
     assert observed["cloud_jobs"][0]["job_id"] == "job-one"
-    two = refresh(kb_dir, one)
+
+    def advance(previous):
+        if not continuation:
+            return refresh(kb_dir, previous)
+        from openkb.application.source_actions import continue_source
+
+        return continue_source(kb_dir, previous.source_id, version_id=previous.input_version)
+
+    two = advance(one)
     if corrupt_image_once:
         assert any("cloud_required_asset_invalid" in warning for warning in two.warnings)
-        two = refresh(kb_dir, two)
-    assert two.stage == "parsed", two
+        two = advance(two)
+    assert two.stage == ("committed" if continuation else "parsed"), two
     assert downloads == 2 and sum(method == "POST" for method, _ in calls) == 1
     assert all(
         block.location["page"] == 1 for block in ParseStore(kb_dir).load(two.parse_id).blocks

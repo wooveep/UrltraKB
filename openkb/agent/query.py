@@ -34,6 +34,9 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    Titles and summaries may be incomplete or misleading; they are not original evidence.
 2. Use read_source_tree and read_source_node to check the original ranges for details,
    prerequisites and exceptions. Follow their pagination and preserve the returned citation.
+   For requested lists of matching items, use search_source_text on relevant original
+   literals and follow every next_offset. Read all matching rows with their headers and
+   context, including unfamiliar component names. Navigation previews are not exhaustive.
 3. Read concept pages (concepts/) for cross-document synthesis.
 4. For "who/what is X" questions about a specific named person, organization,
    place, or product, read the matching page in entities/ first.
@@ -69,6 +72,8 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    A page containing two figures does not identify which image is left/right or which
    mechanism each shows. Confirm the exact image's caption/position or obtain a visual
    observation; omit a displayed figure when this association cannot be established.
+   An image associated with a physical page may be a crop. Do not describe it as a full
+   page unless that exact asset's extent is established by the evidence.
 9. Check the separate analysis coverage status. Published knowledge may be partially
    usable while OCR, images or source content remain pending. Describe relevant gaps;
    never turn an omission into a claim that the original has no such information.
@@ -165,12 +170,24 @@ def build_query_agent(
             **(model_settings.get("extra_args") or {}),
             "timeout": caps["timeout"],
         }
-    return Agent(
+    from dataclasses import replace
+
+    from openkb.agent.answer_review import SourceAnswerAgent
+    from openkb.config import compilation_model_options, resolve_effective_config
+
+    review_options = compilation_model_options(
+        resolve_effective_config(Path(wiki_root).parent)[0], verification=True
+    )
+    settings = ModelSettings(**model_settings)
+    return SourceAnswerAgent(
         name="wiki-query",
         instructions=instructions,
         tools=[read_file, get_page_content, *original_tools, *visual_tools],
         model=CompletionAwareModel(model=model),
-        model_settings=ModelSettings(**model_settings),
+        model_settings=settings,
+        answer_review_settings=replace(
+            settings, extra_args={**(settings.extra_args or {}), **review_options}
+        ),
     )
 
 
@@ -273,20 +290,34 @@ async def iter_agent_response_events(
 
     truncated = answer_truncated(result)
     invalid_targets = [] if truncated else invalid_source_targets(result)
-    if truncated or invalid_targets:
+    from openkb.agent.answer_review import review_answer
+
+    issues = (
+        await review_answer(agent, result, run_config=run_config)
+        if not truncated and not invalid_targets
+        else []
+    )
+    if truncated or invalid_targets or issues:
         if not _replacement_attempts:
             from openkb.processing import OutputTruncated, ProcessingIncomplete
 
             if truncated:
                 raise OutputTruncated("answering")
-            raise ProcessingIncomplete("answer_citation_invalid", "answering")
+            raise ProcessingIncomplete(
+                "answer_evidence_unsupported" if issues else "answer_citation_invalid", "answering"
+            )
         history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
-        if invalid_targets and history and history[-1].get("role") == "assistant":
+        if (invalid_targets or issues) and history and history[-1].get("role") == "assistant":
             history.pop()  # Do not persist the rejected draft in a completed conversation.
         reason = (
             "The previous response hit its output limit. "
             if truncated
-            else "The previous response used source citation targets absent from tool evidence. "
+            else "The previous response failed evidence review. "
+            + (
+                json.dumps(issues, ensure_ascii=False)
+                if issues
+                else "Source citation targets were absent from tool evidence. "
+            )
         )
         history.append(
             {
@@ -531,6 +562,9 @@ async def run_query(
         from openkb.agent.answer_citations import require_source_targets
 
         require_source_targets(result)
+        from openkb.agent.answer_review import require_supported_answer
+
+        await require_supported_answer(agent, result, run_config=run_config)
         return result.final_output or ""
 
     import os
@@ -637,6 +671,9 @@ async def run_query(
     from openkb.agent.answer_citations import require_source_targets
 
     require_source_targets(result)
+    from openkb.agent.answer_review import require_supported_answer
+
+    await require_supported_answer(agent, result, run_config=run_config)
     return result.final_output or ""
 
 

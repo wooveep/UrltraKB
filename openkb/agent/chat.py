@@ -476,6 +476,9 @@ async def _stream_tty_turn(
     from openkb.agent.answer_citations import require_source_targets
 
     require_source_targets(result)
+    from openkb.agent.answer_review import require_supported_answer
+
+    await require_supported_answer(agent, result)
     answer = (result.final_output or "").strip()
     return answer, new_input + result.to_input_list()[len(new_input) :]
 

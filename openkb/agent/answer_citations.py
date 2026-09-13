@@ -56,7 +56,7 @@ def _target(link):
     return None
 
 
-def _strings(value):
+def observation_strings(value):
     if isinstance(value, str):
         try:
             decoded = json.loads(value)
@@ -64,13 +64,17 @@ def _strings(value):
             yield value
         else:
             if decoded != value:
-                yield from _strings(decoded)
+                yield from observation_strings(decoded)
     elif isinstance(value, dict):
         for item in value.values():
-            yield from _strings(item)
+            yield from observation_strings(item)
     elif isinstance(value, list):
         for item in value:
-            yield from _strings(item)
+            yield from observation_strings(item)
+
+
+def source_targets(answer):
+    return {target: link for link in _links(answer) if (target := _target(link))}
 
 
 def invalid_source_targets(result):
@@ -78,13 +82,13 @@ def invalid_source_targets(result):
     answer = getattr(result, "final_output", None)
     if not isinstance(answer, str):
         return []
-    targets = {target: link for link in _links(answer) if (target := _target(link))}
+    targets = source_targets(answer)
     if not targets:
         return []
     observed = set()
     for item in result.to_input_list():
         if item.get("type") == "function_call_output" or item.get("role") == "tool":
-            text = "\n".join(_strings(item.get("output", item.get("content"))))
+            text = "\n".join(observation_strings(item.get("output", item.get("content"))))
             local = {_target(path) for path in _SOURCE.findall(text)}
             # A source reader may return its snapshot path and binding separately.
             # Keep these within one tool observation; never combine loose fields.

@@ -96,6 +96,7 @@ def test_slides_repeated_text_retains_object_identity_and_original_image(
                 continue
             assert len(picture["images"]) == 1
             figure = picture["images"][0]
+            assert figure["extent"] == "not_established_by_source_association"
             assert figure["asset"] in picture["assets"]
             assert (kb_dir / "wiki" / figure["path"]).read_bytes() == image.getvalue()
             assert figure["markdown"] == f"![原图]({figure['path']})"

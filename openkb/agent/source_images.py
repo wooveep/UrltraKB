@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+_EXTENT = "not_established_by_source_association"
 
 
 def published_images(wiki: Path, assets: set[str]) -> dict[str, dict[str, str]]:
@@ -29,7 +30,12 @@ def published_images(wiki: Path, assets: set[str]) -> dict[str, dict[str, str]]:
         relative = path.relative_to(wiki).as_posix()
         catalog.setdefault(
             path.stem,
-            {"asset": path.stem, "path": relative, "markdown": f"![原图]({relative})"},
+            {
+                "asset": path.stem,
+                "path": relative,
+                "markdown": f"![原图]({relative})",
+                "extent": _EXTENT,
+            },
         )
     return catalog
 
@@ -75,6 +81,7 @@ def image_catalog(text: str, source: Path, wiki: Path) -> str:
             entries.append(
                 {
                     "path": relative,
+                    "extent": _EXTENT,
                     "caption": image.content,
                     "source": source.relative_to(wiki).as_posix(),
                     "line": token.map[0] + 1,
@@ -85,6 +92,7 @@ def image_catalog(text: str, source: Path, wiki: Path) -> str:
         return text
     return (
         text + "\n\nSource image catalog (wiki-relative paths for get_image and answer Markdown; "
-        "adjacency records layout, not a claim about unseen image contents):\n"
+        "adjacency records layout, not a claim about unseen image contents; "
+        "association with a page does not establish a full-page image):\n"
         + json.dumps(entries, ensure_ascii=False)
     )

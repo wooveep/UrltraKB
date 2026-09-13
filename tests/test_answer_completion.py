@@ -50,9 +50,10 @@ async def test_invented_source_target_reuses_observed_evidence_once(
     model_service.chat_response = respond
     model_service.chat_without_tools = True
     result = await ask_question(kb_dir, "Which port?", save=True)
-    assert len(model_service) == 3
-    assert result.usage["observable_attempts"] == 3
-    assert result.usage["charged_tokens"] == 390
+    expected = 4 if recovers else 3  # A corrected citation also needs semantic review.
+    assert len(model_service) == expected
+    assert result.usage["observable_attempts"] == expected
+    assert result.usage["charged_tokens"] == 130 * expected
     if recovers:
         assert result.status == "completed", result
         assert f"]({target})" in result.answer
@@ -122,7 +123,7 @@ async def test_complete_binding_in_one_read_can_supply_canonical_citation(
     model_service.chat_without_tools = True
     result = await ask_question(kb_dir, "Which port?", save=True)
     assert result.status == "completed", result
-    assert len(model_service) == 2
+    assert len(model_service) == 3
 
 
 @pytest.mark.asyncio

@@ -86,6 +86,7 @@ def _compile_version(
                     source,
                     options=settings.get("parsing"),
                     force=force_parse,
+                    resume_ocr=retry_omissions,
                     page_overrides=page_overrides,
                 )
                 for row in parsed.quality:

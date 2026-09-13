@@ -104,6 +104,23 @@ def evidence_response(payload):
     return None
 
 
+def answer_review_response(payload):
+    output = payload["observations"][0]["output"] if payload["observations"] else ""
+    quote = (output if isinstance(output, str) else json.dumps(output, ensure_ascii=False))[:64]
+    return {
+        "verdict": "supported",
+        "issues": [],
+        "units": [
+            {
+                "id": unit["id"],
+                "verdict": "supported" if quote else "non_factual",
+                "support": [{"observation": "o1", "quote": quote}] if quote else [],
+            }
+            for unit in payload["units"]
+        ],
+    }
+
+
 class ModelService(list):
     def __init__(self):
         super().__init__()
@@ -113,6 +130,7 @@ class ModelService(list):
         self.drip_seconds = 0.0
         self.respond = None
         self.chat_response = None
+        self.answer_review_response = None
         self.chat_without_tools = False
         self.finish_reason = "stop"
         self.usage = {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}
@@ -139,13 +157,24 @@ def model_service(kb_dir):
             except (ValueError, TypeError):
                 payload = {}
             value = evidence_response(payload) or value
-            chat = calls.chat_response is not None and (
-                body.get("tools") or calls.chat_without_tools
+            review = payload.get("stage") == "answer_verification"
+            chat = review or (
+                calls.chat_response is not None and (body.get("tools") or calls.chat_without_tools)
             )
             if calls.respond is not None and not chat:
                 value = calls.respond(body)
             if chat:
-                message = calls.chat_response(body)
+                if review:
+                    message = (
+                        calls.answer_review_response(body)
+                        if calls.answer_review_response
+                        else {
+                            "role": "assistant",
+                            "content": json.dumps(answer_review_response(payload)),
+                        }
+                    )
+                else:
+                    message = calls.chat_response(body)
                 finish = (
                     "tool_calls"
                     if message.get("tool_calls") and calls.finish_reason == "stop"

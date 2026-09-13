@@ -150,8 +150,8 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
         assert {doc_id for doc_id, _ in indexed_reads} == {nav["pageindex"]["doc_id"]}
         assert indexed_reads[0][1][-1]["content"] == "Set pressure to 37 kPa."
         assert "37 kPa" in answer.answer
-        assert answer.usage["observable_attempts"] == 4
-        assert answer.usage["charged_tokens"] == 520
+        assert answer.usage["observable_attempts"] == 5
+        assert answer.usage["charged_tokens"] == 650
         assert all(
             row["cache_read_tokens"] == 40 for row in answer.usage["measurement"]["requests"]
         )
