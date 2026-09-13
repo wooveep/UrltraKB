@@ -468,6 +468,11 @@ async def _stream_tty_turn(
             live.stop()
         print()
 
+    from openkb.agent.completion_model import answer_truncated
+    from openkb.processing import OutputTruncated
+
+    if answer_truncated(result):
+        raise OutputTruncated("answering")
     answer = "".join(collected).strip()
     if not answer:
         answer = (result.final_output or "").strip()
@@ -993,6 +998,7 @@ async def run_chat(
 ) -> None:
     """Run the chat REPL against ``session`` until the user exits."""
     from openkb.config import resolve_effective_config
+    from openkb.processing import ProcessingIncomplete
 
     use_color = _use_color(force_off=no_color)
     style = _build_style(use_color)
@@ -1063,5 +1069,7 @@ async def run_chat(
                         )
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))
+        except ProcessingIncomplete as exc:
+            _fmt(style, ("class:error", f"[unfinished] {exc.reason}\n"))
         except Exception as exc:
             _fmt(style, ("class:error", f"[ERROR] {exc}\n"))

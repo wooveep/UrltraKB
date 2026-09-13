@@ -113,6 +113,7 @@ class ModelService(list):
         self.drip_seconds = 0.0
         self.respond = None
         self.chat_response = None
+        self.chat_without_tools = False
         self.finish_reason = "stop"
         self.usage = {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}
 
@@ -138,13 +139,18 @@ def model_service(kb_dir):
             except (ValueError, TypeError):
                 payload = {}
             value = evidence_response(payload) or value
-            if calls.respond is not None and not (
-                calls.chat_response is not None and body.get("tools")
-            ):
+            chat = calls.chat_response is not None and (
+                body.get("tools") or calls.chat_without_tools
+            )
+            if calls.respond is not None and not chat:
                 value = calls.respond(body)
-            if calls.chat_response is not None and body.get("tools"):
+            if chat:
                 message = calls.chat_response(body)
-                finish = "tool_calls" if message.get("tool_calls") else "stop"
+                finish = (
+                    "tool_calls"
+                    if message.get("tool_calls") and calls.finish_reason == "stop"
+                    else calls.finish_reason
+                )
                 if body.get("stream"):
                     delta = {**message}
                     if "tool_calls" in delta:

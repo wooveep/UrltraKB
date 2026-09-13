@@ -182,6 +182,13 @@ preview. Exhausted optional allowance leaves a basic or degraded index; account,
 identity, cancellation and global budget failures still end the operation.
 
 Question and chat tools capture the published source/version/parse/index together.
+Provider length stops are retained even when the model SDK would otherwise discard
+them. The application may request one concise replacement using the evidence already
+read, with no tools and at most one model turn. The repair instruction is not saved
+in conversation history. A second truncated response cannot be saved as a completed
+answer. Legacy query and TTY chat also reject truncated completion; prior completed
+turns and all request charges remain intact.
+
 Use the returned original-range citations for details, prerequisites and exceptions;
 titles and summaries are navigation hints. Long original and Markdown reads paginate
 explicitly. A source-index rebuild reads saved parsing, changes only its retrieval

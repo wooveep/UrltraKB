@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,9 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    permissions, comparisons, examples and adjacent-row notes. One citation does not
    support every clause in a paragraph. Read and cite each necessary table cell AND
    its header/merged subject. Omit an extra claim when its own evidence is unavailable.
+   Preserve exact product and service names. Name similarity or a commonly known
+   relationship does not establish source-stated identity, aliases or equivalence.
+   If the requested name is absent, say so without relabeling another source entry.
    Do not substitute a navigation summary or a nearby valid citation for actual support.
 8. Include relevant original figures in the answer as Markdown images when they help explain
    the answer: ![description](sources/images/file.png). Use an existing wiki-root-relative
@@ -147,6 +151,7 @@ def build_query_agent(
 
     model_settings["include_usage"] = True
 
+    from openkb.agent.completion_model import CompletionAwareModel
     from openkb.processing import request_budget_settings
 
     if caps := request_budget_settings():
@@ -159,7 +164,7 @@ def build_query_agent(
         name="wiki-query",
         instructions=instructions,
         tools=[read_file, get_page_content, *original_tools, *visual_tools],
-        model=f"litellm/{model}",
+        model=CompletionAwareModel(model=model),
         model_settings=ModelSettings(**model_settings),
     )
 
@@ -187,6 +192,7 @@ async def iter_agent_response_events(
     *,
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
+    _replacement_attempts: int = 1,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -257,6 +263,44 @@ async def iter_agent_response_events(
     from openkb.processing import processing_checkpoint
 
     processing_checkpoint()
+    from openkb.agent.completion_model import answer_truncated
+
+    if answer_truncated(result):
+        if not _replacement_attempts:
+            from openkb.processing import OutputTruncated
+
+            raise OutputTruncated("answering")
+        history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
+        history.append(
+            {
+                "role": "developer",
+                "content": (
+                    "The previous response hit its output limit. Produce one concise, complete "
+                    "replacement answer to the original question using the evidence already "
+                    "read. Include only requested fields, omit optional explanations, and finish "
+                    "all source citations. Do not repeat the search or invent missing support."
+                ),
+            }
+        )
+        recovery_position = len(history) - 1
+        replacement_stream = iter_agent_response_events(
+            agent.clone(tools=[], handoffs=[]),
+            history,
+            max_turns=1,
+            run_config=run_config,
+            _replacement_attempts=0,
+        )
+        async with aclosing(replacement_stream):
+            async for event in replacement_stream:
+                if event["event"] == "final":
+                    # This instruction belongs to one repair request, never the next
+                    # user question. Preserve any pre-existing developer messages.
+                    completed = event["data"]["history"]
+                    event["data"]["history"] = (
+                        completed[:recovery_position] + completed[recovery_position + 1 :]
+                    )
+                yield event
+        return
     # Deltas also contain assistant narration before tool calls. The SDK's
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
@@ -460,6 +504,11 @@ async def run_query(
             if run_config
             else await Runner.run(agent, question, max_turns=MAX_TURNS)
         )
+        from openkb.agent.completion_model import answer_truncated
+        from openkb.processing import OutputTruncated
+
+        if answer_truncated(result):
+            raise OutputTruncated("answering")
         return result.final_output or ""
 
     import os
@@ -558,6 +607,11 @@ async def run_query(
                 live.update(_make_markdown("".join(segment)))
             live.stop()
         print()
+    from openkb.agent.completion_model import answer_truncated
+    from openkb.processing import OutputTruncated
+
+    if answer_truncated(result):
+        raise OutputTruncated("answering")
     return "".join(collected) if collected else result.final_output or ""
 
 
@@ -579,9 +633,10 @@ def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None
     if bundle is None:
         return None
     from agents import RunConfig
-    from agents.extensions.models.litellm_model import LitellmModel
 
-    litellm_model = LitellmModel(
+    from openkb.agent.completion_model import CompletionAwareModel
+
+    litellm_model = CompletionAwareModel(
         model=model,
         base_url=bundle.base_url,
         api_key=bundle.api_key,

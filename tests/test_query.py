@@ -45,7 +45,7 @@ class TestBuildQueryAgent:
 
     def test_agent_model(self, tmp_path):
         agent = build_query_agent(str(tmp_path), "my-model")
-        assert agent.model == "litellm/my-model"
+        assert agent.model.model == "my-model"
 
 
 class TestRunQuery:
