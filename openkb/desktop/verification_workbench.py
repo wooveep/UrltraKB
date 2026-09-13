@@ -242,7 +242,9 @@ def verify_history_submission(window, kb, wait):
         QTest.keyClick(window.question, Qt.Key.Key_Return)
         task_id = window.manager.tasks()[-1].id
         try:
-            wait(lambda: "已排队" in window.chat.toPlainText())
+            wait(lambda: "排队显示验证" in window.chat.toPlainText())
+            assert "已排队" not in window.chat.toPlainText()
+            assert window.stop_answer.isVisible()
             assert on_page(window, "对话") and window.chat.isVisible()
         finally:
             window.manager.stop(task_id)

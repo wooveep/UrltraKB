@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
+    parser.add_argument("--startup", choices=("system", "light", "dark"), help="First-frame fonts")
     parser.add_argument("--tables", action="store_true", help="Populated native table layouts")
     parser.add_argument("--settings-layout", action="store_true", help="Settings layout and input")
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
@@ -61,6 +62,10 @@ def main() -> int:
     app = QApplication(application_arguments([]))
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("OpenKB Verification")
+    if args.startup:
+        from openkb.desktop.verification_startup import verify_startup
+
+        return verify_startup(app, root, args.startup)
     if args.lifecycle:
         from openkb.desktop.verification_lifecycle import verify_lifecycle
 

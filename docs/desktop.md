@@ -15,6 +15,10 @@ Keep the program's resources together. No developer Python, Node or Rust runtime
 is needed to run a complete portable build. Other Linux desktops, Wayland,
 macOS and ARM have not been accepted as distribution targets.
 
+Only one desktop instance runs per OS user. Launching the program again restores
+the existing window, including when it is hidden in the tray. Explicit Quit
+releases the instance; a crashed instance does not block the next launch.
+
 Use the knowledge-base manager to create a new KB or open an existing one.
 Registered locations and locations beneath the configured KB root appear with
 their full paths. Two KBs may share a directory name; select by path. Switching
@@ -50,6 +54,7 @@ mode applies to all pages and newly opened dialogs. Appearance and sidebar
 choices use the existing Qt `OpenKB/OpenKB` application identity in the user's
 platform settings, separately from KB/model/credential configuration. The reader's
 zoom is available on the Knowledge page and applies to content previews as well.
+Bundled fonts apply on the first visible frame, without manually changing themes.
 
 See [implementation and evidence](desktop-workbench.md) for the scope, assets,
 actual application screenshots and reproducible source acceptance commands.
@@ -103,9 +108,12 @@ context and **对话历史** opens saved chats with one click. Reopening a KB re
 the last selected conversation. The complete transcript stays visible during a
 follow-up, and the composer offers **停止** while a reply is running.
 
-The chat displays a short progress status until the final answer is ready. Tool
-narration and explicitly tagged reasoning are excluded from the answer. Quoted
-code, citations, formulas and diagrams remain available. Completed turns retain
+While generating, the chat shows the submitted question and keeps Stop available;
+the answer appears only when complete. Task stages, tool narration and explicitly
+tagged reasoning are excluded from the answer. Quoted
+code, citations, formulas and diagrams remain available. If the model produces
+only intermediate text without a final answer, the turn remains incomplete.
+Completed turns retain
 the established session model/language and reusable SDK history. Accepted submissions are first saved in a private desktop outbox, including
 while the KB is busy. Recovery transfers them into the conversation without
 replaying model requests; interrupted submissions remain in the timeline

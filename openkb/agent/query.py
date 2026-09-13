@@ -54,7 +54,7 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    OCR text. Interpret visual content only from an explicitly obtained visual observation.
 
 Answer based only on wiki content. Be concise.
-Before each tool call, output one short sentence explaining the reason.
+Use tools silently. Return only the final answer, without thinking or search narration.
 
 If you cannot find relevant information, say so clearly.
 """
@@ -174,7 +174,6 @@ async def iter_agent_response_events(
         if run_config
         else Runner.run_streamed(agent, input_data, max_turns=max_turns, hooks=hooks)
     )
-    collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
 
     stream = settled_stream(result)
@@ -184,7 +183,6 @@ async def iter_agent_response_events(
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text:
-                        collected.append(text)
                         yield {"event": "delta", "data": {"text": text}}
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
@@ -223,7 +221,9 @@ async def iter_agent_response_events(
     # Deltas also contain assistant narration before tool calls. The SDK's
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
-    answer = visible_answer(final if isinstance(final, str) else "".join(collected))
+    if not isinstance(final, str):
+        raise RuntimeError("The model did not return a final text answer")
+    answer = visible_answer(final)
     yield {
         "event": "final",
         "data": {

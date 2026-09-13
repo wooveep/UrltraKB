@@ -66,10 +66,14 @@ class ConversationView(MarkdownView):
             parts.append(
                 '<table width="100%" cellspacing="0" cellpadding="14">'
                 f'<tr><td width="22%"></td><td bgcolor="{background}">{question}</td></tr>'
-                '</table>\n\n<p style="font-size: 13px; margin-top: 24px;">UrltraKB</p>\n\n'
-                + visible_answer(answer)
-                + '\n\n<p style="margin-bottom: 28px;"></p>'
+                "</table>"
             )
+            if answer:
+                parts.append(
+                    '\n\n<p style="font-size: 13px; margin-top: 24px;">UrltraKB</p>\n\n'
+                    + visible_answer(answer)
+                    + '\n\n<p style="margin-bottom: 28px;"></p>'
+                )
         if not parts:
             self.show_temporary("")
         else:
