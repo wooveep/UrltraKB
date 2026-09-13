@@ -21,6 +21,7 @@ def compilation_profile(settings, bundle):
             "endpoint": content_id(getattr(bundle, "base_url", None)),
             "headers": content_id(getattr(bundle, "extra_headers", None)),
             "source_omissions": module_revision("openkb.source_omissions"),
+            "source_coverage": module_revision("openkb.source_coverage"),
             "source_summary": module_revision("openkb.source_summary"),
             "compilation_omissions": module_revision("openkb.compilation_omissions"),
             "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
@@ -51,6 +52,7 @@ def compilation_profile(settings, bundle):
                     "request_analysis",
                     "shared_analysis",
                     "evidence_wire",
+                    "model_json",
                     "evidence_verifier",
                     "evidence_markup",
                     "compiler",
@@ -85,6 +87,11 @@ class CompilationCheckpoints:
         self.verification_options = compilation_model_options(settings, verification=True)
         self.adjudication_thinking = settings.get("verification_adjudication_thinking")
         self.correction_thinking = settings.get("correction_thinking")
+        self.stage_efforts = {
+            key: settings[key]
+            for key in ("verification_adjudication_reasoning_effort", "correction_reasoning_effort")
+            if settings.get(key) is not None
+        }
         self.store = SourceStore(kb_dir)
         self.root = self.store.owned_path(self.store.root / "compilation")
         self.input = {
@@ -174,6 +181,7 @@ class CompilationCheckpoints:
                 {
                     "verification_options": self.verification_options,
                     "adjudication_thinking": self.adjudication_thinking,
+                    **({"stage_efforts": self.stage_efforts} if self.stage_efforts else {}),
                     **(
                         {"correction_thinking": self.correction_thinking}
                         if self.correction_thinking is not None
@@ -188,6 +196,7 @@ class CompilationCheckpoints:
             ),
             "implementation": module_revision("openkb.agent.compiler"),
             "message_format": module_revision("openkb.agent.evidence_units"),
+            "model_json": module_revision("openkb.agent.model_json"),
             "stage_implementation": {
                 name: module_revision("openkb.agent." + name)
                 for name in stage_modules.get(payload.get("stage"), ())

@@ -2407,6 +2407,12 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "navigation": {"enabled": False, "processing": None},
         "compilation_thinking": None,
         "verification_thinking": None,
+        "verification_adjudication_thinking": None,
+        "correction_thinking": None,
+        "compilation_reasoning_effort": None,
+        "verification_reasoning_effort": None,
+        "verification_adjudication_reasoning_effort": None,
+        "correction_reasoning_effort": None,
     }
 
 

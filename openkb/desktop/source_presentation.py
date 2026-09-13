@@ -3,6 +3,10 @@
 KINDS = {"heading": "标题", "paragraph": "正文", "table": "表格", "code": "代码", "image": "图像"}
 REASONS = {
     "request_timeout": "本轮模型请求等待超时，已完成内容已保留，可继续处理。",
+    "request_outcome_unknown": "模型请求的远端执行结果尚不明确，已暂停新增派发并保留进展。",
+    "provider_temporarily_unavailable": "服务暂不可用；已保留进展，可继续处理待完成内容。",
+    "cloud_queue_full": "云 OCR 队列已满，已保留有界重试记录，可稍后继续。",
+    "ocr_repetitive_transcription": "OCR 出现大量重复输出，异常转写已跳过，原图已保留。",
     "source_facts_missing": "部分原文的重要内容未被提取，需要补充处理。",
     "needs_acceptance": "已有页面包含人工修改，请在“知识变更”中检查差异。",
     "input_version_conflict": "资料或知识页面已变化，请刷新后继续处理。",
@@ -112,6 +116,9 @@ def status_text(value):
         )
         if not navigation["accounting_complete"]:
             rows.append("部分导航执行未正常结束，已知消耗保留，最终用量无法确认。")
+    from openkb.source_coverage import coverage_text
+
+    rows.extend(["", coverage_text(result.get("coverage"))])
     warnings = result.get("warnings", result.get("auxiliary_warnings"))
     if result.get("omissions"):
         rows.extend(["", "内容遗漏：已排除未通过处理或核验的内容，其余已验证内容可用。"])

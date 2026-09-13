@@ -91,6 +91,7 @@ class DocumentResult:
     source_id: str | None = None
     parse_id: str | None = None
     omissions: tuple[dict[str, Any], ...] = ()
+    coverage: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, str) or not isinstance(self.stage, str):
@@ -121,6 +122,9 @@ class DocumentResult:
         if not isinstance(self.omissions, tuple):
             raise ValueError("Invalid document omissions")
         validate_omissions(self.omissions)
+        from openkb.source_coverage import validate_coverage
+
+        validate_coverage(self.coverage, self.source_id, self.input_version, self.parse_id)
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> DocumentResult:

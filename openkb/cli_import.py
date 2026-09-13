@@ -67,6 +67,9 @@ def run_requests(kb_dir: Path, requests: list[UnitRequest]) -> int:
                 )
                 if document.reason:
                     click.echo(f"    {document.stage}: {document.reason}")
+                from openkb.source_coverage import coverage_text
+
+                click.echo(f"    {coverage_text(document.coverage)}")
                 if document.source_id:
                     click.echo(
                         f"    Source: {document.source_id} · Version: {document.input_version}"

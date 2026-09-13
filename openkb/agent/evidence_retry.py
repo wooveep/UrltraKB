@@ -101,7 +101,10 @@ def retry_batches(
         except (OutputTruncated, InputTooLarge) as exc:
             parts = split(current)
             if not parts:
-                raise  # Smallest meaningful unit also exceeded the model ceiling.
+                if on_unrecoverable is not None:
+                    on_unrecoverable(current, exc)
+                    continue
+                raise
             remember(parts, "capacity")
             logger.info("%s [%s]; splitting batch of %s", exc.reason, stage, len(current))
             on_event(
@@ -114,6 +117,12 @@ def retry_batches(
                 }
             )
             pending.extend((part, 1) for part in reversed(parts))
+        except ProcessingIncomplete as exc:
+            if exc.reason != "provider_temporarily_unavailable" or on_unrecoverable is None:
+                raise
+            # Transport has already used its bounded retries. Isolate this
+            # batch instead of retrying the whole document or splitting forever.
+            on_unrecoverable(current, exc)
         else:
             yield current, result
 

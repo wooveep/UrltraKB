@@ -174,9 +174,7 @@ def apply_title_correction(output, payload):
 
 def generation_options(settings, *, correction=False):
     """An explicit correction mode leaves the normal generation mode unchanged."""
-    mode = settings.get("correction_thinking") if correction else None
-    adjusted = {**settings, "compilation_thinking": mode} if mode is not None else settings
-    return compilation_model_options(adjusted)
+    return compilation_model_options(settings, stage="correction" if correction else "compilation")
 
 
 def fits(limits, model, system, payload):

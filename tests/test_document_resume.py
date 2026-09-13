@@ -30,6 +30,64 @@ def document(tmp_path, text="Alpha requirement.\n\nBeta requirement."):
     return source
 
 
+@pytest.mark.parametrize("envelope", ["fence", "bom", "duplicate"])
+def test_review_format_recovery_never_discards_a_conflicting_verdict(
+    kb_dir, tmp_path, monkeypatch, envelope
+):
+    calls = Counter()
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        stage = payload["stage"]
+        calls[stage] += 1
+        value = response(evidence_response(payload))
+        if stage == "verification":
+            raw = value.choices[0].message.content
+            value.choices[0].message.content = (
+                "```json\n" + raw + "\n```"
+                if envelope == "fence"
+                else "\ufeff" + raw
+                if envelope == "bom"
+                else '{"verdict":"unsupported","verdict":"supported",'
+                '"reason":"Conflicting conclusions"}'
+            )
+        return value
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, document(tmp_path))
+    if envelope == "duplicate":
+        assert result.knowledge_compilation == "unfinished", result
+        assert result.reason == "evidence_verification_invalid"
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    else:
+        assert result.knowledge_compilation == "completed", result
+        assert calls["verification"] == 1
+
+
+def test_recovered_split_ranges_cover_the_original_block(kb_dir, tmp_path, monkeypatch):
+    config_path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(output_tokens=1024, max_output_tokens=1024)
+    config_path.write_text(yaml.safe_dump(config))
+    text = " ".join(f"Operation {i} requires its own approval." for i in range(12))
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        value = response(evidence_response(payload))
+        if payload["stage"] == "facts" and any(len(u["text"]) > 200 for u in payload["units"]):
+            value.choices[0].finish_reason = "length"
+        return value
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, document(tmp_path, text))
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "complete"
+    ranges = result.coverage["ranges"]
+    assert len(ranges) > 1
+    assert ranges[0]["start"] == 0 and ranges[-1]["end"] == len(text)
+    assert all(left["end"] == right["start"] for left, right in zip(ranges, ranges[1:]))
+
+
 @pytest.mark.parametrize(
     "stage,defect",
     [

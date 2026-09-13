@@ -33,6 +33,7 @@ class CloudJobs:
         self.store, self.source, self.config = store, source, config
         self.started = time.monotonic()
         self.requests = self.pages = self.downloaded = 0
+        self.admitted_pages: set[str] = set()
         self.session = requests.Session()
         self.session.trust_env = False
         self.token = resolve_ocr_credential(store.kb_dir, config).api_key
@@ -72,6 +73,9 @@ class CloudJobs:
         self.record["requests"] = self.record.get("requests", 0) + 1
         if method == "POST":
             self.record["state"] = "submitting"
+            # A prior explicit rejection cannot classify a new, lost response.
+            self.record.pop("service_code", None)
+            self.record.pop("http_status", None)
             self.record["submissions"] = self.record.get("submissions", 0) + 1
         if self.path is None:
             raise CloudIncomplete("cloud_checkpoint_missing")
@@ -105,6 +109,7 @@ class CloudJobs:
         if self.path is not None:
             self._save(self.path)
         reasons = {
+            10010: "cloud_queue_full",
             12001: "cloud_daily_quota_exhausted",
             12002: "cloud_rate_limited",
             11001: "cloud_job_not_found",
@@ -147,7 +152,14 @@ class CloudJobs:
         """The only output page belongs to this physically extracted original page."""
         self.path, self.record = None, {}
         try:
-            return self._page(document, page)
+            for attempt in range(3):
+                try:
+                    return self._page(document, page)
+                except CloudIncomplete as exc:
+                    if str(exc) not in {"cloud_queue_full", "cloud_rate_limited"} or attempt == 2:
+                        raise
+                    self._wait(self.config.limits.poll_seconds * (2**attempt))
+            raise AssertionError("Positive OCR retry count required")
         except CloudIncomplete as exc:
             if self.path is not None:
                 self.record["reason"] = str(exc)
@@ -161,6 +173,12 @@ class CloudJobs:
         finally:
             if self.record.get("state") in {"submitting", "submission_unknown", "submitted"}:
                 self.remote_may_continue = True
+
+    def _wait(self, seconds):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self._checkpoint()
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 
     def cached_page(self, document, page, *, input_id=None):
         """Read a validated result without submission, polling, download or checkpoint writes."""
@@ -246,16 +264,23 @@ class CloudJobs:
         if state in {"submitting", "submission_unknown"}:
             raise CloudIncomplete("cloud_submission_unknown")
         if state == "rejected":
-            raise CloudIncomplete(self.record["reason"])
+            if self.record.get("service_code") not in {10010, 12002}:
+                raise CloudIncomplete(self.record["reason"])
+            # These documented responses prove no job was accepted. Unknown
+            # submissions and daily quotas never take this recovery path.
+            state = self.record["state"] = "planned"
+            self._save(path)
         if state not in {"planned", "submitted"}:
             raise CloudIncomplete("cloud_checkpoint_invalid")
         self._checkpoint()
         if not self.token:
             raise CloudIncomplete("cloud_credentials_missing")
         if state == "planned":
-            if self.pages >= self.config.limits.max_pages:
+            if identity not in self.admitted_pages and self.pages >= self.config.limits.max_pages:
                 raise CloudIncomplete("ocr_page_budget_exhausted")
-            self.pages += 1
+            if identity not in self.admitted_pages:
+                self.pages += 1
+                self.admitted_pages.add(identity)
             try:
                 with self.store.asset(digest).open("rb") as file:
                     response = self._request(
@@ -286,9 +311,11 @@ class CloudJobs:
                 rejected = type(code) is int and (10001 <= code <= 10010 or code in {12001, 12002})
                 reason = (
                     (
-                        {12001: "cloud_daily_quota_exhausted", 12002: "cloud_rate_limited"}.get(
-                            code
-                        )
+                        {
+                            10010: "cloud_queue_full",
+                            12001: "cloud_daily_quota_exhausted",
+                            12002: "cloud_rate_limited",
+                        }.get(code)
                         or f"cloud_service_error_{code}"
                     )
                     if rejected
@@ -296,6 +323,13 @@ class CloudJobs:
                 )
                 self.record.update(
                     state="rejected" if rejected else "submission_unknown", reason=reason
+                )
+                self.record.setdefault("submission_history", []).append(
+                    {
+                        "attempt": self.record.get("submissions", 0),
+                        "service_code": code,
+                        "reason": reason,
+                    }
                 )
                 self._save(path)
                 raise CloudIncomplete(reason) from None

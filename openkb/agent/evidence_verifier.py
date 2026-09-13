@@ -4,6 +4,7 @@ import json
 
 from openkb.agent.evidence_generation_protocol import source_mapping
 from openkb.agent.evidence_units import JSON_FORMAT, messages
+from openkb.agent.model_json import json_text, unique_fields
 from openkb.config import compilation_model_options
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
 
@@ -58,8 +59,6 @@ def verification_payload(
 ):
     result = {
         "stage": "verification",
-        "title": title,
-        "content": "# " + title + "\n\n" + content,
         # The extractor's paraphrase is not evidence and must not become a second
         # authority that can overrule a faithful original quotation.
         "facts": [
@@ -74,6 +73,7 @@ def verification_payload(
         result["fragment_bindings"] = bindings
     if review_context is not None:
         result["review_context"] = review_context
+    result.update(title=title, content="# " + title + "\n\n" + content)
     return result
 
 
@@ -138,6 +138,7 @@ def _verify_once(
     checkpoints=None,
     attempt=0,
     title_context=None,
+    adjudication=False,
 ):
     from openkb.agent.compiler import _llm_call
 
@@ -154,7 +155,9 @@ def _verify_once(
         title_context=title_context,
     )
     request = messages(verification_system(title_context), payload)
-    options = compilation_model_options(settings, verification=True)
+    options = compilation_model_options(
+        settings, verification=True, stage="verification_adjudication" if adjudication else None
+    )
     key = (
         checkpoints.review_key(request, settings["model"], options, attempt)
         if checkpoints
@@ -198,7 +201,7 @@ def _verify_once(
             raw = _llm_call(
                 settings["model"],
                 request,
-                "verification",
+                "verification_adjudication" if adjudication else "verification",
                 bundle=bundle,
                 response_format=JSON_FORMAT,
                 **options,
@@ -225,8 +228,9 @@ def _verify_once(
 
 
 def _review_object(raw):
+    raw = json_text(raw)
     try:
-        return json.loads(raw)
+        return json.loads(raw, object_pairs_hook=unique_fields)
     except json.JSONDecodeError as exc:
         if exc.msg != "Extra data":
             raise
@@ -234,8 +238,8 @@ def _review_object(raw):
         # object. Join only this exact, disjoint shape; never pick a verdict or
         # discard a conflicting object, field, issue, or surrounding prose.
         text = raw.lstrip()
-        first, end = json.JSONDecoder().raw_decode(text)
-        tail = json.loads(text[end:])
+        first, end = json.JSONDecoder(object_pairs_hook=unique_fields).raw_decode(text)
+        tail = json.loads(text[end:], object_pairs_hook=unique_fields)
         if (
             isinstance(first, dict)
             and "verdict" in first
@@ -293,8 +297,9 @@ def verify_content(
     """Retry unusable reviews, then use at most one explicitly configured adjudication."""
     attempts = settings.get("processing", {}).get("max_attempts", 2)
     mode = settings.get("verification_adjudication_thinking")
-    current = settings.get("verification_thinking") or settings.get("compilation_thinking")
-    adjudicate = mode is not None and mode != current
+    adjudicate = compilation_model_options(settings, stage="verification_adjudication") != (
+        compilation_model_options(settings, verification=True)
+    )
     review_context = None
     review = None
     for attempt in range(attempts):
@@ -345,11 +350,12 @@ def verify_content(
             content,
             facts,
             evidence,
-            {**settings, "verification_thinking": mode},
+            settings,
             bundle=bundle,
             bindings=bindings,
             checkpoints=checkpoints,
             title_context=title_context,
+            adjudication=True,
             review_context={
                 **context,
                 "instruction": (

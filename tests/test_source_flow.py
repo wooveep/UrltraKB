@@ -56,6 +56,15 @@ def test_unknown_compilation_position_is_not_guessed():
     assert [row.state for row in rows[2:5]] == ["unknown"] * 3
 
 
+def test_publication_can_finish_while_original_coverage_is_pending():
+    value = saved("committed", "completed")
+    value["result"]["coverage"] = {"status": "partial"}
+    rows = {row.key: row for row in flow_steps(value)}
+    assert rows["publication"].state == "completed"
+    assert rows["generation"].state == "review"
+    assert "待分析" in rows["generation"].progress
+
+
 def test_live_retry_replaces_old_failure_and_does_not_publish_at_100_percent():
     activity = SourceActivity("b" * 32, "running", "facts", (ProgressStep("facts", 100, 100),))
     rows = flow_steps(saved("planning", reason="request_timeout"), activity)

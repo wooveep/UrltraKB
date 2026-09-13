@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -39,6 +40,72 @@ def profile(**changes):
     )
     values.update(changes)
     return {"processing": values}
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_unknown_transport_stops_subsequent_dispatch_in_the_same_budget(asynchronous):
+    budget = ExecutionBudget(RequestLimits.from_config(profile()))
+    calls = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        raise TimeoutError("Remote result was lost")
+
+    async def acompletion(**kwargs):
+        return completion(**kwargs)
+
+    for _ in range(2):
+        with pytest.raises(ProcessingIncomplete, match="request_outcome_unknown"):
+            kwargs = {
+                "model": "openai/offline-test",
+                "messages": [{"role": "user", "content": "Facts"}],
+            }
+            if asynchronous:
+                asyncio.run(budget.acall(acompletion, **kwargs))
+            else:
+                budget.call(completion, **kwargs)
+    assert len(calls) == budget.attempts == 1
+    assert budget.unknown_usage == 1
+
+
+def test_request_preparing_during_a_lost_response_cannot_dispatch_after_the_stop(monkeypatch):
+    budget = ExecutionBudget(RequestLimits.from_config(profile(concurrency=2)))
+    preparing, release = threading.Event(), threading.Event()
+    counter = litellm.token_counter
+    sent, errors = [], []
+
+    def tokens(*args, **kwargs):
+        if kwargs.get("messages", [{}])[0].get("content") == "second":
+            preparing.set()
+            assert release.wait(5)
+        return counter(*args, **kwargs)
+
+    def transport(**kwargs):
+        sent.append(kwargs["messages"][0]["content"])
+        raise TimeoutError("Remote response was lost")
+
+    def call(label):
+        try:
+            budget.call(
+                transport,
+                model="openai/offline-test",
+                messages=[{"role": "user", "content": label}],
+            )
+        except ProcessingIncomplete as exc:
+            errors.append(exc.reason)
+
+    monkeypatch.setattr(litellm, "token_counter", tokens)
+    worker = threading.Thread(target=call, args=("second",))
+    worker.start()
+    try:
+        assert preparing.wait(5)
+        call("first")
+    finally:
+        release.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert sent == ["first"]
+    assert errors == ["request_outcome_unknown", "request_outcome_unknown"]
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -172,9 +239,10 @@ def test_single_long_span_splits_without_gaps_and_progress_counts_only_finished_
     assert "".join(part["text"] for part in completed) == text
     cursor = 0
     for part in completed:
-        assert part["reference"]["start"] == cursor
+        span = part["span"] if stage == "facts" else part["reference"]
+        assert span["start"] == cursor
         cursor += len(part["text"])
-        assert part["reference"]["end"] == cursor
+        assert span["end"] == cursor
     for phase in ("facts", "generation"):
         counters = [
             step for event in events for step in event["progress"] if step["phase"] == phase

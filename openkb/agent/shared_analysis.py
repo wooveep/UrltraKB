@@ -64,12 +64,6 @@ def fact_input(unit):
             }
             for row in unit[field]
         ]
-    if "navigation" in unit:
-        result["navigation"] = {
-            key: value
-            for key, value in unit["navigation"].items()
-            if key not in {"index", "node", "start", "end"}
-        }
     return result
 
 
@@ -96,6 +90,7 @@ class SharedAnalysis:
                     "openkb.agent.evidence_quotes",
                     "openkb.agent.evidence_coverage",
                     "openkb.agent.evidence_wire",
+                    "openkb.agent.model_json",
                     "openkb.agent.request_analysis",
                     "openkb.agent.compiler",
                     "openkb.execution_receipt",

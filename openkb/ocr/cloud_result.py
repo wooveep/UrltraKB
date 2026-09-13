@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 
 from PIL import Image
 
 from openkb.evidence import BlockDraft
 from openkb.ocr.cloud import CloudIncomplete
+from openkb.ocr.transcription_quality import repetitive_transcription
 
 
 def verify_image(content: bytes) -> None:
@@ -45,18 +47,35 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
             raise ValueError("Invalid image mapping")
         pruned = output.get("prunedResult")
         layout = pruned.get("parsing_res_list") if isinstance(pruned, dict) else None
-        contents = [text]
+        reason = None
         if isinstance(layout, list):
+            layout = [dict(block) if isinstance(block, dict) else block for block in layout]
             for block in layout:
                 if not isinstance(block, dict) or not isinstance(block.get("block_content"), str):
                     raise ValueError("Invalid layout content")
-                contents.append(block["block_content"])
-                if block.get("block_label") in {"image", "figure"} and not _references(
-                    block["block_content"]
-                ):
+                references = _layout_references(block, images)
+                if block.get("block_label") in {"image", "figure"} and not references:
                     # A caption, empty layout item or unrelated page image
                     # cannot prove this required visual was downloaded.
                     raise CloudIncomplete("cloud_required_asset_missing")
+                if block.get("block_label") in {"image", "figure"} and repetitive_transcription(
+                    block["block_content"]
+                ):
+                    reason = "ocr_repetitive_transcription"
+                    marker = "[OCR transcription omitted: repetitive output]"
+                    if block["block_content"] not in text:
+                        # The raw response remains retained. An unmatched page
+                        # rendition cannot safely contribute a second copy.
+                        text = "\n".join(f"![Original figure]({name})" for name in images)
+                    else:
+                        text = text.replace(block["block_content"], marker)
+                    block["block_content"] = marker
+                    block["transcription_pending"] = True
+                for reference in sorted(references - _references(block["block_content"])):
+                    block["block_content"] += f"\n![Original figure]({reference})"
+        contents = [text] + (
+            [block["block_content"] for block in layout] if isinstance(layout, list) else []
+        )
         for content in contents:
             if any(reference not in images for reference in _references(content)):
                 raise CloudIncomplete("cloud_required_asset_missing")
@@ -71,9 +90,8 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
         # synchronous API conventions that this service has not established.
         location = {"kind": "pdf", "page": page}
         blocks = [BlockDraft(text, "paragraph", location, tuple(assets.values()))]
-        reason = None
         if not text.strip():
-            reason = "ocr_blank_or_illustration"
+            reason = reason or "ocr_blank_or_illustration"
         elif "\ufffd" in text or "\x00" in text:
             reason = "ocr_unmapped_glyphs"
         elif not isinstance(layout, list) or not layout:
@@ -112,8 +130,15 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
                             content,
                             kind,
                             (block_locations or {}).get(block["block_id"], location),
-                            tuple(assets.values()),
-                            f"OCR layout block {block['block_id']}; label={label}",
+                            tuple(
+                                assets[name] for name in sorted(_references(block["block_content"]))
+                            ),
+                            f"OCR layout block {block['block_id']}; label={label}"
+                            + (
+                                "; transcription=pending"
+                                if block.get("transcription_pending")
+                                else ""
+                            ),
                         )
                     )
         return blocks, reason
@@ -123,6 +148,25 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
 
 _MARKDOWN_IMAGE = re.compile(r"(!\[[^\]]*\]\()\s*(<[^>]+>|[^)\s]+)([^)]*\))")
 _HTML_IMAGE = re.compile(r"(<img\b[^>]*\bsrc\s*=\s*)([\"'])(.*?)(\2)", re.IGNORECASE)
+
+
+def _layout_references(block, images):
+    references = _references(block["block_content"])
+    if references or block.get("block_label") not in {"image", "figure"}:
+        return references
+    box = block.get("block_bbox")
+    if (
+        not isinstance(box, list)
+        or len(box) != 4
+        or any(type(v) not in {int, float} or not math.isfinite(v) for v in box)
+        or not (0 <= box[0] < box[2] and 0 <= box[1] < box[3])
+    ):
+        return set()
+    # PaddleX construct_img_path uses label + integer raster coordinates.
+    # Match only that exact returned mapping key, never an adjacent page image.
+    coordinates = "_".join(str(int(value)) for value in box)
+    name = f"imgs/img_in_{block['block_label']}_box_{coordinates}.jpg"
+    return {name} if name in images else set()
 
 
 def _references(text):

@@ -74,6 +74,10 @@ def extract_facts(
     cache = FactCache(checkpoints, FACTS_SYSTEM, units, validate_unit)
     progress_lock = threading.Lock()
     failures = []
+    from openkb.compilation_report import collect_compile_report
+
+    with collect_compile_report() as report:
+        coverage_report = report
 
     def failed(batch, error):
         with progress_lock:
@@ -183,6 +187,13 @@ def extract_facts(
         ):
             with progress_lock:
                 progress.advance(sum(len(unit["text"]) for unit in completed))
+                for unit in completed:
+                    row = cache.get(unit)
+                    coverage_report.source_units[unit["id"]] = {
+                        "reference": unit["reference"],
+                        "facts": [fact["id"] for fact in validate_unit(unit, row)],
+                        "empty_reason": row.get("empty_reason", ""),
+                    }
             results.extend(facts)
         return results
 

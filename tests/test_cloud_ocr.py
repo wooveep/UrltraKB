@@ -51,6 +51,94 @@ def scanned_pdf(path):
         pdf.save(path)
 
 
+def test_explicit_queue_rejection_recovers_without_losing_attempts(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    cloud_settings(kb_dir)
+    monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
+    source = tmp_path / "queue.pdf"
+    scanned_pdf(source)
+    submissions = []
+
+    def service(self, method, url, **kwargs):
+        response = requests.Response()
+        response.status_code = 200
+        response._content_consumed = True
+        if method.upper() == "POST":
+            submissions.append(url)
+            value = (
+                {"code": 10010, "msg": "Job submission queue is full", "data": {}}
+                if len(submissions) == 1
+                else {"code": 0, "data": {"jobId": "accepted"}}
+            )
+        elif url.endswith("/accepted"):
+            value = {
+                "code": 0,
+                "data": {
+                    "state": "done",
+                    "resultUrl": {"jsonUrl": "https://assets.example.test/one"},
+                },
+            }
+        else:
+            value = {
+                "result": {
+                    "layoutParsingResults": [
+                        {
+                            "markdown": {"text": "Scanned: timeout 42 seconds.", "images": {}},
+                            "prunedResult": {
+                                "parsing_res_list": [
+                                    {
+                                        "block_id": 0,
+                                        "block_label": "text",
+                                        "block_content": "Scanned: timeout 42 seconds.",
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                }
+            }
+        response._content = json.dumps(value).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "request", service)
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    from openkb.application.source_history import source_status
+
+    jobs = source_status(kb_dir, result.source_id)["cloud_jobs"]
+    assert len(submissions) == 2
+    assert sum(job["submissions"] for job in jobs) == 2
+
+
+def test_failed_ocr_page_does_not_discard_independent_native_page(
+    kb_dir, tmp_path, monkeypatch, model_service
+):
+    cloud_settings(kb_dir)
+    monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
+    scan = tmp_path / "scan.pdf"
+    scanned_pdf(scan)
+    source = tmp_path / "mixed.pdf"
+    with pymupdf.open() as pdf, pymupdf.open(scan) as scanned:
+        pdf.new_page().insert_text((40, 40), "Independent requirement: keep pressure at 37 kPa.")
+        pdf.insert_pdf(scanned)
+        pdf.save(source)
+
+    def quota(self, method, url, **kwargs):
+        result = requests.Response()
+        result.status_code = 200
+        result._content_consumed = True
+        result._content = json.dumps({"code": 12001, "data": {}}).encode()
+        return result
+
+    monkeypatch.setattr(requests.Session, "request", quota)
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "partial"
+    assert any(row.get("page") == 2 for row in result.coverage["issues"])
+    assert any(row["understanding"] == "pending" for row in result.coverage["assets"])
+
+
 def test_shared_import_never_reposts_an_uncertain_cloud_submission(
     kb_dir, tmp_path, monkeypatch, model_service
 ):

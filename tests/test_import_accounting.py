@@ -26,6 +26,7 @@ def test_import_reports_stage_and_request_time_with_provider_cache_details(
         "completion_tokens": 30,
         "total_tokens": 130,
         "prompt_tokens_details": {"cached_tokens": 40},
+        "completion_tokens_details": {"reasoning_tokens": 12},
     }
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
@@ -46,6 +47,10 @@ def test_import_reports_stage_and_request_time_with_provider_cache_details(
     assert all(row["queue_seconds"] >= 0 for row in requests)
     assert all(row["cache_read_tokens"] == 40 for row in requests)
     assert all(row["cache_write_tokens"] is None for row in requests)
+    assert all(row["input_tokens"] == 100 and row["cache_miss_tokens"] == 60 for row in requests)
+    assert all(row["output_tokens"] == 30 and row["reasoning_tokens"] == 12 for row in requests)
+    assert all(row["provider_model"] == "offline-test" for row in requests)
+    assert all(row["effective_options"]["max_tokens"] == 1024 for row in requests)
     assert result.usage["charged_tokens"] == 520
     saved = source_status(kb_dir, result.source_id)["result"]
     assert saved["usage"]["measurement"] == measurement

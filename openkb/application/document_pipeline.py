@@ -24,6 +24,8 @@ from openkb.locks import LockCancelled, atomic_write_text
 from openkb.mutation import RecoveryRequired
 from openkb.parsing import parse_document
 from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
+from openkb.source_coverage import source_coverage, stored_coverage
+from openkb.source_request_journal import journal_source_requests
 from openkb.sources import SourceStore, SourceVersion, content_id
 from openkb.state import HashRegistry
 
@@ -74,7 +76,10 @@ def _compile_version(
     stage = "parsing"
     with collect_compile_report() as report:
         try:
-            with processing_scope(settings):
+            with (
+                processing_scope(settings) as budget,
+                journal_source_requests(store, source, budget),
+            ):
                 on_event({"stage": stage})
                 parsed = parse_document(
                     kb_dir,
@@ -110,15 +115,27 @@ def _compile_version(
                         parse_id=parsed.id,
                         usage=report.usage,
                         warnings=tuple(report.warnings),
+                        coverage=source_coverage(source, parsed, report),
                     )
                 registry = HashRegistry(kb_dir / ".openkb/hashes.json")
                 previous = registry.get(source.source_id)
                 from openkb.compilation_omissions import stored_omissions, validate_omissions
 
                 previous_omissions = stored_omissions(previous)
+                previous_coverage = (
+                    stored_coverage(previous, source, parsed)
+                    if previous
+                    and previous.get("source_version") == source.id
+                    and previous.get("parse_id") == parsed.id
+                    else {}
+                )
+                has_gaps = bool(previous_omissions) or previous_coverage.get("status") in {
+                    "pending",
+                    "partial",
+                }
                 if (
                     not force
-                    and not (retry_omissions and previous_omissions)
+                    and not (retry_omissions and has_gaps)
                     and previous
                     and previous.get("source_version") == source.id
                     and previous.get("parse_id") == parsed.id
@@ -136,10 +153,11 @@ def _compile_version(
                         warnings=tuple(report.warnings)
                         + (("knowledge_content_omitted",) if previous_omissions else ()),
                         omissions=previous_omissions,
-                        resume=source.id if previous_omissions else None,
+                        resume=source.id if has_gaps else None,
                         source_id=source.source_id,
                         parse_id=parsed.id,
                         usage=report.usage,
+                        coverage=previous_coverage,
                     )
                 name = document_name or (previous.get("doc_name") if previous else None)
                 name = name or f"{_sanitize_stem(Path(source.name).stem)[:100]}-{source.source_id}"
@@ -202,6 +220,7 @@ def _compile_version(
                     from openkb.compilation_omissions import omission_notice as compilation_notice
 
                     omissions = validate_omissions(report.omissions)
+                    coverage = source_coverage(source, parsed, report, published=True)
                     body += compilation_notice(omissions)
                     # Only this newly generated summary is owned by the source.
                     # Later cross-source link cleanup must not absorb manual text.
@@ -229,6 +248,7 @@ def _compile_version(
                         "compilation_navigation_id": navigation["id"],
                         "compilation_profile": bound_settings["_compilation_profile"],
                         "compilation_omissions": json.dumps(omissions, ensure_ascii=False),
+                        "compilation_coverage": json.dumps(coverage, ensure_ascii=False),
                     }
                     proposal = workspace.proposal(document, replaces=replaces)
                 stage = "committing"
@@ -255,10 +275,11 @@ def _compile_version(
                     stage="committed",
                     warnings=tuple(report.warnings),
                     omissions=omissions,
-                    resume=source.id if omissions else None,
+                    resume=source.id if coverage["status"] != "complete" else None,
                     usage=report.usage,
                     source_id=source.source_id,
                     parse_id=parsed.id,
+                    coverage=coverage,
                 )
         except ProcessingIncomplete as exc:
             reason, stage, status = exc.reason, exc.stage, "unfinished"
@@ -294,6 +315,7 @@ def _compile_version(
             usage=report.usage,
             source_id=source.source_id,
             parse_id=parsed.id if parsed else None,
+            coverage=source_coverage(source, parsed, report),
         )
 
 

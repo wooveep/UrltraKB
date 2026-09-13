@@ -37,7 +37,7 @@ DEFAULT_PROCESSING = {
 
 
 class ProcessingIncomplete(BaseException):
-    """A bounded run ended without permission to publish partial knowledge."""
+    """A bounded operation is incomplete; its caller decides the recoverable scope."""
 
     def __init__(self, reason: str, stage: str = "compiling") -> None:
         super().__init__(reason)
@@ -207,7 +207,7 @@ class ExecutionBudget:
     def reserve(
         self, kwargs: dict[str, Any], limits: RequestLimits | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        remaining = self.checkpoint()
+        self.checkpoint()
         options, tokens = (limits or self.limits).request(
             kwargs["model"], kwargs["messages"], kwargs
         )
@@ -221,9 +221,11 @@ class ExecutionBudget:
             or timeout <= 0
         ):
             raise ProcessingIncomplete("invalid_request_timeout", self.stage)
-        options["timeout"] = min(timeout, remaining)
         reserved = tokens + options["max_tokens"]
         with self.lock:
+            # Token counting and adapter preparation may overlap a remote
+            # failure. Admission and the stop latch share the same lock.
+            options["timeout"] = min(timeout, self.checkpoint())
             if self.limits.max_requests is not None and self.attempts >= self.limits.max_requests:
                 raise ProcessingIncomplete("request_budget_exhausted", self.stage)
             if (
@@ -310,6 +312,8 @@ class ExecutionBudget:
             return True
 
     def _call(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
+        from openkb.provider_usage import WireUsage
+
         for attempt in range(self.limits.max_attempts):
             waiting = time.monotonic()
             while not self.permits.acquire(timeout=0.05):
@@ -320,8 +324,9 @@ class ExecutionBudget:
             done = None
             try:
                 options, observation = self.reserve(kwargs, limits)
+                wire_usage = WireUsage(options)
                 measured = self.measurement.begin_request(
-                    observation, acquired - waiting, time.monotonic() - acquired
+                    observation, acquired - waiting, time.monotonic() - acquired, options=options
                 )
                 # Only the transport runs here. It cannot publish Wiki changes.
                 # SDK timeout commonly means idle-read time, so also bound the
@@ -357,8 +362,10 @@ class ExecutionBudget:
                     raise ProcessingIncomplete("request_timeout", self.stage)
                 if errors:
                     raise errors[0]
-                response = values[0]
-                self.measurement.provider_usage(measured, getattr(response, "usage", None))
+                response = wire_usage.restore(values[0])
+                self.measurement.provider_usage(
+                    measured, getattr(response, "usage", None), response=response
+                )
                 self.settle(observation, response)
                 from openkb.execution_receipt import dispatched_output
 
@@ -367,11 +374,22 @@ class ExecutionBudget:
             except (OutputTruncated, InputTooLarge):
                 raise  # Settled or never sent: the compiler can shrink the batch.
             except ProcessingIncomplete as exc:
-                self.incomplete = exc
+                with self.lock:
+                    self.incomplete = exc
                 raise
             except Exception as exc:
-                if not _transient(exc) or attempt + 1 == self.limits.max_attempts:
+                if _uncertain_transport(exc):
+                    with self.lock:
+                        self.incomplete = ProcessingIncomplete(
+                            "request_outcome_unknown", self.stage
+                        )
+                    raise self.incomplete from None
+                if not _transient(exc):
                     raise
+                if attempt + 1 == self.limits.max_attempts:
+                    raise ProcessingIncomplete(
+                        "provider_temporarily_unavailable", self.stage
+                    ) from None
             finally:
                 if measured is not None and done is not None and not done.is_set():
                     self.measurement.observe_pending(measured)
@@ -412,6 +430,8 @@ class ExecutionBudget:
                     raise
 
     async def _acall(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
+        from openkb.provider_usage import WireUsage
+
         for attempt in range(self.limits.max_attempts):
             waiting = time.monotonic()
             while not self.permits.acquire(blocking=False):
@@ -422,11 +442,15 @@ class ExecutionBudget:
             measured = None
             try:
                 options, observation = self.reserve(kwargs, limits)
+                wire_usage = WireUsage(options)
                 measured = self.measurement.begin_request(
-                    observation, acquired - waiting, time.monotonic() - acquired
+                    observation, acquired - waiting, time.monotonic() - acquired, options=options
                 )
                 response = await asyncio.wait_for(function(**options), options["timeout"])
-                self.measurement.provider_usage(measured, getattr(response, "usage", None))
+                wire_usage.restore(response)
+                self.measurement.provider_usage(
+                    measured, getattr(response, "usage", None), response=response
+                )
                 self.settle(observation, response)
                 from openkb.execution_receipt import dispatched_output
 
@@ -435,11 +459,22 @@ class ExecutionBudget:
             except (OutputTruncated, InputTooLarge):
                 raise
             except ProcessingIncomplete as exc:
-                self.incomplete = exc
+                with self.lock:
+                    self.incomplete = exc
                 raise
             except Exception as exc:
-                if not _transient(exc) or attempt + 1 == self.limits.max_attempts:
+                if _uncertain_transport(exc):
+                    with self.lock:
+                        self.incomplete = ProcessingIncomplete(
+                            "request_outcome_unknown", self.stage
+                        )
+                    raise self.incomplete from None
+                if not _transient(exc):
                     raise
+                if attempt + 1 == self.limits.max_attempts:
+                    raise ProcessingIncomplete(
+                        "provider_temporarily_unavailable", self.stage
+                    ) from None
             finally:
                 if measured is not None:
                     self.measurement.finish_request(measured)
@@ -457,13 +492,16 @@ def _transient(exc: Exception) -> bool:
     return isinstance(
         exc,
         (
-            TimeoutError,
-            litellm.Timeout,
             litellm.RateLimitError,
             litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
         ),
     )
+
+
+def _uncertain_transport(exc: Exception) -> bool:
+    import litellm
+
+    return isinstance(exc, (TimeoutError, litellm.Timeout, litellm.APIConnectionError))
 
 
 _ACTIVE: ContextVar[ExecutionBudget | None] = ContextVar("openkb_processing", default=None)

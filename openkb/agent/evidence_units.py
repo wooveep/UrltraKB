@@ -21,7 +21,8 @@ Quote only that unit's text. Context and positions explain table headers and spa
 Quote enough contiguous text to identify exactly one occurrence inside that unit.
 Images are retained evidence associated with their paragraph, heading, page and neighboring
 text; OCR is supplementary and may be unavailable. Do not infer unseen image text or facts
-from an asset path or OCR failure notice. An image-only unit may have no textual facts.
+from an asset path or OCR failure notice. OCR omission markers are status, not source facts.
+An image-only unit may have no textual facts.
 Navigation titles and summaries are selection hints, never factual evidence.
 Do not infer information absent from the evidence. Return complete JSON, never an ellipsis."""
 
@@ -31,6 +32,15 @@ JSON_FORMAT = {"type": "json_object"}
 def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
     from openkb.agent.evidence_wire import WireMessages, encode_payload, share_contexts
 
+    if payload.get("stage") == "facts":
+        from openkb.agent.shared_analysis import fact_input
+
+        # Dispatch the same semantic input that authorizes reuse. Local evidence
+        # identities remain available for quote rebinding, not model inference.
+        payload = {
+            **payload,
+            "units": [{"id": unit["id"], **fact_input(unit)} for unit in payload["units"]],
+        }
     wire, identities = encode_payload(payload, identity_values)
     wire = share_contexts(wire)
     contract = {
@@ -113,9 +123,8 @@ def facts_fit(units, limits, model):
 def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     """Every nonempty block is covered in order; large blocks retain exact spans."""
     reader = indexed_reader(kb_dir, source, parsed, navigation)
-    from openkb.navigation_tree import block_hints
+    from openkb.agent.source_semantics import document_label
 
-    hints = block_hints(navigation) if navigation else {}
     heading = []
     levels = []
     bridge = min(128, max(1, limits.context_tokens // 32))
@@ -207,8 +216,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                     }
                 )
                 value = {
-                    "document": source.name,
-                    **({"navigation": hints[index]} if hints else {}),
+                    "document": document_label(source.name),
                     "reference": asdict(
                         Evidence(source.source_id, source.id, parsed.id, block.id, start, end)
                     ),

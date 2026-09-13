@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, SecretStr
 
+from openkb.compilation_settings import CompilationSettings
 from openkb.ocr.config import ParsingSettings
 from openkb.vision.config import VisionSettings
 
@@ -42,7 +43,7 @@ class NavigationSettings(BaseModel):
     processing: ProcessingSettings | None = None
 
 
-class _KbConfigWritable(BaseModel):
+class _KbConfigWritable(CompilationSettings):
     """Typed schema for the writable ``config.yaml`` fields.
 
     All fields are optional so a partial merge-patch validates. Used to reject
@@ -63,8 +64,6 @@ class _KbConfigWritable(BaseModel):
     image_understanding: VisionSettings | None = None
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
-    compilation_thinking: Literal["enabled", "disabled"] | None = None
-    verification_thinking: Literal["enabled", "disabled"] | None = None
 
 
 # Single source of truth for the writable config keys (derived from the model
@@ -72,7 +71,7 @@ class _KbConfigWritable(BaseModel):
 _KB_CONFIG_WRITABLE_KEYS = set(_KbConfigWritable.model_fields)
 
 
-class GlobalConfigValues(BaseModel):
+class GlobalConfigValues(CompilationSettings):
     """Raw global-layer values (null where global.yaml is silent)."""
 
     model: str | None = None
@@ -83,18 +82,14 @@ class GlobalConfigValues(BaseModel):
     image_understanding: VisionSettings | None = None
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings | None = None
-    compilation_thinking: Literal["enabled", "disabled"] | None = None
-    verification_thinking: Literal["enabled", "disabled"] | None = None
 
 
-class GlobalConfigResponse(BaseModel):
+class GlobalConfigResponse(CompilationSettings):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     image_understanding: VisionSettings = Field(default_factory=VisionSettings)
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
-    compilation_thinking: Literal["enabled", "disabled"] | None = None
-    verification_thinking: Literal["enabled", "disabled"] | None = None
     language: str
     pageindex_threshold: int
     # Effective global entity-type vocabulary (cleaned; always includes "other").
@@ -132,14 +127,12 @@ class GlobalConfigPatchRequest(BaseModel):
     kb_root: str | None = None
 
 
-class KbConfigResponse(BaseModel):
+class KbConfigResponse(CompilationSettings):
     model: str
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     image_understanding: VisionSettings = Field(default_factory=VisionSettings)
     processing: ProcessingSettings | None = None
     navigation: NavigationSettings = Field(default_factory=NavigationSettings)
-    compilation_thinking: Literal["enabled", "disabled"] | None = None
-    verification_thinking: Literal["enabled", "disabled"] | None = None
     language: str
     pageindex_threshold: int
     # Effective entity-type vocabulary (cleaned; always includes "other").

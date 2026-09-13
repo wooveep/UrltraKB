@@ -30,7 +30,7 @@ class Measurement:
             "analyses": [],
         }
 
-    def begin_request(self, observation, queue_seconds, preparation_seconds):
+    def begin_request(self, observation, queue_seconds, preparation_seconds, *, options=None):
         with self.lock:
             row = {
                 "id": f"{self.identity}:{observation['attempt']}",
@@ -44,6 +44,13 @@ class Measurement:
                 "transport_complete": False,
                 "cache_read_tokens": None,
                 "cache_write_tokens": None,
+                "input_tokens": None,
+                "cache_miss_tokens": None,
+                "output_tokens": None,
+                "reasoning_tokens": None,
+                "provider_model": None,
+                "system_fingerprint": None,
+                "effective_options": effective_options(options or {}),
             }
             self.value["requests"].append(row)
             self.active_requests += 1
@@ -66,7 +73,7 @@ class Measurement:
                 # This is a lower bound until the transport actually finishes.
                 row["request_seconds"] = time.monotonic() - self.started - row["started_seconds"]
 
-    def provider_usage(self, row, usage):
+    def provider_usage(self, row, usage, *, response=None):
         details = getattr(usage, "prompt_tokens_details", None)
 
         def count(*values):
@@ -82,6 +89,51 @@ class Measurement:
                 getattr(details, "cache_creation_tokens", None),
                 getattr(usage, "cache_creation_input_tokens", None),
             )
+            row["input_tokens"] = count(getattr(usage, "prompt_tokens", None))
+            row["output_tokens"] = count(getattr(usage, "completion_tokens", None))
+            row["reasoning_tokens"] = count(
+                getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None)
+            )
+            row["cache_miss_tokens"] = count(getattr(usage, "prompt_cache_miss_tokens", None))
+            if (
+                row["cache_miss_tokens"] is None
+                and row["input_tokens"] is not None
+                and row["cache_read_tokens"] is not None
+                and row["cache_read_tokens"] <= row["input_tokens"]
+            ):
+                row["cache_miss_tokens"] = row["input_tokens"] - row["cache_read_tokens"]
+            for field in ("provider_model", "system_fingerprint"):
+                value = getattr(response, "model" if field == "provider_model" else field, None)
+                row[field] = value if isinstance(value, str) else None
+
+
+def effective_options(options):
+    """Retain known model controls only; never headers, credentials, messages or callbacks."""
+    selected = {
+        key: options[key]
+        for key in (
+            "model",
+            "max_tokens",
+            "max_completion_tokens",
+            "temperature",
+            "top_p",
+            "seed",
+            "reasoning_effort",
+            "timeout",
+            "response_format",
+        )
+        if key in options
+    }
+    extra = options.get("extra_body")
+    if isinstance(extra, dict) and "reasoning_effort" in extra:
+        selected["reasoning_effort"] = extra["reasoning_effort"]
+    if isinstance(extra, dict) and isinstance(extra.get("thinking"), dict):
+        selected["thinking"] = {
+            key: value
+            for key, value in extra["thinking"].items()
+            if key in {"type", "budget_tokens"}
+        }
+    return selected
 
 
 @contextmanager
@@ -203,7 +255,16 @@ def validate_measurement(value):
                     "cache_write_tokens",
                 }
             )
-            if not isinstance(row, dict) or set(row) not in (
+            metadata = {
+                "input_tokens",
+                "cache_miss_tokens",
+                "output_tokens",
+                "reasoning_tokens",
+                "provider_model",
+                "system_fingerprint",
+                "effective_options",
+            }
+            if not isinstance(row, dict) or (set(row) - metadata) not in (
                 common | extras,
                 common | extras | ({"transport_complete"} if field == "requests" else set()),
             ):
@@ -228,6 +289,18 @@ def validate_measurement(value):
             else:
                 if not isinstance(row["operation"], str) or not row["operation"]:
                     raise ValueError("Invalid measured operation")
-                for key in ("cache_read_tokens", "cache_write_tokens"):
-                    if row[key] is not None and (type(row[key]) is not int or row[key] < 0):
+                for key in (
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                    "input_tokens",
+                    "cache_miss_tokens",
+                    "output_tokens",
+                    "reasoning_tokens",
+                ):
+                    if row.get(key) is not None and (type(row[key]) is not int or row[key] < 0):
                         raise ValueError("Invalid provider cache usage")
+                for key in ("provider_model", "system_fingerprint"):
+                    if row.get(key) is not None and not isinstance(row[key], str):
+                        raise ValueError("Invalid provider model evidence")
+                if "effective_options" in row and not isinstance(row["effective_options"], dict):
+                    raise ValueError("Invalid effective model options")

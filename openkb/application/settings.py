@@ -21,6 +21,7 @@ from openkb.application.settings_data import (
     SettingsView,
     _KbConfigWritable,
 )
+from openkb.compilation_settings import setting_values
 from openkb.config import (
     DEFAULT_CONFIG,
     _atomic_yaml_dump,
@@ -157,8 +158,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         has_image_api_key=bool(resolve_image_credential(kb_dir).api_key),
         processing=effective.get("processing"),
         navigation=effective.get("navigation") or {},
-        compilation_thinking=effective.get("compilation_thinking"),
-        verification_thinking=effective.get("verification_thinking"),
+        **setting_values(effective),
         language=effective["language"],
         pageindex_threshold=effective["pageindex_threshold"],
         # Cleaned effective list (what the compiler will use), not the raw stored
@@ -174,8 +174,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
             image_understanding=global_config.get("image_understanding"),
             processing=global_config.get("processing"),
             navigation=global_config.get("navigation"),
-            compilation_thinking=global_config.get("compilation_thinking"),
-            verification_thinking=global_config.get("verification_thinking"),
+            **setting_values(global_config),
             language=global_config.get("language"),
             pageindex_threshold=global_config.get("pageindex_threshold"),
             entity_types=global_config.get("entity_types"),
@@ -285,8 +284,7 @@ def _read_global_config() -> GlobalConfigResponse:
             gc["processing"] if gc.get("processing") is not None else DEFAULT_CONFIG["processing"]
         ),
         navigation=gc.get("navigation") or {},
-        compilation_thinking=gc.get("compilation_thinking"),
-        verification_thinking=gc.get("verification_thinking"),
+        **setting_values(gc),
         language=gc.get("language", DEFAULT_CONFIG["language"]),
         pageindex_threshold=gc.get("pageindex_threshold", DEFAULT_CONFIG["pageindex_threshold"]),
         # Effective global vocabulary (cleaned; defaults to DEFAULT_ENTITY_TYPES).

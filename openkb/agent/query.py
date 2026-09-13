@@ -46,15 +46,26 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    Pass that existing path to the visual tool only when image understanding is enabled.
 7. Synthesize a clear, concise answer. Cite original facts using the exact Markdown
    citation returned by read_source_node, preserving its version, parse and block anchor.
+   Every factual clause needs supporting evidence, INCLUDING optional explanations,
+   permissions, comparisons, examples and adjacent-row notes. One citation does not
+   support every clause in a paragraph. Read and cite each necessary table cell AND
+   its header/merged subject. Omit an extra claim when its own evidence is unavailable.
+   Do not substitute a navigation summary or a nearby valid citation for actual support.
 8. Include relevant original figures in the answer as Markdown images when they help explain
    the answer: ![description](sources/images/file.png). Use an existing wiki-root-relative
    path from images[].markdown or the source image catalog, copying its destination verbatim.
    Keep the figure with its associated explanation and
    cite the source paragraph/page; never invent an image path or claim to have read missing
    OCR text. Interpret visual content only from an explicitly obtained visual observation.
+   A page containing two figures does not identify which image is left/right or which
+   mechanism each shows. Confirm the exact image's caption/position or obtain a visual
+   observation; omit a displayed figure when this association cannot be established.
+9. Check the separate analysis coverage status. Published knowledge may be partially
+   usable while OCR, images or source content remain pending. Describe relevant gaps;
+   never turn an omission into a claim that the original has no such information.
 
 Answer based only on wiki content. Be concise.
-Before each tool call, output one short sentence explaining the reason.
+Use tools silently. Return only the final answer, without thinking or search narration.
 
 If you cannot find relevant information, say so clearly.
 """
@@ -202,7 +213,6 @@ async def iter_agent_response_events(
         if run_config
         else Runner.run_streamed(agent, input_data, max_turns=max_turns, hooks=hooks)
     )
-    collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
 
     stream = settled_stream(result)
@@ -212,7 +222,6 @@ async def iter_agent_response_events(
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text:
-                        collected.append(text)
                         yield {"event": "delta", "data": {"text": text}}
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
@@ -251,7 +260,9 @@ async def iter_agent_response_events(
     # Deltas also contain assistant narration before tool calls. The SDK's
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
-    answer = visible_answer(final if isinstance(final, str) else "".join(collected))
+    if not isinstance(final, str):
+        raise RuntimeError("The model did not return a final text answer")
+    answer = visible_answer(final)
     yield {
         "event": "final",
         "data": {

@@ -329,6 +329,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 parse_id=result["parse_id"] if result else None,
                 resume=result["resume"] if result else source.id,
                 omissions=result.get("omissions", []) if result else [],
+                coverage=result.get("coverage", {}) if result else {},
                 original=details["original"],
                 cumulative_usage=details["cumulative_usage"],
             )

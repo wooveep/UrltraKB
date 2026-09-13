@@ -4,7 +4,9 @@ import json
 import re
 from dataclasses import asdict
 
-from openkb.agent.evidence_units import JSON_FORMAT, fits, messages
+from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches
+from openkb.agent.evidence_units import JSON_FORMAT, messages
+from openkb.agent.model_json import unique_fields
 from openkb.compilation_report import collect_compile_report, report_content_omission
 from openkb.config import compilation_model_options
 from openkb.evidence import Evidence, complete_read_bound
@@ -23,7 +25,8 @@ The original text and context remain complete, including declared unresolved con
 candidate is not safe merely because its own quotation is supported. If an omitted condition
 is necessary to interpret an action/conclusion, mark that candidate dependent. Independent
 means its meaning remains correct without ALL omitted content and without other withdrawn
-candidates. When uncertain use unknown, not independent. Do not generate or repair knowledge.
+candidates, including when no other candidate is published. When uncertain use unknown,
+not independent. Do not generate or repair knowledge.
 Return JSON {"topics":[{"path":"exact candidate path", "status":"independent|dependent|unknown",
 "reason":"explanation grounded in original context"}]} covering every candidate exactly once.
 Assess the transitive closure: a topic depending on any withdrawn topic is also dependent."""
@@ -60,15 +63,6 @@ def dependency_payload(payload):
     )
 
 
-def _unique_fields(pairs):
-    value = {}
-    for name, item in pairs:
-        if name in value:
-            raise ValueError("Duplicate dependency response field")
-        value[name] = item
-    return value
-
-
 def _decisions(value, paths):
     if (
         not isinstance(value, dict)
@@ -96,7 +90,7 @@ def _decisions(value, paths):
 
 
 def protect_dependencies(
-    reader, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
+    reader, source, parsed, accepted, facts, settings, checkpoints, bundle, on_event
 ):
     with collect_compile_report() as report:
         omissions = list(report.omissions)
@@ -104,6 +98,19 @@ def protect_dependencies(
 
     omissions += [
         {"stage": "parsing", "reason": reason} for reason in local_omissions(source, parsed)
+    ]
+    from openkb.source_coverage import parsing_gaps
+
+    omissions += [{"stage": "parsing", **row} for row in parsing_gaps(parsed)]
+    omissions += [
+        {
+            "stage": "image_understanding",
+            "block": block.id,
+            "reason": "original_image_retained_understanding_pending",
+            "assets": list(block.assets),
+        }
+        for block in parsed.blocks
+        if block.assets
     ]
     if not omissions:
         return accepted
@@ -124,79 +131,89 @@ def protect_dependencies(
     payload = {
         "stage": "dependencies",
         "source": original,
-        "omissions": omissions,
+        "omissions": sorted(omissions, key=content_id),
         "candidates": [
             {
                 "path": group["path"],
                 "content": content,
                 "facts": [fact for fact in facts if fact["topic"] in group["members"]],
             }
-            for group, content in accepted
+            for group, content in sorted(accepted, key=lambda item: item[0]["path"])
         ],
     }
-    payload = dependency_payload(payload)
-    paths = {group["path"] for group, _ in accepted}
     options = compilation_model_options(settings, verification=True)
-    key = checkpoints.key(
-        SYSTEM,
-        payload,
-        dependencies={
-            "implementation": module_revision(__name__),
-            "message_format": module_revision("openkb.agent.evidence_wire"),
-            "model_options": options,
-        },
-    )
-    saved = checkpoints.load(key)
-    if saved is None:
-        # Execution and protocol failures are recoverable, not semantic verdicts.
-        # Only a complete, validated decision may become a reusable checkpoint.
-        review_limits = limits
-        while not fits(review_limits, settings["model"], SYSTEM, payload):
-            expanded = review_limits.expanded(reason="input_budget_exceeded")
-            if expanded == review_limits:
-                raise ProcessingIncomplete(
-                    "dependency_context_exceeds_request_budget", "dependencies"
-                )
-            review_limits = expanded
-        else:
+    errors = []
+    decisions = {}
+
+    def review_key(candidates):
+        request = dependency_payload({**payload, "candidates": candidates})
+        return checkpoints.key(
+            SYSTEM,
+            request,
+            dependencies={
+                "implementation": module_revision(__name__),
+                "message_format": module_revision("openkb.agent.evidence_wire"),
+                "model_options": options,
+            },
+        )
+
+    def review(candidates):
+        request = dependency_payload({**payload, "candidates": candidates})
+        paths = {candidate["path"] for candidate in candidates}
+        key = review_key(candidates)
+        saved = checkpoints.load(key)
+        if saved is None:
             from openkb.agent.compiler import _llm_call
 
-            with progress_scope("dependencies", len(paths), "topics") as progress:
-                raw = _llm_call(
-                    settings["model"],
-                    # This response contains paths, statuses and reasons only.
-                    # No ID rebinding is needed; preserve conflicting JSON fields
-                    # for the strict parser instead of normalizing them away.
-                    list(messages(SYSTEM, payload)),
-                    "dependencies",
-                    bundle=bundle,
-                    response_format=JSON_FORMAT,
-                    **options,
+            raw = _llm_call(
+                settings["model"],
+                list(messages(SYSTEM, request)),
+                "dependencies",
+                bundle=bundle,
+                response_format=JSON_FORMAT,
+                **options,
+            )
+            try:
+                saved = json.loads(raw, object_pairs_hook=unique_fields)
+                _decisions(saved, paths)
+            except (ValueError, TypeError) as exc:
+                diagnostic = checkpoints.key(
+                    SYSTEM,
+                    {
+                        "stage": "dependency_response",
+                        "review": key,
+                        "response_digest": content_id(raw),
+                    },
                 )
-                try:
-                    candidate = json.loads(raw, object_pairs_hook=_unique_fields)
-                    _decisions(candidate, paths)
-                    saved = candidate
-                except (ValueError, TypeError) as exc:
-                    diagnostic = checkpoints.key(
-                        SYSTEM,
-                        {
-                            "stage": "dependency_response",
-                            "review": key,
-                            "response_digest": content_id(raw),
-                        },
-                    )
-                    checkpoints.save(
-                        diagnostic,
-                        {"status": "invalid_response", "response": str(raw), "reason": str(exc)},
-                        receipt=raw,
-                    )
-                    raise ProcessingIncomplete(
-                        "dependency_invalid_response", "dependencies"
-                    ) from None
-                progress.advance(len(paths))
-        checkpoints.save(key, saved)
-    decisions = _decisions(saved, paths)
+                checkpoints.save(
+                    diagnostic,
+                    {"status": "invalid_response", "response": str(raw), "reason": str(exc)},
+                    receipt=raw,
+                )
+                raise ResponseIncomplete("dependency_invalid_response", "dependencies") from None
+            checkpoints.save(key, saved)
+        return _decisions(saved, paths)
+
+    def pending(candidates, error):
+        errors.append(error)
+        report_content_omission("generation", error.reason, [row["path"] for row in candidates])
+        decisions.update((row["path"], "unknown") for row in candidates)
+
+    # Candidate splitting reduces request size without truncating the ordered
+    # original, prerequisites, omissions or any candidate's own verified facts.
+    # A minimum request that still cannot be checked remains explicitly pending.
+    with progress_scope("dependencies", len(accepted), "topics") as progress:
+        for candidates, result in retry_batches(
+            payload["candidates"],
+            review,
+            stage="dependencies",
+            on_event=on_event,
+            on_unrecoverable=pending,
+            checkpoints=checkpoints,
+            recovery_key=review_key,
+        ):
+            decisions.update(result)
+            progress.advance(len(candidates))
     retained = []
     for group, content in accepted:
         status = decisions[group["path"]]
@@ -211,5 +228,7 @@ def protect_dependencies(
                 [group["path"]],
             )
     if not retained:
+        if errors:
+            raise errors[0]
         raise ProcessingIncomplete("dependency_scope_unresolved", "dependencies")
     return retained

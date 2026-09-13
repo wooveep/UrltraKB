@@ -173,7 +173,10 @@ def test_navigation_rebuild_uses_saved_parse_without_rewriting_knowledge(
         assert '"stage": "generation"' not in call["messages"][-1]["content"]
 
 
-def test_navigation_retries_cannot_spend_the_compiler_reserve(kb_dir, tmp_path, model_service):
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_navigation_retries_cannot_spend_the_compiler_reserve(
+    kb_dir, tmp_path, model_service, uncertain
+):
     import json
 
     import litellm
@@ -198,13 +201,23 @@ def test_navigation_retries_cannot_spend_the_compiler_reserve(kb_dir, tmp_path, 
         stage = json.loads(kwargs["messages"][-1]["content"])["stage"]
         stages.append(stage)
         if stage == "index_summary":
-            raise TimeoutError("Transient transport failure")
+            if uncertain:
+                raise TimeoutError("Remote execution is unknown")
+            raise litellm.ServiceUnavailableError(
+                "Service rejected this request", model=kwargs["model"], llm_provider="openai"
+            )
         return original(**kwargs)
 
     from unittest.mock import patch
 
     with patch.object(litellm, "completion", completion):
         result = import_document(kb_dir, source)
+    if uncertain:
+        assert result.knowledge_compilation == "unfinished", result
+        assert result.reason == "request_outcome_unknown"
+        assert stages == ["index_summary"]
+        assert result.usage["unknown_usage"] == 1
+        return
     assert result.knowledge_compilation == "completed", result
     assert stages.count("index_summary") == 1
     assert len(stages) == 5

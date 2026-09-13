@@ -78,7 +78,7 @@ def test_pooled_heading_context_keeps_distinct_actor_scopes(kb_dir, tmp_path, mo
                 ]
                 assert len(context) == 1
                 assert headings[actor].strip() in context[0]["text"]
-                observed.append((actor, context[0]["reference"]["block_id"]))
+                observed.append((actor, context[0]["text"]))
         return evidence_response(payload)
 
     model_service.respond = respond

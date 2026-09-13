@@ -192,6 +192,11 @@ def continue_source(
             from openkb.compilation_omissions import stored_omissions
 
             omissions = stored_omissions(proposal.document)
+            from openkb.source_coverage import stored_coverage
+
+            coverage = stored_coverage(
+                proposal.document, source, ParseStore(kb_dir).load(proposal.parse_id)
+            )
             result = DocumentResult(
                 source.origin,
                 "added" if complete else "unfinished",
@@ -204,10 +209,17 @@ def continue_source(
                 knowledge_compilation="completed" if complete else "unfinished",
                 stage="committed" if complete else "committing",
                 reason=None if complete else publication.status,
-                resume=(source.id if omissions else None) if complete else proposal.id,
+                resume=(
+                    source.id
+                    if omissions or coverage.get("status") in {"partial", "pending"}
+                    else None
+                )
+                if complete
+                else proposal.id,
                 omissions=omissions,
                 warnings=("knowledge_content_omitted",) if omissions else (),
                 usage=report.usage,
+                coverage=coverage,
             )
             from openkb.application.document_pipeline import finish_compilation
 

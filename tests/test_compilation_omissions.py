@@ -52,6 +52,10 @@ def setup(kb_dir, tmp_path, monkeypatch):
             }
         if stage == "generation":
             title = payload.get("title", payload.get("revision", {}).get("title", "Beta"))
+            if state.get("unavailable_topic") == title:
+                raise litellm.ServiceUnavailableError(
+                    "Busy", model="offline-test", llm_provider="openai"
+                )
             value = {
                 "content": "# "
                 + title
@@ -79,6 +83,9 @@ def test_local_failure_publishes_only_verified_content(kb_dir, setup, stage):
         "generation" if stage == "verification" else stage
     )
     assert "knowledge_content_omitted" in result.warnings
+    assert result.coverage["status"] == "partial"
+    assert result.coverage["ranges"]
+    assert any(row["status"] == "pending" for row in result.coverage["ranges"])
     assert (kb_dir / "wiki/concepts/alpha.md").exists()
     assert not (kb_dir / "wiki/concepts/beta.md").exists()
     body = (kb_dir / "wiki/concepts/alpha.md").read_text()
@@ -90,6 +97,7 @@ def test_local_failure_publishes_only_verified_content(kb_dir, setup, stage):
     before = calls.copy()
     repeated = import_document(kb_dir, source)
     assert repeated.status == "skipped" and repeated.omissions == result.omissions
+    assert repeated.coverage == result.coverage
     assert calls == before
 
 
@@ -102,8 +110,20 @@ def test_explicit_continue_can_complete_excluded_work(kb_dir, setup):
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
     assert not second.omissions
+    assert second.coverage["status"] == "complete"
     assert (kb_dir / "wiki/concepts/beta.md").exists()
     assert "内容遗漏" not in next((kb_dir / "wiki/summaries").glob("*.md")).read_text()
+
+
+def test_exhausted_temporary_failure_skips_only_affected_topic(kb_dir, setup):
+    source, state, calls = setup
+    state.update(broken=False, unavailable_topic="Beta")
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "partial"
+    assert (kb_dir / "wiki/concepts/alpha.md").exists()
+    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert any(row["reason"] == "provider_temporarily_unavailable" for row in result.omissions)
 
 
 @pytest.mark.parametrize(

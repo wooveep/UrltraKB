@@ -347,19 +347,12 @@ def resolve_per_request_overrides(
 
 
 def compilation_model_options(
-    config: dict[str, Any], *, verification: bool = False
+    config: dict[str, Any], *, verification: bool = False, stage: str | None = None
 ) -> dict[str, Any]:
-    """Explicit compiler thinking mode; absence preserves provider defaults."""
-    key = "verification_thinking" if verification else "compilation_thinking"
-    mode = config.get(key)
-    if verification and mode is None:
-        key, mode = "compilation_thinking", config.get("compilation_thinking")
-    if mode is None:
-        return {}
-    if not isinstance(mode, str) or mode not in {"enabled", "disabled"}:
-        raise ValueError(f"{key} must be enabled, disabled or null")
-    # extra_body bypasses older provider adapters that silently drop disabled.
-    return {"extra_body": {"thinking": {"type": mode}}}
+    """Explicit compiler controls; absence preserves provider defaults."""
+    from openkb.compilation_settings import model_options
+
+    return model_options(config, stage or ("verification" if verification else "compilation"))
 
 
 @dataclass(frozen=True)
@@ -481,10 +474,8 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     from openkb.navigation_options import validate_navigation_options
 
     validate_navigation_options(config.get("navigation"))
-    for key in ("verification_adjudication_thinking", "correction_thinking"):
-        mode = config.get(key)
-        if mode is not None and mode not in ("enabled", "disabled"):
-            raise ValueError(f"{key} must be enabled, disabled or null")
+    for stage in ("verification_adjudication", "correction"):
+        compilation_model_options(config, stage=stage)
     for key in ("model", "language"):
         value = config.get(key)
         if allow_inherited and value is None:
@@ -523,6 +514,12 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "navigation",
     "compilation_thinking",
     "verification_thinking",
+    "verification_adjudication_thinking",
+    "correction_thinking",
+    "compilation_reasoning_effort",
+    "verification_reasoning_effort",
+    "verification_adjudication_reasoning_effort",
+    "correction_reasoning_effort",
 )
 
 

@@ -91,6 +91,7 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             "unknown_usage": 0,
             "elapsed_seconds": 0.0,
         }
+        reported_ids: set[str] = set()
         for path in directory.glob("*.json"):
             if path.name == "latest.json":
                 continue
@@ -101,6 +102,14 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             totals["runs"] += 1
             for field in totals.keys() - {"runs"}:
                 totals[field] += result.usage.get(field, 0)
+            reported_ids.update(
+                row["id"] for row in result.usage.get("measurement", {}).get("requests", [])
+            )
+        from openkb.source_request_journal import unreported_source_usage
+
+        unreported, pending_requests = unreported_source_usage(store, source_id, reported_ids)
+        for field in totals:
+            totals[field] += unreported[field]
         from openkb.navigation import read_navigation
         from openkb.navigation_usage import navigation_usage
 
@@ -140,6 +149,7 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             "original": str(store.original(version)),
             "result": asdict(current) if current and current.input_version == version.id else None,
             "cumulative_usage": totals,
+            "unconfirmed_requests": pending_requests,
             "cloud_jobs": _cloud_jobs(store, source_id),
             "local_ocr": local_ocr_usage(store, source_id),
             "navigation": read_navigation(kb_dir, version),

@@ -131,6 +131,9 @@ def compile_evidence(
                 "evidence_verification_invalid",
                 "knowledge_evidence_mismatch",
                 "generated_asset_evidence_invalid",
+                "provider_temporarily_unavailable",
+                "topic_context_exceeds_request_budget",
+                "topic_evidence_exceeds_request_budget",
             }:
                 raise
             return group, exc
@@ -164,8 +167,13 @@ def compile_evidence(
     from openkb.agent.evidence_dependencies import protect_dependencies
 
     accepted = protect_dependencies(
-        reader, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
+        reader, source, parsed, accepted, facts, settings, checkpoints, bundle, on_event
     )
+    from openkb.compilation_report import collect_compile_report
+
+    with collect_compile_report() as report:
+        members = {member for group, _ in accepted for member in group["members"]}
+        report.published_facts.update(fact["id"] for fact in facts if fact["topic"] in members)
     # Excluded topics withdraw only this source's contribution. A page supported
     # by another source remains intact; stale text from this source cannot stand
     # in for a failed new version. All edits still belong to the private proposal.

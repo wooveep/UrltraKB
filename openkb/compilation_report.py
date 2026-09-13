@@ -19,6 +19,8 @@ class CompileReport:
     unfinished: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     omissions: list[dict[str, Any]] = field(default_factory=list)
+    source_units: dict[str, dict[str, Any]] = field(default_factory=dict)
+    published_facts: set[str] = field(default_factory=set)
     usage: dict[str, Any] = field(default_factory=dict)
     stage: str = "converting"
     failure_reason: str | None = None

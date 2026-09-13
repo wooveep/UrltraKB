@@ -183,3 +183,75 @@ def test_dependency_protocol_failure_can_resume_without_rerolling_valid_refusal(
         assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert calls["generation"] == before["generation"]
     assert calls["verification"] == before["verification"]
+
+
+@pytest.mark.parametrize("bad_candidate", [False, True, "refusal"])
+def test_dependency_capacity_splits_candidates_without_losing_original_context(
+    kb_dir, tmp_path, monkeypatch, bad_candidate
+):
+    from openkb.processing import InputTooLarge
+
+    config = {**DEFAULT_CONFIG, "navigation": {"enabled": False}}
+    (kb_dir / ".openkb/config.yaml").write_text(yaml.safe_dump(config))
+    source = tmp_path / "capacity.md"
+    source.write_text("Backup is required.\n\nAlpha uses port 1001.\n\nBeta uses port 1002.")
+    reviews = []
+    resumed = False
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        stage = payload["stage"]
+        if stage == "dependencies":
+            assert any("Backup" in row["text"] for row in payload["source"])
+            reviews.append([row["path"] for row in payload["candidates"]])
+            if len(payload["candidates"]) > 1 and not resumed:
+                raise InputTooLarge()
+            if bad_candidate and payload["candidates"][0]["path"] == "concepts/alpha":
+                if bad_candidate == "refusal" and not resumed:
+                    return response(
+                        {
+                            "topics": [
+                                {
+                                    "path": "concepts/alpha",
+                                    "status": "dependent",
+                                    "reason": "Requires omitted backup.",
+                                }
+                            ]
+                        }
+                    )
+                if bad_candidate is True:
+                    return response({"topics": []})
+        value = evidence_response(payload)
+        if stage == "facts":
+            value["units"] = [
+                row
+                for row, unit in zip(value["units"], payload["units"], strict=True)
+                if "Backup" not in unit["text"]
+            ]
+            for row in value["units"]:
+                row["facts"][0]["topic"] = row["facts"][0]["quote"].split()[0]
+        elif stage == "planning":
+            value = {
+                "topics": [
+                    {"name": label.lower(), "title": label, "kind": "concept", "members": [uid]}
+                    for uid, label in payload["topic_labels"].items()
+                ]
+            }
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "partial"
+    assert (kb_dir / "wiki/concepts/alpha.md").exists() is not bool(bad_candidate)
+    assert (kb_dir / "wiki/concepts/beta.md").exists()
+    assert any(len(batch) > 1 for batch in reviews)
+    assert {batch[0] for batch in reviews if len(batch) == 1} == {"concepts/alpha", "concepts/beta"}
+
+    if bad_candidate == "refusal":
+        before = list(reviews)
+        resumed = True  # Any accidental reroll would now return independent.
+        continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+        assert continued.knowledge_compilation == "completed", continued
+        assert not (kb_dir / "wiki/concepts/alpha.md").exists()
+        assert reviews == before

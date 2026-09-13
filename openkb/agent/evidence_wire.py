@@ -5,6 +5,8 @@ import re
 from collections import Counter
 from types import MappingProxyType
 
+from openkb.agent.model_json import DuplicateFieldError, json_text, unique_fields
+
 _IDENTITY_FIELDS = {
     "start",
     "end",
@@ -44,13 +46,27 @@ class WireMessages(list):
 
     def decode_response(self, raw):
         try:
-            value = json.loads(raw)
+            raw = json_text(raw)
+            value = json.loads(raw, object_pairs_hook=unique_fields)
+        except DuplicateFieldError:
+            from openkb.agent.evidence_retry import ResponseIncomplete
+
+            stage = json.loads(self[-1]["content"]).get("stage", "generation")
+            reason = (
+                "evidence_verification_invalid"
+                if stage == "verification"
+                else "evidence_output_invalid"
+            )
+            raise ResponseIncomplete(reason, stage) from None
         except (ValueError, TypeError):
             return raw  # The stage's bounded format-recovery policy decides what to do.
         return json.dumps(_map(value, self.inverse), ensure_ascii=False)
 
     def encode_response(self, raw):
-        return json.dumps(_map(json.loads(raw), self.identities), ensure_ascii=False)
+        return json.dumps(
+            _map(json.loads(json_text(raw), object_pairs_hook=unique_fields), self.identities),
+            ensure_ascii=False,
+        )
 
 
 def encode_payload(payload, identity_values=()):

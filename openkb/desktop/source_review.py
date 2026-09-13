@@ -227,6 +227,8 @@ class SourceReview(SourceStages, QDialog):
         def loaded(value):
             self._saved = value
             result = value["result"] or {}
+            from openkb.source_coverage import coverage_text
+
             labels = {
                 "completed": "知识编译完成",
                 "unfinished": "知识编译未完成",
@@ -237,6 +239,8 @@ class SourceReview(SourceStages, QDialog):
                 value["source"]["name"]
                 + " · 原文已保存 · "
                 + labels.get(result.get("knowledge_compilation"), "等待知识编译")
+                + " · "
+                + coverage_text(result.get("coverage"))
             )
             self.details.setPlainText(status_text(value))
             self.refresh_flow()

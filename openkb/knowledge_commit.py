@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from dataclasses import asdict, dataclass
@@ -101,6 +102,7 @@ class KnowledgeProposal:
                 - {
                     "compilation_profile",
                     "compilation_omissions",
+                    "compilation_coverage",
                     "navigation_id",
                     "compilation_navigation_id",
                 }
@@ -110,6 +112,14 @@ class KnowledgeProposal:
             from openkb.compilation_omissions import stored_omissions
 
             stored_omissions(self.document)
+            from openkb.source_coverage import validate_coverage
+
+            validate_coverage(
+                json.loads(self.document.get("compilation_coverage", "{}")),
+                self.source_id,
+                self.version_id,
+                self.parse_id,
+            )
             if (
                 self.document["source_id"] != self.source_id
                 or self.document["parse_id"] != self.parse_id
@@ -154,6 +164,13 @@ def load_proposal(kb_dir: Path, proposal_id: str) -> KnowledgeProposal:
     proposal = KnowledgeProposal(**{**value, "protected": tuple(value["protected"])})
     if proposal.id != proposal_id:
         raise ValueError("Proposal identity mismatch")
+    from openkb.source_coverage import stored_coverage
+
+    stored_coverage(
+        proposal.document,
+        SourceStore(kb_dir).version(proposal.version_id),
+        ParseStore(kb_dir).load(proposal.parse_id),
+    )
     for name in {*proposal.before, *proposal.changes}:
         _page_path(kb_dir, name)
     return proposal
@@ -212,6 +229,9 @@ class KnowledgeWorkspace:
         self, document: dict[str, Any] | None = None, *, replaces: str | None = None
     ) -> KnowledgeProposal:
         with kb_ingest_lock(self.kb_dir / ".openkb"):
+            from openkb.source_coverage import stored_coverage
+
+            stored_coverage(document, self.source, self.parsed)
             after = wiki_version(self.path)
             changes = {
                 name: after.get(name)

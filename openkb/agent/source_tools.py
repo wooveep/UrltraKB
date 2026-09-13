@@ -11,6 +11,7 @@ from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
 from openkb.navigation_tree import snapshot_name
 from openkb.pageindex_store import PageIndexUnavailable, indexed_reader
+from openkb.source_coverage import coverage_window
 from openkb.source_windows import original_window
 from openkb.sources import SourceStore
 from openkb.state import HashRegistry
@@ -38,6 +39,7 @@ def _capture(kb_dir):
     entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
     snapshots = {}
     readers = {}
+    coverages = {}
     for entry in entries.values():
         if not all(entry.get(key) for key in ("source_id", "source_version", "parse_id")):
             continue
@@ -52,14 +54,17 @@ def _capture(kb_dir):
             raise ValueError("Published source parsing mismatch")
         snapshots[source.source_id] = (source, parsed, nav)
         readers[source.source_id] = EvidenceSnapshot(indexed_reader(kb_dir, source, parsed, nav))
-    return snapshots, readers
+        from openkb.source_coverage import stored_coverage
+
+        coverages[source.source_id] = stored_coverage(entry, source, parsed)
+    return snapshots, readers, coverages
 
 
 def source_tools(kb_dir):
     from openkb.agent.source_images import published_images
 
     with kb_read_lock(kb_dir / ".openkb"):
-        snapshots, readers = _capture(kb_dir)
+        snapshots, readers, coverages = _capture(kb_dir)
         images = published_images(
             kb_dir / "wiki",
             {
@@ -90,6 +95,7 @@ def source_tools(kb_dir):
                 "version": source.id,
                 "parse": parsed.id,
                 "index": nav["id"],
+                "analysis_coverage": coverages[source.source_id].get("status", "unknown"),
             }
             for source, parsed, nav in snapshots.values()
         ]
@@ -118,6 +124,8 @@ def source_tools(kb_dir):
                 "quality": parsed.quality,
                 "capabilities": navigation_capabilities(nav),
                 "status": nav["status"],
+                "analysis_coverage": coverages[source_id].get("status", "unknown"),
+                "coverage_issues": coverages[source_id].get("issues", []),
             },
             ensure_ascii=False,
         )
@@ -154,7 +162,17 @@ def source_tools(kb_dir):
                 "[原文](" + quote(snapshot_name(source, parsed), safe="/-.") + f"#block-{block.id})"
             )
             if block.assets:
-                row["images"] = [images[asset] for asset in block.assets if asset in images]
+                row["images"] = [
+                    {
+                        **images[asset],
+                        "source_reference": row["reference"],
+                        "location": row["location"],
+                        "association": "source_block_only",
+                    }
+                    for asset in block.assets
+                    if asset in images
+                ]
+            row["analysis_coverage"] = coverage_window(coverages[source_id], row["reference"])
             rows.append(row)
             remaining -= len(row["text"]) + len(json.dumps(row["location"])) + len(row["context"])
             if row["next_start"] is not None:

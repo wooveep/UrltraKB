@@ -71,6 +71,7 @@ def source_snapshot(document):
                 "reason",
                 "parse_id",
                 "omissions",
+                "coverage",
             )
         },
         "cumulative_usage": document.get("cumulative_usage", {}),
@@ -136,6 +137,13 @@ def flow_steps(saved, activity=None):
         omitted = [row for row in (result.get("omissions") or ()) if row["stage"] == key]
         if committed and omitted:
             status = "review"
+        coverage_pending = (
+            committed
+            and key == "generation"
+            and (result.get("coverage") or {}).get("status") in {"pending", "partial"}
+        )
+        if coverage_pending:
+            status = "review"
         rows.append(
             FlowStep(
                 key,
@@ -144,7 +152,13 @@ def flow_steps(saved, activity=None):
                 key == current,
                 f"{counter.percent}% · {counter.completed}/{counter.total}"
                 if counter
-                else (f"已排除 {sum(len(row['items']) for row in omitted)} 项" if omitted else ""),
+                else (
+                    f"已排除 {sum(len(row['items']) for row in omitted)} 项"
+                    if omitted
+                    else "原文仍有待分析内容"
+                    if coverage_pending
+                    else ""
+                ),
             )
         )
     return tuple(rows)

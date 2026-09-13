@@ -121,6 +121,53 @@ def test_other_source_reuses_fact_analysis_and_rebinds_original_citations(
     assert first.input_version in pages and second.input_version in pages
 
 
+def test_display_copy_and_regenerated_navigation_reuse_semantic_fact_input(
+    kb_dir, tmp_path, model_service
+):
+    path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["navigation"] = {"enabled": True}
+    path.write_text(yaml.safe_dump(config))
+    first_path = tmp_path / "Operations V2.md"
+    second_path = tmp_path / "Operations V2 (copy).md"
+    for source in (first_path, second_path):
+        source.write_text("# Operations\n\n" + "Timeout is 30 seconds. Never overlap retries. " * 7)
+    navigation_generation = 0
+
+    def respond(body):
+        nonlocal navigation_generation
+        payload = json.loads(body["messages"][-1]["content"])
+        result = evidence_response(payload)
+        if payload["stage"] == "index_summary":
+            navigation_generation += 1
+            for row in result["summaries"]:
+                row["summary"] = f"Navigation description {navigation_generation}."
+        return result
+
+    model_service.respond = respond
+    first = import_document(kb_dir, first_path)
+    assert first.knowledge_compilation == "completed", first
+    before = len(model_service)
+    second = import_document(kb_dir, second_path)
+    assert second.knowledge_compilation == "completed", second
+    assert first.source_id != second.source_id
+    assert navigation_generation == 2
+    assert all(
+        json.loads(call["messages"][-1]["content"])["stage"] != "facts"
+        for call in model_service[before:]
+    )
+    # A filename's unique version remains meaningful, even with the same body.
+    third_path = tmp_path / "Operations V3.md"
+    third_path.write_bytes(first_path.read_bytes())
+    before = len(model_service)
+    third = import_document(kb_dir, third_path)
+    assert third.knowledge_compilation == "completed", third
+    assert any(
+        json.loads(call["messages"][-1]["content"])["stage"] == "facts"
+        for call in model_service[before:]
+    )
+
+
 def test_equal_occurrences_keep_their_distinct_fact_rows(kb_dir, tmp_path, model_service):
     originals = []
     text = "Voltage is 5 volts. Timeout is 30 seconds."

@@ -7,7 +7,7 @@ for the rest of its batch. Updating settings applies to a new task.
 ## Results and stopping
 
 Each document reports `source_intake`, `knowledge_compilation`, `stage`, `reason`,
-`quality`, `unfinished`, `resources`, `warnings`, `omissions` and `usage`. A completed or
+`quality`, `unfinished`, `resources`, `warnings`, `omissions`, `coverage` and `usage`. A completed or
 previously completed identical document is successful. Exhausted local content
 attempts can exclude that content and publish verified siblings; invalid model
 output never becomes published knowledge. Global execution budgets still stop the run. An ordinary failed
@@ -38,7 +38,24 @@ never automatically replayed from its summary. A confirmed business receipt
 survives failed auxiliary teardown; cleanup warnings are separate from knowledge
 completion.
 
-## Accepted publication policy — 2026-09-12
+## Accepted publication policy — 2026-09-13
+
+> 导入文档，异常的情况，可以丢弃，知识可以缺失，任务不能随意中止与判断失败。
+
+Skipping means excluding unreliable content or candidate knowledge from this import,
+while retaining originals, historical evidence and other sources' contributions.
+Bounded recovery continues independent work. No usable candidate means unfinished
+with saved progress; it does not mean publication succeeded. Cancellation, hard
+budgets, uncertain remote execution and integrity failures still stop new dispatch.
+
+`coverage` reports the immutable original block ranges and assets, independently of
+publication: `unknown` for legacy records, `pending` before publication, and `partial`
+or `complete` after publication. A saved image, available OCR transcription and image
+understanding have separate states. Pending necessary image understanding remains a
+gap. Ranges cannot be removed or shortened to claim completeness. Published source
+tools report the published parse's coverage, even if a newer parse is selected.
+Desktop, CLI and Continue retain the distinction between committed knowledge and
+remaining original content.
 
 The user explicitly approved normal import and publication despite ordinary
 errors and missing content. This revises the publication requirements in
@@ -83,8 +100,9 @@ acceptance.
   not appear as a complete task. Retained content still requires original
   evidence, full coverage of its selected facts and semantic verification.
 - If no usable facts, plan or verified topic remains, the document stays
-  unfinished. Transport/account failures, cancellation, identity corruption and
-  global budgets are not content omissions.
+  unfinished. Confirmed temporary service failures use bounded backoff, then isolate
+  affected content. Unknown remote execution, account failures, cancellation,
+  identity corruption and global budgets are not content omissions.
 
 `omissions` contains stage, fixed reason and excluded identities. The original
 source/version/parse identifies the evidence; rejected text is not copied into
@@ -117,8 +135,10 @@ coverage and known omissions. Excluding a prerequisite must not make a retained
 procedure or conclusion misleading. Before partial publication, a bounded dependency
 review checks candidates against the complete available original and recorded parsing
 omissions. Dependent or unresolved candidates are also excluded, including transitive
-dependencies. If that full review does not fit its allowance, it cannot certify
-independence; no usable candidate means the source stays unfinished.
+dependencies. Capacity or protocol failures split the candidates while preserving
+the complete ordered original and omissions in each request. Minimum candidates
+that cannot be reviewed remain pending; no usable candidate means the source stays
+unfinished. Split recovery and valid refusals survive Continue.
 
 Measure cold import, identical reimport and interrupted continuation separately.
 Compare the same enabled features and quality scope, including all failed,
@@ -834,6 +854,21 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 可精确定位到候选正文或标题的无依据声明，允许其拒绝反馈没有来源 occurrence。
 应用保留该否定结论；缺失覆盖与缺失来源路径仍要求引用，未知编号仍然无效。
 
+知识库可分别设置 `compilation_reasoning_effort`、`verification_reasoning_effort`、
+`verification_adjudication_reasoning_effort` 和 `correction_reasoning_effort`。
+值为 `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`，实际支持范围由
+供应商决定。未设置的核验继承编译选项，增强核验继承普通核验选项，纠正继承编译选项。
+这些配置不改变默认策略，也不增加纠正轮数；实际发出的设置进入复用条件和费用记录。
+较轻核验仍覆盖所有新候选，只有未通过且增强选项不同的候选才增加一次增强核验。
+
+新生成的导航摘要也逐项独立核对原文。错误、含糊或协议无效的摘要退回原文预览，
+不会成为事实依据。纯副本显示名称和随机导航措辞不再进入事实请求；版本、对象、
+表头、顺序和必要上下文仍约束共享分析。每个来源保留自己的证据绑定。
+
+费用按实际请求记录输入、缓存 hit/miss、总输出和供应商提供的思考明细，以及实际模型
+名称和有效选项。输出已含思考时不重复相加，缺失明细保持未知。超时或断连后远端执行
+状态不明时停止新增派发，不把未收到的用量补零，也不盲目重发。
+
 若模型将 verdict/reason 与 issues 分别返回为两个 JSON 对象，仅在字段严格互不冲突、
 第二个对象只有 issues 时无损合并，再执行完整校验。矛盾结论、额外文本和其他对象
 不会被丢弃后当作成功。保存的原响应可直接重放恢复，无需再次请求同一判断。
@@ -853,9 +888,15 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 
 存在未解析内容时，发布前还要检查知识是否依赖缺失的前提、例外或表头。该检查保留
 完整原文与候选内容，在允许的上下文范围内压缩重复引用。有效判定后，省略依赖缺失
-内容或仍不确定的主题，发布其余独立主题；容量不足、协议无效或没有可保留主题时
-保持未完成。请求、token 与时间上限仍然生效，压缩本身不能证明知识独立或完整。
+内容或仍不确定的主题，发布其余独立主题；容量或协议问题有界拆分，最小候选仍无法
+确认时跳过并保留诊断，没有可保留主题时保持未完成。请求、token 与时间上限仍然
+生效，压缩本身不能证明知识独立或完整。
 
 本轮实现的测试范围、真实实验成本和未通过项目见[来源索引验收记录](source-index-validation.md)。
 
-依赖检查的返回若缺少候选、含未知路径或格式无效，导入保持未完成，并单独保存原始返回及协议诊断；继续可在原额度内重试。有效的依赖或未知判定保留原理由并复用。请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带索引制品 ID 的空事实收据升级后可能重做一次；新版本内仅调整总请求、token 或时限不使这类已完成单元失效。
+依赖检查的返回若缺少候选、含未知路径或格式无效，单独保存原始返回及协议诊断，
+有界拆分和重试后隔离无法确认的候选；继续可在原额度内补缺口。有效的依赖或未知
+判定保留原理由并复用，不能通过重跑已拆分的父批次绕过子批次的拒绝。
+请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带索引制品
+ID 的空事实收据升级后可能重做一次；新版本内仅调整总请求、token 或时限不使这些
+已完成单元失效。

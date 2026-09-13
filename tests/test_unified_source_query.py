@@ -76,7 +76,7 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
         payload = json.loads(body["messages"][-1]["content"])
         if payload.get("stage") == "facts":
             assert indexed_reads, "Fact analysis must read original content from PageIndex"
-            indexed_before_facts.append(all(unit.get("navigation") for unit in payload["units"]))
+            indexed_before_facts.append(all("navigation" not in unit for unit in payload["units"]))
         return evidence_response(payload)
 
     model_service.respond = respond
@@ -167,7 +167,7 @@ def test_index_summary_runs_before_compilation_with_shared_request_accounting(
     config = yaml.safe_load(config_path.read_text())
     config["navigation"] = {
         "enabled": True,
-        "processing": {**config["processing"], "max_requests": 1},
+        "processing": {**config["processing"], "max_requests": 2},
     }
     config["processing"]["max_requests"] = 6
     config_path.write_text(yaml.safe_dump(config))
@@ -191,6 +191,7 @@ def test_index_summary_runs_before_compilation_with_shared_request_accounting(
     assert imported.knowledge_compilation == "completed", imported
     assert stages[0] == "index_summary"
     assert stages.count("index_summary") == 1
+    assert stages.count("index_summary_verification") == 1
     assert imported.usage["observable_attempts"] == len(stages)
     nav = source_status(kb_dir, imported.source_id)["navigation"]
     assert nav["status"] == "enhanced"

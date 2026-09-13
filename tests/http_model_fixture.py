@@ -72,6 +72,13 @@ def evidence_response(payload):
                 {"id": row["id"], "summary": "Source navigation."} for row in payload["nodes"]
             ]
         }
+    elif isinstance(payload, dict) and payload.get("stage") == "index_summary_verification":
+        return {
+            "summaries": [
+                {"id": row["id"], "verdict": "supported", "reason": "Source description preserved."}
+                for row in payload["candidates"]
+            ]
+        }
     elif isinstance(payload, dict) and payload.get("stage") == "index_structure":
         return {
             "sections": [
