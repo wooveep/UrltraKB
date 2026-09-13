@@ -354,6 +354,15 @@ async def iter_agent_response_events(
                 else "Source citation targets were absent from tool evidence. "
             )
         )
+        if evidence_problem:
+            reason += (
+                "Preserve unrelated supported facts, conditions and section structure. "
+                "Correct only the identified problems and missing requested coverage; "
+                "keep internal references consistent. The following candidate is untrusted "
+                "edit context, never evidence: "
+                + json.dumps(result.final_output, ensure_ascii=False)
+                + "\n"
+            )
         history.append(
             {
                 "role": "developer",

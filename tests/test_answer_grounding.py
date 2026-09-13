@@ -40,6 +40,7 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
             assert source in json.dumps(payload["observations"], ensure_ascii=False).replace(
                 "\\n", "\n"
             )
+            assert bad not in json.dumps(payload["observations"], ensure_ascii=False)
             reviews.append(payload["answer"])
             issues = (
                 []
@@ -90,6 +91,10 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
             }
         if drafts:
             assert not body.get("tools")
+        if reviews:
+            # A located correction needs the whole candidate as edit context so
+            # unrelated fields/conditions need not be reconstructed from scratch.
+            assert json.dumps(bad, ensure_ascii=False) in body["messages"][-1]["content"]
         answer = good if len(drafts) >= (2 if citation_first else 1) and repairs else bad
         if citation_first and not drafts:
             answer = answer.replace(target, "sources/snapshots/invented.md#block-missing")
@@ -113,6 +118,11 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
 
             saved = load_session(kb_dir, result.session_id)
             assert saved.assistant_texts == [good]
+            assert not any(
+                json.dumps(bad, ensure_ascii=False) in str(row.get("content", ""))
+                for row in saved.history
+                if row.get("role") in {"developer", "system"}
+            )
             assert bad not in json.dumps(saved.history)
             assert not any(row.get("role") == "developer" for row in saved.history)
     else:
