@@ -240,5 +240,9 @@ def _check_units(reviews, payload, issues, invalid):
 
 
 async def require_supported_answer(agent, result, *, run_config=None):
+    from openkb.agent.answer_text import visible_answer
+
+    if not isinstance(result.final_output, str) or not visible_answer(result.final_output).strip():
+        raise ProcessingIncomplete("answer_empty", "answering")
     if await review_answer(agent, result, run_config=run_config):
         raise ProcessingIncomplete("answer_evidence_unsupported", "answering")

@@ -22,13 +22,22 @@ matching-row completeness and exact figure associations. An image's page associa
 does not establish that the asset depicts the whole page. OCR and visual observations
 keep their distinct meanings; missing image understanding remains unknown.
 
-Streamed application answers have one shared replacement allowance for truncation,
-unobserved citation targets or a semantic rejection. The replacement retains the
-evidence, has no tools and must pass review again. Review instructions, rejected
+Streamed application answers allow one replacement for empty/truncated output or unobserved
+citation targets, and one for an evidence rejection or invalid review. Fixing a
+citation does not consume the evidence correction. Each allowance is used at most
+once, within the same task budget. The replacement retains the evidence, has no
+tools and must pass review again. Review instructions, rejected
 drafts and review results never become completed conversation history. Invalid or
 truncated reviews cannot authorize completion. Legacy terminal paths also reject
 unsupported answers. Review requests use the configured verification model options
 and share task limits, cancellation cleanup and usage accounting with answer requests.
+An unchanged answer with a valid semantic rejection cannot obtain a new verdict by
+repeating review. Empty output never authorizes completion.
+
+DOCX parsing records successful OCR against exact retained image assets. Image-only
+Markdown/HTML does not count as transcription, and one recognized frame does not
+complete a multi-frame original. Detached VML images retain unknown paragraph
+positions and a coverage gap; fact extraction cannot infer a heading from adjacency.
 
 The import policy remains: “导入文档，异常的情况，可以丢弃，知识可以缺失，任务不能随意中止与判断失败。”
 Local omissions do not discard independent usable content. Original evidence and

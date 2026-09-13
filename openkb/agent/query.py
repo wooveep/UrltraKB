@@ -214,6 +214,8 @@ async def iter_agent_response_events(
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
     _replacement_attempts: int = 1,
+    _evidence_attempts: int = 1,
+    _rejected_answer: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -288,33 +290,60 @@ async def iter_agent_response_events(
     from openkb.agent.completion_model import answer_truncated
 
     truncated = answer_truncated(result)
-    invalid_targets = [] if truncated else invalid_source_targets(result)
+    empty = isinstance(result.final_output, str) and not visible_answer(result.final_output).strip()
+    invalid_targets = [] if truncated or empty else invalid_source_targets(result)
     from openkb.agent.answer_review import review_answer
+    from openkb.processing import OutputTruncated, ProcessingIncomplete
 
-    issues = (
-        await review_answer(agent, result, run_config=run_config)
-        if not truncated and not invalid_targets
-        else []
-    )
-    if truncated or invalid_targets or issues:
-        if not _replacement_attempts:
-            from openkb.processing import OutputTruncated, ProcessingIncomplete
+    if (
+        _rejected_answer is not None
+        and isinstance(result.final_output, str)
+        and (" ".join(result.final_output.split()) == " ".join(_rejected_answer.split()))
+    ):
+        raise ProcessingIncomplete("answer_evidence_unsupported", "answering")
+    issues = []
+    invalid_review = None
+    if not truncated and not empty and not invalid_targets:
+        try:
+            issues = await review_answer(agent, result, run_config=run_config)
+        except ProcessingIncomplete as exc:
+            if exc.reason != "answer_verification_invalid":
+                raise
+            invalid_review = exc
+    evidence_problem = bool(issues) or invalid_review is not None
+    if truncated or empty or invalid_targets or evidence_problem:
+        allowance = _evidence_attempts if evidence_problem else _replacement_attempts
+        if not allowance:
+            if invalid_review is not None:
+                raise invalid_review
 
             if truncated:
                 raise OutputTruncated("answering")
+            if empty:
+                raise ProcessingIncomplete("answer_empty", "answering")
             raise ProcessingIncomplete(
                 "answer_evidence_unsupported" if issues else "answer_citation_invalid", "answering"
             )
         history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
-        if (invalid_targets or issues) and history and history[-1].get("role") == "assistant":
+        if (
+            (empty or invalid_targets or evidence_problem)
+            and history
+            and history[-1].get("role") == "assistant"
+        ):
             history.pop()  # Do not persist the rejected draft in a completed conversation.
         reason = (
             "The previous response hit its output limit. "
             if truncated
+            else "The previous response contained no answer text. "
+            if empty
             else "The previous response failed evidence review. "
             + (
                 json.dumps(issues, ensure_ascii=False)
                 if issues
+                else "The review could not establish valid, exact quoted support for every "
+                "answer unit. Limit the replacement to requested literal facts, preserving "
+                "all observed matching rows, and explicitly leave undefined meanings unknown. "
+                if invalid_review is not None
                 else "Source citation targets were absent from tool evidence. "
             )
         )
@@ -341,7 +370,9 @@ async def iter_agent_response_events(
             history,
             max_turns=1,
             run_config=run_config,
-            _replacement_attempts=0,
+            _replacement_attempts=_replacement_attempts - int(not evidence_problem),
+            _evidence_attempts=_evidence_attempts - int(evidence_problem),
+            _rejected_answer=result.final_output if issues else _rejected_answer,
         )
         async with aclosing(replacement_stream):
             async for event in replacement_stream:

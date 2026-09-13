@@ -11,8 +11,9 @@ from openkb.locks import atomic_write_text
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", [ask_question, continue_conversation])
 @pytest.mark.parametrize("repairs", [True, False])
+@pytest.mark.parametrize("citation_first", [False, True])
 async def test_semantic_review_repairs_once_and_rechecks_before_completion(
-    kb_dir, model_service, operation, repairs
+    kb_dir, model_service, operation, repairs, citation_first
 ):
     target = "sources/snapshots/v-p.md#block-row"
     source = (
@@ -89,7 +90,9 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
             }
         if drafts:
             assert not body.get("tools")
-        answer = good if drafts and repairs else bad
+        answer = good if len(drafts) >= (2 if citation_first else 1) and repairs else bad
+        if citation_first and not drafts:
+            answer = answer.replace(target, "sources/snapshots/invented.md#block-missing")
         drafts.append(answer)
         return {"role": "assistant", "content": answer}
 
@@ -97,10 +100,11 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
     model_service.answer_review_response = chat
     model_service.chat_without_tools = True
     result = await operation(kb_dir, "Both components: list the port and literal type.")
-    assert len(reviews) == 2
-    assert len(drafts) == 2
-    assert result.usage["observable_attempts"] == 5
-    assert result.usage["charged_tokens"] == 650
+    assert len(reviews) == (2 if repairs else 1)
+    assert len(drafts) == 2 + int(citation_first)
+    requests = 4 + int(repairs) + int(citation_first)
+    assert result.usage["observable_attempts"] == requests
+    assert result.usage["charged_tokens"] == 130 * requests
     if repairs:
         assert result.status == "completed", result
         assert result.answer == good
@@ -161,7 +165,93 @@ async def test_invalid_review_never_authorizes_a_completed_answer(kb_dir, model_
     result = await ask_question(kb_dir, "Which port?", save=True)
     assert result.status != "completed"
     assert result.saved_path is None
-    assert result.usage["observable_attempts"] == 3
+    assert result.usage["observable_attempts"] == 5
+
+
+@pytest.mark.asyncio
+async def test_empty_terminal_answer_never_completes(kb_dir, model_service):
+    model_service.chat_response = lambda body: {"role": "assistant", "content": ""}
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "Which port?", save=True)
+    assert result.status != "completed" and result.saved_path is None
+    assert result.usage["observable_attempts"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty", ["", "<think>Rejected private draft</think>"])
+async def test_empty_draft_is_removed_before_replacement_and_history(kb_dir, model_service, empty):
+    calls = []
+
+    def chat(body):
+        calls.append(body)
+        return {"role": "assistant", "content": empty if len(calls) == 1 else "Hello."}
+
+    model_service.chat_response = chat
+    model_service.chat_without_tools = True
+    result = await continue_conversation(kb_dir, "Hello.")
+    assert result.status == "completed" and result.answer == "Hello."
+    assert len(calls) == 2
+    from openkb.agent.chat_session import load_session
+
+    saved = load_session(kb_dir, result.session_id)
+    assert saved.assistant_texts == ["Hello."]
+    for history in (saved.history, calls[1]["messages"]):
+        assert not any(
+            row.get("role") == "assistant" and row.get("content") == empty for row in history
+        )
+        assert "Rejected private draft" not in json.dumps(history)
+
+
+@pytest.mark.asyncio
+async def test_invalid_review_allows_one_evidence_preserving_replacement(kb_dir, model_service):
+    from tests.http_model_fixture import answer_review_response
+
+    target = "sources/snapshots/v-p.md#block-row"
+    answer = f"Port: 4100 [Original]({target})"
+    atomic_write_text(kb_dir / "wiki/sources/port.md", answer)
+    reviews = []
+
+    def chat(body):
+        if any(message["role"] == "tool" for message in body["messages"]):
+            return {"role": "assistant", "content": answer}
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "read",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path":"sources/port.md"}',
+                    },
+                }
+            ],
+        }
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        return {
+            "role": "assistant",
+            "content": (
+                '{"verdict":"supported","units":[],"issues":[]}'
+                if len(reviews) == 1
+                else json.dumps(answer_review_response(payload))
+            ),
+        }
+
+    model_service.chat_response = chat
+    model_service.chat_without_tools = True
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "Which port?")
+    assert result.status == "completed" and result.answer == answer
+    assert len(reviews) == 2 and result.usage["observable_attempts"] == 5
+    from openkb.agent.chat_session import load_session
+
+    saved = load_session(kb_dir, result.session_id)
+    assert saved.assistant_texts == [answer]
+    assert not any(row.get("role") == "developer" for row in saved.history)
 
 
 @pytest.mark.asyncio
@@ -216,4 +306,4 @@ async def test_uncited_claim_from_concept_page_cannot_skip_source_review(kb_dir,
     result = await ask_question(kb_dir, "Who can connect?", save=True)
     assert result.status != "completed"
     assert result.saved_path is None
-    assert len(reviews) == 2
+    assert len(reviews) == 1
