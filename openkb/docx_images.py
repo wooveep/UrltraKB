@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import io
 import re
+from typing import Any
 
 from openkb.ocr.eligibility import ocr_candidate
 from openkb.ocr.image_session import ImageOcrSession
 from openkb.ocr.optional import recognize
+from openkb.ocr.transcription_quality import transcribed_text
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import SourceStore, content_id
@@ -20,7 +22,9 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
     import pymupdf
     from PIL import Image, ImageOps, UnidentifiedImageError
 
-    quality = []
+    quality: list[dict[str, Any]] = []
+    transcriptions = set()
+    complete_frames = 0
     try:
         with Image.open(io.BytesIO(content)) as image:
             frames = getattr(image, "n_frames", 1)
@@ -78,7 +82,7 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                     text += "\n" + block.text
                 if reason == "ocr_optional_image_skipped" and isinstance(ocr, ImageOcrSession):
                     continue
-                if reason or not blocks:
+                if reason or not any(transcribed_text(block.text) for block in blocks):
                     quality.append(
                         {
                             "status": "verified",
@@ -88,9 +92,29 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                             + (reason or "ocr_content_unverified"),
                         }
                     )
+                else:
+                    complete_frames += 1
+                    transcriptions.add(preview)
+                    for block in blocks:
+                        if (
+                            block.context.startswith("OCR layout block")
+                            and "transcription=pending" not in block.context
+                            and transcribed_text(block.text)
+                        ):
+                            transcriptions.update(block.assets)
+            if complete_frames == frames:
+                transcriptions.add(original)
     except (OSError, ValueError, UnidentifiedImageError) as exc:
         reason = str(exc) if str(exc).startswith("docx_") else "docx_image_render_unavailable"
         quality.append(
             {"status": "verified", "reason": "docx_image_ocr_notice:" + original + ":" + reason}
+        )
+    if transcriptions:
+        quality.append(
+            {
+                "status": "verified",
+                "reason": "docx_image_transcription_available",
+                "transcriptions": sorted(transcriptions),
+            }
         )
     return text, tuple(assets), quality

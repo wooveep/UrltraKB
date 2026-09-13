@@ -92,6 +92,7 @@ def attachment_quality(quality, attachment):
     return [
         {
             "status": row["status"],
+            **({"transcriptions": row["transcriptions"]} if "transcriptions" in row else {}),
             "reason": "docx_attachment:"
             + attachment.part
             + ":"

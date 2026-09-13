@@ -13,7 +13,7 @@ from openkb.ocr.image_session import image_ocr_scope
 from openkb.parsing_docx_quality import conversion_quality
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
-from openkb.sources import SourceStore
+from openkb.sources import SourceStore, content_id
 
 
 def parse_docx(
@@ -190,6 +190,21 @@ def parse_docx(
                                 }
                             )
                 progress.advance()
+            elif isinstance(node, nodes.Image):
+                # VML extras can follow intervening textbox paragraphs. Their
+                # nearest paragraph is not proof of original ownership.
+                assets = []
+                text = inline(node, assets)
+                blocks.append(
+                    BlockDraft(
+                        text,
+                        "image",
+                        {"kind": "docx", **(position or {})},
+                        tuple(assets),
+                        "Detached DOCX image; original paragraph position unavailable.",
+                    )
+                )
+                quality.append({"status": "verified", "reason": "docx_image_position_unavailable"})
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
@@ -260,7 +275,7 @@ def parse_docx(
         quality.append({"status": "needs_review", "reason": "empty_content"})
     for message in result.messages:
         quality.append(conversion_quality(message.message))
-    return blocks, [dict(row) for row in dict.fromkeys(tuple(row.items()) for row in quality)]
+    return blocks, list({content_id(row): row for row in quality}.values())
 
 
 def _outline_levels(stream):

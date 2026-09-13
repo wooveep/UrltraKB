@@ -143,6 +143,14 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
 
     for index, block in enumerate(parsed.blocks):
         processing_checkpoint()
+        original_location = block.location
+        while "attachment" in original_location:
+            original_location = original_location["attachment"]["position"]
+        detached_image = (
+            block.kind == "image"
+            and original_location["kind"] == "docx"
+            and "paragraph" not in original_location
+        )
         if block.kind == "heading":
             title = reader.read(
                 Evidence(source.source_id, source.id, parsed.id, block.id),
@@ -157,9 +165,15 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             levels = [item for item in levels if item[0] < level]
             levels.append((level, title, block))
             heading = [value for _, value, _ in levels]
-        heading_evidence = [
-            neighbor(item, 0, item.chars, "heading") for _, _, item in levels if item.id != block.id
-        ]
+        heading_evidence = (
+            [
+                neighbor(item, 0, item.chars, "heading")
+                for _, _, item in levels
+                if item.id != block.id
+            ]
+            if not detached_image
+            else []
+        )
         previous = parsed.blocks[index - 1] if index else None
         following = parsed.blocks[index + 1] if index + 1 < len(parsed.blocks) else None
         before_block = (
@@ -224,7 +238,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                     "kind": block.kind,
                     "location": block.location,
                     "context": block.context,
-                    "headings": block.location.get("headings", heading),
+                    "headings": [] if detached_image else block.location.get("headings", heading),
                     "span": {"block": block.id, "start": start, "end": end, "total": block.chars},
                     "assets": list(block.assets),
                     "neighbors": [item for item in (before, after) if item],

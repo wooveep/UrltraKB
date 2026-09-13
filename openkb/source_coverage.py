@@ -109,6 +109,7 @@ def source_coverage(source, parsed, report, *, published=False):
         units.setdefault(unit["reference"]["block_id"], []).append(unit)
     ranges = []
     assets = {}
+    transcriptions = {digest for row in parsed.quality for digest in row.get("transcriptions", [])}
     for block in parsed.blocks:
         cursor = 0
 
@@ -158,7 +159,7 @@ def source_coverage(source, parsed, report, *, published=False):
             )
             entry["blocks"].append(block.id)
             # Transcription is separate from understanding the figure's relationships.
-            if (
+            if digest in transcriptions or (
                 block.context.startswith("OCR layout block")
                 and "transcription=pending" not in block.context
             ):
@@ -200,7 +201,9 @@ def parsing_gaps(parsed):
     return [
         dict(row)
         for row in parsed.quality
-        if row["status"] == "needs_review" or "image_ocr_notice:" in row["reason"]
+        if row["status"] == "needs_review"
+        or "image_ocr_notice:" in row["reason"]
+        or row["reason"].endswith("docx_image_position_unavailable")
     ]
 
 

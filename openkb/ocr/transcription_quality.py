@@ -1,5 +1,35 @@
 """Recognize a narrow repeated-output failure without inventing replacement text."""
 
+from html.parser import HTMLParser
+
+from markdown_it import MarkdownIt
+
+
+class _VisibleText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.text = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style"}:
+            self.hidden += 1
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style"}:
+            self.hidden = max(0, self.hidden - 1)
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.text.append(data)
+
+
+def transcribed_text(text):
+    """Image alt text, titles and markup cannot establish an OCR transcription."""
+    parser = _VisibleText()
+    parser.feed(MarkdownIt("commonmark").enable("table").render(text))
+    return "".join(parser.text).strip()
+
 
 def repetitive_transcription(text):
     lines = text.splitlines()

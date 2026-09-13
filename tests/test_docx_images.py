@@ -158,6 +158,60 @@ def test_empty_ocr_is_advisory_for_a_retained_docx_image(kb_dir):
     assert quality[0]["reason"].startswith("docx_image_ocr_notice:")
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "![original](asset:{asset})",
+        '![original](<asset:{asset}> "diagram title")',
+        '<img alt="diagram title" src="asset:{asset}">',
+        '<div><img src="asset:{asset}"></div>',
+    ],
+)
+def test_image_markup_alone_is_not_an_ocr_transcription(kb_dir, markup):
+    store = SourceStore(kb_dir)
+    original = store.put_bytes(_png("white"))
+
+    class ImageOnlyOcr:
+        def page(self, *args, **kwargs):
+            return [
+                BlockDraft(
+                    markup.format(asset=original),
+                    "paragraph",
+                    {"kind": "pdf", "page": 1},
+                    (original,),
+                    "OCR layout block 0; label=image",
+                )
+            ], None
+
+    _, assets, quality = read_image(_png("white"), store, ImageOnlyOcr())
+    assert original in assets
+    assert not any(row.get("transcriptions") for row in quality)
+
+
+def test_one_recognized_frame_does_not_complete_the_multiframe_original(kb_dir):
+    frames = [Image.open(io.BytesIO(_png(color))) for color in ("white", "black")]
+    stream = io.BytesIO()
+    frames[0].save(stream, format="TIFF", save_all=True, append_images=frames[1:])
+    store = SourceStore(kb_dir)
+    original = store.put_bytes(stream.getvalue())
+
+    class PartialOcr:
+        calls = 0
+
+        def page(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                return [], "ocr_time_budget_exhausted"
+            return [
+                BlockDraft("Restart control 9473", "paragraph", {"kind": "pdf", "page": 1})
+            ], None
+
+    _, assets, quality = read_image(stream.getvalue(), store, PartialOcr())
+    available = {asset for row in quality for asset in row.get("transcriptions", [])}
+    assert available and available <= set(assets)
+    assert original in assets and original not in available
+
+
 def test_missing_docx_relationship_keeps_text_and_visible_marker(kb_dir, tmp_path):
     from tests.docx_attachment_fixtures import docx_with_parts
 

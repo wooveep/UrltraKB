@@ -283,7 +283,8 @@ def test_optional_exhaustion_reuses_saved_image_text_without_new_ocr(kb_dir):
         read_image(_png("white"), SourceStore(kb_dir), session)
         text, _, quality = read_image(_png("black"), SourceStore(kb_dir), session)
         assert "Previously recognized command 9473" in text
-        assert not quality and not session.notices()
+        assert all(row["reason"] == "docx_image_transcription_available" for row in quality)
+        assert not session.notices()
     assert backend.calls == backend.cache_reads == 1
 
 

@@ -176,7 +176,13 @@ class ParseVersion:
         if not isinstance(self.quality, list):
             raise ValueError("Invalid parsing quality")
         for row in self.quality:
-            if not isinstance(row, dict) or set(row) - {"page", "block", "status", "reason"}:
+            if not isinstance(row, dict) or set(row) - {
+                "page",
+                "block",
+                "status",
+                "reason",
+                "transcriptions",
+            }:
                 raise ValueError("Invalid quality record")
             if row.get("status") not in {"verified", "needs_review"} or not isinstance(
                 row.get("reason"), str
@@ -186,6 +192,17 @@ class ParseVersion:
                 raise ValueError("Invalid quality page")
             if "block" in row and row["block"] not in {block.id for block in self.blocks}:
                 raise ValueError("Invalid quality block")
+            if "transcriptions" in row:
+                assets = {asset for block in self.blocks for asset in block.assets}
+                values = row["transcriptions"]
+                if (
+                    row["status"] != "verified"
+                    or not isinstance(values, list)
+                    or not values
+                    or any(not isinstance(asset, str) or asset not in assets for asset in values)
+                    or len(set(values)) != len(values)
+                ):
+                    raise ValueError("Invalid image transcription binding")
         pages = self.profile.get("physical_pages")
         if pages is not None:
             if type(pages) is not int or pages <= 0:
