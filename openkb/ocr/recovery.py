@@ -1,4 +1,4 @@
-"""Find accepted work still relevant to a cached source and its retained attachments."""
+"""Find pending OCR work relevant to a cached source and its retained attachments."""
 
 from openkb.ocr.reprocessing import effective_attempts
 from openkb.processing import processing_checkpoint
@@ -47,7 +47,10 @@ def has_resumable_jobs(store, source, parsed, settings, retries, overrides):
             continue
         if record.get("identity") != content_id(intent) or path.stem != record["identity"]:
             raise ValueError("Cloud OCR recovery identity mismatch")
-        if record.get("state") in {"submitted", "raw_downloaded"} and record.get("reason") not in {
+        state = record.get("state")
+        if state == "rejected" and record.get("service_code") in {10010, 12002}:
+            return True  # These explicit rejections prove that no job was accepted.
+        if state in {"planned", "submitted", "raw_downloaded"} and record.get("reason") not in {
             "cloud_job_failed",
             "cloud_job_expired",
             "cloud_job_not_found",

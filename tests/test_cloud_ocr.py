@@ -51,8 +51,10 @@ def scanned_pdf(path):
         pdf.save(path, deflate=True)
 
 
+@pytest.mark.parametrize("rejections", [1, 3])
+@pytest.mark.parametrize("service_code", [10010, 12002])
 def test_explicit_queue_rejection_recovers_without_losing_attempts(
-    kb_dir, tmp_path, monkeypatch, model_service
+    kb_dir, tmp_path, monkeypatch, model_service, rejections, service_code
 ):
     cloud_settings(kb_dir)
     monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
@@ -67,8 +69,8 @@ def test_explicit_queue_rejection_recovers_without_losing_attempts(
         if method.upper() == "POST":
             submissions.append(url)
             value = (
-                {"code": 10010, "msg": "Job submission queue is full", "data": {}}
-                if len(submissions) == 1
+                {"code": service_code, "data": {}}
+                if len(submissions) <= rejections
                 else {"code": 0, "data": {"jobId": "accepted"}}
             )
         elif url.endswith("/accepted"):
@@ -103,12 +105,18 @@ def test_explicit_queue_rejection_recovers_without_losing_attempts(
 
     monkeypatch.setattr(requests.Session, "request", service)
     result = import_document(kb_dir, source)
+    if rejections == 3:
+        from openkb.application.source_actions import continue_source
+
+        assert result.knowledge_compilation == "unfinished", result
+        assert len(submissions) == 3
+        result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     from openkb.application.source_history import source_status
 
     jobs = source_status(kb_dir, result.source_id)["cloud_jobs"]
-    assert len(submissions) == 2
-    assert sum(job["submissions"] for job in jobs) == 2
+    assert len(submissions) == rejections + 1
+    assert sum(job["submissions"] for job in jobs) == rejections + 1
 
 
 def test_failed_ocr_page_does_not_discard_independent_native_page(
@@ -123,8 +131,10 @@ def test_failed_ocr_page_does_not_discard_independent_native_page(
         pdf.new_page().insert_text((40, 40), "Independent requirement: keep pressure at 37 kPa.")
         pdf.insert_pdf(scanned)
         pdf.save(source)
+    submissions = []
 
     def quota(self, method, url, **kwargs):
+        submissions.append(method)
         result = requests.Response()
         result.status_code = 200
         result._content_consumed = True
@@ -137,6 +147,11 @@ def test_failed_ocr_page_does_not_discard_independent_native_page(
     assert result.coverage["status"] == "partial"
     assert any(row.get("page") == 2 for row in result.coverage["issues"])
     assert any(row["understanding"] == "pending" for row in result.coverage["assets"])
+    from openkb.application.source_actions import continue_source
+
+    continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+    assert continued.knowledge_compilation == "completed", continued
+    assert submissions == ["POST"]
 
 
 def test_shared_import_never_reposts_an_uncertain_cloud_submission(
@@ -156,6 +171,10 @@ def test_shared_import_never_reposts_an_uncertain_cloud_submission(
     monkeypatch.setattr(requests.Session, "request", lost_response)
     one = import_document(kb_dir, source)
     two = refresh(kb_dir, one)
+    from openkb.application.source_actions import continue_source
+
+    continued = continue_source(kb_dir, one.source_id, version_id=one.input_version)
+    assert continued.knowledge_compilation == "unfinished", continued
     assert one.knowledge_compilation == "unfinished" and two.stage == "parsing"
     assert len(submissions) == 1
     assert any("cloud_submission_unknown" in warning for warning in two.warnings)

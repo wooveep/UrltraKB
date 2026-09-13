@@ -374,9 +374,13 @@ unrelated historical implementations and changed requests are not reused.
 
 Continue the saved source after a stopped or unfinished task. With unchanged
 source bytes, parsing settings and parser profile, the parser reuses its validated
-saved result, including embedded document contents and image/OCR results. It does
-not expand the same Word attachments again. Explicit reparse, changed source or
-parsing configuration can request new parsing work.
+saved result, including embedded document contents and image/OCR results. When
+relevant cloud OCR work remains, Continue resumes accepted jobs and can submit
+pages left unstarted by a previous budget. An explicit queue-full or rate-limit
+rejection also permits a bounded new attempt; an uncertain submission does not.
+Each continuation uses the current allowance, retains earlier attempts and reuses
+completed OCR. Retained Word attachments participate in this recovery when needed.
+Explicit reparse, changed source or parsing configuration can request new parsing work.
 
 Compilation recovery has separate states:
 
