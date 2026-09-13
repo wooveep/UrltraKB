@@ -7,6 +7,182 @@ from openkb.application.conversations import ask_question
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recovers", [False, True])
+@pytest.mark.parametrize(
+    "bad_link",
+    [
+        "B#block-invented-id",
+        "./sources/missing.md",
+        "sources/snapshots/version-parse.md%23block-exact-original-id",
+    ],
+)
+async def test_invented_source_target_reuses_observed_evidence_once(
+    kb_dir, model_service, recovers, bad_link
+):
+    import json
+
+    from openkb.locks import atomic_write_text
+
+    target = "sources/snapshots/version-parse.md#block-exact-original-id"
+    atomic_write_text(kb_dir / "wiki/index.md", f"Port is 4321. [Source]({target})")
+
+    def respond(body):
+        if len(model_service) == 1:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "read-evidence",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": "index.md"}),
+                        },
+                    }
+                ],
+            }
+        if len(model_service) == 3:
+            assert not body.get("tools")
+            assert any(m.get("role") == "tool" for m in body["messages"])
+        link = target if recovers and len(model_service) == 3 else bad_link
+        return {"role": "assistant", "content": f"Port is 4321. [Source]({link})"}
+
+    model_service.chat_response = respond
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "Which port?", save=True)
+    assert len(model_service) == 3
+    assert result.usage["observable_attempts"] == 3
+    assert result.usage["charged_tokens"] == 390
+    if recovers:
+        assert result.status == "completed", result
+        assert f"]({target})" in result.answer
+        assert "B#block" not in result.answer
+    else:
+        assert result.status != "completed", result
+        assert result.saved_path is None
+
+
+@pytest.mark.asyncio
+async def test_literal_markdown_examples_are_not_evidence_links(kb_dir, model_service):
+    answer = (
+        "Use `[Source](sources/example.md#block-example)` or:\n\n"
+        "```markdown\n[x](sources/example.md#block-example)\n```"
+    )
+    model_service.chat_response = lambda body: {"role": "assistant", "content": answer}
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "Show Markdown syntax", save=True)
+    assert result.status == "completed", result
+    assert len(model_service) == 1
+    assert result.answer == answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native_source", [False, True])
+async def test_complete_binding_in_one_read_can_supply_canonical_citation(
+    kb_dir, model_service, native_source
+):
+    import json
+
+    from openkb.locks import atomic_write_text
+
+    reference = {"source_id": "s", "version_id": "v", "parse_id": "p", "block_id": "b"}
+    text = (
+        'sources/snapshots/v-p.md\n<a id="block-b"></a>\nPort: 4321.\n<!-- source-evidence: '
+        + json.dumps(reference)
+        + " -->"
+    )
+    if native_source:
+        text = (
+            "sources/Document-s.md\n<!-- source-evidence: " + repr(reference) + " -->\nPort: 4321."
+        )
+    atomic_write_text(kb_dir / "wiki/index.md", text)
+
+    def respond(body):
+        if len(model_service) == 1:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "read-binding",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": "index.md"}),
+                        },
+                    }
+                ],
+            }
+        return {
+            "role": "assistant",
+            "content": "Port: 4321. [Source](sources/snapshots/v-p.md#block-b)",
+        }
+
+    model_service.chat_response = respond
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "Which port?", save=True)
+    assert result.status == "completed", result
+    assert len(model_service) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["query", "tty"])
+async def test_terminal_returns_final_answer_without_intermediate_bad_citation(
+    kb_dir, model_service, entry
+):
+    import json
+
+    from openkb.agent.query import build_run_config_from_bundle, run_query
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+
+    def respond(body):
+        if len(model_service) == 1:
+            return {
+                "role": "assistant",
+                "content": "Checking [draft](B#block-wrong).",
+                "tool_calls": [
+                    {
+                        "id": "read-before-answer",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": "index.md"}),
+                        },
+                    }
+                ],
+            }
+        return {"role": "assistant", "content": "Final supported answer."}
+
+    model_service.chat_response = respond
+    with kb_ingest_lock(kb_dir / ".openkb"), ExecutionContext().begin(kb_dir) as bundle:
+        config = build_run_config_from_bundle("openai/offline-test", bundle)
+        if entry == "query":
+            answer = await run_query(
+                "Question",
+                kb_dir,
+                "openai/offline-test",
+                stream=True,
+                run_config=config,
+                bundle=bundle,
+            )
+        else:
+            from openkb.agent.chat import _build_style, _stream_tty_turn
+            from openkb.agent.chat_session import ChatSession
+            from openkb.agent.query import build_chat_agent
+
+            session = ChatSession.new(kb_dir, "openai/offline-test", "en")
+            agent = build_chat_agent(kb_dir, session.model, bundle=bundle)
+            agent.model = config.model
+            answer, _ = await _stream_tty_turn(
+                agent, session, "Question", _build_style(False), use_color=False
+            )
+    assert answer == "Final supported answer."
+    assert len(model_service) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovers", [False, True])
 async def test_length_stop_reuses_evidence_for_one_bounded_replacement(
     kb_dir, model_service, recovers
 ):

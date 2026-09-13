@@ -189,6 +189,15 @@ in conversation history. A second truncated response cannot be saved as a comple
 answer. Legacy query and TTY chat also reject truncated completion; prior completed
 turns and all request charges remain intact.
 
+Source links in final answers must be observed in tool evidence or derived from a
+complete binding with its matching source page or snapshot anchor in the same tool
+result. Abbreviated
+paths and invented anchors use the same single replacement allowance as length
+stops. Markdown code examples are not treated as citations. This target check does
+not establish that a cited source supports every factual claim; semantic review
+remains separate. Terminal answers use the final response, excluding intermediate
+tool narration.
+
 Use the returned original-range citations for details, prerequisites and exceptions;
 titles and summaries are navigation hints. Long original and Markdown reads paginate
 explicitly. A source-index rebuild reads saved parsing, changes only its retrieval

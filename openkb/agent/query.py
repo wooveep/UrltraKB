@@ -268,22 +268,36 @@ async def iter_agent_response_events(
     from openkb.processing import processing_checkpoint
 
     processing_checkpoint()
+    from openkb.agent.answer_citations import invalid_source_targets
     from openkb.agent.completion_model import answer_truncated
 
-    if answer_truncated(result):
+    truncated = answer_truncated(result)
+    invalid_targets = [] if truncated else invalid_source_targets(result)
+    if truncated or invalid_targets:
         if not _replacement_attempts:
-            from openkb.processing import OutputTruncated
+            from openkb.processing import OutputTruncated, ProcessingIncomplete
 
-            raise OutputTruncated("answering")
+            if truncated:
+                raise OutputTruncated("answering")
+            raise ProcessingIncomplete("answer_citation_invalid", "answering")
         history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
+        if invalid_targets and history and history[-1].get("role") == "assistant":
+            history.pop()  # Do not persist the rejected draft in a completed conversation.
+        reason = (
+            "The previous response hit its output limit. "
+            if truncated
+            else "The previous response used source citation targets absent from tool evidence. "
+        )
         history.append(
             {
                 "role": "developer",
                 "content": (
-                    "The previous response hit its output limit. Produce one concise, complete "
+                    reason + "Produce one concise, complete "
                     "replacement answer to the original question using the evidence already "
                     "read. Include only requested fields, omit optional explanations, and finish "
-                    "all source citations. Do not repeat the search or invent missing support."
+                    "all source citations. Copy source targets exactly from tool results; "
+                    "never abbreviate paths with aliases or invent block anchors. "
+                    "Do not repeat the search or invent missing support."
                 ),
             }
         )
@@ -514,6 +528,9 @@ async def run_query(
 
         if answer_truncated(result):
             raise OutputTruncated("answering")
+        from openkb.agent.answer_citations import require_source_targets
+
+        require_source_targets(result)
         return result.final_output or ""
 
     import os
@@ -617,7 +634,10 @@ async def run_query(
 
     if answer_truncated(result):
         raise OutputTruncated("answering")
-    return "".join(collected) if collected else result.final_output or ""
+    from openkb.agent.answer_citations import require_source_targets
+
+    require_source_targets(result)
+    return result.final_output or ""
 
 
 def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None") -> Any:

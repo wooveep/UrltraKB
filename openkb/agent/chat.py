@@ -473,9 +473,10 @@ async def _stream_tty_turn(
 
     if answer_truncated(result):
         raise OutputTruncated("answering")
-    answer = "".join(collected).strip()
-    if not answer:
-        answer = (result.final_output or "").strip()
+    from openkb.agent.answer_citations import require_source_targets
+
+    require_source_targets(result)
+    answer = (result.final_output or "").strip()
     return answer, new_input + result.to_input_list()[len(new_input) :]
 
 
