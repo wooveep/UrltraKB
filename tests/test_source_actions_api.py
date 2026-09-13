@@ -51,8 +51,10 @@ def test_rest_rebuild_navigation_is_queryable_and_leaves_knowledge_unchanged(
 def test_rest_navigation_rejects_malformed_saved_status(
     kb_dir, tmp_path, monkeypatch, model_service
 ):
-    from openkb.locks import atomic_write_json
-    from openkb.sources import SourceStore, content_id, read_object
+    import json
+    import sqlite3
+
+    from openkb.sources import content_id
     from openkb.state import HashRegistry
 
     monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
@@ -60,13 +62,21 @@ def test_rest_navigation_rejects_malformed_saved_status(
     source = tmp_path / "navigation.md"
     source.write_text("Required version 7.")
     imported = import_document(kb_dir, source)
-    root = SourceStore(kb_dir).root / "navigation"
     registry = HashRegistry(kb_dir / ".openkb/hashes.json")
     published = registry.get(imported.source_id)
-    record = read_object(root / f"{published['navigation_id']}.json")
-    record["status"] = []
-    identity = content_id(record)
-    atomic_write_json(root / f"{identity}.json", record)
+    with sqlite3.connect(kb_dir / ".openkb/pageindex.db") as connection:
+        record = json.loads(
+            connection.execute(
+                "SELECT metadata FROM openkb_source_indexes WHERE index_id = ?",
+                (published["navigation_id"],),
+            ).fetchone()[0]
+        )
+        record["status"] = []
+        identity = content_id(record)
+        connection.execute(
+            "UPDATE openkb_source_indexes SET metadata = ?, index_id = ? WHERE index_id = ?",
+            (json.dumps(record), identity, published["navigation_id"]),
+        )
     registry.add(imported.source_id, {**published, "navigation_id": identity})
     with TestClient(create_app()) as client:
         response = client.post(

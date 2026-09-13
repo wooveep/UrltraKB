@@ -7,10 +7,10 @@ from agents import function_tool
 
 from openkb.evidence import ParseStore
 from openkb.evidence_snapshot import EvidenceSnapshot
-from openkb.legacy_source_views import capture_legacy, legacy_read, legacy_tree
 from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
 from openkb.navigation_tree import snapshot_name
+from openkb.pageindex_store import PageIndexUnavailable, indexed_reader
 from openkb.source_windows import original_window
 from openkb.sources import SourceStore
 from openkb.state import HashRegistry
@@ -28,8 +28,7 @@ original wording explicitly instead of silently equating directions, positions o
 Image rows include answer-ready images[].markdown links bound to that original block.
 Copy their destination verbatim: asset IDs are not paths, and source names must not be
 inserted into image destinations. Missing images are unavailable, not inferred from an ID.
-Legacy sources without these tools' source entries remain available via read_file and
-get_page_content with the precision their saved material actually provides."""
+"""
 
 
 def _capture(kb_dir):
@@ -46,36 +45,21 @@ def _capture(kb_dir):
         if source.source_id != entry["source_id"]:
             raise ValueError("Published source identity mismatch")
         parsed = ParseStore(kb_dir).load(entry["parse_id"])
-        try:
-            if not entry.get("navigation_id"):
-                raise ValueError("Published source predates unified indexing")
-            nav = read_navigation(kb_dir, source, identity=entry["navigation_id"])
-            if "nodes" not in nav:
-                raise ValueError("Legacy navigation lacks checked ranges")
-        except (FileNotFoundError, ValueError):
-            from openkb.navigation_tree import basic_tree
-            from openkb.sources import content_id
-
-            nodes = basic_tree(kb_dir, source, parsed)
-            nav = {
-                "id": content_id(["local-query-fallback", source.id, parsed.id, nodes]),
-                "parse": parsed.id,
-                "nodes": nodes,
-                "status": "degraded",
-                "reason": "saved_navigation_unavailable",
-            }
+        if not entry.get("navigation_id"):
+            raise PageIndexUnavailable("PageIndex published source binding is required")
+        nav = read_navigation(kb_dir, source, identity=entry["navigation_id"])
         if nav["parse"] != entry["parse_id"]:
             raise ValueError("Published source parsing mismatch")
         snapshots[source.source_id] = (source, parsed, nav)
-        readers[source.source_id] = EvidenceSnapshot(ParseStore(kb_dir).reader(source, parsed))
-    return snapshots, readers, capture_legacy(kb_dir, entries)
+        readers[source.source_id] = EvidenceSnapshot(indexed_reader(kb_dir, source, parsed, nav))
+    return snapshots, readers
 
 
 def source_tools(kb_dir):
     from openkb.agent.source_images import published_images
 
     with kb_read_lock(kb_dir / ".openkb"):
-        snapshots, readers, legacy = _capture(kb_dir)
+        snapshots, readers = _capture(kb_dir)
         images = published_images(
             kb_dir / "wiki",
             {
@@ -109,10 +93,6 @@ def source_tools(kb_dir):
             }
             for source, parsed, nav in snapshots.values()
         ]
-        rows.extend(
-            {key: value for key, value in view.items() if key not in {"text", "path"}}
-            for view in legacy.values()
-        )
         return json.dumps(
             {
                 "sources": rows[offset : offset + limit],
@@ -125,8 +105,6 @@ def source_tools(kb_dir):
     def read_source_tree(source_id: str, offset: int = 0, limit: int = 20) -> str:
         """Read ordered source ranges and navigation hints, which are not factual evidence."""
         window(offset, limit)
-        if source_id in legacy:
-            return json.dumps(legacy_tree(legacy[source_id], offset, limit), ensure_ascii=False)
         source, parsed, nav = selected(source_id)
         nodes = nav["nodes"]
         return json.dumps(
@@ -161,11 +139,6 @@ def source_tools(kb_dir):
             or not 1 <= max_chars <= 16000
         ):
             raise ValueError("Invalid original-source window")
-        if source_id in legacy:
-            return json.dumps(
-                legacy_read(legacy[source_id], node_id, offset, start, max_chars),
-                ensure_ascii=False,
-            )
         source, parsed, nav = selected(source_id)
         node = next((node for node in nav["nodes"] if node["id"] == node_id), None)
         if node is None or offset > node["end"] - node["start"]:

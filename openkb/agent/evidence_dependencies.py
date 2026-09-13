@@ -7,7 +7,7 @@ from dataclasses import asdict
 from openkb.agent.evidence_units import JSON_FORMAT, fits, messages
 from openkb.compilation_report import collect_compile_report, report_content_omission
 from openkb.config import compilation_model_options
-from openkb.evidence import Evidence, ParseStore, complete_read_bound
+from openkb.evidence import Evidence, complete_read_bound
 from openkb.implementation import module_revision
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
 from openkb.progress import progress_scope
@@ -96,7 +96,7 @@ def _decisions(value, paths):
 
 
 def protect_dependencies(
-    kb_dir, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
+    reader, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
 ):
     with collect_compile_report() as report:
         omissions = list(report.omissions)
@@ -108,7 +108,6 @@ def protect_dependencies(
     if not omissions:
         return accepted
     processing_checkpoint("dependencies")
-    reader = ParseStore(kb_dir).reader(source, parsed)
     original = []
     for block in parsed.blocks:
         reference = Evidence(source.source_id, source.id, parsed.id, block.id)

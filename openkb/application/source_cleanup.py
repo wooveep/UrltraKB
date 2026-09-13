@@ -32,6 +32,7 @@ class HistoryCleanup:
     bytes: int
     versions: tuple[str, ...]
     parses: tuple[str, ...]
+    pageindex_documents: tuple[str, ...] = ()
 
 
 def _references(path: Path) -> set[str]:
@@ -96,7 +97,6 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         ("proposals", knowledge / "proposals", "*.json"),
         ("blobs", store.root / "blobs", "*/*"),
         ("compilation", store.root / "compilation", "*.json"),
-        ("navigation", store.root / "navigation", "*.json"),
         ("analysis", store.root / "analysis/records", "*.json"),
         ("analysis_inputs", store.root / "analysis/inputs", "*.json"),
         ("analysis_bindings", store.root / "analysis/bindings", "*/*.json"),
@@ -109,8 +109,18 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
                 raise ValueError("Ambiguous stored content identity")
             nodes[identity] = path
             groups[kind].add(identity)
+    from openkb.pageindex_store import index_inventory, inventory_bindings
+
+    index_records = inventory_bindings(kb_dir)
+    groups["navigation"] = set(index_records)
     roots = set()
     bindings: dict[str, set[str]] = {}
+    for identity in groups["navigation"]:
+        record = index_records[identity]
+        # A citation retaining an old version must keep its database trees too,
+        # even when the citation names only version and parse IDs. Relational
+        # provenance survives damage to retired tree/text/metadata payloads.
+        bindings.setdefault(record["version"], set()).add(identity)
     for identity in groups["analysis_bindings"]:
         path = nodes[identity]
         try:
@@ -131,9 +141,6 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         progress = store.owned_path(store.root / "compilation/latest" / f"{source.id}.json")
         if progress.exists():
             roots.update(_references(progress))
-        navigation = store.owned_path(store.root / "navigation/latest" / f"{source.id}.json")
-        if navigation.exists():
-            roots.update(_references(navigation))
     wiki = wiki_version(kb_dir)
     # Generated snapshots are leaves reached by actual citations, not independent
     # roots. Only byte-identical generated files qualify; user edits stay roots.
@@ -178,13 +185,19 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
     for path in protected_paths:
         roots.update(_references(store.owned_path(path)))
     retained = set()
+    available = nodes.keys() | index_records.keys()
     queue = list(roots)
     while queue:
         identity = queue.pop()
-        if identity in retained or identity not in nodes:
+        if identity in retained or identity not in available:
             continue
         retained.add(identity)
-        if identity in groups["analysis"]:
+        if identity in index_records:
+            references = {
+                match.decode("ascii")
+                for match in _IDENTITY.findall(json.dumps(index_records[identity]).encode())
+            }
+        elif identity in groups["analysis"]:
             try:
                 record = read_object(nodes[identity])
                 # Producer metadata records historical expense; it must not pin
@@ -212,15 +225,23 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
             )
         references.update(bindings.get(identity, set()))
         queue.extend(references - retained)
-    unused = nodes.keys() - retained
-    removable = {nodes[identity] for identity in unused}
+    unused = available - retained
+    removable = {nodes[identity] for identity in unused & nodes.keys()}
+
+    indexes = index_inventory(kb_dir)
+    referenced_indexes = {
+        index_records[identity]["pageindex"]["doc_id"]
+        for identity in retained & groups["navigation"]
+    }
+    unused_indexes = tuple(sorted(indexes.keys() - referenced_indexes))
+    removable.update(
+        store.owned_path(kb_dir / relative)
+        for identity in unused_indexes
+        for relative in indexes[identity]["files"]
+    )
     for relative, (version, parse) in snapshots.items():
         if version in unused or parse in unused:
             removable.add(store.owned_path(kb_dir / "wiki" / relative))
-    for path in store.owned_path(store.root / "navigation/prepared").glob("*.json"):
-        record = read_object(store.owned_path(path))
-        if record.get("navigation") in unused:
-            removable.add(path)
     for lookup_kind, key in (("lookup", "parse_id"), ("selected", "parse_id")):
         for path in store.owned_path(store.root / "parses" / lookup_kind).glob("*.json"):
             record = read_object(store.owned_path(path))
@@ -233,7 +254,7 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
     for path in store.owned_path(knowledge / "accepted").glob("*.json"):
         if path.stem in unused:
             removable.add(store.owned_path(path))
-    for kind in ("compilation", "navigation"):
+    for kind in ("compilation",):
         for path in store.owned_path(store.root / kind / "latest").glob("*.json"):
             if path.stem in unused:
                 removable.add(store.owned_path(path))
@@ -248,11 +269,20 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
                 state[path.relative_to(kb_dir).as_posix()] = HashRegistry.hash_file(path)
     files = tuple(sorted(path.relative_to(kb_dir).as_posix() for path in removable))
     return HistoryCleanup(
-        content_id({"state": state, "wiki": wiki, "files": files}),
+        content_id(
+            {
+                "state": state,
+                "wiki": wiki,
+                "files": files,
+                "pageindex": indexes,
+                "bindings": index_records,
+            }
+        ),
         files,
         sum(path.stat().st_size for path in removable),
         tuple(sorted(unused & groups["versions"])),
         tuple(sorted(unused & groups["parses"])),
+        unused_indexes,
     )
 
 
@@ -273,12 +303,27 @@ def cleanup_history(kb_dir: Path, preview_id: str, *, context: ExecutionContext 
                 raise ValueError("History or citations changed; review a new cleanup preview")
             paths = [SourceStore(kb_dir).owned_path(kb_dir / path) for path in preview.files]
             baseline_path = kb_dir / ".openkb/knowledge/baselines.json"
+            from openkb.pageindex_store import (
+                database_paths,
+                delete_indexes,
+                managed_index_directories,
+            )
+
+            database = database_paths(kb_dir) if preview.pageindex_documents else []
+            directories = managed_index_directories(kb_dir, preview.pageindex_documents)
+            backups = [
+                path for path in paths if not any(path.is_relative_to(d) for d in directories)
+            ]
             with mutation_scope(
-                kb_dir, [*paths, baseline_path], operation="clean unreferenced source history"
+                kb_dir,
+                [*backups, *directories, *database, baseline_path],
+                operation="clean unreferenced source history",
+                hardlink_dirs=set(directories),
             ):
+                delete_indexes(kb_dir, preview.pageindex_documents)
                 for path in paths:
                     context.check_stop()
-                    path.unlink()
+                    path.unlink(missing_ok=True)  # SDK deletion also removes its managed input.
                 if baseline_path.exists():
                     from openkb.locks import atomic_write_json
 

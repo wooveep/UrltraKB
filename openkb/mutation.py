@@ -415,6 +415,7 @@ def mutation_scope(
     operation: str,
     lock_path: Path | None = None,
     delegated_lease: DelegatedWriteLease | None = None,
+    hardlink_dirs: set[Path] | None = None,
 ):
     """Commit a protected multi-file change, retaining evidence if rollback fails.
 
@@ -432,7 +433,7 @@ def mutation_scope(
         delegated_lease is not None and delegated_lease.authorizes(required_lock)
     ):
         raise RuntimeError("Mutation requires the knowledge-base write lease")
-    snapshot = snapshot_paths(kb_dir, paths, operation=operation)
+    snapshot = snapshot_paths(kb_dir, paths, operation=operation, hardlink_dirs=hardlink_dirs)
     try:
         yield snapshot
         check_cancelled()

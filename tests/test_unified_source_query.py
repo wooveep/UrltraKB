@@ -53,8 +53,19 @@ def test_question_file_reads_are_bounded_and_paginate_without_losing_text(
 
 
 def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
-    kb_dir, tmp_path, model_service
+    kb_dir, tmp_path, model_service, monkeypatch
 ):
+    from pageindex.collection import Collection
+
+    indexed_reads = []
+    sdk_read = Collection.get_page_content
+
+    def read_index(documents, doc_id, pages):
+        result = sdk_read(documents, doc_id, pages)
+        indexed_reads.append((doc_id, result))
+        return result
+
+    monkeypatch.setattr(Collection, "get_page_content", read_index)
     source = tmp_path / "handbook.md"
     source.write_text(
         "# Start\n\nCheck the backup first.\n\n## Pressure\n\nSet pressure to 37 kPa."
@@ -64,6 +75,7 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload.get("stage") == "facts":
+            assert indexed_reads, "Fact analysis must read original content from PageIndex"
             indexed_before_facts.append(all(unit.get("navigation") for unit in payload["units"]))
         return evidence_response(payload)
 
@@ -132,8 +144,11 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
         "prompt_tokens_details": {"cached_tokens": 40},
     }
     for operation in (ask_question, continue_conversation):
+        indexed_reads.clear()
         answer = asyncio.run(operation(kb_dir, "What pressure should I set?"))
         assert answer.status == "completed", answer
+        assert {doc_id for doc_id, _ in indexed_reads} == {nav["pageindex"]["doc_id"]}
+        assert indexed_reads[0][1][-1]["content"] == "Set pressure to 37 kPa."
         assert "37 kPa" in answer.answer
         assert answer.usage["observable_attempts"] == 4
         assert answer.usage["charged_tokens"] == 520
@@ -346,57 +361,46 @@ def test_unpublished_new_version_never_replaces_original_used_by_query(
     assert seen == [old, old]
 
 
-def test_legacy_saved_pages_join_source_tools_without_paid_migration(kb_dir, model_service):
-    import json
+def test_json_navigation_cannot_replace_the_pageindex_database(kb_dir, tmp_path, model_service):
+    import pytest
 
+    from openkb.sources import content_id
     from openkb.state import HashRegistry
-    from tests.http_model_fixture import original_source_answer
-
-    path = kb_dir / "wiki/sources/legacy.json"
-    path.write_text(
-        json.dumps([{"page": 7, "content": "Retained timeout: 42 seconds.", "images": []}])
-    )
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
-        "old-export", {"type": "long_pdf", "name": "Legacy", "doc_name": "legacy"}
-    )
-
-    def inspect(tree, result):
-        row = result["evidence"][0]
-        assert "42 seconds" in row["text"]
-        assert row["location"]["kind"] == "saved_export"
-        assert "page" not in row["location"]
-        assert "version_id" not in row["reference"]
-        assert tree["status"] == "legacy_saved"
-        return "42 seconds, from the retained export; physical PDF position unavailable."
-
-    model_service.chat_response = original_source_answer(inspect)
-    for operation in (ask_question, continue_conversation):
-        result = asyncio.run(operation(kb_dir, "What timeout was retained?"))
-        assert result.status == "completed", result
-    assert len(model_service) == 8  # Only question/conversation requests; no migration model calls.
-
-
-def test_query_reconstructs_basic_ranges_when_saved_index_is_missing(
-    kb_dir, tmp_path, model_service
-):
-    from openkb.state import HashRegistry
-    from tests.http_model_fixture import original_source_answer
 
     original = tmp_path / "pressure.md"
     original.write_text("The threshold is 37 kPa.")
     result = import_document(kb_dir, original)
-    entry = HashRegistry(kb_dir / ".openkb/hashes.json").get(result.source_id)
-    (kb_dir / ".openkb/source-store/navigation" / (entry["navigation_id"] + ".json")).unlink()
-    before = len(model_service)
-
-    def inspect(tree, evidence):
-        assert tree["status"] == "degraded"
-        assert "37 kPa" in evidence["evidence"][0]["text"]
-        return "37 kPa."
-
-    model_service.chat_response = original_source_answer(inspect)
-    assert asyncio.run(ask_question(kb_dir, "What is the threshold?")).status == "completed"
-    assert len(model_service) - before == 4
+    nav = source_status(kb_dir, result.source_id)["navigation"]
+    legacy = {
+        key: nav[key]
+        for key in (
+            "source_id",
+            "version",
+            "parse",
+            "profile",
+            "status",
+            "reason",
+            "positions",
+            "usage",
+            "nodes",
+        )
+    }
+    legacy["schema"] = 2
+    identity = content_id(legacy)
+    path = kb_dir / ".openkb/source-store/navigation" / (identity + ".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(legacy))
+    registry = HashRegistry(kb_dir / ".openkb/hashes.json")
+    entry = registry.get(result.source_id)
+    registry.add(result.source_id, {**entry, "navigation_id": identity})
+    database = kb_dir / ".openkb/pageindex.db"
+    database.unlink()
+    requests = len(model_service)
+    with pytest.raises(ValueError, match="PageIndex"):
+        asyncio.run(ask_question(kb_dir, "What is the threshold?"))
+    assert len(model_service) == requests
+    assert not database.exists()
+    assert json.loads(path.read_text()) == legacy
 
 
 def test_pdf_threshold_does_not_change_native_query_route(kb_dir, tmp_path, model_service):

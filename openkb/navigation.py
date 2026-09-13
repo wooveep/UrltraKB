@@ -7,12 +7,11 @@ from importlib.metadata import version as package_version
 
 from openkb.evidence import Evidence, ParseStore
 from openkb.implementation import module_revision
-from openkb.locks import atomic_write_json
 from openkb.processing import (
     processing_checkpoint,
     validate_usage,
 )
-from openkb.sources import SourceStore, content_id, read_object
+from openkb.sources import SourceStore, content_id
 
 
 def _location_rows(source, parsed):
@@ -31,63 +30,51 @@ def _location_rows(source, parsed):
 def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 200:
         raise ValueError("Invalid navigation window")
-    store = SourceStore(kb_dir)
-    root = store.owned_path(store.root / "navigation")
-    if identity is None:
-        from openkb.state import HashRegistry
+    from openkb.navigation_tree import validate_nodes
+    from openkb.pageindex_store import PageIndexUnavailable, load_nodes, saved_indexes
+    from openkb.sources import valid_id
+    from openkb.state import HashRegistry
 
+    if identity is None:
         published = HashRegistry(kb_dir / ".openkb/hashes.json").get(source.source_id)
         if published and published.get("source_version") == source.id:
             identity = published.get("navigation_id")
-        if identity is None:
-            pointer = store.owned_path(root / "latest" / f"{source.id}.json")
-            if not pointer.exists():
-                return None
-            selected = read_object(pointer)
-            if set(selected) != {"navigation"}:
-                raise ValueError("Invalid navigation pointer")
-            identity = selected["navigation"]
-    from openkb.sources import valid_id
-
-    record = read_object(store.owned_path(root / f"{valid_id(identity)}.json"))
+    records = saved_indexes(kb_dir, identity=identity, version=source.id)
+    if not records:
+        if identity is not None:
+            raise PageIndexUnavailable("PageIndex published source index is unavailable")
+        return None
+    identity, record = next(iter(records.items()))
     if (
-        set(record) - {"nodes", "schema"}
-        != {"source_id", "version", "parse", "profile", "status", "reason", "positions", "usage"}
+        set(record)
+        != {
+            "schema",
+            "source_id",
+            "version",
+            "parse",
+            "profile",
+            "status",
+            "reason",
+            "usage",
+            "pageindex",
+        }
+        or type(record["schema"]) is not int
+        or record["schema"] != 1
         or content_id(record) != identity
-        or record.get("version") != source.id
-        or record.get("source_id") != source.source_id
-        or not isinstance(record.get("status"), str)
+        or record["version"] != source.id
+        or record["source_id"] != source.source_id
+        or not isinstance(record["status"], str)
         or record["status"] not in {"basic", "enhanced", "degraded"}
-        or (record.get("reason") is not None and not isinstance(record["reason"], str))
+        or (record["reason"] is not None and not isinstance(record["reason"], str))
     ):
-        raise ValueError("Navigation identity mismatch")
+        raise ValueError("PageIndex navigation identity mismatch")
     valid_id(record["profile"])
     parsed = ParseStore(kb_dir).load(valid_id(record["parse"]))
     if parsed.input_key != source.input_key:
-        raise ValueError("Navigation parsing identity mismatch")
-    rows = record["positions"]
-    expected = _location_rows(source, parsed)
-    if not isinstance(rows, list) or len(rows) != len(expected):
-        raise ValueError("Invalid navigation coverage")
-    for row, original in zip(rows, expected):
-        if (
-            not isinstance(row, dict)
-            or {key: row.get(key) for key in original} != original
-            or set(row) - original.keys() - {"title", "summary", "parents"}
-            or any(key in row and not isinstance(row[key], str) for key in ("title", "summary"))
-            or not isinstance(row.get("parents", []), list)
-            or any(
-                type(parent) is not int or not 1 <= parent <= len(rows)
-                for parent in row.get("parents", [])
-            )
-        ):
-            raise ValueError("Invalid navigation position")
-    if "nodes" in record:
-        from openkb.navigation_tree import validate_nodes
-
-        if type(record.get("schema")) is not int or record["schema"] != 2:
-            raise ValueError("Invalid navigation schema")
-        validate_nodes(record["nodes"], len(rows))
+        raise ValueError("PageIndex navigation parsing identity mismatch")
+    rows = _location_rows(source, parsed)
+    record["nodes"] = load_nodes(kb_dir, record["pageindex"])
+    validate_nodes(record["nodes"], len(rows))
     validate_usage(record["usage"])
     return {
         **record,
@@ -163,28 +150,26 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 "dispatch": module_revision("openkb.execution_receipt"),
                 "budget": module_revision("openkb.processing"),
                 "pageindex": package_version("pageindex"),
+                "pageindex_store": module_revision("openkb.pageindex_store"),
+                "pageindex_bindings": module_revision("openkb.pageindex_bindings"),
                 "endpoint": content_id(getattr(bundle, "base_url", None)),
                 "headers": content_id(getattr(bundle, "extra_headers", None)),
             }
         )
-        cache = store.owned_path(
-            store.root
-            / "navigation"
-            / "prepared"
-            / f"{content_id([source.id, parsed.id, profile])}.json"
-        )
-        if cache.exists():
-            try:
-                identity = read_object(cache)["navigation"]
+        from openkb.pageindex_store import indexed_reader, saved_indexes
+
+        try:
+            candidates = saved_indexes(kb_dir, version=source.id, parse=parsed.id, profile=profile)
+            if candidates:
+                identity = next(iter(candidates))
                 saved = read_navigation(kb_dir, source, identity=identity, limit=200)
-                # Compiler receives the full range map even when public reads paginate.
+                indexed_reader(kb_dir, source, parsed, saved)
                 saved["positions"] = _location_rows(source, parsed)
                 return saved
-            except (FileNotFoundError, KeyError, ValueError):
-                # This lookup is disposable. Rebuild from validated immutable parsing.
-                pass
+        except (FileNotFoundError, KeyError, ValueError):
+            pass  # Explicit processing may replace a damaged database generation.
         record = {
-            "schema": 2,
+            "schema": 1,
             "source_id": source.source_id,
             "version": source.id,
             "parse": parsed.id,
@@ -227,10 +212,12 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 if run is not None:
                     record["usage"] = run.finish(budget)
                 budget.on_observation = previous_observer
-        identity = content_id(record)
-        atomic_write_json(store.owned_path(store.root / "navigation" / f"{identity}.json"), record)
-        atomic_write_json(cache, {"navigation": identity})
-        return {**record, "id": identity}
+        from openkb.pageindex_store import save_index
+
+        identity = save_index(kb_dir, source, parsed, record)
+        saved = read_navigation(kb_dir, source, identity=identity)
+        saved["positions"] = record["positions"]
+        return saved
 
 
 def navigation_capabilities(record):

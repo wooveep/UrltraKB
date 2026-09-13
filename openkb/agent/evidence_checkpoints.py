@@ -25,6 +25,9 @@ def compilation_profile(settings, bundle):
             "compilation_omissions": module_revision("openkb.compilation_omissions"),
             "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
             "evidence_reader": module_revision("openkb.evidence"),
+            "pageindex_reader": module_revision("openkb.pageindex_evidence"),
+            "pageindex_store": module_revision("openkb.pageindex_store"),
+            "pageindex_bindings": module_revision("openkb.pageindex_bindings"),
             "evidence_context": module_revision("openkb.evidence_context"),
             "implementation": {
                 name: module_revision("openkb.agent." + name)

@@ -10,14 +10,18 @@ from openkb.sources import SourceStore
 
 def test_cleanup_preserves_cited_versions_and_shared_assets(kb_dir, tmp_path, model_service):
     from openkb.application.source_cleanup import cleanup_history, preview_history_cleanup
+    from openkb.application.source_history import source_status
+    from tests.test_pageindex_source_storage import collection
 
     original = tmp_path / "notes.md"
     original.write_text("First version: keep the cited timeout of 42 seconds.")
     first = import_document(kb_dir, original)
+    first_index = source_status(kb_dir, first.source_id)["navigation"]["pageindex"]["doc_id"]
     parsed = ParseStore(kb_dir).load(first.parse_id)
     reference = Evidence(first.source_id, first.input_version, parsed.id, parsed.blocks[0].id)
     original.write_text("Second version: separate shared input.")
     second = import_document(kb_dir, original)
+    second_index = source_status(kb_dir, second.source_id)["navigation"]["pageindex"]["doc_id"]
     independent = tmp_path / "independent.md"
     independent.write_text(original.read_text())
     other = import_document(kb_dir, independent)
@@ -32,6 +36,11 @@ def test_cleanup_preserves_cited_versions_and_shared_assets(kb_dir, tmp_path, mo
     assert current.input_version not in preview.versions
     assert other.input_version not in preview.versions
     cleanup_history(kb_dir, preview.id)
+    with collection(kb_dir) as documents:
+        retained = {row["doc_id"] for row in documents.list_documents()}
+        assert second_index not in retained
+        assert first_index in retained
+        assert documents.get_page_content(first_index, "1")[0]["content"].endswith("42 seconds.")
     assert "42 seconds" in read_source_evidence(kb_dir, reference, max_chars=100).text
     store = SourceStore(kb_dir)
     assert store.original(store.version(other.input_version)).read_text() == independent.read_text()
@@ -79,3 +88,38 @@ def test_cleanup_protects_saved_conversation_citations_and_preview_races(
     assert old.input_version not in after.versions
     assert old.parse_id not in after.parses
     assert not any(old.input_version in name for name in after.files)
+
+
+def test_cleanup_preview_covers_sdk_companion_files(kb_dir, tmp_path, model_service, monkeypatch):
+    from pageindex.collection import Collection
+
+    from openkb.application.source_cleanup import cleanup_history, preview_history_cleanup
+    from openkb.application.source_history import source_status
+
+    original = tmp_path / "notes.md"
+    original.write_text("Old material.")
+    first = import_document(kb_dir, original)
+    doc_id = source_status(kb_dir, first.source_id)["navigation"]["pageindex"]["doc_id"]
+    original.write_text("Current material.")
+    assert import_document(kb_dir, original).knowledge_compilation == "completed"
+    before = preview_history_cleanup(kb_dir)
+    companion = kb_dir / ".openkb/files/default" / doc_id / "unreviewed.txt"
+    companion.parent.mkdir(parents=True)
+    companion.write_text("Review this managed companion before cleanup.")
+    with pytest.raises(ValueError, match="changed"):
+        cleanup_history(kb_dir, before.id)
+    after = preview_history_cleanup(kb_dir)
+    assert companion.relative_to(kb_dir).as_posix() in after.files
+    delete = Collection.delete_document
+
+    def failed_delete(collection, identity):
+        delete(collection, identity)
+        raise OSError("Interrupted SDK deletion")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Collection, "delete_document", failed_delete)
+        with pytest.raises(OSError, match="Interrupted SDK deletion"):
+            cleanup_history(kb_dir, after.id)
+    assert companion.read_text() == "Review this managed companion before cleanup."
+    cleanup_history(kb_dir, preview_history_cleanup(kb_dir).id)
+    assert not companion.parent.exists()

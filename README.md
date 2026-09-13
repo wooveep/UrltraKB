@@ -142,16 +142,19 @@ See the [desktop guide](docs/desktop.md) for daily workflows, configuration, wat
   <img src="assets/openkb-architecture.webp" alt="OpenKB Architecture: from raw documents (markitdown / PageIndex) through LLM wiki compilation to the wiki/ foundation, powering query/chat, the Skill Factory, and future generators" width="900" />
 </div>
 
-### Short vs Long Document Handling
+### Native Document Processing
 
-|               | Short documents            | Long documents (PDF ≥ 20 pages)    |
+|               | Text and Office documents | PDF documents |
 | ------------- | -------------------------- | ---------------------------------- |
-| **Convert**   | markitdown → Markdown      | PageIndex → tree index + summaries |
-| **Images**    | Extracted inline (pymupdf) | Extracted by PageIndex             |
-| **LLM reads** | Full text                  | Document trees                     |
-| **Result**    | summary + concepts         | summary + concepts                 |
+| **Parse**     | Native text, paragraphs, cells and slide objects | Native PDF text and physical pages |
+| **Index**     | PageIndex tree and original ranges in `pageindex.db` | PageIndex tree and original ranges in `pageindex.db` |
+| **Compile**   | Bounded original evidence → verified knowledge | Bounded original evidence → verified knowledge |
 
-Short documents are read in full by the LLM. Long PDFs are processed by [PageIndex](https://github.com/VectifyAI/PageIndex) into a hierarchical tree index. The LLM reads the tree instead of the full text, enabling accurate and scalable retrieval for long documents.
+All supported documents receive a PageIndex database index before knowledge compilation.
+Facts and source-backed answers read original ranges through the local PageIndex collection.
+The database is stored at `.openkb/pageindex.db`; the release does not support JSON
+navigation indexes. See [source indexing and citations](docs/document-processing.md#source-indexing-and-original-citations).
+
 
 ### Knowledge Compilation
 

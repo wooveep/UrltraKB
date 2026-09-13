@@ -6,7 +6,8 @@ import json
 import re
 from dataclasses import asdict
 
-from openkb.evidence import Evidence, ParseStore, complete_read_bound
+from openkb.evidence import Evidence, complete_read_bound
+from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
 from openkb.sources import content_id
 
@@ -111,7 +112,7 @@ def facts_fit(units, limits, model):
 
 def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     """Every nonempty block is covered in order; large blocks retain exact spans."""
-    reader = ParseStore(kb_dir).reader(source, parsed)
+    reader = indexed_reader(kb_dir, source, parsed, navigation)
     from openkb.navigation_tree import block_hints
 
     hints = block_hints(navigation) if navigation else {}

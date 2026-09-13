@@ -137,12 +137,21 @@ relationships and declared table headers; formulas are not executed. Undeclared 
 roles remain uncertain. Unsupported slide objects and notes remain explicit omissions
 or original attachments; successful parsing does not prove semantic completeness.
 
-Source indexing is enabled by default without rewriting existing KB configuration.
-`navigation.enabled: false` keeps the complete basic range map and disables paid index
-enhancement. The historical `pageindex_threshold` still loads for compatibility but
-does not choose the new source processing path. Existing short-document Markdown and
-saved PageIndex exports remain readable without a paid migration. Internal range/node
-numbers never acquire physical page precision that the original export did not have.
+Source indexing is enabled by default. Every new index uses the original local
+PageIndex collection and SQLite storage at `.openkb/pageindex.db`. The SDK stores
+its document tree and original block text there; source/version/parse bindings
+and reusable index lookups live in the same database. Facts, generation, verification,
+question and chat read indexed originals through PageIndex's collection API, in
+batches of at most 1,000 native ranges. Native range numbers are mapped back to the
+actual paragraph, cell, slide or physical page before citations are returned.
+
+`navigation.enabled: false` disables paid enhancement while still creating the
+database index with complete basic ranges. A missing or damaged published database
+index requires rebuilding; it does not silently switch to raw parsing or a JSON tree.
+The release does not read, migrate or fall back to
+`.openkb/source-store/navigation/*.json`. The source store still retains immutable
+originals, parsing, assets and usage receipts. Index storage and retrieval use the
+database regardless of document length or the former PDF threshold.
 
 Native structure is preferred. Missing structure and long range summaries may use
 bounded model requests: at most 32 requests, 262144 tokens and 120 seconds for optional
@@ -591,18 +600,18 @@ events expose checkpoint hits. Resuming starts a new bounded run while source
 history retains earlier usage. A completed version is skipped only when its
 compilation profile still matches.
 
-## Optional original navigation
+## Rebuild source navigation
 
-`navigation.enabled` defaults to false. Basic ordered positions remain readable
-after compilation. To enable the pinned local PageIndex enhancement, set
-`navigation.enabled: true` and provide a separate `navigation.processing` mapping
-using the execution fields above. These limits require explicit calibration;
-they do not borrow the document's compilation allowance.
+`navigation.enabled` defaults to true. Optional structure and summary enhancement
+shares the import's bounded execution allowance and finishes before fact analysis.
+Disabling enhancement still saves a complete basic PageIndex database index.
 
-Knowledge publication, settled usage history and the runtime completion receipt
-precede navigation work. Navigation failure or stopping reports a warning and
-retains basic positions. Each navigation attempt records reservations and settled
-usage separately; an interrupted attempt keeps unknown usage visible.
+Each successful generation has an immutable database binding. Continue can reuse a
+valid generation; rebuilding a damaged one creates a fresh document row. Queries bind
+to the published index, so a new unpublished generation cannot replace their evidence.
+The database, managed SDK inputs and binding updates participate in KB mutation recovery.
+History cleanup removes unreferenced database rows and managed inputs together while
+retaining indexes reached by current sources, citations, conversations and proposals.
 
 Rebuild with `openkb --kb-dir KB source rebuild-navigation SOURCE_ID --version VERSION_ID
 --parse PARSE_ID`, the desktop's **重建导航** action, or

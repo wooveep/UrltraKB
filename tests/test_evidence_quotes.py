@@ -40,6 +40,7 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
         assert fact["quote"] == original
     from openkb.agent.evidence_units import source_units
     from openkb.config import resolve_effective_config
+    from openkb.navigation import read_navigation
     from openkb.processing import RequestLimits
     from openkb.sources import SourceStore
 
@@ -48,7 +49,12 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
     settings = resolve_effective_config(kb_dir)[0]
     unit = next(
         source_units(
-            kb_dir, source_version, parsed, RequestLimits.from_config(settings), settings["model"]
+            kb_dir,
+            source_version,
+            parsed,
+            RequestLimits.from_config(settings),
+            settings["model"],
+            navigation=read_navigation(kb_dir, source_version),
         )
     )
     from openkb.agent.evidence_facts import validate_unit

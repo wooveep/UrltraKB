@@ -7,6 +7,25 @@ rebuild cannot silently change the evidence behind an answer. Native pages, para
 cells and slide objects retain their own position types instead of becoming artificial
 PDF pages.
 
+The release stores indexes exclusively in `.openkb/pageindex.db`, through the pinned
+PageIndex `LocalClient.collection().add()` and `SQLiteStorage`. A native parser adapter
+supplies validated structure; standard SDK document rows hold trees and original block
+text. The `openkb_source_indexes` table in that same database binds immutable source,
+version, parse and index identities, and supports prepared-index lookup. Its metadata
+never duplicates the tree or original text. Compiler and question tools use collection
+structure and page-content reads, then restore native coordinates from the bound parse.
+SDK range reads are batched at its 1,000-range limit. There is no JSON index compatibility,
+migration or missing-index fallback. Damaged published data fails validation; explicit
+processing can replace it with a new immutable database generation.
+
+The SDK deduplicates input bytes without considering parsing options. A small managed
+input descriptor identifies each generation, avoiding accidental reuse of a damaged or
+differently parsed row. It contains identities only; the tree and original text are in
+the database. The SDK's managed files are append-only, permitting hardlinked mutation
+backups. Recovery covers its copy-before-parse window, the database and binding insert.
+Usage receipts and immutable original/parse assets retain their existing source-store
+roles; they are not alternate index stores.
+
 Original-range tools also expose exact published image destinations, bound to the
 block's asset identity and checked against the published bytes. Missing, damaged or
 symbolically linked images are unavailable without preventing a text answer. Answer

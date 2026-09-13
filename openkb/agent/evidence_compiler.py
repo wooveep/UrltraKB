@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
-from openkb.evidence import ParseStore
+from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits
 from openkb.progress import progress_scope
 
@@ -29,7 +29,7 @@ def compile_evidence(
     from openkb.lint import list_existing_wiki_targets
 
     limits = RequestLimits.from_config(settings)
-    reader = ParseStore(kb_dir).reader(source, parsed)
+    reader = indexed_reader(kb_dir, source, parsed, navigation)
     checkpoints = CompilationCheckpoints(kb_dir, source, parsed, settings, bundle)
 
     from openkb.agent.evidence_facts import extract_facts
@@ -164,7 +164,7 @@ def compile_evidence(
     from openkb.agent.evidence_dependencies import protect_dependencies
 
     accepted = protect_dependencies(
-        kb_dir, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
+        reader, source, parsed, accepted, facts, settings, limits, checkpoints, bundle
     )
     # Excluded topics withdraw only this source's contribution. A page supported
     # by another source remains intact; stale text from this source cannot stand
