@@ -42,6 +42,15 @@ completion.
 
 > 导入文档，异常的情况，可以丢弃，知识可以缺失，任务不能随意中止与判断失败。
 
+The subsequent accepted requirement also keeps ordinary content exhaustion on the
+normal import completion path: retain a registered, editable source and omission
+notice even when no knowledge can be generated. Users may fill gaps afterward.
+This boundary is not implemented yet; the current no-usable-content behavior
+described below remains a tracked gap, not the target policy. See the
+[repair and small-file validation plan](import-repair-plan.md) for implementation
+order, exact acceptance cases and issue closure conditions. New validation uses
+small fixed files; full large-document reruns are not a prerequisite for this work.
+
 Skipping means excluding unreliable content or candidate knowledge from this import,
 while retaining originals, historical evidence and other sources' contributions.
 Bounded recovery continues independent work. No usable candidate means unfinished
@@ -192,8 +201,9 @@ turns and all request charges remain intact.
 Source links in final answers must be observed in tool evidence or derived from a
 complete binding with its matching source page or snapshot anchor in the same tool
 result. Abbreviated
-paths and invented anchors use the same single replacement allowance as length
-stops. Markdown code examples are not treated as citations. This target check does
+paths and invented anchors use their own bounded citation replacement allowance,
+separate from recovery after length stops. Markdown code examples are not treated
+as citations. This target check does
 not establish that a cited source supports every factual claim; semantic review
 remains separate. Terminal answers use the final response, excluding intermediate
 tool narration.
