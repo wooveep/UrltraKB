@@ -24,6 +24,12 @@ text; OCR is supplementary and may be unavailable. Do not infer unseen image tex
 from an asset path or OCR failure notice. OCR omission markers are status, not source facts.
 An image-only unit may have no textual facts.
 Navigation titles and summaries are selection hints, never factual evidence.
+Original headings can identify a topic or state an explicit fact, but an ambiguous
+organizational label is not a property, classification or behavior of the named subject.
+Do not turn a label followed by a colon and a topic into "the subject is/has the label".
+Retain such wording as a source label when useful, or report no facts for a purely
+organizational heading. Preserve any actual assertion and its scope; do not drop facts
+merely because they occur in a heading.
 Do not infer information absent from the evidence. Return complete JSON, never an ellipsis."""
 
 JSON_FORMAT = {"type": "json_object"}

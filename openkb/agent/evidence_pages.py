@@ -39,6 +39,10 @@ Keep every restriction bound to the exact operation and version named in the sou
 A heading cannot extend a restriction to other operations. If layout and wording conflict,
 preserve the literal claim and state the ambiguity instead of resolving it by inference.
 Do not add plausible safety rationales, requirements, permissions or steps absent from evidence.
+An ambiguous organizational label in an original heading does not establish a property
+or classification of its subject. Keep it as a quoted source label if required, without
+expanding it into a factual sentence or an attribute heading in this contribution.
+An extractor's statement cannot authorize that expansion; verify the original meaning.
 If revision is supplied, correct that candidate using its review and the original evidence.
 You may also return "title" to correct a public title rejected by the review. Use a concise,
 faithful topic label; keep the page identity unchanged.

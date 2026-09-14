@@ -25,6 +25,10 @@ generated part's heading. Repeated parse blocks do not prove repetition in the p
 reject unsupported claims about extraction artifacts or the number of source occurrences.
 The candidate's opening heading renders the public title. Assess its claims independently:
 a correct body does not make an incorrect title supported.
+Check subheadings too: quoting an ambiguous source label in the body does not support
+a new heading or sentence asserting that label as a subject's property or classification.
+Organizational labels and explicit assertions are different; preserve genuine factual
+assertions in source headings, but do not infer an assertion from a colon and topic name.
 Neutral topic labels such as "Startup support" or "Version compatibility" introduce a
 discussion of status; they do not assert that support exists. Accept such labels with a
 faithful body. Explicit assertions such as "Version 6 is supported" must be supported.
