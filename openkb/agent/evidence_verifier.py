@@ -25,6 +25,8 @@ and faithful paraphrases are allowed.
 Each restriction must name its operation within this candidate, without depending on another
 generated part's heading. Repeated parse blocks do not prove repetition in the physical document;
 reject unsupported claims about extraction artifacts or the number of source occurrences.
+Repeated wording in a candidate is not by itself a claim that the source repeats it.
+Judge an actual assertion of source repetition separately from redundant presentation.
 The candidate's opening heading renders the public title. Assess its claims independently:
 a correct body does not make an incorrect title supported.
 Check subheadings too: quoting an ambiguous source label in the body does not support
@@ -66,6 +68,11 @@ add an unsupported premise even without changing a concrete value: check whether
 named category of rules or restrictions actually exists in the supplied source. General
 writing instructions are not evidence that the document contains those categories.
 This does not prohibit actual source statements about preservation or verification.
+Document positions and explicit structural/image bindings are source evidence, distinct
+from processing-status annotations. They may support a faithful description of an
+association even when that description is not a verbatim source caption. Require the
+binding for the particular passage or asset; same-page proximity alone is insufficient.
+Such an association does not establish unseen image contents or a crop's full extent.
 Reject a generator's tour of source topics or description of which material its page
 includes or excludes. Required facts and their necessary context should be stated directly.
 Actual source descriptions of scope remain valid knowledge; distinguish their provenance.

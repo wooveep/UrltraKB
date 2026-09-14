@@ -70,6 +70,12 @@ Check every factual clause, table heading, optional explanation and image descri
   page can support image association without defining a printed label or interpreting
   visual contents. Do not accept a claim that such proven positioning is unavailable
   merely because image understanding is disabled. Ambiguous positions remain unknown.
+  A generated alt/description may faithfully name an explicitly bound source section
+  or caption; it need not equal the asset's original alt text verbatim. Require the
+  association for that exact asset, not merely a nearby heading on the same page.
+  This does not prove unseen visual details or the full extent of a crop. A source
+  picture's original description does not automatically belong to every derived crop;
+  prefer its directly bound original asset when the user requests the original figure.
 - A faithful partial answer may state specific evidence gaps. It must still include the
   relevant requested facts already available; a generic partial-coverage disclaimer does
   not excuse omitting observed matching rows. Do not demand unrelated source material.
