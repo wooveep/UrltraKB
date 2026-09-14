@@ -126,12 +126,25 @@ def plan_topics(
             "coordination": module_revision("openkb.agent.planning_candidates"),
         },
     )
+    all_topics, retained_groups = topics, []
     if resume:
         retained = checkpoints.load_recovery(retained_key, "plan")
         if retained is not None:
-            groups = _validate(retained, topics, entity_types)
-            on_event({"stage": "planning", "topics": len(topics), "cached": True, "retained": True})
-            return groups
+            members = retained.get("members") if isinstance(retained, dict) else None
+            if (
+                not isinstance(members, list)
+                or not all(isinstance(member, str) for member in members)
+                or len(set(members)) != len(members)
+                or not set(members) <= set(topics)
+            ):
+                raise ResponseIncomplete("topic_plan_invalid", "planning")
+            retained_groups = _validate(retained, sorted(members), entity_types)
+            topics = [topic for topic in topics if topic not in members]
+            on_event(
+                {"stage": "planning", "topics": len(members), "cached": True, "retained": True}
+            )
+            if not topics:
+                return retained_groups
 
     def payload(batch):
         return {
@@ -254,7 +267,7 @@ def plan_topics(
         return groups
 
     processing_checkpoint("planning")
-    with progress_scope("planning", len(topics), "topics") as progress:
+    with progress_scope("planning", len(all_topics), "topics") as progress:
         batches = []
         offset = 0
         while offset < len(topics):
@@ -277,7 +290,9 @@ def plan_topics(
         from openkb.agent.planning_candidates import reconcile_candidates
 
         candidates = dict(parallel_batches(batches, plan, limits.concurrency, stage="planning"))
-        ordered = [group for index in sorted(candidates) for group in candidates[index]]
+        ordered = retained_groups + [
+            group for index in sorted(candidates) for group in candidates[index]
+        ]
         groups = reconcile_candidates(
             ordered,
             plan_once,
@@ -298,10 +313,17 @@ def plan_topics(
                 "planning", error.reason, [content_id(topic) for topic in batch]
             )
     groups = list(planned.values())
-    if not failures:
-        retained = {"topics": [{k: v for k, v in group.items() if k != "path"} for group in groups]}
-        _validate(retained, topics, entity_types)
-        checkpoints.save_recovery(retained_key, "plan", retained)
+    # Keep completed members even when another planning window was omitted.
+    # A partial plan is valid workflow progress, never complete topic coverage.
+    members = sorted(member for group in groups for member in group["members"])
+    if len(set(members)) != len(members) or not set(members) <= set(all_topics):
+        raise ResponseIncomplete("topic_coverage_incomplete", "planning")
+    retained = {
+        "topics": [{k: v for k, v in group.items() if k != "path"} for group in groups],
+        "members": members,
+    }
+    _validate(retained, members, entity_types)
+    checkpoints.save_recovery(retained_key, "plan", retained)
     return groups
 
 
