@@ -255,17 +255,7 @@ async def iter_agent_response_events(
         raise ProcessingIncomplete("answer_evidence_unsupported", "answering")
     issues = []
     if not truncated and not empty and not invalid_targets:
-        try:
-            issues = await review_answer(agent, result, run_config=run_config)
-        except ProcessingIncomplete as exc:
-            if exc.reason != "answer_verification_invalid":
-                raise
-            if not _evidence_attempts:
-                raise
-            # An invalid review has no authorized edit scope. Retry that protocol
-            # once with the exact unchanged answer, consuming the same allowance.
-            _evidence_attempts -= 1
-            issues = await review_answer(agent, result, run_config=run_config)
+        issues = await review_answer(agent, result, run_config=run_config)
     evidence_problem = bool(issues)
     if truncated or empty or invalid_targets or evidence_problem:
         allowance = (

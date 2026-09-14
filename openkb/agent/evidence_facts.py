@@ -52,6 +52,7 @@ def validate_unit(unit, item):
             "topic": fact["topic"],
             "statement": fact["statement"],
             "quote": quote,
+            "source_kind": unit["kind"],
             "reference": reference,
             "scope": unit["reference"],
             "context_evidence": [

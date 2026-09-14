@@ -33,6 +33,9 @@ Neutral topic labels such as "Startup support" or "Version compatibility" introd
 discussion of status; they do not assert that support exists. Accept such labels with a
 faithful body. Explicit assertions such as "Version 6 is supported" must be supported.
 Judge required fact coverage by each fact's original quote and supplied source.
+source_kind records only the parsed structure, never a verified semantic role. A paragraph
+may be an organizational label; a heading may state an explicit fact. Check the wording
+and original context independently of the candidate's interpretation or public title.
 A literal source claim remains supported even when it appears under a conflicting heading;
 preserve that wording and describe ambiguity without using the heading to negate the claim.
 Faithful title translations and a neutral common heading above separate tasks are allowed;

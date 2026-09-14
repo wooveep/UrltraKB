@@ -102,6 +102,51 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
         )
 
 
+@pytest.mark.parametrize(
+    "original_text",
+    [
+        "# Reference: auxiliary assembly",
+        "# The auxiliary assembly is isolated",
+        "Reference: auxiliary assembly",
+    ],
+)
+def test_extractor_interpretation_is_not_a_generation_authority(
+    kb_dir, tmp_path, model_service, original_text
+):
+    original = tmp_path / "labels.md"
+    original.write_text(original_text)
+    invented = "The assembly has an independent safety function."
+    observed = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        response = evidence_response(payload)
+        if payload["stage"] == "facts":
+            for unit, output in zip(payload["units"], response["units"], strict=True):
+                output["facts"] = [
+                    {"topic": "Assembly", "statement": invented, "quote": unit["text"]}
+                ]
+        if payload["stage"] in {"generation", "verification"}:
+            observed.append(payload)
+        if payload["stage"] == "generation":
+            response["content"] = original_text
+        return response
+
+    model_service.respond = respond
+    result = import_document(kb_dir, original)
+    assert result.knowledge_compilation == "completed", result
+    assert {p["stage"] for p in observed} == {"generation", "verification"}
+    for payload in observed:
+        assert invented not in json.dumps(payload)
+        assert payload["facts"][0]["quote"] == original_text
+        assert payload["facts"][0]["source_kind"] == (
+            "heading" if original_text.startswith("#") else "paragraph"
+        )
+    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert pages and original_text in pages[0].read_text()
+    assert invented not in pages[0].read_text()
+
+
 def test_unsupported_draft_is_corrected_from_feedback_and_verified_before_publication(
     kb_dir, tmp_path, model_service
 ):

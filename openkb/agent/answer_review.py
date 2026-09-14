@@ -63,6 +63,10 @@ later parenthetical aliases, categories or equivalence. Check those clauses inde
 Copy short contiguous substrings verbatim. For metadata, copy the relevant field/value
 with its original structure; never reconstruct an object, move a nested field, remove
 intervening fields, or add closing braces to an excerpt. Use separate quotes when needed.
+For structured metadata, prefer a typed leaf reference instead of quoting serialized JSON:
+{"observation":"o1","path":["coverage","complete"],"value":false}.
+path traverses the exact observed object with string keys and integer list indices; value
+must equal that scalar exactly (including its type). Do not reconstruct whole objects.
 Quoted operational metadata may support statements about retrieval or coverage, but
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
@@ -76,6 +80,11 @@ Return only JSON {"verdict":"supported|unsupported|uncertain", "units":[
 {"kind":"unsupported|missing|citation|image", "units":["u1"], "claim":"exact draft substring",
 "reason":"specific discrepancy and the evidence needed or already observed"}]}.
 Include each supplied unit ID exactly once. supported units require nonempty support.
+Only the supplied units need per-unit judgments in this request. The full answer remains
+context: independently check whole-question coverage against ALL observations, including
+every requested matching row, even when other answer units are reviewed in another batch.
+Return missing coverage as kind=missing with units: []; never mark an unassigned unit.
+observation_order retains the original read order, including repeated identical reads.
 For each unsupported/uncertain unit, include an issue with a nonempty claim copied
 from that unit. Include the affected unsupported/uncertain unit IDs in each issue;
 a claim crossing units must identify every affected unit. Do not select supported units.
@@ -137,13 +146,23 @@ def _payload(agent, result):
                 "output": {"image_understanding_enabled": enabled},
             }
         )
+    unique, order, seen = [], [], {}
+    for index, observation in enumerate(observations, 1):
+        # Only byte-identical tool records share a representation. Keep the read
+        # sequence; changed output or arguments always remain separate evidence.
+        key = json.dumps(observation, ensure_ascii=False)
+        if key not in seen:
+            seen[key] = f"o{index}"
+            unique.append({"id": seen[key], **observation})
+        order.append(seen[key])
     return {
         "stage": "answer_verification",
         "question": questions[-1] if questions else "",
         "prior_questions": questions[:-1],
         "answer": answer,
         "units": [{"id": u.id, "text": u.text} for u in answer_units(answer)],
-        "observations": [{"id": f"o{i}", **o} for i, o in enumerate(observations, 1)],
+        "observations": unique,
+        "observation_order": order,
     }
 
 
@@ -152,6 +171,39 @@ async def review_answer(agent, result, *, run_config=None):
     payload = _payload(agent, result)
     if payload is None:
         return []
+    issues = []
+    retry = True
+    for batch in _batches(payload["units"]):
+        request = {**payload, "units": batch}
+        try:
+            located = await _review_once(agent, request, run_config=run_config)
+        except ProcessingIncomplete as exc:
+            if exc.reason != "answer_verification_invalid" or not retry:
+                raise
+            # One protocol recovery for this answer. Valid earlier batches stay
+            # reviewed; an invalid response never grants permission to edit.
+            retry = False
+            located = await _review_once(agent, request, run_config=run_config)
+        for issue in located:
+            if issue not in issues:
+                issues.append(issue)
+    return issues
+
+
+def _batches(units):
+    batch, chars = [], 0
+    for unit in units:
+        if batch and (len(batch) >= 8 or chars + len(unit["text"]) > 6000):
+            yield batch
+            batch, chars = [], 0
+        # A single indivisible unit stays intact, with its exact correction ID.
+        batch.append(unit)
+        chars += len(unit["text"])
+    if batch:
+        yield batch
+
+
+async def _review_once(agent, payload, *, run_config=None):
     processing_checkpoint("answering")
     reviewer = agent.clone(
         name="answer-verifier",
@@ -237,11 +289,15 @@ def _check_units(reviews, payload, issues, invalid):
                 not isinstance(support, dict)
                 or not isinstance(support.get("observation"), str)
                 or support["observation"] not in observations
-                or not isinstance(support.get("quote"), str)
-                or not support["quote"].strip()
             ):
                 raise invalid
             output = observations[support["observation"]]
+            if "path" in support or "value" in support:
+                if not _matches_leaf(output, support):
+                    raise invalid
+                continue
+            if not isinstance(support.get("quote"), str) or not support["quote"].strip():
+                raise invalid
             # JSON tool results preserve their structure; quote scalar text values or
             # their exact serialized metadata, never combine separate observations.
             texts = [json.dumps(output, ensure_ascii=False), *observation_strings(output)]
@@ -276,6 +332,26 @@ def _check_units(reviews, payload, issues, invalid):
     if covered != rejected:
         raise invalid
     return located
+
+
+def _matches_leaf(output, support):
+    path = support.get("path")
+    if "value" not in support or not isinstance(path, list) or "quote" in support:
+        return False
+    for key in path:
+        if isinstance(output, dict) and isinstance(key, str) and key in output:
+            output = output[key]
+        elif isinstance(output, list) and type(key) is int and 0 <= key < len(output):
+            output = output[key]
+        else:
+            return False
+    value = support["value"]
+    return (
+        not isinstance(value, (dict, list))
+        and type(value) is type(output)
+        and value == output
+        and (not isinstance(value, str) or bool(value.strip()))
+    )
 
 
 async def require_supported_answer(agent, result, *, run_config=None):
