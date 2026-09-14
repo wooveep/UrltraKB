@@ -4,6 +4,7 @@ import json
 import re
 from collections import deque
 from dataclasses import dataclass, replace
+from decimal import Decimal, InvalidOperation
 
 from agents import Agent, ModelSettings, Runner
 
@@ -30,7 +31,14 @@ class InvalidReview(ProcessingIncomplete):
 
     def __init__(self, feedback=None):
         super().__init__("answer_verification_invalid", "answering")
-        self.feedback = feedback or {"problem": "invalid_review_shape"}
+        # Feedback is diagnostic data. Preserve a rejected decimal's literal
+        # instead of rounding it while serializing the next bounded request.
+        self.feedback = json.loads(
+            json.dumps(
+                feedback or {"problem": "invalid_review_shape"},
+                default=lambda number: {"json_number_literal": str(number)},
+            )
+        )
 
 
 INSTRUCTIONS = """Independently verify a knowledge-base answer against observed evidence.
@@ -65,6 +73,11 @@ Check every factual clause, table heading, optional explanation and image descri
 - A faithful partial answer may state specific evidence gaps. It must still include the
   relevant requested facts already available; a generic partial-coverage disclaimer does
   not excuse omitting observed matching rows. Do not demand unrelated source material.
+- Processing-only commentary belongs in an answer only when requested or needed to explain
+  a gap affecting the requested facts. Reject an unsolicited parser-status note or raw
+  coordinate report as a located issue even when its metadata is accurate. Positioning
+  can still support figure selection internally. Preserve relevant source quotations,
+  including original wording about processing; distinguish provenance, not keywords.
 
 Review EVERY supplied unit, including introductory and closing prose. For a supported unit,
 give exact quotations from identified observations for ALL its factual clauses. A name
@@ -76,9 +89,11 @@ intervening fields, or add closing braces to an excerpt. Use separate quotes whe
 For structured metadata, prefer a typed value reference instead of quoting serialized JSON:
 {"observation":"o1","path":["coverage","complete"],"value":false}.
 path traverses the exact observed object with string keys and integer list indices; value
-must equal that observed value exactly, including types at every nested level. Coordinate
-vectors and asset lists may be referenced as complete arrays. Choose the smallest complete
-field needed; do not remove fields or elements from an object or array.
+must equal that observed value exactly, including JSON types at every nested level.
+Numerically identical finite JSON numbers such as 115 and 115.0 are equivalent; strings,
+booleans, rounded or approximate numbers are not substitutes. List indices must be integers.
+Coordinate vectors and asset lists may be referenced as complete arrays. Choose the smallest
+complete field needed; do not remove fields or elements from an object or array.
 Quoted operational metadata may support statements about retrieval or coverage, but
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
@@ -286,9 +301,14 @@ async def _review_once(agent, payload, *, run_config=None):
     if answer_truncated(review):
         raise OutputTruncated("answering")
     try:
-        value = json.loads(json_text(review.final_output), object_pairs_hook=unique_fields)
+        value = json.loads(
+            json_text(review.final_output),
+            object_pairs_hook=unique_fields,
+            parse_float=Decimal,
+            parse_constant=Decimal,
+        )
         value = unpack_review(value, identities)
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, InvalidOperation):
         raise invalid from None
     if (
         not isinstance(value, dict)
@@ -382,7 +402,9 @@ def _check_units(reviews, payload, issues, invalid):
         ):
             raise invalid
         covered.update(supplied)
-        located.append({**issue, "units": supplied})
+        located.append(
+            {key: issue[key] for key in ("kind", "claim", "reason")} | {"units": supplied}
+        )
     if covered != rejected:
         raise invalid
     return located
@@ -403,6 +425,12 @@ def _matches_value(output, support):
 
 
 def _same_json(value, original):
+    if type(value) in (int, float, Decimal) and type(original) in (int, float):
+        # The observation's serialized number is authoritative. Decimal keeps
+        # the review's literal intact; binary-float decoding could round a
+        # different number to this value before it reaches the comparison.
+        left, right = Decimal(str(value)), Decimal(str(original))
+        return left.is_finite() and right.is_finite() and left == right
     if type(value) is not type(original):
         return False
     if isinstance(value, list):

@@ -58,10 +58,13 @@ def _target(link):
 
 def observation_strings(value):
     if isinstance(value, str):
+        # A JSON-looking scalar is still observed text. Decoding it may expose
+        # nested references, but must not erase its literal quotable wording.
+        yield value
         try:
             decoded = json.loads(value)
         except (ValueError, TypeError):
-            yield value
+            pass
         else:
             if decoded != value:
                 yield from observation_strings(decoded)

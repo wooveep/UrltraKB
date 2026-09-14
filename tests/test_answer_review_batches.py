@@ -167,6 +167,7 @@ async def test_invalid_protocol_does_not_spend_the_semantic_correction(kb_dir, m
     [
         None,
         "array",
+        "array_number_form",
         "array_wrong_type",
         "wrong_type",
         "wrong_path",
@@ -192,8 +193,10 @@ async def test_metadata_support_binds_an_exact_typed_value(kb_dir, model_service
             support["path"] = ["complete"]
         elif damage == "array":
             support.update(path=["blocks"], value=metadata["blocks"])
-        elif damage == "array_wrong_type":
+        elif damage == "array_number_form":
             support.update(path=["blocks"], value=[{"characters": 42.0}])
+        elif damage == "array_wrong_type":
+            support.update(path=["blocks"], value=[{"characters": "42"}])
         elif damage == "partial_object":
             support.update(path=[], value={"coverage": metadata["coverage"]})
         elif damage == "quote_and_path":
@@ -204,8 +207,97 @@ async def test_metadata_support_binds_an_exact_typed_value(kb_dir, model_service
 
     model_service.answer_review_response = review
     result = await continue_conversation(kb_dir, "Is source coverage complete?")
-    assert (result.status == "completed") == (damage in {None, "array"}), result
-    assert len(reviews) == (1 if damage in {None, "array"} else 2)
+    valid = damage in {None, "array", "array_number_form"}
+    assert (result.status == "completed") == valid, result
+    assert len(reviews) == (1 if valid else 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "changed_coordinate",
+        "boolean",
+        "string_index",
+        "large_rounded",
+        "rounded_wire_integer",
+        "rounded_wire_fraction",
+        "nonfinite",
+    ],
+)
+async def test_coordinate_support_preserves_exact_numbers_across_json_number_forms(
+    kb_dir, model_service, damage
+):
+    metadata = {"figures": [{"bbox": [115.0, 261.5, 228.5, 278.5]}]}
+    claimed = 115
+    if damage == "large_rounded":
+        metadata["figures"][0]["bbox"][0] = 9007199254740993
+        claimed = 9007199254740992.0
+    elif damage == "nonfinite":
+        metadata["figures"][0]["bbox"][0] = claimed = float("inf")
+    elif damage == "rounded_wire_integer":
+        metadata["figures"][0]["bbox"][0] = 9007199254740992
+    answer = f"The figure starts at x={claimed}."
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", json.dumps(metadata))
+    model_service.chat_response = _reader(answer)
+    model_service.chat_without_tools = True
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        support = {
+            "observation": "o1",
+            "path": ["figures", 0, "bbox"],
+            "value": [claimed, 261.5, 228.5, 278.5],
+        }
+        if damage == "changed_coordinate":
+            support["value"][0] = 115.00001
+        elif damage == "boolean":
+            support["value"][0] = True
+        elif damage == "string_index":
+            support["path"][1] = "0"
+        value = answer_review_response(payload)
+        value["units"][0]["support"] = [support]
+        if damage in {"rounded_wire_integer", "rounded_wire_fraction"}:
+            support["value"][0] = "WIRE_NUMBER"
+            literal = (
+                "9007199254740993.0"
+                if damage == "rounded_wire_integer"
+                else "115.00000000000000001"
+            )
+            return {
+                "role": "assistant",
+                "content": json.dumps(value).replace('"WIRE_NUMBER"', literal),
+            }
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "Where does the figure start?")
+    assert (result.status == "completed") == (damage is None), result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invented_closing_brace", [False, True])
+async def test_review_can_quote_observed_json_text_without_reconstructing_its_structure(
+    kb_dir, model_service, invented_closing_brace
+):
+    metadata = {"context": json.dumps({"coverage": {"status": "partial", "missing": 2}})}
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", json.dumps(metadata))
+    model_service.chat_response = _reader("Coverage is partial.")
+    model_service.chat_without_tools = True
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        quote = '"coverage": {"status": "partial"'
+        if invented_closing_brace:
+            quote += "}"
+        value = answer_review_response(payload)
+        value["units"][0]["support"] = [{"observation": "o1", "quote": quote}]
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "What coverage status was observed?")
+    assert (result.status == "completed") != invented_closing_brace, result
 
 
 @pytest.mark.asyncio
