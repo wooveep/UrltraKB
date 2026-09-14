@@ -15,6 +15,16 @@ windows by context_start and follow next until context_complete before interpret
 With context_format=legacy_display (or absent), context retains the legacy mixed display;
 do not guess that its parser annotations are source quotations."""
 
+CONTEXT_INSTRUCTIONS += """ Optional image_relations record original asset bytes, full
+normalized display frames (orientation/alpha/encoding may change), and assets returned
+by OCR for each frame. source_alt is author-supplied alternative text for the original;
+it describes that image, not every OCR output. OCR image labels such as 'Original figure'
+are reader-generated display labels, not an author's selection of the original image.
+Image provenance can establish whole-original or whole-frame extent without interpreting
+visual contents; it does not establish the extent or contents of other OCR outputs.
+Use these relationships to select an original/display frame when asked for its figure,
+without narrating processing metadata unless it is relevant to the user's question."""
+
 
 def has_structured_context(value):
     """Check projected evidence before adding provenance or interning contexts."""
@@ -32,12 +42,17 @@ def validate_context_data(value):
     if value is None:
         return
     invalid = ValueError("Invalid structured source context")
-    if not isinstance(value, dict) or set(value) != {
-        "source_excerpts",
-        "structure",
-        "reader_status",
-    }:
+    required = {"source_excerpts", "structure", "reader_status"}
+    if (
+        not isinstance(value, dict)
+        or not required <= set(value)
+        or set(value) - required - {"image_relations"}
+    ):
         raise invalid
+    if "image_relations" in value:
+        from openkb.image_provenance import validate_image_relations
+
+        validate_image_relations(value["image_relations"])
     excerpts, structure, status = (
         value["source_excerpts"],
         value["structure"],
@@ -73,6 +88,8 @@ def validate_context_data(value):
                 raise invalid
         elif type(item) is not int or item < (0 if key == "list_level" else 1):
             raise invalid
+    if status == {} and "image_relations" in value:
+        return
     if (
         set(status) != {"header_role"}
         or not isinstance(status["header_role"], str)

@@ -24,6 +24,7 @@ EVIDENCE_PROVENANCE = {
         "source_excerpts": "parsed_source_text",
         "structure": "document_structure",
         "reader_status": "reader_metadata_not_author_statements",
+        "image_relations": "recorded_asset_derivations;_source_alt_is_author_supplied",
     },
     "context_format": "structured_json_uses_context_data_roles;_legacy_display_mixes_roles",
     "location": "document_position",
@@ -147,6 +148,9 @@ class BlockDraft:
             raise ValueError("Invalid block assets")
         for item in self.assets:
             valid_id(item)
+        from openkb.image_provenance import validate_image_bindings
+
+        validate_image_bindings(self.context_data, self.assets)
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from agents import function_tool
 from openkb.agent.answer_references import short_citation
 from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, ParseStore, complete_read_bound
 from openkb.evidence_snapshot import EvidenceSnapshot
+from openkb.image_provenance import image_origin
 from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
 from openkb.navigation_tree import snapshot_name
@@ -202,6 +203,7 @@ def source_tools(kb_dir):
                         "source_reference": row["reference"],
                         "location": row["location"],
                         "association": "source_block_only",
+                        **image_origin(block.context_data, asset),
                     }
                     for asset in block.assets
                     if asset in images

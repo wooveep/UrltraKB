@@ -15,10 +15,16 @@ from openkb.progress import progress_scope
 from openkb.sources import SourceStore, content_id
 
 
-def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Original image"):
+def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text=None, relations=None):
     original = store.put_bytes(content)
     assets = [original]
-    text = f"![{alt_text}](asset:{original})"
+    label = alt_text or "Original image"
+    text = f"![{label}](asset:{original})"
+    relation: dict[str, Any] = {"original_asset": original, "frames": []}
+    if alt_text is not None:
+        relation["source_alt"] = alt_text
+    if relations is not None:
+        relations.append(relation)
     import pymupdf
     from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -44,8 +50,14 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                 preview = store.put_bytes(rendered)
                 if preview not in assets:
                     assets.append(preview)
+                frame_relation: dict[str, Any] = {
+                    "number": index + 1,
+                    "asset": preview,
+                    "ocr_assets": [],
+                }
+                relation["frames"].append(frame_relation)
                 if index == 0:
-                    text = f"![{alt_text}](asset:{preview})"
+                    text = f"![{label}](asset:{preview})"
                 if not ocr_candidate(background):
                     quality.append(
                         {"status": "verified", "reason": "docx_image_ocr_skipped:" + original}
@@ -72,6 +84,9 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text="Origin
                 previous_context = None
                 for block in blocks:
                     assets.extend(asset for asset in block.assets if asset not in assets)
+                    frame_relation["ocr_assets"].extend(
+                        asset for asset in block.assets if asset not in frame_relation["ocr_assets"]
+                    )
                     if block.kind == "image" and re.fullmatch(
                         r"!\[[^\]]*\]\(asset:[0-9a-f]{64}\)", block.text
                     ):
