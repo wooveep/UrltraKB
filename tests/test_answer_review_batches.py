@@ -450,6 +450,67 @@ async def test_protocol_feedback_repairs_only_the_review_binding(kb_dir, model_s
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "damage", ["wrapper", "real_wrapper", "nested", "string_index", "persistent"]
+)
+async def test_metadata_path_feedback_identifies_the_failed_step_without_guessing(
+    kb_dir, model_service, damage
+):
+    source = {"figures": [{"bbox": [11.0, 22.0]}]}
+    if damage == "real_wrapper":
+        source["output"] = {"note": "a real source field"}
+    answer = "The figure starts at 11."
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", json.dumps(source))
+    model_service.chat_response = _reader(answer)
+    model_service.chat_without_tools = True
+    reviews = []
+    correct = ["figures", 0, "bbox", 0]
+    wrong = {
+        "wrapper": ["output", *correct],
+        "real_wrapper": ["output", *correct],
+        "persistent": ["output", *correct],
+        "nested": ["figures", 0, "missing"],
+        "string_index": ["figures", "0", "bbox", 0],
+    }[damage]
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        feedback = payload.get("protocol_feedback", {}).get("error")
+        if feedback:
+            assert feedback["problem"] == "support_mismatch"
+            detail = feedback["binding_error"]
+            assert detail["path_root"] == "observation.output"
+            assert detail["reason"] == "invalid_path"
+            if damage in {"wrapper", "persistent"}:
+                assert detail["step"] == 0 and detail["container_type"] == "object"
+                assert detail["available_keys"] == ["figures"]
+            elif damage == "real_wrapper":
+                assert detail["step"] == 1 and detail["container_type"] == "object"
+                assert detail["available_keys"] == ["note"]
+            elif damage == "nested":
+                assert detail["step"] == 2 and detail["available_keys"] == ["bbox"]
+            else:
+                assert detail["step"] == 1 and detail["container_type"] == "array"
+                assert detail["length"] == 1
+        assert payload["answer"] == answer and payload["observations"][0]["output"] == source
+        value = answer_review_response(payload)
+        value["units"][0]["support"] = [
+            {
+                "observation": "o1",
+                "path": correct if feedback and damage != "persistent" else wrong,
+                "value": 11,
+            }
+        ]
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "Where does the figure start?")
+    assert (result.status == "completed") == (damage != "persistent"), result
+    assert len(reviews) == 2 and result.usage["observable_attempts"] == 4
+
+
+@pytest.mark.asyncio
 async def test_a_truncated_single_unit_never_authorizes_completion(kb_dir, model_service):
     atomic_write_text(kb_dir / "wiki/sources/rows.md", "Count: 10")
     model_service.chat_response = _reader("Count: 10")

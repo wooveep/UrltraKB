@@ -54,6 +54,12 @@ must not enter the candidate, even when accurately described and not attributed 
 author. Reject it as a located claim issue so it can be removed while preserving original
 wording and supported relations. These reader-only diagnostics belong in the application's
 processing report. Ambiguity in the original wording itself may be described faithfully.
+Also reject the generator's self-description of how it assembled, checked or preserved
+the source. An assurance of faithful handling is not source knowledge. Such framing can
+add an unsupported premise even without changing a concrete value: check whether each
+named category of rules or restrictions actually exists in the supplied source. General
+writing instructions are not evidence that the document contains those categories.
+This does not prohibit actual source statements about preservation or verification.
 A literal source claim remains supported even when it appears under a conflicting heading;
 preserve that wording and describe ambiguity without using the heading to negate the claim.
 Faithful title translations and a neutral common heading above separate tasks are allowed;

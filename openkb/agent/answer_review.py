@@ -88,7 +88,9 @@ with its original structure; never reconstruct an object, move a nested field, r
 intervening fields, or add closing braces to an excerpt. Use separate quotes when needed.
 For structured metadata, prefer a typed value reference instead of quoting serialized JSON:
 {"observation":"o1","path":["coverage","complete"],"value":false}.
-path traverses the exact observed object with string keys and integer list indices; value
+path starts at the selected observation's output VALUE, not its enclosing record. Do not
+prepend "output" unless that value itself has an actual key named "output". Traverse the
+exact observed object with string keys and integer list indices; value
 must equal that observed value exactly, including JSON types at every nested level.
 Numerically identical finite JSON numbers such as 115 and 115.0 are equivalent; strings,
 booleans, rounded or approximate numbers are not substitutes. List indices must be integers.
@@ -363,9 +365,15 @@ def _check_units(reviews, payload, issues, invalid):
                 raise invalid
             output = observations[support["observation"]]
             if "path" in support or "value" in support:
-                if not _matches_value(output, support):
+                mismatch = _value_error(output, support)
+                if mismatch:
                     raise InvalidReview(
-                        {"problem": "support_mismatch", "unit": review["id"], "support": support}
+                        {
+                            "problem": "support_mismatch",
+                            "unit": review["id"],
+                            "support": support,
+                            "binding_error": mismatch,
+                        }
                     )
                 continue
             if not isinstance(support.get("quote"), str) or not support["quote"].strip():
@@ -410,18 +418,34 @@ def _check_units(reviews, payload, issues, invalid):
     return located
 
 
-def _matches_value(output, support):
+def _value_error(output, support):
+    """Describe the first invalid binding without guessing a replacement path/value."""
     path = support.get("path")
     if "value" not in support or not isinstance(path, list) or "quote" in support:
-        return False
-    for key in path:
+        return {"reason": "invalid_support_shape"}
+    for step, key in enumerate(path):
         if isinstance(output, dict) and isinstance(key, str) and key in output:
             output = output[key]
         elif isinstance(output, list) and type(key) is int and 0 <= key < len(output):
             output = output[key]
         else:
-            return False
-    return _same_json(support["value"], output)
+            if isinstance(output, dict):
+                container = {
+                    "container_type": "object",
+                    "available_keys": list(output)[:16],
+                    "total_keys": len(output),
+                }
+            elif isinstance(output, list):
+                container = {"container_type": "array", "length": len(output)}
+            else:
+                container = {"container_type": "scalar"}
+            return {
+                "reason": "invalid_path",
+                "path_root": "observation.output",
+                "step": step,
+                **container,
+            }
+    return None if _same_json(support["value"], output) else {"reason": "unequal_value"}
 
 
 def _same_json(value, original):
