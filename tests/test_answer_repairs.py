@@ -11,6 +11,7 @@ from openkb.application.source_history import source_status
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("marker_prefix", ["", "@"])
 @pytest.mark.parametrize(
     "entry,unknown",
     [
@@ -21,7 +22,7 @@ from openkb.application.source_history import source_status
     ],
 )
 async def test_short_evidence_citations_render_and_survive_followup(
-    kb_dir, tmp_path, model_service, unknown, entry, capsys
+    kb_dir, tmp_path, model_service, unknown, entry, capsys, marker_prefix
 ):
     source = tmp_path / "small.md"
     source.write_text("The pressure is 37 kPa; stop first before changing it.")
@@ -57,6 +58,7 @@ async def test_short_evidence_citations_render_and_survive_followup(
         row = json.loads(outputs[-1]["content"])["evidence"][0]
         observed.append(row)
         citation = "[evidence:unobserved]" if unknown else row.get("short_citation", "MISSING")
+        citation = citation.replace("[evidence:", f"[{marker_prefix}evidence:")
         return {"role": "assistant", "content": row["text"] + " " + citation}
 
     model_service.chat_response = chat

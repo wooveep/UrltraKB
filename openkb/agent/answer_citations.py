@@ -84,7 +84,7 @@ def invalid_source_targets(result):
         return []
     from openkb.agent.answer_references import render_references
 
-    _, unresolved = render_references(answer, {}) if "[evidence:" in answer else (answer, [])
+    _, unresolved = render_references(answer, {}) if "evidence:" in answer else (answer, [])
     targets = source_targets(answer)
     if not targets:
         return unresolved

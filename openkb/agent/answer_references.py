@@ -9,7 +9,7 @@ from markdown_it import MarkdownIt
 from openkb.agent.answer_result import RenderedAnswer
 from openkb.agent.evidence_markup import rewrite_inline
 
-_MARKER = re.compile(r"\[evidence:([^\]\r\n]+)\]")
+_MARKER = re.compile(r"\[@?evidence:([^\]\r\n]+)\]")
 _CANONICAL = re.compile(
     r"\[原文\]\(sources/snapshots/[0-9a-f]{64}-[0-9a-f]{64}\.md#block-[0-9a-f]{64}\)"
 )
@@ -66,8 +66,11 @@ def render_references(answer, bindings):
         if not silent:
             state.push("text", "", 0).content = match[0]
             if state.src is prose:
-                if match[0] in bindings:
-                    replacements.append((state.pos, match.end(), bindings[match[0]]))
+                # Both citation spellings name the same exact observed identifier.
+                # Never choose an unknown or colliding target by similarity.
+                marker = "[evidence:" + match[1] + "]"
+                if marker in bindings:
+                    replacements.append((state.pos, match.end(), bindings[marker]))
                 else:
                     unresolved.append(match[0])
         state.pos = match.end()
@@ -86,7 +89,7 @@ def render_references(answer, bindings):
 
 def resolve_references(result):
     answer = getattr(result, "final_output", None)
-    if not isinstance(answer, str) or "[evidence:" not in answer:
+    if not isinstance(answer, str) or "evidence:" not in answer:
         return result
     rendered, _ = render_references(answer, _observed(result))
     return RenderedAnswer(result, rendered) if rendered != answer else result
