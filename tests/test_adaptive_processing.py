@@ -264,8 +264,9 @@ def test_indivisible_truncation_stops_without_publishing(kb_dir, tmp_path, monke
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
-    assert result.knowledge_compilation == "unfinished"
-    assert result.reason == "output_budget_exhausted"
+    assert result.status == "added"
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "output_budget_exhausted" for row in result.omissions)
     assert len(calls) == 1  # Legacy profile has no adaptive ceiling override.
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 

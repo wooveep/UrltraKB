@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from agents import Agent, ModelSettings, Runner
 
 from openkb.agent.answer_citations import observation_strings, source_targets
+from openkb.agent.answer_correction import answer_units
 from openkb.agent.completion_model import answer_truncated
 from openkb.agent.model_json import json_text, unique_fields
 from openkb.agent.request_budget import RequestBudgetHooks
@@ -57,11 +58,13 @@ formatting and language with no factual assertions, never a way to skip a diffic
 Return only JSON {"verdict":"supported|unsupported|uncertain", "units":[
 {"id":"u1", "verdict":"supported|unsupported|uncertain|non_factual",
 "support":[{"observation":"o1", "quote":"exact observed substring"}]}], "issues":[
-{"kind":"unsupported|missing|citation|image", "claim":"exact draft substring",
+{"kind":"unsupported|missing|citation|image", "units":["u1"], "claim":"exact draft substring",
 "reason":"specific discrepancy and the evidence needed or already observed"}]}.
 Include each supplied unit ID exactly once. supported units require nonempty support.
 For each unsupported/uncertain unit, include an issue with a nonempty claim copied
-from that unit. Requested information missing from the whole draft uses kind=missing.
+from that unit. Include the affected unsupported/uncertain unit IDs in each issue;
+a claim crossing units must identify every affected unit. Do not select supported units.
+Requested information missing from the whole draft uses kind=missing and units: [].
 Use an empty claim only for missing requested coverage. Supported requires issues: [].
 Unsupported/uncertain requires at least one concrete issue. Do not rewrite the draft.
 """
@@ -116,19 +119,7 @@ def _payload(result):
         "question": questions[-1] if questions else "",
         "prior_questions": questions[:-1],
         "answer": answer,
-        "units": [
-            {"id": f"u{i}", "text": text}
-            for i, text in enumerate(
-                (
-                    part.strip()
-                    for line in answer.splitlines()
-                    if line.strip()
-                    for part in re.split(r"(?<=[。！？])|(?<=\.)\s+", line)
-                    if part.strip()
-                ),
-                1,
-            )
-        ],
+        "units": [{"id": u.id, "text": u.text} for u in answer_units(answer)],
         "observations": [{"id": f"o{i}", **o} for i, o in enumerate(observations, 1)],
     }
 
@@ -194,8 +185,7 @@ async def review_answer(agent, result, *, run_config=None):
             or not issue["reason"].strip()
         ):
             raise invalid
-    _check_units(value.get("units"), payload, issues, invalid)
-    return issues
+    return _check_units(value.get("units"), payload, issues, invalid)
 
 
 def _check_units(reviews, payload, issues, invalid):
@@ -203,7 +193,7 @@ def _check_units(reviews, payload, issues, invalid):
     observations = {row["id"]: row["output"] for row in payload["observations"]}
     if not isinstance(reviews, list) or len(reviews) != len(expected):
         raise invalid
-    seen = set()
+    seen, rejected = set(), set()
     for review in reviews:
         if (
             not isinstance(review, dict)
@@ -215,11 +205,8 @@ def _check_units(reviews, payload, issues, invalid):
         ):
             raise invalid
         seen.add(review["id"])
-        rejected = review["verdict"] in {"unsupported", "uncertain"}
-        if rejected and not any(
-            issue["claim"] and issue["claim"] in expected[review["id"]] for issue in issues
-        ):
-            raise invalid
+        if review["verdict"] in {"unsupported", "uncertain"}:
+            rejected.add(review["id"])
         if review["verdict"] == "supported" and not review["support"]:
             raise invalid
         for support in review["support"]:
@@ -237,6 +224,35 @@ def _check_units(reviews, payload, issues, invalid):
             texts = [json.dumps(output, ensure_ascii=False), *observation_strings(output)]
             if not any(support["quote"] in text for text in texts):
                 raise invalid
+
+    located, covered = [], set()
+    units = answer_units(payload["answer"])
+    for issue in issues:
+        spans = (
+            [m.span() for m in re.finditer(re.escape(issue["claim"]), payload["answer"])]
+            if issue["claim"]
+            else []
+        )
+        candidates = {
+            unit.id
+            for unit in units
+            if unit.id in rejected
+            and any(left < unit.end and right > unit.start for left, right in spans)
+        }
+        supplied = issue.get("units", [unit.id for unit in units if unit.id in candidates])
+        if (
+            not isinstance(supplied, list)
+            or not all(isinstance(i, str) for i in supplied)
+            or len(supplied) != len(set(supplied))
+            or not set(supplied) <= candidates
+            or (not supplied and issue["kind"] != "missing")
+        ):
+            raise invalid
+        covered.update(supplied)
+        located.append({**issue, "units": supplied})
+    if covered != rejected:
+        raise invalid
+    return located
 
 
 async def require_supported_answer(agent, result, *, run_config=None):

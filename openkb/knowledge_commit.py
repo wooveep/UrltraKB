@@ -237,6 +237,13 @@ class KnowledgeWorkspace:
                 name: after.get(name)
                 for name in sorted(self.before.keys() | after.keys())
                 if self.before.get(name) != after.get(name)
+                and not (
+                    name.startswith(("summaries/", "concepts/", "entities/"))
+                    and name.endswith(".md")
+                    and self.before.get(name) is not None
+                    and after.get(name) is not None
+                    and after.get(name) == self.ownership.generated.get(name)
+                )
             }
             for name, digest in changes.items():
                 if name in self.before:
@@ -356,6 +363,22 @@ def publish_proposal(
         if proposal.document is not None:
             paths.append(kb_dir / ".openkb/hashes.json")
         store = SourceStore(kb_dir)
+        from openkb.source_refs import SourceOwnership
+
+        ownership = SourceOwnership(kb_dir, proposal.source_id)
+        # Record actual authored changes, never acquire manual text from the
+        # transaction's input snapshot when an unchanged candidate is skipped.
+        authored = {
+            "source_id": proposal.source_id,
+            "proposal": proposal.id,
+            "generated": {
+                name: digest
+                for name, digest in {**ownership.generated, **proposal.changes}.items()
+                if name.startswith(("summaries/", "concepts/", "entities/"))
+                and name.endswith(".md")
+            },
+        }
+        ownership_path = _directory(kb_dir, "ownership", f"{proposal.source_id}.json")
         for digest in proposal.changes.values():
             if digest is not None:
                 store.asset(digest)
@@ -371,7 +394,9 @@ def publish_proposal(
                 raise ValueError("Publication navigation does not match compiled parsing")
         processing_checkpoint("committing")
         with mutation_scope(
-            kb_dir, [*paths, baseline_path, receipt], operation="publish source knowledge"
+            kb_dir,
+            [*paths, baseline_path, receipt, ownership_path],
+            operation="publish source knowledge",
         ):
             for name, digest in proposal.changes.items():
                 processing_checkpoint()
@@ -388,12 +413,14 @@ def publish_proposal(
                 if proposal.replaces is not None and proposal.replaces != proposal.source_id:
                     registry.remove_by_hash(proposal.replaces)
                 registry.add(proposal.source_id, proposal.document)
+            atomic_write_json(ownership_path, authored)
             atomic_write_json(
                 receipt,
                 {
                     "proposal": proposal.id,
                     "source_version": proposal.version_id,
                     "parse": proposal.parse_id,
+                    "ownership": content_id(authored),
                 },
             )
         return Publication("completed", proposal.id, tuple(proposal.changes))

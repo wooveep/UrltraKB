@@ -49,6 +49,24 @@ def prepare_docx(
     stream = io.BytesIO()
     with ZipFile(io.BytesIO(data)) as archive:
         names = archive.namelist()
+        from openkb.parsing_failures import DocumentContentError
+
+        if not {"[Content_Types].xml", "_rels/.rels"} <= set(names):
+            raise DocumentContentError("docx_required_package_part_missing")
+        package_relationships = xml.fromstring(
+            read_member(archive, "_rels/.rels", budget, depth), forbid_dtd=True
+        )
+        try:
+            main_parts = [
+                package_path("", rel.get("Target", ""))
+                for rel in package_relationships
+                if rel.get("Type", "").endswith("/officeDocument")
+                and rel.get("TargetMode", "Internal") == "Internal"
+            ]
+        except ValueError as exc:
+            raise DocumentContentError("docx_main_document_target_invalid") from exc
+        if len(main_parts) != 1 or main_parts[0] not in names:
+            raise DocumentContentError("docx_main_document_part_missing")
         if len(names) != len(set(names)):
             raise ValueError("docx_duplicate_package_member")
         for part in sorted(_PARTS.intersection(names)):

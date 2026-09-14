@@ -99,7 +99,8 @@ def test_invalid_figure_output_is_not_reused_after_model_correction(
 
     model_service.respond = respond
     first = import_document(kb_dir, source)
-    assert first.reason == "generated_asset_evidence_invalid"
+    assert first.knowledge_compilation == "completed"
+    assert any(row["reason"] == "generated_asset_evidence_invalid" for row in first.omissions)
     valid = True
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed

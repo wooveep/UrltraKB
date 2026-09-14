@@ -13,6 +13,7 @@ from openkb.ocr.assembly import assembly_profile
 from openkb.ocr.backend import PageOcr, create_ocr
 from openkb.ocr.config import OcrSettings, parsing_settings
 from openkb.ocr.reprocessing import effective_attempts
+from openkb.parsing_failures import read_document
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import SourceStore, SourceVersion
@@ -32,7 +33,7 @@ def parse_document(
 ) -> ParseVersion:
     selected = parsing_settings(options)
     native_profile = None
-    profile = {
+    profile: dict[str, Any] = {
         "parser": "openkb-structured-v3",
         "ocr": native_profile or selected.ocr.profile(),
         "ocr_assembly": assembly_profile(selected.ocr.backend),
@@ -61,8 +62,13 @@ def parse_document(
     if source.suffix == ".pdf":
         import pymupdf
 
-        with pymupdf.open(path) as pdf:
-            profile["physical_pages"] = pdf.page_count
+        try:
+            with pymupdf.open(path) as pdf:
+                profile["physical_pages"] = pdf.page_count
+        except pymupdf.FileDataError:
+            # No trustworthy page count exists. The parser below records a
+            # document-level omission; never invent a physical-page denominator.
+            pass
     if not force:
         with progress_scope("parse_cache"):
             cached = store.find(source, profile)
@@ -123,9 +129,19 @@ def parse_document(
                             row,
                         )
         try:
-            blocks, quality = parse_pdf(
-                path, originals, ocr=ocr, force_pages=set(retries), reuse=reuse
+            blocks, quality = read_document(
+                parse_pdf, path, originals, ocr=ocr, force_pages=set(retries), reuse=reuse
             )
+            if (
+                quality
+                and all("page" not in row for row in quality)
+                and "physical_pages" in profile
+            ):
+                reason = ";".join(row["reason"] for row in quality)
+                quality = [
+                    {"page": page, "status": "needs_review", "reason": reason}
+                    for page in range(1, profile["physical_pages"] + 1)
+                ]
         finally:
             if ocr is not None:
                 ocr.close()
@@ -134,7 +150,8 @@ def parse_document(
 
         docx_ocr = create_ocr(originals, source, selected.ocr, native_profile=native_profile)
         try:
-            blocks, quality = parse_docx(
+            blocks, quality = read_document(
+                parse_docx,
                 path,
                 originals,
                 ocr=docx_ocr,
@@ -150,13 +167,13 @@ def parse_document(
     elif source.suffix == ".pptx":
         from openkb.parsing_office import parse_pptx
 
-        blocks, quality = parse_pptx(path, originals)
+        blocks, quality = read_document(parse_pptx, path, originals)
     elif source.suffix == ".xlsx":
         from openkb.parsing_office import parse_xlsx
 
-        blocks, quality = parse_xlsx(path, originals)
+        blocks, quality = read_document(parse_xlsx, path, originals)
     else:
-        blocks, quality = parse_text(path, source, originals)
+        blocks, quality = read_document(parse_text, path, source, originals)
     processing_checkpoint()
     if selected.ocr.policy == "off":
         quality = [

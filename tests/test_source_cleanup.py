@@ -8,6 +8,58 @@ from openkb.evidence import Evidence, ParseStore
 from openkb.sources import SourceStore
 
 
+def test_pending_proposal_shared_with_authorship_keeps_its_original_citations(kb_dir, tmp_path):
+    from openkb.application.documents import DocumentResult
+    from openkb.application.source_cleanup import preview_history_cleanup
+    from openkb.application.source_history import record_source_result
+    from openkb.inputs import prepared_input
+    from openkb.knowledge_commit import KnowledgeWorkspace
+    from openkb.locks import atomic_write_text
+    from tests.test_knowledge_proposals import inputs, publish_proposal
+
+    sources = []
+    for name in ("target", "author", "other"):
+        folder = tmp_path / name
+        folder.mkdir()
+        sources.append(inputs(kb_dir, folder))
+    (old, parsed), (author, author_parse), (other, other_parse) = sources
+    cited = f"[Old](sources/snapshots/{old.id}-{parsed.id}.md#block-{parsed.blocks[0].id})"
+    with KnowledgeWorkspace(kb_dir, author, author_parse, {"model": "test"}) as workspace:
+        atomic_write_text(workspace.path / "wiki/concepts/owned.md", cited)
+        authored = workspace.proposal()
+    assert publish_proposal(kb_dir, authored.id).status == "completed"
+    atomic_write_text(kb_dir / "wiki/concepts/owned.md", "Manual text without the old citation.")
+    target = tmp_path / "target/manual.txt"
+    target.write_text("New original bytes.")
+    with prepared_input(target) as ready:
+        SourceStore(kb_dir).intake(ready)
+    atomic_write_text(kb_dir / "wiki/concepts/proposed.md", "Manual text to review.")
+    with KnowledgeWorkspace(kb_dir, other, other_parse, {"model": "test"}) as workspace:
+        atomic_write_text(workspace.path / "wiki/concepts/proposed.md", cited)
+        pending = workspace.proposal()
+    assert pending.changes["concepts/proposed.md"] == authored.changes["concepts/owned.md"]
+    assert publish_proposal(kb_dir, pending.id).status == "needs_acceptance"
+    record_source_result(
+        kb_dir,
+        DocumentResult(
+            source="other",
+            status="unfinished",
+            resources=(),
+            input_version=other.id,
+            source_id=other.source_id,
+            parse_id=other_parse.id,
+            source_intake="saved",
+            knowledge_compilation="unfinished",
+            stage="committing",
+            reason="needs_acceptance",
+            resume=pending.id,
+        ),
+    )
+    preview = preview_history_cleanup(kb_dir)
+    assert old.id not in preview.versions
+    assert parsed.id not in preview.parses
+
+
 def test_cleanup_preserves_cited_versions_and_shared_assets(kb_dir, tmp_path, model_service):
     from openkb.application.source_cleanup import cleanup_history, preview_history_cleanup
     from openkb.application.source_history import source_status

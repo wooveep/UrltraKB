@@ -54,8 +54,9 @@ def test_persistent_single_unit_coverage_error_stops_after_bounded_retry(
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source, on_event=events.append)
-    assert result.knowledge_compilation == "unfinished"
-    assert result.reason == "section_coverage_incomplete"
+    assert result.status == "added"
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "section_coverage_incomplete" for row in result.omissions)
     assert len(calls) == 2
     diagnostic = [event for event in events if event.get("operation") == "response_invalid"]
     assert diagnostic[-1]["expected"] == 1 and diagnostic[-1]["missing"] == 1

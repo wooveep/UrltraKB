@@ -128,7 +128,11 @@ def enhance_ranges(kb_dir, source, parsed, record, settings, bundle, *, reserve_
     reader = ParseStore(kb_dir).reader(source, parsed)
     checkpoints = CompilationCheckpoints(kb_dir, source, parsed, settings, bundle)
     options = settings.get("navigation") or {}
-    if options.get("enabled", True) is not True:
+    from openkb.source_omissions import has_readable_content
+
+    if options.get("enabled", True) is not True or not has_readable_content(
+        checkpoints.store, parsed
+    ):
         return
     with processing_scope(settings) as budget, measure_span("index_summary"):
         allowance = IndexAllowance(budget, options, reserve_compilation)

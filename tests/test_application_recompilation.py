@@ -206,7 +206,7 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
         (json.dumps({"topics": [{"name": ["bad"]}]}), "topic_plan_invalid"),
     ],
 )
-def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
+def test_degraded_compile_reports_omissions_and_preserves_unowned_summary(
     kb_dir, monkeypatch, plan, code
 ):
     import litellm
@@ -228,6 +228,6 @@ def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, "h"))
     assert result.status == "unfinished"
-    assert result.message == code
-    assert result.unfinished == ("planning",)
+    assert result.message == "needs_acceptance"
+    assert any(row["reason"] == code for row in result.document.omissions)
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

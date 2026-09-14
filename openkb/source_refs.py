@@ -35,8 +35,8 @@ class SourceOwnership:
     """Separate source authorship from the latest accepted publication state."""
 
     def __init__(self, kb_dir: Path, source_id: str | None = None):
-        from openkb.knowledge_commit import _baselines, _directory, load_proposal
-        from openkb.sources import SourceStore, read_object
+        from openkb.knowledge_commit import _baselines, _directory, _page_path, load_proposal
+        from openkb.sources import SourceStore, content_id, read_object, valid_id
 
         self.wiki = kb_dir / "wiki"
         self.source_id = source_id
@@ -46,12 +46,29 @@ class SourceOwnership:
         if source_id is not None:
             receipt = _directory(kb_dir, "completed", f"{source_id}.json")
             if receipt.exists():
-                proposal = load_proposal(kb_dir, read_object(receipt)["proposal"])
-                if proposal.source_id != source_id:
-                    raise ValueError("Source ownership publication does not match")
+                record = read_object(receipt)
                 # A different source may publish accepted link cleanup containing
                 # manual edits. It cannot acquire authorship on this source's behalf.
-                self.generated = {**proposal.before, **proposal.changes}
+                if "ownership" in record:
+                    owned = read_object(_directory(kb_dir, "ownership", f"{source_id}.json"))
+                    if (
+                        content_id(owned) != record["ownership"]
+                        or set(owned) != {"source_id", "proposal", "generated"}
+                        or owned["source_id"] != source_id
+                        or owned["proposal"] != record["proposal"]
+                        or not isinstance(owned["generated"], dict)
+                    ):
+                        raise ValueError("Source ownership record does not match publication")
+                    for name, digest in owned["generated"].items():
+                        _page_path(kb_dir, name)
+                        if digest is not None:
+                            valid_id(digest)
+                    self.generated = owned["generated"]
+                else:
+                    proposal = load_proposal(kb_dir, record["proposal"])
+                    if proposal.source_id != source_id:
+                        raise ValueError("Source ownership publication does not match")
+                    self.generated = {**proposal.before, **proposal.changes}
 
     def requires_review(self, name: str, previous: str) -> bool:
         """A different source's accepted cleanup cannot authorize overwriting edits."""

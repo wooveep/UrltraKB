@@ -1299,7 +1299,7 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir, tmp_path, model_serv
         }
 
 
-def test_recompile_corrupt_original_is_failed_separately(
+def test_recompile_unreadable_original_keeps_unowned_summary_for_review(
     monkeypatch, kb_dir, tmp_path, model_service
 ):
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
@@ -1316,8 +1316,10 @@ def test_recompile_corrupt_original_is_failed_separately(
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["recompiled"] == 0
-        assert body["failed_count"] == 1 and body["skipped"] == 0
-        assert body["docs"][0]["status"] == "error"
+        assert body["failed_count"] == 0 and body["skipped"] == 0
+        assert body["unfinished_count"] == 1
+        assert body["docs"][0]["message"] == "needs_acceptance"
+        assert (kb_dir / "wiki/summaries/paper.md").read_text().endswith("# Paper\n")
 
         assert not model_service
 

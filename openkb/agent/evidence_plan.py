@@ -231,7 +231,14 @@ def plan_topics(
             while size and not fits_batch(topics[offset : offset + size]):
                 size //= 2
             if not size:
-                raise ProcessingIncomplete("topic_context_exceeds_request_budget", "planning")
+                from openkb.compilation_report import report_content_omission
+                from openkb.sources import content_id
+
+                report_content_omission(
+                    "planning", "topic_context_exceeds_request_budget", [content_id(topics[offset])]
+                )
+                offset += 1
+                continue
             batches.append(topics[offset : offset + size])
             offset += size
         from openkb.agent.evidence_parallel import parallel_batches
@@ -254,8 +261,6 @@ def plan_topics(
         from openkb.compilation_report import report_content_omission
         from openkb.sources import content_id
 
-        if not planned:
-            raise failures[0][1]
         for batch, error in failures:
             report_content_omission(
                 "planning", error.reason, [content_id(topic) for topic in batch]

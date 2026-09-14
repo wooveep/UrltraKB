@@ -45,17 +45,19 @@ completion.
 The subsequent accepted requirement also keeps ordinary content exhaustion on the
 normal import completion path: retain a registered, editable source and omission
 notice even when no knowledge can be generated. Users may fill gaps afterward.
-This boundary is not implemented yet; the current no-usable-content behavior
-described below remains a tracked gap, not the target policy. See the
+The implementation now uses the same publication transaction even when no facts,
+plan or verified topic survives. The source summary states zero generated knowledge,
+keeps omissions visible, and remains editable. See the
 [repair and small-file validation plan](import-repair-plan.md) for implementation
 order, exact acceptance cases and issue closure conditions. New validation uses
 small fixed files; full large-document reruns are not a prerequisite for this work.
 
 Skipping means excluding unreliable content or candidate knowledge from this import,
 while retaining originals, historical evidence and other sources' contributions.
-Bounded recovery continues independent work. No usable candidate means unfinished
-with saved progress; it does not mean publication succeeded. Cancellation, hard
-budgets, uncertain remote execution and integrity failures still stop new dispatch.
+Bounded recovery continues independent work. No usable candidate still completes
+source registration with zero knowledge and partial coverage. Cancellation, hard
+budgets and integrity failures still stop execution. Unknown remote OCR jobs are
+never blindly resubmitted; their pending transcription does not block publication.
 
 `coverage` reports the immutable original block ranges and assets, independently of
 publication: `unknown` for legacy records, `pending` before publication, and `partial`
@@ -86,9 +88,10 @@ invented or treated as proof that a fact does not exist. Review and reprocessing
 remain available afterward, with original bytes and evidence identities retained.
 
 The selected knowledge changes still commit through one managed transaction.
-No usable content, unverifiable source identity, service/account failures, exhausted
-execution budgets, unaccepted manual overwrites, user stopping and failed transaction
-recovery retain their existing outcomes. Unsupported generated claims are excluded,
+Unverifiable source identity, service/account failures, exhausted execution budgets,
+unaccepted new manual overwrites, user stopping and failed transaction recovery
+retain their existing outcomes. A byte-identical regenerated contribution is a no-op:
+Continue preserves manual edits without demanding acceptance of an unchanged candidate. Unsupported generated claims are excluded,
 never published. This is an accepted specification revision; it does not
 claim that every format and error path has already passed implementation checks.
 
@@ -108,10 +111,11 @@ acceptance.
 - Generation excludes the entire failed topic, so partially verified steps do
   not appear as a complete task. Retained content still requires original
   evidence, full coverage of its selected facts and semantic verification.
-- If no usable facts, plan or verified topic remains, the document stays
-  unfinished. Confirmed temporary service failures use bounded backoff, then isolate
-  affected content. Unknown remote execution, account failures, cancellation,
-  identity corruption and global budgets are not content omissions.
+- If no usable facts, plan or verified topic remains, source registration and the
+  editable zero-knowledge summary still complete. Confirmed temporary service
+  failures use bounded backoff, then isolate affected content. Unknown model execution,
+  account failures, cancellation, identity corruption and global budgets retain their
+  execution limits; pending OCR content is independently recorded as an omission.
 
 `omissions` contains stage, fixed reason and excluded identities. The original
 source/version/parse identifies the evidence; rejected text is not copied into
@@ -146,8 +150,9 @@ review checks candidates against the complete available original and recorded pa
 omissions. Dependent or unresolved candidates are also excluded, including transitive
 dependencies. Capacity or protocol failures split the candidates while preserving
 the complete ordered original and omissions in each request. Minimum candidates
-that cannot be reviewed remain pending; no usable candidate means the source stays
-unfinished. Split recovery and valid refusals survive Continue.
+that cannot be reviewed remain pending; with no usable candidate, source registration
+and the zero-knowledge summary still complete. Split recovery and valid refusals
+survive Continue.
 
 Measure cold import, identical reimport and interrupted continuation separately.
 Compare the same enabled features and quality scope, including all failed,
@@ -919,7 +924,7 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 存在未解析内容时，发布前还要检查知识是否依赖缺失的前提、例外或表头。该检查保留
 完整原文与候选内容，在允许的上下文范围内压缩重复引用。有效判定后，省略依赖缺失
 内容或仍不确定的主题，发布其余独立主题；容量或协议问题有界拆分，最小候选仍无法
-确认时跳过并保留诊断，没有可保留主题时保持未完成。请求、token 与时间上限仍然
+确认时跳过并保留诊断；没有可保留主题时仍完成来源登记及零知识摘要。请求、token 与时间上限仍然
 生效，压缩本身不能证明知识独立或完整。
 
 本轮实现的测试范围、真实实验成本和未通过项目见[来源索引验收记录](source-index-validation.md)。
@@ -930,3 +935,26 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带索引制品
 ID 的空事实收据升级后可能重做一次；新版本内仅调整总请求、token 或时限不使这些
 已完成单元失效。
+
+
+## 2026-09-14：完成带缺失的导入与限定范围的回答修正
+
+损坏的 PDF/Office 包、明确的文本解码失败及已记录的 OCR/附件问题保留原件，
+通过正常事务发布来源和缺失说明。全部知识被排除时不调用额外模型编造摘要事实，
+显示生成知识 0 条。CLI 返回成功，REST 和桌面将发布完成与 partial 覆盖分别呈现。
+声明为已保存的原件或资产损坏、输入身份变化、硬额度与事务恢复故障仍阻止执行。
+
+人工修改后的原页与自动生成基线分别保存。相同候选的 Continue 不覆盖人工补写，
+也不把人工文字重新认领为自动生成；真正的新差异继续走既有人工覆盖保护。
+历史清理同时保留待接受提案引用的原件，以及归属比较所必需的旧生成字节。
+
+原文读取工具提供 `short_citation` 标识。程序只根据已观察的来源工具结果展开为
+完整的版本、解析和块链接；未知/歧义标识不猜测匹配，原有合法完整链接继续有效。
+Markdown 代码示例及未改动排版保持原字节；答案核验、最终显示和会话保存使用同一
+渲染结果。终端逐步显示工具进度，完成核验后显示最终答案，避免留下内部短标识。
+
+回答核验保留明确的受影响单元 ID，包括跨单元问题；相同词句不自动扩大修改范围。
+修正协议只允许替换已核验定位的单元，或为明确缺失插入内容，再核验组装后的全文。
+修正后再遇到坏引用仍沿用原允许范围，不能退回整篇改写。无效核验只允许对原答案
+重核一次，不开放全部单元。所有修正和核验仍共用原请求与 tokens/时间额度；
+回答失败不阻止或回滚已经完成的资料导入。

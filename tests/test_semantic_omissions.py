@@ -165,9 +165,17 @@ def test_dependency_protocol_failure_can_resume_without_rerolling_valid_refusal(
     monkeypatch.setattr(litellm, "completion", completion)
     invalid = decision in {"malformed", "duplicate_status"}
     first = import_document(kb_dir, source)
-    assert first.knowledge_compilation == "unfinished", first
-    assert first.reason == (
-        "dependency_invalid_response" if invalid else "dependency_scope_unresolved"
+    assert first.knowledge_compilation == "completed", first
+    assert any(
+        row["reason"]
+        == (
+            "dependency_invalid_response"
+            if invalid
+            else "required_context_omitted"
+            if decision == "dependent"
+            else "dependency_scope_unresolved"
+        )
+        for row in first.omissions
     )
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     before = calls.copy()
@@ -178,7 +186,8 @@ def test_dependency_protocol_failure_can_resume_without_rerolling_valid_refusal(
         assert calls["dependencies"] == before["dependencies"] + 1
         assert list((kb_dir / "wiki/concepts").glob("*.md"))
     else:
-        assert resumed.knowledge_compilation == "unfinished", resumed
+        assert resumed.knowledge_compilation == "completed", resumed
+        assert resumed.omissions
         assert calls["dependencies"] == before["dependencies"]
         assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert calls["generation"] == before["generation"]

@@ -591,7 +591,7 @@ def test_url_ingest_keeps_original_on_model_failure_and_continues_without_downlo
     assert len(copies) == 1
 
 
-def test_url_incomplete_generation_keeps_all_published_knowledge_unchanged(
+def test_url_incomplete_generation_registers_original_without_invalid_knowledge(
     kb_dir, monkeypatch, model_service
 ):
     import json
@@ -600,6 +600,8 @@ def test_url_incomplete_generation_keeps_all_published_knowledge_unchanged(
     from openkb.knowledge_commit import wiki_version
     from tests.http_model_fixture import evidence_response
 
+    previous = kb_dir / "wiki/concepts/manual.md"
+    previous.write_text("Previously committed knowledge")
     before = wiki_version(kb_dir)
 
     def respond(body):
@@ -615,8 +617,11 @@ def test_url_incomplete_generation_keeps_all_published_knowledge_unchanged(
         "openkb.url_ingest.fetch_url_to_raw", _prepared_fetch("paper.md", b"# Paper")
     )
     result = import_url(kb_dir, "https://example.test/paper")
-    assert result.knowledge_compilation == "unfinished" and result.source_intake == "saved"
-    assert wiki_version(kb_dir) == before
+    assert result.knowledge_compilation == "completed" and result.source_intake == "saved"
+    assert wiki_version(kb_dir) != before
+    assert previous.read_text() == "Previously committed knowledge"
+    assert list((kb_dir / "wiki/concepts").glob("*.md")) == [previous]
+    assert result.omissions and result.coverage["status"] == "partial"
 
 
 def test_url_preparation_is_private_and_keeps_the_document_lease(

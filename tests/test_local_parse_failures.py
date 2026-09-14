@@ -38,7 +38,7 @@ def test_broken_embedded_document_does_not_prevent_body_publication(
     parent = attached_docx(tmp_path / "parent.docx", _broken_child(tmp_path))
     result = import_document(kb_dir, parent)
     assert result.knowledge_compilation == "completed", result
-    assert any("docx_attachment_unparsed:" in warning for warning in result.warnings)
+    assert any("source_content_unparsed:" in warning for warning in result.warnings)
     parsed = ParseStore(kb_dir).load(result.parse_id)
     assert any(row["status"] == "needs_review" for row in parsed.quality)
     assert any(
@@ -100,7 +100,10 @@ def test_unreadable_document_formats_are_isolated(kb_dir, tmp_path, model_servic
             archive.writestr(name, data)
     result = import_document(kb_dir, parent)
     assert result.knowledge_compilation == "completed", result
-    assert any("docx_attachment_unparsed:" in warning for warning in result.warnings)
+    assert any(
+        "docx_attachment_unparsed:" in warning or "source_content_unparsed:" in warning
+        for warning in result.warnings
+    )
     assert list((kb_dir / "wiki/sources/attachments").glob("*." + extension))
 
 
@@ -139,11 +142,14 @@ def test_force_reparse_refreshes_body_but_reuses_unchanged_child(kb_dir, tmp_pat
     assert calls == [0]
 
 
-def test_unusable_whole_document_is_not_published(kb_dir, tmp_path, model_service):
+def test_empty_document_publishes_only_source_summary(kb_dir, tmp_path, model_service):
     path = tmp_path / "empty.docx"
     write_docx(path, "<w:p/>")
     result = import_document(kb_dir, path)
-    assert result.knowledge_compilation != "completed"
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "partial"
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert len(list((kb_dir / "wiki/summaries").glob("*.md"))) == 1
     assert not model_service
 
 
@@ -185,9 +191,13 @@ def test_missing_footnote_keeps_following_body(kb_dir, tmp_path, model_service):
     )
 
 
-def test_missing_note_marker_alone_is_not_usable_content(kb_dir, tmp_path, model_service):
+def test_missing_note_marker_publishes_omission_without_inventing_content(
+    kb_dir, tmp_path, model_service
+):
     path = tmp_path / "only-missing-note.docx"
     write_docx(path, '<w:p><w:r><w:footnoteReference w:id="99"/></w:r></w:p>')
     result = import_document(kb_dir, path)
-    assert result.knowledge_compilation != "completed"
+    assert result.knowledge_compilation == "completed", result
+    assert result.coverage["status"] == "partial"
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert not model_service

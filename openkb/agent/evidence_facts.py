@@ -17,7 +17,7 @@ from openkb.agent.evidence_units import (
     source_units,
 )
 from openkb.config import compilation_model_options
-from openkb.processing import ProcessingIncomplete, processing_checkpoint
+from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import content_id
 
@@ -70,6 +70,10 @@ def extract_facts(
 
     model = settings["model"]
     processing_checkpoint("facts")
+    from openkb.source_omissions import has_readable_content
+
+    if not has_readable_content(checkpoints.store, parsed):
+        return []
     units = list(source_units(kb_dir, source, parsed, limits, model, navigation=navigation))
     cache = FactCache(checkpoints, FACTS_SYSTEM, units, validate_unit)
     progress_lock = threading.Lock()
@@ -211,12 +215,18 @@ def extract_facts(
         # extraction into an apparently complete source contribution.
         excluded = {unit["reference"]["block_id"] for batch, _ in failures for unit in batch}
         facts = [fact for fact in facts if fact["scope"]["block_id"] not in excluded]
-        if not facts:
-            raise failures[0][1]
         for batch, error in failures:
             report_content_omission(
                 "facts", error.reason, [unit["reference"]["block_id"] for unit in batch]
             )
-    if not facts and any(unit["kind"] not in {"image", "heading"} for unit in units):
-        raise ProcessingIncomplete("source_facts_missing", "facts")
+    if not facts and not failures:
+        from openkb.compilation_report import report_content_omission
+
+        missing = [
+            unit["reference"]["block_id"]
+            for unit in units
+            if unit["kind"] not in {"image", "heading"}
+        ]
+        if missing:
+            report_content_omission("facts", "source_facts_missing", missing)
     return facts

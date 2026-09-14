@@ -56,8 +56,8 @@ def test_review_format_recovery_never_discards_a_conflicting_verdict(
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
     if envelope == "duplicate":
-        assert result.knowledge_compilation == "unfinished", result
-        assert result.reason == "evidence_verification_invalid"
+        assert result.knowledge_compilation == "completed", result
+        assert any(row["reason"] == "evidence_verification_invalid" for row in result.omissions)
         assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     else:
         assert result.knowledge_compilation == "completed", result
@@ -142,7 +142,8 @@ def test_resume_reuses_successful_split_children_without_parent_call(kb_dir, tmp
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
-    assert first.stage == "planning"
+    assert first.knowledge_compilation == "completed", first
+    assert any(row["stage"] == "planning" for row in first.omissions)
     phase = 2
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
@@ -163,7 +164,8 @@ def test_resume_verification_does_not_regenerate_received_draft(kb_dir, tmp_path
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
-    assert first.reason == "evidence_verification_invalid"
+    assert first.knowledge_compilation == "completed", first
+    assert any(row["reason"] == "evidence_verification_invalid" for row in first.omissions)
     phase = 2
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
@@ -215,7 +217,9 @@ def test_explicit_request_count_stops_even_with_unlimited_tokens():
     assert failure.value.reason == "request_budget_exhausted"
 
 
-def test_semantic_unsupported_still_prevents_publication(kb_dir, tmp_path, monkeypatch):
+def test_semantic_unsupported_omits_knowledge_and_finishes_publication(
+    kb_dir, tmp_path, monkeypatch
+):
     calls = Counter()
 
     def completion(**kwargs):
@@ -228,7 +232,8 @@ def test_semantic_unsupported_still_prevents_publication(kb_dir, tmp_path, monke
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
-    assert result.reason == "knowledge_evidence_mismatch"
+    assert result.knowledge_compilation == "completed", result
+    assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
     assert calls["generation"] == 2
     # The mock correction returns the identical rejected candidate: reuse that
     # exact rejection instead of paying for another stochastic decision.
@@ -236,7 +241,7 @@ def test_semantic_unsupported_still_prevents_publication(kb_dir, tmp_path, monke
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
-def test_empty_extraction_of_factual_body_is_not_success(kb_dir, tmp_path, monkeypatch):
+def test_empty_extraction_of_factual_body_is_an_explicit_omission(kb_dir, tmp_path, monkeypatch):
     calls = Counter()
 
     def completion(**kwargs):
@@ -258,7 +263,8 @@ def test_empty_extraction_of_factual_body_is_not_success(kb_dir, tmp_path, monke
         document(tmp_path, "The required pressure is 37 kPa. Never retry authentication failure."),
     )
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert result.knowledge_compilation != "completed"
+    assert result.knowledge_compilation == "completed", result
+    assert any(row["reason"] == "source_facts_missing" for row in result.omissions)
     assert not pages
 
 
@@ -567,11 +573,12 @@ def test_changed_correction_contract_replaces_only_the_stale_correction(
     monkeypatch.setattr(evidence_pages, "messages", old_messages)
     source = document(tmp_path, "One required fact.")
     first = import_document(kb_dir, source)
-    assert first.reason == "knowledge_evidence_mismatch"
+    assert first.knowledge_compilation == "completed", first
+    assert any(row["reason"] == "knowledge_evidence_mismatch" for row in first.omissions)
     assert calls[1, "generation"] == 2 and calls[1, "verification"] == 1
     phase = 2
     monkeypatch.setattr(evidence_pages, "messages", current_messages)
-    second = import_document(kb_dir, source)
+    second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
     assert calls[2, "generation"] == 1 and calls[2, "verification"] == 1
     assert calls[2, "facts"] == calls[2, "planning"] == 0

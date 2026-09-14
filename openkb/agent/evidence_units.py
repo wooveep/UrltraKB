@@ -187,6 +187,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             else None
         )
         start = 0
+        block_units = []
         while start < block.chars:
             # This is a read bound, not a truncation: subsequent spans continue
             # until the complete block has been accounted for.
@@ -254,15 +255,22 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                 else:
                     high = size - 1
             if not low:
-                raise ProcessingIncomplete("evidence_context_exceeds_request_budget", "facts")
+                from openkb.compilation_report import report_content_omission
+
+                report_content_omission(
+                    "facts", "evidence_context_exceeds_request_budget", [block.id]
+                )
+                block_units.clear()
+                break
             # Prefer complete lines/steps where possible. A long line remains
             # linked by its block identity and exact contiguous character span.
             if low < len(view.text):
                 boundary = view.text.rfind("\n", 0, low)
                 if boundary > low // 2:
                     low = boundary + 1
-            yield unit(low)
+            block_units.append(unit(low))
             start += low
+        yield from block_units
 
 
 def fact_batches(units, limits, model):

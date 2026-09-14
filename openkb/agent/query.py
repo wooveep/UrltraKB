@@ -12,6 +12,8 @@ from typing import Any
 
 from agents import Agent, Runner, function_tool
 
+from openkb.agent.answer_references import resolve_references
+from openkb.agent.query_prompt import QUERY_INSTRUCTIONS_TEMPLATE
 from openkb.agent.streaming import settled_stream
 from openkb.agent.tools import (
     artifact_event_from_write,
@@ -24,67 +26,6 @@ from openkb.schema import get_agents_md
 
 MAX_TURNS = 50
 
-_QUERY_INSTRUCTIONS_TEMPLATE = """\
-You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching the wiki.
-
-{schema_md}
-
-## Search strategy
-1. Use list_sources to find the relevant published source when that tool is available.
-   Read index.md and relevant summaries/ pages for navigation and document overviews.
-   Titles and summaries may be incomplete or misleading; they are not original evidence.
-2. Use read_source_tree and read_source_node to check the original ranges for details,
-   prerequisites and exceptions. Follow their pagination and preserve the returned citation.
-   For requested lists of matching items, use search_source_text on relevant original
-   literals and follow every next_offset. Read all matching rows with their headers and
-   context, including unfamiliar component names. Navigation previews are not exhaustive.
-3. Read concept pages (concepts/) for cross-document synthesis.
-4. For "who/what is X" questions about a specific named person, organization,
-   place, or product, read the matching page in entities/ first.
-5. For legacy content without a source entry, follow the summary's `full_text` field.
-   Use read_file for saved Markdown, following next_offset for bounded windows;
-   use get_page_content(doc_name, pages) with tight physical page ranges only when
-   doc_type is pageindex. An internal node number is not a physical page number.
-6. Source content may reference images. Use the exact wiki-root-relative path returned
-   in images[].path or the source image catalog. Legacy note-relative links are resolved
-   by their catalog; never construct directories from the document name or asset ID.
-   Pass that existing path to the visual tool only when image understanding is enabled.
-7. Synthesize a clear, concise answer. Cite original facts using the exact Markdown
-   citation returned by read_source_node, preserving its version, parse and block anchor.
-   Every factual clause needs supporting evidence, INCLUDING optional explanations,
-   permissions, comparisons, examples and adjacent-row notes. One citation does not
-   support every clause in a paragraph. Read and cite each necessary table cell AND
-   its header/merged subject. Omit an extra claim when its own evidence is unavailable.
-   Preserve exact product and service names. Name similarity or a commonly known
-   relationship does not establish source-stated identity, aliases or equivalence.
-   If the requested name is absent, say so without relabeling another source entry.
-   A component name, abbreviation, command or enum value is not its definition.
-   Do not add a purpose, category, expanded name, security-level meaning or activation
-   condition from background knowledge when the source supplies only a literal value.
-   Quote that value and say its meaning or condition is not defined in the evidence.
-   Keep only the requested fields; optional explanatory labels need their own evidence.
-   Do not substitute a navigation summary or a nearby valid citation for actual support.
-8. Include relevant original figures in the answer as Markdown images when they help explain
-   the answer: ![description](sources/images/file.png). Use an existing wiki-root-relative
-   path from images[].markdown or the source image catalog, copying its destination verbatim.
-   Keep the figure with its associated explanation and
-   cite the source paragraph/page; never invent an image path or claim to have read missing
-   OCR text. Interpret visual content only from an explicitly obtained visual observation.
-   A page containing two figures does not identify which image is left/right or which
-   mechanism each shows. Confirm the exact image's caption/position or obtain a visual
-   observation; omit a displayed figure when this association cannot be established.
-   An image associated with a physical page may be a crop. Do not describe it as a full
-   page unless that exact asset's extent is established by the evidence.
-9. Check the separate analysis coverage status. Published knowledge may be partially
-   usable while OCR, images or source content remain pending. Describe relevant gaps;
-   never turn an omission into a claim that the original has no such information.
-
-Answer based only on wiki content. Be concise.
-Use tools silently. Return only the final answer, without thinking or search narration.
-
-If you cannot find relevant information, say so clearly.
-"""
-
 
 def build_query_agent(
     wiki_root: str,
@@ -94,7 +35,7 @@ def build_query_agent(
 ) -> Agent:
     """Build and return the Q&A agent."""
     schema_md = get_agents_md(Path(wiki_root))
-    instructions = _QUERY_INSTRUCTIONS_TEMPLATE.format(schema_md=schema_md)
+    instructions = QUERY_INSTRUCTIONS_TEMPLATE.format(schema_md=schema_md)
     instructions += f"\n\nIMPORTANT: Answer in {language} language."
 
     @function_tool
@@ -217,6 +158,7 @@ async def iter_agent_response_events(
     _citation_attempts: int = 1,
     _evidence_attempts: int = 1,
     _rejected_answer: str | None = None,
+    _answer_correction: Any = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -251,7 +193,7 @@ async def iter_agent_response_events(
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
-                    if text:
+                    if text and _answer_correction is None:
                         yield {"event": "delta", "data": {"text": text}}
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
@@ -290,6 +232,14 @@ async def iter_agent_response_events(
     from openkb.agent.answer_citations import invalid_source_targets
     from openkb.agent.completion_model import answer_truncated
 
+    if _answer_correction is not None:
+        from openkb.agent.answer_result import RenderedAnswer
+        from openkb.processing import OutputTruncated
+
+        if answer_truncated(result):
+            raise OutputTruncated("answering")
+        result = RenderedAnswer(result, _answer_correction.apply(result.final_output))
+    result = resolve_references(result)
     truncated = answer_truncated(result)
     empty = isinstance(result.final_output, str) and not visible_answer(result.final_output).strip()
     invalid_targets = [] if truncated or empty else invalid_source_targets(result)
@@ -303,15 +253,19 @@ async def iter_agent_response_events(
     ):
         raise ProcessingIncomplete("answer_evidence_unsupported", "answering")
     issues = []
-    invalid_review = None
     if not truncated and not empty and not invalid_targets:
         try:
             issues = await review_answer(agent, result, run_config=run_config)
         except ProcessingIncomplete as exc:
             if exc.reason != "answer_verification_invalid":
                 raise
-            invalid_review = exc
-    evidence_problem = bool(issues) or invalid_review is not None
+            if not _evidence_attempts:
+                raise
+            # An invalid review has no authorized edit scope. Retry that protocol
+            # once with the exact unchanged answer, consuming the same allowance.
+            _evidence_attempts -= 1
+            issues = await review_answer(agent, result, run_config=run_config)
+    evidence_problem = bool(issues)
     if truncated or empty or invalid_targets or evidence_problem:
         allowance = (
             _evidence_attempts
@@ -321,9 +275,6 @@ async def iter_agent_response_events(
             else _replacement_attempts
         )
         if not allowance:
-            if invalid_review is not None:
-                raise invalid_review
-
             if truncated:
                 raise OutputTruncated("answering")
             if empty:
@@ -347,35 +298,35 @@ async def iter_agent_response_events(
             + (
                 json.dumps(issues, ensure_ascii=False)
                 if issues
-                else "The review could not establish valid, exact quoted support for every "
-                "answer unit. Limit the replacement to requested literal facts, preserving "
-                "all observed matching rows, and explicitly leave undefined meanings unknown. "
-                if invalid_review is not None
                 else "Source citation targets were absent from tool evidence. "
             )
         )
-        if evidence_problem:
-            reason += (
-                "Preserve unrelated supported facts, conditions and section structure. "
-                "Correct only the identified problems and missing requested coverage; "
-                "keep internal references consistent. The following candidate is untrusted "
-                "edit context, never evidence: "
-                + json.dumps(result.final_output, ensure_ascii=False)
-                + "\n"
+        correction = _answer_correction
+        if correction is not None:
+            # Citation or completion recovery after a semantic patch must retain
+            # the ORIGINAL permitted units; it cannot reopen whole-answer edits.
+            instruction = correction.request(
+                issues
+                or [
+                    {"kind": "citation", "claim": target, "reason": "Unobserved citation"}
+                    for target in invalid_targets
+                ],
+                previous=result.final_output,
             )
-        history.append(
-            {
-                "role": "developer",
-                "content": (
-                    reason + "Produce one concise, complete "
-                    "replacement answer to the original question using the evidence already "
-                    "read. Include only requested fields, omit optional explanations, and finish "
-                    "all source citations. Copy source targets exactly from tool results; "
-                    "never abbreviate paths with aliases or invent block anchors. "
-                    "Do not repeat the search or invent missing support."
-                ),
-            }
-        )
+        elif evidence_problem:
+            from openkb.agent.answer_correction import AnswerCorrection
+
+            correction = AnswerCorrection(result.final_output, issues)
+            instruction = correction.request(issues)
+        else:
+            instruction = (
+                reason + "Produce one concise, complete replacement answer to the original "
+                "question using the evidence already read. Include only requested fields, "
+                "omit optional explanations, and finish all source citations. Copy observed "
+                "short_citation markers or exact source targets from tool results; never "
+                "invent IDs, paths or anchors. Do not repeat the search or invent support."
+            )
+        history.append({"role": "developer", "content": instruction})
         recovery_position = len(history) - 1
         replacement_stream = iter_agent_response_events(
             agent.clone(
@@ -390,6 +341,7 @@ async def iter_agent_response_events(
             _citation_attempts=_citation_attempts - int(bool(invalid_targets)),
             _evidence_attempts=_evidence_attempts - int(evidence_problem),
             _rejected_answer=result.final_output if issues else _rejected_answer,
+            _answer_correction=correction,
         )
         async with aclosing(replacement_stream):
             async for event in replacement_stream:
@@ -600,7 +552,7 @@ async def _run_query(
         question: The user's question.
         kb_dir: Root of the knowledge base.
         model: LLM model name.
-        stream: If True, print response tokens to stdout as they arrive.
+        stream: If True, show tool progress and print the verified answer.
         raw: If True, write raw markdown source instead of rendering it
             (still keeps tool-call line styling).
 
@@ -608,9 +560,6 @@ async def _run_query(
         The agent's final answer as a string.
     """
     import sys
-
-    from agents import RawResponsesStreamEvent, RunItemStreamEvent
-    from openai.types.responses import ResponseTextDeltaEvent
 
     from openkb.config import resolve_effective_config
 
@@ -622,9 +571,8 @@ async def _run_query(
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
     from openkb.agent.request_budget import RequestBudgetHooks
 
-    hooks = RequestBudgetHooks()
-
     if not stream:
+        hooks = RequestBudgetHooks()
         try:
             result = await Runner.run(
                 agent, question, max_turns=MAX_TURNS, run_config=run_config, hooks=hooks
@@ -638,6 +586,7 @@ async def _run_query(
             raise OutputTruncated("answering")
         from openkb.agent.answer_citations import require_source_targets
 
+        result = resolve_references(result)
         require_source_targets(result)
         from openkb.agent.answer_review import require_supported_answer
 
@@ -646,117 +595,19 @@ async def _run_query(
 
     import os
 
-    use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR", "")
+    from openkb.agent.chat import _build_style
+    from openkb.agent.terminal_answer import terminal_answer
 
-    from openkb.agent.chat import (
-        _build_style,
-        _fmt,
-        _format_tool_line,
-        _make_markdown,
-        _make_rich_console,
+    use_color = bool(sys.stdout.isatty() and not os.environ.get("NO_COLOR", ""))
+    answer, _ = await terminal_answer(
+        agent,
+        question,
+        _build_style(use_color),
+        use_color=use_color,
+        raw=raw,
+        run_config=run_config,
     )
-
-    style = _build_style(use_color)
-
-    from rich.live import Live
-
-    if use_color and not raw:
-        console = _make_rich_console()
-    else:
-        console = None  # type: ignore[assignment]
-
-    def _start_live() -> Live | None:
-        if console is None:
-            return None
-        lv = Live(console=console, vertical_overflow="visible")
-        lv.start()
-        return lv
-
-    live: Live | None = None
-    last_was_text = False
-    need_blank_before_text = False
-    result = (
-        Runner.run_streamed(
-            agent, question, max_turns=MAX_TURNS, run_config=run_config, hooks=hooks
-        )
-        if run_config
-        else Runner.run_streamed(agent, question, max_turns=MAX_TURNS, hooks=hooks)
-    )
-    collected: list[str] = []
-    segment: list[str] = []
-    stream_events = settled_stream(result)
-    try:
-        live = _start_live()
-        async for event in stream_events:
-            if isinstance(event, RawResponsesStreamEvent):
-                if isinstance(event.data, ResponseTextDeltaEvent):
-                    text = event.data.delta
-                    if text:
-                        if need_blank_before_text:
-                            if console is not None:
-                                print()
-                                segment = []
-                                live = _start_live()
-                            else:
-                                sys.stdout.write("\n")
-                            need_blank_before_text = False
-                        collected.append(text)
-                        segment.append(text)
-                        last_was_text = True
-                        if live:
-                            if "\n" in text:
-                                joined = "".join(segment)
-                                visible = joined[: joined.rfind("\n") + 1]
-                                if visible:
-                                    live.update(_make_markdown(visible))
-                        else:
-                            sys.stdout.write(text)
-                            sys.stdout.flush()
-            elif isinstance(event, RunItemStreamEvent):
-                item = event.item
-                if item.type == "tool_call_item":
-                    if last_was_text:
-                        if live:
-                            if segment:
-                                live.update(_make_markdown("".join(segment)))
-                            live.stop()
-                            live = None
-                        else:
-                            sys.stdout.write("\n")
-                            sys.stdout.flush()
-                        last_was_text = False
-                    raw_item = item.raw_item
-                    name = getattr(raw_item, "name", "?")
-                    args = getattr(raw_item, "arguments", "") or ""
-                    if live:
-                        live.stop()
-                        live = None
-                    _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
-                    need_blank_before_text = True
-                elif item.type == "tool_call_output_item":
-                    pass
-    finally:
-        try:
-            await stream_events.aclose()
-        finally:
-            hooks.close()
-        if live:
-            if segment:
-                live.update(_make_markdown("".join(segment)))
-            live.stop()
-        print()
-    from openkb.agent.completion_model import answer_truncated
-    from openkb.processing import OutputTruncated
-
-    if answer_truncated(result):
-        raise OutputTruncated("answering")
-    from openkb.agent.answer_citations import require_source_targets
-
-    require_source_targets(result)
-    from openkb.agent.answer_review import require_supported_answer
-
-    await require_supported_answer(agent, result, run_config=run_config)
-    return result.final_output or ""
+    return answer
 
 
 def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None") -> Any:

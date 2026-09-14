@@ -156,9 +156,6 @@ def compile_evidence(
                 continue
             accepted.append((group, content))
             progress.advance()
-        if failures and not accepted:
-            raise failures[0][1]
-
     if failures:
         from openkb.compilation_report import report_content_omission
 
@@ -202,6 +199,7 @@ def compile_evidence(
         "# "
         + source.name
         + "\n\n"
+        + ("本次生成知识：0 条。可手动编辑本页补充，或稍后继续处理。\n\n" if not groups else "")
         + "\n".join(f"- [[{group['path']}|{group['title']}]]" for group in groups),
     )
     _update_index(

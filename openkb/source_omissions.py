@@ -4,68 +4,30 @@ import re
 
 
 def local_omissions(source, parsed):
-    """Return bounded source-content diagnostics, never waive unknown global failures."""
-    pending = [row for row in parsed.quality if row["status"] == "needs_review"]
-    if not pending:
-        return []
-    if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
-        return (
-            [row["reason"] for row in pending]
-            if all(
-                row["reason"] == "unclosed_code_span" or row["reason"].startswith("missing_asset:")
-                for row in pending
-            )
-            else []
-        )
-    if source.suffix == ".pdf":
-        return (
-            [row["reason"] for row in pending]
-            if all(row["reason"].startswith("pdf_page_unparsed:") for row in pending)
-            else []
-        )
-    if source.suffix in {".xlsx", ".pptx"}:
-        prefix = (
-            "xlsx_chart_original_only:"
-            if source.suffix == ".xlsx"
-            else "pptx_object_original_only:"
-        )
-        return (
-            [row["reason"] for row in pending]
-            if all(row["reason"].startswith(prefix) for row in pending)
-            else []
-        )
-    if source.suffix != ".docx":
-        return []
-    prefixes = (
-        "docx_attachment:",
-        "docx_attachment_",
-        "docx_ole_",
-        "docx_linked_object_",
-        "docx_external_attachment_",
-        "docx_conversion_warning:",
-        "docx_part_unparsed:",
-    )
-    local = {
-        "docx_image_asset_missing",
-        "docx_image_requires_ocr",
-        "unresolved_docx_note",
-        "unresolved_docx_comment",
-    }
-    if any(
-        row["reason"] not in local and not row["reason"].startswith(prefixes) for row in pending
-    ):
-        return []
-    return [row["reason"] for row in pending]
+    """A saved parsing diagnostic is a content omission, independent of format.
+
+    Execution exceptions and immutable-artifact validation are handled by their
+    owners; this function does not catch or downgrade either of them.
+    """
+    return [row["reason"] for row in parsed.quality if row["status"] == "needs_review"]
 
 
 def has_readable_content(store, parsed):
+    transcribed = {
+        asset
+        for row in parsed.quality
+        if row["status"] == "verified"
+        for asset in row.get("transcriptions", [])
+    }
     for block in parsed.blocks:
-        if block.kind == "image":
+        if block.kind == "image" and not transcribed.intersection(block.assets):
             continue
         text = store.asset(block.blob).read_text(encoding="utf-8")
+        text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
         text = re.sub(r"!?\[[^\]]*\]\(asset:[0-9a-f]{64}\)", "", text)
         text = re.sub(
-            r"\[(?:Original image unavailable|Embedded document could not be parsed[^\]]*|"
+            r"\[(?:Original image unavailable|Embedded document (?:could not be parsed|"
+            r"has no readable content)[^\]]*|"
             r"Skipped non-document attachment:[^\]]*|unresolved comment|"
             r"(?:footnote|endnote) [^\]]*: unresolved)\]",
             "",

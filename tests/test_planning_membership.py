@@ -77,8 +77,7 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkey
         assert result[0]["members"] == ["Task"]
         assert cp.load(current) == row(["Task"])
     else:
-        with pytest.raises(ProcessingIncomplete, match="topic_coverage_incomplete"):
-            plan.plan_topics(*args, bundle=None, on_event=lambda event: None)
+        assert plan.plan_topics(*args, bundle=None, on_event=lambda event: None) == []
         assert cp.load(current) is None
 
     changed = {**request, "existing_pages": "concepts/another-page: Another page"}

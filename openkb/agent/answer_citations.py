@@ -82,9 +82,12 @@ def invalid_source_targets(result):
     answer = getattr(result, "final_output", None)
     if not isinstance(answer, str):
         return []
+    from openkb.agent.answer_references import render_references
+
+    _, unresolved = render_references(answer, {}) if "[evidence:" in answer else (answer, [])
     targets = source_targets(answer)
     if not targets:
-        return []
+        return unresolved
     observed = set()
     for item in result.to_input_list():
         if item.get("type") == "function_call_output" or item.get("role") == "tool":
@@ -119,7 +122,9 @@ def invalid_source_targets(result):
                 if snapshot or source_page:
                     local.add(_target(f"{path}#{fragment}"))
             observed.update(local)
-    return sorted(link for target, link in targets.items() if target not in observed)
+    return sorted(
+        set(unresolved) | {link for target, link in targets.items() if target not in observed}
+    )
 
 
 def require_source_targets(result):

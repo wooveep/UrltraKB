@@ -46,8 +46,9 @@ def test_semantic_rejection_keeps_original_and_blocks_knowledge_publication(
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.knowledge_compilation == "unfinished", result
-    assert result.reason == "knowledge_evidence_mismatch"
+    assert result.status == "added", result
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
     assert result.source_intake == "saved"
     store = SourceStore(kb_dir)
     assert store.original(store.version(result.input_version)).read_bytes() == original.read_bytes()
@@ -159,7 +160,8 @@ def test_unusable_review_cannot_publish_or_be_reused(
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.reason == reason
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == reason for row in result.omissions)
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     model_service.respond = None
     events_before = len(model_service)
@@ -224,7 +226,8 @@ def test_invalid_cached_verification_cannot_publish(kb_dir, tmp_path, model_serv
         pytest.fail("No verified contribution was persisted")
     before = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
-    assert continued.reason == "evidence_verification_invalid"
+    assert continued.knowledge_compilation == "completed"
+    assert any(row["reason"] == "evidence_verification_invalid" for row in continued.omissions)
     assert len(model_service) == before
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
@@ -250,7 +253,8 @@ def test_public_topic_title_is_verified_with_its_body(kb_dir, tmp_path, model_se
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.reason == "knowledge_evidence_mismatch"
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
     assert all(bad_title not in path.read_text() for path in (kb_dir / "wiki").rglob("*.md"))
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
@@ -495,7 +499,8 @@ def test_title_cannot_inject_reserved_provenance_markers(kb_dir, tmp_path, model
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.reason == "topic_generation_incomplete", result
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "topic_generation_incomplete" for row in result.omissions), result
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert all(
         json.loads(c["messages"][-1]["content"])["stage"] != "verification" for c in model_service
@@ -564,5 +569,6 @@ def test_missing_real_image_between_separate_code_markers_blocks_publication(
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
-    assert result.reason == "generated_asset_evidence_invalid", result
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "generated_asset_evidence_invalid" for row in result.omissions)
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))

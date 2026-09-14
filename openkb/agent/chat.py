@@ -30,7 +30,6 @@ from openkb.agent.query import (
     build_chat_agent,
     iter_agent_response_events,
 )
-from openkb.agent.streaming import settled_stream
 from openkb.config import LlmCredentialBundle
 from openkb.log import append_log
 from openkb.model_outputs import ModelOutputs, model_output_scope
@@ -369,118 +368,10 @@ async def _stream_tty_turn(
     use_color: bool = True,
     raw: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
-    from agents import (
-        RawResponsesStreamEvent,
-        RunItemStreamEvent,
-        Runner,
-    )
-    from openai.types.responses import ResponseTextDeltaEvent
+    from openkb.agent.terminal_answer import terminal_answer
 
     new_input = session.history + [{"role": "user", "content": user_input}]
-
-    from openkb.agent.request_budget import RequestBudgetHooks
-    from openkb.vision.history import text_history
-
-    hooks = RequestBudgetHooks()
-    result = Runner.run_streamed(agent, text_history(new_input), max_turns=MAX_TURNS, hooks=hooks)
-
-    print()
-    collected: list[str] = []
-    segment: list[str] = []
-    last_was_text = False
-    need_blank_before_text = False
-
-    if use_color and not raw:
-        from rich.live import Live
-
-        console = _make_rich_console()
-    else:
-        console = None  # type: ignore[assignment]
-
-    def _start_live() -> Any:
-        if console is None:
-            return None
-        lv = Live(console=console, vertical_overflow="visible")
-        lv.start()
-        return lv
-
-    live = _start_live()
-    stream = settled_stream(result)
-
-    try:
-        async for event in stream:
-            if isinstance(event, RawResponsesStreamEvent):
-                if isinstance(event.data, ResponseTextDeltaEvent):
-                    text = event.data.delta
-                    if text:
-                        if need_blank_before_text:
-                            if console is not None:
-                                print()
-                                segment = []
-                                live = _start_live()
-                            else:
-                                sys.stdout.write("\n")
-                            need_blank_before_text = False
-                        collected.append(text)
-                        segment.append(text)
-                        last_was_text = True
-                        if live:
-                            if "\n" in text:
-                                joined = "".join(segment)
-                                visible = joined[: joined.rfind("\n") + 1]
-                                if visible:
-                                    live.update(_make_markdown(visible))
-                        else:
-                            sys.stdout.write(text)
-                            sys.stdout.flush()
-            elif isinstance(event, RunItemStreamEvent):
-                item = event.item
-                if item.type == "tool_call_item":
-                    if last_was_text:
-                        if live:
-                            if segment:
-                                live.update(_make_markdown("".join(segment)))
-                            live.stop()
-                            live = None
-                        else:
-                            sys.stdout.write("\n")
-                            sys.stdout.flush()
-                        last_was_text = False
-                    raw_item = item.raw_item
-                    name = getattr(raw_item, "name", "?")
-                    args = getattr(raw_item, "arguments", "") or ""
-                    if live:
-                        live.stop()
-                        live = None
-                    _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
-                    need_blank_before_text = True
-    finally:
-        try:
-            await stream.aclose()
-        finally:
-            hooks.close()
-        from openkb.processing import processing_checkpoint
-
-        processing_checkpoint()
-        if live:
-            if segment:
-                live.update(_make_markdown("".join(segment)))
-            live.stop()
-        print()
-
-    from openkb.agent.completion_model import answer_truncated
-    from openkb.processing import OutputTruncated
-
-    if answer_truncated(result):
-        raise OutputTruncated("answering")
-    from openkb.agent.answer_citations import require_source_targets
-
-    require_source_targets(result)
-    from openkb.agent.answer_review import require_supported_answer
-
-    await require_supported_answer(agent, result)
-    answer = (result.final_output or "").strip()
-    return answer, new_input + result.to_input_list()[len(new_input) :]
+    return await terminal_answer(agent, new_input, style, use_color=use_color, raw=raw)
 
 
 def _save_transcript(kb_dir: Path, session: ChatSession, name: str | None) -> Path:

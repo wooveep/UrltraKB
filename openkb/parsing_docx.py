@@ -166,6 +166,15 @@ def parse_docx(
                                 options=_options,
                                 resume_ocr=resume_ocr,
                             )
+                            if not drafts:
+                                drafts = [
+                                    BlockDraft(
+                                        "[Embedded document has no readable content; "
+                                        "original retained]",
+                                        "paragraph",
+                                        {"kind": "converted", "line": 1},
+                                    )
+                                ]
                             blocks.extend(bind_blocks(drafts, attachment, location))
                             quality.extend(attachment_quality(checks, attachment))
                         except ATTACHMENT_CONTENT_ERRORS:

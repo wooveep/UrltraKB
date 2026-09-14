@@ -36,9 +36,6 @@ def normalize_links(content, known_targets, assets, *, links_only=False):
     markdown = MarkdownIt("commonmark").enable(["table", "strikethrough"])
     environment = {}
     tokens = markdown.parse(content, environment)
-    # Match CommonMark normalization without treating Unicode separators as lines.
-    offsets = [0, *(match.end() for match in re.finditer(r"\r\n?|\n", content))]
-    lines = re.split(r"\r\n?|\n", content.replace("\0", "\ufffd"))
     norm_index = build_norm_index(known_targets)
     prose, replacements = "", []
 
@@ -79,12 +76,25 @@ def normalize_links(content, known_targets, assets, *, links_only=False):
     markdown.inline.ruler.before("escape", "wiki_link", wiki_link)
     if not links_only:
         markdown.inline.ruler.at("image", figure)
+
+    def parse_inline(text):
+        nonlocal prose, replacements
+        prose, replacements = text, []
+        markdown.inline.parse(prose, markdown, environment, [])
+        return replacements
+
+    return rewrite_inline(content, tokens, parse_inline)
+
+
+def rewrite_inline(content, tokens, parse_inline):
+    """Apply parser-produced inline edits at exact original Markdown positions."""
+    offsets = [0, *(match.end() for match in re.finditer(r"\r\n?|\n", content))]
+    lines = re.split(r"\r\n?|\n", content.replace("\0", "\ufffd"))
     edits, columns = [], {}
     for index, token in enumerate(tokens):
         if token.type != "inline" or not token.map:
             continue
-        prose, replacements = token.content, []
-        markdown.inline.parse(prose, markdown, environment, [])
+        replacements = parse_inline(token.content)
         cell = index > 0 and tokens[index - 1].type in {"th_open", "td_open"}
         if not replacements and not cell:
             continue

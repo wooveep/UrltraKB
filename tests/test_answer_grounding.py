@@ -99,6 +99,18 @@ async def test_semantic_review_repairs_once_and_rechecks_before_completion(
         if citation_first and not drafts:
             answer = answer.replace(target, "sources/snapshots/invented.md#block-missing")
         drafts.append(answer)
+        if payload.get("stage") == "answer_correction":
+            edits = (
+                [
+                    {
+                        "unit": payload["editable_units"][0],
+                        "text": good.split("[Original]", 1)[0].rstrip(),
+                    }
+                ]
+                if repairs
+                else []
+            )
+            return {"role": "assistant", "content": json.dumps({"edits": edits, "insertions": []})}
         return {"role": "assistant", "content": answer}
 
     model_service.chat_response = chat
@@ -153,6 +165,8 @@ async def test_invalid_review_never_authorizes_a_completed_answer(kb_dir, model_
     atomic_write_text(kb_dir / "wiki/index.md", f"Port: 4100. [Original]({target})")
 
     def chat(body):
+        if '"stage": "answer_correction"' in body["messages"][-1]["content"]:
+            return {"role": "assistant", "content": '{"edits":[],"insertions":[]}'}
         if any(m["role"] == "tool" for m in body["messages"]):
             return {"role": "assistant", "content": f"Port: 4100 [Original]({target})"}
         return {
@@ -171,11 +185,12 @@ async def test_invalid_review_never_authorizes_a_completed_answer(kb_dir, model_
         }
 
     model_service.chat_response = chat
+    model_service.chat_without_tools = True
     model_service.answer_review_response = lambda body: {"role": "assistant", "content": review}
     result = await ask_question(kb_dir, "Which port?", save=True)
     assert result.status != "completed"
     assert result.saved_path is None
-    assert result.usage["observable_attempts"] == 5
+    assert result.usage["observable_attempts"] == 4
 
 
 @pytest.mark.asyncio
@@ -222,6 +237,8 @@ async def test_invalid_review_allows_one_evidence_preserving_replacement(kb_dir,
     reviews = []
 
     def chat(body):
+        if '"stage": "answer_correction"' in body["messages"][-1]["content"]:
+            return {"role": "assistant", "content": '{"edits":[],"insertions":[]}'}
         if any(message["role"] == "tool" for message in body["messages"]):
             return {"role": "assistant", "content": answer}
         return {
@@ -256,7 +273,7 @@ async def test_invalid_review_allows_one_evidence_preserving_replacement(kb_dir,
     model_service.answer_review_response = review
     result = await continue_conversation(kb_dir, "Which port?")
     assert result.status == "completed" and result.answer == answer
-    assert len(reviews) == 2 and result.usage["observable_attempts"] == 5
+    assert len(reviews) == 2 and result.usage["observable_attempts"] == 4
     from openkb.agent.chat_session import load_session
 
     saved = load_session(kb_dir, result.session_id)

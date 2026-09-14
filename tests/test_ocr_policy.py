@@ -41,7 +41,9 @@ def test_ocr_off_retains_scanned_original_without_launching_an_engine(
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("OCR launched a process"))
     result = import_document(kb_dir, path)
     assert result.source_intake == "saved"
-    assert result.knowledge_compilation != "completed"
+    assert result.knowledge_compilation == "completed"
+    assert result.coverage["status"] == "partial"
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     parsed = ParseStore(kb_dir).load(result.parse_id)
     assert parsed.profile["ocr"]["policy"] == "off"
     assert any("ocr_disabled" in row["reason"] for row in parsed.quality)
@@ -151,7 +153,7 @@ def test_new_minimal_local_selection_is_not_migrated_to_system(kb_dir, selection
     assert read_settings_view(kb_dir).values.parsing.ocr.backend == "local"
 
 
-def test_ocr_off_docx_with_only_image_stays_unfinished(kb_dir, tmp_path, monkeypatch):
+def test_ocr_off_docx_with_only_image_publishes_zero_knowledge(kb_dir, tmp_path, monkeypatch):
     from PIL import Image
 
     from tests.docx_attachment_fixtures import docx_with_parts
@@ -182,6 +184,8 @@ def test_ocr_off_docx_with_only_image_stays_unfinished(kb_dir, tmp_path, monkeyp
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("OCR was launched"))
     result = import_document(kb_dir, source)
     assert result.source_intake == "saved"
-    assert result.knowledge_compilation != "completed"
+    assert result.knowledge_compilation == "completed"
+    assert result.coverage["status"] == "partial"
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     parsed = ParseStore(kb_dir).load(result.parse_id)
     assert any("readable_text_absent" in q["reason"] for q in parsed.quality)

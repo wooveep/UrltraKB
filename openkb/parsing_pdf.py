@@ -27,7 +27,7 @@ def parse_pdf(
         progress_scope("pdf", document.page_count, "pages") as progress,
     ):
         if document.needs_pass:
-            raise ValueError("Encrypted PDF requires an unlocked input copy")
+            return [], [{"status": "needs_review", "reason": "pdf_encrypted_content_unavailable"}]
         for number, page in enumerate(document, 1):
             processing_checkpoint("parsing")
             if number in (reuse or {}):

@@ -26,7 +26,11 @@ def parse_xlsx(path, store):
     from openpyxl import load_workbook
     from openpyxl.utils.cell import range_boundaries
 
-    book = load_workbook(checked_package(path), data_only=False, keep_links=False)
+    from openkb.parsing_failures import read_office_package
+
+    book = read_office_package(
+        load_workbook, checked_package(path), data_only=False, keep_links=False
+    )
     blocks, quality = [], []
     try:
         with progress_scope("xlsx", len(book.worksheets), "items") as progress:
@@ -128,7 +132,9 @@ def parse_pptx(path, store):
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-    presentation = Presentation(checked_package(path))
+    from openkb.parsing_failures import read_office_package
+
+    presentation = read_office_package(Presentation, checked_package(path))
     blocks, quality = [], []
 
     def visit(shapes, base, title, title_id, groups=()):

@@ -11,7 +11,7 @@ from openkb.compilation_report import collect_compile_report, report_content_omi
 from openkb.config import compilation_model_options
 from openkb.evidence import Evidence, complete_read_bound
 from openkb.implementation import module_revision
-from openkb.processing import ProcessingIncomplete, processing_checkpoint
+from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
 from openkb.sources import content_id
 
@@ -92,6 +92,8 @@ def _decisions(value, paths):
 def protect_dependencies(
     reader, source, parsed, accepted, facts, settings, checkpoints, bundle, on_event
 ):
+    if not accepted:
+        return []
     with collect_compile_report() as report:
         omissions = list(report.omissions)
     from openkb.source_omissions import local_omissions
@@ -142,7 +144,6 @@ def protect_dependencies(
         ],
     }
     options = compilation_model_options(settings, verification=True)
-    errors = []
     decisions = {}
 
     def review_key(candidates):
@@ -195,7 +196,6 @@ def protect_dependencies(
         return _decisions(saved, paths)
 
     def pending(candidates, error):
-        errors.append(error)
         report_content_omission("generation", error.reason, [row["path"] for row in candidates])
         decisions.update((row["path"], "unknown") for row in candidates)
 
@@ -227,8 +227,4 @@ def protect_dependencies(
                 else "dependency_scope_unresolved",
                 [group["path"]],
             )
-    if not retained:
-        if errors:
-            raise errors[0]
-        raise ProcessingIncomplete("dependency_scope_unresolved", "dependencies")
     return retained

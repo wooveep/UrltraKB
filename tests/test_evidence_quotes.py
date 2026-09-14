@@ -94,7 +94,8 @@ def test_quote_repair_does_not_accept_rewrites_or_ambiguous_positions(
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source, on_event=events.append)
-    assert result.reason == "fact_evidence_invalid"
+    assert result.knowledge_compilation == "completed"
+    assert any(row["reason"] == "fact_evidence_invalid" for row in result.omissions)
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     failures = [e for e in events if e.get("operation") == "response_invalid"]
     assert failures[-1]["field"] == "quote"
@@ -139,11 +140,14 @@ def test_previous_valid_fact_checkpoint_is_revalidated_and_reused(kb_dir, tmp_pa
     monkeypatch.setattr(CompilationCheckpoints, "key", previous_key)
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, source)
-    assert first.reason == "output_budget_exhausted"
+    assert first.knowledge_compilation == "completed"
+    assert any(row["reason"] == "output_budget_exhausted" for row in first.omissions)
     assert calls.count("facts") == 1
     calls.clear()
     first_run = False
     monkeypatch.setattr(CompilationCheckpoints, "key", current_key)
-    second = import_document(kb_dir, source)
+    from openkb.application.source_actions import continue_source
+
+    second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
-    assert "facts" not in calls
+    assert "facts" not in calls and "planning" in calls

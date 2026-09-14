@@ -422,22 +422,28 @@ class ParseStore:
                     {"version": version.id, "parse": parsed.id, "page": page, "reason": reason},
                 )
 
+    def _validate_artifacts(self, version: SourceVersion, parsed: ParseVersion) -> None:
+        self._bind(version, parsed)
+        if self.load(parsed.id) != parsed:
+            raise ValueError("Parse manifest changed")
+        self.sources.original(version)
+        for asset in version.assets.values():
+            if asset is not None:
+                self.sources.asset(asset)
+        for block in parsed.blocks:
+            content = self.sources.asset(block.blob)
+            with content.open(encoding="utf-8", newline="") as stream:
+                length = sum(len(chunk) for chunk in iter(lambda: stream.read(8192), ""))
+            if length != block.chars:
+                raise ValueError("Content block length mismatch")
+            for asset in block.assets:
+                self.sources.asset(asset)
+
     def complete(self, version: SourceVersion, parsed: ParseVersion) -> bool:
         with kb_read_lock(self.kb_dir / ".openkb"):
-            self._bind(version, parsed)
-            self.sources.original(version)
-            for asset in version.assets.values():
-                if asset is None:
-                    return False
-                self.sources.asset(asset)
-            for block in parsed.blocks:
-                content = self.sources.asset(block.blob)
-                with content.open(encoding="utf-8", newline="") as stream:
-                    length = sum(len(chunk) for chunk in iter(lambda: stream.read(8192), ""))
-                if length != block.chars:
-                    raise ValueError("Content block length mismatch")
-                for asset in block.assets:
-                    self.sources.asset(asset)
+            self._validate_artifacts(version, parsed)
+            if any(asset is None for asset in version.assets.values()):
+                return False
             accepted_missing = self.accepted_missing_images(version, parsed)
             for row in parsed.quality:
                 if row["status"] == "verified":
@@ -455,23 +461,14 @@ class ParseStore:
             return True
 
     def compilable(self, version: SourceVersion, parsed: ParseVersion) -> bool:
-        """Validate evidence, permitting explicit local omissions beside readable text."""
-        from openkb.source_omissions import has_readable_content, local_omissions
+        """Permit publication with omissions, including no usable knowledge at all.
 
+        Parser quality diagnostics describe missing content. They cannot waive
+        corrupt identities, changed originals or missing stored evidence bytes.
+        """
         with kb_read_lock(self.kb_dir / ".openkb"):
-            if self.complete(version, parsed):
-                return True
-            # A missing input asset is distinct from an unsupported embedded object.
-            if any(asset is None for asset in version.assets.values()) and version.suffix not in {
-                ".md",
-                ".markdown",
-                ".txt",
-                ".csv",
-            }:
-                return False
-            return bool(local_omissions(version, parsed)) and has_readable_content(
-                self.sources, parsed
-            )
+            self._validate_artifacts(version, parsed)
+            return True
 
     def _missing_images(self, version: SourceVersion, parsed: ParseVersion) -> list[str]:
         if version.suffix != ".docx":

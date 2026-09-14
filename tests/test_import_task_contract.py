@@ -292,15 +292,16 @@ def test_slow_drip_http_response_obeys_elapsed_request_deadline(kb_dir, model_se
     assert not (kb_dir / "wiki/summaries/slow-drip.md").exists()
 
 
-def test_corrupt_pdf_reports_conversion_failure(kb_dir):
+def test_corrupt_pdf_publishes_a_content_gap(kb_dir):
     from openkb.application.documents import import_document
 
     source = kb_dir / "corrupt.pdf"
     source.write_bytes(b"not a PDF")
     result = import_document(kb_dir, source)
-    assert result.status == "failed"
-    assert result.stage == "parsing"
-    assert result.reason.startswith("parsing_failed:")
+    assert result.status == "added"
+    assert result.knowledge_compilation == "completed"
+    assert result.coverage["status"] == "partial"
+    assert any("source_content_unparsed" in warning for warning in result.warnings)
     assert result.source_intake == "saved"
 
 

@@ -61,8 +61,13 @@ def read_member(archive: ZipFile, name: str, budget: ExpansionBudget, depth: int
 
 
 def decode_text(data: bytes) -> str:
+    from openkb.parsing_failures import DocumentContentError
+
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return data.decode("utf-16")
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise DocumentContentError("text_encoding_unsupported") from exc
     for encoding in ("utf-8-sig", "gb18030"):
         try:
             text = data.decode(encoding)
@@ -70,7 +75,7 @@ def decode_text(data: bytes) -> str:
                 return text
         except UnicodeDecodeError:
             continue
-    raise ValueError("docx_attachment_text_encoding_unsupported")
+    raise DocumentContentError("docx_attachment_text_encoding_unsupported")
 
 
 def _native_package(data: bytes) -> tuple[str, bytes]:

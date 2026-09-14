@@ -72,7 +72,9 @@ def test_corrupt_immutable_blob_is_rejected_instead_of_replaced(kb_dir, tmp_path
         intake(kb_dir, source)
 
 
-def test_shared_import_retains_original_when_compiler_is_unfinished(kb_dir, tmp_path, monkeypatch):
+def test_shared_import_registers_original_when_all_knowledge_is_omitted(
+    kb_dir, tmp_path, monkeypatch
+):
     from types import SimpleNamespace
 
     import litellm
@@ -90,7 +92,8 @@ def test_shared_import_retains_original_when_compiler_is_unfinished(kb_dir, tmp_
         ),
     )
     result = import_document(kb_dir, source)
-    assert result.status == "unfinished"
+    assert result.status == "added"
+    assert result.omissions
     assert result.source_intake == "saved"
     assert result.source_id is not None and result.input_version is not None
     saved = SourceStore(kb_dir).version(result.input_version)
@@ -101,7 +104,7 @@ def test_shared_import_retains_original_when_compiler_is_unfinished(kb_dir, tmp_
     documents = get_kb_list(kb_dir)["documents"]
     assert len(documents) == 1
     assert documents[0]["source_id"] == result.source_id
-    assert documents[0]["knowledge_compilation"] == "unfinished"
+    assert documents[0]["knowledge_compilation"] == "completed"
 
 
 def test_shared_import_compiles_independent_sources_and_skips_only_completed_version(
@@ -200,7 +203,7 @@ def test_recompilation_preserves_manual_metadata_and_uses_saved_source(
     summary.write_text("---\ntitle: Human annotation\n---\nHuman content")
     source.unlink()
     result = asyncio.run(recompile_document(kb_dir, first.source_id))
-    assert result.status == "unfinished" and result.message == "needs_acceptance"
+    assert result.status == "compiled"
     assert summary.read_text().endswith("Human content")
     assert result.document.source_intake == "saved"
 

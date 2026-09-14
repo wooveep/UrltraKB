@@ -169,6 +169,18 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
                 roots.add(digest)
     # A retained pending proposal must keep its exact before/after images. Old
     # completed proposals are history, not a second chain of publication roots.
+    from openkb.source_refs import SourceOwnership
+
+    ownership_blobs: set[str] = set()
+    for receipt in store.owned_path(knowledge / "completed").glob("*.json"):
+        source_id = valid_id(receipt.stem, source=True)
+        record = read_object(receipt)
+        ownership = SourceOwnership(kb_dir, source_id)
+        ownership_blobs.update(
+            digest for digest in ownership.generated.values() if digest is not None
+        )
+        if "ownership" not in record:
+            roots.add(record["proposal"])  # Legacy ownership still needs its proposal.
     for latest in store.owned_path(store.root / "runs").glob("*/latest.json"):
         record = read_object(store.owned_path(latest))
         attempt = valid_id(record["attempt"], source=True)
@@ -225,6 +237,10 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
             )
         references.update(bindings.get(identity, set()))
         queue.extend(references - retained)
+    # Weak roots retain bytes solely for authorship comparisons. Traverse all
+    # strong roots first: a pending proposal may independently need the same
+    # bytes and every original citation contained in them.
+    retained.update(ownership_blobs)
     unused = available - retained
     removable = {nodes[identity] for identity in unused & nodes.keys()}
 

@@ -14,8 +14,9 @@ from tests.test_docx_images import _png
 
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("image_kind", ["drawing", "vml"])
+@pytest.mark.parametrize("only_images", [False, True])
 def test_successful_image_transcription_does_not_complete_its_neighbor(
-    kb_dir, tmp_path, monkeypatch, model_service, nested, image_kind
+    kb_dir, tmp_path, monkeypatch, model_service, nested, image_kind, only_images
 ):
     cloud_settings(kb_dir)
     monkeypatch.setenv("TEST_OCR_TOKEN", "synthetic-test-token")
@@ -55,6 +56,22 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
             for name in ("first", "second")
         ),
     )
+    if only_images:
+        import re
+        from zipfile import ZipFile
+
+        with ZipFile(source) as archive:
+            parts = {name: archive.read(name) for name in archive.namelist()}
+        body = (
+            parts["word/document.xml"]
+            .decode()
+            .replace("<w:t>Follow the pictured command.</w:t>", "")
+        )
+        body = re.sub(r"<v:shape><v:textbox>.*?</v:textbox></v:shape>", "", body)
+        parts["word/document.xml"] = body.encode()
+        with ZipFile(source, "w") as archive:
+            for name, data in parts.items():
+                archive.writestr(name, data)
     if nested:
         source = attached_docx(tmp_path / "outer.docx", source.read_bytes())
     submissions = []
@@ -109,6 +126,9 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
     assert second["transcription"] == "pending"
     assert first["understanding"] == second["understanding"] == "pending"
     assert result.coverage["status"] == "partial"
+    assert any("9473" in str(request["messages"][-1]["content"]) for request in model_service), (
+        "Successful OCR text must reach knowledge compilation"
+    )
     if image_kind == "vml":
         positions = [
             row["location"]
