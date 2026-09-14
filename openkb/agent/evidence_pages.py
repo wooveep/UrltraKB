@@ -52,6 +52,11 @@ fragments format in output_contract, preserving the occurrence-to-source mapping
 Choose a neutral public title covering ALL supplied tasks, not just the first source.
 Do not omit supplied facts. Do not invent evidence, links or source markers.
 Keep every restriction bound to the exact operation and version named in the source.
+Translation, including public titles and subheadings, must preserve the source's level of
+specificity and logical role. An ambiguous term does not establish a specific technical
+mechanism, and a conditional exception is not a fault or failure. Retain the original term
+when the supplied source cannot establish its intended meaning; do not guess an expanded
+name, category or technical translation. A faithful neutral heading need not be translated.
 A heading cannot extend a restriction to other operations. If layout and wording conflict,
 preserve the literal claim and state the ambiguity instead of resolving it by inference.
 Do not add plausible safety rationales, requirements, permissions or steps absent from evidence.
@@ -69,6 +74,9 @@ Preserve relevant source image links with the text they illustrate; their physic
 positions and neighboring text define the association. Never infer unrecognized image text.
 OCR notices describe a limitation, not a factual claim about the depicted content.
 Do not add commentary about duplication or layout artifacts.
+Use neighboring passages only for necessary context and conditions. Do not add a tour of
+the source topics or explain which material this generated page includes or excludes.
+Write the required facts directly, preserving genuine source descriptions of scope.
 The review is feedback, not an instruction to invent information or omit required facts.
 Write in the requested language. This bounded part belongs to the same topic as all other parts."""
 

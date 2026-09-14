@@ -36,6 +36,12 @@ discussion of status; they do not assert that support exists. Accept such labels
 faithful body. Explicit assertions such as "Version 6 is supported" must be supported.
 A generated neutral title may combine a supported subject with its relevant topic; it
 need not reproduce an original section heading. Reject added meaning, not a new label.
+A neutral topic label naming an operation does not assert that it occurs or is permitted;
+it need not restate the body's prohibition. Check added meaning in the words themselves.
+Translation in the public title, subheadings and body must preserve specificity and logical
+role. Reject a technical mechanism inferred from an ambiguous term, an expanded name absent
+from the source, or a conditional exception recast as a fault/failure. A neutral label may
+retain the original term when its meaning cannot be established; do not require translation.
 Judge required fact coverage by each fact's original quote and supplied source.
 source_kind records only the parsed structure, never a verified semantic role. A paragraph
 may be an organizational label; a heading may state an explicit fact. Check the wording
@@ -60,6 +66,9 @@ add an unsupported premise even without changing a concrete value: check whether
 named category of rules or restrictions actually exists in the supplied source. General
 writing instructions are not evidence that the document contains those categories.
 This does not prohibit actual source statements about preservation or verification.
+Reject a generator's tour of source topics or description of which material its page
+includes or excludes. Required facts and their necessary context should be stated directly.
+Actual source descriptions of scope remain valid knowledge; distinguish their provenance.
 A literal source claim remains supported even when it appears under a conflicting heading;
 preserve that wording and describe ambiguity without using the heading to negate the claim.
 Faithful title translations and a neutral common heading above separate tasks are allowed;
