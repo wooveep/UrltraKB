@@ -96,6 +96,7 @@ class SharedAnalysis:
                     "openkb.agent.evidence_quotes",
                     "openkb.agent.evidence_coverage",
                     "openkb.agent.evidence_wire",
+                    "openkb.source_context",
                     "openkb.agent.model_json",
                     "openkb.agent.request_analysis",
                     "openkb.agent.compiler",

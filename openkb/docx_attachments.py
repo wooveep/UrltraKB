@@ -142,6 +142,7 @@ def parse_attachment(
                 b.location,
                 b.assets,
                 b.context,
+                b.context_data,
             )
             for b in parsed.blocks
         ], parsed.quality

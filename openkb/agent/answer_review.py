@@ -14,6 +14,7 @@ from openkb.agent.model_json import json_text, unique_fields
 from openkb.agent.request_budget import RequestBudgetHooks
 from openkb.agent.streaming import settled_stream
 from openkb.processing import OutputTruncated, ProcessingIncomplete, processing_checkpoint
+from openkb.source_context import CONTEXT_INSTRUCTIONS
 
 
 @dataclass
@@ -82,7 +83,7 @@ Quoted operational metadata may support statements about retrieval or coverage, 
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
 working connection or any observed image. Disabled does not prove missing source content.
-Check evidence_provenance: reader context mixes original excerpts with parser annotations.
+Check evidence_provenance: legacy reader context mixes original excerpts with parser annotations.
 An unconfirmed header role is a reader limitation, not something the original author said.
 Literal first-row cells can still support their exact labels and unambiguous row relations.
 knowledge_analysis_status records compilation, not whether already observed original/OCR
@@ -110,6 +111,8 @@ Requested information missing from the whole draft uses kind=missing and units: 
 Use an empty claim only for missing requested coverage. Supported requires issues: [].
 Unsupported/uncertain requires at least one concrete issue. Do not rewrite the draft.
 """
+
+INSTRUCTIONS += "\n" + CONTEXT_INSTRUCTIONS
 
 
 def _decode(value):

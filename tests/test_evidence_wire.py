@@ -2,8 +2,89 @@
 
 import json
 
+import pytest
+import yaml
+
 from openkb.application.documents import import_document
 from tests.http_model_fixture import evidence_response
+
+
+def test_transport_identity_in_prose_is_omitted_without_interrupting_publication(
+    kb_dir, tmp_path, model_service
+):
+    source = tmp_path / "local-reference.md"
+    source.write_text("The chamber must cool before opening.")
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        response = evidence_response(payload)
+        if payload["stage"] == "generation":
+            response["content"] += f" ({payload['facts'][0]['id']})"
+        return response
+
+    model_service.respond = respond
+    result = import_document(kb_dir, source)
+    assert result.status == "added" and result.knowledge_compilation == "completed", result
+    assert result.omissions
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+
+
+@pytest.mark.parametrize("literal", ["r8", "@r:1", "@r:1 and @r_:2", "⟪r:1⟫"])
+def test_source_words_resembling_transport_identities_remain_literal(
+    kb_dir, tmp_path, model_service, literal
+):
+    source = tmp_path / "literal-label.md"
+    source.write_text(f"The printed label is {literal}.")
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        response = evidence_response(payload)
+        if payload["stage"] == "generation":
+            response["content"] = source.read_text()
+        return response
+
+    model_service.respond = respond
+    result = import_document(kb_dir, source)
+    assert result.status == "added" and result.knowledge_compilation == "completed", result
+    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert pages and source.read_text() in pages[0].read_text()
+    for call in model_service:
+        payload = json.loads(call["messages"][-1]["content"])
+        if payload["stage"] == "generation":
+            assert payload["facts"][0]["quote"] == source.read_text()
+            assert payload["identity_protocol"]["namespace"] not in source.read_text()
+
+
+@pytest.mark.parametrize("field", ["title", "heading", "content"])
+def test_transport_identity_cannot_escape_through_a_scoped_fragment(
+    kb_dir, tmp_path, model_service, field
+):
+    source = tmp_path / "separate-tasks.md"
+    source.write_text("# Chamber\n\nCool before opening.\n\n# Tank\n\nDrain before cleaning.")
+    config = kb_dir / ".openkb/config.yaml"
+    settings = yaml.safe_load(config.read_text())
+    settings.setdefault("processing", {}).update(context_tokens=32768, output_tokens=4096)
+    config.write_text(yaml.safe_dump(settings))
+
+    scoped_attempts = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        response = evidence_response(payload)
+        if payload["stage"] == "generation":
+            if response.get("fragments"):
+                scoped_attempts.append(payload)
+                target = response if field == "title" else response["fragments"][0]
+                target[field] = f"A reference ({payload['facts'][0]['id']})"
+            else:
+                response["content"] += f" ({payload['facts'][0]['id']})"
+        return response
+
+    model_service.respond = respond
+    result = import_document(kb_dir, source)
+    assert result.status == "added" and result.knowledge_compilation == "completed", result
+    assert scoped_attempts
+    assert result.omissions and not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
 def test_short_wire_ids_preserve_literal_hex_and_every_occurrence(kb_dir, tmp_path, model_service):

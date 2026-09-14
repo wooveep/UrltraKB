@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.docx_containers import ExpansionBudget
+from openkb.docx_context import cell_excerpts
 from openkb.docx_package import prepare_docx
 from openkb.evidence import BlockDraft
 from openkb.ocr.image_session import image_ocr_scope
@@ -114,7 +115,7 @@ def parse_docx(
             return text
         return "".join(inline(child, assets) for child in getattr(node, "children", []))
 
-    def visit(children, position=None, header=""):
+    def visit(children, position=None, header="", context_data=None):
         nonlocal paragraph_number, table_number
         for node in children:
             processing_checkpoint("parsing")
@@ -141,12 +142,33 @@ def parse_docx(
                 if text.strip() or assets:
                     kind = "table" if position else "heading" if level is not None else "paragraph"
                     context = header
+                    details = context_data
                     if node.numbering:
                         context += (
                             f"\nList level {node.numbering.level_index}; "
                             f"ordered={node.numbering.is_ordered}"
                         )
-                    blocks.append(BlockDraft(text, kind, location, tuple(assets), context))
+                        if details is not None:
+                            list_level = node.numbering.level_index
+                            if isinstance(list_level, str) and re.fullmatch(r"[0-9]+", list_level):
+                                try:
+                                    list_level = int(list_level)
+                                except ValueError:
+                                    list_level = None
+                            if type(list_level) is int and list_level >= 0:
+                                details = {
+                                    **details,
+                                    "structure": {
+                                        **details["structure"],
+                                        "list_level": list_level,
+                                        "ordered": node.numbering.is_ordered,
+                                    },
+                                }
+                            else:
+                                quality.append(
+                                    {"status": "needs_review", "reason": "docx_list_level_omitted"}
+                                )
+                    blocks.append(BlockDraft(text, kind, location, tuple(assets), context, details))
                     for attachment in pending_attachments:
                         from openkb.docx_attachments import (
                             ATTACHMENT_CONTENT_ERRORS,
@@ -211,22 +233,34 @@ def parse_docx(
                         {"kind": "docx", **(position or {})},
                         tuple(assets),
                         "Detached DOCX image; original paragraph position unavailable.",
+                        context_data,
                     )
                 )
                 quality.append({"status": "verified", "reason": "docx_image_position_unavailable"})
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
+                header_rows = {
+                    number: [inline(cell, []) for cell in row.children]
+                    for number, row in enumerate(node.children, 1)
+                    if row.is_header or number == 1
+                }
+                original_rows = {
+                    number: [
+                        cell_excerpts(
+                            cell, notes=notes, comments=comments, attachments=prepared.attachments
+                        )
+                        for cell in row.children
+                    ]
+                    for number, row in enumerate(node.children, 1)
+                    if number in header_rows
+                }
                 headers = [
-                    (number, " | ".join(inline(cell, []) for cell in row.children))
+                    (number, " | ".join(header_rows[number]))
                     for number, row in enumerate(node.children, 1)
                     if row.is_header
                 ]
-                first_row = (
-                    " | ".join(inline(cell, []) for cell in node.children[0].children)
-                    if node.children
-                    else ""
-                )
+                first_row = " | ".join(header_rows.get(1, []))
                 for row_index, row in enumerate(node.children, 1):
                     for cell_index, cell in enumerate(row.children, 1):
                         context = f"Table {table}; colspan={cell.colspan}; rowspan={cell.rowspan}"
@@ -235,10 +269,43 @@ def parse_docx(
                             context += "; declared header: " + " | ".join(declared)
                         elif not headers and row_index > 1:
                             context += "; first row (header role unconfirmed): " + first_row
+                        excerpt_rows = (
+                            [number for number, _ in headers if number != row_index]
+                            if headers
+                            else [1]
+                            if row_index > 1
+                            else []
+                        )
+                        structure = {"table": table}
+                        for key, value in (("colspan", cell.colspan), ("rowspan", cell.rowspan)):
+                            if type(value) is int and value > 0:
+                                structure[key] = value
+                            else:
+                                quality.append(
+                                    {"status": "needs_review", "reason": "docx_table_span_omitted"}
+                                )
+                        details = {
+                            "source_excerpts": [
+                                {
+                                    **excerpt,
+                                    "row": number,
+                                    "cell": column,
+                                    "relation": "declared_header" if headers else "first_row",
+                                }
+                                for number in excerpt_rows
+                                for column, excerpts in enumerate(original_rows[number], 1)
+                                for excerpt in excerpts
+                            ],
+                            "structure": structure,
+                            "reader_status": {
+                                "header_role": "declared" if headers else "unconfirmed"
+                            },
+                        }
                         visit(
                             cell.children,
                             {"table": table, "row": row_index, "cell": cell_index},
                             context,
+                            details,
                         )
 
     def capture(document):

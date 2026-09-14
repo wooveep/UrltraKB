@@ -147,6 +147,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 "verification": module_revision("openkb.navigation_verification"),
                 "structure": module_revision("openkb.navigation_structure"),
                 "wire": module_revision("openkb.agent.evidence_wire"),
+                "source_context": module_revision("openkb.source_context"),
                 "model_json": module_revision("openkb.agent.model_json"),
                 "analysis": module_revision("openkb.agent.request_analysis"),
                 "shared": module_revision("openkb.agent.shared_analysis"),

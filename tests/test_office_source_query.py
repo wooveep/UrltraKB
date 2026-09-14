@@ -48,7 +48,8 @@ def test_reader_annotations_and_pending_analysis_are_not_original_claims(
         assert fields["context"] == "reader_context_with_source_excerpts"
         assert fields["analysis_coverage"] == "knowledge_analysis_status"
         row = next(row for row in result["evidence"] if row["text"] == "10")
-        assert "header role unconfirmed" in row["context"]
+        assert row["context_format"] == "structured_json"
+        assert json.loads(row["context"])["reader_status"] == {"header_role": "unconfirmed"}
         assert row["analysis_coverage"]["status"] == "pending"
         views.append(result)
         return "Signal A: 10."

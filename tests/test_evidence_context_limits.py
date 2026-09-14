@@ -153,8 +153,12 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
     assert table
     assert all("page" not in item["location"] for item in table)
     assert all(
-        "Required value" in item["context"] for item in table if item["location"]["row"] != 1
+        {"text": "Required value", "row": 1, "cell": 2, "relation": "declared_header"}
+        in item["context_data"]["source_excerpts"]
+        for item in table
+        if item["location"]["row"] != 1
     )
+    assert all("context" not in item for item in table)
     for item in table:
         if item["location"]["row"] == 1:
             expected = "Parameter" if item["location"]["cell"] == 1 else "Required value"

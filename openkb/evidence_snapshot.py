@@ -1,7 +1,6 @@
 """Detached, validated source text for concurrent readers under an ingestion lease."""
 
 import copy
-import json
 
 from openkb.evidence import Evidence, EvidenceSlice, complete_read_bound, evidence_bounds
 from openkb.locks import kb_read_lock
@@ -24,13 +23,7 @@ class EvidenceSnapshot:
             for block in self._blocks.values():
                 processing_checkpoint("generation")
                 reference = Evidence(*self._identity, block.id)
-                bound = max(
-                    4096,
-                    block.chars,
-                    len(block.context)
-                    + len(json.dumps(block.location, ensure_ascii=False))
-                    + 64 * len(block.assets),
-                )
+                bound = complete_read_bound(block)
                 view = reader.read(reference, max_chars=bound)
                 if len(view.text) != block.chars:
                     raise ValueError("Evidence span is missing")
@@ -63,4 +56,5 @@ class EvidenceSnapshot:
             block.assets,
             block.context,
             following if following < end else None,
+            copy.deepcopy(block.context_data),
         )

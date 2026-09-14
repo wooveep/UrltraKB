@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from openkb.application.documents import import_document
+from openkb.application.source_actions import continue_source
 from tests.http_model_fixture import evidence_response
 from tests.test_adaptive_processing import response
 
@@ -50,6 +51,12 @@ def test_single_document_uses_bounded_parallel_batches_and_keeps_all_checkpoints
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
+    if result.reason == "request_budget_exhausted":
+        # Reviews share the same hard allowance. Resume once from checkpoints;
+        # the coverage assertion below also forbids re-extracting prior batches.
+        assert result.usage["observable_attempts"] == 100
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+        result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     assert peak == concurrency
     # Compact IDs are request-local; original unit text proves full batch coverage.

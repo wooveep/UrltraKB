@@ -9,6 +9,7 @@ from dataclasses import asdict
 from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, complete_read_bound
 from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
+from openkb.source_context import CONTEXT_INSTRUCTIONS, context_fields, has_structured_context
 from openkb.sources import content_id
 
 FACTS_SYSTEM = """Extract source facts, preserving versions, parameters, prerequisites,
@@ -18,7 +19,7 @@ Return JSON {"units":[{"id":"input id","facts":[{"topic":"specific reusable topi
 "empty_reason":"explicit reason if no facts"}]}. Account for EVERY input unit.
 If facts is empty, empty_reason MUST be a nonempty string explaining why; never omit it.
 Quote only that unit's text. Context and positions explain table headers and span continuity.
-evidence_provenance applies to units and their neighbors: context mixes source excerpts
+evidence_provenance applies to units and their neighbors: legacy context mixes source excerpts
 with reader annotations. A reader's unconfirmed header role is not an original author's
 claim. Preserve literal cells and row relations without converting annotations into facts.
 Quote enough contiguous text to identify exactly one occurrence inside that unit.
@@ -41,6 +42,9 @@ JSON_FORMAT = {"type": "json_object"}
 def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
     from openkb.agent.evidence_wire import WireMessages, encode_payload, share_contexts
 
+    structured_context = has_structured_context(payload)
+    if structured_context and CONTEXT_INSTRUCTIONS not in system:
+        system += "\n" + CONTEXT_INSTRUCTIONS
     if payload.get("stage") == "facts":
         from openkb.agent.shared_analysis import fact_input
 
@@ -51,7 +55,12 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
             "units": [{"id": unit["id"], **fact_input(unit)} for unit in payload["units"]],
         }
     if payload.get("stage") in {"facts", "generation", "verification"}:
-        payload = {**payload, "evidence_provenance": EVIDENCE_PROVENANCE}
+        provenance = {
+            key: role
+            for key, role in EVIDENCE_PROVENANCE.items()
+            if structured_context or key not in {"context_data", "context_format"}
+        }
+        payload = {**payload, "evidence_provenance": provenance}
     wire, identities = encode_payload(payload, identity_values)
     wire = share_contexts(wire)
     contract = {
@@ -249,7 +258,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                     "text": view.text[:size],
                     "kind": block.kind,
                     "location": block.location,
-                    "context": block.context,
+                    **context_fields(block),
                     "headings": [] if detached_image else block.location.get("headings", heading),
                     "span": {"block": block.id, "start": start, "end": end, "total": block.chars},
                     "assets": list(block.assets),

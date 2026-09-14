@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from openkb.locks import atomic_write_json, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
+from openkb.source_context import block_record, context_size, parse_record, validate_context_data
 from openkb.sources import SourceStore, SourceVersion, content_id, read_object, valid_id
 
 _CONFIRMABLE = {"blank_or_illustration", "ocr_blank_or_illustration", "image_content_requires_ocr"}
@@ -18,6 +20,12 @@ _CONFIRMABLE = {"blank_or_illustration", "ocr_blank_or_illustration", "image_con
 EVIDENCE_PROVENANCE = {
     "text": "parsed_source_text",
     "context": "reader_context_with_source_excerpts",
+    "context_data": {
+        "source_excerpts": "parsed_source_text",
+        "structure": "document_structure",
+        "reader_status": "reader_metadata_not_author_statements",
+    },
+    "context_format": "structured_json_uses_context_data_roles;_legacy_display_mixes_roles",
     "location": "document_position",
     "analysis_coverage": "knowledge_analysis_status",
 }
@@ -126,10 +134,12 @@ class BlockDraft:
     location: dict[str, Any]
     assets: tuple[str, ...] = ()
     context: str = ""
+    context_data: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not isinstance(self.context, str):
             raise ValueError("Invalid parsed text")
+        validate_context_data(self.context_data)
         if self.kind not in {"heading", "paragraph", "table", "code", "image"}:
             raise ValueError("Invalid content block kind")
         validate_location(self.location)
@@ -149,6 +159,7 @@ class Block:
     location: dict[str, Any]
     assets: tuple[str, ...]
     context: str
+    context_data: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         valid_id(self.id)
@@ -160,8 +171,8 @@ class Block:
             or self.chars < 0
         ):
             raise ValueError("Invalid content block bounds")
-        BlockDraft("", self.kind, self.location, self.assets, self.context)
-        payload = asdict(self)
+        BlockDraft("", self.kind, self.location, self.assets, self.context, self.context_data)
+        payload = block_record(self)
         payload.pop("id")
         if self.id != content_id(payload):
             raise ValueError("Content block digest mismatch")
@@ -230,7 +241,7 @@ class ParseVersion:
                 for block in self.blocks
             ):
                 raise ValueError("Parsed block escapes the original PDF pages")
-        payload = asdict(self)
+        payload = parse_record(self)
         payload.pop("id")
         if self.id != content_id(payload):
             raise ValueError("Parse artifact digest mismatch")
@@ -264,6 +275,7 @@ class EvidenceSlice:
     assets: tuple[str, ...]
     context: str
     next_start: int | None
+    context_data: dict[str, Any] | None = None
 
 
 def complete_read_bound(block):
@@ -271,7 +283,7 @@ def complete_read_bound(block):
     return max(
         4096,
         block.chars,
-        len(block.context)
+        context_size(block)
         + len(json.dumps(block.location, ensure_ascii=False))
         + 64 * len(block.assets),
     )
@@ -327,6 +339,11 @@ class ParseStore:
                     "location": draft.location,
                     "assets": draft.assets,
                     "context": draft.context,
+                    **(
+                        {"context_data": draft.context_data}
+                        if draft.context_data is not None
+                        else {}
+                    ),
                 }
                 blocks.append(Block(id=content_id(block_payload), **block_payload))
             lookup_key = content_id({"input": version.input_key, "profile": profile})
@@ -337,7 +354,7 @@ class ParseStore:
                 "blocks": tuple(blocks),
                 "quality": quality or [],
             }
-            serialized = {**payload, "blocks": [asdict(block) for block in blocks]}
+            serialized = {**payload, "blocks": [block_record(block) for block in blocks]}
             parsed = ParseVersion(id=content_id(serialized), **payload)
             artifact = self.sources.owned_path(self.root / f"{parsed.id}.json")
             lookup = self.sources.owned_path(self.root / "lookup" / f"{lookup_key}.json")
@@ -345,7 +362,7 @@ class ParseStore:
                 raise ValueError("Immutable parse artifact changed")
             with mutation_scope(self.kb_dir, [artifact, lookup], operation="parse checkpoint"):
                 if not artifact.exists():
-                    atomic_write_json(artifact, asdict(parsed))
+                    atomic_write_json(artifact, parse_record(parsed))
                 atomic_write_json(lookup, {"parse_id": parsed.id})
             return parsed
 
@@ -613,6 +630,7 @@ class EvidenceReader:
                 block.assets,
                 block.context,
                 following if following < end else None,
+                copy.deepcopy(block.context_data),
             )
 
 
@@ -632,12 +650,12 @@ def evidence_bounds(reference, identity, blocks, max_chars):
     # Metadata is also output, not an escape hatch around bounded reads.
     # A caller can explicitly request a larger window to include a long
     # table header; do not silently drop required context.
-    context_size = (
-        len(block.context)
+    metadata_size = (
+        context_size(block)
         + len(json.dumps(block.location, ensure_ascii=False))
         + 64 * len(block.assets)
     )
-    if context_size > max(4096, max_chars):
+    if metadata_size > max(4096, max_chars):
         raise ValueError("Evidence context exceeds the read bound; request a larger window")
     end = reference.end if reference.end is not None else block.chars
     if reference.start > end or end > block.chars:

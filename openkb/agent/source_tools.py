@@ -12,6 +12,7 @@ from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
 from openkb.navigation_tree import snapshot_name
 from openkb.pageindex_store import PageIndexUnavailable, indexed_reader
+from openkb.source_context import CONTEXT_INSTRUCTIONS
 from openkb.source_coverage import coverage_window
 from openkb.source_windows import original_window
 from openkb.sources import SourceStore
@@ -30,7 +31,7 @@ Tree status describes navigation enhancement only; it does not describe parsing 
 Use the separate quality field for parsing limitations. Preserve ambiguous or conflicting
 original wording explicitly instead of silently equating directions, positions or conditions.
 evidence_provenance distinguishes parsed source text from reader context and analysis status.
-Context includes source excerpts AND parser annotations (such as unconfirmed header roles);
+Legacy context includes source excerpts AND parser annotations (such as unconfirmed header roles);
 do not attribute those annotations to the original author. First-row values remain readable.
 Pending knowledge analysis does not make observed original/OCR text unavailable. Describe
 only gaps that limit the requested answer, without adding unrelated processing diagnostics.
@@ -55,6 +56,8 @@ A search covers only its exact case-insensitive literal, not synonyms or inferre
 Search results carry their own row/header context; retain every matching row when asked
 which items satisfy a condition. A table category does not prove actual network access.
 """
+
+INSTRUCTIONS += "\n" + CONTEXT_INSTRUCTIONS
 
 
 def _capture(kb_dir):

@@ -5,6 +5,7 @@ import re
 
 from openkb.agent.evidence_generation_protocol import source_mapping
 from openkb.evidence import Evidence
+from openkb.source_context import context_fields
 
 TITLE_CONTEXT_SYSTEM = """
 When title_context is supplied, it contains a selected window of original quotations
@@ -28,9 +29,7 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         view = reader.read(scope, max_chars=reader.complete_bound(scope))
         if view.next_start is not None:
             raise ValueError("Incomplete original title evidence")
-        contextual = {}
-        if view.context:
-            contextual["context"] = view.context
+        contextual = context_fields(view) if view.context or view.context_data else {}
         neighbors = []
         for item in fact.get("context_evidence", []):
             ref = Evidence(**item["reference"])
@@ -40,7 +39,7 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
                     "relation": item["relation"],
                     "text": neighbor.text,
                     "location": neighbor.location,
-                    "context": neighbor.context,
+                    **context_fields(neighbor),
                 }
             )
         if view.text.strip() in {"}", "};"}:
@@ -72,7 +71,7 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         passage = {
             "scope": scope,
             "text": item["text"],
-            **{k: item[k] for k in ("context", "neighbors") if k in item},
+            **{k: item[k] for k in ("context", "context_data", "neighbors") if k in item},
         }
         key = json.dumps(passage, ensure_ascii=False, sort_keys=True)
         if key not in seen:

@@ -4,6 +4,7 @@ import re
 from dataclasses import asdict, replace
 
 from openkb.evidence import complete_read_bound, evidence_bounds
+from openkb.source_context import context_fields
 
 
 def _scope(location):
@@ -91,7 +92,7 @@ def enclosing_code(reader, reference):
                         "relation": "enclosing_code",
                         "text": item.text,
                         "location": item.location,
-                        "context": item.context,
+                        **context_fields(item),
                     }
                     for item in reversed(selected)
                 ]

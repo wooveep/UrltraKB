@@ -22,16 +22,21 @@ _IDENTITY_FIELDS = {
 _IDENTITY_LISTS = {"covered"}
 
 
-def _map(value, identities, *, field="", create=False):
+def _map(value, identities, *, field="", create=False, namespace=None):
     if isinstance(value, dict):
         return {
-            key: _map(item, identities, field=key, create=create) for key, item in value.items()
+            key: _map(item, identities, field=key, create=create, namespace=namespace)
+            for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_map(item, identities, field=field, create=create) for item in value]
+        return [
+            _map(item, identities, field=field, create=create, namespace=namespace)
+            for item in value
+        ]
     if isinstance(value, str) and field in _IDENTITY_FIELDS | _IDENTITY_LISTS:
         if create and re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", value):
-            return identities.setdefault(value, f"r{len(identities) + 1}")
+            label = f"{namespace}{len(identities) + 1}" if namespace else f"r{len(identities) + 1}"
+            return identities.setdefault(value, label)
         return identities.get(value, value)
     return value
 
@@ -60,6 +65,9 @@ class WireMessages(list):
             raise ResponseIncomplete(reason, stage) from None
         except (ValueError, TypeError):
             return raw  # The stage's bounded format-recovery policy decides what to do.
+        payload = json.loads(self[-1]["content"])
+        if payload.get("stage") == "generation" and (protocol := payload.get("identity_protocol")):
+            _check_identity_placement(value, protocol["namespace"])
         return json.dumps(_map(value, self.inverse), ensure_ascii=False)
 
     def encode_response(self, raw):
@@ -70,8 +78,47 @@ class WireMessages(list):
 
 
 def encode_payload(payload, identity_values=()):
-    identities = {value: f"r{i}" for i, value in enumerate(dict.fromkeys(identity_values), 1)}
-    return _map(payload, identities, create=True), identities
+    namespace = None
+    if payload.get("stage") == "generation":
+        # A private namespace absent from the entire original input cannot be
+        # confused with a real source label such as r8, even inside literal code.
+        namespace = "@r:"
+        original = json.dumps(payload, ensure_ascii=False)
+        while namespace in original:
+            namespace = namespace[:-1] + "_:"
+    identities = {
+        value: f"{namespace}{i}" if namespace else f"r{i}"
+        for i, value in enumerate(dict.fromkeys(identity_values), 1)
+    }
+    wire = _map(payload, identities, create=True, namespace=namespace)
+    if namespace:
+        wire["identity_protocol"] = {
+            "namespace": namespace,
+            "instruction": (
+                "Private identity markers belong only in structured identity fields and covered. "
+                "Never write them in titles, headings, Markdown or quotations. They are not "
+                "citations. The application attaches original source references after review."
+            ),
+        }
+    return wire, identities
+
+
+def _check_identity_placement(value, namespace, field=""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _check_identity_placement(key, namespace)
+            _check_identity_placement(item, namespace, key)
+    elif isinstance(value, list):
+        for item in value:
+            _check_identity_placement(item, namespace, field)
+    elif (
+        isinstance(value, str)
+        and namespace in value
+        and field not in _IDENTITY_FIELDS | _IDENTITY_LISTS
+    ):
+        from openkb.agent.evidence_retry import ResponseIncomplete
+
+        raise ResponseIncomplete("topic_generation_incomplete", "generation")
 
 
 def projected_response(value, payload):

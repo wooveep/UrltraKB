@@ -13,6 +13,7 @@ from openkb.evidence import Evidence, complete_read_bound
 from openkb.implementation import module_revision
 from openkb.processing import processing_checkpoint
 from openkb.progress import progress_scope
+from openkb.source_context import CONTEXT_INSTRUCTIONS, context_fields
 from openkb.sources import content_id
 
 SYSTEM = """Review semantic dependencies of candidate knowledge on omitted source content.
@@ -30,6 +31,8 @@ not independent. Do not generate or repair knowledge.
 Return JSON {"topics":[{"path":"exact candidate path", "status":"independent|dependent|unknown",
 "reason":"explanation grounded in original context"}]} covering every candidate exactly once.
 Assess the transitive closure: a topic depending on any withdrawn topic is also dependent."""
+
+SYSTEM += "\n" + CONTEXT_INSTRUCTIONS
 
 
 def dependency_payload(payload):
@@ -126,7 +129,7 @@ def protect_dependencies(
                 "reference": asdict(reference),
                 "kind": block.kind,
                 "location": view.location,
-                "context": block.context,
+                **context_fields(view),
                 "text": view.text,
             }
         )

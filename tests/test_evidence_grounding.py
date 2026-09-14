@@ -668,6 +668,13 @@ def test_compilation_keeps_reader_annotations_separate_from_original_text(
         provenance = payload["evidence_provenance"]
         assert provenance["text"] == "parsed_source_text"
         assert provenance["context"] == "reader_context_with_source_excerpts"
-        assert "header role unconfirmed" in json.dumps(payload)
+        assert (
+            provenance["context_data"]["reader_status"] == "reader_metadata_not_author_statements"
+        )
+        rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
+        assert any(
+            row["context_data"]["reader_status"] == {"header_role": "unconfirmed"} for row in rows
+        )
+        assert all("context" not in row for row in rows)
     store = SourceStore(kb_dir)
     assert store.original(store.version(result.input_version)).read_bytes() == original.read_bytes()

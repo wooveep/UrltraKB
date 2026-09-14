@@ -51,4 +51,5 @@ class IndexedEvidence:
             block.assets,
             block.context,
             following if following < end else None,
+            copy.deepcopy(block.context_data),
         )

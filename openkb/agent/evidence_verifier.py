@@ -36,7 +36,7 @@ Judge required fact coverage by each fact's original quote and supplied source.
 source_kind records only the parsed structure, never a verified semantic role. A paragraph
 may be an organizational label; a heading may state an explicit fact. Check the wording
 and original context independently of the candidate's interpretation or public title.
-evidence_provenance applies to evidence and neighbors: context contains original excerpts
+evidence_provenance applies to evidence and neighbors: legacy context contains original excerpts
 AND reader annotations. An unconfirmed header role is a reader limitation, not an original
 author's statement. Reject attribution of such metadata to the original, while preserving
 literal cells and supported row relations. An identical phrase actually quoted from source

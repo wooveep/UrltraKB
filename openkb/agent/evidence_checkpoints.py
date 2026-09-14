@@ -31,6 +31,7 @@ def compilation_profile(settings, bundle):
             "pageindex_store": module_revision("openkb.pageindex_store"),
             "pageindex_bindings": module_revision("openkb.pageindex_bindings"),
             "evidence_context": module_revision("openkb.evidence_context"),
+            "source_context": module_revision("openkb.source_context"),
             "implementation": {
                 name: module_revision("openkb.agent." + name)
                 for name in (
@@ -162,6 +163,7 @@ class CompilationCheckpoints:
             "generation": (
                 "evidence_pages",
                 "evidence_generation_protocol",
+                "evidence_wire",
                 "evidence_title_context",
                 "evidence_verifier",
                 "evidence_markup",
@@ -202,6 +204,7 @@ class CompilationCheckpoints:
             ),
             "implementation": module_revision("openkb.agent.compiler"),
             "message_format": module_revision("openkb.agent.evidence_units"),
+            "source_context": module_revision("openkb.source_context"),
             "model_json": module_revision("openkb.agent.model_json"),
             "stage_implementation": {
                 name: module_revision("openkb.agent." + name)
