@@ -22,7 +22,7 @@ def verify_image(content: bytes) -> None:
         raise CloudIncomplete("cloud_required_asset_invalid") from None
 
 
-def parse_single_page(raw, page, store, download, *, block_locations=None):
+def parse_single_page(raw, page, store, download, *, block_locations=None, pdf_page=None):
     try:
         rows = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
         outputs = []
@@ -48,6 +48,10 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
         pruned = output.get("prunedResult")
         layout = pruned.get("parsing_res_list") if isinstance(pruned, dict) else None
         reason = None
+        if pdf_page is not None:
+            from openkb.ocr.layout_coordinates import cloud_block_locations
+
+            block_locations, reason = cloud_block_locations(pruned, pdf_page, page)
         if isinstance(layout, list):
             layout = [dict(block) if isinstance(block, dict) else block for block in layout]
             for block in layout:
@@ -85,9 +89,8 @@ def parse_single_page(raw, page, store, download, *, block_locations=None):
             verify_image(content)
             assets[name] = store.put_bytes(content)
         text = _rewrite_assets(text, assets)
-        # A single physically extracted page gives a verified original page
-        # binding. Do not infer jobs bounding-box coordinates from local or
-        # synchronous API conventions that this service has not established.
+        # The page rendition spans several layout blocks. Only individual
+        # validated boxes may carry a more precise physical source position.
         location = {"kind": "pdf", "page": page}
         blocks = [BlockDraft(text, "paragraph", location, tuple(assets.values()))]
         if not text.strip():

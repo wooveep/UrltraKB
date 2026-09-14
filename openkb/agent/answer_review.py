@@ -20,6 +20,7 @@ class SourceAnswerAgent(Agent):
     """Keep the configured review options when query agents are cloned for chat or repair."""
 
     answer_review_settings: ModelSettings | None = None
+    image_understanding_enabled: bool | None = None
 
 
 INSTRUCTIONS = """Independently verify a knowledge-base answer against observed evidence.
@@ -33,6 +34,8 @@ Check every factual clause, table heading, optional explanation and image descri
 - Preserve literal names, numbers, protocols and conditions. A service name or enum value
   does not define its purpose, category, alias, security meaning or activation condition.
   Reject background explanations absent from the evidence, however plausible.
+  Check translations too: an ambiguous original term does not support a more specific
+  technical mechanism. Each slash-separated or parenthetical translation needs support.
 - A table type, address or default-listening flag is not evidence of actual reachability,
   permission or firewall behavior. Quote the literal fields and preserve undefined meanings.
 - For a requested enumeration, compare ALL matching observed rows and requested fields.
@@ -52,7 +55,10 @@ give exact quotations from identified observations for ALL its factual clauses. 
 alone cannot support an added definition. A disclaimer at the start does not authorize
 later parenthetical aliases, categories or equivalence. Check those clauses independently.
 Quoted operational metadata may support statements about retrieval or coverage, but
-navigation summaries still cannot establish source facts. non_factual is only for labels,
+navigation summaries still cannot establish source facts. execution_capabilities records
+the current agent's configured image-understanding enablement; enabled does not prove a
+working connection or any observed image. Disabled does not prove missing source content.
+non_factual is only for labels,
 formatting and language with no factual assertions, never a way to skip a difficult claim.
 
 Return only JSON {"verdict":"supported|unsupported|uncertain", "units":[
@@ -79,7 +85,7 @@ def _decode(value):
     return value
 
 
-def _payload(result):
+def _payload(agent, result):
     calls = {}
     questions = []
     observations = []
@@ -114,6 +120,14 @@ def _payload(result):
     )
     if not isinstance(answer, str) or not (original or source_targets(answer)):
         return None
+    enabled = getattr(agent, "image_understanding_enabled", None)
+    if type(enabled) is bool:
+        observations.append(
+            {
+                "name": "execution_capabilities",
+                "output": {"image_understanding_enabled": enabled},
+            }
+        )
     return {
         "stage": "answer_verification",
         "question": questions[-1] if questions else "",
@@ -126,7 +140,7 @@ def _payload(result):
 
 async def review_answer(agent, result, *, run_config=None):
     """Return located issues. Never expose or persist a review as conversation evidence."""
-    payload = _payload(result)
+    payload = _payload(agent, result)
     if payload is None:
         return []
     processing_checkpoint("answering")

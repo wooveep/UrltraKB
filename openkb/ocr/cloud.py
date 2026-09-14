@@ -378,7 +378,8 @@ class CloudJobs:
             return self.store.asset(assets[url]).read_bytes()
 
         try:
-            blocks, reason = parse_single_page(raw, page, self.store, asset)
+            with pymupdf.open(self.store.asset(profile["slice"])) as sliced:
+                blocks, reason = parse_single_page(raw, page, self.store, asset, pdf_page=sliced[0])
         except CloudIncomplete as exc:
             if str(exc) in {
                 "cloud_result_invalid",

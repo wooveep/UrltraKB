@@ -125,6 +125,7 @@ def build_query_agent(
         tools=[read_file, get_page_content, *original_tools, *visual_tools],
         model=CompletionAwareModel(model=model),
         model_settings=settings,
+        image_understanding_enabled=bool(visual_tools),
         answer_review_settings=replace(
             settings, extra_args={**(settings.extra_args or {}), **review_options}
         ),
