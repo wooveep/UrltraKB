@@ -68,19 +68,23 @@ def document_name(attachment: Attachment) -> str | None:
     return name if PurePosixPath(name).suffix.lower() in SUPPORTED_EXTENSIONS else None
 
 
+def _bind_location(location, attachment, position):
+    return {
+        **position,
+        "attachment": {
+            "part": attachment.part,
+            "name": attachment.name,
+            "blob": attachment.blob,
+            "position": location,
+        },
+    }
+
+
 def bind_blocks(blocks, attachment: Attachment, position: dict) -> list[BlockDraft]:
     return [
         replace(
             block,
-            location={
-                **position,
-                "attachment": {
-                    "part": attachment.part,
-                    "name": attachment.name,
-                    "blob": attachment.blob,
-                    "position": block.location,
-                },
-            },
+            location=_bind_location(block.location, attachment, position),
             assets=tuple(dict.fromkeys((attachment.blob, *block.assets))),
             context=f"Embedded attachment: {attachment.name}\n{block.context}",
         )
@@ -88,11 +92,17 @@ def bind_blocks(blocks, attachment: Attachment, position: dict) -> list[BlockDra
     ]
 
 
-def attachment_quality(quality, attachment):
+def attachment_quality(quality, attachment, position):
     return [
         {
             "status": row["status"],
             **({"transcriptions": row["transcriptions"]} if "transcriptions" in row else {}),
+            **({"count": row["count"]} if "count" in row else {}),
+            **(
+                {"location": _bind_location(row["location"], attachment, position)}
+                if "location" in row
+                else {}
+            ),
             "reason": "docx_attachment:"
             + attachment.part
             + ":"

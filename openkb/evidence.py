@@ -209,6 +209,8 @@ class ParseVersion:
                 "status",
                 "reason",
                 "transcriptions",
+                "location",
+                "count",
             }:
                 raise ValueError("Invalid quality record")
             if row.get("status") not in {"verified", "needs_review"} or not isinstance(
@@ -219,6 +221,10 @@ class ParseVersion:
                 raise ValueError("Invalid quality page")
             if "block" in row and row["block"] not in {block.id for block in self.blocks}:
                 raise ValueError("Invalid quality block")
+            if "location" in row:
+                validate_location(row["location"])
+            if "count" in row and (type(row["count"]) is not int or row["count"] < 1):
+                raise ValueError("Invalid quality count")
             if "transcriptions" in row:
                 assets = {asset for block in self.blocks for asset in block.assets}
                 values = row["transcriptions"]

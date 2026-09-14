@@ -212,7 +212,7 @@ def test_one_recognized_frame_does_not_complete_the_multiframe_original(kb_dir):
     assert original in assets and original not in available
 
 
-def test_missing_docx_relationship_keeps_text_and_visible_marker(kb_dir, tmp_path):
+def test_missing_docx_relationship_keeps_text_and_reports_omission(kb_dir, tmp_path):
     from tests.docx_attachment_fixtures import docx_with_parts
 
     file = docx_with_parts(
@@ -234,7 +234,8 @@ def test_missing_docx_relationship_keeps_text_and_visible_marker(kb_dir, tmp_pat
         source = originals.intake(ready)
     parsed = parse_document(kb_dir, source)
     text = "\n".join(originals.asset(b.blob).read_text() for b in parsed.blocks)
-    assert "Retained instructions." in text and "[Original image unavailable]" in text
+    assert text.strip() == "Retained instructions."
+    assert any(row["reason"] == "docx_image_asset_missing" for row in parsed.quality)
     parses = ParseStore(kb_dir)
     assert not parses.complete(source, parsed)
     parses.accept_missing_images(source, parsed)

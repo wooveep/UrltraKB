@@ -275,6 +275,18 @@ def test_table_context_separates_generated_note_notices_from_literal_original_wo
         {"text": literal, "row": 1, "cell": 2, "relation": "first_row"},
     ]
     assert any(row["reason"] == "unresolved_docx_note" for row in parsed.quality)
+    from openkb.application.source_actions import read_source_evidence
+    from openkb.evidence import Evidence
+
+    def original_text(block):
+        return read_source_evidence(
+            kb_dir,
+            Evidence(result.source_id, result.input_version, parsed.id, block.id),
+            max_chars=1000,
+        ).text
+
+    assert original_text(parsed.blocks[0]).strip() == "Retention"
+    assert original_text(parsed.blocks[1]) == literal
     for request in model_service:
         payload = json.loads(request["messages"][-1]["content"])
 
@@ -290,6 +302,41 @@ def test_table_context_separates_generated_note_notices_from_literal_original_wo
                     check(item)
 
         check(payload)
+
+
+@pytest.mark.parametrize(
+    "reference,notice,reason",
+    [
+        ('<w:footnoteReference w:id="7"/>', "[footnote 7: unresolved]", "unresolved_docx_note"),
+        ('<w:commentReference w:id="7"/>', "[unresolved comment]", "unresolved_docx_comment"),
+    ],
+)
+def test_missing_inline_content_keeps_a_boundary_and_preserves_literal_notice_words(
+    kb_dir, tmp_path, model_service, reference, notice, reason
+):
+    from openkb.application.source_actions import read_source_evidence
+    from openkb.evidence import Evidence, ParseStore
+
+    source = tmp_path / "missing-inline.docx"
+    literal = "The printed label is " + notice + "."
+    write_docx(
+        source,
+        "<w:p><w:r><w:t>1</w:t>" + reference + "<w:t>0</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>" + literal + "</w:t></w:r></w:p>",
+    )
+    result = import_document(kb_dir, source)
+    assert result.status == "added" and result.knowledge_compilation == "completed", result
+    assert reason in result.warnings
+    parsed = ParseStore(kb_dir).load(result.parse_id)
+    texts = [
+        read_source_evidence(
+            kb_dir,
+            Evidence(result.source_id, result.input_version, parsed.id, block.id),
+            max_chars=1000,
+        ).text
+        for block in parsed.blocks
+    ]
+    assert texts == ["1\n0", literal]
 
 
 def test_table_context_preserves_resolved_note_wording_with_its_original_role(kb_dir, tmp_path):

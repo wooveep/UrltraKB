@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from openkb.locks import kb_ingest_lock
@@ -15,28 +16,57 @@ if TYPE_CHECKING:
 
 def _position(location):
     # Heading text can contain OCR output; physical source positions cannot.
+    # A detached image's surrounding document/table is not its original position.
+    if location.get("kind") == "docx" and "paragraph" not in location:
+        return None
     result = {
         key: value for key, value in location.items() if key not in {"headings", "attachment"}
     }
     if "attachment" in location:
         attachment = location["attachment"]
+        position = _position(attachment["position"])
+        if position is None:
+            return None
         result["attachment"] = {
             "part": attachment["part"],
             "blob": attachment["blob"],
-            "position": _position(attachment["position"]),
+            "position": position,
         }
     return result
 
 
 def _markers(store: ParseStore, parsed: ParseVersion) -> list[str]:
-    result = []
-    for block in parsed.blocks:
-        processing_checkpoint()
-        text = store.sources.asset(block.blob).read_text(encoding="utf-8")
-        count = text.count("[Original image unavailable]")
-        if count:
-            result.append(content_id({"position": _position(block.location), "count": count}))
-    return sorted(result)
+    missing = [
+        row
+        for row in parsed.quality
+        if row["reason"] == "docx_image_asset_missing"
+        or row["reason"].endswith(":docx_image_asset_missing")
+    ]
+    counts: Counter[str] = Counter()
+    if any("location" in row for row in missing):
+        # New parses locate omissions independently of source wording. Partial
+        # location metadata cannot authorize inheriting a historical decision.
+        for row in missing:
+            processing_checkpoint()
+            if not isinstance(row.get("location"), dict):
+                return []
+            position = _position(row["location"])
+            if position is None:
+                return []
+            counts[content_id(position)] += row.get("count", 1)
+    else:
+        # Read old snapshots as recorded, without migrating bytes or guessing
+        # whether same-named literal text in a new parse is a missing object.
+        for block in parsed.blocks:
+            processing_checkpoint()
+            text = store.sources.asset(block.blob).read_text(encoding="utf-8")
+            count = text.count("[Original image unavailable]")
+            if count:
+                position = _position(block.location)
+                if position is None:
+                    return []
+                counts[content_id(position)] += count
+    return sorted(content_id({"position": key, "count": count}) for key, count in counts.items())
 
 
 def inherit_missing_images(store: ParseStore, version: SourceVersion, parsed: ParseVersion) -> None:

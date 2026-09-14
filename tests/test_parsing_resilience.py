@@ -145,12 +145,27 @@ def _missing_docx(path, *, text="Retained instructions."):
     )
 
 
+@pytest.mark.parametrize("placement", ["body", "first_row", "declared_header"])
 def test_reparse_inherits_only_the_same_original_missing_image_locations(
-    kb_dir, tmp_path, monkeypatch
+    kb_dir, tmp_path, monkeypatch, placement
 ):
     import openkb.parsing as parsing
 
     path = _missing_docx(tmp_path / "missing.docx")
+    if placement != "body":
+        from zipfile import ZipFile
+
+        with ZipFile(path) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        document = members["word/document.xml"].decode()
+        row_properties = "<w:trPr><w:tblHeader/></w:trPr>" if placement == "declared_header" else ""
+        document = document.replace(
+            "<w:body>", f"<w:body><w:tbl><w:tr>{row_properties}<w:tc>", 1
+        ).replace("</w:body>", "</w:tc></w:tr></w:tbl></w:body>", 1)
+        members["word/document.xml"] = document.encode()
+        with ZipFile(path, "w") as archive:
+            for name, data in members.items():
+                archive.writestr(name, data)
     sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
     with prepared_input(path) as ready:
         source = sources.intake(ready)
@@ -170,6 +185,47 @@ def test_reparse_inherits_only_the_same_original_missing_image_locations(
         changed = sources.intake(ready)
     new = parse_document(kb_dir, changed)
     assert not parses.complete(changed, new)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_detached_missing_images_keep_the_count_without_inheriting_an_unlocated_decision(
+    kb_dir, tmp_path, monkeypatch, nested
+):
+    import openkb.parsing as parsing
+    from tests.docx_attachment_fixtures import attached_docx
+
+    path = docx_with_parts(
+        tmp_path / "detached.docx",
+        "<w:p><w:r><w:t>Retained instructions.</w:t>"
+        '<w:pict xmlns:v="urn:schemas-microsoft-com:vml" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<v:shape><v:imagedata r:id="first"/></v:shape>'
+        '<v:shape><v:imagedata r:id="second"/></v:shape>'
+        "</w:pict></w:r></w:p>",
+        relationships="".join(
+            f'<Relationship Id="{name}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="media/{name}.png"/>'
+            for name in ("first", "second")
+        ),
+    )
+    if nested:
+        path = attached_docx(tmp_path / "parent.docx", path.read_bytes())
+    sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
+    with prepared_input(path) as ready:
+        source = sources.intake(ready)
+    one = parse_document(kb_dir, source)
+    missing = [row for row in one.quality if row["reason"].endswith("docx_image_asset_missing")]
+    assert sum(row["count"] for row in missing) == 2
+    assert any("Retained instructions." in sources.asset(b.blob).read_text() for b in one.blocks)
+    parses.accept_missing_images(source, one)
+    assert parses.accepted_missing_images(source, one)
+    previous = parsing.package_version
+    monkeypatch.setattr(parsing, "package_version", lambda name: previous(name) + ".test")
+    two = parse_document(kb_dir, source, force=True)
+    assert two.id != one.id
+    assert not parses.accepted_missing_images(source, two)
+    assert parses.accepted_missing_images(source, one)
 
 
 def test_missing_image_inheritance_rejects_new_locations_and_unrelated_failures(kb_dir, tmp_path):
@@ -194,7 +250,14 @@ def test_missing_image_inheritance_rejects_new_locations_and_unrelated_failures(
                 "[Original image unavailable]", "paragraph", {"kind": "docx", "paragraph": 8}
             ),
         ],
-        quality=one.quality,
+        quality=[
+            *one.quality,
+            {
+                "status": "needs_review",
+                "reason": "docx_image_asset_missing",
+                "location": {"kind": "docx", "paragraph": 8},
+            },
+        ],
     )
     inherit_missing_images(parses, source, extra)
     assert not parses.accepted_missing_images(source, extra)
@@ -207,6 +270,83 @@ def test_missing_image_inheritance_rejects_new_locations_and_unrelated_failures(
     inherit_missing_images(parses, source, unrelated)
     assert parses.accepted_missing_images(source, unrelated)
     assert not parses.complete(source, unrelated)
+
+
+@pytest.mark.parametrize("missing_count", [1, 2])
+def test_missing_image_decision_survives_legacy_snapshot_without_rewriting_it(
+    kb_dir, tmp_path, missing_count
+):
+    from zipfile import ZipFile
+
+    path = _missing_docx(tmp_path / "legacy.docx")
+    if missing_count == 2:
+        with ZipFile(path) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        document = members["word/document.xml"].decode()
+        start = document.index("<w:drawing>")
+        end = document.index("</w:drawing>", start) + len("</w:drawing>")
+        drawing = document[start:end]
+        members["word/document.xml"] = document.replace(drawing, drawing + drawing, 1).encode()
+        with ZipFile(path, "w") as archive:
+            for name, data in members.items():
+                archive.writestr(name, data)
+    sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
+    with prepared_input(path) as ready:
+        source = sources.intake(ready)
+    legacy = parses.save(
+        source,
+        {"docx": "historical-inline-markers"},
+        [
+            BlockDraft(
+                "Retained instructions." + "[Original image unavailable]" * missing_count,
+                "paragraph",
+                {"kind": "docx", "paragraph": 1, "headings": []},
+            )
+        ],
+        quality=[{"status": "needs_review", "reason": "docx_image_asset_missing"}],
+    )
+    artifact = parses.root / f"{legacy.id}.json"
+    before = artifact.read_bytes()
+    parses.accept_missing_images(source, legacy)
+    current = parse_document(kb_dir, source)
+    missing = [row for row in current.quality if row["reason"] == "docx_image_asset_missing"]
+    assert len(missing) == 1 and missing[0]["count"] == missing_count
+    assert parses.accepted_missing_images(source, current)
+    assert parses.complete(source, current)
+    assert artifact.read_bytes() == before
+    assert sources.asset(legacy.blocks[0].blob).read_text().endswith("[Original image unavailable]")
+
+
+def test_nested_missing_image_decision_uses_omission_position_not_literal_text(kb_dir, tmp_path):
+    from tests.docx_attachment_fixtures import attached_docx
+
+    literal = "The printed label is [Original image unavailable]."
+    child = _missing_docx(tmp_path / "child.docx", text=literal)
+    path = attached_docx(tmp_path / "parent.docx", child.read_bytes())
+    sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
+    with prepared_input(path) as ready:
+        source = sources.intake(ready)
+    one = parse_document(kb_dir, source)
+    missing = [row for row in one.quality if row["reason"].endswith(":docx_image_asset_missing")]
+    assert len(missing) == 1
+    location = missing[0]["location"]
+    assert location["paragraph"] == 1
+    assert location["attachment"]["position"]["paragraph"] == 1
+    assert any(sources.asset(b.blob).read_text().strip() == literal for b in one.blocks)
+    parses.accept_missing_images(source, one)
+    two = parses.save(
+        source,
+        {"test": "same-nested-omission"},
+        [
+            BlockDraft(sources.asset(b.blob).read_text(), b.kind, b.location, b.assets, b.context)
+            for b in one.blocks
+        ],
+        quality=one.quality,
+    )
+    from openkb.missing_image_reviews import inherit_missing_images
+
+    inherit_missing_images(parses, source, two)
+    assert parses.accepted_missing_images(source, two)
 
 
 def test_optional_image_budget_stops_across_nested_documents_and_resets_next_run(kb_dir):

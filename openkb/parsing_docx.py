@@ -43,7 +43,18 @@ def parse_docx(
     notes = None
     comments: dict[str, Any] = {}
     active_notes: set[tuple[str, str]] = set()
+    missing_image_nodes: set[int] = set()
     progress = None
+
+    def locate_missing_images(start, location):
+        missing = [row for row in quality[start:] if row["reason"] == "docx_image_asset_missing"]
+        if missing:
+            quality[start:] = [row for row in quality[start:] if row not in missing]
+            for row in quality[:start]:
+                if row["reason"] == "docx_image_asset_missing" and row.get("location") == location:
+                    row["count"] += len(missing)
+                    return
+            quality.append({**missing[0], "location": location, "count": len(missing)})
 
     def inline(node, assets: list[str]) -> str:
         if isinstance(node, nodes.Text):
@@ -75,14 +86,14 @@ def parse_docx(
             identity = (node.note_type, node.note_id)
             if notes is None or identity in active_notes:
                 quality.append({"status": "needs_review", "reason": "unresolved_docx_note"})
-                return f"[{node.note_type} {node.note_id}: unresolved]"
+                return "\n"
             active_notes.add(identity)
             try:
                 try:
                     note = notes.resolve(node)
                 except KeyError:
                     quality.append({"status": "needs_review", "reason": "unresolved_docx_note"})
-                    return f"[{node.note_type} {node.note_id}: unresolved]"
+                    return "\n"
                 text = "\n".join(inline(child, assets) for child in note.body)
                 return f" [{node.note_type} {node.note_id}: {text}]"
             finally:
@@ -91,7 +102,7 @@ def parse_docx(
             comment = comments.get(node.comment_id)
             if comment is None:
                 quality.append({"status": "needs_review", "reason": "unresolved_docx_comment"})
-                return "[unresolved comment]"
+                return "\n"
             text = "\n".join(inline(child, assets) for child in comment.body)
             return f" [Editorial comment {node.comment_id}: {text}]"
         if isinstance(node, nodes.Image):
@@ -99,8 +110,11 @@ def parse_docx(
                 with node.open() as stream:
                     content = stream.read()
             except (KeyError, OSError):
+                missing_image_nodes.add(id(node))
                 quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
-                return "[Original image unavailable]"
+                # Keep an omitted inline object's boundary: joining surrounding
+                # runs can change words/numbers. Diagnostics are not source text.
+                return "\n"
             digest = store.put_bytes(content)
             if digest in prepared.icons:
                 assets.append(digest)
@@ -123,6 +137,7 @@ def parse_docx(
                 paragraph_number += 1
                 pending_attachments.clear()
                 assets: list[str] = []
+                quality_start = len(quality)
                 text = inline(node, assets)
                 heading = re.fullmatch(
                     r"heading\s*([1-9])", node.style_id or "", re.IGNORECASE
@@ -139,6 +154,7 @@ def parse_docx(
                     **({"heading_level": level} if level is not None else {}),
                     **(position or {}),
                 }
+                locate_missing_images(quality_start, location)
                 if text.strip() or assets:
                     kind = "table" if position else "heading" if level is not None else "paragraph"
                     context = header
@@ -198,7 +214,7 @@ def parse_docx(
                                     )
                                 ]
                             blocks.extend(bind_blocks(drafts, attachment, location))
-                            quality.extend(attachment_quality(checks, attachment))
+                            quality.extend(attachment_quality(checks, attachment, location))
                         except ATTACHMENT_CONTENT_ERRORS:
                             blocks.extend(
                                 bind_blocks(
@@ -225,12 +241,15 @@ def parse_docx(
                 # VML extras can follow intervening textbox paragraphs. Their
                 # nearest paragraph is not proof of original ownership.
                 assets = []
+                quality_start = len(quality)
                 text = inline(node, assets)
+                location = {"kind": "docx", **(position or {})}
+                locate_missing_images(quality_start, location)
                 blocks.append(
                     BlockDraft(
                         text,
                         "image",
-                        {"kind": "docx", **(position or {})},
+                        location,
                         tuple(assets),
                         "Detached DOCX image; original paragraph position unavailable.",
                         context_data,
@@ -240,11 +259,6 @@ def parse_docx(
             elif isinstance(node, nodes.Table):
                 table_number += 1
                 table = table_number
-                header_rows = {
-                    number: [inline(cell, []) for cell in row.children]
-                    for number, row in enumerate(node.children, 1)
-                    if row.is_header or number == 1
-                }
                 original_rows = {
                     number: [
                         cell_excerpts(
@@ -253,7 +267,13 @@ def parse_docx(
                         for cell in row.children
                     ]
                     for number, row in enumerate(node.children, 1)
-                    if number in header_rows
+                    if row.is_header or number == 1
+                }
+                # Preview source wording without running image/OCR/attachment
+                # handling a second time before its physical position is known.
+                header_rows = {
+                    number: ["\n".join(item["text"] for item in cell) for cell in cells]
+                    for number, cells in original_rows.items()
                 }
                 headers = [
                     (number, " | ".join(header_rows[number]))
@@ -335,7 +355,8 @@ def parse_docx(
             with image.open() as stream:
                 return {"src": "asset:" + store.put_bytes(stream.read())}
         except (KeyError, OSError):
-            quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
+            if id(image) not in missing_image_nodes:
+                quality.append({"status": "needs_review", "reason": "docx_image_asset_missing"})
             return {"src": ""}
 
     with image_ocr_scope(ocr) as image_ocr, prepared.stream as source:
