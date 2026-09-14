@@ -48,7 +48,8 @@ class AnswerCorrection:
                 "stage": "answer_correction",
                 "instructions": (
                     "Return JSON only: {edits: [{unit: ID, text: replacement}], "
-                    "insertions: [{after: ID, text: added text}]}. Edit only editable_units; "
+                    "insertions: [{after: ID, text: added text}]}. Empty operation lists may "
+                    "be omitted. Edit only editable_units; "
                     "all other original bytes are preserved by the application. Copy units "
                     "verbatim except for identified defects. Insertions are allowed only for "
                     "missing requested coverage; use an existing unit ID as after. Keep "
@@ -76,14 +77,15 @@ class AnswerCorrection:
             raise invalid from None
         if (
             not isinstance(value, dict)
-            or set(value) != {"edits", "insertions"}
-            or not isinstance(value["edits"], list)
-            or not isinstance(value["insertions"], list)
+            or not value
+            or not set(value) <= {"edits", "insertions"}
+            or not isinstance(value.get("edits", []), list)
+            or not isinstance(value.get("insertions", []), list)
         ):
             raise invalid
         units = {u.id: u for u in self.units}
         replacements, seen = [], set()
-        for edit in value["edits"]:
+        for edit in value.get("edits", []):
             if (
                 not isinstance(edit, dict)
                 or set(edit) != {"unit", "text"}
@@ -97,7 +99,7 @@ class AnswerCorrection:
             seen.add(unit.id)
             replacements.append((unit.start, unit.end, edit["text"]))
         seen = set()
-        for insertion in value["insertions"]:
+        for insertion in value.get("insertions", []):
             if (
                 not self.insertions_allowed
                 or not isinstance(insertion, dict)

@@ -116,7 +116,19 @@ async def test_short_evidence_citations_render_and_survive_followup(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("damage", [None, "outside_scope", "unknown", "duplicate", "rewrite"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "omit_empty",
+        "null_insertions",
+        "unknown_field",
+        "outside_scope",
+        "unknown",
+        "duplicate",
+        "rewrite",
+    ],
+)
 async def test_located_repair_preserves_table_conditions_figures_and_history(
     kb_dir, model_service, damage
 ):
@@ -166,11 +178,16 @@ async def test_located_repair_preserves_table_conditions_figures_and_history(
                 edits[0]["unit"] = "u-unobserved"
             if damage == "duplicate":
                 edits.append(edits[0])
+            patch = {"edits": edits, "insertions": []}
+            if damage == "omit_empty":
+                patch.pop("insertions")
+            if damage == "null_insertions":
+                patch["insertions"] = None
+            if damage == "unknown_field":
+                patch["replacement"] = good
             return {
                 "role": "assistant",
-                "content": good
-                if damage == "rewrite"
-                else json.dumps({"edits": edits, "insertions": []}),
+                "content": good if damage == "rewrite" else json.dumps(patch),
             }
         if any(m["role"] == "tool" for m in body["messages"]):
             return {"role": "assistant", "content": bad}
@@ -229,8 +246,9 @@ async def test_located_repair_preserves_table_conditions_figures_and_history(
         kb_dir, "List all six rows, conditions and captioned figures."
     )
     assert len(corrections) == 1
-    assert result.usage["observable_attempts"] == (4 if damage else 5)
-    if damage:
+    rejected = damage not in {None, "omit_empty"}
+    assert result.usage["observable_attempts"] == (4 if rejected else 5)
+    if rejected:
         assert result.status != "completed" and result.turn_count == 0
         assert result.error.endswith("(ProcessingIncomplete)")
         assert reviews == [bad]
@@ -243,6 +261,76 @@ async def test_located_repair_preserves_table_conditions_figures_and_history(
         saved = load_session(kb_dir, result.session_id)
         assert saved.assistant_texts == [good]
         assert not any(row.get("role") == "developer" for row in saved.history)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("patch_kind", ["insertions_only", "missing_operations", "null_edits"])
+async def test_missing_answer_coverage_accepts_only_explicit_valid_insertions(
+    kb_dir, model_service, patch_kind
+):
+    from openkb.locks import atomic_write_text
+    from tests.http_model_fixture import answer_review_response
+
+    first, missing = "Stop before replacement.", "Use a safety shield."
+    complete = first + "\n" + missing
+    atomic_write_text(kb_dir / "wiki/sources/steps.md", complete)
+    reviews = []
+
+    def chat(body):
+        try:
+            payload = json.loads(body["messages"][-1]["content"])
+        except ValueError:
+            payload = {}
+        if payload.get("stage") == "answer_correction":
+            assert payload["insertions_allowed"] and not payload["editable_units"]
+            patch = {"insertions": [{"after": "u1", "text": missing}]}
+            if patch_kind == "missing_operations":
+                patch = {}
+            elif patch_kind == "null_edits":
+                patch["edits"] = None
+            return {"role": "assistant", "content": json.dumps(patch)}
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return {"role": "assistant", "content": first}
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "original",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"sources/steps.md"}'},
+                }
+            ],
+        }
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload["answer"])
+        value = answer_review_response(payload)
+        if payload["answer"] == first:
+            value.update(
+                verdict="unsupported",
+                issues=[
+                    {
+                        "kind": "missing",
+                        "units": [],
+                        "claim": "",
+                        "reason": "Include the observed safety shield step.",
+                    }
+                ],
+            )
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.chat_response = chat
+    model_service.answer_review_response = review
+    model_service.chat_without_tools = True
+    result = await continue_conversation(kb_dir, "List both replacement precautions.")
+    if patch_kind == "insertions_only":
+        assert result.status == "completed" and result.answer == complete
+        assert reviews == [first, complete]
+    else:
+        assert result.status == "failed" and result.turn_count == 0
+        assert reviews == [first]
 
 
 @pytest.mark.parametrize(
