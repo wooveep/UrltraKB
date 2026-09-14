@@ -132,12 +132,21 @@ def parse_pptx(path, store):
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+    from openkb.office_locations import TITLE_PLACEHOLDERS
     from openkb.parsing_failures import read_office_package
 
     presentation = read_office_package(Presentation, checked_package(path))
     blocks, quality = [], []
 
-    def visit(shapes, base, title, title_id, groups=()):
+    def native_titles(shapes):
+        for shape in shapes:
+            processing_checkpoint("parsing")
+            if shape.is_placeholder and shape.placeholder_format.type.name in TITLE_PLACEHOLDERS:
+                yield shape
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from native_titles(shape.shapes)
+
+    def visit(shapes, base, title_context, groups=()):
         for shape in shapes:
             processing_checkpoint("parsing")
             position = {
@@ -151,10 +160,13 @@ def parse_pptx(path, store):
                 ],
                 "coordinate_unit": "emu",
                 "group_ids": list(groups),
+                "placeholder_type": (
+                    shape.placeholder_format.type.name if shape.is_placeholder else None
+                ),
             }
-            context = f"Slide title: {title}; object name: {shape.name}"
+            context = title_context + f"\nStored object name: {shape.name}"
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                visit(shape.shapes, base, title, title_id, (*groups, shape.shape_id))
+                visit(shape.shapes, base, title_context, (*groups, shape.shape_id))
             elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 digest = store.put_bytes(shape.image.blob)
                 blocks.append(
@@ -189,7 +201,11 @@ def parse_pptx(path, store):
                 for number, paragraph in enumerate(shape.text_frame.paragraphs, 1):
                     if not paragraph.text.strip():
                         continue
-                    kind = "heading" if shape.shape_id == title_id else "paragraph"
+                    kind = (
+                        "heading"
+                        if position["placeholder_type"] in TITLE_PLACEHOLDERS
+                        else "paragraph"
+                    )
                     blocks.append(
                         BlockDraft(
                             paragraph.text,
@@ -221,21 +237,33 @@ def parse_pptx(path, store):
 
     with progress_scope("pptx", len(presentation.slides), "items") as progress:
         for slide_index, slide in enumerate(presentation.slides, 1):
-            title_shape = slide.shapes.title
-            title = title_shape.text if title_shape is not None else f"Slide {slide_index}"
+            titles = list(native_titles(slide.shapes))
+            title_context = (
+                "\n".join(
+                    f"Native {shape.placeholder_format.type.name} placeholder object "
+                    f"{shape.shape_id}: {shape.text if shape.has_text_frame else ''}"
+                    for shape in titles
+                )
+                or "No native title placeholder."
+            )
+            base = {
+                "kind": "pptx",
+                "slide": slide_index,
+                "title_placeholder_count": len(titles),
+                "title_object_id": titles[0].shape_id if len(titles) == 1 else None,
+            }
             before = len(blocks)
             visit(
                 slide.shapes,
-                {"kind": "pptx", "slide": slide_index},
-                title,
-                title_shape.shape_id if title_shape is not None else None,
+                base,
+                title_context,
             )
             if before == len(blocks):
                 blocks.append(
                     BlockDraft(
                         "[Slide with no readable text]",
                         "paragraph",
-                        {"kind": "pptx", "slide": slide_index},
+                        base,
                     )
                 )
             if slide.has_notes_slide:
@@ -245,8 +273,8 @@ def parse_pptx(path, store):
                         BlockDraft(
                             notes.text,
                             "paragraph",
-                            {"kind": "pptx", "slide": slide_index, "notes": True},
-                            context=f"Speaker notes for slide {slide_index}: {title}",
+                            {**base, "notes": True},
+                            context=f"Speaker notes for slide {slide_index}\n{title_context}",
                         )
                     )
             progress.advance()

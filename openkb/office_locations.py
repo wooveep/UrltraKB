@@ -2,6 +2,8 @@
 
 import re
 
+TITLE_PLACEHOLDERS = {"TITLE", "CENTER_TITLE", "VERTICAL_TITLE"}
+
 
 def _cell(value):
     if not isinstance(value, str) or not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", value):
@@ -40,6 +42,50 @@ def validate_presentation_location(location):
         type(location["object_id"]) is not int or location["object_id"] < 1
     ):
         raise ValueError("Invalid original slide object")
+    if {"title_object_id", "title_placeholder_count"} & location.keys():
+        count, title = location.get("title_placeholder_count"), location.get("title_object_id")
+        if (
+            not {"title_object_id", "title_placeholder_count"} <= location.keys()
+            or type(count) is not int
+            or count < 0
+            or (count == 1 and (type(title) is not int or title < 1))
+            or (count != 1 and title is not None)
+        ):
+            raise ValueError("Invalid native title placeholder identity")
+    if "placeholder_type" in location:
+        role = location["placeholder_type"]
+        roles = {
+            "BITMAP",
+            "BODY",
+            "CENTER_TITLE",
+            "CHART",
+            "DATE",
+            "FOOTER",
+            "HEADER",
+            "MEDIA_CLIP",
+            "OBJECT",
+            "ORG_CHART",
+            "PICTURE",
+            "SLIDE_IMAGE",
+            "SLIDE_NUMBER",
+            "SUBTITLE",
+            "TABLE",
+            "TITLE",
+            "VERTICAL_BODY",
+            "VERTICAL_OBJECT",
+            "VERTICAL_TITLE",
+        }
+        if "object_id" not in location or (
+            role is not None and (not isinstance(role, str) or role not in roles)
+        ):
+            raise ValueError("Invalid native placeholder type")
+        if "title_placeholder_count" in location:
+            is_title = role in TITLE_PLACEHOLDERS
+            count, title = location["title_placeholder_count"], location["title_object_id"]
+            if (is_title and count == 0) or (
+                count == 1 and (location["object_id"] == title) != is_title
+            ):
+                raise ValueError("Native placeholder type conflicts with title identity")
     if "bbox" in location and location.get("coordinate_unit") != "emu":
         raise ValueError("Slide object coordinates require explicit EMU units")
     if "coordinate_unit" in location and location["coordinate_unit"] != "emu":

@@ -42,7 +42,7 @@ def parse_document(
         "markitdown": package_version("markitdown"),
     }
     if source.suffix == ".pptx":
-        profile["pptx"] = "openkb-pptx-v2-notes-and-omissions"
+        profile["pptx"] = "openkb-pptx-v3-native-placeholder-roles"
         profile["python-pptx"] = package_version("python-pptx")
     if source.suffix == ".xlsx":
         profile["xlsx"] = "openkb-xlsx-v2-row-relations"

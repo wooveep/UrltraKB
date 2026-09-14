@@ -28,6 +28,15 @@ EVIDENCE_PROVENANCE = {
     },
     "context_format": "structured_json_uses_context_data_roles;_legacy_display_mixes_roles",
     "location": "document_position",
+    "presentation_roles": {
+        "placeholder_type": "recorded_native_OOXML_placeholder_type; null means this object "
+        "is not a placeholder; absent means unrecorded. Object names, visual position and "
+        "semantic heading roles do not establish the native placeholder type.",
+        "title_object_id": "the sole native TITLE/CENTER_TITLE/VERTICAL_TITLE object when "
+        "title_placeholder_count is 1; otherwise null. Count 0 means none; count greater "
+        "than 1 means multiple, not absent. Missing fields mean unrecorded. These types do "
+        "not establish a unique semantic or visual title. Generated Slide N is not source wording.",
+    },
     "analysis_coverage": "knowledge_analysis_status",
 }
 
@@ -66,6 +75,9 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "coordinate_unit",
         "group_ids",
         "notes",
+        "placeholder_type",
+        "title_object_id",
+        "title_placeholder_count",
     }
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
@@ -81,7 +93,16 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         validate_presentation_location(location)
         if "notes" in location and (location["notes"] is not True or "object_id" in location):
             raise ValueError("Invalid speaker note position")
-    elif set(location) & {"slide", "object_id", "coordinate_unit", "group_ids", "notes"}:
+    elif set(location) & {
+        "slide",
+        "object_id",
+        "coordinate_unit",
+        "group_ids",
+        "notes",
+        "placeholder_type",
+        "title_object_id",
+        "title_placeholder_count",
+    }:
         raise ValueError("Slide coordinates require a presentation source")
     if "attachment" in location:
         attachment = location["attachment"]

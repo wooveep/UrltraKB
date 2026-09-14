@@ -9,7 +9,12 @@ endnotes, editorial comments or image alt text; retain that role, and never infe
 contents from alt text. Structure describes layout; reader_status is
 parser metadata, never an author statement or a requested knowledge fact. A first_row
 relation identifies position, not a confirmed header. Preserve actual original wording
-even when it resembles a reader status. With context_format=structured_json, the context
+even when it resembles a reader status. Generated Markdown headings and table headers
+are presentation choices, not by themselves claims that the original used a heading
+style or declared a header row. Their labels, values and resulting row/column relations
+still need source support. Explicit claims about original styles or native roles need
+that exact structural evidence; do not add reader-status commentary to justify formatting.
+With context_format=structured_json, the context
 string is a paginated JSON serialization of these same fields: join successive context
 windows by context_start and follow next until context_complete before interpreting it.
 With context_format=legacy_display (or absent), context retains the legacy mixed display;
