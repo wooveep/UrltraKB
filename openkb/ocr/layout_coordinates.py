@@ -30,6 +30,7 @@ def pdf_block_location(block, pdf_page, number, image_size):
         "kind": "pdf",
         "page": number,
         "bbox": list(rendered * pdf_page.derotation_matrix),
+        "display_bbox": list(rendered),
     }
 
 

@@ -29,7 +29,19 @@ rather than inventing content.
 Tree status describes navigation enhancement only; it does not describe parsing quality.
 Use the separate quality field for parsing limitations. Preserve ambiguous or conflicting
 original wording explicitly instead of silently equating directions, positions or conditions.
+cloud_ocr describes retained local job receipts for this original version, captured with
+the question's source snapshot. It is separate from the published parse, not a remote poll.
+rejected_before_acceptance means no job was accepted for that receipt, not queued work.
+accepted alone does not establish that the job is running or completed. remote_state is
+only the last observed remote state; downloaded means locally retained OCR, not image
+understanding or complete knowledge. Empty job receipts do not prove OCR is unnecessary.
 Image rows include answer-ready images[].markdown links bound to that original block.
+PDF display_bbox uses displayed-page points, with x increasing right and y increasing down.
+The separate bbox is in unrotated PDF points; it need not have the same left/right direction.
+An explicit directional caption and uniquely aligned display_bbox positions on the same
+page can establish a caption-to-image association without image understanding. This proves
+position only, not the meaning of a printed label or unseen visual details. Uninterpreted
+labels do not invalidate a clear positional association. Ambiguous layouts remain unknown.
 Copy their destination verbatim: asset IDs are not paths, and source names must not be
 inserted into image destinations. Missing images are unavailable, not inferred from an ID.
 Use search_source_text to enumerate literal matches across a whole published source,
@@ -73,6 +85,11 @@ def source_tools(kb_dir):
 
     with kb_read_lock(kb_dir / ".openkb"):
         snapshots, readers, coverages = _capture(kb_dir)
+        from openkb.ocr.history import source_job_snapshots
+
+        cloud_snapshots = source_job_snapshots(
+            SourceStore(kb_dir), [source for source, _, _ in snapshots.values()]
+        )
         images = published_images(
             kb_dir / "wiki",
             {
@@ -130,6 +147,7 @@ def source_tools(kb_dir):
                 "nodes": nodes[offset : offset + limit],
                 "next_offset": offset + limit if offset + limit < len(nodes) else None,
                 "quality": parsed.quality,
+                "cloud_ocr": cloud_snapshots[source.id],
                 "capabilities": navigation_capabilities(nav),
                 "status": nav["status"],
                 "analysis_coverage": coverages[source_id].get("status", "unknown"),

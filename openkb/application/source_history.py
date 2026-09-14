@@ -11,6 +11,7 @@ from typing import Any
 
 from openkb.application.documents import DocumentResult
 from openkb.locks import atomic_write_json, kb_ingest_lock, kb_read_lock
+from openkb.ocr.history import cloud_jobs
 from openkb.ocr.local_usage import local_ocr_usage
 from openkb.sources import SourceStore, read_object, valid_id
 
@@ -150,40 +151,8 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             "result": asdict(current) if current and current.input_version == version.id else None,
             "cumulative_usage": totals,
             "unconfirmed_requests": pending_requests,
-            "cloud_jobs": _cloud_jobs(store, source_id),
+            "cloud_jobs": cloud_jobs(store, source_id),
             "local_ocr": local_ocr_usage(store, source_id),
             "navigation": read_navigation(kb_dir, version),
             "navigation_usage": indexed_usage,
         }
-
-
-def _cloud_jobs(store: SourceStore, source_id: str) -> list[dict[str, Any]]:
-    """Expose durable requests, including failed downloads and uncertain POSTs."""
-    result = []
-    for path in sorted(store.owned_path(store.root / "cloud-jobs").glob("*.json")):
-        job = read_object(store.owned_path(path))
-        value = job.get("input")
-        if not isinstance(value, dict):
-            raise ValueError("Invalid cloud job input")
-        version = store.version(valid_id(value.get("source")))
-        if version.source_id != source_id:
-            continue
-        counts = {}
-        for field in ("requests", "submissions", "download_bytes"):
-            count = job.get(field, 0)
-            if type(count) is not int or count < 0:
-                raise ValueError("Invalid cloud job accounting")
-            counts[field] = count
-        result.append(
-            {
-                "version_id": version.id,
-                "page": value.get("page"),
-                "identity": job.get("identity"),
-                "job_id": job.get("job_id"),
-                "state": job.get("state"),
-                "remote_state": job.get("remote_state"),
-                "reason": job.get("reason"),
-                **counts,
-            }
-        )
-    return result

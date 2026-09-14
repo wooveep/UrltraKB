@@ -46,6 +46,10 @@ Check every factual clause, table heading, optional explanation and image descri
   full-page image: a crop is not the whole page. Adjacency alone does not identify left/right
   figures. Require the exact caption/position or an obtained visual observation. Never
   treat OCR transcription as image understanding, or infer unseen visual details.
+  Explicit directional captions and uniquely aligned display_bbox positions on the same
+  page can support image association without defining a printed label or interpreting
+  visual contents. Do not accept a claim that such proven positioning is unavailable
+  merely because image understanding is disabled. Ambiguous positions remain unknown.
 - A faithful partial answer may state specific evidence gaps. It must still include the
   relevant requested facts already available; a generic partial-coverage disclaimer does
   not excuse omitting observed matching rows. Do not demand unrelated source material.

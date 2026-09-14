@@ -117,7 +117,12 @@ def test_cloud_caption_positions_survive_import_and_source_readback(
     assert result.knowledge_compilation == "completed", result
     caption = layout_readings(kb_dir, result)[0]
     assert caption.text == "Left: return path"
-    assert caption.location == {"kind": "pdf", "page": 2, "bbox": expected}
+    assert caption.location == {
+        "kind": "pdf",
+        "page": 2,
+        "bbox": expected,
+        "display_bbox": [10, 20, 60, 35],
+    }
     assert calls == ["POST", "GET", "GET"]
 
 
@@ -171,3 +176,19 @@ def test_upgraded_cloud_assembly_reuses_downloaded_job_without_remote_requests(
     assert [(job["job_id"], job["requests"], job["submissions"]) for job in current] == [
         (job["job_id"], job["requests"], job["submissions"]) for job in previous
     ]
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        {"kind": "text", "line": 1, "bbox": [0, 0, 1, 1], "display_bbox": [0, 0, 1, 1]},
+        {"kind": "pdf", "page": 1, "display_bbox": [0, 0, 1, 1]},
+        {"kind": "pdf", "page": 1, "bbox": [0, 0, 1, 1], "display_bbox": [-1, 0, 1, 1]},
+        {"kind": "pdf", "page": 1, "bbox": [0, 0, 1, 1], "display_bbox": [0, 0, float("nan"), 1]},
+    ],
+)
+def test_invalid_display_coordinates_cannot_become_source_evidence(location):
+    from openkb.evidence import BlockDraft
+
+    with pytest.raises(ValueError):
+        BlockDraft("Caption", "paragraph", location)

@@ -38,6 +38,7 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "headings",
         "heading_level",
         "bbox",
+        "display_bbox",
         "attachment",
         "sheet",
         "sheet_index",
@@ -93,14 +94,21 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         type(location["heading_level"]) is not int or not 1 <= location["heading_level"] <= 9
     ):
         raise ValueError("Invalid native heading level")
-    if "bbox" in location and (
-        not isinstance(location["bbox"], list)
-        or len(location["bbox"]) != 4
-        or not all(type(item) in {float, int} and math.isfinite(item) for item in location["bbox"])
-        or location["bbox"][0] > location["bbox"][2]
-        or location["bbox"][1] > location["bbox"][3]
-    ):
-        raise ValueError("Invalid source coordinates")
+    if "display_bbox" in location and (location["kind"] != "pdf" or "bbox" not in location):
+        raise ValueError("Display coordinates require a positioned PDF block")
+    for coordinate in ("bbox", "display_bbox"):
+        if coordinate not in location:
+            continue
+        box = location[coordinate]
+        if (
+            not isinstance(box, list)
+            or len(box) != 4
+            or not all(type(item) in {float, int} and math.isfinite(item) for item in box)
+            or box[0] > box[2]
+            or box[1] > box[3]
+            or (coordinate == "display_bbox" and min(box) < 0)
+        ):
+            raise ValueError("Invalid source coordinates")
 
 
 @dataclass(frozen=True)
