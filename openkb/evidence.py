@@ -14,6 +14,14 @@ from openkb.sources import SourceStore, SourceVersion, content_id, read_object, 
 
 _CONFIRMABLE = {"blank_or_illustration", "ocr_blank_or_illustration", "image_content_requires_ocr"}
 
+# All evidence consumers distinguish original text from reader-supplied context.
+EVIDENCE_PROVENANCE = {
+    "text": "parsed_source_text",
+    "context": "reader_context_with_source_excerpts",
+    "location": "document_position",
+    "analysis_coverage": "knowledge_analysis_status",
+}
+
 
 def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
     if _depth > 8:

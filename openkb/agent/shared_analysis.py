@@ -5,6 +5,7 @@ import hashlib
 import time
 
 from openkb.agent.analysis_flights import LOCK as _LOCK
+from openkb.evidence import EVIDENCE_PROVENANCE
 from openkb.execution_measurement import measurement_identity, record_analysis
 from openkb.implementation import module_revision
 from openkb.locks import atomic_write_bytes, atomic_write_json
@@ -76,6 +77,11 @@ class SharedAnalysis:
             "schema": 1,
             "stage": stage,
             "system": system,
+            **(
+                {"evidence_provenance": copy.deepcopy(EVIDENCE_PROVENANCE)}
+                if stage == "facts"
+                else {}
+            ),
             "capabilities": checkpoints.analysis_options,
             "options": checkpoints.input.get("model_options", {}) if options is None else options,
             "model": {

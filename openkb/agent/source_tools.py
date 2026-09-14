@@ -6,7 +6,7 @@ from urllib.parse import quote
 from agents import function_tool
 
 from openkb.agent.answer_references import short_citation
-from openkb.evidence import Evidence, ParseStore, complete_read_bound
+from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, ParseStore, complete_read_bound
 from openkb.evidence_snapshot import EvidenceSnapshot
 from openkb.locks import kb_read_lock
 from openkb.navigation import navigation_capabilities, read_navigation
@@ -16,13 +16,6 @@ from openkb.source_coverage import coverage_window
 from openkb.source_windows import original_window
 from openkb.sources import SourceStore
 from openkb.state import HashRegistry
-
-EVIDENCE_PROVENANCE = {
-    "text": "parsed_source_text",
-    "context": "reader_context_with_source_excerpts",
-    "location": "document_position",
-    "analysis_coverage": "knowledge_analysis_status",
-}
 
 INSTRUCTIONS = """For source-backed answers use list_sources, read_source_tree, then
 read_source_node. Each tool is bound to the same published source/version/parse/index snapshot.

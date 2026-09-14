@@ -108,6 +108,7 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
         "# Reference: auxiliary assembly",
         "# The auxiliary assembly is isolated",
         "Reference: auxiliary assembly",
+        "The original table labels its first row 'header role unconfirmed'.",
     ],
 )
 def test_extractor_interpretation_is_not_a_generation_authority(
@@ -617,3 +618,56 @@ def test_missing_real_image_between_separate_code_markers_blocks_publication(
     assert result.knowledge_compilation == "completed"
     assert any(row["reason"] == "generated_asset_evidence_invalid" for row in result.omissions)
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+
+
+def test_compilation_keeps_reader_annotations_separate_from_original_text(
+    kb_dir, tmp_path, model_service
+):
+    from tests.document_fixtures import write_docx
+
+    original = tmp_path / "row-origin.docx"
+    write_docx(
+        original,
+        "<w:tbl>"
+        + "".join(
+            "<w:tr>"
+            + "".join(f"<w:tc><w:p><w:r><w:t>{v}</w:t></w:r></w:p></w:tc>" for v in row)
+            + "</w:tr>"
+            for row in [("Item", "Count"), ("A", "10")]
+        )
+        + "</w:tbl>",
+    )
+    claimed = "The original marks this table as header role unconfirmed."
+    observed = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        response = evidence_response(payload)
+        if payload["stage"] in {"facts", "generation", "verification"}:
+            observed.append(payload)
+        if payload["stage"] == "generation":
+            if "fragments" in response:
+                for part in response["fragments"]:
+                    part["content"] += "\n" + claimed
+            else:
+                response["content"] += "\n" + claimed
+        if payload["stage"] == "verification" and payload.get("evidence_provenance"):
+            return {
+                "verdict": "unsupported",
+                "reason": "The annotation belongs to the reader, not the original author.",
+            }
+        return response
+
+    model_service.respond = respond
+    result = import_document(kb_dir, original)
+    assert result.status == "added" and result.knowledge_compilation == "completed", result
+    assert result.omissions
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
+    for payload in observed:
+        provenance = payload["evidence_provenance"]
+        assert provenance["text"] == "parsed_source_text"
+        assert provenance["context"] == "reader_context_with_source_excerpts"
+        assert "header role unconfirmed" in json.dumps(payload)
+    store = SourceStore(kb_dir)
+    assert store.original(store.version(result.input_version)).read_bytes() == original.read_bytes()

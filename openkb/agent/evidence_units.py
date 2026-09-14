@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict
 
-from openkb.evidence import Evidence, complete_read_bound
+from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, complete_read_bound
 from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
 from openkb.sources import content_id
@@ -18,6 +18,9 @@ Return JSON {"units":[{"id":"input id","facts":[{"topic":"specific reusable topi
 "empty_reason":"explicit reason if no facts"}]}. Account for EVERY input unit.
 If facts is empty, empty_reason MUST be a nonempty string explaining why; never omit it.
 Quote only that unit's text. Context and positions explain table headers and span continuity.
+evidence_provenance applies to units and their neighbors: context mixes source excerpts
+with reader annotations. A reader's unconfirmed header role is not an original author's
+claim. Preserve literal cells and row relations without converting annotations into facts.
 Quote enough contiguous text to identify exactly one occurrence inside that unit.
 Images are retained evidence associated with their paragraph, heading, page and neighboring
 text; OCR is supplementary and may be unavailable. Do not infer unseen image text or facts
@@ -47,6 +50,8 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
             **payload,
             "units": [{"id": unit["id"], **fact_input(unit)} for unit in payload["units"]],
         }
+    if payload.get("stage") in {"facts", "generation", "verification"}:
+        payload = {**payload, "evidence_provenance": EVIDENCE_PROVENANCE}
     wire, identities = encode_payload(payload, identity_values)
     wire = share_contexts(wire)
     contract = {

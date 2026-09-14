@@ -188,7 +188,8 @@ def test_equal_occurrences_keep_their_distinct_fact_rows(kb_dir, tmp_path, model
                 quote = "Timeout is 30 seconds." if index == 2 else "Voltage is 5 volts."
                 row["facts"] = [{"topic": "Operation", "statement": quote, "quote": quote}]
         if payload["stage"] == "generation":
-            generated.append([fact["statement"] for fact in payload["facts"]])
+            assert all("statement" not in fact for fact in payload["facts"])
+            generated.append([fact["quote"] for fact in payload["facts"]])
         return response
 
     model_service.respond = respond
@@ -363,3 +364,54 @@ def test_removal_refuses_ambiguous_owned_ranges_without_partial_wiki_changes(
         remove_document(kb_dir, imported.source_id)
     assert {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()} == before
     assert HashRegistry(kb_dir / ".openkb/hashes.json").get(imported.source_id)
+
+
+@pytest.mark.parametrize("scope", ["same_source", "shared_source"])
+def test_changed_evidence_provenance_invalidates_only_dependent_facts(
+    kb_dir, tmp_path, model_service, monkeypatch, scope
+):
+    from openkb.application.source_actions import continue_source
+    from openkb.evidence import EVIDENCE_PROVENANCE
+
+    paths = []
+    for folder in ("first", "second", "third"):
+        path = tmp_path / folder / "procedure.md"
+        path.parent.mkdir()
+        path.write_text("Disconnect power before replacement.")
+        paths.append(path)
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "unsupported", "reason": "Controlled generation remains omitted."}
+        return evidence_response(payload)
+
+    def facts_since(index):
+        return [
+            json.loads(call["messages"][-1]["content"])
+            for call in model_service[index:]
+            if json.loads(call["messages"][-1]["content"])["stage"] == "facts"
+        ]
+
+    model_service.respond = respond
+    first = import_document(kb_dir, paths[0])
+    assert first.status == "added" and first.omissions
+    count = len(model_service)
+    if scope == "same_source":
+        same = continue_source(kb_dir, first.source_id, version_id=first.input_version)
+    else:
+        same = import_document(kb_dir, paths[1])
+    assert same.knowledge_compilation == "completed" and not facts_since(count)
+    monkeypatch.setitem(EVIDENCE_PROVENANCE, "context", "reader_context_with_explicit_role_origins")
+    count = len(model_service)
+    if scope == "same_source":
+        changed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
+        assert changed.parse_id == first.parse_id and changed.input_version == first.input_version
+    else:
+        changed = import_document(kb_dir, paths[2])
+    assert changed.knowledge_compilation == "completed", changed
+    assert facts_since(count), "A changed source-role contract cannot reuse old facts."
+    assert all(
+        p["evidence_provenance"]["context"] == EVIDENCE_PROVENANCE["context"]
+        for p in facts_since(count)
+    )

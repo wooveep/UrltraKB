@@ -4,6 +4,7 @@ import threading
 from copy import deepcopy
 
 from openkb.config import compilation_model_options
+from openkb.evidence import EVIDENCE_PROVENANCE
 from openkb.implementation import module_revision
 from openkb.locks import atomic_write_json
 from openkb.processing import processing_checkpoint
@@ -172,6 +173,11 @@ class CompilationCheckpoints:
             "system": system,
             "payload": payload,
             "dependencies": dependencies,
+            **(
+                {"evidence_provenance": deepcopy(EVIDENCE_PROVENANCE)}
+                if payload.get("stage") == "facts"
+                else {}
+            ),
             # Completed source facts remain valid when only future batch limits
             # change. New shared requests have the stricter actual-dispatch key.
             **(
