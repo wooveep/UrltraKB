@@ -96,3 +96,68 @@ async def test_answer_observes_rejected_ocr_without_claiming_it_is_queued(
     assert result.status == "completed", result
     assert len(seen) == 1
     assert submissions == expected_requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["malformed_version", "unbound_receipt"])
+async def test_unverified_old_ocr_receipt_does_not_authorize_status_or_block_original(
+    kb_dir, tmp_path, model_service, damage
+):
+    from openkb.locks import atomic_write_json
+    from openkb.sources import SourceStore
+
+    text = "Stop the pump before maintenance."
+    document = tmp_path / "maintenance.txt"
+    document.write_text(text)
+    imported = await asyncio.to_thread(import_document, kb_dir, document)
+    assert imported.knowledge_compilation == "completed"
+    store = SourceStore(kb_dir)
+    version_id = imported.input_version
+    if damage == "malformed_version":
+        version_id = "f" * 64
+        atomic_write_json(store.root / "versions" / f"{version_id}.json", {})
+    atomic_write_json(
+        store.root / "cloud-jobs" / ("e" * 64 + ".json"),
+        {"input": {"source": version_id}, "job_id": "unbound"},
+    )
+    observed = []
+
+    def chat(body):
+        outputs = [json.loads(m["content"]) for m in body["messages"] if m.get("role") == "tool"]
+        if not outputs:
+            tool = "read_source_tree"
+            arguments = {"source_id": imported.source_id}
+        elif len(outputs) == 1:
+            tree = outputs[0]
+            status = tree["cloud_ocr"]
+            if damage == "malformed_version":
+                assert status["status"] == "unavailable"
+            else:
+                assert status["jobs"][0]["submission"] == "unknown"
+            tool = "read_source_node"
+            arguments = {"source_id": imported.source_id, "node_id": tree["nodes"][0]["id"]}
+        else:
+            row = outputs[-1]["evidence"][0]
+            assert row["text"] == text
+            observed.append(row)
+            return {"role": "assistant", "content": text + " " + row["citation"]}
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "read" + str(len(outputs)),
+                    "type": "function",
+                    "function": {
+                        "name": tool,
+                        "arguments": json.dumps(arguments),
+                    },
+                }
+            ],
+        }
+
+    model_service.chat_response = chat
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "What must happen before maintenance?")
+    assert result.status == "completed", result
+    assert len(observed) == 1

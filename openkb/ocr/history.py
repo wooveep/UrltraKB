@@ -1,8 +1,9 @@
 """Read retained cloud OCR receipts without polling or exposing credentials."""
 
+import re
 from typing import Any
 
-from openkb.sources import SourceStore, read_object, valid_id
+from openkb.sources import SourceStore, content_id, read_object, valid_id
 
 
 def cloud_jobs(store: SourceStore, source_id: str | None = None) -> list[dict[str, Any]]:
@@ -13,7 +14,10 @@ def cloud_jobs(store: SourceStore, source_id: str | None = None) -> list[dict[st
         value = job.get("input")
         if not isinstance(value, dict):
             raise ValueError("Invalid cloud job input")
-        version = store.version(valid_id(value.get("source")))
+        try:
+            version = store.version(valid_id(value.get("source")))
+        except (TypeError, KeyError):
+            raise ValueError("Invalid cloud job source version") from None
         if source_id is not None and version.source_id != source_id:
             continue
         if any(
@@ -36,10 +40,44 @@ def cloud_jobs(store: SourceStore, source_id: str | None = None) -> list[dict[st
                 "state": job.get("state"),
                 "remote_state": job.get("remote_state"),
                 "reason": job.get("reason"),
+                "receipt_verified": _receipt_verified(path.stem, job, value),
                 **counts,
             }
         )
     return result
+
+
+def _receipt_verified(identity, job, value):
+    """Legacy or incomplete receipts retain their raw fields, never inferred acceptance."""
+    if (
+        job.get("identity") != identity
+        or content_id(value) != identity
+        or set(value) != {"source", "page", "slice", "profile"}
+        or type(value.get("page")) is not int
+        or value["page"] < 1
+        or not isinstance(value.get("profile"), dict)
+        or value["profile"].get("physical_page") != value["page"]
+        or value["profile"].get("slice") != value.get("slice")
+    ):
+        return False
+    state, job_id = job.get("state"), job.get("job_id")
+    accepted = {"submitted", "raw_downloaded", "downloaded"}
+    if state not in accepted | {"planned", "submitting", "submission_unknown", "rejected"}:
+        return False
+    if state in accepted:
+        if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", job_id):
+            return False
+    elif job_id is not None:
+        return False
+    try:
+        valid_id(value.get("slice"))
+        if state in {"raw_downloaded", "downloaded"}:
+            valid_id(job.get("result_blob"))
+        if state == "downloaded":
+            valid_id(job.get("parse_id"))
+    except ValueError:
+        return False
+    return True
 
 
 def source_job_snapshots(store, sources):
@@ -68,6 +106,14 @@ def source_job_snapshots(store, sources):
         version = job["version_id"]
         if version not in snapshots:
             continue
+        if not job["receipt_verified"]:
+            job = {
+                **job,
+                "state": "unknown",
+                "remote_state": None,
+                "reason": "unverified_job_receipt",
+                "job_id": None,
+            }
         state = job["state"]
         submission = (
             "rejected_before_acceptance"
