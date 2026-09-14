@@ -36,6 +36,8 @@ Check every factual clause, table heading, optional explanation and image descri
   Reject background explanations absent from the evidence, however plausible.
   Check translations too: an ambiguous original term does not support a more specific
   technical mechanism. Each slash-separated or parenthetical translation needs support.
+  A faithful translation preserving an unambiguous source meaning does not require the
+  translated wording itself to appear in the original. Reject added meaning, not language.
 - A table type, address or default-listening flag is not evidence of actual reachability,
   permission or firewall behavior. Quote the literal fields and preserve undefined meanings.
 - For a requested enumeration, compare ALL matching observed rows and requested fields.
@@ -58,6 +60,9 @@ Review EVERY supplied unit, including introductory and closing prose. For a supp
 give exact quotations from identified observations for ALL its factual clauses. A name
 alone cannot support an added definition. A disclaimer at the start does not authorize
 later parenthetical aliases, categories or equivalence. Check those clauses independently.
+Copy short contiguous substrings verbatim. For metadata, copy the relevant field/value
+with its original structure; never reconstruct an object, move a nested field, remove
+intervening fields, or add closing braces to an excerpt. Use separate quotes when needed.
 Quoted operational metadata may support statements about retrieval or coverage, but
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
