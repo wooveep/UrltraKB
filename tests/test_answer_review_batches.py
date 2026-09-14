@@ -162,8 +162,19 @@ async def test_invalid_protocol_does_not_spend_the_semantic_correction(kb_dir, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("damage", [None, "wrong_type", "wrong_path", "non_leaf", "quote_and_path"])
-async def test_metadata_support_binds_an_exact_typed_leaf(kb_dir, model_service, damage):
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "array",
+        "array_wrong_type",
+        "wrong_type",
+        "wrong_path",
+        "partial_object",
+        "quote_and_path",
+    ],
+)
+async def test_metadata_support_binds_an_exact_typed_value(kb_dir, model_service, damage):
     metadata = {"coverage": {"complete": False}, "blocks": [{"characters": 42}]}
     atomic_write_text(kb_dir / "wiki/sources/rows.md", json.dumps(metadata))
     model_service.chat_response = _reader("Source coverage is partial.")
@@ -179,8 +190,12 @@ async def test_metadata_support_binds_an_exact_typed_leaf(kb_dir, model_service,
             support["value"] = 0
         elif damage == "wrong_path":
             support["path"] = ["complete"]
-        elif damage == "non_leaf":
-            support.update(path=["coverage"], value=metadata["coverage"])
+        elif damage == "array":
+            support.update(path=["blocks"], value=metadata["blocks"])
+        elif damage == "array_wrong_type":
+            support.update(path=["blocks"], value=[{"characters": 42.0}])
+        elif damage == "partial_object":
+            support.update(path=[], value={"coverage": metadata["coverage"]})
         elif damage == "quote_and_path":
             support["quote"] = "anything"
         value = answer_review_response(payload)
@@ -189,8 +204,8 @@ async def test_metadata_support_binds_an_exact_typed_leaf(kb_dir, model_service,
 
     model_service.answer_review_response = review
     result = await continue_conversation(kb_dir, "Is source coverage complete?")
-    assert (result.status == "completed") == (damage is None), result
-    assert len(reviews) == (1 if damage is None else 2)
+    assert (result.status == "completed") == (damage in {None, "array"}), result
+    assert len(reviews) == (1 if damage in {None, "array"} else 2)
 
 
 @pytest.mark.asyncio
@@ -229,7 +244,8 @@ async def test_failed_batch_cannot_discard_previous_reviews_or_expand_edits(
     result = await continue_conversation(kb_dir, "List all channels.")
     assert (result.status == "completed") == (damage == "transient"), result
     assert len(reviews) == 3
-    assert reviews[1] == reviews[2]
+    assert reviews[1] == {k: v for k, v in reviews[2].items() if k != "protocol_feedback"}
+    assert reviews[2]["protocol_feedback"]["error"]
     assert not {u["id"] for u in reviews[0]["units"]} & {u["id"] for u in reviews[1]["units"]}
     assert result.usage["observable_attempts"] == 5
 
@@ -262,3 +278,96 @@ async def test_identical_observations_share_storage_but_keep_read_order(kb_dir, 
     result = await continue_conversation(kb_dir, "What is channel 4's condition?")
     assert result.status == "completed" and result.answer == answer, result
     assert len(reviews) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_limit", [None, 3])
+async def test_length_stopped_reviews_split_without_losing_units_or_scope(
+    kb_dir, model_service, request_limit
+):
+    if request_limit:
+        from openkb.application.settings import apply_kb_config_patch
+        from openkb.application.settings_data import KbConfigPatchRequest
+        from openkb.processing import DEFAULT_PROCESSING
+
+        apply_kb_config_patch(
+            kb_dir,
+            KbConfigPatchRequest(
+                kb=str(kb_dir),
+                config={"processing": {**DEFAULT_PROCESSING, "max_requests": request_limit}},
+            ),
+        )
+    answer = "\n".join(f"Channel {i}: {7400 + i}" for i in range(1, 13))
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", answer)
+    model_service.chat_response = _reader(answer)
+    model_service.chat_without_tools = True
+    reviews = []
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        model_service.finish_reason = "length" if len(payload["units"]) > 4 else "stop"
+        assert payload["answer"] == answer
+        assert payload["observations"][0]["output"] == answer
+        return {"role": "assistant", "content": json.dumps(answer_review_response(payload))}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "List all channels and values.")
+    if request_limit:
+        assert result.status != "completed"
+        assert len(model_service) == result.usage["observable_attempts"] == request_limit
+        return
+    assert result.status == "completed" and result.answer == answer, result
+    successful = [p for p in reviews if len(p["units"]) <= 4]
+    ids = [u["id"] for p in successful for u in p["units"]]
+    assert len(ids) == len(set(ids)) == 12
+    assert len(reviews) == 4 and result.usage["observable_attempts"] == 6
+
+
+@pytest.mark.asyncio
+async def test_protocol_feedback_repairs_only_the_review_binding(kb_dir, model_service):
+    source = {"coverage": {"status": "partial"}}
+    answer = "Coverage is partial."
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", json.dumps(source))
+    model_service.chat_response = _reader(answer)
+    model_service.chat_without_tools = True
+    reviews = []
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        feedback = payload.get("protocol_feedback", {}).get("error")
+        if feedback:
+            assert feedback["problem"] == "support_mismatch"
+            assert feedback["unit"] == "u1" and feedback["support"]["value"] == "complete"
+        assert payload["answer"] == answer and payload["observations"][0]["output"] == source
+        value = answer_review_response(payload)
+        value["units"][0]["support"] = [
+            {
+                "observation": "o1",
+                "path": ["coverage", "status"],
+                "value": "partial" if feedback else "complete",
+            }
+        ]
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "Is source coverage complete?")
+    assert result.status == "completed" and result.answer == answer, result
+    assert len(reviews) == 2 and result.usage["observable_attempts"] == 4
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_single_unit_never_authorizes_completion(kb_dir, model_service):
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", "Count: 10")
+    model_service.chat_response = _reader("Count: 10")
+    model_service.chat_without_tools = True
+
+    def review(body):
+        model_service.finish_reason = "length"
+        return {"role": "assistant", "content": '{"verdict":"supported"}'}
+
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "What is the count?")
+    assert result.status != "completed" and result.turn_count == 0
+    assert result.usage["observable_attempts"] == 3

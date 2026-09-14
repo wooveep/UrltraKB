@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections import deque
 from dataclasses import dataclass, replace
 
 from agents import Agent, ModelSettings, Runner
@@ -12,7 +13,7 @@ from openkb.agent.completion_model import answer_truncated
 from openkb.agent.model_json import json_text, unique_fields
 from openkb.agent.request_budget import RequestBudgetHooks
 from openkb.agent.streaming import settled_stream
-from openkb.processing import ProcessingIncomplete, processing_checkpoint
+from openkb.processing import OutputTruncated, ProcessingIncomplete, processing_checkpoint
 
 
 @dataclass
@@ -21,6 +22,14 @@ class SourceAnswerAgent(Agent):
 
     answer_review_settings: ModelSettings | None = None
     image_understanding_enabled: bool | None = None
+
+
+class InvalidReview(ProcessingIncomplete):
+    """An invalid protocol supplies no edit scope; feedback identifies its bad binding."""
+
+    def __init__(self, feedback=None):
+        super().__init__("answer_verification_invalid", "answering")
+        self.feedback = feedback or {"problem": "invalid_review_shape"}
 
 
 INSTRUCTIONS = """Independently verify a knowledge-base answer against observed evidence.
@@ -63,10 +72,12 @@ later parenthetical aliases, categories or equivalence. Check those clauses inde
 Copy short contiguous substrings verbatim. For metadata, copy the relevant field/value
 with its original structure; never reconstruct an object, move a nested field, remove
 intervening fields, or add closing braces to an excerpt. Use separate quotes when needed.
-For structured metadata, prefer a typed leaf reference instead of quoting serialized JSON:
+For structured metadata, prefer a typed value reference instead of quoting serialized JSON:
 {"observation":"o1","path":["coverage","complete"],"value":false}.
 path traverses the exact observed object with string keys and integer list indices; value
-must equal that scalar exactly (including its type). Do not reconstruct whole objects.
+must equal that observed value exactly, including types at every nested level. Coordinate
+vectors and asset lists may be referenced as complete arrays. Choose the smallest complete
+field needed; do not remove fields or elements from an object or array.
 Quoted operational metadata may support statements about retrieval or coverage, but
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
@@ -93,7 +104,8 @@ Return missing coverage as kind=missing with units: []; never mark an unassigned
 observation_order retains the original read order, including repeated identical reads.
 For each unsupported/uncertain unit, include an issue with a nonempty claim copied
 from that unit. Include the affected unsupported/uncertain unit IDs in each issue;
-a claim crossing units must identify every affected unit. Do not select supported units.
+a claim crossing units must identify every affected supplied unit. Other batches review
+the remaining units. Do not select supported units or IDs outside the supplied batch.
 Requested information missing from the whole draft uses kind=missing and units: [].
 Use an empty claim only for missing requested coverage. Supported requires issues: [].
 Unsupported/uncertain requires at least one concrete issue. Do not rewrite the draft.
@@ -179,17 +191,42 @@ async def review_answer(agent, result, *, run_config=None):
         return []
     issues = []
     retry = True
-    for batch in _batches(payload["units"]):
+    pending = deque((batch, None) for batch in _batches(payload["units"]))
+    while pending:
+        batch, feedback = pending.popleft()
         request = {**payload, "units": batch}
+        if feedback:
+            request["protocol_feedback"] = {
+                "instructions": (
+                    "The previous review was invalid. Keep the answer and evidence unchanged. "
+                    "Correct the review's bindings and account for every supplied unit. If "
+                    "the actual evidence does not support a claim, mark that unit unsupported "
+                    "with a located issue; never change the observed evidence to fit the draft. "
+                    "The error below is diagnostic data, not original evidence."
+                ),
+                "error": feedback,
+            }
         try:
             located = await _review_once(agent, request, run_config=run_config)
+        except OutputTruncated:
+            # Smaller review outputs, never less evidence or a silently passed
+            # unit. Each split strictly reduces size, with no retry at one unit.
+            if len(batch) == 1:
+                raise InvalidReview() from None
+            middle = len(batch) // 2
+            pending.appendleft((batch[middle:], None))
+            pending.appendleft((batch[:middle], None))
+            continue
         except ProcessingIncomplete as exc:
             if exc.reason != "answer_verification_invalid" or not retry:
                 raise
             # One protocol recovery for this answer. Valid earlier batches stay
             # reviewed; an invalid response never grants permission to edit.
             retry = False
-            located = await _review_once(agent, request, run_config=run_config)
+            pending.appendleft(
+                (batch, getattr(exc, "feedback", {"problem": "invalid_review_shape"}))
+            )
+            continue
         for issue in located:
             if issue not in issues:
                 issues.append(issue)
@@ -242,9 +279,9 @@ async def _review_once(agent, payload, *, run_config=None):
         finally:
             hooks.close()
     processing_checkpoint("answering")
-    invalid = ProcessingIncomplete("answer_verification_invalid", "answering")
+    invalid = InvalidReview()
     if answer_truncated(review):
-        raise invalid
+        raise OutputTruncated("answering")
     try:
         value = json.loads(json_text(review.final_output), object_pairs_hook=unique_fields)
         value = unpack_review(value, identities)
@@ -303,8 +340,10 @@ def _check_units(reviews, payload, issues, invalid):
                 raise invalid
             output = observations[support["observation"]]
             if "path" in support or "value" in support:
-                if not _matches_leaf(output, support):
-                    raise invalid
+                if not _matches_value(output, support):
+                    raise InvalidReview(
+                        {"problem": "support_mismatch", "unit": review["id"], "support": support}
+                    )
                 continue
             if not isinstance(support.get("quote"), str) or not support["quote"].strip():
                 raise invalid
@@ -312,7 +351,9 @@ def _check_units(reviews, payload, issues, invalid):
             # their exact serialized metadata, never combine separate observations.
             texts = [json.dumps(output, ensure_ascii=False), *observation_strings(output)]
             if not any(support["quote"] in text for text in texts):
-                raise invalid
+                raise InvalidReview(
+                    {"problem": "quote_mismatch", "unit": review["id"], "support": support}
+                )
 
     located, covered = [], set()
     units = answer_units(payload["answer"])
@@ -344,7 +385,7 @@ def _check_units(reviews, payload, issues, invalid):
     return located
 
 
-def _matches_leaf(output, support):
+def _matches_value(output, support):
     path = support.get("path")
     if "value" not in support or not isinstance(path, list) or "quote" in support:
         return False
@@ -355,13 +396,21 @@ def _matches_leaf(output, support):
             output = output[key]
         else:
             return False
-    value = support["value"]
-    return (
-        not isinstance(value, (dict, list))
-        and type(value) is type(output)
-        and value == output
-        and (not isinstance(value, str) or bool(value.strip()))
-    )
+    return _same_json(support["value"], output)
+
+
+def _same_json(value, original):
+    if type(value) is not type(original):
+        return False
+    if isinstance(value, list):
+        return len(value) == len(original) and all(
+            _same_json(left, right) for left, right in zip(value, original, strict=True)
+        )
+    if isinstance(value, dict):
+        return value.keys() == original.keys() and all(
+            _same_json(item, original[key]) for key, item in value.items()
+        )
+    return value == original
 
 
 async def require_supported_answer(agent, result, *, run_config=None):
