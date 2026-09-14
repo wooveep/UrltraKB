@@ -171,7 +171,12 @@ def image_tools(kb_dir: Path):
     if not session.connection.settings.enabled:
         return (
             [],
-            "Image understanding is disabled. Work from text and identify uninterpreted images.",
+            "Image understanding is disabled. Use observed text and explicit image bindings; "
+            "do not infer unobserved visual contents. Showing a source figure or citing its "
+            "caption does not require visual interpretation. State this limitation only when "
+            "the requested answer needs visual information that the observed text and bindings "
+            "cannot establish, or when the user asks about image-understanding status. "
+            "Do not append an unsolicited vision-status note to a supported answer.",
         )
 
     @function_tool

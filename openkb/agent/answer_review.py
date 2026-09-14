@@ -84,6 +84,11 @@ Check every factual clause, table heading, optional explanation and image descri
   coordinate report as a located issue even when its metadata is accurate. Positioning
   can still support figure selection internally. Preserve relevant source quotations,
   including original wording about processing; distinguish provenance, not keywords.
+  A request to display a source figure or cite its caption does not itself request visual
+  interpretation or processing diagnostics. If the exact figure and caption are already
+  established, disabled image understanding is not a gap in that requested answer. Reject
+  an appended vision-status disclaimer in that case; retain it when visual information
+  actually needed for the question is unavailable, or the user asks about that capability.
 
 Review EVERY supplied unit, including introductory and closing prose. For a supported unit,
 give exact quotations from identified observations for ALL its factual clauses. A name
