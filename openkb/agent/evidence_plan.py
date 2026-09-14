@@ -83,7 +83,16 @@ def decode_members(value, topics):
 
 
 def plan_topics(
-    topics, workspace, settings, limits, checkpoints, *, bundle, on_event, navigation=None
+    topics,
+    workspace,
+    settings,
+    limits,
+    checkpoints,
+    *,
+    bundle,
+    on_event,
+    navigation=None,
+    resume=False,
 ):
     import litellm
 
@@ -100,6 +109,29 @@ def plan_topics(
     planned = {}
     failures = []
     schema = get_agents_md(wiki)
+    from openkb.implementation import module_revision
+
+    # Continue retains an already settled source plan. This is workflow state,
+    # not a claim that a request with a different catalogue has the same inputs.
+    # New facts/topics, parsing, model, schema and planning rules still bind it;
+    # generation independently rechecks other-source contributions and targets.
+    retained_key = checkpoints.key(
+        "retained-source-plan-v1",
+        {
+            "stage": "planning",
+            "topics": topics,
+            "entity_types": entity_types,
+            "schema": schema,
+            "navigation": navigation.get("id") if navigation else None,
+            "coordination": module_revision("openkb.agent.planning_candidates"),
+        },
+    )
+    if resume:
+        retained = checkpoints.load_recovery(retained_key, "plan")
+        if retained is not None:
+            groups = _validate(retained, topics, entity_types)
+            on_event({"stage": "planning", "topics": len(topics), "cached": True, "retained": True})
+            return groups
 
     def payload(batch):
         return {
@@ -265,7 +297,12 @@ def plan_topics(
             report_content_omission(
                 "planning", error.reason, [content_id(topic) for topic in batch]
             )
-    return list(planned.values())
+    groups = list(planned.values())
+    if not failures:
+        retained = {"topics": [{k: v for k, v in group.items() if k != "path"} for group in groups]}
+        _validate(retained, topics, entity_types)
+        checkpoints.save_recovery(retained_key, "plan", retained)
+    return groups
 
 
 def _validate(value, topics, entity_types):

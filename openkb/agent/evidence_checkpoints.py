@@ -276,7 +276,7 @@ class CompilationCheckpoints:
     def load_recovery(self, key, kind):
         """Mutable workflow state is never treated as a verified model result."""
         processing_checkpoint()
-        if kind not in {"split", "draft", "review"}:
+        if kind not in {"split", "draft", "review", "plan"}:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         if not path.exists():
@@ -314,7 +314,7 @@ class CompilationCheckpoints:
 
     def save_recovery(self, key, kind, value):
         processing_checkpoint()
-        if kind not in {"split", "draft", "review"}:
+        if kind not in {"split", "draft", "review", "plan"}:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         with self._write_lock:

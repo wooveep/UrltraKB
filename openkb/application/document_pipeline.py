@@ -196,6 +196,7 @@ def _compile_version(
                             bundle=bundle,
                             on_event=on_event,
                             navigation=navigation,
+                            resume_plan=retry_omissions,
                         )
                     finally:
                         asyncio.run(_close_async_llm_clients())

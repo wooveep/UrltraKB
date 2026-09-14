@@ -19,6 +19,7 @@ def compile_evidence(
     bundle=None,
     on_event=lambda event: None,
     navigation=None,
+    resume_plan=False,
 ):
     from openkb.agent.compiler import (
         _update_index,
@@ -58,6 +59,7 @@ def compile_evidence(
         bundle=bundle,
         on_event=on_event,
         navigation=navigation,
+        resume=resume_plan,
     )
     from openkb.agent.evidence_pages import retract_retired_topics
 
