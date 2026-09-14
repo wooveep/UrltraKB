@@ -9,6 +9,66 @@ from openkb.application.documents import import_document
 from tests.http_model_fixture import original_source_answer
 
 
+def test_reader_annotations_and_pending_analysis_are_not_original_claims(
+    kb_dir, tmp_path, model_service
+):
+    import json
+
+    from tests.document_fixtures import write_docx
+    from tests.http_model_fixture import answer_review_response, evidence_response
+
+    source = tmp_path / "rows.docx"
+    write_docx(
+        source,
+        "<w:tbl>"
+        + "".join(
+            "<w:tr>"
+            + "".join(f"<w:tc><w:p><w:r><w:t>{v}</w:t></w:r></w:p></w:tc>" for v in row)
+            + "</w:tr>"
+            for row in [("Signal", "Count"), ("A", "10")]
+        )
+        + "</w:tbl>",
+    )
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification":
+            return {"verdict": "unsupported", "reason": "The controlled candidate is unsupported."}
+        return evidence_response(payload)
+
+    model_service.respond = respond
+    imported = import_document(kb_dir, source)
+    assert imported.status == "added" and imported.knowledge_compilation == "completed"
+    assert imported.omissions
+    views, reviews = [], []
+
+    def inspect(tree, result):
+        fields = result.get("evidence_provenance", {})
+        assert fields["text"] == "parsed_source_text"
+        assert fields["context"] == "reader_context_with_source_excerpts"
+        assert fields["analysis_coverage"] == "knowledge_analysis_status"
+        row = next(row for row in result["evidence"] if row["text"] == "10")
+        assert "header role unconfirmed" in row["context"]
+        assert row["analysis_coverage"]["status"] == "pending"
+        views.append(result)
+        return "Signal A: 10."
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        originals = [
+            o["output"] for o in payload["observations"] if o.get("name") == "read_source_node"
+        ]
+        assert originals[0]["evidence_provenance"] == views[-1]["evidence_provenance"]
+        reviews.append(payload)
+        return {"role": "assistant", "content": json.dumps(answer_review_response(payload))}
+
+    model_service.chat_response = original_source_answer(inspect)
+    model_service.answer_review_response = review
+    result = asyncio.run(continue_conversation(kb_dir, "What is signal A's count?"))
+    assert result.status == "completed" and result.answer == "Signal A: 10.", result
+    assert len(views) == len(reviews) == 1
+
+
 def test_spreadsheet_equal_values_retain_cell_and_header_identity_in_query_and_chat(
     kb_dir, tmp_path, model_service
 ):

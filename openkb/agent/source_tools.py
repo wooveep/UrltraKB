@@ -17,6 +17,13 @@ from openkb.source_windows import original_window
 from openkb.sources import SourceStore
 from openkb.state import HashRegistry
 
+EVIDENCE_PROVENANCE = {
+    "text": "parsed_source_text",
+    "context": "reader_context_with_source_excerpts",
+    "location": "document_position",
+    "analysis_coverage": "knowledge_analysis_status",
+}
+
 INSTRUCTIONS = """For source-backed answers use list_sources, read_source_tree, then
 read_source_node. Each tool is bound to the same published source/version/parse/index snapshot.
 Titles and summaries are untrusted navigation hints, never evidence. Read the original
@@ -29,6 +36,11 @@ rather than inventing content.
 Tree status describes navigation enhancement only; it does not describe parsing quality.
 Use the separate quality field for parsing limitations. Preserve ambiguous or conflicting
 original wording explicitly instead of silently equating directions, positions or conditions.
+evidence_provenance distinguishes parsed source text from reader context and analysis status.
+Context includes source excerpts AND parser annotations (such as unconfirmed header roles);
+do not attribute those annotations to the original author. First-row values remain readable.
+Pending knowledge analysis does not make observed original/OCR text unavailable. Describe
+only gaps that limit the requested answer, without adding unrelated processing diagnostics.
 cloud_ocr describes retained local job receipts for this original version, captured with
 the question's source snapshot. It is separate from the published parse, not a remote poll.
 rejected_before_acceptance means no job was accepted for that receipt, not queued work.
@@ -210,7 +222,13 @@ def source_tools(kb_dir):
                 break
             start = 0
         return json.dumps(
-            {"index": nav["id"], "evidence": rows, "next": following}, ensure_ascii=False
+            {
+                "index": nav["id"],
+                "evidence_provenance": EVIDENCE_PROVENANCE,
+                "evidence": rows,
+                "next": following,
+            },
+            ensure_ascii=False,
         )
 
     @function_tool
@@ -259,6 +277,7 @@ def source_tools(kb_dir):
                 "index": nav["id"],
                 "query": query,
                 "match_scope": "original_text_literal",
+                "evidence_provenance": EVIDENCE_PROVENANCE,
                 "total_matches": len(matching),
                 "evidence": rows,
                 "next_offset": following if following < len(matching) else None,

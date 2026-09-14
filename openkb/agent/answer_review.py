@@ -71,6 +71,12 @@ Quoted operational metadata may support statements about retrieval or coverage, 
 navigation summaries still cannot establish source facts. execution_capabilities records
 the current agent's configured image-understanding enablement; enabled does not prove a
 working connection or any observed image. Disabled does not prove missing source content.
+Check evidence_provenance: reader context mixes original excerpts with parser annotations.
+An unconfirmed header role is a reader limitation, not something the original author said.
+Literal first-row cells can still support their exact labels and unambiguous row relations.
+knowledge_analysis_status records compilation, not whether already observed original/OCR
+text exists or is readable. Reject a claim that such text is unavailable based only on
+pending compilation. Omit unrelated diagnostics rather than inventing a source limitation.
 non_factual is only for labels,
 formatting and language with no factual assertions, never a way to skip a difficult claim.
 
@@ -204,6 +210,8 @@ def _batches(units):
 
 
 async def _review_once(agent, payload, *, run_config=None):
+    from openkb.agent.answer_review_wire import pack_review, unpack_review
+
     processing_checkpoint("answering")
     reviewer = agent.clone(
         name="answer-verifier",
@@ -216,9 +224,10 @@ async def _review_once(agent, payload, *, run_config=None):
         ),
     )
     hooks = RequestBudgetHooks()
+    wire, identities = pack_review(payload)
     review = Runner.run_streamed(
         reviewer,
-        json.dumps(payload, ensure_ascii=False),
+        json.dumps(wire, ensure_ascii=False),
         max_turns=1,
         run_config=run_config,
         hooks=hooks,
@@ -238,6 +247,7 @@ async def _review_once(agent, payload, *, run_config=None):
         raise invalid
     try:
         value = json.loads(json_text(review.final_output), object_pairs_hook=unique_fields)
+        value = unpack_review(value, identities)
     except (ValueError, TypeError, AttributeError):
         raise invalid from None
     if (
