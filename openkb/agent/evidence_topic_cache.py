@@ -1,9 +1,36 @@
 """Reuse a fully verified topic when continuing an incomplete publication."""
 
+import posixpath
+from urllib.parse import unquote, urlsplit
+
+from openkb.agent.answer_citations import _links
+from openkb.agent.evidence_markup import normalize_links
 from openkb.agent.evidence_pages import _previous_contribution
 from openkb.implementation import module_revision
 from openkb.schema import get_agents_md
 from openkb.sources import content_id
+
+
+def _valid_page_links(content, page, targets):
+    if normalize_links(content, targets, {}, links_only=True) != content:
+        return False
+    # The shared Markdown parser includes reference/HTML links and excludes
+    # literal code. Resolve ordinary relative URLs from this contribution's page.
+    for link in _links(content):
+        try:
+            url = urlsplit(link)
+        except ValueError:
+            return False
+        if url.scheme or url.netloc or not url.path:
+            continue
+        path = posixpath.normpath(posixpath.join(posixpath.dirname(page), unquote(url.path)))
+        target = path.lstrip("/").removesuffix(".md")
+        if posixpath.splitext(path)[1] not in {"", ".md"}:
+            continue
+        if target == "index" or target.startswith(("concepts/", "entities/", "summaries/")):
+            if target not in targets:
+                return False
+    return True
 
 
 def verified_topic(group, facts, wiki, source, settings, checkpoints, targets, generate):
@@ -53,11 +80,9 @@ def verified_topic(group, facts, wiki, source, settings, checkpoints, targets, g
             or not saved["title"].strip()
         ):
             raise ValueError("Invalid verified topic receipt")
-        from openkb.agent.evidence_markup import normalize_links
-
         # New unrelated targets need no new prose. Removing or renaming a link
         # actually used by this content requires generation under current inputs.
-        if normalize_links(saved["content"], targets, {}, links_only=True) == saved["content"]:
+        if _valid_page_links(saved["content"], group["path"], targets):
             group["title"] = saved["title"]
             return saved["content"]
     content = generate()

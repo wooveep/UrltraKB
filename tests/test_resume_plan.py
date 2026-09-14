@@ -13,18 +13,22 @@ from tests.test_adaptive_processing import response
 
 
 @pytest.mark.parametrize(
-    "manual_edit,gap_stage,target_change",
+    "manual_edit,gap_stage,target_change,link_form",
     [
-        (False, "planning", None),
-        (True, "planning", None),
-        (False, "generation", None),
-        (True, "generation", None),
-        (False, "generation", "add"),
-        (False, "generation", "remove"),
+        (False, "planning", None, "wiki"),
+        (True, "planning", None, "wiki"),
+        (False, "generation", None, "wiki"),
+        (True, "generation", None, "wiki"),
+        (False, "generation", "add", "wiki"),
+        (False, "generation", "remove", "wiki"),
+        (False, "generation", "remove", "markdown"),
+        (False, "generation", "remove", "reference"),
+        (False, "generation", "remove", "html"),
+        (False, "generation", "remove", "literal"),
     ],
 )
 def test_continue_keeps_published_topic_plan_and_only_generates_the_failed_topic(
-    kb_dir, tmp_path, monkeypatch, manual_edit, gap_stage, target_change
+    kb_dir, tmp_path, monkeypatch, manual_edit, gap_stage, target_change, link_form
 ):
     from openkb.locks import atomic_write_text
 
@@ -32,6 +36,14 @@ def test_continue_keeps_published_topic_plan_and_only_generates_the_failed_topic
     reference = kb_dir / "wiki/concepts/reference.md"
     if target_change == "remove":
         atomic_write_text(reference, "# An independently maintained reference page\n")
+    links = {
+        "wiki": "[[concepts/reference]]",
+        "markdown": "[Reference](reference.md)",
+        "reference": "[Reference][ref]\n\n[ref]: ../concepts/%72eference.md#heading",
+        "html": '<a href="reference.md">Reference</a>',
+        "literal": "`[Example](reference.md)`\n\n```md\n[Example](reference.md)\n```\n"
+        "[External](https://example.com/reference.md)",
+    }
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
@@ -71,7 +83,7 @@ def test_continue_keeps_published_topic_plan_and_only_generates_the_failed_topic
             and target_change == "remove"
         ):
             for fragment in value.get("fragments", [value]):
-                fragment["content"] += " [[concepts/reference]]"
+                fragment["content"] += " " + links[link_form]
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -98,12 +110,14 @@ def test_continue_keeps_published_topic_plan_and_only_generates_the_failed_topic
     assert not any(p == 2 and stage == "facts" for p, stage, _ in calls)
     assert all("Alpha" not in members for p, members in planning_members if p == 2)
     expected = ["Replanned Beta" if gap_stage == "planning" else "Beta"]
-    if target_change == "remove":
+    used_link_removed = target_change == "remove" and link_form != "literal"
+    if used_link_removed:
         expected.append("Alpha")
     assert sorted(title for p, stage, title in calls if p == 2 and stage == "generation") == sorted(
         expected
     )
-    if target_change == "remove":
+    if used_link_removed:
+        assert "reference.md" not in read_page(kb_dir, page.path).body
         assert "[[concepts/reference]]" not in read_page(kb_dir, page.path).body
     else:
         assert read_page(kb_dir, page.path).content == page.content
