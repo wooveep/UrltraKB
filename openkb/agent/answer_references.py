@@ -26,18 +26,34 @@ def _observed(result):
             calls[item.get("call_id", item.get("id"))] = item.get("name")
         if item.get("type") != "function_call_output":
             continue
-        if calls.get(item.get("call_id", item.get("id"))) not in {
+        name = calls.get(item.get("call_id", item.get("id")))
+        if name not in {
             "read_source_node",
             "search_source_text",
+            "read_source_nodes",
+            "search_sources",
         }:
             continue
         try:
             value = json.loads(item.get("output", ""))
         except (ValueError, TypeError):
             continue
-        if not isinstance(value, dict) or not isinstance(value.get("evidence"), list):
+        if not isinstance(value, dict):
             continue
-        for row in value["evidence"]:
+        if name in {"read_source_nodes", "search_sources"}:
+            results = value.get("results")
+            if not isinstance(results, list):
+                continue
+            outputs = [row.get("output") for row in results if isinstance(row, dict)]
+        else:
+            outputs = [value]
+        rows = [
+            row
+            for output in outputs
+            if isinstance(output, dict) and isinstance(output.get("evidence"), list)
+            for row in output["evidence"]
+        ]
+        for row in rows:
             if not isinstance(row, dict):
                 continue
             citation, marker = row.get("citation"), row.get("short_citation")

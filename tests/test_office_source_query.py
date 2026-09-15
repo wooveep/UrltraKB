@@ -15,7 +15,7 @@ def test_reader_annotations_and_pending_analysis_are_not_original_claims(
     import json
 
     from tests.document_fixtures import write_docx
-    from tests.http_model_fixture import answer_review_response, evidence_response
+    from tests.http_model_fixture import evidence_response
 
     source = tmp_path / "rows.docx"
     write_docx(
@@ -40,7 +40,7 @@ def test_reader_annotations_and_pending_analysis_are_not_original_claims(
     imported = import_document(kb_dir, source)
     assert imported.status == "added" and imported.knowledge_compilation == "completed"
     assert imported.omissions
-    views, reviews = [], []
+    views = []
 
     def inspect(tree, result):
         fields = result.get("evidence_provenance", {})
@@ -54,20 +54,10 @@ def test_reader_annotations_and_pending_analysis_are_not_original_claims(
         views.append(result)
         return "Signal A: 10."
 
-    def review(body):
-        payload = json.loads(body["messages"][-1]["content"])
-        originals = [
-            o["output"] for o in payload["observations"] if o.get("name") == "read_source_node"
-        ]
-        assert originals[0]["evidence_provenance"] == views[-1]["evidence_provenance"]
-        reviews.append(payload)
-        return {"role": "assistant", "content": json.dumps(answer_review_response(payload))}
-
     model_service.chat_response = original_source_answer(inspect)
-    model_service.answer_review_response = review
     result = asyncio.run(continue_conversation(kb_dir, "What is signal A's count?"))
     assert result.status == "completed" and result.answer == "Signal A: 10.", result
-    assert len(views) == len(reviews) == 1
+    assert len(views) == 1
 
 
 def test_spreadsheet_equal_values_retain_cell_and_header_identity_in_query_and_chat(

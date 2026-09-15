@@ -1,4 +1,4 @@
-"""Show tool progress, then the rendered and verified terminal answer once."""
+"""Show tool progress, then the completed terminal answer once."""
 
 from contextlib import aclosing
 
@@ -7,9 +7,7 @@ async def terminal_answer(agent, input_data, style, *, use_color, raw, run_confi
     from openkb.agent.chat import _fmt, _format_tool_line, _make_markdown, _make_rich_console
     from openkb.agent.query import iter_agent_response_events
 
-    stream = iter_agent_response_events(
-        agent, input_data, run_config=run_config, _replacement_attempts=0
-    )
+    stream = iter_agent_response_events(agent, input_data, run_config=run_config)
     async with aclosing(stream):
         async for event in stream:
             data = event["data"]

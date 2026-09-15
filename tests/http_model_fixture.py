@@ -320,3 +320,22 @@ def original_source_answer(inspect):
         return {"role": "assistant", "content": inspect(tree, evidence)}
 
     return respond
+
+
+def wiki_source_answer(answer):
+    def chat(body):
+        if any(row["role"] == "tool" for row in body["messages"]):
+            return {"role": "assistant", "content": answer}
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "read",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"sources/rows.md"}'},
+                }
+            ],
+        }
+
+    return chat

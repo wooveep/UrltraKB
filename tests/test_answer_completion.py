@@ -50,7 +50,7 @@ async def test_invented_source_target_reuses_observed_evidence_once(
     model_service.chat_response = respond
     model_service.chat_without_tools = True
     result = await ask_question(kb_dir, "Which port?", save=True)
-    expected = 4 if recovers else 3  # A corrected citation also needs semantic review.
+    expected = 3  # One retrieval, one draft, and at most one citation recovery.
     assert len(model_service) == expected
     assert result.usage["observable_attempts"] == expected
     assert result.usage["charged_tokens"] == 130 * expected
@@ -123,7 +123,7 @@ async def test_complete_binding_in_one_read_can_supply_canonical_citation(
     model_service.chat_without_tools = True
     result = await ask_question(kb_dir, "Which port?", save=True)
     assert result.status == "completed", result
-    assert len(model_service) == 3
+    assert len(model_service) == 2
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_terminal_returns_final_answer_without_intermediate_bad_citation(
                 agent, session, "Question", _build_style(False), use_color=False
             )
     assert answer == "Final supported answer."
-    assert len(model_service) == 3
+    assert len(model_service) == 2
 
 
 @pytest.mark.asyncio
@@ -218,7 +218,7 @@ async def test_length_stop_reuses_evidence_for_one_bounded_replacement(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recovers", [False, True])
 @pytest.mark.parametrize("request_limit", [None, 3, 4])
-async def test_length_recovery_retains_one_separate_citation_repair(
+async def test_one_recovery_does_not_restart_for_a_second_failure(
     kb_dir, model_service, recovers, request_limit
 ):
     import json
@@ -249,7 +249,7 @@ async def test_length_recovery_retains_one_separate_citation_repair(
         if call >= 3:
             assert not body.get("tools") and body.get("tool_choice") == "none"
             assert any(m.get("role") == "tool" for m in body["messages"])
-        link = target if call == 4 and recovers else "sources/missing.md"
+        link = target if call == 3 and recovers else "sources/missing.md"
         return {"role": "assistant", "content": f"Port is 4321. [Source]({link})"}
 
     model_service.chat_response = respond
@@ -262,12 +262,11 @@ async def test_length_recovery_retains_one_separate_citation_repair(
         config["processing"]["max_requests"] = request_limit
         save_config(config_path, config)
     result = await ask_question(kb_dir, "Which port?", save=True)
-    expected = 5 if recovers else 4
-    expected = min(expected, request_limit) if request_limit is not None else expected
+    expected = 3
     assert len(model_service) == expected
     assert result.usage["observable_attempts"] == expected
     assert result.usage["charged_tokens"] == 130 * expected
-    if recovers and request_limit is None:
+    if recovers:
         assert result.status == "completed", result
         assert result.answer == f"Port is 4321. [Source]({target})"
         assert result.saved_path
@@ -334,6 +333,7 @@ async def test_legacy_query_does_not_return_a_truncated_answer_as_complete(
 
     model_service.finish_reason = "length"
     model_service.chat_response = lambda body: {"role": "assistant", "content": "Partial"}
+    model_service.chat_without_tools = True
     from openkb.locks import kb_ingest_lock
 
     with kb_ingest_lock(kb_dir / ".openkb"), ExecutionContext().begin(kb_dir) as bundle:
@@ -346,7 +346,7 @@ async def test_legacy_query_does_not_return_a_truncated_answer_as_complete(
                 run_config=build_run_config_from_bundle("openai/offline-test", bundle),
                 bundle=bundle,
             )
-    assert len(model_service) == 1
+    assert len(model_service) == (2 if stream else 1)
 
 
 @pytest.mark.asyncio
@@ -360,6 +360,7 @@ async def test_tty_chat_does_not_commit_a_length_stopped_turn(kb_dir, model_serv
 
     model_service.finish_reason = "length"
     model_service.chat_response = lambda body: {"role": "assistant", "content": "Partial"}
+    model_service.chat_without_tools = True
     session = ChatSession.new(kb_dir, "openai/offline-test", "en")
     session.record_turn("Old question", "Old complete answer", [])
     with (
@@ -371,7 +372,7 @@ async def test_tty_chat_does_not_commit_a_length_stopped_turn(kb_dir, model_serv
         agent.model = build_run_config_from_bundle(session.model, bundle).model
         with pytest.raises(OutputTruncated):
             await _run_turn(agent, session, "New question", _build_style(False), use_color=False)
-    assert len(model_service) == 1
+    assert len(model_service) == 2
     assert load_session(kb_dir, session.id).user_turns == ["Old question"]
 
 

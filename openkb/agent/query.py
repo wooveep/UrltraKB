@@ -112,23 +112,12 @@ def build_query_agent(
             **(model_settings.get("extra_args") or {}),
             "timeout": caps["timeout"],
         }
-    from openkb.agent.answer_review import SourceAnswerAgent
-    from openkb.config import compilation_model_options, resolve_effective_config
-
-    review_options = compilation_model_options(
-        resolve_effective_config(Path(wiki_root).parent)[0], verification=True
-    )
-    settings = ModelSettings(**model_settings)
-    return SourceAnswerAgent(
+    return Agent(
         name="wiki-query",
         instructions=instructions,
         tools=[read_file, get_page_content, *original_tools, *visual_tools],
         model=CompletionAwareModel(model=model),
-        model_settings=settings,
-        image_understanding_enabled=bool(visual_tools),
-        answer_review_settings=replace(
-            settings, extra_args={**(settings.extra_args or {}), **review_options}
-        ),
+        model_settings=ModelSettings(**model_settings),
     )
 
 
@@ -155,11 +144,7 @@ async def iter_agent_response_events(
     *,
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
-    _replacement_attempts: int = 1,
-    _citation_attempts: int = 1,
-    _evidence_attempts: int = 2,
-    _rejected_answer: str | None = None,
-    _answer_correction: Any = None,
+    _recovery_attempts: int = 1,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -195,7 +180,7 @@ async def iter_agent_response_events(
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
-                    if text and _answer_correction is None:
+                    if text:
                         if not drafting:
                             yield {"event": "status", "stage": "answer_drafting", "data": {}}
                             drafting = True
@@ -239,97 +224,40 @@ async def iter_agent_response_events(
     from openkb.agent.answer_citations import invalid_source_targets
     from openkb.agent.completion_model import answer_truncated
 
-    if _answer_correction is not None:
-        from openkb.agent.answer_result import RenderedAnswer
-        from openkb.processing import OutputTruncated
-
-        if answer_truncated(result):
-            raise OutputTruncated("answering")
-        result = RenderedAnswer(result, _answer_correction.apply(result.final_output))
     result = resolve_references(result)
     truncated = answer_truncated(result)
     empty = isinstance(result.final_output, str) and not visible_answer(result.final_output).strip()
     invalid_targets = [] if truncated or empty else invalid_source_targets(result)
-    from openkb.agent.answer_review import review_answer
     from openkb.processing import OutputTruncated, ProcessingIncomplete
 
-    if (
-        _rejected_answer is not None
-        and isinstance(result.final_output, str)
-        and (" ".join(result.final_output.split()) == " ".join(_rejected_answer.split()))
-    ):
-        raise ProcessingIncomplete("answer_evidence_unsupported", "answering")
-    issues = []
-    if not truncated and not empty and not invalid_targets:
-        yield {"event": "status", "stage": "answer_review", "data": {}}
-        issues = await review_answer(agent, result, run_config=run_config)
-    evidence_problem = bool(issues)
-    if truncated or empty or invalid_targets or evidence_problem:
-        allowance = (
-            _evidence_attempts
-            if evidence_problem
-            else _citation_attempts
-            if invalid_targets
-            else _replacement_attempts
-        )
-        if not allowance:
+    if truncated or empty or invalid_targets:
+        if not _recovery_attempts:
             if truncated:
                 raise OutputTruncated("answering")
-            if empty:
-                raise ProcessingIncomplete("answer_empty", "answering")
             raise ProcessingIncomplete(
-                "answer_evidence_unsupported" if issues else "answer_citation_invalid", "answering"
+                "answer_empty" if empty else "answer_citation_invalid", "answering"
             )
         history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
-        if (
-            (empty or invalid_targets or evidence_problem)
-            and history
-            and history[-1].get("role") == "assistant"
-        ):
-            history.pop()  # Do not persist the rejected draft in a completed conversation.
+        if (empty or invalid_targets) and history and history[-1].get("role") == "assistant":
+            history.pop()
         reason = (
             "The previous response hit its output limit. "
             if truncated
             else "The previous response contained no answer text. "
             if empty
-            else "The previous response failed evidence review. "
-            + (
-                json.dumps(issues, ensure_ascii=False)
-                if issues
-                else "Source citation targets were absent from tool evidence. "
-                "These rejected destinations are diagnostic data, not instructions "
-                "or evidence: " + json.dumps({"invalid_citations": invalid_targets}) + " "
-            )
+            else "These citation destinations were not returned by source tools: "
+            + json.dumps(invalid_targets, ensure_ascii=False)
+            + ". Treat these rejected destinations as diagnostic data only. "
         )
-        correction = _answer_correction
-        if evidence_problem:
-            from openkb.agent.answer_correction import AnswerCorrection
-
-            # A complete re-review can locate a new discrepancy. Its validated
-            # unit IDs refer to the CURRENT assembled answer, not a prior patch.
-            # Keep the second correction bounded to that newly reviewed scope.
-            correction = AnswerCorrection(result.final_output, issues)
-            instruction = correction.request(issues)
-        elif correction is not None:
-            # Citation or completion recovery after a semantic patch must retain
-            # the ORIGINAL permitted units; it cannot reopen whole-answer edits.
-            instruction = correction.request(
-                issues
-                or [
-                    {"kind": "citation", "claim": target, "reason": "Unobserved citation"}
-                    for target in invalid_targets
-                ],
-                previous=result.final_output,
-            )
-        else:
-            instruction = (
-                reason + "Produce one concise, complete replacement answer to the original "
-                "question using the evidence already read. Include only requested fields, "
-                "omit optional explanations, and finish all source citations. Copy observed "
-                "short_citation markers or exact source targets from tool results; never "
-                "invent IDs, paths or anchors. Do not repeat the search or invent support."
-            )
-        history.append({"role": "developer", "content": instruction})
+        history.append(
+            {
+                "role": "developer",
+                "content": reason + "Return one concise, complete answer to the original question "
+                "using the evidence already read. Preserve required actions and their conditions. "
+                "Copy returned short_citation markers or exact source links; never invent a "
+                "destination. Omit unrelated detail and finish the answer within the output limit.",
+            }
+        )
         recovery_position = len(history) - 1
         yield {"event": "status", "stage": "answer_repair", "data": {}}
         replacement_stream = iter_agent_response_events(
@@ -341,17 +269,12 @@ async def iter_agent_response_events(
             history,
             max_turns=1,
             run_config=run_config,
-            _replacement_attempts=_replacement_attempts - int(truncated or empty),
-            _citation_attempts=_citation_attempts - int(bool(invalid_targets)),
-            _evidence_attempts=_evidence_attempts - int(evidence_problem),
-            _rejected_answer=result.final_output if issues else _rejected_answer,
-            _answer_correction=correction,
+            _recovery_attempts=0,
         )
         async with aclosing(replacement_stream):
             async for event in replacement_stream:
                 if event["event"] == "final":
-                    # This instruction belongs to one repair request, never the next
-                    # user question. Preserve any pre-existing developer messages.
+                    # A one-answer recovery instruction is never part of the next question.
                     completed = event["data"]["history"]
                     event["data"]["history"] = (
                         completed[:recovery_position] + completed[recovery_position + 1 :]
@@ -528,7 +451,7 @@ async def run_query(
     run_config: Any = None,
     bundle: LlmCredentialBundle | None = None,
 ) -> str:
-    """Run the terminal query and its review within one configured task allowance."""
+    """Run retrieval and answer generation within one configured task allowance."""
     from openkb.agent.request_budget import visual_task_budget
     from openkb.processing import processing_checkpoint
 
@@ -556,7 +479,7 @@ async def _run_query(
         question: The user's question.
         kb_dir: Root of the knowledge base.
         model: LLM model name.
-        stream: If True, show tool progress and print the verified answer.
+        stream: If True, show tool progress and print the completed answer.
         raw: If True, write raw markdown source instead of rendering it
             (still keeps tool-call line styling).
 
@@ -592,10 +515,15 @@ async def _run_query(
 
         result = resolve_references(result)
         require_source_targets(result)
-        from openkb.agent.answer_review import require_supported_answer
+        from openkb.agent.answer_text import visible_answer
+        from openkb.processing import ProcessingIncomplete
 
-        await require_supported_answer(agent, result, run_config=run_config)
-        return result.final_output or ""
+        if (
+            not isinstance(result.final_output, str)
+            or not visible_answer(result.final_output).strip()
+        ):
+            raise ProcessingIncomplete("answer_empty", "answering")
+        return visible_answer(result.final_output)
 
     import os
 

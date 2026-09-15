@@ -1,4 +1,4 @@
-"""Legacy query transports share one hard allowance with independent answer review."""
+"""Retrieval and answer generation share one hard request allowance."""
 
 import json
 
@@ -14,9 +14,7 @@ from openkb.processing import ProcessingIncomplete
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True])
-async def test_query_review_cannot_exceed_configured_request_allowance(
-    kb_dir, model_service, stream
-):
+async def test_query_cannot_exceed_configured_request_allowance(kb_dir, model_service, stream):
     target = "sources/snapshots/v-p.md#block-port"
     atomic_write_text(kb_dir / "wiki/index.md", f"Port: 4100 [Original]({target})")
 
@@ -41,7 +39,7 @@ async def test_query_review_cannot_exceed_configured_request_allowance(
     model_service.chat_response = chat
     with kb_ingest_lock(kb_dir / ".openkb"):
         config = load_config(kb_dir / ".openkb/config.yaml")
-        config["processing"]["max_requests"] = 2
+        config["processing"]["max_requests"] = 1
         save_config(kb_dir / ".openkb/config.yaml", config)
         with ExecutionContext().begin(kb_dir) as bundle, collect_compile_report() as report:
             with pytest.raises(ProcessingIncomplete):
@@ -53,6 +51,6 @@ async def test_query_review_cannot_exceed_configured_request_allowance(
                     bundle=bundle,
                     run_config=build_run_config_from_bundle(config["model"], bundle),
                 )
-    assert len(model_service) == 2
-    assert report.usage["observable_attempts"] == 2
-    assert report.usage["charged_tokens"] == 260
+    assert len(model_service) == 1
+    assert report.usage["observable_attempts"] == 1
+    assert report.usage["charged_tokens"] == 130
