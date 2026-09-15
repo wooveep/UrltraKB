@@ -24,7 +24,10 @@ def verify_sessions(window, kb, wait_until):
 
     def confirm():
         modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.windowTitle() == "确认删除对话":
+        # QMessageBox ignores window titles on macOS; identify the actual prompt.
+        if isinstance(modal, QMessageBox) and modal.informativeText().startswith(
+            "已导出的副本会保留。"
+        ):
             if stale:
                 session.record_turn("确认之后的新问题", "必须保留的新回答。", [])
             modal.done(QMessageBox.StandardButton.Yes)

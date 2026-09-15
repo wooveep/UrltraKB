@@ -43,7 +43,7 @@ def verify_recompilation(window, kb, wait_until):
 
     def confirm():
         modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.windowTitle() == "确认重编译":
+        if isinstance(modal, QMessageBox) and modal.text().endswith("份资料进行重编译？"):
             if stale_confirmation:
                 with kb_ingest_lock(kb / ".openkb"):
                     atomic_write_text(kb / "wiki/concepts/after-confirmation.md", "手工编辑。")

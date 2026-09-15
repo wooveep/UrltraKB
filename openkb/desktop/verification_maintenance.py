@@ -21,7 +21,7 @@ def verify_maintenance(window, kb, wait_until):
 
     def confirm():
         modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.windowTitle() == "确认修复链接":
+        if isinstance(modal, QMessageBox) and modal.text().startswith("规范化可匹配的知识链接"):
             if stale:
                 with kb_ingest_lock(kb / ".openkb"):
                     atomic_write_text(page, page.read_text(encoding="utf-8") + "手工编辑。\n")

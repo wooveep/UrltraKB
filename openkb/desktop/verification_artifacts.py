@@ -79,7 +79,7 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
 
             def confirm():
                 modal = QApplication.activeModalWidget()
-                if isinstance(modal, QMessageBox) and modal.windowTitle() == "确认归档并替换产物":
+                if isinstance(modal, QMessageBox) and modal.text().startswith("归档并替换 "):
                     if stale:
                         with kb_ingest_lock(kb / ".openkb"):
                             atomic_write_text(

@@ -121,10 +121,10 @@ print("UrltraKB")  # fenced_code 中文知识
         dialog = QApplication.activeModalWidget()
         if not isinstance(dialog, QMessageBox):
             return
-        if dialog.windowTitle() == "操作未完成":
+        if dialog.parentWidget() is window and dialog.icon() == QMessageBox.Icon.Warning:
             unexpected_dialogs.append(dialog.text())
             dialog.close()
-        elif "failure" in evidence and dialog.windowTitle() == "退出 UrltraKB":
+        elif "failure" in evidence and dialog.text().startswith("后台仍有任务。"):
             for button in dialog.buttons():
                 if button.text() == "安全停止并退出":
                     button.click()

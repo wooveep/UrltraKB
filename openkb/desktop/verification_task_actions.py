@@ -48,7 +48,7 @@ def verify_task_actions(window, kb, wait_until):
 
     def confirm():
         modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.windowTitle() == "清理任务摘要":
+        if isinstance(modal, QMessageBox) and modal.text().startswith("清理所选 "):
             modal.button(QMessageBox.StandardButton.Yes).click()
 
     confirmer.timeout.connect(confirm)
