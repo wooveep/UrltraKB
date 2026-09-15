@@ -78,3 +78,25 @@ through the public conversation operation. Both failed before these changes and
 passed afterwards; the focused answer/query suite passed 101 tests. Actual-model
 results are recorded separately in release verification artifacts so a passing
 transport test is not mistaken for semantic acceptance of the real question.
+
+## Follow-up: discrepancies discovered after correction
+
+The clarified automatic-partition/swap question completed its first review with one
+located introduction defect. After correction, full re-review identified additional
+real scope errors in previously accepted prose: Custom was contrasted with automatic
+partition creation although the source uses both in the same sequence, and an
+all-in-one boot-loader step was presented as common to management-only installation.
+The operation ended with `answer_evidence_unsupported` after 744.5 seconds because
+the single semantic correction allowance was exhausted.
+
+Answers now allow at most two semantic correction rounds. A subsequent complete
+review grants edits only to its located units in the current assembled answer.
+Citation/completion recovery still retains that correction's existing scope and
+cannot reopen other units. Every corrected answer still receives full evidence
+review; request/token/time budgets and strict citation checks remain binding.
+No unchanged unit is silently accepted based on an earlier reviewer judgment.
+
+`tests/test_answer_followup_repair.py` reproduces the second-review failure through
+the public conversation/HTTP seam. Its three cases went from failing to passing:
+the later defect can be corrected and saved, an edit outside the newly located scope
+is rejected, and a still-incorrect second correction terminates without saving a turn.

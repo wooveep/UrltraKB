@@ -157,7 +157,7 @@ async def iter_agent_response_events(
     run_config: Any = None,
     _replacement_attempts: int = 1,
     _citation_attempts: int = 1,
-    _evidence_attempts: int = 1,
+    _evidence_attempts: int = 2,
     _rejected_answer: str | None = None,
     _answer_correction: Any = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
@@ -302,7 +302,15 @@ async def iter_agent_response_events(
             )
         )
         correction = _answer_correction
-        if correction is not None:
+        if evidence_problem:
+            from openkb.agent.answer_correction import AnswerCorrection
+
+            # A complete re-review can locate a new discrepancy. Its validated
+            # unit IDs refer to the CURRENT assembled answer, not a prior patch.
+            # Keep the second correction bounded to that newly reviewed scope.
+            correction = AnswerCorrection(result.final_output, issues)
+            instruction = correction.request(issues)
+        elif correction is not None:
             # Citation or completion recovery after a semantic patch must retain
             # the ORIGINAL permitted units; it cannot reopen whole-answer edits.
             instruction = correction.request(
@@ -313,11 +321,6 @@ async def iter_agent_response_events(
                 ],
                 previous=result.final_output,
             )
-        elif evidence_problem:
-            from openkb.agent.answer_correction import AnswerCorrection
-
-            correction = AnswerCorrection(result.final_output, issues)
-            instruction = correction.request(issues)
         else:
             instruction = (
                 reason + "Produce one concise, complete replacement answer to the original "

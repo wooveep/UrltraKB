@@ -100,7 +100,7 @@ async def test_short_evidence_citations_render_and_survive_followup(
     first = await continue_conversation(kb_dir, "What is the pressure and prerequisite?")
     if unknown:
         assert first.status != "completed" and first.turn_count == 0
-        assert first.error.endswith("(ProcessingIncomplete)")
+        assert first.error.endswith("(answer_citation_invalid)")
         return
     assert first.status == "completed", first
     assert observed[0]["citation"] in first.answer
@@ -255,7 +255,7 @@ async def test_located_repair_preserves_table_conditions_figures_and_history(
     assert result.usage["observable_attempts"] == 3 + len(reviews)
     if rejected:
         assert result.status != "completed" and result.turn_count == 0
-        assert result.error.endswith("(ProcessingIncomplete)")
+        assert result.error.endswith("(answer_correction_invalid)")
         assert reviews and set(reviews) == {bad}
     else:
         assert result.status == "completed", result
