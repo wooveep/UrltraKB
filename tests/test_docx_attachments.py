@@ -31,7 +31,9 @@ def test_embedded_docx_is_read_with_container_and_original_positions(kb_dir, tmp
         store.read(Evidence(version.source_id, version.id, parsed.id, b.id), max_chars=2000)
         for b in parsed.blocks
     ]
-    child_content = next((item for item in contents if "9473" in item.text), None)
+    child_content = next(
+        (item for item in contents if "Recovery requires port 9473." in item.text), None
+    )
     assert child_content is not None, "Embedded instructions were discarded with the OLE element"
     assert child_content.location["paragraph"] == 1
     attachment = child_content.location["attachment"]
