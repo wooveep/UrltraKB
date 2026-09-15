@@ -176,7 +176,10 @@ class CompilationCheckpoints:
             "payload": payload,
             "dependencies": dependencies,
             **(
-                {"evidence_provenance": deepcopy(EVIDENCE_PROVENANCE)}
+                {
+                    "evidence_provenance": deepcopy(EVIDENCE_PROVENANCE),
+                    "evidence_reader": module_revision("openkb.evidence"),
+                }
                 if payload.get("stage") == "facts"
                 else {}
             ),

@@ -6,7 +6,7 @@ from urllib.parse import quote
 from agents import function_tool
 
 from openkb.agent.answer_references import short_citation
-from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, ParseStore, complete_read_bound
+from openkb.evidence import Evidence, ParseStore, complete_read_bound, source_provenance
 from openkb.evidence_snapshot import EvidenceSnapshot
 from openkb.image_provenance import image_origin
 from openkb.locks import kb_read_lock
@@ -222,7 +222,7 @@ def source_tools(kb_dir):
         return json.dumps(
             {
                 "index": nav["id"],
-                "evidence_provenance": EVIDENCE_PROVENANCE,
+                "evidence_provenance": source_provenance(rows),
                 "evidence": rows,
                 "next": following,
             },
@@ -275,7 +275,7 @@ def source_tools(kb_dir):
                 "index": nav["id"],
                 "query": query,
                 "match_scope": "original_text_literal",
-                "evidence_provenance": EVIDENCE_PROVENANCE,
+                "evidence_provenance": source_provenance(rows),
                 "total_matches": len(matching),
                 "evidence": rows,
                 "next_offset": following if following < len(matching) else None,

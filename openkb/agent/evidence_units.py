@@ -6,10 +6,10 @@ import json
 import re
 from dataclasses import asdict
 
-from openkb.evidence import EVIDENCE_PROVENANCE, Evidence, complete_read_bound
+from openkb.evidence import Evidence, complete_read_bound, source_provenance
 from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
-from openkb.source_context import CONTEXT_INSTRUCTIONS, context_fields, has_structured_context
+from openkb.source_context import context_fields, context_instructions, has_structured_context
 from openkb.sources import content_id
 
 FACTS_SYSTEM = """Extract source facts, preserving versions, parameters, prerequisites,
@@ -43,8 +43,10 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
     from openkb.agent.evidence_wire import WireMessages, encode_payload, share_contexts
 
     structured_context = has_structured_context(payload)
-    if structured_context and CONTEXT_INSTRUCTIONS not in system:
-        system += "\n" + CONTEXT_INSTRUCTIONS
+    if structured_context:
+        instructions = context_instructions(payload)
+        if instructions not in system:
+            system += "\n" + instructions
     if payload.get("stage") == "facts":
         from openkb.agent.shared_analysis import fact_input
 
@@ -57,7 +59,7 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
     if payload.get("stage") in {"facts", "generation", "verification"}:
         provenance = {
             key: role
-            for key, role in EVIDENCE_PROVENANCE.items()
+            for key, role in source_provenance(payload).items()
             if structured_context or key not in {"context_data", "context_format"}
         }
         payload = {**payload, "evidence_provenance": provenance}

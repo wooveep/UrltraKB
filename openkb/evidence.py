@@ -45,6 +45,30 @@ EVIDENCE_PROVENANCE = {
 }
 
 
+def source_provenance(value):
+    """Describe applicable reader roles without charging other formats for OOXML guidance."""
+
+    def presentation(item):
+        if isinstance(item, dict):
+            location = item.get("location")
+            while isinstance(location, dict):
+                if location.get("kind") == "pptx":
+                    return True
+                attachment = location.get("attachment")
+                location = attachment.get("position") if isinstance(attachment, dict) else None
+            return any(presentation(child) for child in item.values())
+        if isinstance(item, (list, tuple)):
+            return any(presentation(child) for child in item)
+        return False
+
+    has_presentation = presentation(value)
+    return {
+        key: copy.deepcopy(role)
+        for key, role in EVIDENCE_PROVENANCE.items()
+        if key != "presentation_roles" or has_presentation
+    }
+
+
 def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
     if _depth > 8:
         raise ValueError("Source attachment nesting is too deep")

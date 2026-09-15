@@ -3,7 +3,7 @@
 import copy
 import json
 
-CONTEXT_INSTRUCTIONS = """When context_data is present, source_excerpts contain parsed source
+_TEXT_CONTEXT_INSTRUCTIONS = """When context_data is present, source_excerpts contain parsed source
 wording with original row/cell positions. An optional source_kind identifies footnotes,
 endnotes, editorial comments or image alt text; retain that role, and never infer image
 contents from alt text. Structure describes layout; reader_status is
@@ -23,7 +23,7 @@ windows by context_start and follow next until context_complete before interpret
 With context_format=legacy_display (or absent), context retains the legacy mixed display;
 do not guess that its parser annotations are source quotations."""
 
-CONTEXT_INSTRUCTIONS += """ Optional image_relations record original asset bytes, full
+_IMAGE_CONTEXT_INSTRUCTIONS = """ Optional image_relations record original asset bytes, full
 normalized display frames (orientation/alpha/encoding may change), and assets returned
 by OCR for each frame. source_alt is author-supplied alternative text for the original;
 it describes that image, not every OCR output. OCR image labels such as 'Original figure'
@@ -32,6 +32,24 @@ Image provenance can establish whole-original or whole-frame extent without inte
 visual contents; it does not establish the extent or contents of other OCR outputs.
 Use these relationships to select an original/display frame when asked for its figure,
 without narrating processing metadata unless it is relevant to the user's question."""
+
+CONTEXT_INSTRUCTIONS = _TEXT_CONTEXT_INSTRUCTIONS + _IMAGE_CONTEXT_INSTRUCTIONS
+
+
+def context_instructions(value):
+    """Keep image-derivation guidance with image evidence, not every plain table cell."""
+
+    def images(item):
+        if isinstance(item, dict):
+            context = item.get("context_data")
+            if isinstance(context, dict) and context.get("image_relations"):
+                return True
+            return any(images(child) for child in item.values())
+        if isinstance(item, (list, tuple)):
+            return any(images(child) for child in item)
+        return False
+
+    return CONTEXT_INSTRUCTIONS if images(value) else _TEXT_CONTEXT_INSTRUCTIONS
 
 
 def has_structured_context(value):

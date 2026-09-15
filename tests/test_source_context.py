@@ -37,6 +37,7 @@ def test_docx_table_context_keeps_original_cells_separate_from_reader_status(
     assert result.status == "added" and result.knowledge_compilation == "completed", result
     assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
     for payload in observed:
+        assert "presentation_roles" not in payload["evidence_provenance"]
         rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
         cell = next(row for row in rows if row["text"] == "7 days")
         assert "context" not in cell, "Mixed display text must not compete with typed context."
@@ -100,6 +101,7 @@ def test_structured_table_context_pages_through_query_tools_without_duplicate_me
             **cursor,
         )
         row = result["evidence"][0]
+        assert "presentation_roles" not in result["evidence_provenance"]
         assert row["context_format"] == "structured_json"
         assert "context_data" not in row
         assert len(row["text"]) + len(row["context"]) <= 128
@@ -123,6 +125,7 @@ def test_structured_table_context_pages_through_query_tools_without_duplicate_me
         kb_dir, reference, max_chars=complete_read_bound(block)
     ).context_data == json.loads("".join(contexts))
     matching = invoke("search_source_text", source_id=imported.source_id, query="7 days")
+    assert "presentation_roles" not in matching["evidence_provenance"]
     assert json.loads(matching["evidence"][0]["context"]) == json.loads("".join(contexts))
 
 
