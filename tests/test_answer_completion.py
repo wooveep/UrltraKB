@@ -463,6 +463,8 @@ async def test_closing_replacement_waits_for_its_stream_cleanup(monkeypatch):
 
     monkeypatch.setattr(Runner, "run_streamed", run)
     stream = iter_agent_response_events(Agent(name="Test"), "A question")
-    assert (await anext(stream))["data"]["text"] == "Replacement"
+    while (event := await anext(stream))["event"] == "status":
+        pass
+    assert event["data"]["text"] == "Replacement"
     await stream.aclose()
     assert closed.is_set()

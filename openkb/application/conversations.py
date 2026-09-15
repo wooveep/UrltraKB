@@ -48,6 +48,12 @@ def _validate_question(kb_dir: Path, question: str) -> Path:
     return root
 
 
+def _failure_code(error):
+    if isinstance(error, ProcessingIncomplete):
+        return getattr(error, "diagnostic_code", error.reason)
+    return type(error).__name__
+
+
 async def ask_question(
     kb_dir: Path,
     question: str,
@@ -114,7 +120,7 @@ async def ask_question(
                     str(path) if path else None,
                     resources=(str(path),) if path else (),
                     changes=(f"created: {path.relative_to(root).as_posix()}",) if path else (),
-                    error=f"Question did not complete ({type(exc).__name__})",
+                    error=f"Question did not complete ({_failure_code(exc)})",
                     unfinished=(unfinished_stage,),
                     usage=report.usage,
                 )
@@ -205,7 +211,7 @@ async def continue_conversation(
                         turn_count=session.turn_count,
                         resources=(*outputs.resources, str(session.path)),
                         changes=outputs.changes,
-                        error=f"Conversation did not complete ({type(exc).__name__})",
+                        error=f"Conversation did not complete ({_failure_code(exc)})",
                         unfinished=("complete conversation turn",),
                     )
                 return AnswerResult(

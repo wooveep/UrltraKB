@@ -189,12 +189,16 @@ async def iter_agent_response_events(
     pending_calls: dict[str, tuple[str, str]] = {}
 
     stream = settled_stream(result)
+    drafting = False
     try:
         async for event in stream:
             if isinstance(event, RawResponsesStreamEvent):
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text and _answer_correction is None:
+                        if not drafting:
+                            yield {"event": "status", "stage": "answer_drafting", "data": {}}
+                            drafting = True
                         yield {"event": "delta", "data": {"text": text}}
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
@@ -205,6 +209,8 @@ async def iter_agent_response_events(
                     call_id = _resolve_tool_call_id(raw_item)
                     if call_id:
                         pending_calls[call_id] = (name, arguments)
+                    drafting = False
+                    yield {"event": "status", "stage": "answer_sources", "data": {}}
                     yield {"event": "tool_call", "data": {"name": name, "arguments": arguments}}
                 elif item.type == "tool_call_output_item":
                     raw_item = item.raw_item
@@ -255,6 +261,7 @@ async def iter_agent_response_events(
         raise ProcessingIncomplete("answer_evidence_unsupported", "answering")
     issues = []
     if not truncated and not empty and not invalid_targets:
+        yield {"event": "status", "stage": "answer_review", "data": {}}
         issues = await review_answer(agent, result, run_config=run_config)
     evidence_problem = bool(issues)
     if truncated or empty or invalid_targets or evidence_problem:
@@ -319,6 +326,7 @@ async def iter_agent_response_events(
             )
         history.append({"role": "developer", "content": instruction})
         recovery_position = len(history) - 1
+        yield {"event": "status", "stage": "answer_repair", "data": {}}
         replacement_stream = iter_agent_response_events(
             agent.clone(
                 tools=[],

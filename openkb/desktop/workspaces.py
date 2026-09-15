@@ -261,7 +261,8 @@ class Workspaces:
             self.context_toggle.setChecked(False)
 
     def _conversations(self):
-        from openkb.desktop.conversation_view import ConversationView, QuestionEdit
+        from openkb.desktop.conversation_cards import ConversationView
+        from openkb.desktop.conversation_view import QuestionEdit
 
         w = self.window
         layout = self.hosts["对话"]
@@ -277,7 +278,9 @@ class Workspaces:
         self.history_toggle.setCheckable(True)
         row.addWidget(self.history_toggle)
         layout.addLayout(row)
-        w.conversation_notice = path_label("")
+        from openkb.desktop.conversation_activity import ConversationActivity
+
+        w.conversation_notice = ConversationActivity()
         w.conversation_notice.setObjectName("muted")
         w.conversation_notice.hide()
         layout.addWidget(w.conversation_notice)

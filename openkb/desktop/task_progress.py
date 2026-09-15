@@ -15,6 +15,7 @@ _PHASES = {
     "planning": "规划知识主题",
     "generation": "生成知识页面",
     "parse_cache": "校验已保存解析",
+    "answer_review": "核对回答原文与引用",
 }
 _UNITS = {
     "paragraphs": "段",

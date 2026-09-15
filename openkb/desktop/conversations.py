@@ -8,8 +8,9 @@ from openkb.agent.answer_text import visible_answer
 from openkb.agent.chat_session import ChatSession
 from openkb.application.conversations import read_conversation
 from openkb.desktop.chat_outbox import ChatOutbox
+from openkb.desktop.conversation_activity import failure_status, task_status
 from openkb.desktop.io import _defer_wait
-from openkb.runtime.records import TERMINAL
+from openkb.runtime.records import TERMINAL, TaskView
 from openkb.runtime.requests import ContinueConversation
 
 
@@ -30,6 +31,8 @@ class Chat:
     attempt: str | None = None
     read_error: str = ""
     generation: int = 0
+    activity: TaskView | None = None
+    failure: str = ""
 
 
 class Conversations:
@@ -158,6 +161,23 @@ class Conversations:
                 chat.turns = list(session.timeline)
                 chat.title = session.title or "对话"
                 chat.status = chat.read_error = ""
+                if not any(after == len(session.turns) for after, _ in session.incomplete):
+                    chat.failure = ""
+                if not chat.failure and any(
+                    after == len(session.turns) for after, _ in session.incomplete
+                ):
+                    candidates = [
+                        task
+                        for task in self.window.manager.tasks()
+                        if task.kb_dir == str(chat.root)
+                        and any(row.session_id == session.id for row in task.results)
+                    ]
+                    latest = max(candidates, key=lambda task: task.started_at or "", default=None)
+                    if latest and latest.state in TERMINAL and latest.state != "completed":
+                        chat.failure = failure_status(
+                            latest.error or (latest.results[-1].error if latest.results else None),
+                            stopped=latest.state == "stopped",
+                        )
                 chat.persisted = True
                 chat.completed_count = len(session.turns)
             if self.active is chat:
@@ -233,6 +253,8 @@ class Conversations:
         chat.generation += 1
         chat.question, chat.task = question, task
         chat.running = True
+        chat.activity = None
+        chat.failure = ""
         chat.status = "已排队，等待执行…"
         chat.draft = ""
         self.tasks[task] = chat
@@ -248,11 +270,10 @@ class Conversations:
         chat = self.tasks.get(task.id)
         if not chat or task.id != chat.task or task.state in TERMINAL:
             return
-        status = {
-            "queued": "已排队，等待执行…",
-            "waiting": "等待知识库可用…",
-            "stopping": "正在停止…",
-        }.get(task.state, "正在生成回答…")
+        status = task_status(task)
+        chat.activity = task
+        if self.active is chat and hasattr(self.window.conversation_notice, "set_task"):
+            self.window.conversation_notice.set_task(task)
         if chat.status != status:
             chat.status = status
             if self.active is chat:
@@ -263,6 +284,15 @@ class Conversations:
         if not chat or chat.task != task.id:
             return
         chat.running = False
+        chat.activity = None
+        chat.failure = (
+            failure_status(
+                task.error or (task.results[-1].error if task.results else None),
+                stopped=task.state == "stopped",
+            )
+            if task.state != "completed"
+            else ""
+        )
         if task.results and task.results[-1].session_id:
             chat.identity = task.results[-1].session_id
             chat.persisted = True
@@ -278,11 +308,7 @@ class Conversations:
         else:
             # Incomplete model text can contain tool narration or reasoning.
             # Keep the submitted question visible, without presenting it as an answer.
-            chat.status = (
-                "回答已停止。可以继续提问。"
-                if task.state == "stopped"
-                else "暂时未能完成回答，可在任务中查看原因。"
-            )
+            chat.status = chat.failure
             chat.turns.append((chat.question, chat.status))
             chat.question = ""
             self.recover(chat.root, chat=chat)
@@ -296,12 +322,24 @@ class Conversations:
             w.question.setPlainText(chat.draft if chat else "")
         w.conversation_title.setText(chat.title if chat else "新对话")
         w.conversation_title.setToolTip(chat.title if chat else "新对话")
-        notice = ("正在读取对话…" if chat.loading else chat.read_error) if chat else ""
-        w.conversation_notice.setText(notice)
+        notice = (
+            (
+                chat.status
+                if chat.running
+                else "正在读取对话…"
+                if chat.loading
+                else chat.read_error or chat.failure
+            )
+            if chat
+            else ""
+        )
+        if chat and chat.running and chat.activity and hasattr(w.conversation_notice, "set_task"):
+            w.conversation_notice.set_task(chat.activity)
+        else:
+            w.conversation_notice.setText(notice)
         w.conversation_notice.setVisible(bool(notice))
         if chat:
-            # Pending task stages belong in Tasks. The answer surface shows the
-            # submitted question until a completed answer is available.
+            # Public stages are separate from unverified deltas and tool narration.
             pending = (chat.question, "") if chat.question else None
             w.chat.show_turns(chat.turns, chat.root / "wiki", pending=pending)
         else:

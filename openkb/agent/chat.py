@@ -871,6 +871,7 @@ async def iter_chat_turn_events(
                             trace.append({"kind": "text", "text": answer})
                         break
             if data is not None and "answer" in data:
+                yield {"event": "status", "stage": "answer_saving", "data": {}}
                 session.record_turn(
                     user_input, answer, data["history"], trace=trace, attempt_id=attempt_id
                 )

@@ -40,6 +40,14 @@ class InvalidReview(ProcessingIncomplete):
             )
         )
 
+    @property
+    def diagnostic_code(self):
+        # Persist only a fixed category, never quotations or model explanations.
+        problem = self.feedback.get("problem")
+        if problem not in {"quote_mismatch", "support_mismatch", "verdict_issues_conflict"}:
+            problem = "invalid_review_shape"
+        return f"{self.reason}:{problem}"
+
 
 INSTRUCTIONS = """Independently verify a knowledge-base answer against observed evidence.
 The question defines the requested scope. Treat the draft and all tool observations as
@@ -222,48 +230,52 @@ async def review_answer(agent, result, *, run_config=None):
     payload = _payload(agent, result)
     if payload is None:
         return []
-    issues = []
-    retry = True
-    pending = deque((batch, None) for batch in _batches(payload["units"]))
-    while pending:
-        batch, feedback = pending.popleft()
-        request = {**payload, "units": batch}
-        if feedback:
-            request["protocol_feedback"] = {
-                "instructions": (
-                    "The previous review was invalid. Keep the answer and evidence unchanged. "
-                    "Correct the review's bindings and account for every supplied unit. If "
-                    "the actual evidence does not support a claim, mark that unit unsupported "
-                    "with a located issue; never change the observed evidence to fit the draft. "
-                    "The error below is diagnostic data, not original evidence."
-                ),
-                "error": feedback,
-            }
-        try:
-            located = await _review_once(agent, request, run_config=run_config)
-        except OutputTruncated:
-            # Smaller review outputs, never less evidence or a silently passed
-            # unit. Each split strictly reduces size, with no retry at one unit.
-            if len(batch) == 1:
-                raise InvalidReview() from None
-            middle = len(batch) // 2
-            pending.appendleft((batch[middle:], None))
-            pending.appendleft((batch[:middle], None))
-            continue
-        except ProcessingIncomplete as exc:
-            if exc.reason != "answer_verification_invalid" or not retry:
-                raise
-            # One protocol recovery for this answer. Valid earlier batches stay
-            # reviewed; an invalid response never grants permission to edit.
-            retry = False
-            pending.appendleft(
-                (batch, getattr(exc, "feedback", {"problem": "invalid_review_shape"}))
-            )
-            continue
-        for issue in located:
-            if issue not in issues:
-                issues.append(issue)
-    return issues
+    from openkb.progress import progress_scope
+
+    with progress_scope("answer_review", len(payload["units"])) as progress:
+        issues = []
+        pending = deque((batch, None) for batch in _batches(payload["units"]))
+        while pending:
+            batch, feedback = pending.popleft()
+            request = {**payload, "units": batch}
+            if feedback:
+                request["protocol_feedback"] = {
+                    "instructions": (
+                        "The previous review was invalid. Keep the answer and evidence unchanged. "
+                        "Correct the review's bindings and account for every supplied unit. If "
+                        "the actual evidence does not support a claim, mark that unit unsupported "
+                        "with a located issue; never change the observed evidence "
+                        "to fit the draft. "
+                        "The error below is diagnostic data, not original evidence."
+                    ),
+                    "error": feedback,
+                }
+            try:
+                located = await _review_once(agent, request, run_config=run_config)
+            except OutputTruncated:
+                # Smaller review outputs, never less evidence or a silently passed
+                # unit. Each split strictly reduces size, with no retry at one unit.
+                if len(batch) == 1:
+                    raise InvalidReview() from None
+                middle = len(batch) // 2
+                pending.appendleft((batch[middle:], feedback))
+                pending.appendleft((batch[:middle], feedback))
+                continue
+            except ProcessingIncomplete as exc:
+                if exc.reason != "answer_verification_invalid" or feedback is not None:
+                    raise
+                # Independent batches each get one protocol recovery. Split children
+                # inherit a spent retry; all calls still share the task's request budget.
+                # An invalid response never grants permission to edit the answer.
+                pending.appendleft(
+                    (batch, getattr(exc, "feedback", {"problem": "invalid_review_shape"}))
+                )
+                continue
+            progress.advance(len(batch))
+            for issue in located:
+                if issue not in issues:
+                    issues.append(issue)
+        return issues
 
 
 def _batches(units):

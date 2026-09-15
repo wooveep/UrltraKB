@@ -32,6 +32,7 @@ class ProgressStep:
             "generation",
             "dependencies",
             "parse_cache",
+            "answer_review",
         } or self.unit not in {"items", "paragraphs", "pages", "lines", "characters", "topics"}:
             raise ValueError("Invalid progress scope")
         if type(self.completed) is not int or self.completed < 0:
