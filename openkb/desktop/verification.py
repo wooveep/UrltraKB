@@ -29,11 +29,6 @@ def create_application():
 
 def main() -> int:
     multiprocessing.freeze_support()
-    if os.environ.get("URLTRAKB_VERIFY_TIMEOUT_TRACE") == "1":
-        import faulthandler
-
-        # Opt-in diagnostics for a stalled native CI acceptance driver.
-        faulthandler.dump_traceback_later(60, repeat=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-base", help="Controlled HTTP model fixture URL")
@@ -57,7 +52,7 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=False)
 
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb import config
     from openkb.application.knowledge_bases import initialize_kb
@@ -74,6 +69,7 @@ def main() -> int:
         str((args.workbench_restart or root) / "qt"),
     )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    from openkb.desktop.verification_dialogs import visible_dialogs
     from openkb.desktop.window import Workbench
 
     app = create_application()
@@ -134,8 +130,8 @@ print("UrltraKB")  # fenced_code 中文知识
     unexpected_dialogs: list[str] = []
 
     def observe_dialogs():
-        for dialog in QApplication.topLevelWidgets():
-            if not isinstance(dialog, QMessageBox) or not dialog.isVisible():
+        for dialog in visible_dialogs():
+            if not isinstance(dialog, QMessageBox):
                 continue
             if dialog.parentWidget() is window and dialog.icon() == QMessageBox.Icon.Warning:
                 unexpected_dialogs.append(dialog.text())
@@ -400,8 +396,12 @@ print("UrltraKB")  # fenced_code 中文知识
                 documents = management_page(window, other, "资料", DocumentsDialog, wait_until)
 
                 def enter_urls():
-                    dialog = QApplication.activeModalWidget()
-                    assert isinstance(dialog, QInputDialog)
+                    dialog = next(
+                        (d for d in visible_dialogs() if isinstance(d, QInputDialog)), None
+                    )
+                    if dialog is None:
+                        QTimer.singleShot(20, enter_urls)
+                        return
                     dialog.setTextValue("\n".join([args.url + "-missing", args.url, args.url]))
                     dialog.accept()
 

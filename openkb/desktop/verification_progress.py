@@ -69,7 +69,15 @@ def verify_progress(window, kb, root, wait):
                 )
 
         def inspect():
-            dialog = QApplication.activeModalWidget()
+            from openkb.desktop.verification_dialogs import visible_dialogs
+
+            dialog = next(
+                (d for d in visible_dialogs() if d.findChild(QProgressBar, "task-detail-progress")),
+                None,
+            )
+            if dialog is None:
+                QTimer.singleShot(20, inspect)
+                return
             try:
                 progress = dialog.findChild(QProgressBar, "task-detail-progress")
                 observed.append(progress.value() == 58 and "58/100" in progress.toolTip())

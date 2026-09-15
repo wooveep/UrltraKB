@@ -4,7 +4,7 @@ import threading
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QInputDialog
+from PySide6.QtWidgets import QInputDialog
 
 from openkb import config
 from openkb.application.knowledge_bases import initialize_kb
@@ -90,8 +90,10 @@ def verify_catalog(window, output, wait_until):
     holder.start()
 
     def confirm():
-        question = QApplication.activeModalWidget()
-        if not isinstance(question, QInputDialog):
+        from openkb.desktop.verification_dialogs import visible_dialogs
+
+        question = next((d for d in visible_dialogs() if isinstance(d, QInputDialog)), None)
+        if question is None:
             QTimer.singleShot(20, confirm)
             return
         question.setTextValue(first.name)

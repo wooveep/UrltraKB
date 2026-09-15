@@ -1,29 +1,29 @@
-"""Find acceptance prompts directly in Qt's visible top-level widgets."""
+"""Observe acceptance dialogs only after their modal event loop has started."""
 
-import os
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
-from PySide6.QtWidgets import QApplication, QMessageBox
 
-_observations: dict[str, int] = {}
+def visible_dialogs() -> list[QDialog]:
+    # This driver pumps events itself, without an outer QApplication.exec().
+    # Cocoa may dispatch timers during show(), before QDialog.exec registers its
+    # event loop. Closing a prompt then leaves exec() waiting forever afterwards.
+    if QThread.currentThread().loopLevel() == 0:
+        return []
+    return [
+        widget
+        for widget in QApplication.topLevelWidgets()
+        if isinstance(widget, QDialog) and widget.isVisible()
+    ]
 
 
 def message_box(text: str) -> QMessageBox | None:
-    boxes = [
-        widget
-        for widget in QApplication.topLevelWidgets()
-        if isinstance(widget, QMessageBox) and widget.isVisible()
-    ]
-    if os.environ.get("URLTRAKB_VERIFY_TIMEOUT_TRACE") == "1":
-        count = _observations.get(text, 0)
-        _observations[text] = count + 1
-        if count < 2 or count % 50 == 0:
-            print(
-                "[DEBUG-mac-dialog]",
-                text,
-                "active=",
-                type(QApplication.activeModalWidget()).__name__,
-                "visible=",
-                [(box.text(), box.informativeText()) for box in boxes],
-                flush=True,
-            )
-    return next((box for box in boxes if text in box.text() or text in box.informativeText()), None)
+    return next(
+        (
+            box
+            for box in visible_dialogs()
+            if isinstance(box, QMessageBox)
+            and (text in box.text() or text in box.informativeText())
+        ),
+        None,
+    )

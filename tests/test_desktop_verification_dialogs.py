@@ -10,7 +10,6 @@ import pytest
 def test_acceptance_can_confirm_repeated_async_message_boxes():
     pytest.importorskip("PySide6")
     environment = dict(os.environ)
-    environment["URLTRAKB_VERIFY_TIMEOUT_TRACE"] = "1"
     if sys.platform == "linux":
         environment["QT_QPA_PLATFORM"] = "offscreen"
     subprocess.run(
@@ -20,6 +19,7 @@ def test_acceptance_can_confirm_repeated_async_message_boxes():
             r"""
 import time
 from PySide6.QtCore import QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog, QMessageBox
 from openkb.desktop.verification import create_application
 from openkb.desktop.verification_dialogs import message_box
@@ -29,9 +29,16 @@ parent = QDialog()
 parent.show()
 confirmed = []
 
+class ShowingMessageBox(QMessageBox):
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Cocoa may dispatch timer callbacks while showing a dialog, before
+        # QDialog.exec has started the event loop that done() needs to exit.
+        QTest.qWait(60)
+
 def show():
     dispatcher.stop()
-    box = QMessageBox(parent)
+    box = ShowingMessageBox(parent)
     box.setWindowTitle('确认删除对话')
     box.setText('删除验收用对话？')
     box.setInformativeText('已导出的副本会保留。')
