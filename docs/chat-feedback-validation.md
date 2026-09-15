@@ -53,3 +53,28 @@ events before an answer delta. Light and dark native previews were inspected.
 
 Windows source, frozen-program and distribution verification results accompany the
 matching release materials. The installed GUI must exit before replacing its files.
+
+## Follow-up: missing procedural content
+
+The user identified the acceptance requirement: the applicable system-disk procedure
+must include automatic partitioning and deletion of swap. The original also assigns
+the freed space to `/home`. Multiple-disk manual partitioning and management-only
+installation remain separate scenarios; the answer must not silently merge them.
+
+Repeated drafts overgeneralized branch-specific steps into a common procedure. The
+generation and review instructions now explicitly retain procedural branches and
+required removal actions, including the scope inherited from answer headings.
+
+Another repeat failed with `answer_citation_invalid` before semantic review. The
+citation-repair request previously omitted the actual rejected targets. It now supplies
+the precise list as diagnostic data. For a review quotation bound to the wrong
+observation, feedback now lists every observation containing that exact quotation.
+These are locators only: the unchanged evidence, original provenance, applicable
+scenario and resulting answer must still pass normal validation. No quotation is
+normalized or automatically reassigned to a different source.
+
+`tests/test_answer_binding_recovery.py` reproduces both missing-diagnostic paths
+through the public conversation operation. Both failed before these changes and
+passed afterwards; the focused answer/query suite passed 101 tests. Actual-model
+results are recorded separately in release verification artifacts so a passing
+transport test is not mistaken for semantic acceptance of the real question.

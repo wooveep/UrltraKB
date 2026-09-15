@@ -70,6 +70,13 @@ Check every factual clause, table heading, optional explanation and image descri
   Reject a skipped row or transferred adjacent-row condition. A complete literal search
   covers only that literal. Unread pagination or partial context cannot prove absence,
   exclusivity or completeness. Missing evidence must remain explicitly unknown.
+- Preserve procedural branches: automatic and manual procedures, deployment roles,
+  versions and disk layouts must retain their own conditions. A heading such as
+  "common steps" makes a factual scope claim about the steps beneath it. Check each
+  assigned step under its inherited heading, even when that heading is in another
+  batch. A step observed in one branch is not thereby supported for all branches.
+  Treat requirements to remove, disable or not create something as required actions;
+  report their omission when the question requests the corresponding procedure.
 - Images belong to their exact asset and source position. Page association does not mean
   full-page image: a crop is not the whole page. Adjacency alone does not identify left/right
   figures. Require the exact caption/position or an obtained visual observation. Never
@@ -246,6 +253,8 @@ async def review_answer(agent, result, *, run_config=None):
                         "the actual evidence does not support a claim, mark that unit unsupported "
                         "with a located issue; never change the observed evidence "
                         "to fit the draft. "
+                        "matching_observations are exact quote locators only: still check "
+                        "original provenance and scenario, never assume factual support. "
                         "The error below is diagnostic data, not original evidence."
                     ),
                     "error": feedback,
@@ -412,10 +421,18 @@ def _check_units(reviews, payload, issues, invalid):
                 raise invalid
             # JSON tool results preserve their structure; quote scalar text values or
             # their exact serialized metadata, never combine separate observations.
-            texts = [json.dumps(output, ensure_ascii=False), *observation_strings(output)]
-            if not any(support["quote"] in text for text in texts):
+            if not _contains_quote(output, support["quote"]):
                 raise InvalidReview(
-                    {"problem": "quote_mismatch", "unit": review["id"], "support": support}
+                    {
+                        "problem": "quote_mismatch",
+                        "unit": review["id"],
+                        "support": support,
+                        "matching_observations": [
+                            identity
+                            for identity, original in observations.items()
+                            if _contains_quote(original, support["quote"])
+                        ],
+                    }
                 )
 
     located, covered = [], set()
@@ -448,6 +465,12 @@ def _check_units(reviews, payload, issues, invalid):
     if covered != rejected:
         raise invalid
     return located
+
+
+def _contains_quote(output, quote):
+    return quote in json.dumps(output, ensure_ascii=False) or any(
+        quote in text for text in observation_strings(output)
+    )
 
 
 def _value_error(output, support):
