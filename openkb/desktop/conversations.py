@@ -252,7 +252,7 @@ class Conversations:
             "queued": "已排队，等待执行…",
             "waiting": "等待知识库可用…",
             "stopping": "正在停止…",
-        }.get(task.state, "正在查阅资料并整理回答…")
+        }.get(task.state, "正在生成回答…")
         if chat.status != status:
             chat.status = status
             if self.active is chat:
@@ -300,7 +300,9 @@ class Conversations:
         w.conversation_notice.setText(notice)
         w.conversation_notice.setVisible(bool(notice))
         if chat:
-            pending = (chat.question, chat.status) if chat.question else None
+            # Pending task stages belong in Tasks. The answer surface shows the
+            # submitted question until a completed answer is available.
+            pending = (chat.question, "") if chat.question else None
             w.chat.show_turns(chat.turns, chat.root / "wiki", pending=pending)
         else:
             w.chat.show_temporary("")

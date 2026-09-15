@@ -110,6 +110,37 @@ async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_di
 
 
 @pytest.mark.asyncio
+async def test_missing_final_answer_never_saves_search_narration(kb_dir, monkeypatch):
+    from openkb.application.conversations import read_conversation
+
+    class ModelRun:
+        is_complete = False
+        final_output = None
+
+        async def stream_events(self):
+            yield RawResponsesStreamEvent(
+                data=ResponseTextDeltaEvent(
+                    type="response.output_text.delta",
+                    delta="我先查询知识库，再逐条分析。",
+                    content_index=0,
+                    item_id="search-narration",
+                    output_index=0,
+                    sequence_number=0,
+                    logprobs=[],
+                )
+            )
+            self.is_complete = True
+
+        def to_input_list(self):
+            return []
+
+    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: ModelRun())
+    result = await continue_conversation(kb_dir, "请回答")
+    assert result.status == "failed"
+    assert read_conversation(kb_dir, result.session_id).turns == ()
+
+
+@pytest.mark.asyncio
 async def test_interrupted_submission_survives_reopen_without_a_completed_model_turn(
     kb_dir, monkeypatch
 ):
