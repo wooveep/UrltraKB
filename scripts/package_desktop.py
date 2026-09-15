@@ -155,6 +155,10 @@ def _program_copy(program, inventory, destination, identity):
         copied = destination / name
         copied.parent.mkdir(parents=True, exist_ok=True)
         copied.symlink_to(link, target_is_directory=True)
+    # A framework's Resources link can refer through its later Versions/Current
+    # link. Resolve only after all inventoried directory links have been created.
+    for name in inventory.get("directory_links", {}):
+        copied = destination / name
         if not copied.resolve(strict=True).is_relative_to(destination.resolve()):
             raise ValueError("Copied program link escapes its directory")
     for row in rows:

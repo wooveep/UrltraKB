@@ -78,6 +78,49 @@ def test_macos_app_preserves_runtime_location(tmp_path):
         info = plistlib.load(stream)
     assert info["CFBundleExecutable"] == "UrltraKB"
     assert info["CFBundleVersion"] == "123"
-    assert info["LSMinimumSystemVersion"] == "13.0"
+    assert info["LSMinimumSystemVersion"] == "14.0"
     assert (runtime / info["CFBundleExecutable"]).read_bytes() == b"Mach-O fixture"
     assert json.loads((runtime / "_internal/openkb/_build_info.json").read_text()) == identity
+
+
+def test_program_copy_preserves_mac_framework_links(tmp_path):
+    from scripts.package_desktop import _program_copy, digest
+
+    original = tmp_path / "program"
+    framework = original / "_internal/QtCore.framework/Versions"
+    (framework / "A/Resources").mkdir(parents=True)
+    (framework / "A/Resources/Info.plist").write_bytes(b"framework metadata")
+    (framework / "Current").symlink_to("A", target_is_directory=True)
+    (framework.parent / "Resources").symlink_to(
+        "Versions/Current/Resources", target_is_directory=True
+    )
+    identity = {"version": "0.1.dev123+g123456789abc", "commit": "a" * 40}
+    info = original / "_internal/openkb/_build_info.json"
+    info.parent.mkdir()
+    info.write_text(json.dumps(identity))
+    for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify"):
+        (original / name).write_bytes(b"executable")
+        (original / name).chmod(0o755)
+    inventory = {
+        **identity,
+        "platform": {"system": "Darwin", "machine": "arm64"},
+        "files": [
+            {
+                "path": p.relative_to(original).as_posix(),
+                "size": p.stat().st_size,
+                "sha256": digest(p),
+            }
+            for p in original.rglob("*")
+            if p.is_file()
+        ],
+        "directory_links": {
+            "_internal/QtCore.framework/Resources": "Versions/Current/Resources",
+            "_internal/QtCore.framework/Versions/Current": "A",
+        },
+    }
+    copied = tmp_path / "copied"
+    _program_copy(original, inventory, copied, identity)
+    resources = copied / "_internal/QtCore.framework/Resources"
+    assert resources.is_symlink()
+    assert (resources / "Info.plist").read_bytes() == b"framework metadata"
+    assert resources.resolve().is_relative_to(copied)

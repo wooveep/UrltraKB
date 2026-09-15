@@ -15,6 +15,8 @@ Use Actions → Desktop packages → Run workflow, or:
 
 ```sh
 gh workflow run desktop-build.yml --repo wooveep/UrltraKB --ref main
+# Or select only one native target:
+gh workflow run desktop-build.yml --repo wooveep/UrltraKB --ref main -f target=macos-arm64
 gh run list --repo wooveep/UrltraKB --workflow desktop-build.yml
 gh run watch RUN_ID --repo wooveep/UrltraKB --exit-status
 gh run download RUN_ID --repo wooveep/UrltraKB --dir downloads
@@ -24,13 +26,16 @@ Application/build changes pushed to `main` and `v*` tags also trigger the matrix
 Each successful target uploads an installer, the exact source export, the native
 inventory, acceptance evidence and `SHA256SUMS.txt`. The package stage extracts
 the installer and runs its CLI and native acceptance runner before uploading.
+Debian jobs additionally install with apt in a clean Debian container, run the
+installed commands and desktop acceptance, then check removal of the program.
 No model account or model API key is required for these checks.
 
 Debian packages require Debian 13 or a compatible newer system (glibc 2.41+).
 They install under `/opt/urltrakb`, with a desktop menu entry and the
 `urltrakb`, `urltrakb-cli`, and `urltrakb-api` commands. PySide's pinned ARM64
 wheel requires glibc 2.39+, so Debian 12 is not a supported target.
-macOS requires Apple Silicon and macOS 13+. The app has an ad-hoc signature;
+macOS requires Apple Silicon and macOS 14+ (including the selected NumPy wheel).
+The app has an ad-hoc signature;
 Developer ID signing and Apple notarization are not configured. Downloaded CI
 apps may require explicit approval in macOS Privacy & Security before launch.
 Optional OCR engines and model weights remain separate installations.

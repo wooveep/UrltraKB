@@ -109,6 +109,7 @@ def main() -> None:
             "--cache-dir",
             args.build_dir.resolve() / "downloads",
         )
+        run(python, "-m", "pytest", "tests/test_render_processes.py", "-q")
         run(python, "scripts/build_desktop.py")
         with tempfile.TemporaryDirectory(prefix="inventory-", dir=workspace) as temporary:
             fresh = Path(temporary) / "inventory.json"

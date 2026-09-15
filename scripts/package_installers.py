@@ -96,7 +96,7 @@ def stage_macos(program: Path, app: Path, identity: dict) -> Path:
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": "0.1.0",
                 "CFBundleVersion": identity["version"].split(".dev")[1].split("+")[0],
-                "LSMinimumSystemVersion": "13.0",
+                "LSMinimumSystemVersion": "14.0",
                 "NSHighResolutionCapable": True,
                 "NSPrincipalClass": "NSApplication",
             },

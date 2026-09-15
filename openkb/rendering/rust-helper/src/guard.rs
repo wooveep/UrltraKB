@@ -67,3 +67,68 @@ fn watch(parent: Option<u32>, timeout: u32) {
     thread::sleep(Duration::from_millis(timeout.into()));
     std::process::exit(124);
 }
+
+#[cfg(target_os = "macos")]
+fn watch(parent: Option<u32>, timeout: u32) {
+    use std::ffi::{c_int, c_long, c_void};
+    // Darwin's sys/event.h and sys/time.h layouts. No third-party runtime is needed.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Event {
+        ident: usize,
+        filter: i16,
+        flags: u16,
+        fflags: u32,
+        data: isize,
+        udata: *mut c_void,
+    }
+    #[repr(C)]
+    struct Timespec {
+        seconds: c_long,
+        nanoseconds: c_long,
+    }
+    unsafe extern "C" {
+        fn kqueue() -> c_int;
+        fn kevent(
+            queue: c_int,
+            changes: *const Event,
+            change_count: c_int,
+            events: *mut Event,
+            event_count: c_int,
+            timeout: *const Timespec,
+        ) -> c_int;
+        fn close(fd: c_int) -> c_int;
+    }
+    if let Some(pid) = parent {
+        // EVFILT_PROC / NOTE_EXIT watches this process instance. PID reuse cannot
+        // hide its exit after registration, unlike polling kill(pid, 0).
+        let change = Event {
+            ident: pid as usize,
+            filter: -5,             // EVFILT_PROC
+            flags: 0x0001 | 0x0010, // EV_ADD | EV_ONESHOT
+            fflags: 0x8000_0000,    // NOTE_EXIT
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        let mut result = change;
+        let limit = Timespec {
+            seconds: (timeout / 1000).into(),
+            nanoseconds: ((timeout % 1000) * 1_000_000).into(),
+        };
+        // SAFETY: the repr(C) records match Darwin's ABI and remain valid for
+        // the blocking call. The descriptor belongs only to this guard thread.
+        unsafe {
+            let queue = kqueue();
+            if queue < 0 {
+                std::process::exit(125);
+            }
+            let count = kevent(queue, &change, 1, &mut result, 1, &limit);
+            close(queue);
+            // Registration failure (including an already-gone owner) also stops
+            // the helper. Only an event-free timeout is reported as a deadline.
+            std::process::exit(if count == 0 { 124 } else { 125 });
+        }
+    }
+    thread::sleep(Duration::from_millis(timeout.into()));
+    std::process::exit(124);
+}
