@@ -89,10 +89,11 @@ class ProcessingField(SettingsSection):
                 ("max_context_tokens", "模型最大上下文（token）", int),
                 ("max_output_tokens", "模型最大输出（token）", int),
                 ("request_timeout", "模型无内容等待时限（秒）", float),
+                ("timeout_retries", "编译超时额外重试次数（0 关闭）", int),
                 ("stage_timeout", "阶段总时限（秒，0 不限）", lambda text: float(text) or None),
                 ("document_timeout", "资料总时限（秒，0 不限）", lambda text: float(text) or None),
                 ("cleanup_timeout", "任务收尾时限（秒）", float),
-                ("max_attempts", "单次操作最多尝试数", int),
+                ("max_attempts", "非超时错误最多尝试数", int),
                 ("max_requests", "累计请求上限（0 不限）", lambda text: int(text) or None),
                 ("max_tokens", "累计 token 上限（0 表示不限）", lambda text: int(text) or None),
                 ("concurrency", "同时进行的模型请求上限", int),
@@ -105,6 +106,7 @@ class ProcessingField(SettingsSection):
 
     def load(self, value, source):
         values = dict(value or {})
+        values.setdefault("timeout_retries", 5)
         for key in ("context_tokens", "output_tokens"):
             values.setdefault("max_" + key, values.get(key, ""))
         for key in ("stage_timeout", "document_timeout", "max_requests", "max_tokens"):
@@ -122,7 +124,7 @@ class ProcessingField(SettingsSection):
         except ProcessingIncomplete:
             raise ValueError(
                 "初始值不得超过模型最大值，输出须小于上下文；"
-                "阶段/资料总时限、累计请求和 token 可填 0，其余须为正数。"
+                "超时重试次数、阶段/资料总时限、累计请求和 token 可填 0，其余须为正数。"
             ) from None
         return result
 

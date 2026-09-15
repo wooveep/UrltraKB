@@ -324,10 +324,11 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `max_context_tokens` | 1048576 (1M) | Model context ceiling for adaptive retries |
 | `max_output_tokens` | 393216 (384K) | Model output ceiling for adaptive retries |
 | `request_timeout` | 180 | Seconds without meaningful content during streamed compilation; elapsed seconds for other requests |
+| `timeout_retries` | 5 | Additional attempts after a streamed compiler timeout; 0 disables them, so 5 means at most 6 total attempts |
 | `stage_timeout` | `null` | Optional total seconds for one processing stage; no default cap |
 | `document_timeout` | `null` | Optional total seconds for the whole document; no default cap |
 | `cleanup_timeout` | 10 | Seconds for auxiliary cleanup or shutdown grace |
-| `max_attempts` | 2 | Maximum transport attempts at each request size |
+| `max_attempts` | 2 | Maximum attempts for other retryable failures at each request size |
 | `max_requests` | `null` | Optional cumulative model-attempt limit; no default cap |
 | `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
 | `concurrency` | 8 | Maximum concurrent model calls within one document |
@@ -386,8 +387,8 @@ knowledge-base concurrency overrides remain in effect until cleared.
 
 Topic planning uses at most 128 candidate topics per batch, with additional input
 and output capacity checks. Completed batches advance a topic counter; retries do
-not inflate it. Planning remains ordered because later batches reuse earlier page
-identities. This reduces large response bursts but does not guarantee a provider
+not inflate it. Independent batches are restored to source order and their page
+identities are reconciled afterward. This reduces large response bursts but does not guarantee a provider
 will respond within a particular time.
 
 Semantic review responses are recorded separately from accepted page checkpoints.
@@ -1023,8 +1024,12 @@ Markdown 代码示例及未改动排版保持原字节；答案核验、最终�
 
 Synchronous compiler requests receive streaming responses. The request wait resets only
 when a nonempty reasoning or answer delta arrives. Role announcements, empty chunks and
-connection keepalives do not extend it. Explicit stage and document deadlines still apply,
-and a stalled or disconnected response stops the item without overlapping a retry.
+connection keepalives do not extend it. Explicit stage and document deadlines still apply.
+After a timeout, compilation can retry five additional times with a short backoff.
+Each attempt consumes the same cumulative request, token and time allowances. The old
+local stream must close before another attempt starts; if it cannot finish within the
+cleanup allowance, the item stops. An abrupt disconnect without a terminal marker also
+stops the item. A timeout does not establish whether the remote service billed that attempt.
 Only a response with a terminal marker is eligible for normal validation and checkpointing.
 
 Task diagnostics distinguish no content yet, reasoning activity and answer activity,

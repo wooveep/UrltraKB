@@ -24,6 +24,7 @@ class StreamActivity:
     def __init__(self):
         self.started = self.last_content = time.monotonic()
         self.lock = threading.RLock()
+        self.stopped = threading.Event()
         self.fragments = 0
         self.content_characters = 0
         self.reasoning_characters = 0
@@ -101,6 +102,8 @@ def collect(function, options, activity):
         model = fingerprint = None
         for chunk in stream:
             check_cancelled()
+            if activity.stopped.is_set():
+                raise TimeoutError("Model stream stopped after an idle timeout")
             model = field(chunk, "model") or model
             fingerprint = field(chunk, "system_fingerprint") or fingerprint
             provided = field(chunk, "usage")
@@ -126,7 +129,7 @@ def collect(function, options, activity):
         if finish is None or (wire is not None and not wire.finished):
             # A disconnected stream is not a settled response, even if its
             # partial content happens to parse as valid JSON.
-            raise TimeoutError("Model stream ended without a terminal response")
+            raise ConnectionError("Model stream ended without a terminal response")
         if isinstance(usage, dict):
             from litellm.types.utils import Usage
 

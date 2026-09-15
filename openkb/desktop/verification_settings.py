@@ -102,6 +102,7 @@ def verify_processing_settings(dialog, kb, wait_until):
         "max_context_tokens": 8192,
         "max_output_tokens": 512,
         "request_timeout": 5,
+        "timeout_retries": 2,
         "stage_timeout": 30,
         "document_timeout": 60,
         "cleanup_timeout": 5,

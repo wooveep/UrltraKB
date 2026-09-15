@@ -21,7 +21,7 @@ def _processing_settings(value):
     from openkb.processing import ProcessingIncomplete, RequestLimits
 
     fields = set(RequestLimits.__dataclass_fields__)
-    optional = {"max_context_tokens", "max_output_tokens"}
+    optional = {"max_context_tokens", "max_output_tokens", "timeout_retries"}
     if not isinstance(value, dict) or not fields - optional <= set(value) <= fields:
         raise ValueError("Provide all processing budget fields and no unknown fields")
     try:
@@ -30,7 +30,7 @@ def _processing_settings(value):
     except ProcessingIncomplete:
         raise ValueError(
             "Request limits must be finite, positive and fit the model context; "
-            "aggregate caps may be null"
+            "aggregate caps may be null and timeout_retries may be zero"
         ) from None
 
 

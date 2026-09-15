@@ -26,6 +26,7 @@ DEFAULT_PROCESSING = {
     "max_context_tokens": 1048576,
     "max_output_tokens": 393216,
     "request_timeout": 180,
+    "timeout_retries": 5,
     "stage_timeout": None,
     "document_timeout": None,
     "cleanup_timeout": 10,
@@ -72,6 +73,7 @@ class RequestLimits:
     concurrency: int
     max_context_tokens: int | None = None
     max_output_tokens: int | None = None
+    timeout_retries: int = 5
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> RequestLimits:
@@ -83,6 +85,10 @@ class RequestLimits:
         if type(context) is not int or type(output) is not int or not 0 < output < context:
             raise ProcessingIncomplete("model_capabilities_required", "configuration")
         numbers: dict[str, Any] = {}
+        retries = values.get("timeout_retries", DEFAULT_PROCESSING["timeout_retries"])
+        if type(retries) is not int or retries < 0:
+            raise ProcessingIncomplete("execution_budget_required", "configuration")
+        numbers["timeout_retries"] = retries
         for key in ("request_timeout", "stage_timeout", "document_timeout", "cleanup_timeout"):
             value = values.get(key)
             if key in {"stage_timeout", "document_timeout"} and key in values and value is None:
@@ -312,9 +318,12 @@ class ExecutionBudget:
             return True
 
     def _call(self, function: Any, limits: RequestLimits, **kwargs: Any) -> Any:
+        from openkb.model_retry import StreamTimeoutRetries
         from openkb.provider_usage import WireUsage
 
-        for attempt in range(self.limits.max_attempts):
+        retries = StreamTimeoutRetries(self)
+        attempt = 0
+        while True:
             waiting = time.monotonic()
             while not self.permits.acquire(timeout=0.05):
                 self._check_queue(waiting)
@@ -360,8 +369,7 @@ class ExecutionBudget:
                         measured["response_activity"] = activity.snapshot()
                         deadline = time.monotonic() + max(0, activity.remaining(options["timeout"]))
                     if time.monotonic() >= deadline:
-                        # Transport outcome is unknown. End this item; do not
-                        # overlap another attempt with an outstanding request.
+                        # A retry must first finish this local stream transport.
                         if allowance := active_allowance():
                             allowance.request_timed_out(options)
                         raise ProcessingIncomplete("request_timeout", self.stage)
@@ -384,14 +392,21 @@ class ExecutionBudget:
             except (OutputTruncated, InputTooLarge):
                 raise  # Settled or never sent: the compiler can shrink the batch.
             except ProcessingIncomplete as exc:
+                if retries.retry(exc, activity, done):
+                    continue
                 with self.lock:
                     self.incomplete = exc
                 raise
             except Exception as exc:
                 if _uncertain_transport(exc):
+                    if retries.retry(exc, activity, done):
+                        continue
                     with self.lock:
                         self.incomplete = ProcessingIncomplete(
-                            "request_outcome_unknown", self.stage
+                            "request_timeout"
+                            if activity is not None and retries.is_timeout(exc)
+                            else "request_outcome_unknown",
+                            self.stage,
                         )
                     raise self.incomplete from None
                 if not _transient(exc):
@@ -422,7 +437,7 @@ class ExecutionBudget:
             while time.monotonic() < deadline:
                 self.checkpoint()
                 time.sleep(min(0.05, max(0, deadline - time.monotonic())))
-        raise AssertionError("Positive attempt limit required")
+            attempt += 1
 
     def _check_queue(self, waiting):
         self.checkpoint()
@@ -513,7 +528,9 @@ def _transient(exc: Exception) -> bool:
 def _uncertain_transport(exc: Exception) -> bool:
     import litellm
 
-    return isinstance(exc, (TimeoutError, litellm.Timeout, litellm.APIConnectionError))
+    return isinstance(
+        exc, (TimeoutError, ConnectionError, litellm.Timeout, litellm.APIConnectionError)
+    )
 
 
 _ACTIVE: ContextVar[ExecutionBudget | None] = ContextVar("openkb_processing", default=None)

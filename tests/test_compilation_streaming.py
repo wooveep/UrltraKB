@@ -75,7 +75,9 @@ def test_active_reasoning_outlives_timeout_and_records_activity_without_text(tmp
 
 @pytest.mark.parametrize("mode", ["silent", "empty_chunks", "reasoning_then_stall"])
 def test_only_meaningful_output_resets_idle_wait_and_no_automatic_retry(mode):
-    budget = ExecutionBudget(RequestLimits.from_config(profile(request_timeout=0.15)))
+    budget = ExecutionBudget(
+        RequestLimits.from_config(profile(request_timeout=0.15, timeout_retries=0))
+    )
     release = threading.Event()
     sent = []
 

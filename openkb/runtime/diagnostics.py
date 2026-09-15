@@ -276,6 +276,15 @@ def install_llm_diagnostics(sdk: Any) -> None:
         current.trace_sdk(sdk)
 
 
+def report_model_retry(count: int, limit: int) -> None:
+    message = f"模型等待超时；前一次本地连接已结束，自动重试 {count}/{limit}"
+    current = _CURRENT.get()
+    if current is not None:
+        current.emit(message)
+    else:
+        logging.getLogger(__name__).info(message)
+
+
 def read_task_log(directory: Path, *, limit: int = 100_000) -> str:
     """Bounded tail for historical tasks; never load multi-megabyte logs in Qt."""
     chunks: list[str] = []
