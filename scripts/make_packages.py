@@ -103,6 +103,7 @@ def main() -> None:
             "-r",
             "packaging/desktop/build-requirements.txt",
         )
+        run(python, "-m", "pytest", "tests/test_desktop_verification_dialogs.py", "-q")
         run(
             python,
             "scripts/prepare_desktop_assets.py",

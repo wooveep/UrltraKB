@@ -15,6 +15,18 @@ import time
 from pathlib import Path
 
 
+def create_application():
+    """Keep acceptance dialogs accessible to the same Qt driver on every host."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from openkb.desktop.fonts import application_arguments
+
+    # Native macOS alerts run outside the widget interface used by our timers.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
+    return QApplication(application_arguments([]))
+
+
 def main() -> int:
     multiprocessing.freeze_support()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -57,10 +69,9 @@ def main() -> int:
         str((args.workbench_restart or root) / "qt"),
     )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    from openkb.desktop.fonts import application_arguments
     from openkb.desktop.window import Workbench
 
-    app = QApplication(application_arguments([]))
+    app = create_application()
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("OpenKB Verification")
     if args.startup:
