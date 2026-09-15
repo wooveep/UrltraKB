@@ -8,7 +8,10 @@ wording with original row/cell positions. An optional source_kind identifies foo
 endnotes, editorial comments or image alt text; retain that role, and never infer image
 contents from alt text. Structure describes layout; reader_status is
 parser metadata, never an author statement or a requested knowledge fact. A first_row
-relation identifies position, not a confirmed header. Preserve actual original wording
+relation identifies position; position alone does not establish a header role. An
+unconfirmed native/header annotation does not refute semantic column labels established
+by their actual wording and unambiguous cell relationships. Calling those labels a table
+header does not itself claim a native header flag. Preserve actual original wording
 even when it resembles a reader status. Generated Markdown headings and table headers
 are presentation choices, not by themselves claims that the original used a heading
 style or declared a header row. Their labels, values and resulting row/column relations

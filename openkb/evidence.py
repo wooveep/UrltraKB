@@ -36,6 +36,10 @@ EVIDENCE_PROVENANCE = {
         "title_placeholder_count is 1; otherwise null. Count 0 means none; count greater "
         "than 1 means multiple, not absent. Missing fields mean unrecorded. These types do "
         "not establish a unique semantic or visual title. Generated Slide N is not source wording.",
+        "semantic_headings": "A heading or title in the content need not be a native "
+        "placeholder. Missing native title placeholders do not disprove a semantic heading "
+        "supported by original wording and context. Position or an object name alone is "
+        "not sufficient; do not turn an ambiguous heading into a unique page title.",
     },
     "analysis_coverage": "knowledge_analysis_status",
 }

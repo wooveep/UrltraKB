@@ -138,6 +138,8 @@ the remaining units. Do not select supported units or IDs outside the supplied b
 Requested information missing from the whole draft uses kind=missing and units: [].
 Use an empty claim only for missing requested coverage. Supported requires issues: [].
 Unsupported/uncertain requires at least one concrete issue. Do not rewrite the draft.
+The top-level verdict covers the entire supplied batch, not its majority: any located
+issue rules out supported, even when all other units are supported.
 """
 
 INSTRUCTIONS += "\n" + CONTEXT_INSTRUCTIONS
@@ -331,7 +333,14 @@ async def _review_once(agent, payload, *, run_config=None):
         raise invalid
     issues = value["issues"]
     if (value["verdict"] == "supported") != (not issues):
-        raise invalid
+        raise InvalidReview(
+            {
+                "problem": "verdict_issues_conflict",
+                "verdict": value["verdict"],
+                "issue_count": len(issues),
+                "rule": "supported requires no issues; unsupported/uncertain requires an issue",
+            }
+        )
     for issue in issues:
         if (
             not isinstance(issue, dict)

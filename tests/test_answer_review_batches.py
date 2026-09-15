@@ -524,3 +524,64 @@ async def test_a_truncated_single_unit_never_authorizes_completion(kb_dir, model
     result = await continue_conversation(kb_dir, "What is the count?")
     assert result.status != "completed" and result.turn_count == 0
     assert result.usage["observable_attempts"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_conflicting_overall_verdict_gets_one_diagnostic_before_any_answer_edit(
+    kb_dir, model_service, persistent
+):
+    bad, good = "Channel 4: normal", "Channel 4: standby only"
+    atomic_write_text(kb_dir / "wiki/sources/rows.md", good)
+    reviews, corrections = [], []
+    reader = _reader(bad)
+
+    def chat(body):
+        raw = body["messages"][-1]["content"]
+        if '"stage": "answer_correction"' in raw:
+            payload = json.loads(raw)
+            corrections.append(payload)
+            assert len(reviews) == 2 and payload["editable_units"] == ["u1"]
+            return {
+                "role": "assistant",
+                "content": json.dumps({"edits": [{"unit": "u1", "text": good}]}),
+            }
+        return reader(body)
+
+    def review(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        reviews.append(payload)
+        feedback = payload.get("protocol_feedback", {}).get("error")
+        if feedback:
+            assert feedback["problem"] == "verdict_issues_conflict"
+            assert feedback["verdict"] == "supported" and feedback["issue_count"] == 1
+            assert payload["answer"] == bad and not corrections
+            assert payload["observations"] == reviews[0]["observations"]
+        value = answer_review_response(payload)
+        if payload["answer"] == bad:
+            value["units"][0].update(verdict="unsupported", support=[])
+            value.update(
+                verdict="unsupported" if feedback and not persistent else "supported",
+                issues=[
+                    {
+                        "kind": "unsupported",
+                        "units": ["u1"],
+                        "claim": "normal",
+                        "reason": "The observed condition is standby only.",
+                    }
+                ],
+            )
+        return {"role": "assistant", "content": json.dumps(value)}
+
+    model_service.chat_response = chat
+    model_service.chat_without_tools = True
+    model_service.answer_review_response = review
+    result = await continue_conversation(kb_dir, "What is channel 4's condition?")
+    assert (result.status == "completed") != persistent, result
+    assert len(corrections) == (0 if persistent else 1)
+    assert len(reviews) == (2 if persistent else 3)
+    assert result.usage["observable_attempts"] == (4 if persistent else 6)
+    if persistent:
+        assert result.turn_count == 0
+    else:
+        assert result.answer == good
