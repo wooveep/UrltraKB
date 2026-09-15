@@ -159,6 +159,7 @@ jobs:
       - name: Package and verify extracted application
         env:
           BUILD_DIRECTORY: ${{ matrix.build-dir }}
+          URLTRAKB_VERIFY_TIMEOUT_TRACE: ${{ runner.os == 'macOS' && '1' || '' }}
         run: uv run --no-project --python 3.12.13 python scripts/make_packages.py bundle --build-dir "$BUILD_DIRECTORY"
       - name: Upload application and source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

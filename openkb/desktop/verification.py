@@ -29,6 +29,11 @@ def create_application():
 
 def main() -> int:
     multiprocessing.freeze_support()
+    if os.environ.get("URLTRAKB_VERIFY_TIMEOUT_TRACE") == "1":
+        import faulthandler
+
+        # Opt-in diagnostics for a stalled native CI acceptance driver.
+        faulthandler.dump_traceback_later(60, repeat=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-base", help="Controlled HTTP model fixture URL")
