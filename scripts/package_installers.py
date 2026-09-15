@@ -174,6 +174,7 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
         evidence = {
             **identity,
             "target": target.name,
+            "acceptance_qt_platform": os.environ.get("QT_QPA_PLATFORM") or "native",
             "scope": "CI build; release materials unaudited",
             "inventory": inventory,
             "installer_sha256": digest(artifact),

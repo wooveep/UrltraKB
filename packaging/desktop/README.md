@@ -29,6 +29,10 @@ the installer and runs its CLI and native acceptance runner before uploading.
 Debian jobs additionally install with apt in a clean Debian container, run the
 installed commands and desktop acceptance, then check removal of the program.
 No model account or model API key is required for these checks.
+Linux and macOS CI application checks use Qt's `offscreen` platform, so the
+same assertions run without depending on the runner's desktop session or
+system dialogs. The build manifest records this mode. Native macOS window,
+menu, and first-launch behavior still require interactive platform acceptance.
 
 Debian packages require Debian 13 or a compatible newer system (glibc 2.41+).
 They install under `/opt/urltrakb`, with a desktop menu entry and the
