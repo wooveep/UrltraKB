@@ -113,13 +113,16 @@ Corpus checks establish technical output/error handling; visual inspection
 of labels, relationships, baselines and clipping remains a separate check.
 
 The frozen program also carries the original `openkb/ocr/worker.py`, `openvino_worker.py`,
-`supervisor.py`, `loading.py`, `cloud_result.py`, `local_result.py`, and
+`supervisor.py`, `loading.py`, `cloud_result.py`, `local_result.py`, `openvino_result.py`,
+`layout_coordinates.py`, `transcription_quality.py`, and
 `openkb/runtime/process_tree.py` files. The
 separately installed optional OCR Python runtime executes these scripts and
 verifies worker/loading hashes; Windows also loads the process-tree helper from
 its original relative path. OCR result adapters also require source bytes to
 identify their interpretation version. Embedded Python bytecode is not a
-substitute. Check their presence and source hashes in both platform inventories,
+substitute. The basic acceptance runner parses a tiny text document and checks
+all adapter fingerprints without model calls or an OCR installation.
+Check their presence and source hashes in both platform inventories,
 and exercise an actual scanned-page import with local OCR configured. OCR
 dependencies and model weights remain in the separate optional runtime package.
 The parser also reads Mammoth's distribution version, so its metadata is

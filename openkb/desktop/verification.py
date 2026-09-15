@@ -152,6 +152,14 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        from openkb.desktop.verification_documents import verify_native_parsing
+
+        parser_kb = root / "解析验证库"
+        initialize_kb(parser_kb, seed_environment=False)
+        verify_native_parsing(parser_kb, root)
+        checks.append(
+            "native text intake and parsing; original preserved; OCR adapter fingerprints"
+        )
         if args.settings_layout:
             from openkb.desktop.verification_settings_layout import verify_settings_layout
 

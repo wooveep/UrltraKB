@@ -87,7 +87,7 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openkb"]
-exclude = ["/openkb/web"]
+exclude = ["/openkb/web", "/openkb/rendering/assets", "/openkb/rendering/rust-helper/target"]
 
 # Ship reproducible application/build sources, not maintainer-local workspace
 # state or retired bundles that may remain in an upgraded source checkout.
@@ -99,7 +99,10 @@ include = [
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/Makefile", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]
-exclude = ["/openkb/web", "/frontend"]
+exclude = [
+    "/openkb/web", "/frontend", "/openkb/rendering/assets",
+    "/openkb/rendering/rust-helper/target", "/packaging/desktop/build", "/packaging/desktop/dist",
+]
 
 # Bundle the built-in deck themes + html critic into the wheel so
 # `openkb deck new` / `--critique` / chat `/deck` work right after

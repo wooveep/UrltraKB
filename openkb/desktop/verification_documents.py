@@ -7,6 +7,31 @@ import sqlite3
 from pathlib import Path
 
 
+def verify_native_parsing(kb: Path, root: Path) -> None:
+    """Exercise parser file boundaries even when no model is configured."""
+    from openkb.evidence import ParseStore
+    from openkb.inputs import prepared_input
+    from openkb.locks import kb_ingest_lock
+    from openkb.ocr.assembly import assembly_profile
+    from openkb.parsing import parse_document
+    from openkb.sources import SourceStore
+
+    # Local adapters are fingerprinted without installing or invoking OCR.
+    assert len(assembly_profile("local")["adapters"]) == 5
+    text = "原生解析验收：等待时间为 42 秒。\n"
+    document = root / "原生解析.txt"
+    document.write_text(text, encoding="utf-8")
+    with prepared_input(document) as ready, kb_ingest_lock(kb / ".openkb"):
+        store = SourceStore(kb)
+        source = store.intake(ready)
+        parsed = parse_document(kb, source, options={"ocr": {"policy": "off"}})
+        assert parsed.blocks and ParseStore(kb).complete(source, parsed)
+        assert any(
+            text.strip() in store.asset(block.blob).read_text("utf-8") for block in parsed.blocks
+        )
+        assert store.original(source).read_bytes() == document.read_bytes()
+
+
 def verify_long_pdf(kb: Path, pdf: Path) -> str:
     import pymupdf
 

@@ -22,7 +22,8 @@ datas += [
     (str(repo / "openkb/ocr" / name), "openkb/ocr")
     for name in (
         "worker.py", "openvino_worker.py", "supervisor.py", "loading.py",
-        "cloud_result.py", "local_result.py",
+        "cloud_result.py", "local_result.py", "openvino_result.py",
+        "layout_coordinates.py", "transcription_quality.py",
     )
 ]
 datas += [(str(repo / "openkb/runtime/process_tree.py"), "openkb/runtime")]
