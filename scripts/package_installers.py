@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -19,10 +18,12 @@ from pathlib import Path
 try:
     from scripts.desktop_platform import desktop_target
     from scripts.export_desktop_source import verify_source
+    from scripts.macos_bundle import stage_macos
     from scripts.package_desktop import _program_copy, digest, record
 except ModuleNotFoundError:
     from desktop_platform import desktop_target
     from export_desktop_source import verify_source
+    from macos_bundle import stage_macos
     from package_desktop import _program_copy, digest, record
 
 
@@ -80,31 +81,6 @@ def stage_debian(program: Path, root: Path, source: Path, identity: dict, arch: 
     )
 
 
-def stage_macos(program: Path, app: Path, identity: dict) -> Path:
-    """Keep the inventoried onedir runtime intact inside the native app bundle."""
-    contents = app / "Contents"
-    contents.mkdir(parents=True)
-    runtime = contents / "MacOS"
-    shutil.move(program, runtime)
-    with (contents / "Info.plist").open("wb") as stream:
-        plistlib.dump(
-            {
-                "CFBundleExecutable": "UrltraKB",
-                "CFBundleIdentifier": "io.github.wooveep.urltrakb",
-                "CFBundleName": "UrltraKB",
-                "CFBundleDisplayName": "UrltraKB",
-                "CFBundlePackageType": "APPL",
-                "CFBundleShortVersionString": "0.1.0",
-                "CFBundleVersion": identity["version"].split(".dev")[1].split("+")[0],
-                "LSMinimumSystemVersion": "14.0",
-                "NSHighResolutionCapable": True,
-                "NSPrincipalClass": "NSApplication",
-            },
-            stream,
-        )
-    return runtime
-
-
 def source_archive(source: Path, target: Path) -> None:
     export = json.loads((source / "source-export.json").read_text("utf-8"))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -153,8 +129,7 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
             installed = unpacked / "opt/urltrakb"
         elif target.system == "Darwin":
             app = work / "UrltraKB.app"
-            stage_macos(staged, app, identity)
-            subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
+            stage_macos(staged, app, identity, inventory)
             subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
             subprocess.run(
                 ["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(artifact)],
@@ -174,14 +149,15 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
             installed = unpacked / "UrltraKB"
         # Signing changes Mach-O signatures; compare extraction against the signed staging tree.
         original = (
-            work / "UrltraKB.app/Contents/MacOS"
+            work / "UrltraKB.app"
             if target.system == "Darwin"
             else work / "debian/opt/urltrakb"
             if target.deb_arch
             else staged
         )
+        extracted = unpacked / "UrltraKB.app" if target.system == "Darwin" else installed
         for path in original.rglob("*"):
-            if path.is_file() and digest(path) != digest(installed / path.relative_to(original)):
+            if path.is_file() and digest(path) != digest(extracted / path.relative_to(original)):
                 raise ValueError(f"Installer content differs from staging: {path.name}")
         suffix = ".exe" if target.system == "Windows" else ""
         subprocess.run([str(installed / ("UrltraKBCLI" + suffix)), "--help"], check=True)

@@ -217,6 +217,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
             links[name] = path
         else:
             collected[name] = inputs.record(path)
+            collected[name]["typecode"] = kind
             if sys.platform == "darwin" and kind in {"BINARY", "EXTENSION"}:
                 processed = process_collected_binary(
                     path, name, target_arch="arm64", strict_arch_validation=kind == "EXTENSION"

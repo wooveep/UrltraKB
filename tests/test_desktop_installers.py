@@ -1,7 +1,6 @@
 """Native targets and real Debian package structure, without freezing a fixture app."""
 
 import json
-import plistlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from scripts.desktop_platform import desktop_target
-from scripts.package_installers import stage_debian, stage_macos
+from scripts.macos_bundle import bundle_toc, info_plist
+from scripts.package_installers import stage_debian
 from scripts.prepare_desktop_assets import NODE_HASHES
 
 
@@ -66,21 +66,28 @@ def test_debian_metadata_and_extracted_installation(tmp_path, arch):
     assert "Exec=urltrakb\n" in (installed / "usr/share/applications/urltrakb.desktop").read_text()
 
 
-def test_macos_app_preserves_runtime_location(tmp_path):
+def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
+    osx = pytest.importorskip("PyInstaller.building.osx")
     program = tmp_path / "program"
-    (program / "_internal/openkb").mkdir(parents=True)
     identity = {"version": "0.1.dev123+g123456789abc", "commit": "a" * 40}
-    (program / "UrltraKB").write_bytes(b"Mach-O fixture")
-    (program / "_internal/openkb/_build_info.json").write_text(json.dumps(identity))
-    app = tmp_path / "UrltraKB.app"
-    runtime = stage_macos(program, app, identity)
-    with (app / "Contents/Info.plist").open("rb") as stream:
-        info = plistlib.load(stream)
-    assert info["CFBundleExecutable"] == "UrltraKB"
-    assert info["CFBundleVersion"] == "123"
-    assert info["LSMinimumSystemVersion"] == "14.0"
-    assert (runtime / info["CFBundleExecutable"]).read_bytes() == b"Mach-O fixture"
-    assert json.loads((runtime / "_internal/openkb/_build_info.json").read_text()) == identity
+    inventory = {
+        "files": [
+            {"path": "UrltraKB"},
+            {"path": "_internal/coloredlogs-15.0.1.dist-info/METADATA", "typecode": "DATA"},
+            {"path": "_internal/library.dylib", "typecode": "BINARY"},
+            {"path": "_internal/openkb/_build_info.json", "typecode": "DATA"},
+        ]
+    }
+    # Exercise PyInstaller's real layout logic; copying an onedir tree into MacOS
+    # makes codesign mistake Python .dist-info directories for unsigned bundles.
+    entries = osx.BUNDLE.__new__(osx.BUNDLE)._process_bundle_toc(bundle_toc(program, inventory))
+    layout = {name: (source, kind) for name, source, kind in entries}
+    assert layout["Contents/MacOS/UrltraKB"][1] == "EXECUTABLE"
+    assert layout["Contents/Frameworks/library.dylib"][1] == "BINARY"
+    assert layout["Contents/Resources/coloredlogs-15.0.1.dist-info/METADATA"][1] == "DATA"
+    assert layout["Contents/Frameworks/coloredlogs-15.0.1.dist-info"][1] == "SYMLINK"
+    assert layout["Contents/Resources/openkb/_build_info.json"][1] == "DATA"
+    assert info_plist(identity)["LSMinimumSystemVersion"] == "14.0"
 
 
 def test_program_copy_preserves_mac_framework_links(tmp_path):

@@ -86,7 +86,7 @@ jobs:
           '
       - name: Install and verify on clean Debian
         run: |
-          mkdir -p build/installed-check
+          sudo mkdir -p build/installed-check
           docker run --rm -v "$PWD/dist:/artifacts:ro" -v "$PWD/build/installed-check:/evidence" \
             debian:13.6-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 \
             bash -euc '
@@ -176,5 +176,11 @@ jobs:
           path: |
             ${{ matrix.build-dir }}/**/inventory.json
             ${{ matrix.build-dir }}/**/warn-desktop.txt
-            dist/**/*-check/
+          retention-days: 7
+      - name: Upload failed acceptance evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: acceptance-${{ matrix.target }}
+          path: dist/**/*-check/
           retention-days: 7
