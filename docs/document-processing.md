@@ -147,6 +147,32 @@ verified content, not full original-document coverage.
 
 ## General import optimization contract
 
+Native Word, PDF and PowerPoint tables are knowledge objects. Compilation retains
+their literal cell evidence locally under one table topic instead of asking a model
+to extract a separate topic from each label or value. Original cell/block references,
+headings, attachment identities and merge spans remain available for citations.
+Generation and semantic verification still apply before publication.
+
+Generation first packs the complete table. Only a request-capacity limit partitions
+it into complete rows; a merged cell keeps all the rows it spans together. Capacity
+and malformed-response retries follow the same boundaries. A row that cannot fit
+remains explicitly unavailable rather than being cut into unrelated cell fragments.
+Transport timeouts retain the existing unfinished result and do not trigger a blind
+replay of an outstanding request.
+
+Excel uses declared table ranges, or occupied row regions separated by blank rows
+when no table is declared. Batches retain sheet/range identity, original row and column
+numbers, merge spans, first-row/header evidence and the row offset within the object.
+Declared multirow Word headers repeat in every batch; unmarked first rows retain an
+unconfirmed header role. Batch size follows the measured input, output and review
+capacity, not a fixed cell count. All batches still contribute to the same table topic.
+
+This upgrade reuses the original parse. Unchanged, nonempty prose facts from the
+preceding deployed extractor may resume after validating their complete saved request
+contract, current unit identity and exact quotes. Old cell interpretations do not
+authorize the new table grouping. Changed topics invalidate their retained plan and
+generation receipts; no prior publication decision bypasses current verification.
+
 Production import decisions must follow document structure, source identity,
 available evidence and explicit runtime budgets. Validation filenames, source
 hashes, paragraph numbers, vendor names and expected page counts must not select

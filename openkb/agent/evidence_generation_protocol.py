@@ -62,11 +62,18 @@ def generation_payload(base, facts, evidence):
         **{
             key: value
             for key, value in base.items()
-            if key not in {"_topic_fact_ids", "_title_context"}
+            if key not in {"_topic_fact_ids", "_title_context", "_table_catalog"}
         },
         "facts": facts,
         "evidence": evidence,
     }
+    if base.get("_table_catalog"):
+        from openkb.agent.table_objects import payload_objects
+
+        result["table_objects"] = payload_objects(facts, base["_table_catalog"])
+        result["facts"] = [
+            {key: value for key, value in fact.items() if key != "table_object"} for fact in facts
+        ]
     if base.get("_title_context") and {fact["id"] for fact in facts} != base["_topic_fact_ids"]:
         result["title_context"] = base["_title_context"]
     mapping = source_mapping(evidence)
@@ -76,6 +83,9 @@ def generation_payload(base, facts, evidence):
 
 
 def messages(system, payload):
+    from openkb.agent.table_objects import generation_system
+
+    system = generation_system(system, payload)
     result = base_messages(system, payload)
     wire = json.loads(result[-1]["content"])
     if payload.get("stage") == "generation" and payload.get("source_scopes"):

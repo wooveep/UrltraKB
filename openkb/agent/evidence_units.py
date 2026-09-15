@@ -150,6 +150,10 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     heading = []
     levels = []
     bridge = min(128, max(1, limits.context_tokens // 32))
+    from openkb.agent.table_objects import source_table_objects
+
+    table_objects = source_table_objects(parsed, source)
+    table_headings = {}
 
     def neighbor(block, start, end, relation):
         if end <= start:
@@ -165,6 +169,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
 
     for index, block in enumerate(parsed.blocks):
         processing_checkpoint()
+        object_info = table_objects.get(block.id)
         original_location = block.location
         while "attachment" in original_location:
             original_location = original_location["attachment"]["position"]
@@ -213,7 +218,9 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
         while start < block.chars:
             # This is a read bound, not a truncation: subsequent spans continue
             # until the complete block has been accounted for.
-            available = min(block.chars - start, limits.context_tokens * 4)
+            available = (
+                block.chars if object_info else min(block.chars - start, limits.context_tokens * 4)
+            )
             reference = Evidence(
                 source.source_id,
                 source.id,
@@ -267,8 +274,26 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                     "neighbors": [item for item in (before, after) if item],
                     "heading_evidence": heading_evidence,
                 }
+                if object_info:
+                    value["table_object"] = {
+                        **object_info,
+                        "headings": table_headings.setdefault(object_info["id"], value["headings"]),
+                    }
+                    heading_refs = {content_id(item["reference"]) for item in heading_evidence}
+                    value["neighbors"] = [
+                        item
+                        for item in value["neighbors"]
+                        if table_objects.get(item["reference"]["block_id"], {}).get("id")
+                        != object_info["id"]
+                        and content_id(item["reference"]) not in heading_refs
+                    ]
                 return {"id": content_id(value), **value}
 
+            if object_info:
+                # Native cells are retained literally, not model-extracted. Their
+                # object is packed for generation with its complete row relations.
+                block_units.append(unit(available))
+                break
             low, high = 0, available
             while low < high:
                 size = (low + high + 1) // 2
@@ -296,6 +321,12 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
 
 
 def fact_batches(units, limits, model):
+    from openkb.agent.table_objects import object_batches
+
+    yield from object_batches(units, lambda rows: _ordinary_fact_batches(rows, limits, model))
+
+
+def _ordinary_fact_batches(units, limits, model):
     batch = []
     for unit in units:
         if batch and not facts_fit(batch + [unit], limits, model):

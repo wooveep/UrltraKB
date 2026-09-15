@@ -32,6 +32,7 @@ def retry_batches(
     stage,
     on_event,
     split=halves,
+    response_split=halves,
     validation_attempts=2,
     checkpoints=None,
     recovery_key=None,
@@ -48,7 +49,9 @@ def retry_batches(
             if saved is not None:
                 if not isinstance(saved, dict) or saved.get("kind") not in {"response", "capacity"}:
                     raise ValueError("Invalid saved batch split")
-                parts = halves(current) if saved.get("kind") == "response" else split(current)
+                parts = (
+                    response_split(current) if saved.get("kind") == "response" else split(current)
+                )
                 if not parts or saved.get("parts") != [content_id(part) for part in parts]:
                     raise ValueError("Invalid saved batch split")
                 on_event({"stage": stage, "operation": "resume_split", "items": len(current)})
@@ -79,7 +82,7 @@ def retry_batches(
                 }
             )
             logger.warning("Invalid model response [%s]: %s %s", stage, exc.reason, exc.details)
-            parts = halves(current)
+            parts = response_split(current)
             if parts:
                 remember(parts, "response")
                 on_event(
@@ -170,9 +173,19 @@ def split_units(batch):
 
 
 def split_generation(batch):
+    if any("table_object" in pair[0] for pair in batch):
+        from openkb.agent.table_objects import split_table_pairs
+
+        return split_table_pairs(batch)
     if len(batch) > 1:
         return halves(batch)
     fact, evidence = batch[0]
     # A fact is indivisible: retain its quote and identity while narrowing the
     # reread window, exactly as the normal generation window planner does.
     return [[(fact, part)] for part in split_span(evidence)]
+
+
+def split_generation_response(batch):
+    if any("table_object" in pair[0] for pair in batch):
+        return split_generation(batch)
+    return halves(batch)

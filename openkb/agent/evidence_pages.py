@@ -18,7 +18,12 @@ from openkb.agent.evidence_generation_protocol import (
     normalize_output,
     representative_output,
 )
-from openkb.agent.evidence_retry import ResponseIncomplete, retry_batches, split_generation
+from openkb.agent.evidence_retry import (
+    ResponseIncomplete,
+    retry_batches,
+    split_generation,
+    split_generation_response,
+)
 from openkb.agent.evidence_units import JSON_FORMAT, output_fits
 from openkb.evidence import Evidence
 from openkb.evidence_context import enclosing_code
@@ -79,6 +84,13 @@ the source topics or explain which material this generated page includes or excl
 Write the required facts directly, preserving genuine source descriptions of scope.
 The review is feedback, not an instruction to invent information or omit required facts.
 Write in the requested language. This bounded part belongs to the same topic as all other parts."""
+
+PAGE_SYSTEM += """\nNative table_objects are complete knowledge objects, not separate cell topics.
+Preserve their rows, columns, merged-cell relationships and literal values together as tables.
+When complete is false, this is a row batch of the SAME object: keep the supplied headers,
+original row/column coordinates and row_offset aligned. First-row position alone does not
+prove a declared header. Reader coordinates and batch metadata are for alignment, not claims
+or headings to add to the knowledge page. Do not invent interpretations for isolated labels."""
 
 PAGE_SYSTEM += "\n" + (
     "For EACH fact quoting a short label, heading or incomplete fragment, "
@@ -162,6 +174,8 @@ def _evidence_windows(fact, reader, base, limits, model):
             yield window(len(view.text))
             start += len(view.text)
             continue
+        if "table_object" in fact:
+            raise ProcessingIncomplete("topic_evidence_exceeds_request_budget", "generation")
         low, high = 0, len(view.text) - 1
         while low < high:
             size = (low + high + 1) // 2
@@ -188,6 +202,7 @@ def _model_facts(facts):
         {
             **{key: fact[key] for key in ("id", "quote", "reference")},
             "source_kind": fact.get("source_kind", "unknown"),
+            **({"table_object": fact["table_object"]} if "table_object" in fact else {}),
         }
         for fact in facts
     ]
@@ -199,6 +214,7 @@ def _generation_fits(base, facts, evidence, limits, model):
     content = "\n\n".join(item["text"] for item in evidence)
     projected = _model_facts(facts)
     payload = generation_payload(base, projected, evidence)
+    projected = payload["facts"]
     title_context = payload.get("title_context")
     review_system = verification_system(title_context)
     representative = representative_output(payload)
@@ -364,6 +380,9 @@ def generate_topic(
         "schema": get_agents_md(wiki),
         "known_targets": _target_window(known_targets, group["title"], model, limits),
     }
+    from openkb.agent.table_objects import generation_batches, table_catalog
+
+    base["_table_catalog"] = table_catalog(facts, reader)
     if len(facts) > 1:
         from openkb.agent.evidence_title_context import topic_title_context
 
@@ -607,6 +626,7 @@ def generate_topic(
             stage="generation",
             on_event=on_event,
             split=split_generation,
+            response_split=split_generation_response,
             checkpoints=checkpoints,
             recovery_key=lambda pairs: checkpoints.key(
                 PAGE_SYSTEM,
@@ -620,15 +640,11 @@ def generate_topic(
         ):
             pass
 
-    for fact in facts:
-        for item in _evidence_windows(fact, reader, base, limits, model):
-            if batch and not _generation_fits(
-                base, batch + [fact], evidence + [item], limits, model
-            ):
-                generate()
-                batch, evidence = [], []
-            batch.append(fact)
-            evidence.append(item)
-    if batch:
+    for pairs in generation_batches(
+        facts,
+        lambda fact: _evidence_windows(fact, reader, base, limits, model),
+        lambda batch, evidence: _generation_fits(base, batch, evidence, limits, model),
+    ):
+        batch, evidence = map(list, zip(*pairs))
         generate()
     return retained.rstrip() + "\n\n" + opening + "\n" + "\n\n".join(contributions) + "\n" + closing

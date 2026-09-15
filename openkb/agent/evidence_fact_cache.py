@@ -71,6 +71,9 @@ class FactCache:
             record = cp.record(key)
             if record is None:
                 continue
+            from openkb.agent.table_recovery import restore_prose
+
+            restore_prose(self, key, record)
             value = record["value"]
             rows = value.get("units") if isinstance(value, dict) else None
             if not isinstance(rows, list) or not rows:

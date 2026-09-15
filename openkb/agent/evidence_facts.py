@@ -60,6 +60,8 @@ def validate_unit(unit, item):
                 for neighbor in [*unit["heading_evidence"], *unit["neighbors"]]
             ],
         }
+        if "table_object" in unit:
+            value["table_object"] = unit["table_object"]
         facts.append({"id": content_id(value), **value})
     return facts
 
@@ -99,6 +101,13 @@ def extract_facts(
     def extract(batch):
         processing_checkpoint("facts")
         cache.set_batch(batch)
+        if all("table_object" in unit for unit in batch):
+            from openkb.agent.table_objects import literal_table_row
+
+            rows = [literal_table_row(unit) for unit in batch]
+            cache.save(batch, rows)
+            on_event({"stage": "facts", "operation": "retain_table_object", "cells": len(batch)})
+            return [fact for unit, row in zip(batch, rows) for fact in validate_unit(unit, row)]
         cached = {unit["id"]: cache.get(unit) for unit in batch}
         pending = [unit for unit in batch if cached[unit["id"]] is None]
         on_event(
