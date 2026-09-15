@@ -142,6 +142,13 @@ class WorkerDiagnostics:
 
     def stage(self, value: dict) -> None:
         self.event(value)
+        if value.get("stage") == "facts" and "cached_blocks" in value:
+            reused, total = value["cached_blocks"], value["blocks"]
+            self.emit(f"事实提取：复用 {reused}/{total} 个片段；待处理 {total - reused} 个")
+            return
+        if value.get("stage") == "planning" and value.get("cached"):
+            self.emit(f"主题规划：复用 {value['topics']} 个主题的已完成规划")
+            return
         if value.get("stage"):
             source = Path(value["source"]).name if value.get("source") else ""
             self.emit(f"阶段：{value['stage']} {source}")

@@ -39,6 +39,7 @@ def compilation_profile(settings, bundle):
                     "evidence_compiler",
                     "evidence_facts",
                     "evidence_fact_cache",
+                    "fact_resume",
                     "evidence_coverage",
                     "evidence_parallel",
                     "evidence_quotes",
@@ -52,6 +53,7 @@ def compilation_profile(settings, bundle):
                     "evidence_generation_protocol",
                     "evidence_title_context",
                     "evidence_plan",
+                    "planning_resume",
                     "planning_candidates",
                     "request_analysis",
                     "shared_analysis",
@@ -157,6 +159,7 @@ class CompilationCheckpoints:
         record["stage_implementation"]["evidence_plan"] = (
             "fc602bbd9c064cc294ddffd20c1d54ee278eabee51a0af32e739b1594c422d87"
         )
+        record["stage_implementation"].pop("planning_resume")
         return content_id(record)
 
     def _key_record(self, system, payload, *, dependencies=None):
@@ -164,6 +167,7 @@ class CompilationCheckpoints:
             "facts": (
                 "evidence_facts",
                 "evidence_fact_cache",
+                "fact_resume",
                 "evidence_units",
                 "table_objects",
                 "table_recovery",
@@ -171,7 +175,7 @@ class CompilationCheckpoints:
                 "evidence_coverage",
                 "evidence_quotes",
             ),
-            "planning": ("evidence_plan", "evidence_retry"),
+            "planning": ("evidence_plan", "planning_resume", "evidence_retry"),
             "generation": (
                 "evidence_pages",
                 "table_objects",

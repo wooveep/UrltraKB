@@ -82,6 +82,16 @@ shows its KB, current stage and individual outcomes. An already indexed input
 may be skipped. A batch can retain completed documents while reporting failed
 or unprocessed ones.
 
+**继续处理** resumes knowledge work from the saved parsing result. It does not
+submit or poll OCR again for an unchanged original; use explicit reparse or
+page recognition to refresh OCR. Identical images in different documents share
+recognition results within the KB, identified by the original image content and
+recognition settings, independently of OCR output text. Original figure positions
+and captions remain local to each document. If an explicit refresh changes a few
+blocks, unchanged facts and complete topic groups remain reusable; only affected
+content and its context need new work. Task logs show how many facts and topics
+were reused.
+
 The document list supports removal and recompilation. Review the preview before
 confirming changes. Recompilation can rewrite knowledge pages; open editor drafts
 are checked against the current saved version before a later save. Structural

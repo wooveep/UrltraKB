@@ -276,6 +276,23 @@ def plan_topics(
 
     processing_checkpoint("planning")
     with progress_scope("planning", len(all_topics), "topics") as progress:
+        recovered = []
+        if resume and hasattr(checkpoints, "checkpoint_keys"):
+            from openkb.agent.planning_resume import completed_windows
+
+            completed = set()
+            for members, groups in completed_windows(
+                checkpoints,
+                PLAN_SYSTEM,
+                topics,
+                payload,
+                lambda value, members: _validate(value, members, entity_types),
+            ):
+                recovered.extend(groups)
+                completed.update(members)
+                progress.advance(len(members))
+                on_event({"stage": "planning", "topics": len(members), "cached": True})
+            topics = [topic for topic in topics if topic not in completed]
         batches = []
         offset = 0
         while offset < len(topics):
@@ -303,9 +320,11 @@ def plan_topics(
             candidates[index] = result
             progress.advance(sum(len(group["members"]) for group in result))
         on_event({"stage": "planning", "operation": "planning_coordination"})
-        ordered = retained_groups + [
-            group for index in sorted(candidates) for group in candidates[index]
-        ]
+        ordered = (
+            retained_groups
+            + recovered
+            + [group for index in sorted(candidates) for group in candidates[index]]
+        )
         with progress_scope("planning_coordination"):
             groups = reconcile_candidates(
                 ordered,

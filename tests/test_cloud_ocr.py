@@ -112,6 +112,9 @@ def test_explicit_queue_rejection_recovers_without_losing_attempts(
         assert result.coverage["status"] == "partial"
         assert len(submissions) == 3
         result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+        assert len(submissions) == 3  # Continue retains the saved parse, including OCR notices.
+        result = refresh(kb_dir, result)
+        result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     from openkb.application.source_history import source_status
 
@@ -333,7 +336,11 @@ def test_known_job_resumes_download_without_repeating_ocr(
             return refresh(kb_dir, previous)
         from openkb.application.source_actions import continue_source
 
-        return continue_source(kb_dir, previous.source_id, version_id=previous.input_version)
+        before = list(calls)
+        continued = continue_source(kb_dir, previous.source_id, version_id=previous.input_version)
+        assert calls == before and continued.parse_id == previous.parse_id
+        refreshed = refresh(kb_dir, continued)
+        return continue_source(kb_dir, refreshed.source_id, version_id=refreshed.input_version)
 
     two = advance(one)
     if corrupt_image_once:

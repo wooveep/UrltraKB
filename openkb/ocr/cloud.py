@@ -212,6 +212,13 @@ class CloudJobs:
         intent = {"source": self.source.id, "page": page, "slice": digest, "profile": profile}
         identity = content_id(intent)
         path = self.store.owned_path(self.store.root / "cloud-jobs" / f"{identity}.json")
+        if not path.exists():
+            from openkb.ocr.cloud_reuse import matching_job
+
+            shared = matching_job(self.store, intent)
+            if shared is not None:
+                path, intent = shared
+                identity = path.stem
         if cache_only and not path.exists():
             return None
         self.path = path
@@ -236,7 +243,7 @@ class CloudJobs:
             parsed = ParseStore(self.store.kb_dir).load(self.record["parse_id"])
             if {
                 k: v for k, v in parsed.profile.items() if k != "assembly"
-            } != profile or parsed.input_key != self.source.input_key:
+            } != profile or parsed.input_key != self.store.version(intent["source"]).input_key:
                 raise CloudIncomplete("cloud_checkpoint_input_mismatch")
             if parsed.profile != parsed_profile:
                 if cache_only:
@@ -398,7 +405,8 @@ class CloudJobs:
                 "reason": reason or "ocr_layout_checked",
             }
         ]
-        parsed = ParseStore(self.store.kb_dir).save(self.source, profile, blocks, quality=quality)
+        owner = self.store.version(self.record["input"]["source"])
+        parsed = ParseStore(self.store.kb_dir).save(owner, profile, blocks, quality=quality)
         self.record.update(
             state="downloaded", parse_id=parsed.id, quality_reason=reason, reason=reason
         )

@@ -86,15 +86,36 @@ class LazyOcr:
         self.backend = None
 
     def page(self, *args, **kwargs):
+        cache = self._image_cache(args, kwargs)
+        if cache is not None:
+            saved = cache.load()
+            if saved is not None:
+                return saved
         if self.backend is None:
             self.backend = _create_backend(self.store, self.source, self.settings, **self.options)
-        return self.backend.page(*args, **kwargs)
+        result = self.backend.page(*args, **kwargs)
+        if cache is not None:
+            cache.save(*result)
+        return result
+
+    def _image_cache(self, args, kwargs):
+        if kwargs.get("input_id") is None:
+            return None
+        from openkb.ocr.image_cache import ImageCache
+
+        page = args[1] if len(args) > 1 else kwargs["page"]
+        return ImageCache(self.store, self.settings, kwargs["input_id"], page, self.options)
 
     def close(self):
         if self.backend is not None:
             self.backend.close()
 
     def cached_page(self, *args, **kwargs):
+        cache = self._image_cache(args, kwargs)
+        if cache is not None:
+            saved = cache.load()
+            if saved is not None:
+                return saved
         if self.backend is not None and hasattr(self.backend, "cached_page"):
             return self.backend.cached_page(*args, **kwargs)
         return None

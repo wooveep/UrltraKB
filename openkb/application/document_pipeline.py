@@ -81,12 +81,22 @@ def _compile_version(
                 journal_source_requests(store, source, budget),
             ):
                 on_event({"stage": stage})
-                parsed = parse_document(
+                if retry_omissions and not force_parse:
+                    parsed = ParseStore(kb_dir).selected(source)
+                    if parsed is not None:
+                        for block in parsed.blocks:
+                            store.asset(block.blob)
+                            for asset in block.assets:
+                                store.asset(asset)
+                        on_event({"stage": "parsing", "cached": True})
+                parsed = parsed or parse_document(
                     kb_dir,
                     source,
                     options=settings.get("parsing"),
                     force=force_parse,
-                    resume_ocr=retry_omissions,
+                    # Continue resumes knowledge work against the saved original
+                    # interpretation. Only explicit reparse/OCR refreshes it.
+                    resume_ocr=False,
                     page_overrides=page_overrides,
                 )
                 for row in parsed.quality:

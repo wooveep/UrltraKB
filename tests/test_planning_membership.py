@@ -88,3 +88,89 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(
         cp.load(getattr(cp, key_method)(plan.PLAN_SYSTEM, changed, dependencies=dependencies))
         is None
     )
+
+
+@pytest.mark.parametrize("removed_member", [False, True])
+@pytest.mark.parametrize("changed_context", [False, True])
+def test_added_topics_preserve_completed_windows_after_ocr_refresh(
+    kb_dir, tmp_path, monkeypatch, changed_context, removed_member
+):
+    from openkb.agent import compiler
+    from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+    from openkb.config import DEFAULT_CONFIG
+    from openkb.evidence import ParseStore
+    from openkb.inputs import prepared_input
+    from openkb.parsing import parse_document
+    from openkb.processing import RequestLimits
+    from openkb.sources import SourceStore
+
+    path = tmp_path / "source.txt"
+    path.write_text("Saved original")
+    with prepared_input(path) as ready:
+        source = SourceStore(kb_dir).intake(ready)
+    parsed = parse_document(kb_dir, source)
+    settings = {**DEFAULT_CONFIG, "model": "openai/offline-test"}
+    limits = RequestLimits.from_config(settings)
+    calls = []
+
+    def request(model, messages, stage, **kwargs):
+        payload = json.loads(messages[-1]["content"])
+        calls.append(list(payload["topic_labels"].values()))
+        return json.dumps(
+            {
+                "topics": [
+                    {
+                        "name": calls[-1][0].lower(),
+                        "title": calls[-1][0],
+                        "kind": "concept",
+                        "members": payload["topics"],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(compiler, "_llm_call", request)
+    monkeypatch.setattr(plan, "MAX_PLAN_TOPICS", 2)
+    cp = CompilationCheckpoints(kb_dir, source, parsed, settings, None)
+    plan.plan_topics(
+        ["Bravo", "Charlie", "Delta", "Echo"],
+        kb_dir,
+        settings,
+        limits,
+        cp,
+        bundle=None,
+        on_event=lambda e: None,
+    )
+    assert len(calls) == 2
+    # A quality-only OCR update changes the parse ID but no planning input.
+    from openkb.evidence import BlockDraft
+
+    updated = ParseStore(kb_dir).save(
+        source,
+        parsed.profile,
+        [BlockDraft("Saved original", "paragraph", parsed.blocks[0].location)],
+        quality=[{"status": "verified", "reason": "ocr_notice_updated"}],
+    )
+    assert updated.id != parsed.id
+    if changed_context:
+        monkeypatch.setattr(
+            plan, "_existing_window", lambda *args: "concepts/existing: Existing page"
+        )
+    resumed = CompilationCheckpoints(kb_dir, source, updated, settings, None)
+    calls.clear()
+    topics = ["Alpha", "Bravo", "Charlie", "Delta"] + ([] if removed_member else ["Echo"])
+    result = plan.plan_topics(
+        topics,
+        kb_dir,
+        settings,
+        limits,
+        resumed,
+        bundle=None,
+        on_event=lambda e: None,
+        resume=True,
+    )
+    assert sorted(m for g in result for m in g["members"]) == topics
+    if changed_context:
+        assert sorted(t for batch in calls for t in batch) == topics
+    else:
+        assert calls == [["Alpha", "Delta"]] if removed_member else calls == [["Alpha"]]

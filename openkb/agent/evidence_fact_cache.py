@@ -108,6 +108,9 @@ class FactCache:
                 except ResponseIncomplete:
                     continue  # Old extraction rules may have admitted an unsupported empty unit.
                 self.rows.setdefault(row["id"], row)
+        from openkb.agent.fact_resume import restore_unchanged
+
+        restore_unchanged(self, keys)
 
     def get(self, unit):
         row = self.rows.get(unit["id"])
