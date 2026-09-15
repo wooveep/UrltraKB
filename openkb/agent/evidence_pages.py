@@ -133,9 +133,16 @@ def _evidence_windows(fact, reader, base, limits, model):
     """Cover the full original scope even when generation has less room than extraction."""
     from dataclasses import replace
 
+    from openkb.agent.table_objects import table_limits
+
+    limits = table_limits(limits, [fact])
+
     scope = Evidence(**fact["scope"])
     neighbors = []
-    for value in fact.get("context_evidence", []):
+    context = fact.get("context_evidence", [])
+    if "table_object" in fact:
+        context = base["_table_catalog"][fact["table_object"]["id"]]["_context_evidence"]
+    for value in context:
         reference = Evidence(**value["reference"])
         view = reader.read(reference, max_chars=reader.complete_bound(reference))
         neighbors.append(
@@ -380,7 +387,7 @@ def generate_topic(
         "schema": get_agents_md(wiki),
         "known_targets": _target_window(known_targets, group["title"], model, limits),
     }
-    from openkb.agent.table_objects import generation_batches, table_catalog
+    from openkb.agent.table_objects import generation_batches, table_catalog, table_limits
 
     base["_table_catalog"] = table_catalog(facts, reader)
     if len(facts) > 1:
@@ -643,7 +650,9 @@ def generate_topic(
     for pairs in generation_batches(
         facts,
         lambda fact: _evidence_windows(fact, reader, base, limits, model),
-        lambda batch, evidence: _generation_fits(base, batch, evidence, limits, model),
+        lambda batch, evidence: _generation_fits(
+            base, batch, evidence, table_limits(limits, batch), model
+        ),
     ):
         batch, evidence = map(list, zip(*pairs))
         generate()

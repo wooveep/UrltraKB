@@ -255,3 +255,78 @@ def test_unmarked_worksheet_regions_and_embedded_tables_keep_distinct_identity()
         blocks.append(SimpleNamespace(id=f"embedded{number}", **draft.__dict__))
     objects = source_table_objects(SimpleNamespace(blocks=blocks), SimpleNamespace(id="source"))
     assert objects["embedded1"]["id"] != objects["embedded2"]["id"]
+
+
+def test_split_table_keeps_its_preceding_condition_in_every_row_batch(
+    kb_dir, tmp_path, model_service
+):
+    import yaml
+
+    config_path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(context_tokens=8192, output_tokens=512)
+    config_path.write_text(yaml.safe_dump(config))
+    path = tmp_path / "scoped.docx"
+    condition = "Only applicable to Linux version 7."
+    rows = [("Name", "Value")] + [(f"limit-{i}", str(i)) for i in range(40)]
+    write_docx(
+        path,
+        f"<w:p><w:r><w:t>{condition}</w:t></w:r></w:p><w:tbl>"
+        + "".join(
+            "<w:tr>"
+            + "".join(f"<w:tc><w:p><w:r><w:t>{v}</w:t></w:r></w:p></w:tc>" for v in row)
+            + "</w:tr>"
+            for row in rows
+        )
+        + "</w:tbl>",
+    )
+    generated = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "generation" and payload.get("table_objects"):
+            generated.append(payload)
+        return evidence_response(payload)
+
+    model_service.respond = respond
+    result = import_document(kb_dir, path)
+    assert result.knowledge_compilation == "completed", result
+    assert not result.omissions
+    assert len(generated) > 1
+    assert all(
+        any(
+            neighbor["text"] == condition
+            for item in batch["evidence"]
+            for neighbor in item["neighbors"]
+        )
+        for batch in generated
+    )
+
+
+def test_document_table_uses_configured_context_headroom_before_row_splitting(
+    kb_dir, tmp_path, model_service
+):
+    import litellm
+    import yaml
+
+    config_path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(context_tokens=4096, max_context_tokens=32768)
+    config_path.write_text(yaml.safe_dump(config))
+    path = tmp_path / "whole.docx"
+    write_table(path, [("Parameter", "Value")] + [(f"limit-{i}", str(i)) for i in range(30)])
+    result = import_document(kb_dir, path)
+    assert result.knowledge_compilation == "completed", result
+    assert not result.omissions
+    generated = [
+        call
+        for call in model_service
+        if json.loads(call["messages"][-1]["content"])["stage"] == "generation"
+    ]
+    assert len(generated) == 1
+    request = generated[0]
+    measured = (
+        litellm.token_counter(model=request["model"], messages=request["messages"])
+        + request["max_tokens"]
+    )
+    assert 4096 < measured <= 32768

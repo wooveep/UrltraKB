@@ -7,6 +7,7 @@ and still passes the usual semantic verification and publication checks.
 
 import re
 from collections import defaultdict
+from dataclasses import replace
 from itertools import groupby
 
 from openkb.processing import ProcessingIncomplete
@@ -43,6 +44,20 @@ def generation_system(system, payload):
     if cells and sorted(cells) == sorted(fact["id"] for fact in payload["facts"]):
         return TABLE_SYSTEM
     return system
+
+
+def table_limits(limits, facts):
+    """Use an already configured context ceiling before dividing a document object.
+
+    Dispatch still expands only as needed, before sending the request. Excel's
+    bulk row batches keep the initial target size; no configured limit is raised.
+    """
+    if facts and all(
+        fact.get("table_object", {}).get("position", {}).get("kind") in {"docx", "pdf", "pptx"}
+        for fact in facts
+    ):
+        return replace(limits, context_tokens=limits.max_context_tokens or limits.context_tokens)
+    return limits
 
 
 def native_position(location):
@@ -232,6 +247,13 @@ def table_catalog(facts, reader):
             "header_rows": sorted(header_rows),
             "header_role": "declared" if declared_rows else "first_row_unconfirmed",
             "cell_count": len(members),
+            "_context_evidence": list(
+                {
+                    content_id(item["reference"]): item
+                    for fact in members
+                    for item in fact.get("context_evidence", [])
+                }.values()
+            ),
         }
     return catalog
 
@@ -242,7 +264,17 @@ def payload_objects(facts, catalog):
         obj = fact.get("table_object")
         if obj is None:
             continue
-        item = objects.setdefault(obj["id"], {**catalog[obj["id"]], "cells": []})
+        item = objects.setdefault(
+            obj["id"],
+            {
+                **{
+                    key: value
+                    for key, value in catalog[obj["id"]].items()
+                    if not key.startswith("_")
+                },
+                "cells": [],
+            },
+        )
         item["cells"].append(
             {
                 "fact_id": fact["id"],

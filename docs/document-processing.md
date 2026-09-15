@@ -153,10 +153,13 @@ to extract a separate topic from each label or value. Original cell/block refere
 headings, attachment identities and merge spans remain available for citations.
 Generation and semantic verification still apply before publication.
 
-Generation first packs the complete table. Only a request-capacity limit partitions
+Generation first packs the complete table, using configured context headroom for
+document tables before partitioning. Dispatch expands only when needed within that
+existing ceiling; it does not raise configured limits. Only a request-capacity limit partitions
 it into complete rows; a merged cell keeps all the rows it spans together. Capacity
 and malformed-response retries follow the same boundaries. A row that cannot fit
 remains explicitly unavailable rather than being cut into unrelated cell fragments.
+The table's surrounding source conditions accompany every row batch.
 Transport timeouts retain the existing unfinished result and do not trigger a blind
 replay of an outstanding request.
 
