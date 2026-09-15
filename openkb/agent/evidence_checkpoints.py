@@ -151,6 +151,14 @@ class CompilationCheckpoints:
         record = self._key_record(system, payload, dependencies=dependencies)
         return plan_keys(record)[0] if payload.get("stage") == "planning" else None
 
+    def preceding_plan_key(self, system, payload, *, dependencies=None):
+        """Same semantic contract before incremental progress; revalidate on use."""
+        record = self._key_record(system, payload, dependencies=dependencies)
+        record["stage_implementation"]["evidence_plan"] = (
+            "fc602bbd9c064cc294ddffd20c1d54ee278eabee51a0af32e739b1594c422d87"
+        )
+        return content_id(record)
+
     def _key_record(self, system, payload, *, dependencies=None):
         stage_modules = {
             "facts": (

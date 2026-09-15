@@ -18,7 +18,11 @@ class WireUsage:
                 value = None
             # Only interpret the OpenAI chat wire contract here. Other provider
             # formats keep their adapter's usage handling. Never retain raw text.
-            if isinstance(value, dict) and isinstance(value.get("choices"), list):
+            if (
+                isinstance(value, dict)
+                and isinstance(value.get("choices"), list)
+                and value.get("object") != "chat.completion.chunk"
+            ):
                 usage = value.get("usage")
                 self.complete = isinstance(usage, dict) and all(
                     type(usage.get(key)) is int and usage[key] >= 0

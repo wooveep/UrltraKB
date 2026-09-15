@@ -35,8 +35,11 @@ def test_short_ids_do_not_relax_duplicate_or_missing_member_checks(members):
         plan._validate(plan.decode_members(row(members), ["Task"]), ["Task"], [])
 
 
+@pytest.mark.parametrize("key_method", ["previous_plan_key", "preceding_plan_key"])
 @pytest.mark.parametrize("valid", [True, False])
-def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkeypatch, valid):
+def test_prior_functional_plan_is_revalidated_before_cache_bridge(
+    kb_dir, monkeypatch, valid, key_method
+):
     from types import SimpleNamespace
 
     from openkb.agent import compiler
@@ -62,7 +65,7 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkey
         "existing_pages": "",
     }
     dependencies = {"catalog_window": "", "schema": request["schema"]}
-    previous = cp.previous_plan_key(plan.PLAN_SYSTEM, request, dependencies=dependencies)
+    previous = getattr(cp, key_method)(plan.PLAN_SYSTEM, request, dependencies=dependencies)
     current = cp.key(plan.PLAN_SYSTEM, request, dependencies=dependencies)
     assert previous != current
     cp.save(previous, row(["Task"] if valid else ["Task", "Old page"]))
@@ -82,5 +85,6 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(kb_dir, monkey
 
     changed = {**request, "existing_pages": "concepts/another-page: Another page"}
     assert (
-        cp.load(cp.previous_plan_key(plan.PLAN_SYSTEM, changed, dependencies=dependencies)) is None
+        cp.load(getattr(cp, key_method)(plan.PLAN_SYSTEM, changed, dependencies=dependencies))
+        is None
     )

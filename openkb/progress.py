@@ -29,6 +29,7 @@ class ProgressStep:
             "cloud_ocr",
             "facts",
             "planning",
+            "planning_coordination",
             "generation",
             "dependencies",
             "parse_cache",

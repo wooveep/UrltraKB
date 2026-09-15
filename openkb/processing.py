@@ -322,15 +322,18 @@ class ExecutionBudget:
             observation = None
             measured = None
             done = None
+            activity = None
             try:
                 options, observation = self.reserve(kwargs, limits)
                 wire_usage = WireUsage(options)
                 measured = self.measurement.begin_request(
                     observation, acquired - waiting, time.monotonic() - acquired, options=options
                 )
-                # Only the transport runs here. It cannot publish Wiki changes.
-                # SDK timeout commonly means idle-read time, so also bound the
-                # elapsed request even when the provider keeps dripping bytes.
+                # Streamed compiler calls measure silence between meaningful
+                # deltas. Other calls retain their elapsed request deadline.
+                from openkb.model_stream import StreamActivity, collect
+
+                activity = StreamActivity() if options.get("stream") else None
                 done = threading.Event()
                 values: list[Any] = []
                 errors: list[BaseException] = []
@@ -338,7 +341,11 @@ class ExecutionBudget:
 
                 def request() -> None:
                     try:
-                        values.append(context.run(function, **options))
+                        values.append(
+                            context.run(collect, function, options, activity)
+                            if activity is not None
+                            else context.run(function, **options)
+                        )
                     except BaseException as exc:
                         errors.append(exc)
                     finally:
@@ -349,6 +356,9 @@ class ExecutionBudget:
                 deadline = time.monotonic() + options["timeout"]
                 while not done.wait(min(0.05, max(0, deadline - time.monotonic()))):
                     self.checkpoint()
+                    if activity is not None:
+                        measured["response_activity"] = activity.snapshot()
+                        deadline = time.monotonic() + max(0, activity.remaining(options["timeout"]))
                     if time.monotonic() >= deadline:
                         # Transport outcome is unknown. End this item; do not
                         # overlap another attempt with an outstanding request.
@@ -356,7 +366,7 @@ class ExecutionBudget:
                             allowance.request_timed_out(options)
                         raise ProcessingIncomplete("request_timeout", self.stage)
                 self.checkpoint()
-                if time.monotonic() >= deadline:
+                if activity is None and time.monotonic() >= deadline:
                     if allowance := active_allowance():
                         allowance.request_timed_out(options)
                     raise ProcessingIncomplete("request_timeout", self.stage)
@@ -391,6 +401,8 @@ class ExecutionBudget:
                         "provider_temporarily_unavailable", self.stage
                     ) from None
             finally:
+                if measured is not None and activity is not None:
+                    measured["response_activity"] = activity.snapshot()
                 if measured is not None and done is not None and not done.is_set():
                     self.measurement.observe_pending(measured)
                 if observation is not None and observation["usage"] is None:
@@ -554,11 +566,25 @@ def cleanup_limit() -> float | None:
 
 
 def model_call(function: Any, **kwargs: Any) -> Any:
+    # Compiler operations already declare their request identity. Streaming is
+    # a transport detail and does not invalidate completed semantic checkpoints.
+    import litellm
+
+    from openkb.execution_measurement import current_operation
     from openkb.execution_receipt import dispatched_output
 
+    if current_operation() and function is litellm.completion:
+        kwargs.setdefault("stream", True)
+        kwargs.setdefault("stream_options", {"include_usage": True})
     dispatched_output(kwargs)
     active = _ACTIVE.get()
-    return active.call(function, **kwargs) if active else function(**kwargs)
+    if active:
+        return active.call(function, **kwargs)
+    if kwargs.get("stream"):
+        from openkb.model_stream import StreamActivity, collect
+
+        return collect(function, kwargs, StreamActivity())
+    return function(**kwargs)
 
 
 async def model_acall(function: Any, **kwargs: Any) -> Any:

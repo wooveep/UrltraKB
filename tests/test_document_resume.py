@@ -324,6 +324,9 @@ def test_planning_is_bounded_and_resume_skips_completed_plans(kb_dir, tmp_path, 
     settings, _ = resolve_effective_config(kb_dir)
     cp = CompilationCheckpoints(kb_dir, source, parsed, settings, None)
     topics = [f"topic-{i:04d}" for i in range(300)]
+    from dataclasses import replace
+
+    limits = replace(RequestLimits.from_config(settings), concurrency=1)
     calls = []
     stopped = False
     import openkb.agent.compiler as compiler
@@ -336,17 +339,24 @@ def test_planning_is_bounded_and_resume_skips_completed_plans(kb_dir, tmp_path, 
         return json.dumps(evidence_response(payload))
 
     monkeypatch.setattr(compiler, "_llm_call", model)
-    with pytest.raises(ProcessingIncomplete):
+    stopping_events = []
+    with progress_reporting(stopping_events.append), pytest.raises(ProcessingIncomplete):
         plan_topics(
             topics,
             kb_dir,
             settings,
-            RequestLimits.from_config(settings),
+            limits,
             cp,
             bundle=None,
             on_event=lambda event: None,
         )
     first = calls[0]
+    assert any(
+        step["completed"] == len(first)
+        for event in stopping_events
+        for step in event["progress"]
+        if step["phase"] == "planning"
+    ), "Completed planning batches disappeared from the stopped progress"
     stopped = True
     calls.clear()
     events = []
@@ -355,7 +365,7 @@ def test_planning_is_bounded_and_resume_skips_completed_plans(kb_dir, tmp_path, 
             topics,
             kb_dir,
             settings,
-            RequestLimits.from_config(settings),
+            limits,
             cp,
             bundle=None,
             on_event=lambda event: None,

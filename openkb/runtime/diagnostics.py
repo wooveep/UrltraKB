@@ -92,7 +92,7 @@ class WorkerDiagnostics:
         self._stack = contextlib.ExitStack()
         self._stop = threading.Event()
         self._lock = threading.RLock()
-        self._active: dict[int, float] = {}
+        self._active: dict[int, tuple[float, Any]] = {}
         self._sequence = 0
         self._sdk = None
         self.warnings: set[str] = set()
@@ -146,15 +146,33 @@ class WorkerDiagnostics:
             source = Path(value["source"]).name if value.get("source") else ""
             self.emit(f"阶段：{value['stage']} {source}")
 
+    def _activity_text(self, activity):
+        value = activity.snapshot()
+        kind = {
+            "waiting": "尚未收到有效内容",
+            "reasoning": "正在接收推理",
+            "content": "正在接收正文",
+        }[value["kind"]]
+        return (
+            f"{kind}；推理 {value['reasoning_characters']} 字符，"
+            f"正文 {value['content_characters']} 字符；距最近有效内容 {value['idle_seconds']:.0f}s"
+        )
+
     def pulse(self) -> None:
         with self._lock:
-            starts = tuple(self._active.values())
-        message = (
-            f"等待模型响应：{len(starts)} 个请求，最长已等待 {time.monotonic() - min(starts):.0f}s"
-            if starts
-            else "工作进程仍存活；当前阶段暂无新的模型请求输出"
-        )
-        self.emit(message, activity=False)
+            active = tuple(self._active.items())
+        if not active:
+            self.emit("工作进程仍存活；当前阶段暂无新的模型请求输出", activity=False)
+            return
+        for call_id, (began, activity) in active:
+            message = (
+                self._activity_text(activity)
+                if activity is not None
+                else "等待完整响应，未观测流式内容"
+            )
+            self.emit(
+                f"LLM #{call_id} {message}；已等待 {time.monotonic() - began:.0f}s", activity=False
+            )
 
     def _heartbeat(self) -> None:
         while not self._stop.wait(15):
@@ -167,10 +185,17 @@ class WorkerDiagnostics:
         original_sync, original_async = sdk.completion, sdk.acompletion
 
         def start(kwargs):
+            from openkb.model_stream import current_activity
+
+            activity = current_activity()
             with self._lock:
                 self._sequence += 1
                 call_id = self._sequence
-                self._active[call_id] = time.monotonic()
+                self._active[call_id] = (time.monotonic(), activity)
+            if activity is not None:
+                activity.notify = lambda: self.emit(
+                    f"LLM #{call_id} {self._activity_text(activity)}"
+                )
             output = kwargs.get("max_completion_tokens", kwargs.get("max_tokens"))
             limit = f" output_limit={output}" if type(output) is int else ""
             self.emit(f"LLM #{call_id} 开始：model={kwargs.get('model', 'unknown')}{limit}")
@@ -178,7 +203,10 @@ class WorkerDiagnostics:
 
         def finish(call_id, result=None, error=None, *, streaming=False):
             with self._lock:
-                began = self._active.pop(call_id)
+                active = self._active.pop(call_id, None)
+            if active is None:
+                return
+            began, activity = active
             elapsed = time.monotonic() - began
             usage = getattr(result, "usage", None)
             tokens = (
@@ -214,6 +242,14 @@ class WorkerDiagnostics:
             except BaseException as exc:
                 finish(call_id, error=exc)
                 raise
+            from openkb.model_stream import current_activity
+
+            activity = current_activity()
+            if kwargs.get("stream") and activity is not None:
+                activity.finished = lambda response, error: finish(
+                    call_id, result=response, error=error
+                )
+                return result
             finish(call_id, result=result, streaming=kwargs.get("stream", False))
             return result
 

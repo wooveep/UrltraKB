@@ -323,7 +323,7 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `output_tokens` | 131072 (128K) | Initial output reserve within that context cap |
 | `max_context_tokens` | 1048576 (1M) | Model context ceiling for adaptive retries |
 | `max_output_tokens` | 393216 (384K) | Model output ceiling for adaptive retries |
-| `request_timeout` | 180 | Seconds per request without an explicit timeout |
+| `request_timeout` | 180 | Seconds without meaningful content during streamed compilation; elapsed seconds for other requests |
 | `stage_timeout` | `null` | Optional total seconds for one processing stage; no default cap |
 | `document_timeout` | `null` | Optional total seconds for the whole document; no default cap |
 | `cleanup_timeout` | 10 | Seconds for auxiliary cleanup or shutdown grace |
@@ -1018,3 +1018,18 @@ Markdown 代码示例及未改动排版保持原字节；答案核验、最终�
 修正后再遇到坏引用仍沿用原允许范围，不能退回整篇改写。无效核验只允许对原答案
 重核一次，不开放全部单元。所有修正和核验仍共用原请求与 tokens/时间额度；
 回答失败不阻止或回滚已经完成的资料导入。
+
+### Model response activity
+
+Synchronous compiler requests receive streaming responses. The request wait resets only
+when a nonempty reasoning or answer delta arrives. Role announcements, empty chunks and
+connection keepalives do not extend it. Explicit stage and document deadlines still apply,
+and a stalled or disconnected response stops the item without overlapping a retry.
+Only a response with a terminal marker is eligible for normal validation and checkpointing.
+
+Task diagnostics distinguish no content yet, reasoning activity and answer activity,
+with character counts and time since the last meaningful delta. These are observed
+characters, not billed tokens. Reasoning text is neither displayed nor stored by this
+activity recorder; final provider usage supplies token counts when available.
+Completed planning batches update progress immediately and retain their validated
+checkpoints when a later batch stops. Continue reuses matching completed inputs.

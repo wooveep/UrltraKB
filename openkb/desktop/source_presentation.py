@@ -2,7 +2,7 @@
 
 KINDS = {"heading": "标题", "paragraph": "正文", "table": "表格", "code": "代码", "image": "图像"}
 REASONS = {
-    "request_timeout": "本轮模型请求等待超时，已完成内容已保留，可继续处理。",
+    "request_timeout": "模型等待超时。流式编译按无新内容时长判断；已完成内容已保留，可继续处理。",
     "request_outcome_unknown": "模型请求的远端执行结果尚不明确，已暂停新增派发并保留进展。",
     "provider_temporarily_unavailable": "服务暂不可用；已保留进展，可继续处理待完成内容。",
     "cloud_queue_full": "云 OCR 队列已满，已保留有界重试记录，可稍后继续。",

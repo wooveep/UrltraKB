@@ -175,6 +175,10 @@ def measure_span(stage):
         _PARENT.reset(token)
 
 
+def current_operation():
+    return _OPERATION.get()
+
+
 @contextmanager
 def request_operation(name):
     token = _OPERATION.set(name)
@@ -263,6 +267,7 @@ def validate_measurement(value):
                 "provider_model",
                 "system_fingerprint",
                 "effective_options",
+                "response_activity",
             }
             if not isinstance(row, dict) or (set(row) - metadata) not in (
                 common | extras,
@@ -302,5 +307,9 @@ def validate_measurement(value):
                 for key in ("provider_model", "system_fingerprint"):
                     if row.get(key) is not None and not isinstance(row[key], str):
                         raise ValueError("Invalid provider model evidence")
+                if "response_activity" in row:
+                    from openkb.model_stream import validate_activity
+
+                    validate_activity(row["response_activity"])
                 if "effective_options" in row and not isinstance(row["effective_options"], dict):
                     raise ValueError("Invalid effective model options")

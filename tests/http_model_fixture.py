@@ -128,6 +128,7 @@ class ModelService(list):
         self.release = threading.Event()
         self.release.set()
         self.drip_seconds = 0.0
+        self.stream_disconnect = False
         self.respond = None
         self.chat_response = None
         self.answer_review_response = None
@@ -231,8 +232,40 @@ def model_service(kb_dir):
                     "usage": calls.usage,
                 }
             ).encode()
+            if body.get("stream"):
+                response = json.loads(content)
+                choice = response["choices"][0]
+                chunks = [
+                    {
+                        "id": "offline",
+                        "object": "chat.completion.chunk",
+                        "created": 1,
+                        "model": body["model"],
+                        "choices": [
+                            {"index": 0, "delta": choice["message"], "finish_reason": None}
+                        ],
+                    },
+                    {
+                        "id": "offline",
+                        "object": "chat.completion.chunk",
+                        "created": 1,
+                        "model": body["model"],
+                        "choices": [
+                            {"index": 0, "delta": {}, "finish_reason": choice["finish_reason"]}
+                        ],
+                        "usage": calls.usage,
+                    },
+                ]
+                if calls.stream_disconnect:
+                    chunks = chunks[:1]
+                content = (
+                    "".join("data: " + json.dumps(c) + "\n\n" for c in chunks)
+                    + ("" if calls.stream_disconnect else "data: [DONE]\n\n")
+                ).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header(
+                "Content-Type", "text/event-stream" if body.get("stream") else "application/json"
+            )
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
             try:

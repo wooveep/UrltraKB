@@ -204,6 +204,14 @@ def plan_topics(
         dependencies = {"catalog_window": request["existing_pages"], "schema": schema}
         key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
         value = checkpoints.load(key)
+        if value is None and hasattr(checkpoints, "preceding_plan_key"):
+            value = checkpoints.load(
+                checkpoints.preceding_plan_key(
+                    PLAN_SYSTEM,
+                    request,
+                    dependencies=dependencies,
+                )
+            )
         if value is None:
             previous = checkpoints.previous_plan_key(
                 PLAN_SYSTEM, request, dependencies=dependencies
@@ -289,21 +297,27 @@ def plan_topics(
         from openkb.agent.evidence_parallel import parallel_batches
         from openkb.agent.planning_candidates import reconcile_candidates
 
-        candidates = dict(parallel_batches(batches, plan, limits.concurrency, stage="planning"))
+        progress.advance(sum(len(group["members"]) for group in retained_groups))
+        candidates = {}
+        for index, result in parallel_batches(batches, plan, limits.concurrency, stage="planning"):
+            candidates[index] = result
+            progress.advance(sum(len(group["members"]) for group in result))
+        on_event({"stage": "planning", "operation": "planning_coordination"})
         ordered = retained_groups + [
             group for index in sorted(candidates) for group in candidates[index]
         ]
-        groups = reconcile_candidates(
-            ordered,
-            plan_once,
-            lambda groups: fits_batch(
-                sorted(member for group in groups for member in group["members"]), candidates=groups
-            ),
-            MAX_PLAN_TOPICS,
-            existing=existing_targets,
-        )
+        with progress_scope("planning_coordination"):
+            groups = reconcile_candidates(
+                ordered,
+                plan_once,
+                lambda groups: fits_batch(
+                    sorted(member for group in groups for member in group["members"]),
+                    candidates=groups,
+                ),
+                MAX_PLAN_TOPICS,
+                existing=existing_targets,
+            )
         planned = {group["path"]: group for group in groups}
-        progress.advance(sum(len(group["members"]) for group in groups))
     if failures:
         from openkb.compilation_report import report_content_omission
         from openkb.sources import content_id

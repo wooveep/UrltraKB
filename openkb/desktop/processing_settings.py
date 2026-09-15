@@ -88,7 +88,7 @@ class ProcessingField(SettingsSection):
                 ("output_tokens", "初始输出（token）", int),
                 ("max_context_tokens", "模型最大上下文（token）", int),
                 ("max_output_tokens", "模型最大输出（token）", int),
-                ("request_timeout", "单次请求时限（秒）", float),
+                ("request_timeout", "模型无内容等待时限（秒）", float),
                 ("stage_timeout", "阶段总时限（秒，0 不限）", lambda text: float(text) or None),
                 ("document_timeout", "资料总时限（秒，0 不限）", lambda text: float(text) or None),
                 ("cleanup_timeout", "任务收尾时限（秒）", float),
