@@ -1,0 +1,137 @@
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/unified-desktop-build]
+    tags: ['v*']
+    paths:
+      - '.github/workflows/desktop-build.yml'
+      - 'scripts/**'
+      - 'packaging/**'
+      - 'openkb/**'
+      - 'assets/fonts/**'
+      - 'skills/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debian:
+    name: Debian 13 / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build native Debian environment
+        run: docker build -f packaging/desktop/Dockerfile -t urltrakb-builder .
+      - name: Freeze, inventory and package
+        run: |
+          docker run --rm -v "$PWD:/workspace" urltrakb-builder bash -euc '
+            git config --global --add safe.directory /workspace
+            python3 scripts/make_packages.py desktop
+            python3 scripts/make_packages.py bundle
+          '
+      - name: Upload Debian package and source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UrltraKB-debian-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-debian-${{ matrix.arch }}
+          path: |
+            build/packages/**/inventory.json
+            build/packages/**/warn-desktop.txt
+            dist/**/*-check/
+          retention-days: 7
+
+  desktop:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: windows-x64
+            build-dir: C:/urltrakb-build
+          - runner: macos-15
+            target: macos-arm64
+            build-dir: build/packages
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.11.13'
+          enable-cache: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.13'
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Freeze and inventory
+        env:
+          BUILD_DIRECTORY: ${{ matrix.build-dir }}
+        run: python scripts/make_packages.py desktop --build-dir "$BUILD_DIRECTORY"
+      - name: Package and verify extracted application
+        env:
+          BUILD_DIRECTORY: ${{ matrix.build-dir }}
+        run: python scripts/make_packages.py bundle --build-dir "$BUILD_DIRECTORY"
+      - name: Upload application and source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UrltraKB-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ matrix.target }}
+          path: |
+            ${{ matrix.build-dir }}/**/inventory.json
+            ${{ matrix.build-dir }}/**/warn-desktop.txt
+            dist/**/*-check/
+          retention-days: 7

@@ -189,6 +189,11 @@ class Inputs:
 def inventory(source: Path, program: Path, analysis: Path) -> dict:
     import PyInstaller
     from PyInstaller.archive.readers import CArchiveReader
+    from PyInstaller.building.utils import process_collected_binary
+    from PyInstaller.config import CONF
+    from PyInstaller.configure import get_config
+
+    CONF.update(get_config())
 
     source, program = source.resolve(), program.resolve()
     identity = verify_source(source)
@@ -205,16 +210,26 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     scripts = {name: inputs.record(path) for name, path, _ in toc[13]}
     collected = {}
     links = {}
+    directory_links = {}
     for name, path, kind in [*toc[15], *toc[18]]:
         name = Path(name).as_posix()
         if kind == "SYMLINK":
             links[name] = path
         else:
             collected[name] = inputs.record(path)
+            if sys.platform == "darwin" and kind in {"BINARY", "EXTENSION"}:
+                processed = process_collected_binary(
+                    path, name, target_arch="arm64", strict_arch_validation=kind == "EXTENSION"
+                )
+                collected[name]["processed_sha256"] = digest(Path(processed))
+                collected[name]["processing"] = "PyInstaller arm64 relocation and ad-hoc signing"
     for name, target in links.items():
         resolved = (program / "_internal" / name).resolve(strict=True)
         if not resolved.is_relative_to(program / "_internal"):
             raise ValueError(f"Collected link escapes program directory: {name}")
+        if resolved.is_dir():
+            directory_links["_internal/" + name] = target
+            continue
         destination = resolved.relative_to(program / "_internal").as_posix()
         if destination not in collected:
             raise ValueError(f"Collected link has no component mapping: {name}")
@@ -238,8 +253,10 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     embedded_bootstrap = {}
     for path in sorted(program.rglob("*")):
         if path.is_dir():
-            if path.is_symlink():
-                raise ValueError("Program directory links require explicit inventory support")
+            if path.is_symlink() and directory_links.get(
+                path.relative_to(program).as_posix()
+            ) != os.readlink(path):
+                raise ValueError("Program directory link differs from build analysis")
             continue
         if not path.is_file():
             raise ValueError(f"Unexpected non-file in program: {path.name}")
@@ -295,7 +312,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
                 if not target.is_relative_to(program) or path.resolve(strict=True) != target:
                     raise ValueError(f"Program link differs from build input: {name}")
                 item["link"] = os.readlink(path)
-            if item["sha256"] != item["input_sha256"]:
+            if item["sha256"] != item.get("processed_sha256", item["input_sha256"]):
                 raise ValueError(f"Collected file differs from its build input: {name}")
         else:
             raise ValueError(f"File has no build input mapping: {name}")
@@ -323,6 +340,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
         },
         "components": {key: inputs.components[key] for key in sorted(inputs.used)},
         "files": files,
+        "directory_links": directory_links,
         "python_modules": modules,
         "bootstrap": embedded_bootstrap,
         "base_library": python_base,

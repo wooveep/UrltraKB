@@ -1,5 +1,59 @@
 # UrltraKB desktop builds and split delivery
 
+## Unified GitHub Actions builds
+
+The **Desktop packages** workflow builds the same commit on four native hosts:
+
+| Output | Build environment | Installation |
+| --- | --- | --- |
+| `UrltraKB-VERSION-debian-amd64.deb` | Debian 13 container, x86_64 runner | `sudo apt install ./FILE.deb` |
+| `UrltraKB-VERSION-debian-arm64.deb` | Debian 13 container, ARM64 runner | `sudo apt install ./FILE.deb` |
+| `UrltraKB-VERSION-windows-x64.zip` | Windows x86_64 runner | Extract; run `UrltraKB.exe` |
+| `UrltraKB-VERSION-macos-arm64.zip` | macOS ARM64 runner | Extract; move `UrltraKB.app` to Applications |
+
+Use Actions → Desktop packages → Run workflow, or:
+
+```sh
+gh workflow run desktop-build.yml --repo wooveep/UrltraKB --ref main
+gh run list --repo wooveep/UrltraKB --workflow desktop-build.yml
+gh run watch RUN_ID --repo wooveep/UrltraKB --exit-status
+gh run download RUN_ID --repo wooveep/UrltraKB --dir downloads
+```
+
+Application/build changes pushed to `main` and `v*` tags also trigger the matrix.
+Each successful target uploads an installer, the exact source export, the native
+inventory, acceptance evidence and `SHA256SUMS.txt`. The package stage extracts
+the installer and runs its CLI and native acceptance runner before uploading.
+No model account or model API key is required for these checks.
+
+Debian packages require Debian 13 or a compatible newer system (glibc 2.41+).
+They install under `/opt/urltrakb`, with a desktop menu entry and the
+`urltrakb`, `urltrakb-cli`, and `urltrakb-api` commands. PySide's pinned ARM64
+wheel requires glibc 2.39+, so Debian 12 is not a supported target.
+macOS requires Apple Silicon and macOS 13+. The app has an ad-hoc signature;
+Developer ID signing and Apple notarization are not configured. Downloaded CI
+apps may require explicit approval in macOS Privacy & Security before launch.
+Optional OCR engines and model weights remain separate installations.
+
+These are development build artifacts, retained in Actions for 14 days. They do
+not publish a GitHub Release or claim the separate source/license release audit
+has been completed. `BUILD-NOTICE.txt` records this scope. The reviewed release
+material assembly below remains the release path; its matching `distribution/`
+can be installed beside the executable (inside `Contents/MacOS` on macOS).
+
+To run the same native stages locally:
+
+```sh
+make desktop
+make bundle
+```
+
+On Linux, use `packaging/desktop/Dockerfile` for the same pinned Debian/Rust/uv
+environment as CI. Both CPU architectures use native runners; the build rejects
+unsupported hosts and does not try to freeze a foreign operating system.
+
+## Reviewed release archives
+
 Build and package the actual UrltraKB desktop, CLI, REST and acceptance entry
 points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
@@ -14,6 +68,7 @@ make help
 make package             # wheel, sdist, local PageIndex wheel and SHA256SUMS.txt
 make desktop             # install locked dependencies, build assets, freeze, inventory
 make verify              # run the frozen acceptance runner
+make bundle              # .deb / Windows zip / macOS app zip, with extraction checks
 # On a headless Linux build host:
 QT_QPA_PLATFORM=offscreen make verify
 make release MATERIALS=/absolute/path/to/matching/full-distribution
@@ -21,7 +76,7 @@ make release MATERIALS=/absolute/path/to/matching/full-distribution
 
 All targets select committed source (`COMMIT=HEAD` by default). Commit changes
 before building them. `COMMIT=<tag-or-sha>` selects another revision. Exports and
-desktop output live in `build/packages/COMMIT12/PLATFORM/source/`; the portable
+desktop output live in `build/packages/COMMIT12/TARGET/source/`; the portable
 program is its `packaging/desktop/dist/UrltraKB/` directory. Python packages go to
 `dist/COMMIT12/python/`, final desktop archives to `dist/COMMIT12/`. Install the
 wheel with `pip install --find-links /path/to/python /path/to/python/openkb-*.whl`
@@ -42,7 +97,7 @@ the commands below also rebuild an extracted source archive without Git.
 
 ## Individual build stages
 
-Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
+Build on Linux x86_64/ARM64, Windows x86_64 or macOS ARM64. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected
 committed source to a new directory:
 

@@ -12,8 +12,11 @@ Runtime archives and their top-level directory are named **UrltraKB**. Full
 source/build materials are a separate `UrltraKB-VERSION-materials.zip` download;
 licenses and the companion archive checksum remain available in About.
 Keep the program's resources together. No developer Python, Node or Rust runtime
-is needed to run a complete portable build. Other Linux desktops, Wayland,
-macOS and ARM have not been accepted as distribution targets.
+is needed to run a complete portable build. Other Linux desktops and Wayland
+still require separate platform acceptance. macOS and ARM have CI targets described in
+[`packaging/desktop/README.md`](../packaging/desktop/README.md#unified-github-actions-builds).
+CI artifacts are separate from the reviewed release archives described here;
+their automated checks do not establish full platform acceptance.
 
 Only one desktop instance runs per OS user. Launching the program again restores
 the existing window, including when it is hidden in the tray. Explicit Quit

@@ -125,7 +125,7 @@ def _program_copy(program, inventory, destination, identity):
         ):
             raise ValueError(f"Program input changed: {name}")
         if not suffix and name in required and not original.stat().st_mode & 0o100:
-            raise ValueError(f"Linux entry point is not executable: {name}")
+            raise ValueError(f"Program entry point is not executable: {name}")
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
         if original.is_symlink():
@@ -134,6 +134,29 @@ def _program_copy(program, inventory, destination, identity):
             target.symlink_to(original.readlink())
         else:
             shutil.copy2(original, target)
+    for name, link in inventory.get("directory_links", {}).items():
+        relative = PurePosixPath(name)
+        if (
+            not name.startswith("_internal/")
+            or relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in name.split("/"))
+            or "\\" in name
+            or ":" in name
+        ):
+            raise ValueError("Unsafe program directory link")
+        original = program / name
+        if (
+            not original.is_symlink()
+            or original.readlink().as_posix() != link
+            or not original.resolve(strict=True).is_relative_to(program.resolve())
+            or not original.is_dir()
+        ):
+            raise ValueError(f"Program directory link changed: {name}")
+        copied = destination / name
+        copied.parent.mkdir(parents=True, exist_ok=True)
+        copied.symlink_to(link, target_is_directory=True)
+        if not copied.resolve(strict=True).is_relative_to(destination.resolve()):
+            raise ValueError("Copied program link escapes its directory")
     for row in rows:
         copied = destination / row["path"]
         if (
