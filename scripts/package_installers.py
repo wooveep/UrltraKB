@@ -1,7 +1,7 @@
-"""Make installable CI build artifacts from a verified native program inventory.
+"""Make installable artifacts from a verified native program inventory.
 
-These development artifacts keep exact source and build evidence alongside the
-installer. Reviewed releases continue to use assemble_distribution/package_desktop.
+Keep exact source and build evidence alongside the installer. Comprehensive
+third-party materials use assemble_distribution/package_desktop separately.
 """
 
 from __future__ import annotations
@@ -90,6 +90,7 @@ def source_archive(source: Path, target: Path) -> None:
 
 def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
     identity = verify_source(source)
+    channel = "development build" if ".dev" in identity["version"] else "release"
     target = desktop_target(inventory["platform"]["system"], inventory["platform"]["machine"])
     if target != desktop_target():
         raise ValueError("Installer packaging must run on the inventoried native host")
@@ -107,10 +108,10 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
         source_record = record(work / names[1], "source")
         write(
             staged / "BUILD-NOTICE.txt",
-            f"UrltraKB development build {identity['version']}\nCommit: {identity['commit']}\n"
+            f"UrltraKB {channel} {identity['version']}\nCommit: {identity['commit']}\n"
             f"Target: {target.name}\nSource: {source_record.name}\n"
             f"Source SHA256: {source_record.sha256}\n"
-            "Built automatically from locked inputs. This is a CI test artifact.\n"
+            "Built automatically from locked inputs; exact application source accompanies it.\n"
             "Reviewed source/license release materials are assembled separately using\n"
             "packaging/desktop/DISTRIBUTION.md. Optional OCR runtimes are installed separately.\n",
         )
@@ -175,7 +176,7 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
             **identity,
             "target": target.name,
             "acceptance_qt_platform": os.environ.get("QT_QPA_PLATFORM") or "native",
-            "scope": "CI build; release materials unaudited",
+            "scope": f"Automated {channel}; third-party release materials unaudited",
             "inventory": inventory,
             "installer_sha256": digest(artifact),
             "source_sha256": source_record.sha256,

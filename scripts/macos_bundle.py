@@ -27,9 +27,11 @@ def bundle_toc(program: Path, inventory: dict) -> list[tuple[str, str, str]]:
 
 
 def info_plist(identity: dict) -> dict:
+    version = identity["version"]
     return {
         "CFBundleDisplayName": "UrltraKB",
-        "CFBundleVersion": identity["version"].split(".dev")[1].split("+")[0],
+        "CFBundleShortVersionString": version.split(".dev")[0] if ".dev" in version else version,
+        "CFBundleVersion": version.split(".dev")[1].split("+")[0] if ".dev" in version else version,
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
@@ -58,7 +60,7 @@ def stage_macos(program: Path, app: Path, identity: dict, inventory: dict) -> Pa
     NativeBundle(
         bundle_toc(program, inventory),
         name=app.name,
-        version="0.1.0",
+        version=info_plist(identity)["CFBundleShortVersionString"],
         bundle_identifier="io.github.wooveep.urltrakb",
         info_plist=info_plist(identity),
         icon=str(

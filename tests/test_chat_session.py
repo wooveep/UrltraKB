@@ -221,8 +221,12 @@ def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
 
 
 @pytest.mark.asyncio
-async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb_dir, monkeypatch):
+@pytest.mark.parametrize("close_after", ["status", "delta"])
+async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(
+    kb_dir, monkeypatch, close_after
+):
     import asyncio
+    from contextlib import aclosing
 
     from agents import RawResponsesStreamEvent, Runner
     from openai.types.responses import ResponseTextDeltaEvent
@@ -257,9 +261,11 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
 
     monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: ModelRun())
     session = ChatSession.new(kb_dir, "test", "en")
-    stream = iter_chat_turn_events(object(), session, "Question")
-    assert (await anext(stream))["event"] == "delta"
-    await stream.aclose()
+    async with aclosing(iter_chat_turn_events(object(), session, "Question")) as stream:
+        event = await anext(stream)
+        assert event == {"event": "status", "stage": "answer_drafting", "data": {}}
+        if close_after == "delta":
+            assert (await anext(stream))["event"] == "delta"
     assert settled.is_set()
     assert not session.path.exists()
 

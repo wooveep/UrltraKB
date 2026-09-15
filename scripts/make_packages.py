@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from desktop_platform import desktop_target
-from export_desktop_source import export_source, verify_source
+from export_desktop_source import export_source, source_version, verify_source
 
 ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
@@ -55,8 +55,8 @@ def main() -> None:
     source = workspace / "source"
     if source.exists():
         identity = verify_source(source)
-        if identity["commit"] != commit:
-            raise ValueError("Existing build directory belongs to another commit")
+        if identity != {"commit": commit, "version": source_version(ROOT, commit)}:
+            raise ValueError("Existing build directory has a different identity; use a fresh one")
     else:
         identity = export_source(ROOT, source, commit)
     environment = dict(os.environ, SETUPTOOLS_SCM_PRETEND_VERSION=identity["version"])

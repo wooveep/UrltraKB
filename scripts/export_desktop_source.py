@@ -1,4 +1,4 @@
-"""Export one committed source tree and bind it to a portable development build."""
+"""Export one committed source tree with its release tag or development identity."""
 
 from __future__ import annotations
 
@@ -48,6 +48,22 @@ _GENERATED = {
     "packaging/desktop/build",
     "packaging/desktop/dist",
 }
+_RELEASE_VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+
+
+def source_version(repo: Path, sha: str) -> str:
+    """Only an exact stable tag can label a commit as a release."""
+    versions = {
+        tag[1:]
+        for tag in _git(repo, "tag", "--points-at", sha).splitlines()
+        if re.fullmatch("v" + _RELEASE_VERSION, tag)
+    }
+    if len(versions) > 1:
+        raise ValueError("Multiple release versions tag the selected commit")
+    if versions:
+        return versions.pop()
+    count = int(_git(repo, "rev-list", "--count", sha))
+    return f"0.1.dev{count}+g{sha[:12]}"
 
 
 def _source(name: str) -> bool:
@@ -130,8 +146,7 @@ def export_source(repo: Path, output: Path, commit: str = "HEAD") -> dict[str, s
     sha = _git(repo, "rev-parse", "--verify", "--end-of-options", f"{commit}^{{commit}}")
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
         raise ValueError("Invalid source commit")
-    count = int(_git(repo, "rev-list", "--count", sha))
-    identity = {"version": f"0.1.dev{count}+g{sha[:12]}", "commit": sha}
+    identity = {"version": source_version(repo, sha), "commit": sha}
     blobs = _blobs(repo, sha)
     if not blobs:
         raise ValueError("No application source at the selected commit")
@@ -184,7 +199,9 @@ def verify_source(root: Path) -> dict[str, str]:
         or not isinstance(record["tree"], str)
         or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", record["tree"])
         or not isinstance(record["version"], str)
-        or not re.fullmatch(r"0\.1\.dev[0-9]+\+g[0-9a-f]{12}", record["version"])
+        or not re.fullmatch(
+            rf"(?:{_RELEASE_VERSION}|0\.1\.dev[0-9]+\+g[0-9a-f]{{12}})", record["version"]
+        )
     ):
         raise ValueError("Invalid committed source inventory")
     for name, digest in record["files"].items():

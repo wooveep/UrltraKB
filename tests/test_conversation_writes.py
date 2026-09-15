@@ -172,7 +172,9 @@ async def test_artifact_event_waits_for_commit_before_delivery(kb_dir, monkeypat
         if event["event"] == "artifact":
             assert path.read_text() == "Saved"
             assert not list((kb_dir / ".openkb/journal").glob("*.json"))
-    assert seen == ["artifact", "delta", "final"]
+        if event["event"] == "status":
+            assert event["stage"] == "answer_saving"
+    assert seen == ["artifact", "delta", "status", "final"]
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,14 @@ UrltraKB has two layers: a **wiki foundation** that compiles and maintains your 
 
 # 🚀 Getting Started
 
+### Desktop downloads
+
+Download the [1.0.0 release](https://github.com/wooveep/UrltraKB/releases/tag/v1.0.0)
+for Debian amd64, Debian arm64, Windows x64 or macOS Apple Silicon. The release
+build uploads installers, matching application sources, build inventories and
+SHA256 checksums after all four targets pass their automated checks.
+See [platform requirements and installation](packaging/desktop/README.md).
+
 ### Install
 
 ```bash

@@ -44,11 +44,19 @@ Developer ID signing and Apple notarization are not configured. Downloaded CI
 apps may require explicit approval in macOS Privacy & Security before launch.
 Optional OCR engines and model weights remain separate installations.
 
-These are development build artifacts, retained in Actions for 14 days. They do
-not publish a GitHub Release or claim the separate source/license release audit
-has been completed. `BUILD-NOTICE.txt` records this scope. The reviewed release
-material assembly below remains the release path; its matching `distribution/`
-can be installed beside the executable (inside `Contents/MacOS` on macOS).
+Branch and manual branch builds are development artifacts retained in Actions
+for 14 days. An exact stable tag such as `v1.0.0` embeds version `1.0.0` in the
+program, package metadata and filenames. After all four tag builds succeed, a
+publication job verifies their source commits, versions and SHA256 hashes, then
+uploads the installers, matching application source ZIPs, build inventories and
+combined `SHA256SUMS.txt` to the GitHub Release. A failed target prevents upload.
+Rerun all targets on the release tag to repeat this publication path.
+
+`BUILD-NOTICE.txt` records the build identity and material scope. Automatic
+publication does not establish the separate third-party source/license audit.
+The comprehensive material assembly below remains available; its matching
+`distribution/` can be installed beside the executable (inside `Contents/MacOS`
+on macOS).
 
 To run the same native stages locally:
 
@@ -116,7 +124,10 @@ committed source to a new directory:
 
 This reads Git objects and excludes workspace changes, private notes and retired
 browser files. It writes `source-export.json` and `openkb/_build_info.json` with
-the commit and a development build version. In the exported directory, set
+the commit and its exact stable tag version, or a development version for an
+untagged commit. A commit with multiple stable version tags is rejected. Use a
+fresh build directory when tagging a previously built development commit.
+In the exported directory, set
 `SETUPTOOLS_SCM_PRETEND_VERSION` to the printed version, then install the desktop,
 API and development extras explicitly:
 

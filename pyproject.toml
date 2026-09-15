@@ -14,7 +14,7 @@ authors = [
     {name = "Ray", email = "ray@vectify.ai"},
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -54,9 +54,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/VectifyAI/OpenKB"
-Homepage = "https://github.com/VectifyAI/OpenKB"
-Issues = "https://github.com/VectifyAI/OpenKB/issues"
+Repository = "https://github.com/wooveep/UrltraKB"
+Homepage = "https://github.com/wooveep/UrltraKB"
+Issues = "https://github.com/wooveep/UrltraKB/issues"
 
 [tool.uv.sources]
 pageindex = { path = "packaging/pageindex/pageindex-0.3.0.dev3+openkb.1-py3-none-any.whl" }

@@ -37,7 +37,8 @@ def test_unsupported_host_fails_explicitly(host):
 
 @pytest.mark.skipif(not shutil.which("dpkg-deb"), reason="native Debian packaging tool")
 @pytest.mark.parametrize("arch", ["amd64", "arm64"])
-def test_debian_metadata_and_extracted_installation(tmp_path, arch):
+@pytest.mark.parametrize("version", ["0.1.dev123+g123456789abc", "1.0.0"])
+def test_debian_metadata_and_extracted_installation(tmp_path, arch, version):
     program = tmp_path / "program"
     (program / "_internal").mkdir(parents=True)
     (program / "UrltraKB").write_text("#!/bin/sh\nexit 0\n")
@@ -46,17 +47,16 @@ def test_debian_metadata_and_extracted_installation(tmp_path, arch):
     (program / "_internal/lib.so").symlink_to("lib.so.1")
     source = Path(__file__).resolve().parents[1]
     root = tmp_path / "package"
-    stage_debian(program, root, source, {"version": "0.1.dev123+g123456789abc"}, arch)
+    stage_debian(program, root, source, {"version": version}, arch)
     deb = tmp_path / "test.deb"
     subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(root), str(deb)], check=True)
     assert (
         subprocess.check_output(["dpkg-deb", "-f", str(deb), "Architecture"], text=True).strip()
         == arch
     )
-    assert (
-        subprocess.check_output(["dpkg-deb", "-f", str(deb), "Version"], text=True).strip()
-        == "0.1~dev123+g123456789abc"
-    )
+    assert subprocess.check_output(
+        ["dpkg-deb", "-f", str(deb), "Version"], text=True
+    ).strip() == version.replace(".dev", "~dev")
     installed = tmp_path / "installed"
     subprocess.run(["dpkg-deb", "--extract", str(deb), str(installed)], check=True)
     assert (installed / "opt/urltrakb/UrltraKB").stat().st_mode & 0o111
@@ -88,6 +88,16 @@ def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
     assert layout["Contents/Frameworks/coloredlogs-15.0.1.dist-info"][1] == "SYMLINK"
     assert layout["Contents/Resources/openkb/_build_info.json"][1] == "DATA"
     assert info_plist(identity)["LSMinimumSystemVersion"] == "14.0"
+
+
+@pytest.mark.parametrize(
+    ("version", "short", "build"),
+    [("1.0.0", "1.0.0", "1.0.0"), ("0.1.dev123+g123456789abc", "0.1", "123")],
+)
+def test_macos_version_supports_stable_releases_and_development_builds(version, short, build):
+    metadata = info_plist({"version": version})
+    assert metadata["CFBundleShortVersionString"] == short
+    assert metadata["CFBundleVersion"] == build
 
 
 def test_program_copy_preserves_mac_framework_links(tmp_path):
