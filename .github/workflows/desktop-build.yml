@@ -102,9 +102,8 @@ jobs:
         with:
           version: '0.11.13'
           enable-cache: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: '3.12.13'
+      - name: Install pinned CPython
+        run: uv python install 3.12.13
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install 1.95.0 --profile minimal
@@ -112,11 +111,11 @@ jobs:
       - name: Freeze and inventory
         env:
           BUILD_DIRECTORY: ${{ matrix.build-dir }}
-        run: python scripts/make_packages.py desktop --build-dir "$BUILD_DIRECTORY"
+        run: uv run --no-project --python 3.12.13 python scripts/make_packages.py desktop --build-dir "$BUILD_DIRECTORY"
       - name: Package and verify extracted application
         env:
           BUILD_DIRECTORY: ${{ matrix.build-dir }}
-        run: python scripts/make_packages.py bundle --build-dir "$BUILD_DIRECTORY"
+        run: uv run --no-project --python 3.12.13 python scripts/make_packages.py bundle --build-dir "$BUILD_DIRECTORY"
       - name: Upload application and source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
