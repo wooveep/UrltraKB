@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -76,7 +77,13 @@ class SourceStages:
         layout.addLayout(controls)
         self.record_text = QPlainTextEdit()
         self.record_text.setReadOnly(True)
-        layout.addWidget(self.record_text, 1)
+        self.record_split = QSplitter(Qt.Orientation.Horizontal)
+        self.record_split.addWidget(self.record_text)
+        self.record_evidence = QPlainTextEdit()
+        self.record_evidence.setReadOnly(True)
+        self.record_evidence.setAccessibleName("关联事实与原文引文")
+        self.record_split.addWidget(self.record_evidence)
+        layout.addWidget(self.record_split, 1)
         self.record_empty_space = QWidget()
         layout.addWidget(self.record_empty_space, 1)
         self.tabs.addTab(records, "已保存的阶段结果")
@@ -93,6 +100,10 @@ class SourceStages:
         layout.addWidget(self.open_published)
         layout.addStretch()
         self.tabs.addTab(published, "已入库知识")
+        from openkb.desktop.source_issue_view import SourceIssueView
+
+        self.issue_view = SourceIssueView(self)
+        self.issue_tab = self.tabs.addTab(self.issue_view, "待处理原文")
 
     def source_activity(self):
         if not self._saved:
@@ -149,14 +160,33 @@ class SourceStages:
             return
         self._selected_stage = key
         self._artifact_request += 1
+        self.issue_view.cancel()
         visible = {
             "intake": (0,),
             "parsing": (1, 2),
             "facts": (5,),
             "planning": (5,),
-            "generation": (5,),
+            "generation": (self.issue_tab, 5),
             "publication": (6, 3, 4, 0),
         }[key]
+        result = (self._saved or {}).get("result") or {}
+        if (
+            key == "generation"
+            and self._saved
+            and not (
+                result.get("omissions")
+                or (result.get("coverage") or {}).get("status") in {"pending", "partial"}
+            )
+        ):
+            visible = (5, self.issue_tab)
+        if key in {"facts", "planning", "generation"}:
+            self.tabs.setTabText(
+                5,
+                {"facts": "事实与引文", "planning": "主题与对应事实", "generation": "生成稿与校验"}[
+                    key
+                ],
+            )
+            self.record_evidence.setVisible(key != "generation")
         if key == "parsing" and ((self._saved or {}).get("source") or {}).get("suffix") != ".pdf":
             visible = (1,)
         self.tabs.setTabVisible(visible[0], True)
@@ -173,6 +203,8 @@ class SourceStages:
             self.load_parse(0)
         elif key in {"facts", "planning", "generation"}:
             self.load_artifacts(0)
+            if key == "generation":
+                self.issue_view.load()
         elif key == "publication":
             self.load_published()
             self.load_navigation(0)
@@ -188,7 +220,8 @@ class SourceStages:
         revision = self._artifact_request
         self.records.clear()
         self.record_text.clear()
-        for widget in (self.records, self.record_previous, self.record_next, self.record_text):
+        self.record_evidence.clear()
+        for widget in (self.records, self.record_previous, self.record_next, self.record_split):
             widget.hide()
         self.record_empty_space.show()
         self.record_previous.setEnabled(False)
@@ -215,7 +248,7 @@ class SourceStages:
                 if value["total"]
                 else "此阶段暂无已保存结果。继续处理会从实际未完成的位置恢复。"
             )
-            for widget in (self.records, self.record_previous, self.record_next, self.record_text):
+            for widget in (self.records, self.record_previous, self.record_next, self.record_split):
                 widget.setVisible(bool(value["total"]))
             self.record_empty_space.setVisible(not value["total"])
             for index, record in enumerate(value["records"], offset + 1):
@@ -239,6 +272,14 @@ class SourceStages:
             self.record_text.setPlainText(
                 record["text"]
                 + ("\n\n［此记录仅显示前 16,000 字符］" if record["truncated"] else "")
+            )
+            self.record_evidence.setPlainText(
+                (
+                    "已保存的相关事实与引文（含历史处理轮次）：\n\n"
+                    if self._selected_stage == "planning"
+                    else "本组事实的原文引文：\n\n"
+                )
+                + record.get("evidence", "")
             )
 
     def load_published(self):

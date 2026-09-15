@@ -48,54 +48,14 @@ def compilation_artifacts(kb_dir, source_id, version_id, parse_id, stage, *, off
         parsed = ParseStore(kb_dir).load(parse_id)
         if source.source_id != source_id or parsed.input_key != source.input_key:
             raise ValueError("Source and parsing identities do not match")
-        root = store.owned_path(store.root / "compilation")
-        latest = store.owned_path(root / "latest" / f"{source.id}.json")
-        keys = read_object(latest).get("checkpoints") if latest.exists() else []
-        if not isinstance(keys, list):
-            raise ValueError("Invalid compilation checkpoint index")
-        paths = [(store.owned_path(root / f"{valid_id(key)}.json"), key, False) for key in keys]
-        if stage == "generation":
-            paths += [
-                (store.owned_path(path), valid_id(path.name.removesuffix("-draft.json")), True)
-                for path in sorted(store.owned_path(root / "recovery").glob("*-draft.json"))
-            ]
+        records = saved_compilation_records(
+            store, source_id, version_id, parse_id, drafts=stage == "generation"
+        )
         matches, count = [], 0
-        for path, key, draft in paths:
-            record = read_object(path)
-            identity = record.get("input")
-            if not isinstance(identity, dict) or (
-                identity.get("source"),
-                identity.get("version"),
-                identity.get("parse"),
-            ) != (source_id, version_id, parse_id):
-                continue
-            value = record.get("value")
-            if record.get("key") != key or record.get(
-                "digest" if draft else "value_digest"
-            ) != content_id(value):
-                raise ValueError("Compilation artifact digest mismatch")
-            if draft:
-                if record.get("kind") != "draft":
-                    raise ValueError("Invalid draft artifact")
-                # A verified response supersedes its older pending draft.
-                if key in keys:
-                    continue
-                value = (
-                    value.get("output") or value.get("revision")
-                    if isinstance(value, dict)
-                    else None
-                )
-            if not isinstance(value, dict):
-                continue
-            found = (
-                "facts"
-                if "units" in value
-                else "planning"
-                if "topics" in value
-                else "generation"
-                if "content" in value
-                else None
-            )
+        for record in records:
+            value, key, draft = record["value"], record["key"], record["draft"]
+            identity = record["input"]
+            found = artifact_stage(record)
             if found != stage:
                 continue
             if offset <= count < offset + limit:
@@ -107,6 +67,11 @@ def compilation_artifacts(kb_dir, source_id, version_id, parse_id, stage, *, off
                         "text": text[:16_000],
                         "truncated": len(text) > 16_000,
                         "model": identity.get("model", ""),
+                        "evidence": _related_facts(
+                            value,
+                            saved_compilation_records(store, source_id, version_id, parse_id),
+                            stage,
+                        ),
                     }
                 )
             count += 1
@@ -141,3 +106,87 @@ def _preview(value, stage):
                 + "、".join(topic.get("members", []))
             )
     return "\n\n".join(parts)
+
+
+def saved_compilation_records(store, source_id, version_id, parse_id, *, drafts=False):
+    """Iterate identity- and digest-checked records under the caller's KB read lock."""
+    root = store.owned_path(store.root / "compilation")
+    latest = store.owned_path(root / "latest" / f"{version_id}.json")
+    keys = read_object(latest).get("checkpoints") if latest.exists() else []
+    if not isinstance(keys, list):
+        raise ValueError("Invalid compilation checkpoint index")
+    paths = [(store.owned_path(root / f"{valid_id(key)}.json"), key, False) for key in keys]
+    if drafts:
+        paths += [
+            (store.owned_path(path), valid_id(path.name.removesuffix("-draft.json")), True)
+            for path in sorted(store.owned_path(root / "recovery").glob("*-draft.json"))
+        ]
+    for path, key, draft in paths:
+        record = read_object(path)
+        identity = record.get("input")
+        if not isinstance(identity, dict) or (
+            identity.get("source"),
+            identity.get("version"),
+            identity.get("parse"),
+        ) != (source_id, version_id, parse_id):
+            continue
+        value = record.get("value")
+        if record.get("key") != key or record.get(
+            "digest" if draft else "value_digest"
+        ) != content_id(value):
+            raise ValueError("Compilation artifact digest mismatch")
+        if draft:
+            if record.get("kind") != "draft":
+                raise ValueError("Invalid draft artifact")
+            # A verified response supersedes its older pending draft.
+            if key in keys:
+                continue
+            value = (
+                value.get("output") or value.get("revision") if isinstance(value, dict) else None
+            )
+        if not isinstance(value, dict):
+            continue
+        contract = record.get("contract")
+        if contract is not None and content_id(contract) != key:
+            raise ValueError("Compilation artifact contract mismatch")
+        yield {**record, "value": value, "draft": draft}
+
+
+def artifact_stage(record):
+    value = record["value"]
+    stage = (record.get("contract") or {}).get("payload", {}).get("stage")
+    if stage is not None and stage not in {"facts", "planning", "generation"}:
+        return None
+    if "units" in value:
+        return "facts"
+    if "topics" in value and all(
+        isinstance(row, dict) and {"name", "kind", "members"} <= row.keys()
+        for row in value["topics"]
+    ):
+        return "planning"
+    if "content" in value:
+        return "generation"
+    return None
+
+
+def _related_facts(value, records, stage):
+    if stage == "generation":
+        return ""
+    topics = {member for group in value.get("topics", []) for member in group["members"]}
+    rows = []
+    size = 0
+    for record in [{"value": value}] if stage == "facts" else records:
+        for unit in record["value"].get("units", []):
+            for fact in unit.get("facts", []):
+                if stage == "facts" or fact.get("topic") in topics:
+                    text = (
+                        f"主题：{fact.get('topic', '')}\n事实：{fact.get('statement', '')}\n"
+                        f"原文引文：{fact.get('quote', '')}"
+                    )
+                    if text not in rows:
+                        remaining = 16_000 - size
+                        rows.append(text[:remaining])
+                        size += len(text) + 2
+                        if size >= 16_000:
+                            return "\n\n".join(rows) + "\n\n［引文预览达到 16,000 字符上限］"
+    return "\n\n".join(rows) or "尚无可关联的已保存事实与引文。"

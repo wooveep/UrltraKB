@@ -83,7 +83,7 @@ def test_stage_clicks_show_saved_content_and_do_not_submit_work(window, kb_dir, 
         ("parsing", 1),
         ("facts", 5),
         ("planning", 5),
-        ("generation", 5),
+        ("generation", panel.issue_tab),
         ("publication", 6),
     ]:
         QTest.mouseClick(panel.flow.buttons[key], Qt.MouseButton.LeftButton)
@@ -91,6 +91,8 @@ def test_stage_clicks_show_saved_content_and_do_not_submit_work(window, kb_dir, 
         assert panel.flow.buttons[key].isChecked()
     panel.flow.buttons["facts"].click()
     assert "37 kPa" in panel.record_text.toPlainText()
+    assert panel.tabs.tabText(5) == "事实与引文"
+    assert "37 kPa" in panel.record_evidence.toPlainText()
     assert panel.stage_buttons["continue"].isVisible()
     assert not panel.stage_buttons["reparse"].isVisible()
     assert not window.manager.requests and calls == before

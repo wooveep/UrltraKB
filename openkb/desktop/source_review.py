@@ -216,6 +216,7 @@ class SourceReview(SourceStages, QDialog):
         self._next = None
         self._evidence_revision += 1
         self._artifact_request += 1
+        self.issue_view.cancel()
         self.content.clear()
         self.record_text.clear()
         self.blocks.clear()
