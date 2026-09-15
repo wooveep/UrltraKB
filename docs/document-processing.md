@@ -9,8 +9,8 @@ for the rest of its batch. Updating settings applies to a new task.
 Each document reports `source_intake`, `knowledge_compilation`, `stage`, `reason`,
 `quality`, `unfinished`, `resources`, `warnings`, `omissions`, `coverage` and `usage`. A completed or
 previously completed identical document is successful. Exhausted local content
-attempts can exclude that content and publish verified siblings; invalid model
-output never becomes published knowledge. Global execution budgets still stop the run. An ordinary failed
+attempts can exclude that content and publish verified siblings; known-invalid model
+output is excluded from published knowledge. Global execution budgets still stop the run. An ordinary failed
 or unfinished document allows the batch to continue; stopping ends the current
 item and remaining items. Already committed documents remain committed.
 
@@ -38,7 +38,7 @@ never automatically replayed from its summary. A confirmed business receipt
 survives failed auxiliary teardown; cleanup warnings are separate from knowledge
 completion.
 
-## Accepted publication policy — 2026-09-13
+## Accepted publication policy — revised 2026-09-15
 
 > 导入文档，异常的情况，可以丢弃，知识可以缺失，任务不能随意中止与判断失败。
 
@@ -51,6 +51,15 @@ keeps omissions visible, and remains editable. See the
 [repair and small-file validation plan](import-repair-plan.md) for implementation
 order, exact acceptance cases and issue closure conditions. New validation uses
 small fixed files; full large-document reruns are not a prerequisite for this work.
+
+The latest acceptance retains key-fact, source-identity and manual-edit protections,
+while accepting explicit omissions, answer refusals and a small set of registered
+model semantic defects for later correction by users. Redundant but supported wording
+is an improvement item. A new fully passing independent sample group, a valid new cold
+comparison and proof of speedup are not conditions for closing this delivery. Historical
+failures and all costs remain reported; none of these decisions certify error-free model
+output. See the [acceptance closure record](import-acceptance-closure.md) and
+[follow-up investigation](import-quality-followup.md) for the current scope and evidence.
 
 Skipping means excluding unreliable content or candidate knowledge from this import,
 while retaining originals, historical evidence and other sources' contributions.
@@ -88,18 +97,20 @@ invented or treated as proof that a fact does not exist. Review and reprocessing
 remain available afterward, with original bytes and evidence identities retained.
 
 The selected knowledge changes still commit through one managed transaction.
-Unverifiable source identity, service/account failures, exhausted execution budgets,
+Unverifiable source identity, global service/account failures, exhausted execution budgets,
 unaccepted new manual overwrites, user stopping and failed transaction recovery
 retain their existing outcomes. A byte-identical regenerated contribution is a no-op:
-Continue preserves manual edits without demanding acceptance of an unchanged candidate. Unsupported generated claims are excluded,
-never published. This is an accepted specification revision; it does not
-claim that every format and error path has already passed implementation checks.
+Continue preserves manual edits without demanding acceptance of an unchanged candidate.
+Claims rejected by the checks are excluded; this does not guarantee that a model detects
+every semantic error. The accepted known defects remain separately tracked, without
+disabling checks or declaring every format and error path fully validated.
 
 
 ### Conservative compilation omissions — accepted revision
 
-The latest acceptance rule is “可以少，不能错误”: uncertain content may be
-excluded instead of requiring document-specific debugging. Existing bounded
+The current acceptance preserves key facts and provenance while allowing explicit
+omissions and registered model limitations. Uncertain content may be excluded instead
+of requiring document-specific debugging. Existing bounded
 validation retries, splitting, one correction and configured adjudication remain
 in place. A valid rejection is retained; repeated import must not reroll it into
 acceptance.
@@ -315,8 +326,9 @@ allowances remain in effect for the rest of that document operation; the next
 document starts at the initial values. At the ceiling, fact extraction, topic
 planning, generation and verification retry smaller batches. A single long
 source span can be split at exact character positions while retaining heading,
-neighbor and asset associations. An indivisible unit that still truncates remains
-unfinished. Partial JSON and unverified knowledge are never saved as completed
+neighbor and asset associations. Persistent truncation of an indivisible unit becomes
+an explicit omission after bounded recovery; independent reliable content still publishes.
+Partial JSON and unverified knowledge are never saved as completed
 checkpoints, and retries do not advance business progress. Every attempted request
 still records usage, including truncated responses and unknown reservations.
 Cancellation, elapsed time and request-count limits still apply across retries.
@@ -370,8 +382,10 @@ only with identical inputs and catalogue dependencies and full current validatio
 A complete model response can still omit or duplicate source IDs. These coverage
 errors now trigger smaller batches instead of immediately ending the document.
 An indivisible unit gets at most `max_attempts` validation attempts; persistent
-failure remains unfinished. Invalid source quotations and malformed fact results
-follow the same bounded recovery. No missing unit is silently accepted or skipped.
+content failure becomes an explicit omission at the applicable block/topic boundary.
+Independent reliable content still publishes, including source registration with zero
+knowledge when nothing survives. Invalid source quotations and malformed fact results
+follow the same bounded recovery. No missing unit is silently accepted or hidden.
 Logs include expected/received/missing/duplicate/unexpected counts, the requested
 output limit and the provider finish reason, without recording document content.
 
@@ -431,8 +445,10 @@ Unreadable PDF pages retain their physical page position and an explicit unknown
 content marker; this change does not infer their text. Storage errors, corrupt
 checkpoints and unknown global quality failures are not treated as omissions.
 
-Persistent factual or semantic defects still prevent the source's final atomic
-knowledge publication. Other completed work remains checkpointed for continuation.
+Persistent detected factual or semantic defects exclude the affected candidates and
+necessary dependent operations, while independent verified content still reaches atomic
+publication. With no verified knowledge, the retained original and editable omission
+summary still register normally. Valid checkpoints remain available for continuation.
 A stage percentage measures processed units/topics, not factual recall or whole
 source publication. Desktop task details show the document's stopping reason and
 recovery hint near the top, separately from worker cleanup status.
@@ -464,9 +480,11 @@ public title and cleaned body against the retained original passages and quotes.
 The request preserves the roles of headings and neighboring blocks. Proposed
 fact statements are planning aids; the original evidence remains authoritative.
 Unsupported drafts receive at most one correction using the review feedback,
-followed by another review. Uncertain, malformed or still-unsupported results
-leave the entire source compilation unfinished. An earlier complete Wiki remains
-available, and the retained original can still be read.
+followed by another review. Uncertain, malformed or still-unsupported results become
+explicit content omissions after bounded recovery; they do not prevent reliable siblings
+or zero-knowledge source registration from completing. Updates preserve historical
+references, other-source contributions and manual-edit protections. The retained original
+can still be read, and users can fill gaps manually.
 
 Link cleanup follows Markdown block and table-cell boundaries. Code examples
 retain their literal links and original line endings; real image links must
@@ -475,8 +493,9 @@ resolve to retained source assets, with their titles preserved.
 Generation, verification and correction share the same generation-stage and
 document budgets. Batch planning includes all three complete request shapes,
 using a lossless candidate and representative review feedback. Unexpected output
-expansion is checked against the actual request limit and can still stop the
-operation; no text is truncated to make it fit. Successful checkpoints bind the
+expansion is checked against the actual request limit; an exhausted local content path
+records an omission, while the global execution cap still stops execution. No text is
+truncated to make it fit. Successful checkpoints bind the
 review verdict to the final public title and body digest. The first accepted title
 is fixed for subsequent parts; changing it later requires a new coherent proposal.
 Changing only `verification_thinking` rechecks generation while retaining valid
@@ -634,8 +653,10 @@ and batches split according to the complete request and a representative JSON
 output envelope. Spans keep their block identity and exact character positions;
 table headers, row/cell locations, surrounding spans and hierarchical heading
 evidence remain available. Each unit must return facts with verbatim quotes or
-an explicit reason for having no facts. Missing coverage, invalid quotes and
-truncated output leave the document unfinished.
+an explicit reason for having no facts. Persistent missing coverage, invalid quotes and
+truncated output become explicit content omissions after bounded recovery. Reliable siblings
+still publish, or the retained original registers with zero knowledge if none survive.
+Global execution caps and source-storage integrity failures retain their stopping outcomes.
 
 The compiler merges topic plans across sections and generates concept/entity
 contributions from reread original spans. Facts are a plan, not a replacement
@@ -852,7 +873,8 @@ verification_adjudication_thinking: enabled
 
 这是知识库级高级设置，默认不启用，不改变事实提取、规划或正常生成的思考模式。
 普通核对未通过时，同一候选最多增加一次指定思考模式的独立复核；复核仍拒绝则
-继续有限纠正或报告未完成。不会循环重试直到通过。所有调用共用原请求、token、
+继续有限纠正，仍不能可靠处理的候选记为内容缺失，独立可靠内容继续发布；全候选
+排除也正常登记原件与零知识缺失入口。不会循环重试直到通过。所有调用共用原请求、token、
 时间和取消预算。普通核对与深度复核各自绑定实际请求和思考模式；改变深度复核设置
 不会使未改变的事实、规划或初次生成失效。已有普通肯定结论无需额外复核，旧深度
 复核记录不能冒充新模式下的结果。
