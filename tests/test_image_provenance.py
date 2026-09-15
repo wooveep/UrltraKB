@@ -191,6 +191,13 @@ def test_long_original_alt_stays_in_bounded_context_not_image_shortcuts(
     kb_dir, tmp_path, model_service
 ):
     from openkb.agent.source_tools import source_tools
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+
+    # This checks native DOCX metadata, not the host's optional OCR engine or startup time.
+    apply_kb_config_patch(
+        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"parsing": {"ocr": {"policy": "off"}}})
+    )
 
     original_alt = "Native description. " * 1000
     source = tmp_path / "long-description.docx"
