@@ -134,16 +134,16 @@ print("UrltraKB")  # fenced_code 中文知识
     unexpected_dialogs: list[str] = []
 
     def observe_dialogs():
-        dialog = QApplication.activeModalWidget()
-        if not isinstance(dialog, QMessageBox):
-            return
-        if dialog.parentWidget() is window and dialog.icon() == QMessageBox.Icon.Warning:
-            unexpected_dialogs.append(dialog.text())
-            dialog.close()
-        elif "failure" in evidence and dialog.text().startswith("后台仍有任务。"):
-            for button in dialog.buttons():
-                if button.text() == "安全停止并退出":
-                    button.click()
+        for dialog in QApplication.topLevelWidgets():
+            if not isinstance(dialog, QMessageBox) or not dialog.isVisible():
+                continue
+            if dialog.parentWidget() is window and dialog.icon() == QMessageBox.Icon.Warning:
+                unexpected_dialogs.append(dialog.text())
+                dialog.close()
+            elif "failure" in evidence and dialog.text().startswith("后台仍有任务。"):
+                for button in dialog.buttons():
+                    if button.text() == "安全停止并退出":
+                        button.click()
 
     observer = QTimer(window)
     observer.timeout.connect(observe_dialogs)

@@ -5,10 +5,11 @@ from pathlib import Path
 
 def verify_sessions(window, kb, wait_until):
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb.agent.chat_session import ChatSession
     from openkb.desktop.sessions import SessionsDialog
+    from openkb.desktop.verification_dialogs import message_box
     from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import session_lock
     from openkb.runtime.requests import ExportConversation
@@ -23,11 +24,8 @@ def verify_sessions(window, kb, wait_until):
     tasks = SubmittedTasks(window.manager, wait_until)
 
     def confirm():
-        modal = QApplication.activeModalWidget()
-        # QMessageBox ignores window titles on macOS; identify the actual prompt.
-        if isinstance(modal, QMessageBox) and modal.informativeText().startswith(
-            "已导出的副本会保留。"
-        ):
+        modal = message_box("已导出的副本会保留。")
+        if modal is not None:
             if stale:
                 session.record_turn("确认之后的新问题", "必须保留的新回答。", [])
             modal.done(QMessageBox.StandardButton.Yes)

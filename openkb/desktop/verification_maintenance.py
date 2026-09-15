@@ -3,9 +3,10 @@
 
 def verify_maintenance(window, kb, wait_until):
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb.desktop.maintenance import MaintenanceDialog
+    from openkb.desktop.verification_dialogs import message_box
     from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import atomic_write_text, kb_ingest_lock
 
@@ -20,8 +21,8 @@ def verify_maintenance(window, kb, wait_until):
     confirmer = QTimer()
 
     def confirm():
-        modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.text().startswith("规范化可匹配的知识链接"):
+        modal = message_box("规范化可匹配的知识链接")
+        if modal is not None:
             if stale:
                 with kb_ingest_lock(kb / ".openkb"):
                     atomic_write_text(page, page.read_text(encoding="utf-8") + "手工编辑。\n")

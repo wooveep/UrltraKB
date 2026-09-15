@@ -5,10 +5,11 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
     import zipfile
 
     from PySide6.QtCore import Qt, QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb.application.artifacts import export_artifact
     from openkb.desktop.artifacts import ArtifactsDialog
+    from openkb.desktop.verification_dialogs import message_box
     from openkb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from openkb.locks import atomic_write_text, kb_ingest_lock
 
@@ -78,8 +79,8 @@ def verify_artifacts(window, kb, wait_until, *, model=False):
             confirmer = QTimer()
 
             def confirm():
-                modal = QApplication.activeModalWidget()
-                if isinstance(modal, QMessageBox) and modal.text().startswith("归档并替换 "):
+                modal = message_box("归档并替换 ")
+                if modal is not None:
                     if stale:
                         with kb_ingest_lock(kb / ".openkb"):
                             atomic_write_text(

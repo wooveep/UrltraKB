@@ -5,9 +5,10 @@ from __future__ import annotations
 
 def verify_recompilation(window, kb, wait_until):
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb.desktop.documents import DocumentsDialog
+    from openkb.desktop.verification_dialogs import message_box
     from openkb.desktop.verification_tasks import SubmittedTasks, finished_document
     from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 
@@ -42,8 +43,8 @@ def verify_recompilation(window, kb, wait_until):
     tasks = SubmittedTasks(window.manager, wait_until)
 
     def confirm():
-        modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.text().endswith("份资料进行重编译？"):
+        modal = message_box("份资料进行重编译？")
+        if modal is not None:
             if stale_confirmation:
                 with kb_ingest_lock(kb / ".openkb"):
                     atomic_write_text(kb / "wiki/concepts/after-confirmation.md", "手工编辑。")
