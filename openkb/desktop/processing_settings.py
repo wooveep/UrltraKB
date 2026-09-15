@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.desktop.form_controls import FocusComboBox
+from openkb.desktop.setting_actions import SettingActions
 from openkb.ocr.config import ParsingSettings
 from openkb.processing import ProcessingIncomplete, RequestLimits
 
@@ -23,6 +24,7 @@ class ValueForm(QWidget):
         self.definitions = definitions
         form = QFormLayout(self)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setSpacing(12)
         for key, label, kind in definitions:
             entry = QLineEdit()
             entry.setAccessibleName(label)
@@ -50,32 +52,35 @@ class SettingsSection(QWidget):
     def __init__(self, explanation):
         super().__init__()
         self.body = QVBoxLayout(self)
-        self.action = FocusComboBox()
-        self.action.addItems(["不变", "设置", "清除覆盖"])
-        self.source = QLabel()
+        self.body.setContentsMargins(16, 16, 16, 16)
+        self.body.setSpacing(12)
+        self.controls = SettingActions()
+        self.action, self.source = self.controls.action, self.controls.source
+        self._original = None
+        self.controls.undoRequested.connect(self.undo)
+        self.body.addWidget(self.controls)
         hint = QLabel(explanation)
+        hint.setObjectName("muted")
         hint.setWordWrap(True)
-        for widget in (self.action, self.source, hint):
-            self.body.addWidget(widget)
+        self.body.addWidget(hint)
 
     def changed(self, *_):
         self.action.setCurrentIndex(1)
 
-    def loaded(self, source):
-        self.source.setText(
-            "当前配置来自："
-            + {"kb": "本库", "global": "全局", "default": "默认"}.get(source, source)
-        )
-        self.action.setCurrentIndex(0)
+    def loaded(self, value, source):
+        self._original = value, source
+        self.controls.load(source)
+
+    def undo(self):
+        if self._original is not None:
+            self.load(*self._original)
 
 
 class ProcessingField(SettingsSection):
     def __init__(self):
         super().__init__(
-            "知识编译默认从 256K 上下文、128K 输出开始；截断后逐档增加到 1M／384K，"
-            "仍截断则拆小批次重试。默认不限制阶段或文档总耗时、累计请求数与 token；"
-            "单次请求仍有超时和重试限制。"
-            "可按模型能力调整；清除覆盖后恢复继承。"
+            "通常保持默认即可。仅在模型有容量限制，或需要控制耗时与用量时调整。"
+            "标注「0 不限」的项目可填 0。"
         )
         self.values = ValueForm(
             [
@@ -106,7 +111,7 @@ class ProcessingField(SettingsSection):
             if values.get(key) is None:
                 values[key] = 0
         self.values.load(values)
-        self.loaded(source)
+        self.loaded(value, source)
 
     def value(self):
         if self.action.currentIndex() == 2:
@@ -130,8 +135,9 @@ class NavigationField(SettingsSection):
         self.enabled = QCheckBox("启用本地导航增强")
         self.enabled.toggled.connect(self.changed)
         self.budget = ProcessingField()
-        self.budget.action.hide()
-        self.budget.source.hide()
+        self.budget.controls.hide()
+        self.enabled.toggled.connect(self.budget.setVisible)
+        self.budget.hide()
         self.body.addWidget(self.enabled)
         self.body.addWidget(self.budget)
         for entry in self.budget.values.inputs.values():
@@ -140,7 +146,7 @@ class NavigationField(SettingsSection):
     def load(self, value, source):
         self.enabled.setChecked(value.enabled)
         self.budget.load(value.processing, source)
-        self.loaded(source)
+        self.loaded(value, source)
 
     def value(self):
         if self.action.currentIndex() == 2:
@@ -170,7 +176,7 @@ class OcrField(SettingsSection):
         self.backend = FocusComboBox()
         self.backend.addItem("系统 OCR（默认）", "system")
         self.backend.addItem("本地飞桨模型", "local")
-        self.backend.addItem("PaddleOCR 云 jobs 服务", "cloud")
+        self.backend.addItem("PaddleOCR 云服务", "cloud")
         self.backend.setAccessibleName("需要 OCR 时使用")
         self.backend.activated.connect(self.changed)
         self.body.addWidget(self.backend)
@@ -226,7 +232,7 @@ class OcrField(SettingsSection):
         self.execution.currentIndexChanged.connect(self.visibility)
         self.backend.currentIndexChanged.connect(self.visibility)
         self.policy.currentIndexChanged.connect(self.visibility)
-        self.advanced = QCheckBox("高级：已有运行环境、资源额度与云连接")
+        self.advanced = QCheckBox("连接与资源选项")
         self.body.addWidget(self.advanced)
         self.tabs = QTabWidget()
         self.body.addWidget(self.tabs)
@@ -300,6 +306,7 @@ class OcrField(SettingsSection):
             self.forms[name] = fields
             layout.addStretch()
             self.tabs.addTab(panel, title)
+        self.backend.activated.connect(self.reveal_connection)
         # Keep short states compact; only the enclosing settings page scrolls.
         self.body.addStretch()
 
@@ -328,7 +335,8 @@ class OcrField(SettingsSection):
             if name == "cloud":
                 for key, entry in self.cloud_options.items():
                     entry.setChecked(saved.get("options", {}).get(key, False))
-        self.loaded(source)
+        self.loaded(value, source)
+        self.reveal_connection()
 
     def value(self):
         if self.action.currentIndex() == 2:
@@ -366,6 +374,11 @@ class OcrField(SettingsSection):
             return ParsingSettings.model_validate({"ocr": result}).model_dump()
         except ValueError:
             raise ValueError("请检查 OCR 路径、模型、像素范围与有限正数额度。") from None
+
+    def reveal_connection(self, *_):
+        if self.backend.currentData() == "cloud":
+            self.advanced.setChecked(True)
+            self.tabs.setCurrentIndex(1)
 
     def visibility(self, *_):
         local = self.backend.currentData() == "local" and self.policy.currentData() != "off"

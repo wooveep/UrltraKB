@@ -25,7 +25,8 @@ docs/internal/
 # does not). The PDFs already tracked on main stay tracked — this only stops
 # new drops from being swept into commits.
 examples/docs/
-
+examples/kb/
+.scratch/
 # Locally assembled native rendering runtimes (included by desktop packaging).
 /openkb/rendering/assets/
 /openkb/rendering/rust-helper/target/

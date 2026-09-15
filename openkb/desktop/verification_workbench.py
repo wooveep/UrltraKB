@@ -29,6 +29,9 @@ def verify_workbench(window, first, other, root, wait):
     for name in ("资料", "知识", "对话", "产物", "任务", "设置", "概览"):
         QTest.mouseClick(button(window, name), Qt.MouseButton.LeftButton)
         wait(lambda: on_page(window, name))
+    from openkb.desktop.verification_reading import verify_reading
+
+    verify_reading(window, root, wait)
     button(window, "资料").click()
     from openkb.desktop.documents import DocumentsDialog
 
@@ -154,6 +157,9 @@ def capture_workbench(window, theme, root, wait):
                 if name == "知识":
                     window.tabs.setCurrentIndex(0)
                     wait(lambda: "与文字保持基线" in window.reader.toPlainText())
+                    wait(window.reader.rendering_stopped)
+                if name == "对话":
+                    wait(window.chat.rendering_stopped)
                 if name == "设置":
                     from openkb.desktop.settings import SettingsDialog
 

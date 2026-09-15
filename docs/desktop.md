@@ -48,6 +48,10 @@ window temporarily compacts navigation; widening restores your saved preference.
 secondary panes without discarding the selected page or draft. Narrow windows
 initially hide the directory. Sources and links always belong to the current
 page; task outputs belong to their task on **任务**, including tasks from another KB.
+Click a directory page once to open it; arrow-key selection also changes the
+reader. Clicking the selected page returns from editing to reading, while drafts
+remain available when switching pages. Following a link updates the selected
+directory item.
 
 **设置 → 外观** offers **跟随系统** (default), **浅色**, and **深色**. The selected
 mode applies to all pages and newly opened dialogs. Appearance and sidebar
@@ -55,6 +59,14 @@ choices use the existing Qt `OpenKB/OpenKB` application identity in the user's
 platform settings, separately from KB/model/credential configuration. The reader's
 zoom is available on the Knowledge page and applies to content previews as well.
 Bundled fonts apply on the first visible frame, without manually changing themes.
+
+In Settings, **应用到** selects all knowledge bases or the current one. Edit current
+values directly, then choose **保存更改** in the fixed footer. Source labels show
+where a value comes from; each field's **⋯** menu can restore inheritance/defaults
+or undo its pending edit. **撤销修改** discards the current scope's unsaved changes.
+Advanced content options start collapsed. Image connection details and navigation
+budgets appear when their features are enabled. API keys remain masked and are
+never read back into the form. Saved settings apply to subsequent tasks.
 
 See [implementation and evidence](desktop-workbench.md) for the scope, assets,
 actual application screenshots and reproducible source acceptance commands.
@@ -88,6 +100,9 @@ Browse summaries, concepts, entities and explorations in **知识** (Knowledge).
 source material, outgoing links and backlinks. Missing or ambiguous targets are
 reported rather than linked to an arbitrary page. Code blocks, tables, images,
 Chinese text, mathematics and the supported Mermaid families display natively.
+The reader uses a bounded text column, spaced headings and styled tables/code.
+Figures and display diagrams fit the available width and resize with the window;
+inline formulas retain their baseline. Switching themes keeps the reading position.
 
 The editor saves through the shared page operations and preserves metadata.
 If another entry point or an external editor changed the page after it was

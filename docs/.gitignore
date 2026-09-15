@@ -20,5 +20,7 @@
 
 !ocr-and-images.md
 !source-index-validation.md
+!inflight-analysis-validation.md
+!small-document-calibration.md
 !adr/
 !adr/0001-source-index-and-shared-analysis.md

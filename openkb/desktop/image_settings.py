@@ -2,7 +2,7 @@
 
 import asyncio
 
-from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel, QLineEdit, QPushButton
+from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from openkb.desktop.form_controls import FocusComboBox
 from openkb.desktop.processing_settings import SettingsSection
@@ -34,7 +34,10 @@ class ImageField(SettingsSection):
         self.authentication.addItem("使用此图片连接的 API Key", "api_key")
         self.authentication.addItem("服务无需鉴权", "none")
         self.supports_images = QCheckBox("此端点与模型支持图片输入（保存后测试确认）")
-        form = QFormLayout()
+        self.connection_form = QWidget()
+        form = QFormLayout(self.connection_form)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(12)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         for label, entry in (
             ("连接方式", self.connection),
@@ -46,7 +49,7 @@ class ImageField(SettingsSection):
         ):
             entry.setAccessibleName(label)
             form.addRow(label, entry)
-        self.body.addLayout(form)
+        self.body.addWidget(self.connection_form)
         self.body.addWidget(self.supports_images)
         for combo in (self.connection, self.provider, self.authentication):
             combo.activated.connect(self.changed)
@@ -60,6 +63,10 @@ class ImageField(SettingsSection):
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
         self.body.addStretch()
+        self.enabled.toggled.connect(self.visibility)
+        self.connection.currentIndexChanged.connect(self.visibility)
+        self.authentication.currentIndexChanged.connect(self.visibility)
+        self.visibility()
 
     def load(self, value, source):
         settings = value or VisionSettings()
@@ -71,7 +78,22 @@ class ImageField(SettingsSection):
             combo.setCurrentIndex(combo.findData(getattr(settings, name)))
         self.model.setText(settings.model)
         self.endpoint.setText(settings.endpoint or "")
-        self.loaded(source)
+        self.loaded(value, source)
+        self.visibility()
+
+    def visibility(self, *_):
+        enabled = self.enabled.isChecked()
+        self.connection_form.setVisible(enabled)
+        self.supports_images.setVisible(enabled)
+        self.test.setVisible(enabled)
+        self.status.setVisible(enabled)
+        form = self.connection_form.layout()
+        independent = self.connection.currentData() == "independent"
+        for entry in (self.provider, self.model, self.endpoint, self.authentication):
+            form.setRowVisible(entry, independent)
+        form.setRowVisible(
+            self.api_key, independent and self.authentication.currentData() == "api_key"
+        )
 
     def value(self):
         if self.action.currentIndex() == 2:

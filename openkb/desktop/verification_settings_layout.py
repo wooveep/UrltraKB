@@ -165,38 +165,32 @@ def verify_settings_layout(window, kb, root, wait):
     # Ignoring wheel input must still scroll the form through the native parent chain.
     panel.editors.setCurrentIndex(1)
     settle()
-    action = panel.fields["processing"].action
-    scroll = action.parentWidget()
+    controls = panel.fields["processing"].controls
+    scroll = controls.parentWidget()
     while scroll is not None and not isinstance(scroll, QScrollArea):
         scroll = scroll.parentWidget()
     check(scroll is not None, "processing form has no scrolling owner")
     if scroll is not None:
         scroll.verticalScrollBar().setValue(0)
         window.theme.setFocus()
-        before = action.currentIndex()
-        # A window-level event exercises hit testing and Qt's ignored-wheel propagation.
-        # sendEvent(control, event) only exercises that control's handler.
-        # QtTest's window wheel injection takes native pixels, including at 150% scale.
+        before = controls.action.currentIndex()
         QTest.wheelEvent(
             window.windowHandle(),
-            QPointF(action.mapTo(window, action.rect().center())) * window.devicePixelRatioF(),
+            QPointF(controls.mapTo(window, controls.rect().center())) * window.devicePixelRatioF(),
             QPoint(0, -120),
         )
         settle()
-        check(action.currentIndex() == before, "native wheel changed unfocused choice")
+        check(controls.action.currentIndex() == before, "wheel changed the pending patch")
         check(scroll.verticalScrollBar().value() > 0, "wheel did not reach form scrollbar")
-        scroll.ensureWidgetVisible(action)
-    # Explicit keyboard and popup selection remain available.
-    action.setFocus()
-    action.setCurrentIndex(0)
-    QTest.keyClick(action, Qt.Key.Key_Down)
-    check(action.currentIndex() == 1, "keyboard selection broken")
-    action.showPopup()
-    QTest.keyClick(action, Qt.Key.Key_Down)
-    QTest.keyClick(action, Qt.Key.Key_Return)
-    action.hidePopup()
-    check(action.currentIndex() == 2, "popup selection broken")
-    action.setCurrentIndex(0)
+        scroll.ensureWidgetVisible(controls)
+    # Restoration is an explicit keyboard-accessible action, separate from editing.
+    controls.more.setFocus()
+    controls.more.menu().popup(controls.more.mapToGlobal(controls.more.rect().bottomLeft()))
+    QTest.keyClick(controls.more.menu(), Qt.Key.Key_Down)
+    QTest.keyClick(controls.more.menu(), Qt.Key.Key_Return)
+    check(controls.action.currentIndex() == 2, "keyboard reset action broken")
+    controls.undo.trigger()
+    check(controls.action.currentIndex() == 0, "undo did not restore the saved section")
 
     dialog = SettingsDialog(window.io, None, window)
     dialog.resize(760, 460)

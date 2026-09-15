@@ -118,14 +118,14 @@ class Appearance(QObject):
                 QMainWindow, QDialog, QWidget#workspace {{ background: {bg}; }}
                 QLabel {{ background: transparent; }}
                 QLabel#brand {{ font-size: 17px; font-weight: 500; }}
-                QLabel#pageTitle, QLabel#conversationTitle {{ font-size: 16px; font-weight: 500; }}
-                QLabel#welcomeTitle {{ font-size: 32px; font-weight: 500; }}
+                QLabel#pageTitle {{ font-size: 20px; font-weight: 700; }}
+                QLabel#conversationTitle {{ font-size: 16px; font-weight: 500; }}
+                QLabel#welcomeTitle {{ font-size: 34px; font-weight: 700; }}
                 QLabel#eyebrow {{ color: {accent}; font-size: 13px; font-weight: 500; }}
-                QLabel#sectionTitle {{ font-size: 14px; font-weight: 500; }}
+                QLabel#sectionTitle {{ font-size: 16px; font-weight: 500; }}
                 QLabel#overviewIntro {{ color: {muted}; font-size: 14px; }}
                 QFrame#overviewSummary {{
-                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                        stop: 0 {surface}, stop: 0.35 {surface}, stop: 1 {colors.hero_tint});
+                    background: {surface};
                     border: 1px solid {border}; border-radius: 14px; }}
                 QLabel#overviewStats {{ color: {text}; border: 0; padding: 10px 0;
                     font-size: 22px; font-weight: 500; }}
@@ -134,10 +134,10 @@ class Appearance(QObject):
                 QLabel#drawerTitle {{ font-size: 17px; font-weight: 500; }}
                 QFrame#navigation {{ background: {colors.sidebar}; border: 0;
                     border-right: 1px solid {border}; }}
-                QFrame#topbar {{ background: {bg}; border: 0;
+                QFrame#topbar {{ background: {surface}; border: 0;
                     border-bottom: 1px solid {border}; }}
                 QPushButton, QToolButton, QComboBox {{ background: {surface};
-                    border: 1px solid {border}; border-radius: 8px; padding: 7px 12px;
+                    border: 1px solid {border}; border-radius: 9px; padding: 7px 12px;
                     min-height: 20px; }}
                 QToolButton {{ padding: 6px; }}
                 QComboBox {{ padding-right: 24px; }}
@@ -150,14 +150,12 @@ class Appearance(QObject):
                     background: {selection}; }}
                 QToolButton#navigationToggle:focus, QToolButton#applicationMenu:focus {{
                     border-color: {accent}; }}
-                QFrame#navigation QPushButton {{ text-align: left; padding: 7px 10px;
-                    font-size: 18px; color: {muted}; background: transparent;
-                    border-color: transparent; border-left: 3px solid transparent; }}
+                QFrame#navigation QPushButton {{ text-align: left; padding: 8px 12px;
+                    font-size: 15px; color: {muted}; background: transparent;
+                    border: 1px solid transparent; border-radius: 10px; }}
                 QFrame#navigation QPushButton:hover {{ background: {selection}; }}
                 QFrame#navigation QPushButton:checked {{
-                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                        stop: 0 {selection}, stop: 1 {colors.sidebar});
-                    color: {accent}; border-left-color: {accent}; font-weight: 500; }}
+                    background: {selection}; color: {accent}; font-weight: 500; }}
                 QPushButton:hover, QToolButton:hover, QComboBox:hover {{ background: {selection}; }}
                 QPushButton:checked, QToolButton:checked {{ background: {selection};
                     color: {accent}; font-weight: 500; }}
@@ -191,13 +189,11 @@ class Appearance(QObject):
                 QFrame#documentRemoval {{ background: {surface};
                     border: 1px solid {border}; border-radius: 8px; }}
                 QPushButton#primaryAction, QPushButton#sendButton {{
-                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                        stop: 0 {colors.primary}, stop: 1 {colors.primary_end});
+                    background: {colors.primary};
                     color: {colors.on_accent};
                     border: 1px solid {colors.primary_end}; font-weight: 500; }}
                 QPushButton#primaryAction:hover, QPushButton#sendButton:hover {{
-                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                        stop: 0 {colors.accent_hover}, stop: 1 {colors.accent_pressed});
+                    background: {colors.accent_hover};
                     border-color: {colors.accent_hover}; }}
                 QPushButton#primaryAction:pressed, QPushButton#sendButton:pressed {{
                     background: {colors.accent_pressed}; }}
@@ -215,14 +211,38 @@ class Appearance(QObject):
                 QPushButton#taskStatus[status="attention"] {{
                     color: {colors.attention}; background: {colors.attention_surface}; }}
                 QPushButton#taskStatus:focus {{ border-color: {accent}; }}
-                QToolButton#overviewShortcut {{ padding: 16px 24px; border-radius: 12px; }}
+                QToolButton#overviewShortcut {{ padding: 24px 28px; border-radius: 14px;
+                    text-align: left; font-size: 15px; }}
                 QToolButton#overviewShortcut:hover {{ border-color: {accent};
                     background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
                         stop: 0 {surface}, stop: 1 {selection}); }}
+                QFrame#settingsCard {{ background: {surface};
+                    border: 1px solid {border}; border-radius: 14px; }}
+                QFrame#settingsFooter {{ background: transparent;
+                    border: 0; border-top: 1px solid {border}; }}
+                QLabel#settingSource {{ color: {muted}; font-size: 11px; }}
+                QToolButton#settingMenu {{ background: transparent;
+                    border-color: transparent; padding: 3px 7px; }}
+                QToolButton#settingMenu:hover {{ background: {selection}; }}
+                QToolButton#settingMenu:focus {{ border-color: {accent}; }}
+                QToolButton#disclosure {{ background: transparent; border: 0;
+                    color: {muted}; text-align: left; padding: 8px 4px; }}
+                QToolButton#disclosure:checked {{ color: {accent}; }}
+                QToolButton#disclosure:focus {{ background: {selection}; }}
+                QTreeWidget#knowledgeDirectory {{ background: {surface};
+                    border: 1px solid {border}; border-radius: 12px; padding: 8px; }}
+                QTreeWidget#knowledgeDirectory::item {{ padding: 8px 4px;
+                    border-radius: 6px; min-height: 22px; }}
                 QTabWidget::pane {{ border: 0; }}
                 QTabBar::tab {{ background: transparent; color: {muted}; padding: 9px 14px;
                     border-bottom: 2px solid transparent; }}
                 QTabBar::tab:selected {{ color: {accent}; border-bottom: 2px solid {accent}; }}
+                QTabWidget#settingsCategories QTabBar::tab {{ padding: 9px 12px;
+                    margin: 0 4px 8px 0; border: 0; border-radius: 8px; }}
+                QTabWidget#settingsCategories QTabBar::tab:selected {{
+                    background: {selection}; color: {accent}; }}
+                QTabWidget#settingsCategories QTabBar::tab:hover {{ background: {colors.subtle}; }}
+                QCheckBox {{ spacing: 8px; padding: 4px 0; }}
                 QSplitter::handle {{ background: {bg}; width: 12px; height: 12px; }}
                 QScrollArea {{ background: transparent; border: 0; }}
                 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 3px 1px; }}

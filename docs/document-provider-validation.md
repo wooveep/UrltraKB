@@ -1,5 +1,22 @@
 # Authenticated document-provider validation
 
+## 2026-09-13 bounded cloud OCR calibration
+
+A separately authorized small-document calibration submitted **5 pages** to the
+PaddleOCR-VL-1.6 jobs API, within a new 50-page ceiling. The historical two-page
+scan retained all nine checked claims, commands, numbers, conditions and negation.
+One rasterized table page preserved its four rows, three metric columns, headers,
+body and two formulas. Two mixed native-text/figure pages failed required-image
+asset validation; one raw response contained extensively repeated figure text.
+Native text availability is not an OCR pass. Original inputs, page assets,
+parses and cloud job receipts were saved in the user-designated validation KB.
+
+This run did not repeat the hardware/platform checks below, perform long-scan
+acceptance, or regenerate the pump knowledge to recheck the historical
+isolation-valve/drain-valve link. See the [small-document calibration report](small-document-calibration.md)
+for limits, cumulative cost, failures and the remaining acceptance work. The
+following sections retain the earlier 2026-09-10 evidence and its separate budget.
+
 On 2026-09-10, the shared document operation was exercised with the official
 PaddleOCR jobs service and `deepseek/deepseek-v4-flash` on Debian 13 x64 and
 Windows 11 x64 (build 26100), both using CPython 3.12.13. Two-page OCR, retained

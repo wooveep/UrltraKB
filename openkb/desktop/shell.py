@@ -20,6 +20,15 @@ from openkb.desktop.brand import NAME, mark_icon
 from openkb.desktop.navigation_icons import navigation_icon
 
 PAGES = ("概览", "资料", "知识", "对话", "产物", "任务", "设置")
+PAGE_HINTS = {
+    "概览": "连接资料，积累知识",
+    "资料": "导入与管理原始资料",
+    "知识": "阅读、连接与完善你的知识",
+    "对话": "从知识库中寻找答案",
+    "产物": "查看与导出创作成果",
+    "任务": "查看处理进度与结果",
+    "设置": "按你的习惯，设置工作台",
+}
 
 
 def action(label, callback, parent=None):
@@ -43,8 +52,8 @@ class WorkbenchShell(QWidget):
         self.navigation = QFrame()
         self.navigation.setObjectName("navigation")
         nav = QVBoxLayout(self.navigation)
-        nav.setContentsMargins(10, 14, 10, 12)
-        nav.setSpacing(4)
+        nav.setContentsMargins(12, 20, 12, 16)
+        nav.setSpacing(6)
         self.brand_row = QWidget()
         brand = QHBoxLayout(self.brand_row)
         brand.setContentsMargins(6, 0, 0, 12)
@@ -94,7 +103,13 @@ class WorkbenchShell(QWidget):
         self.title = QLabel("概览")
         self.title.setObjectName("pageTitle")
         self.title.setAccessibleName("当前工作区")
-        top.addWidget(self.title)
+        heading = QVBoxLayout()
+        heading.setSpacing(3)
+        heading.addWidget(self.title)
+        self.subtitle = QLabel(PAGE_HINTS["概览"])
+        self.subtitle.setObjectName("muted")
+        heading.addWidget(self.subtitle)
+        top.addLayout(heading)
         top.addSpacing(12)
         window.kbs = QComboBox()
         window.kbs.setAccessibleName("当前知识库")
@@ -146,6 +161,7 @@ class WorkbenchShell(QWidget):
         if self.window._quitting and name != "任务":
             return
         self.title.setText(name)
+        self.subtitle.setText(PAGE_HINTS[name])
         self.buttons[name].setChecked(True)
         self.stack.setCurrentIndex(PAGES.index(name))
         self.window.workspaces.activate(name)
@@ -162,7 +178,7 @@ class WorkbenchShell(QWidget):
 
     def update_navigation(self):
         compact = self._compact if self.width() < 1080 else not self.expanded
-        self.navigation.setFixedWidth(64 if compact else 232)
+        self.navigation.setFixedWidth(72 if compact else 208)
         self.brand_name.setVisible(not compact)
         self.mark.setVisible(not compact)
         self.brand_row.layout().setContentsMargins(0 if compact else 6, 0, 0, 12)
@@ -184,7 +200,11 @@ class WorkbenchShell(QWidget):
             self.task_status.style().polish(self.task_status)
             self.task_status.update()
         self.task_status.setText(
-            f"任务 · {running + attention}" if self.width() < 1000 else description
+            "任务"
+            if not running and not attention
+            else f"任务 · {running + attention}"
+            if self.width() < 1000
+            else description
         )
 
     def resizeEvent(self, event):
@@ -192,6 +212,7 @@ class WorkbenchShell(QWidget):
             self._compact = event.size().width() < 1080
         self.update_navigation()
         narrow = event.size().width() < 1080
+        self.subtitle.setVisible(not narrow)
         margin = 12 if narrow else 26
         self.top_layout.setContentsMargins(margin, 10, margin, 10)
         self.content_layout.setContentsMargins(margin, 8 if narrow else 12, margin, 12)

@@ -19,10 +19,21 @@ def verify_settings(window, kb, wait_until):
     wait_until(lambda: dialog.form.isEnabled())
     try:
         language, key = dialog.fields["language"], dialog.fields["api_key"]
-        language.action.setCurrentIndex(1)
-        language.text.setText("Chinese")
-        key.action.setCurrentIndex(1)
-        key.text.setText("native-settings-fixture-secret")
+        from PySide6.QtTest import QTest
+
+        assert not dialog.save_button.isEnabled()
+        assert language.text.text() == language.text.placeholderText()
+        language.text.setFocus()
+        language.text.selectAll()
+        QTest.keyClicks(language.text, "Chinese")
+        assert language.action.currentIndex() == 1 and dialog.save_button.isEnabled()
+        language.controls.undo.trigger()
+        assert language.action.currentIndex() == 0 and not dialog.save_button.isEnabled()
+        language.text.selectAll()
+        QTest.keyClicks(language.text, "Chinese")
+        key.text.setFocus()
+        QTest.keyClicks(key.text, "native-settings-fixture-secret")
+        assert key.action.currentIndex() == 1
         dialog.save()
         wait_until(lambda: dialog.form.isEnabled())
         saved = read_settings_view(kb)
@@ -30,8 +41,12 @@ def verify_settings(window, kb, wait_until):
         assert saved.values.has_api_key and saved.sources["api_key"] == "kb"
         assert "native-settings-fixture-secret" not in saved.model_dump_json()
         assert not key.text.text()
-        language.action.setCurrentIndex(2)
-        key.action.setCurrentIndex(2)
+        assert "已保存" in dialog.save_state.text()
+        assert not dialog.save_button.isEnabled()
+        language.controls.reset.trigger()
+        key.controls.reset.trigger()
+        assert not language.text.isEnabled()
+        assert dialog.save_button.isEnabled()
         dialog.save()
         wait_until(lambda: dialog.form.isEnabled())
         cleared = read_settings_view(kb)

@@ -191,10 +191,27 @@ class Workspaces:
         layout.addWidget(w.location)
         self.reading = QSplitter()
         w.pages = QTreeWidget()
+        w.pages.setObjectName("knowledgeDirectory")
         w.pages.setHeaderLabel("知识目录")
         w.pages.setMinimumWidth(160)
         w.pages.setMaximumWidth(320)
-        w.pages.itemActivated.connect(w._activate_page)
+        # Selection covers one mouse click and keyboard navigation. Activation
+        # (often a double click) must not issue a second asynchronous page read.
+        w.pages.currentItemChanged.connect(
+            lambda current, previous: w._activate_page(current, 0) if current else None
+        )
+        w.pages.setExpandsOnDoubleClick(False)
+        w.pages.itemClicked.connect(
+            lambda item, column: item.setExpanded(not item.isExpanded())
+            if item.childCount()
+            else None
+        )
+        w.pages.itemClicked.connect(
+            lambda item, column: w.tabs.setCurrentIndex(0)
+            if w.page
+            and (item.data(0, Qt.ItemDataRole.UserRole) or "").removesuffix(".md") == w.page.path
+            else None
+        )
         self.reading.addWidget(w.pages)
         w.tabs = QTabWidget()
         w.reader = MarkdownView()
@@ -238,6 +255,19 @@ class Workspaces:
         else:
             self._directory_wide = self.directory_toggle.isChecked()
         self.resize_reading(self._narrow)
+
+    def select_page(self, path):
+        """Reflect link navigation without issuing another page read."""
+        tree = self.window.pages
+        matches = tree.findItems("*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive)
+        for item in matches:
+            target = item.data(0, Qt.ItemDataRole.UserRole)
+            if target and target.removesuffix(".md") == path:
+                blocked = tree.blockSignals(True)
+                tree.setCurrentItem(item)
+                tree.scrollToItem(item)
+                tree.blockSignals(blocked)
+                return
 
     def toggle_context(self):
         # On narrow windows secondary panes share the reading space, never stack up.
@@ -420,20 +450,40 @@ class Workspaces:
     def _settings(self):
         w = self.window
         layout = self.hosts["设置"]
+        content, body = page()
+        content.setMaximumWidth(1040)
+        centered = QHBoxLayout()
+        centered.setContentsMargins(0, 0, 0, 0)
+        centered.addStretch()
+        centered.addWidget(content, 1)
+        centered.addStretch()
+        layout.addLayout(centered, 1)
         row = QHBoxLayout()
+        row.addWidget(QLabel("应用到"))
+        self.settings_scope = FocusComboBox()
+        self.settings_scope.setAccessibleName("设置范围")
+        self.settings_scope.addItems(["所有知识库", "当前知识库"])
+        self.settings_scope.setMinimumWidth(150)
+        self.settings_scope.setMaximumWidth(300)
+        self.settings_scope.setSizeAdjustPolicy(
+            FocusComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        row.addWidget(self.settings_scope)
+        row.addStretch()
         row.addWidget(QLabel("外观"))
         w.theme = FocusComboBox()
         w.theme.setAccessibleName("应用主题")
         for label, value in (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark")):
             w.theme.addItem(label, value)
         row.addWidget(w.theme)
-        row.addStretch()
-        row.addWidget(action("关于 UrltraKB", w._about))
-        layout.addLayout(row)
+        body.addLayout(row)
         self.settings_tabs = QTabWidget()
         self.settings_tabs.setAccessibleName("设置范围")
+        self.settings_tabs.tabBar().hide()
+        self.settings_scope.currentIndexChanged.connect(self.settings_tabs.setCurrentIndex)
+        self.settings_tabs.currentChanged.connect(self.settings_scope.setCurrentIndex)
         self.settings_tabs.currentChanged.connect(self.refresh_settings)
-        layout.addWidget(self.settings_tabs, 1)
+        body.addWidget(self.settings_tabs, 1)
 
     def refresh_settings(self):
         selected = self.settings_tabs.currentWidget()
@@ -478,6 +528,13 @@ class Workspaces:
         self.history_drawer.set_content(None)
         self.context_drawer.set_open(False, immediate=True)
         enabled = self.window.kb is not None
+        self.settings_scope.model().item(1).setEnabled(enabled)
+        self.settings_scope.setItemText(
+            1, f"当前知识库 · {self.window.kb.name}" if enabled else "当前知识库（未打开）"
+        )
+        self.settings_scope.setItemData(
+            1, str(self.window.kb) if enabled else "请先打开知识库", Qt.ItemDataRole.ToolTipRole
+        )
         self.shortcuts.setEnabled(enabled)
         self.import_controls.setEnabled(enabled)
         self.watches.root = self.window.kb
