@@ -87,7 +87,9 @@ def _with_global_config_lock(*, recover=True, **wait_options) -> Iterator[None]:
 
     with file_write_lock(GLOBAL_CONFIG_DIR / "global.lock", **wait_options) as first:
         if first and recover:
-            for message in recover_pending_journals(GLOBAL_CONFIG_DIR):
+            for message in recover_pending_journals(
+                GLOBAL_CONFIG_DIR, lock_path=GLOBAL_CONFIG_DIR / "global.lock"
+            ):
                 logger.warning(message)
         cancelled = wait_options.get("cancelled")
         if cancelled and cancelled():

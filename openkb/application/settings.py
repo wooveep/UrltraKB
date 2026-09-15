@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
@@ -429,7 +428,7 @@ def apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
     """Save config and credentials together, or restore both on failure."""
     if not (kb_dir / ".openkb/config.yaml").is_file():
         raise FileNotFoundError(f"Knowledge base not found: {kb_dir}")
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".openkb"), _with_global_config_lock():
         with mutation_scope(
             kb_dir, [kb_dir / ".openkb/config.yaml", kb_dir / ".env"], operation="settings"
         ):
@@ -440,10 +439,9 @@ def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
     """Read native settings with field origins, retaining existing API responses."""
     from dotenv import dotenv_values
 
-    with (
-        kb_read_lock(kb_dir / ".openkb") if kb_dir else nullcontext(),
-        _with_global_config_lock(),
-    ):
+    from openkb.settings_access import settings_read_lock
+
+    with settings_read_lock(kb_dir):
         values = _read_kb_config(kb_dir) if kb_dir else _read_global_config()
         global_config = _load_global_config_unlocked()
         sources: dict[str, str] = (

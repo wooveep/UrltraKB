@@ -147,6 +147,12 @@ after obtaining access to the KB. A running task keeps that configuration;
 an entire batch shares its initial configuration across its documents. A new
 watch-triggered task or manual retry captures its own settings.
 
+Current-KB settings remain readable while a document task is running. Reads
+retain directory identity and use the short configuration lock; they do not wait
+for wiki compilation to finish. Saving KB settings still waits for the current
+task to release the KB. An interrupted settings update is recovered before its
+values are displayed, and unresolved repair gates remain visible.
+
 The top bar shows running counts and results needing attention without changing
 your current page. Click it to open **任务**, where the task list distinguishes
 waiting, processing, stopping and terminal results.

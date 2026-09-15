@@ -497,6 +497,19 @@ def recover_pending_journals(
     kb_dir: Path, *, repairing: bool = False, lock_path: Path | None = None
 ) -> list[str]:
     """Rollback active journals left by an interrupted process."""
+    if lock_path is None and any((kb_dir / ".openkb/journal").glob("*.json")):
+        from openkb.config import _with_global_config_lock
+
+        # Recovery can restore config.yaml and .env. Serialize the whole pair
+        # with settings readers that do not acquire the long-lived KB lease.
+        with _with_global_config_lock():
+            return _recover_pending_journals(kb_dir, repairing=repairing)
+    return _recover_pending_journals(kb_dir, repairing=repairing, lock_path=lock_path)
+
+
+def _recover_pending_journals(
+    kb_dir: Path, *, repairing: bool = False, lock_path: Path | None = None
+) -> list[str]:
     if repairing:
         from openkb.locks import file_write_lock_held
 

@@ -7,7 +7,8 @@ import pytest
 QtCore = pytest.importorskip("PySide6.QtCore")
 
 
-def test_local_io_retry_does_not_rebind_to_a_recreated_kb(kb_dir, monkeypatch):
+@pytest.mark.parametrize("options", [{"exclusive": True}, {"settings_read": True}])
+def test_local_io_retry_does_not_rebind_to_a_recreated_kb(kb_dir, monkeypatch, options):
     from openkb.application.knowledge_bases import initialize_kb
     from openkb.desktop.io import LocalIO, _WaitingForKB
     from openkb.kb_admin import delete_kb
@@ -35,7 +36,7 @@ def test_local_io_retry_does_not_rebind_to_a_recreated_kb(kb_dir, monkeypatch):
                 lambda: writes.append("stale setting"),
                 lambda value, error: results.append((value, error)),
                 kb=kb_dir,
-                exclusive=True,
+                **options,
             )
             until(lambda: any(isinstance(error, _WaitingForKB) for error in attempts))
             delete_kb(kb_dir)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,14 +31,11 @@ def resolve_ocr_credential(
     """
     from openkb import config
     from openkb.config_state import active_values
-    from openkb.locks import kb_read_lock
+    from openkb.settings_access import settings_read_lock
 
     if kb_dir and (captured := active_values(kb_dir)) is not None:
         return CloudCredential(**captured["ocr_credential"])
-    with (
-        kb_read_lock(kb_dir / ".openkb") if kb_dir else nullcontext(),
-        config._with_global_config_lock(),
-    ):
+    with settings_read_lock(kb_dir):
         layers = []
         if kb_dir:
             layers.extend([("kb", dotenv_values(kb_dir / ".env")), ("environment", os.environ)])

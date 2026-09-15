@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--startup", choices=("system", "light", "dark"), help="First-frame fonts")
     parser.add_argument("--tables", action="store_true", help="Populated native table layouts")
     parser.add_argument("--settings-layout", action="store_true", help="Settings layout and input")
+    parser.add_argument("--settings-busy", action="store_true", help="Settings during a KB task")
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
     parser.add_argument("--progress", action="store_true", help="Measured task progress UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
@@ -204,6 +205,12 @@ print("UrltraKB")  # fenced_code 中文知识
                 "native page references, KB discovery/statistics, cancelled/confirmed deletion"
             )
             assert os.environ == environment and os.getcwd() == cwd
+            return 0
+        if args.settings_busy:
+            from openkb.desktop.verification_settings_busy import verify_settings_busy
+
+            verify_settings_busy(window, first, wait_until)
+            checks.append("KB settings load during a task; pending save completes after release")
             return 0
         window.open_knowledge_base(first)
         wait_until(lambda: window.page is not None)

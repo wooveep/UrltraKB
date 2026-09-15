@@ -167,3 +167,31 @@ def test_worker_loss_is_interrupted_and_never_replays_remaining_units(
         release.set()
         manager.shutdown(stop=True)
         assert manager.join(30)
+
+
+def test_settings_read_during_spawned_model_task(kb_dir, tmp_path, model_service):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from openkb.application.settings import read_settings_view
+
+    url, requests, arrived, release = model_service
+    configure(kb_dir, url, "unit-a")
+    manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
+    try:
+        task = manager.submit(kb_dir, [AskQuestion("Waiting for model")])
+        assert arrived.wait(30), manager.get(task)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            try:
+                view = pool.submit(read_settings_view, kb_dir).result(timeout=3)
+                assert view.values.model == "openai/unit-a"
+                assert view.values.has_api_key and view.sources["api_key"] == "kb"
+                assert "synthetic-" not in view.model_dump_json()
+                assert manager.get(task).state == "running"
+                assert not release.is_set()
+            finally:
+                release.set()
+        assert manager.wait(task, timeout=30).state == "completed"
+    finally:
+        release.set()
+        manager.shutdown(stop=True)
+        assert manager.join(30)

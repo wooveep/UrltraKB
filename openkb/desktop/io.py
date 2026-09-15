@@ -41,12 +41,15 @@ class LocalIO(QObject):
         kb: Path | None = None,
         exclusive=False,
         global_settings=False,
+        settings_read=False,
         creating=False,
         deleting=False,
         repair=False,
         cancelled=lambda: False,
         obsolete=lambda: False,
     ):
+        if settings_read and (exclusive or creating or deleting or repair):
+            raise ValueError("Settings reads cannot mutate the knowledge base")
         if self._stop.is_set():
             return
         self._sequence += 1
@@ -99,13 +102,17 @@ class LocalIO(QObject):
                         )
                     ):
                         raise ValueError("请选择已有的知识库目录")
-                    if not deleting:
+                    if not deleting and not settings_read:
                         lease = (
                             kb_repair_lock(kb / ".openkb", **wait_options)
                             if repair
                             else kb_lock(kb / ".openkb", exclusive=exclusive, **wait_options)
                         )
                         scope.enter_context(lease)
+                if settings_read:
+                    from openkb.settings_access import settings_read_lock
+
+                    scope.enter_context(settings_read_lock(kb, **wait_options))
                 if global_settings:
                     from openkb.config import _with_global_config_lock
 

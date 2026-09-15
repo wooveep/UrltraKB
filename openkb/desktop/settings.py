@@ -175,7 +175,7 @@ class SettingsDialog(ManagementPanel):
             lambda: read_settings_view(self.kb),
             self.loaded,
             kb=self.kb,
-            global_settings=True,
+            settings_read=True,
             obsolete=lambda: self._closed,
         )
 
@@ -265,7 +265,7 @@ class SettingsDialog(ManagementPanel):
                 lambda: read_settings_view(self.kb),
                 self.loaded,
                 kb=self.kb,
-                global_settings=True,
+                settings_read=True,
                 obsolete=lambda: self._closed,
             )
 
