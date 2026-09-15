@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 _TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "assets"}
 _FILES = {
+    ".github/workflows/desktop-build.yml",
     ".gitignore",
     "README.md",
     "Makefile",
@@ -110,7 +111,7 @@ def _source_files(root: Path):
             for name in dirs
             if name != "__pycache__"
             and (relative / name).as_posix() not in _GENERATED
-            and (relative.parts or name in _TREES or name == "docs")
+            and (relative.parts or name in _TREES or name in {"docs", ".github"})
         ]
         for name in dirs:
             if (Path(directory) / name).is_symlink():

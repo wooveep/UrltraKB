@@ -13,7 +13,6 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSystemTrayIcon,
@@ -103,8 +102,10 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
                 choice = "等待完成并退出" if wait_for_tasks else "安全停止并退出"
 
                 def choose():
-                    box = QApplication.activeModalWidget()
-                    if isinstance(box, QMessageBox):
+                    from openkb.desktop.verification_dialogs import message_box
+
+                    box = message_box("后台仍有任务。")
+                    if box is not None:
                         next(button for button in box.buttons() if button.text() == choice).click()
                     else:
                         QTimer.singleShot(10, choose)
@@ -146,7 +147,19 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
                 observed = []
 
                 def inspect_details():
-                    dialog = QApplication.activeModalWidget()
+                    from openkb.desktop.verification_dialogs import visible_dialogs
+
+                    dialog = next(
+                        (
+                            d
+                            for d in visible_dialogs()
+                            if d.findChild(QPlainTextEdit, "task-status")
+                        ),
+                        None,
+                    )
+                    if dialog is None:
+                        QTimer.singleShot(10, inspect_details)
+                        return
                     text = dialog.findChild(QPlainTextEdit, "task-status").toPlainText()
                     observed.append(task_id in text and "阶段：" in text)
                     dialog.accept()

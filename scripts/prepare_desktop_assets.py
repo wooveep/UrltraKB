@@ -14,12 +14,19 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+try:
+    from scripts.desktop_platform import desktop_target
+except ModuleNotFoundError:
+    from desktop_platform import desktop_target
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "openkb/rendering"
 NODE_VERSION = "24.20.0"
 NODE_HASHES = {
     "linux-x64.tar.xz": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
     "win-x64.zip": "6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba",
+    "linux-arm64.tar.xz": "5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465f7",
+    "darwin-arm64.tar.gz": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8",
 }
 FONTS = {
     "NotoSansCJKsc-Regular.otf": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
@@ -53,7 +60,7 @@ def main() -> None:
     args = parser.parse_args()
     cache = args.cache_dir.resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    suffix = "win-x64.zip" if os.name == "nt" else "linux-x64.tar.xz"
+    suffix = desktop_target().node_archive
     filename = f"node-v{NODE_VERSION}-{suffix}"
     archive = cache / filename
     download(
@@ -70,7 +77,7 @@ def main() -> None:
     else:
         with tarfile.open(archive) as bundle:
             bundle.extractall(cache, filter="data")
-        node_root = cache / f"node-v{NODE_VERSION}-linux-x64"
+        node_root = cache / filename.split(".tar.")[0]
         node = node_root / "bin/node"
         npm = node_root / "lib/node_modules/npm/bin/npm-cli.js"
     assets = SOURCE / "assets"

@@ -1,0 +1,190 @@
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Native platform to build
+        type: choice
+        default: all
+        options: [all, debian-amd64, debian-arm64, windows-x64, macos-arm64]
+  push:
+    branches: [main, codex/unified-desktop-build]
+    tags: ['v*']
+    paths:
+      - '.github/workflows/desktop-build.yml'
+      - 'scripts/**'
+      - 'packaging/**'
+      - 'openkb/**'
+      - 'assets/fonts/**'
+      - 'skills/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}-${{ inputs.target || 'all' }}
+  cancel-in-progress: true
+
+jobs:
+  targets:
+    name: Select native targets
+    runs-on: ubuntu-24.04
+    outputs:
+      debian: ${{ steps.matrix.outputs.debian }}
+      desktop: ${{ steps.matrix.outputs.desktop }}
+    steps:
+      - id: matrix
+        env:
+          REQUESTED_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          targets = [
+              {"runner": "ubuntu-24.04", "arch": "amd64", "target": "debian-amd64"},
+              {"runner": "ubuntu-24.04-arm", "arch": "arm64", "target": "debian-arm64"},
+              {"runner": "windows-2025", "target": "windows-x64", "build-dir": "C:/urltrakb-build"},
+              {"runner": "macos-15", "target": "macos-arm64", "build-dir": "build/packages"},
+          ]
+          requested = os.environ["REQUESTED_TARGET"]
+          if requested not in {"all", *(row["target"] for row in targets)}:
+              raise SystemExit("Unsupported build target")
+          chosen = [row for row in targets if requested in {"all", row["target"]}]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for group, debian in [("debian", True), ("desktop", False)]:
+                  rows = [row for row in chosen if ("arch" in row) == debian]
+                  print(group + "=" + json.dumps(rows), file=output)
+          PY
+
+  debian:
+    name: Debian 13 / ${{ matrix.arch }}
+    needs: targets
+    if: needs.targets.outputs.debian != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.debian) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build native Debian environment
+        run: docker build -f packaging/desktop/Dockerfile -t urltrakb-builder .
+      - name: Freeze, inventory and package
+        run: |
+          docker run --rm -v "$PWD:/workspace" urltrakb-builder bash -euc '
+            git config --global --add safe.directory /workspace
+            python3 scripts/make_packages.py desktop
+            python3 scripts/make_packages.py bundle
+          '
+      - name: Install and verify on clean Debian
+        run: |
+          sudo mkdir -p build/installed-check
+          docker run --rm -v "$PWD/dist:/artifacts:ro" -v "$PWD/build/installed-check:/evidence" \
+            debian:13.6-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 \
+            bash -euc '
+              apt-get update
+              apt-get install -y --no-install-recommends /artifacts/*/*.deb
+              urltrakb-cli --help
+              QT_QPA_PLATFORM=offscreen /opt/urltrakb/UrltraKBVerify --output /evidence/result
+              apt-get remove -y urltrakb
+              test ! -e /opt/urltrakb/UrltraKB
+              test ! -e /usr/bin/urltrakb
+            '
+      - name: Upload Debian package and source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UrltraKB-debian-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-debian-${{ matrix.arch }}
+          path: |
+            build/packages/**/inventory.json
+            build/packages/**/warn-desktop.txt
+            build/installed-check/
+            dist/**/*-check/
+          retention-days: 7
+
+  desktop:
+    name: ${{ matrix.target }}
+    needs: targets
+    if: needs.targets.outputs.desktop != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.desktop) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.11.13'
+          enable-cache: false
+      - name: Install pinned CPython
+        run: uv python install 3.12.13
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Freeze and inventory
+        env:
+          BUILD_DIRECTORY: ${{ matrix.build-dir }}
+        run: uv run --no-project --python 3.12.13 python scripts/make_packages.py desktop --build-dir "$BUILD_DIRECTORY"
+      - name: Package and verify extracted application
+        env:
+          BUILD_DIRECTORY: ${{ matrix.build-dir }}
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            export QT_QPA_PLATFORM=offscreen
+          fi
+          uv run --no-project --python 3.12.13 python scripts/make_packages.py bundle --build-dir "$BUILD_DIRECTORY"
+      - name: Upload application and source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UrltraKB-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ matrix.target }}
+          path: |
+            ${{ matrix.build-dir }}/**/inventory.json
+            ${{ matrix.build-dir }}/**/warn-desktop.txt
+          retention-days: 7
+      - name: Upload failed acceptance evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: acceptance-${{ matrix.target }}
+          path: dist/**/*-check/
+          retention-days: 7

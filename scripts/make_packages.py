@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from desktop_platform import desktop_target
 from export_desktop_source import export_source, verify_source
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("package", "desktop", "verify", "release"))
+    parser.add_argument("stage", choices=("package", "desktop", "verify", "bundle", "release"))
     parser.add_argument("--commit", default="HEAD")
     parser.add_argument("--uv", default="uv")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build/packages")
@@ -29,11 +30,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.stage == "release" and not args.materials:
         parser.error("release requires MATERIALS pointing to matching assembled distribution files")
-    if args.stage != "package" and (
-        platform.system() not in {"Linux", "Windows"}
-        or platform.machine().lower() not in {"x86_64", "amd64"}
-    ):
-        parser.error("desktop builds require a native Linux or Windows x86_64 host")
+    try:
+        target = desktop_target() if args.stage != "package" else None
+    except ValueError as error:
+        parser.error(str(error))
     commit = subprocess.check_output(
         [
             "git",
@@ -47,7 +47,11 @@ def main() -> None:
         ],
         text=True,
     ).strip()
-    workspace = args.build_dir.resolve() / commit[:12] / platform.system().lower()
+    workspace = (
+        args.build_dir.resolve()
+        / commit[:12]
+        / (target.name if target else platform.system().lower())
+    )
     source = workspace / "source"
     if source.exists():
         identity = verify_source(source)
@@ -99,12 +103,14 @@ def main() -> None:
             "-r",
             "packaging/desktop/build-requirements.txt",
         )
+        run(python, "-m", "pytest", "tests/test_desktop_verification_dialogs.py", "-q")
         run(
             python,
             "scripts/prepare_desktop_assets.py",
             "--cache-dir",
             args.build_dir.resolve() / "downloads",
         )
+        run(python, "-m", "pytest", "tests/test_render_processes.py", "-q")
         run(python, "scripts/build_desktop.py")
         with tempfile.TemporaryDirectory(prefix="inventory-", dir=workspace) as temporary:
             fresh = Path(temporary) / "inventory.json"
@@ -118,6 +124,23 @@ def main() -> None:
         evidence = Path(tempfile.mkdtemp(prefix="acceptance-", dir=workspace)) / "result"
         run(program / ("UrltraKBVerify" + suffix), "--output", evidence)
         logger.info("Acceptance evidence: %s", evidence)
+    elif args.stage == "bundle":
+        if not inventory.is_file():
+            parser.error("run make desktop for this COMMIT before make bundle")
+        run(
+            python,
+            "scripts/package_installers.py",
+            "--source",
+            source,
+            "--program",
+            program,
+            "--inventory",
+            inventory,
+            "--output",
+            destination,
+        )
+        checksums(destination)
+        logger.info("Installable build artifacts: %s", destination)
     else:
         if not inventory.is_file():
             parser.error("run make desktop for this COMMIT before make release")

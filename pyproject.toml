@@ -93,6 +93,7 @@ exclude = ["/openkb/web", "/openkb/rendering/assets", "/openkb/rendering/rust-he
 # state or retired bundles that may remain in an upgraded source checkout.
 [tool.hatch.build.targets.sdist]
 include = [
+    "/.github/workflows/desktop-build.yml",
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
     "/docs/desktop.md", "/docs/golden-principles.md", "/docs/document-processing.md",
     "/docs/ocr-and-images.md", "/docs/optional-ocr-runtime.md", "/docs/document-provider-validation.md",
