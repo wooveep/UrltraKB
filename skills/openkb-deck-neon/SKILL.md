@@ -223,17 +223,23 @@ Cover/closing have no chapter context → top-left label is "OPENKB".
 
 1. **Survey first.** Use wiki-read tools to list `concepts/` and `summaries/`
    and read `wiki/index.md`. Build a mental map before deciding the argument.
-2. **Choose a narrative arc.** One-line thesis, then an 8–12 step arc. Each
-   step → 1–2 slides, landing 8–15 slides total.
+2. **Choose a narrative arc.** Use the user's requested total slide count,
+   including cover and closing slides. When no count is specified, default
+   to 8–15 slides. Fit a one-line thesis and the required content into that
+   total, with one narrative step per slide.
 3. **Read the relevant content.** For each concept the arc touches, read the
    concept page; for cited documents read a targeted slice. **The deck is only
    as expert as the source-reading you do here.** Generic restatements are a
    failure mode — name a specific technique, number, or quote on each slide.
-4. **Outline slides** with concrete `data-type` assignments. Vary types — ≥4
-   distinct, no run of 3+ consecutive same type.
+4. **Outline slides** with concrete `data-type` assignments. Use at least
+   four distinct types when the chosen count permits, with no run of 3+
+   consecutive slides of the same type.
 5. **Write** `output/decks/<slug>/index.html` in one `write_file` call. Inline
    all CSS, inline keyboard-nav JS, inline `<svg>` for any graphics, inline
-   noise as a data-URI. No external anything.
+   noise as a data-URI. For original-source images, keep the exact
+   `sources/images/...` path returned by the task's tools; the application
+   rebases observed paths for the saved file and packages them on evidence
+   export. Retain returned citation markers beside source claims and captions.
 6. **Revise** against §Failure modes; touch at least one slide if any match.
 7. **Self-check** the invariants below; fix anything failing.
 8. Report the deck path + a one-line summary of the arc.
@@ -285,8 +291,8 @@ Cover/closing have no chapter context → top-left label is "OPENKB".
 1. Does `output/decks/<slug>/index.html` exist with NO external
    `<link>`/`<script src>`/web-font import/remote `<img>`?
 2. At least one `data-type="cover"` and one `data-type="closing"`?
-3. Total slide count between 8 and 15?
-4. At least 4 distinct `data-type` values, no run of 3+ same?
+3. Does the total slide count match the count chosen in working-method step 2?
+4. Do `data-type` assignments follow working-method step 4?
 5. Is body copy in `--ink` (readable on dark) — `quote` pull-quotes and
    cover/closing subtitles in `--soft` being the only allowed exceptions — and
    is glow limited to titles / big numbers / graph nodes only?
