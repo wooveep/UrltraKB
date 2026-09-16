@@ -33,6 +33,9 @@ rather than inventing content.
 Tree status describes navigation enhancement only; it does not describe parsing quality.
 Use the separate quality field for parsing limitations. Preserve ambiguous or conflicting
 original wording explicitly instead of silently equating directions, positions or conditions.
+Keep each rule within its own stated scope: a support boundary, an automatic default,
+an example and a limit are different claims. A comparison must name both sides; qualifiers
+such as "only difference" apply to that pair, not another nearby comparison.
 evidence_provenance distinguishes parsed source text from reader context and analysis status.
 Legacy context includes source excerpts AND parser annotations (such as unconfirmed header roles);
 do not attribute those annotations to the original author. First-row values remain readable.

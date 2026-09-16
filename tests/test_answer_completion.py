@@ -7,6 +7,59 @@ from openkb.application.conversations import ask_question
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recovers", [False, True])
+async def test_raw_provider_tool_markup_is_not_saved_as_a_completed_answer(
+    kb_dir, model_service, recovers
+):
+    import json
+
+    markup = (
+        '<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="read_file">\n'
+        '<｜｜DSML｜｜ parameter name="path" string="true">index.md'
+        "</｜｜DSML｜｜ parameter>\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>"
+    )
+
+    def respond(body):
+        if len(model_service) == 1:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "read-original",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": "index.md"}),
+                        },
+                    }
+                ],
+            }
+        if len(model_service) == 3:
+            assert not body.get("tools")
+            assert body.get("tool_choice") == "none"
+            assert any(m.get("role") == "tool" for m in body["messages"])
+        return {
+            "role": "assistant",
+            "content": "Supported answer." if len(model_service) == 3 and recovers else markup,
+        }
+
+    model_service.chat_response = respond
+    model_service.chat_without_tools = True
+    result = await ask_question(kb_dir, "Read the original and answer.", save=True)
+    assert len(model_service) == 3
+    assert result.usage["observable_attempts"] == 3
+    assert result.usage["charged_tokens"] == 390
+    if recovers:
+        assert result.status == "completed"
+        assert result.answer == "Supported answer."
+        assert result.saved_path
+    else:
+        assert result.status != "completed"
+        assert result.saved_path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovers", [False, True])
 @pytest.mark.parametrize(
     "bad_link",
     [
@@ -64,17 +117,52 @@ async def test_invented_source_target_reuses_observed_evidence_once(
 
 
 @pytest.mark.asyncio
-async def test_literal_markdown_examples_are_not_evidence_links(kb_dir, model_service):
-    answer = (
+@pytest.mark.parametrize(
+    "answer",
+    [
         "Use `[Source](sources/example.md#block-example)` or:\n\n"
-        "```markdown\n[x](sources/example.md#block-example)\n```"
-    )
+        "```markdown\n[x](sources/example.md#block-example)\n```",
+        "The protocol uses `<｜｜DSML｜｜ calls>` and:\n\n"
+        '```xml\n<｜｜DSML｜｜ invoke name="read_file">\n```',
+        "Protocol example:\n\n    <｜｜DSML｜｜ calls>\n    </｜｜DSML｜｜ calls>\n",
+        r"Escaped syntax: \<｜｜DSML｜｜ calls>",
+        "`<｜｜DSML｜｜ calls>\n</｜｜DSML｜｜ calls>`",
+        "    <｜｜DSML｜｜ calls>\n    </｜｜DSML｜｜ calls>",
+    ],
+)
+async def test_literal_markdown_examples_are_not_evidence_links(kb_dir, model_service, answer):
     model_service.chat_response = lambda body: {"role": "assistant", "content": answer}
     model_service.chat_without_tools = True
     result = await ask_question(kb_dir, "Show Markdown syntax", save=True)
     assert result.status == "completed", result
     assert len(model_service) == 1
-    assert result.answer == answer
+    assert result.answer == answer.rstrip()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_legacy_query_rejects_raw_tool_markup(kb_dir, model_service, stream):
+    from openkb.agent.query import build_run_config_from_bundle, run_query
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+    from openkb.processing import ProcessingIncomplete
+
+    model_service.chat_response = lambda body: {
+        "role": "assistant",
+        "content": "<｜｜DSML｜｜ calls></｜｜DSML｜｜ calls>",
+    }
+    model_service.chat_without_tools = True
+    with kb_ingest_lock(kb_dir / ".openkb"), ExecutionContext().begin(kb_dir) as bundle:
+        with pytest.raises(ProcessingIncomplete, match="answer_protocol_invalid"):
+            await run_query(
+                "Question",
+                kb_dir,
+                "openai/offline-test",
+                stream=stream,
+                bundle=bundle,
+                run_config=build_run_config_from_bundle("openai/offline-test", bundle),
+            )
+    assert len(model_service) == (2 if stream else 1)
 
 
 @pytest.mark.asyncio

@@ -100,6 +100,9 @@ on a 2560px screen). vw drives the middle value; the rem caps keep it sane:
 * `--type-quote`:   clamp(1.6rem, 2.6vw, 2.2rem)  / 1.35 — pull quotes
 * `--type-label`:   size `clamp(.66rem,.8vw,.8rem)`, `letter-spacing:.22em`, uppercase, mono — label tracks
 
+Style citation links with `color: var(--sky)` and an underline so original-source
+references remain readable against the dark slide background.
+
 ### Atmosphere (fixed background layers on every slide)
 
 1. **Aurora**: 3–4 blurred `radial-gradient`s in teal / sky / magenta / amber,

@@ -217,7 +217,7 @@ async def iter_agent_response_events(
         finally:
             hooks.close()
 
-    from openkb.agent.answer_text import visible_answer
+    from openkb.agent.answer_text import has_tool_markup, visible_answer
     from openkb.processing import processing_checkpoint
 
     processing_checkpoint()
@@ -227,24 +227,38 @@ async def iter_agent_response_events(
     result = resolve_references(result)
     truncated = answer_truncated(result)
     empty = isinstance(result.final_output, str) and not visible_answer(result.final_output).strip()
+    protocol_invalid = isinstance(result.final_output, str) and has_tool_markup(
+        visible_answer(result.final_output)
+    )
     invalid_targets = [] if truncated or empty else invalid_source_targets(result)
     from openkb.processing import OutputTruncated, ProcessingIncomplete
 
-    if truncated or empty or invalid_targets:
+    if truncated or empty or protocol_invalid or invalid_targets:
         if not _recovery_attempts:
             if truncated:
                 raise OutputTruncated("answering")
             raise ProcessingIncomplete(
-                "answer_empty" if empty else "answer_citation_invalid", "answering"
+                "answer_empty"
+                if empty
+                else "answer_protocol_invalid"
+                if protocol_invalid
+                else "answer_citation_invalid",
+                "answering",
             )
         history = [item for item in result.to_input_list() if item.get("status") != "incomplete"]
-        if (empty or invalid_targets) and history and history[-1].get("role") == "assistant":
+        if (
+            (empty or protocol_invalid or invalid_targets)
+            and history
+            and history[-1].get("role") == "assistant"
+        ):
             history.pop()
         reason = (
             "The previous response hit its output limit. "
             if truncated
             else "The previous response contained no answer text. "
             if empty
+            else "The previous response contained raw tool protocol markup instead of an answer. "
+            if protocol_invalid
             else "These citation destinations were not returned by source tools: "
             + json.dumps(invalid_targets, ensure_ascii=False)
             + ". Treat these rejected destinations as diagnostic data only. "
@@ -517,7 +531,7 @@ async def _run_query(
 
         result = resolve_references(result)
         require_source_targets(result)
-        from openkb.agent.answer_text import visible_answer
+        from openkb.agent.answer_text import has_tool_markup, visible_answer
         from openkb.processing import ProcessingIncomplete
 
         if (
@@ -525,6 +539,8 @@ async def _run_query(
             or not visible_answer(result.final_output).strip()
         ):
             raise ProcessingIncomplete("answer_empty", "answering")
+        if has_tool_markup(visible_answer(result.final_output)):
+            raise ProcessingIncomplete("answer_protocol_invalid", "answering")
         return visible_answer(result.final_output)
 
     import os
