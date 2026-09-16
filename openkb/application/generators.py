@@ -330,6 +330,9 @@ async def generate_artifact(
                         if Path(path).is_file()
                         and not Path(path).is_relative_to(kb_dir / ".openkb")
                         and not Path(path).is_relative_to(kb_dir / ".claude-plugin")
+                        # The archive is a reported resource with its own quality
+                        # record, not a support file of the replacement artifact.
+                        and not any(Path(path).is_relative_to(root) for root in history.roots)
                     ]
                     try:
                         checked = save_quality(kb_dir, target, output_files, gen.validation)

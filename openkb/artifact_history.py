@@ -20,7 +20,8 @@ _active: ContextVar[HistoryProtection | None] = ContextVar("artifact_history", d
 def preserve_artifact_history(kb_dir: Path, *, target: Path):
     roots = tuple(
         path.resolve()
-        for path in (kb_dir / "output").rglob("*-workspace")
+        for folder in (kb_dir / "output", kb_dir / "wiki/explorations")
+        for path in folder.rglob("*-workspace")
         if path.is_dir() and any(path.glob("iteration-*"))
     )
     other_files = frozenset(

@@ -172,6 +172,59 @@ def test_saved_html_expands_prose_citations_but_preserves_scripts_and_code(sourc
     assert not any("example" in issue or "comment" in issue for issue in quality["issues"])
 
 
+@pytest.mark.parametrize("folder", ["output/decks", "wiki/explorations"])
+def test_replacement_deck_checks_new_support_files_without_rechecking_history(
+    source_kb, monkeypatch, folder
+):
+    import io
+    import zipfile
+
+    from openkb.application.artifacts import artifact_archive
+
+    definition = source_kb / "skills/custom/SKILL.md"
+    definition.parent.mkdir(parents=True)
+    definition.write_text(
+        "---\nname: custom\ndescription: Test HTML\nod:\n  mode: deck\n"
+        f"  output_path_template: {folder}/{{slug}}/index.html\n---\nMake a deck."
+    )
+    relative = f"{folder}/demo"
+    calls = []
+    old_html = "<html><body>Old [evidence:unknown]</body></html>"
+
+    async def produce(agent, *args, **kwargs):
+        content = old_html
+        if calls:
+            row = await original_row(agent)
+            content = f"<html><body>New {row['short_citation']}</body></html>"
+            await invoke(
+                agent, "write_file", path="output/support.md", content=row["short_citation"]
+            )
+        calls.append(content)
+        await invoke(agent, "write_file", path=f"{relative}/index.html", content=content)
+        return SimpleNamespace(final_output="Saved")
+
+    monkeypatch.setattr(Runner, "run", produce)
+    for _ in range(2):
+        result = asyncio.run(
+            generate_artifact(
+                source_kb,
+                GenerationOptions("deck", "demo", "Cite", overwrite="archive", skill_name="custom"),
+            )
+        )
+        assert result.status == "completed", result
+    quality = artifact_quality(source_kb, relative)
+    assert quality["checks"]["citations"] == "passed", quality
+    assert set(quality["files"]) == {f"{relative}/index.html", "output/support.md"}
+    archived = result.archive_path.relative_to(source_kb).as_posix()
+    assert (result.archive_path / "index.html").read_text() == old_html
+    assert artifact_quality(source_kb, archived)["checks"]["citations"] == "failed"
+    with zipfile.ZipFile(
+        io.BytesIO(artifact_archive(source_kb, relative, include_evidence=True))
+    ) as package:
+        assert not any("-workspace/" in name for name in package.namelist())
+        assert any(name.endswith("support.md") for name in package.namelist())
+
+
 def test_archived_artifact_keeps_quality_and_is_a_source_retention_root(source_kb, monkeypatch):
     from openkb.application.removal import preview_removal
     from openkb.application.source_cleanup import preview_history_cleanup
