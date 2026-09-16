@@ -17,7 +17,9 @@ A versioned record in `.openkb/artifact-quality/` binds the checks to file hashe
 source versions, parsing versions and target snapshot hashes. It lists inspected
 files, issues and unchecked areas. A passed citation check verifies the binding;
 it does not establish semantic support or recall of every required fact. Execution
-status and format checks remain separate. Missing historical records show unknown;
+status and format checks remain separate. Files with no original-source citations
+show citation checking as not checked, including earlier citation-free v1 records.
+Missing historical records show unknown;
 edited or missing recorded files and source targets invalidate previous checks.
 
 Files and records use the same mutation transaction. An ordinary model failure or

@@ -53,6 +53,44 @@ async def original_row(agent):
     return result["evidence"][-1]
 
 
+def test_uncited_saved_artifact_does_not_claim_citation_success(source_kb, monkeypatch):
+    async def produce(agent, *args, **kwargs):
+        await original_row(agent)
+        await invoke(
+            agent,
+            "write_skill_file",
+            path="SKILL.md",
+            content="# Installation guidance\nA paraphrase without a source link.\n",
+        )
+        return SimpleNamespace(final_output="Saved")
+
+    monkeypatch.setattr(Runner, "run", produce)
+    result = asyncio.run(generate_artifact(source_kb, GenerationOptions("skill", "demo", "Cite")))
+    assert result.status == "completed"
+    quality = artifact_quality(source_kb, "output/skills/demo")
+    assert quality["references"] == []
+    assert quality["checks"]["citations"] == "not_checked"
+    assert "source_citations" in quality["unchecked"]
+
+    # Earlier v1 records marked a citation-free file as passed. Reading those
+    # records must remain honest without rewriting their saved bytes or digest.
+    from openkb.artifact_quality import quality_path
+    from openkb.sources import content_id
+
+    path = quality_path(source_kb, source_kb / "output/skills/demo")
+    record = json.loads(path.read_text())
+    record.pop("digest")
+    record["checks"]["citations"] = "passed"
+    record["unchecked"].remove("source_citations")
+    record["digest"] = content_id(record)
+    path.write_text(json.dumps(record))
+    original_bytes = path.read_bytes()
+    restored = artifact_quality(source_kb, "output/skills/demo")
+    assert restored["checks"]["citations"] == "not_checked"
+    assert "source_citations" in restored["unchecked"]
+    assert path.read_bytes() == original_bytes
+
+
 def test_saved_markdown_cites_only_observed_version_and_keeps_examples(source_kb, monkeypatch):
     observed = []
 

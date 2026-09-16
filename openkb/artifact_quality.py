@@ -128,6 +128,10 @@ def read_quality(kb_dir: Path, artifact: Path) -> dict:
                 "checks": unknown_quality()["checks"],
                 "issues": record["issues"] + issues,
             }
+        if not record["references"] and record["checks"]["citations"] == "passed":
+            record["checks"]["citations"] = "not_checked"
+            if "source_citations" not in record["unchecked"]:
+                record["unchecked"].append("source_citations")
         return record
     except (ValueError, OSError, TypeError, KeyError):
         return unknown_quality("quality_record_unreadable")
@@ -164,12 +168,13 @@ def save_quality(kb_dir: Path, artifact: Path, files: list[Path], validation) ->
             else "failed"
             if validation.errors
             else "passed",
-            "citations": "failed" if issues else "passed" if inspected else "not_checked",
+            "citations": "failed" if issues else "passed" if citations.used else "not_checked",
             "semantics": "not_checked",
         },
         "inspected": inspected,
         "issues": issues,
-        "unchecked": ["semantic_support", "required_fact_coverage"],
+        "unchecked": ["semantic_support", "required_fact_coverage"]
+        + ([] if citations.used else ["source_citations"]),
         "references": citations.used,
         "status": "issues" if issues else "checked" if inspected else "unknown",
     }

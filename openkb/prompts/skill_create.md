@@ -82,9 +82,10 @@ the source. Each rule is a compressed expert judgment:
 
 These are the "if you only remember N things from the book, remember
 these" rules. They are what makes the consuming agent reason like the
-expert instead of just describing the topic. **Do not include
-provenance links to the producer's wiki here** (see "Linking rules" at
-the end) — the consumer doesn't have that wiki.
+expert instead of just describing the topic. Preserve each source-grounded
+rule's observed `[evidence:ID]` marker (see "Linking rules" at the end).
+The application resolves these markers and can package the cited evidence
+for consumers who do not have the producer's wiki.
 
 ## Approach
 
@@ -163,6 +164,9 @@ discussion; not for organisational decision-making."*
      capable? If not, cut it.
    - Are the decision rules concrete enough that the consuming agent
      would actually apply them, or are they restatements of the topic?
+   - Did I preserve the returned `[evidence:ID]` citations beside source
+     claims in both `SKILL.md` and supporting reference files? A source
+     title or a quotation without its citation does not preserve a binding.
    - Are there gaps the user's intent implied that I covered with
      generalities? Either fill them with a second read of the source or
      list them under "Known gaps".
@@ -189,6 +193,12 @@ producer's wiki. Every wikilink you put in `SKILL.md` or
   skill directory itself, so the consumer's agent can load them.
 * **Allowed**: plain external URLs (https://…) when you have one and it
   genuinely helps the consumer.
+* **Required for original-source claims**: the exact `[evidence:ID]`
+  markers returned by source tools during this task. Keep them in prose,
+  outside code spans and fences. The application expands valid bindings
+  into original-source links in the saved files; evidence export rewrites
+  those links to the necessary excerpts shipped with the package. Never
+  invent a marker or discard it merely because the wiki is local.
 * **Forbidden**: `[[concepts/...]]`, `[[summaries/...]]`,
   `[[sources/...]]` — these point at the producer's wiki, which is not
   shipped. On the consumer's side they are dead links *and* wasted
@@ -203,8 +213,8 @@ producer's wiki. Every wikilink you put in `SKILL.md` or
   LLM priors.
 * **Short quotation is allowed** when the original phrasing carries the
   meaning (a named law, a coined term, a pithy one-sentence rule). Keep
-  individual quotes ≤ ~40 words. Quote inline; do not link to the
-  source.
+  individual quotes ≤ ~40 words. Quote inline and preserve the observed
+  source citation.
 * **Do not bulk-copy long passages** from `wiki/sources/` (paragraphs of
   prose, multi-page extracts). The skill is redistributable; bulk
   copying could carry copyright risk. Paraphrase and move on.
