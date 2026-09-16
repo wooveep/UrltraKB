@@ -268,7 +268,7 @@ def test_corrupt_document_history_is_rejected(document):
         UnitResult.from_summary({"status": "completed", "document": document})
 
 
-def test_slow_drip_http_response_obeys_elapsed_request_deadline(kb_dir, model_service):
+def test_slow_drip_http_bytes_do_not_reset_content_deadline(kb_dir, model_service):
     import time
 
     import yaml
@@ -278,6 +278,9 @@ def test_slow_drip_http_response_obeys_elapsed_request_deadline(kb_dir, model_se
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
     config["processing"]["request_timeout"] = 0.1
+    # This case isolates one silent request. Retry/transport teardown has its own
+    # bounds and coverage in test_stream_timeout_retries.py.
+    config["processing"]["timeout_retries"] = 0
     config_path.write_text(yaml.safe_dump(config))
     model_service.drip_seconds = 0.04
     source = kb_dir / "slow-drip.md"

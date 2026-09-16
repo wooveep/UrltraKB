@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import shutil
 import zipfile
 from contextlib import nullcontext
@@ -41,7 +42,17 @@ def list_artifacts(kb_dir: Path) -> tuple[Artifact, ...]:
             for path in sorted((kb_dir / "output" / folder).glob("*")):
                 if path.is_dir():
                     _artifact_path(kb_dir, str(path.relative_to(kb_dir)))
-                    items.append(Artifact(path.relative_to(kb_dir).as_posix(), kind))
+                    if path.name.endswith("-workspace"):
+                        for iteration in sorted(path.glob("iteration-*")):
+                            if iteration.is_dir():
+                                _artifact_path(kb_dir, str(iteration.relative_to(kb_dir)))
+                                items.append(
+                                    Artifact(
+                                        iteration.relative_to(kb_dir).as_posix(), kind + "归档"
+                                    )
+                                )
+                    else:
+                        items.append(Artifact(path.relative_to(kb_dir).as_posix(), kind))
                     grouped.append(path)
         for folder in ("output", "wiki/reports", "wiki/explorations"):
             for path in sorted((kb_dir / folder).rglob("*")):
@@ -68,7 +79,67 @@ def read_artifact(kb_dir: Path, relative: str) -> str:
         return path.read_text(encoding="utf-8")
 
 
-def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
+def artifact_quality(kb_dir: Path, relative: str) -> dict:
+    """Read current checks; missing history is unknown and edited files are stale."""
+    from openkb.artifact_quality import read_quality
+
+    kb_dir = kb_dir.resolve()
+    with kb_read_lock(kb_dir / ".openkb"):
+        return read_quality(kb_dir, _artifact_path(kb_dir, relative))
+
+
+def delete_artifact(kb_dir: Path, relative: str) -> None:
+    """Explicitly delete the selected artifact and its own evidence retention roots."""
+    from openkb.application.file_state import file_versions
+    from openkb.artifact_quality import quality_path
+    from openkb.skill.marketplace import regenerate_marketplace
+
+    root = kb_dir.resolve()
+    with kb_ingest_lock(root / ".openkb"):
+        target = _artifact_path(root, relative)
+        if target in {root / "output/skills", root / "output/decks"}:
+            raise ValueError("Select an individual artifact or its archive workspace")
+        # Exact path identities allow explicit deletion even if this artifact's
+        # record is damaged. Unrelated records do not grant deletion authority.
+        members = [target, *target.rglob("*")] if target.is_dir() else [target]
+        records = [path for member in members if (path := quality_path(root, member)).is_file()]
+        paths = [target, *records, root / ".claude-plugin/marketplace.json"]
+        file_versions(root, paths)
+        with mutation_scope(root, paths, operation="delete-artifact"):
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            for path in records:
+                path.unlink()
+            regenerate_marketplace(root)
+
+
+def artifact_archive(
+    kb_dir: Path, relative: str, *, include_evidence: bool = False, strip_root: bool = False
+) -> bytes:
+    """Build a locked archive for download, including the legacy Skill layout."""
+    from openkb.artifact_export import portable_files
+
+    root = kb_dir.resolve()
+    with kb_read_lock(root / ".openkb"):
+        target = _artifact_path(root, relative)
+        files = artifact_files(root, relative)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            if include_evidence:
+                for name, content in portable_files(root, target, files).items():
+                    archive.writestr(name, content)
+            else:
+                base = target if strip_root and target.is_dir() else target.parent
+                for file in files:
+                    archive.write(root / file, (root / file).relative_to(base).as_posix())
+        return output.getvalue()
+
+
+def export_artifact(
+    kb_dir: Path, relative: str, destination: Path, *, include_evidence: bool = False
+) -> Path:
     """Copy a file or a complete directory ZIP under a new, collision-free name."""
     kb_dir, destination = kb_dir.resolve(), destination.resolve()
     if destination.is_relative_to(kb_dir) or any(
@@ -90,8 +161,14 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
         raise NotADirectoryError(destination)
     with kb_read_lock(kb_dir / ".openkb"):
         source = _artifact_path(kb_dir, relative)
-        files = artifact_files(kb_dir, relative)
-        filename = source.name + ".zip" if source.is_dir() else source.name
+        artifact_files(kb_dir, relative)
+        filename = (
+            source.name + "-with-evidence.zip"
+            if include_evidence
+            else source.name + ".zip"
+            if source.is_dir()
+            else source.name
+        )
         number = 0
         while True:
             name = Path(filename)
@@ -105,11 +182,10 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
                 number += 1
         try:
             with output:
-                if source.is_dir():
-                    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                        for file in files:
-                            path = kb_dir / file
-                            archive.write(path, path.relative_to(source.parent).as_posix())
+                if include_evidence:
+                    output.write(artifact_archive(kb_dir, relative, include_evidence=True))
+                elif source.is_dir():
+                    output.write(artifact_archive(kb_dir, relative))
                 else:
                     with source.open("rb") as input_file:
                         shutil.copyfileobj(input_file, output)

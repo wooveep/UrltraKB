@@ -1,4 +1,4 @@
-"""Continue uses a new bounded OCR allowance for pages never submitted."""
+"""Explicit reparse resumes pending OCR; knowledge continuation keeps its saved parse."""
 
 import json
 
@@ -7,13 +7,13 @@ import requests
 import yaml
 
 from openkb.application.documents import import_document
-from openkb.application.source_actions import continue_source
+from openkb.application.source_actions import continue_source, reparse_source
 from openkb.application.source_history import source_status
 from openkb.evidence import ParseStore
 from tests.test_cloud_ocr import cloud_settings, scanned_pdf
 
 
-def test_continue_submits_unstarted_page_without_resubmitting_completed_page(
+def test_explicit_reparse_submits_unstarted_page_without_resubmitting_completed_page(
     kb_dir, tmp_path, monkeypatch, model_service
 ):
     cloud_settings(kb_dir)
@@ -79,6 +79,10 @@ def test_continue_submits_unstarted_page_without_resubmitting_completed_page(
 
     repeated = import_document(kb_dir, source)
     assert repeated.status == "skipped" and len(submissions) == 1
+    continued = continue_source(kb_dir, first.source_id, version_id=first.input_version)
+    assert len(submissions) == 1 and continued.parse_id == first.parse_id
+    refreshed = reparse_source(kb_dir, first.source_id, version_id=first.input_version)
+    assert refreshed.parse_id != first.parse_id
     continued = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert len(submissions) == 2, continued
     assert continued.knowledge_compilation == "completed", continued

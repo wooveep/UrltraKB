@@ -264,6 +264,11 @@ class DeckResponse(BaseModel):
     name: str
     status: str
     path: str
+    execution: str | None = None
+    artifact_quality: dict | None = None
+    quality: list[str] = Field(default_factory=list)
+    unfinished: list[str] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
 
 
 class DeckListResponse(BaseModel):
@@ -281,6 +286,11 @@ class SkillResponse(BaseModel):
     name: str
     status: str
     path: str
+    execution: str | None = None
+    artifact_quality: dict | None = None
+    quality: list[str] = Field(default_factory=list)
+    unfinished: list[str] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
 
 
 class SkillListResponse(BaseModel):

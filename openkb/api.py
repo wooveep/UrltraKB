@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
 from openkb.agent.chat_session import delete_session, list_sessions, load_session
 from openkb.agent.query import build_run_config_from_bundle, run_query
+from openkb.api_artifacts import generation_failure
 from openkb.api_config import apply_kb_config_patch, read_kb_config
 from openkb.api_config_router import config_router
 from openkb.api_documents_router import documents_router
@@ -632,13 +633,14 @@ def create_app() -> FastAPI:
             async for event in _iter_deck(request, kb_dir, bundle=bundle):
                 name = event.get("event")
                 if name == "error":
+                    result = event
                     error_code = event.get("code", 500)
                     error_message = event.get("message", "Deck generation failed.")
                 elif name == "final":
                     result = event
         if error_code is not None:
-            raise HTTPException(status_code=error_code, detail=error_message)
-        return DeckResponse(name=result["name"], status=result["status"], path=result["path"])
+            return generation_failure(error_code, error_message, result)
+        return DeckResponse(**{key: value for key, value in result.items() if key != "event"})
 
     @app.get("/api/v1/deck", response_model=DeckListResponse)
     async def deck_list_endpoint(
@@ -700,13 +702,14 @@ def create_app() -> FastAPI:
             async for event in _iter_skill(request, kb_dir, bundle=bundle):
                 name = event.get("event")
                 if name == "error":
+                    result = event
                     error_code = event.get("code", 500)
                     error_message = event.get("message", "Skill generation failed.")
                 elif name == "final":
                     result = event
         if error_code is not None:
-            raise HTTPException(status_code=error_code, detail=error_message)
-        return SkillResponse(name=result["name"], status=result["status"], path=result["path"])
+            return generation_failure(error_code, error_message, result)
+        return SkillResponse(**{key: value for key, value in result.items() if key != "event"})
 
     @app.get("/api/v1/skill", response_model=SkillListResponse)
     async def skill_list_endpoint(
@@ -730,30 +733,16 @@ def create_app() -> FastAPI:
     async def skill_archive_endpoint(
         name: str,
         kb: str = Query(...),
+        include_evidence: bool = False,
         _: None = Depends(require_bearer_token),
     ) -> Any:
-        import io
-        import zipfile
+        from openkb.api_artifacts import skill_archive_response
 
-        from openkb.cli import _validate_skill_name
-        from openkb.skill import skill_dir, skills_root
+        return await skill_archive_response(name, kb, include_evidence)
 
-        if _validate_skill_name(name):
-            raise HTTPException(status_code=400, detail="Invalid skill name.")
-        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        root = skills_root(kb_dir).resolve()
-        target = skill_dir(kb_dir, name).resolve()
-        if not target.is_relative_to(root):
-            raise HTTPException(status_code=400, detail="Invalid skill name.")
-        if not target.is_dir():
-            raise HTTPException(status_code=404, detail=f"Skill not found: {name}")
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in target.rglob("*"):
-                if f.is_file():
-                    zf.write(f, f.relative_to(target))
-        buf.seek(0)
-        return StreamingResponse(buf, media_type="application/zip")
+    from openkb.api_artifacts import router as artifacts_router
+
+    app.include_router(artifacts_router)
 
     # Preserve the established JSON error shape for unknown API paths.
     @app.api_route(

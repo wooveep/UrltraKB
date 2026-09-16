@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from openkb.application.execution import ExecutionContext
@@ -33,6 +33,7 @@ class HistoryCleanup:
     versions: tuple[str, ...]
     parses: tuple[str, ...]
     pageindex_documents: tuple[str, ...] = ()
+    artifact_dependencies: dict[str, list[dict]] = field(default_factory=dict)
 
 
 def _references(path: Path) -> set[str]:
@@ -59,7 +60,8 @@ def _compilation_references(path: Path) -> set[str]:
     value, identity = record.get("value"), record.get("input")
     if (
         isinstance(value, dict)
-        and set(value) == {"content", "title"}
+        and set(value)
+        in ({"content", "title"}, {"content", "title", "review_notes", "source_details"})
         and isinstance(value["content"], str)
         and isinstance(identity, dict)
         and re.fullmatch(r"[0-9a-f]{32}", str(identity.get("source", "")))
@@ -71,7 +73,10 @@ def _compilation_references(path: Path) -> set[str]:
         if body.count(opening) == body.count(closing) == 1:
             start, end = body.index(opening), body.index(closing)
             if start < end:
-                owned = json.dumps(identity) + body[start : end + len(closing)]
+                metadata = {key: item for key, item in value.items() if key != "content"}
+                owned = (
+                    json.dumps(identity) + json.dumps(metadata) + body[start : end + len(closing)]
+                )
                 return {match.decode("ascii") for match in _IDENTITY.findall(owned.encode())}
     contract = record.get("contract")
     if (
@@ -194,6 +199,37 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         protected_paths += list(store.owned_path(store.root / name).rglob("*.json"))
     protected_paths += list((kb_dir / ".openkb/visual-observations").glob("*.json"))
     protected_paths += list((kb_dir / ".openkb/chats").glob("*.json"))
+    from openkb.artifact_quality import dependency_records
+
+    artifacts = dependency_records(kb_dir)
+    # Retain explicit version links even when recording a partially saved artifact
+    # failed. Short unresolved markers cannot identify a version: keep history
+    # conservatively until the user repairs or explicitly deletes that artifact.
+    recorded_files = {
+        relative: digest
+        for _, record in artifacts.values()
+        for relative, digest in record["files"].items()
+    }
+    unresolved_artifacts = {}
+    artifact_files = (
+        path
+        for root in (kb_dir / "output", kb_dir / "wiki/explorations")
+        for path in root.rglob("*")
+    )
+    for path in artifact_files:
+        path = store.owned_path(path)
+        if not path.is_file():
+            continue
+        protected_paths.append(path)
+        relative = path.relative_to(kb_dir).as_posix()
+        if (
+            path.suffix.lower() in {".md", ".markdown", ".html", ".htm"}
+            and recorded_files.get(relative) != HashRegistry.hash_file(path)
+            and b"evidence:" in path.read_bytes()
+        ):
+            roots.update(groups["versions"] | groups["parses"])
+            unresolved_artifacts[relative] = [{"retention": "unresolved_citations_keep_history"}]
+    protected_paths += [path for path, _ in artifacts.values()]
     for path in protected_paths:
         roots.update(_references(store.owned_path(path)))
     retained = set()
@@ -277,7 +313,13 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
     # Any state change after the preview invalidates authorization, including a
     # citation in an unrelated page or an intake that starts sharing a blob.
     state = {}
-    for directory in (store.root, knowledge, kb_dir / ".openkb/chats"):
+    for directory in (
+        store.root,
+        knowledge,
+        kb_dir / ".openkb/chats",
+        kb_dir / ".openkb/artifact-quality",
+        kb_dir / "output",
+    ):
         for path in directory.rglob("*"):
             path = store.owned_path(path)
             if path.is_file():
@@ -292,6 +334,7 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
                 "files": files,
                 "pageindex": indexes,
                 "bindings": index_records,
+                "artifacts": sorted(artifacts),
             }
         ),
         files,
@@ -299,6 +342,13 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         tuple(sorted(unused & groups["versions"])),
         tuple(sorted(unused & groups["parses"])),
         unused_indexes,
+        {
+            **{
+                relative: record.get("references", [])
+                for relative, (_, record) in artifacts.items()
+            },
+            **unresolved_artifacts,
+        },
     )
 
 

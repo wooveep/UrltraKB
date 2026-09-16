@@ -17,6 +17,7 @@ import re
 import shutil
 from pathlib import Path
 
+from openkb.artifact_quality import quality_path, read_quality, relocate_quality
 from openkb.skill import (
     extract_description,
 )
@@ -79,7 +80,9 @@ def save_iteration(kb_dir: Path, skill_name: str) -> Path | None:
     ws = _workspace_dir(kb_dir, skill_name)
     ws.mkdir(parents=True, exist_ok=True)
     dest = ws / f"iteration-{next_n}"
+    quality = read_quality(kb_dir, src)
     shutil.copytree(src, dest)
+    relocate_quality(kb_dir, src, dest, quality)
     return dest
 
 
@@ -111,10 +114,13 @@ def restore_iteration(kb_dir: Path, skill_name: str, n: int | None = None) -> Pa
     # in both directions. A user who edits files in chat then rolls back
     # gets those edits preserved as the next iteration, not silently lost.
     dest = _skill_dir(kb_dir, skill_name)
+    quality = read_quality(kb_dir, src)
     if dest.exists():
         save_iteration(kb_dir, skill_name)
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
+    quality_path(kb_dir, dest).unlink(missing_ok=True)
+    relocate_quality(kb_dir, src, dest, quality)
     return dest
 
 

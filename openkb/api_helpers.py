@@ -593,6 +593,7 @@ async def _iter_deck(
         generate_artifact,
         preflight_generation,
     )
+    from openkb.artifact_presentation import generation_facts
 
     yield {"event": "start", "endpoint": "deck"}
     err = preflight_generation(kb_dir, request.name)
@@ -616,9 +617,16 @@ async def _iter_deck(
             "event": "error",
             "code": 400 if result.status == "invalid" and result.error_type is None else 500,
             "message": f"Deck generation failed: {result.message}",
+            **generation_facts(result),
         }
         return
-    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
+    yield {
+        "event": "final",
+        "name": request.name,
+        "status": "done",
+        "path": str(result.output_dir),
+        **generation_facts(result),
+    }
 
 
 async def _stream_deck(
@@ -657,6 +665,7 @@ async def _iter_skill(
         generate_artifact,
         preflight_generation,
     )
+    from openkb.artifact_presentation import generation_facts
 
     yield {"event": "start", "endpoint": "skill"}
     err = preflight_generation(kb_dir, request.name)
@@ -680,9 +689,16 @@ async def _iter_skill(
             "event": "error",
             "code": 400 if result.status == "invalid" and result.error_type is None else 500,
             "message": f"Skill generation failed: {result.message}",
+            **generation_facts(result),
         }
         return
-    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
+    yield {
+        "event": "final",
+        "name": request.name,
+        "status": "done",
+        "path": str(result.output_dir),
+        **generation_facts(result),
+    }
 
 
 async def _stream_skill(

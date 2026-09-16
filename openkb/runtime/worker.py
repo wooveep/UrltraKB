@@ -178,6 +178,7 @@ def _execute(
         import asyncio
 
         from openkb.application.generators import GenerationOptions, generate_artifact
+        from openkb.artifact_presentation import generation_summary
 
         generated = asyncio.run(
             generate_artifact(
@@ -200,9 +201,12 @@ def _execute(
             unfinished=generated.unfinished,
             error=generated.message,
             halt=generated.status == "blocked",
-            output="\n".join([*generated.validation.errors, *generated.validation.warnings])
-            if generated.validation
-            else "",
+            output=generation_summary(generated)
+            + (
+                "\n" + "\n".join([*generated.validation.errors, *generated.validation.warnings])
+                if generated.validation
+                else ""
+            ),
         )
     if isinstance(request, CheckKnowledge):
         import asyncio

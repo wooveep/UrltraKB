@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -23,11 +24,14 @@ from PySide6.QtWidgets import (
 from openkb import frontmatter
 from openkb.application.artifacts import (
     artifact_files,
+    artifact_quality,
+    delete_artifact,
     export_artifact,
     list_artifacts,
     read_artifact,
 )
 from openkb.application.generators import GenerationOptions, preview_generation
+from openkb.artifact_presentation import quality_summary
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.form_controls import FocusComboBox, scroll_form
 from openkb.desktop.panels import ManagementPanel
@@ -99,6 +103,9 @@ class ArtifactsDialog(ManagementPanel):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.addWidget(self.files)
+        self.quality_status = QLabel()
+        self.quality_status.setWordWrap(True)
+        content_layout.addWidget(self.quality_status)
         content_layout.addWidget(self.tabs)
         splitter = QSplitter()
         splitter.addWidget(self.items)
@@ -113,6 +120,11 @@ class ArtifactsDialog(ManagementPanel):
         self.preview_button.setEnabled(False)
         self.preview_button.clicked.connect(self.preview)
         outputs.addWidget(self.export_button)
+        self.include_evidence = QCheckBox("携带引用依据")
+        outputs.addWidget(self.include_evidence)
+        delete_button = QPushButton("删除所选产物…")
+        delete_button.clicked.connect(self.delete)
+        outputs.addWidget(delete_button)
         outputs.addWidget(self.preview_button)
         outer.addLayout(outputs)
         self.timer = QTimer(self)
@@ -212,18 +224,21 @@ class ArtifactsDialog(ManagementPanel):
         self._selection += 1
         selection = self._selection
         self.files.clear()
+        self.quality_status.clear()
         if not item:
             return
         path = item.data(Qt.ItemDataRole.UserRole)
 
-        def loaded(files, error):
+        def loaded(value, error):
             if error:
                 self.status.setText(f"无法读取产物文件（{type(error).__name__}）")
                 return
+            files, quality = value
+            self.quality_status.setText(quality_summary(quality))
             self.files.addItems(files)
 
         self.window.io.submit(
-            lambda: artifact_files(self.kb, path),
+            lambda: (artifact_files(self.kb, path), artifact_quality(self.kb, path)),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or selection != self._selection,
@@ -275,11 +290,38 @@ class ArtifactsDialog(ManagementPanel):
         if not destination:
             return
         path = item.data(Qt.ItemDataRole.UserRole)
+        include_evidence = self.include_evidence.isChecked()
         self.window.io.submit(
-            lambda: export_artifact(self.kb, path, Path(destination)),
+            lambda: export_artifact(
+                self.kb, path, Path(destination), include_evidence=include_evidence
+            ),
             lambda output, error: self.status.setText(
                 f"导出未完成（{type(error).__name__}）" if error else f"已导出新副本：{output}"
             ),
+            kb=self.kb,
+            obsolete=lambda: self._closed,
+        )
+
+    def delete(self):
+        item = self.items.currentItem()
+        if not item:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if (
+            QMessageBox.question(self, "删除产物", f"删除 {path} 及其保留依据记录？")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        def finished(_, error):
+            self.status.setText(
+                f"删除未完成（{type(error).__name__}）" if error else f"已删除：{path}"
+            )
+            self.refresh()
+
+        self.window.io.submit(
+            lambda: delete_artifact(self.kb, path),
+            finished,
             kb=self.kb,
             obsolete=lambda: self._closed,
         )

@@ -16,6 +16,7 @@ in ``openkb.agent.query``. The differences:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from agents import Agent, Runner, function_tool
 from agents.model_settings import ModelSettings
@@ -100,10 +101,13 @@ def build_skill_create_agent(
         """
         return _get_page_content_impl(doc_name, pages, wiki_root)
 
+    from openkb.agent.source_tools import source_tools
     from openkb.vision.session import image_tools
 
     visual_tools, visual_instructions = image_tools(Path(wiki_root).parent)
     instructions += "\n\n" + visual_instructions
+    original_tools, original_instructions = source_tools(Path(wiki_root).parent)
+    instructions += "\n\n" + original_instructions
 
     @function_tool
     async def query_wiki(question: str) -> str:
@@ -121,7 +125,7 @@ def build_skill_create_agent(
         from openkb.agent.query import run_query
 
         kb_dir = Path(wiki_root).parent
-        return await run_query(question, kb_dir, model, stream=False)
+        return await run_query(question, kb_dir, model, stream=False, bundle=bundle)
 
     @function_tool
     def write_skill_file(path: str, content: str) -> str:
@@ -141,7 +145,7 @@ def build_skill_create_agent(
     # reads; the model has no reason to issue parallel writes to the
     # same path. An explicit config value (e.g. `null` for Bedrock) wins.
     if bundle is not None:
-        model_settings = {
+        model_settings: dict[str, Any] = {
             "parallel_tool_calls": (
                 bundle.parallel_tool_calls if bundle.parallel_tool_calls_explicit else True
             ),
@@ -151,6 +155,16 @@ def build_skill_create_agent(
     else:
         model_settings = resolve_model_settings(default_parallel_tool_calls=True)
 
+    from openkb.agent.completion_model import CompletionAwareModel
+    from openkb.processing import request_budget_settings
+
+    model_settings["include_usage"] = True
+    if caps := request_budget_settings():
+        model_settings["max_tokens"] = caps["max_tokens"]
+        model_settings["extra_args"] = {
+            **(model_settings.get("extra_args") or {}),
+            "timeout": caps["timeout"],
+        }
     return Agent(
         name="skill-creator",
         instructions=instructions,
@@ -158,12 +172,13 @@ def build_skill_create_agent(
             list_wiki_dir,
             read_wiki_file,
             get_page_content,
+            *original_tools,
             *visual_tools,
             query_wiki,
             write_skill_file,
             done,
         ],
-        model=f"litellm/{model}",
+        model=CompletionAwareModel(model=model),
         model_settings=ModelSettings(**model_settings),
     )
 
@@ -218,11 +233,16 @@ async def run_skill_create(
     from openkb.agent.query import build_run_config_from_bundle
 
     run_config = build_run_config_from_bundle(model, bundle)
+    from openkb.agent.request_budget import RequestBudgetHooks
+
+    hooks = RequestBudgetHooks()
     try:
         if run_config:
-            await Runner.run(agent, seed, max_turns=MAX_TURNS, run_config=run_config)
+            result = await Runner.run(
+                agent, seed, max_turns=MAX_TURNS, run_config=run_config, hooks=hooks
+            )
         else:
-            await Runner.run(agent, seed, max_turns=MAX_TURNS)
+            result = await Runner.run(agent, seed, max_turns=MAX_TURNS, hooks=hooks)
     except MaxTurnsExceeded as exc:
         raise RuntimeError(
             f"Skill compilation hit the {MAX_TURNS}-step cap before finishing. "
@@ -230,6 +250,14 @@ async def run_skill_create(
             f"be too broad. Try splitting into multiple skills with narrower "
             f"intents, or pass a smaller wiki subset."
         ) from exc
+    finally:
+        hooks.close()
+
+    from openkb.agent.completion_model import answer_truncated
+    from openkb.processing import OutputTruncated
+
+    if answer_truncated(result):
+        raise OutputTruncated("generation")
 
     if not (skill_root / "SKILL.md").exists():
         raise RuntimeError(

@@ -183,17 +183,30 @@ async def run_skill(
     # None (CLI path) build_run_config_from_bundle returns None and the call is
     # byte-identical to the pre-bundle behavior (no run_config kwarg passed).
     run_config = build_run_config_from_bundle(model, bundle)
+    from openkb.agent.request_budget import RequestBudgetHooks
+
+    hooks = RequestBudgetHooks()
     try:
         if run_config:
-            await Runner.run(agent, user_seed, max_turns=max_turns, run_config=run_config)
+            completed = await Runner.run(
+                agent, user_seed, max_turns=max_turns, run_config=run_config, hooks=hooks
+            )
         else:
-            await Runner.run(agent, user_seed, max_turns=max_turns)
+            completed = await Runner.run(agent, user_seed, max_turns=max_turns, hooks=hooks)
     except MaxTurnsExceeded as exc:
         raise RuntimeError(
             f"Skill {skill_name!r} hit the {max_turns}-step cap before "
             f"finishing. The intent may be too broad or the wiki too large; "
             f"try a tighter intent or split into smaller skills."
         ) from exc
+    finally:
+        hooks.close()
+
+    from openkb.agent.completion_model import answer_truncated
+    from openkb.processing import OutputTruncated
+
+    if answer_truncated(completed):
+        raise OutputTruncated("generation")
 
     result = SkillRunResult(
         skill_name=skill_name,

@@ -15,9 +15,17 @@ from openkb.agent.skills import PreparedSkill, prepare_skill
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.artifact_history import preserve_artifact_history
+from openkb.artifact_quality import (
+    quality_path,
+    read_quality,
+    relocate_quality,
+    save_quality,
+    unknown_quality,
+)
 from openkb.config import DEFAULT_CONFIG, LlmCredentialBundle, resolve_effective_config
 from openkb.locks import LockCancelled, async_kb_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, mutation_scope
+from openkb.processing import ProcessingIncomplete
 from openkb.schema import PAGE_CONTENT_DIRS
 from openkb.skill import validate_skill_name as validate_name
 
@@ -85,6 +93,7 @@ def _paths(
         if target_type == "skill"
         else [kb_dir / "output", kb_dir / "wiki/explorations"]
     )
+    roots.append(quality_path(kb_dir, target))
     contained_paths(kb_dir, [target, *roots])
     return target, roots
 
@@ -151,6 +160,7 @@ class GenerationResult:
     message: str | None = None
     error_type: str | None = None
     artifact_path: Path | None = None
+    artifact_quality: dict | None = None
 
 
 def _archive(kb_dir: Path, target: Path) -> Path:
@@ -163,7 +173,11 @@ def _archive(kb_dir: Path, target: Path) -> Path:
         if p.name.removeprefix("iteration-").isdigit()
     ]
     dest = workspace / f"iteration-{max(existing, default=0) + 1}"
-    with mutation_scope(kb_dir, [target, dest], operation="archive-artifact"):
+    previous = read_quality(kb_dir, target)
+    old_record, new_record = quality_path(kb_dir, target), quality_path(kb_dir, dest)
+    with mutation_scope(
+        kb_dir, [target, dest, old_record, new_record], operation="archive-artifact"
+    ):
         if target.is_dir():
             shutil.copytree(target, dest)
             shutil.rmtree(target)
@@ -171,6 +185,8 @@ def _archive(kb_dir: Path, target: Path) -> Path:
             dest.mkdir(parents=True)
             shutil.copy2(target, dest / target.name)
             target.unlink()
+        relocate_quality(kb_dir, target, dest, previous)
+        old_record.unlink(missing_ok=True)
     return dest
 
 
@@ -216,7 +232,14 @@ async def generate_artifact(
                 "conflict", message="Artifact already exists; rename or confirm replacement"
             )
         before = file_versions(kb_dir, roots)
-        with context.begin(kb_dir) if context else nullcontext(bundle) as credentials:
+        from openkb.agent.request_budget import visual_task_budget
+        from openkb.agent.source_session import source_session
+
+        with (
+            context.begin(kb_dir) if context else nullcontext(bundle) as credentials,
+            visual_task_budget(kb_dir),
+            source_session(kb_dir),
+        ):
             from openkb.skill.generator import Generator
 
             if model is None:
@@ -239,7 +262,7 @@ async def generate_artifact(
                     bundle=credentials,
                     **({"prepared": prepared} if prepared is not None else {}),
                 )
-                failure: Exception | None = None
+                failure: BaseException | None = None
                 quality_diff_failed = False
                 if context:
                     context.on_event({"stage": "generating"})
@@ -251,17 +274,24 @@ async def generate_artifact(
                         await gen.run()
                     except (LockCancelled, RecoveryRequired):
                         raise
-                    except Exception as exc:
+                    except (Exception, ProcessingIncomplete) as exc:
                         failure = exc
                     if failure is None and archive and options.target_type == "skill":
+                        from openkb.artifact_quality import add_generated_diff
                         from openkb.skill.workspace import write_diff
 
                         # Diff is independent and best effort, as in the existing CLI.
                         try:
+                            archived_quality = read_quality(kb_dir, archive)
                             with mutation_scope(
-                                kb_dir, [archive / "diff.md"], operation="artifact-diff"
+                                kb_dir,
+                                [archive / "diff.md", quality_path(kb_dir, archive)],
+                                operation="artifact-diff",
                             ):
                                 write_diff(archive, target, archive / "diff.md")
+                                add_generated_diff(
+                                    kb_dir, archive, archive / "diff.md", archived_quality
+                                )
                         except RecoveryRequired:
                             raise
                         except Exception:
@@ -289,6 +319,45 @@ async def generate_artifact(
                             quality.append("validation_errors")
                         if gen.validation.warnings:
                             quality.append("validation_warnings")
+                    output_files = [
+                        path
+                        for path in (target.rglob("*") if target.is_dir() else [target])
+                        if path.is_file()
+                    ]
+                    output_files += [
+                        Path(path)
+                        for path in resources
+                        if Path(path).is_file()
+                        and not Path(path).is_relative_to(kb_dir / ".openkb")
+                        and not Path(path).is_relative_to(kb_dir / ".claude-plugin")
+                    ]
+                    try:
+                        checked = save_quality(kb_dir, target, output_files, gen.validation)
+                    except RecoveryRequired:
+                        raise
+                    except Exception as exc:
+                        # Retain authorized work, but never reuse an old pass for these bytes.
+                        # A previous record still retains its historical dependencies;
+                        # its hashes make checks stale when the saved bytes changed.
+                        checked = unknown_quality("quality_record_failed")
+                        failure = failure or exc
+                        gen.stage = "quality"
+                        quality.append("quality_record_failed")
+                    if checked["checks"]["citations"] == "failed":
+                        quality.append("citation_errors")
+                    changes = archive_changes + changed_files(kb_dir, roots, before)
+                    resources = tuple(
+                        dict.fromkeys(
+                            [
+                                *resources,
+                                *(
+                                    str(kb_dir / path)
+                                    for path, version in file_versions(kb_dir, roots).items()
+                                    if before.get(path) != version
+                                ),
+                            ]
+                        )
+                    )
                 return GenerationResult(
                     "failed" if failure else "completed",
                     target.parent if file_target else target,
@@ -299,7 +368,7 @@ async def generate_artifact(
                     tuple(quality),
                     (
                         gen.stage
-                        if gen.stage in {"generation", "validation", "marketplace"}
+                        if gen.stage in {"generation", "validation", "marketplace", "quality"}
                         else "generation",
                     )
                     if failure
@@ -309,6 +378,7 @@ async def generate_artifact(
                     else None,
                     type(failure).__name__ if failure else None,
                     artifact_path=artifact_path,
+                    artifact_quality=checked,
                 )
             except (LockCancelled, asyncio.CancelledError):
                 raise

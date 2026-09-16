@@ -202,7 +202,9 @@ def test_navigation_retries_cannot_spend_the_compiler_reserve(
         stages.append(stage)
         if stage == "index_summary":
             if uncertain:
-                raise TimeoutError("Remote execution is unknown")
+                # Connection loss remains unknown; stream timeouts have their
+                # own bounded retry policy and are a different contract.
+                raise ConnectionError("Remote execution is unknown")
             raise litellm.ServiceUnavailableError(
                 "Service rejected this request", model=kwargs["model"], llm_provider="openai"
             )

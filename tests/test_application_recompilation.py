@@ -10,7 +10,7 @@ import pytest
 from tests.http_model_fixture import evidence_response
 
 
-def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
+def test_unknown_transport_recompile_retains_previous_summary(kb_dir, monkeypatch):
     import litellm
 
     from openkb.application.recompilation import recompile_document
@@ -32,9 +32,11 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", unavailable)
     result = asyncio.run(recompile_document(kb_dir, "long-hash"))
-    assert result.status == "failed"
-    assert result.error_type == "ConnectionError"
-    assert result.document.stage == "compiling"
+    # An uncertain physical request is resumable, not a confirmed provider failure.
+    assert result.status == "unfinished"
+    assert result.error_type is None
+    assert result.document.reason == "request_outcome_unknown"
+    assert result.document.stage == "facts"
     assert not result.changes
     assert "private provider detail" not in repr(result)
     assert summary.read_text() == original

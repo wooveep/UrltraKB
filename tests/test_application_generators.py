@@ -19,6 +19,128 @@ def compiled_kb(kb_dir):
     return kb_dir
 
 
+def test_skill_can_read_original_sources_without_a_nested_query(kb_dir, monkeypatch):
+    from openkb.application.generators import GenerationOptions, generate_artifact
+
+    compiled_kb(kb_dir)
+    observed = []
+
+    async def produce(agent, *args, **kwargs):
+        tools = {tool.name: tool for tool in agent.tools}
+        result = await invoke_write(tools["list_sources"], '{"offset":0,"limit":20}')
+        observed.append(json.loads(result))
+        await invoke_write(tools["write_skill_file"], '{"path":"SKILL.md","content":"# Skill"}')
+        return SimpleNamespace(final_output="Done")
+
+    monkeypatch.setattr(Runner, "run", produce)
+    result = asyncio.run(
+        generate_artifact(kb_dir, GenerationOptions("skill", "demo", "Read original sources"))
+    )
+    assert result.status == "completed", result
+    assert observed == [{"sources": [], "next_offset": None}]
+
+
+def test_nested_skill_query_keeps_credentials_and_counts_each_request_once(kb_dir, model_service):
+    from openkb.application.execution import ExecutionContext
+    from openkb.application.generators import GenerationOptions, generate_artifact
+    from openkb.config import resolve_effective_config
+    from openkb.processing import processing_scope
+
+    compiled_kb(kb_dir)
+
+    def respond(body):
+        tools = {tool["function"]["name"] for tool in body.get("tools", [])}
+        outputs = [row for row in body["messages"] if row["role"] == "tool"]
+        if "write_skill_file" not in tools:
+            return {"role": "assistant", "content": "No original sources are registered."}
+        if len(outputs) >= 2:
+            return {"role": "assistant", "content": "Saved."}
+        name, arguments = (
+            ("query_wiki", {"question": "What original sources are registered?"})
+            if not outputs
+            else ("write_skill_file", {"path": "SKILL.md", "content": "# Source availability"})
+        )
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": f"step-{len(outputs)}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+            ],
+        }
+
+    model_service.chat_response = respond
+    with processing_scope(resolve_effective_config(kb_dir)[0]) as budget:
+        result = asyncio.run(
+            generate_artifact(
+                kb_dir,
+                GenerationOptions("skill", "demo", "Describe available sources"),
+                context=ExecutionContext(),
+            )
+        )
+    assert result.status == "completed", result
+    assert len(model_service) == 4
+    assert budget.attempts == 4
+    assert budget.charged_tokens == 520
+    assert budget.unknown_usage == 0
+
+
+def test_quality_checks_saved_supporting_markdown_and_invalidates_after_edit(kb_dir, monkeypatch):
+    from openkb.application.artifacts import artifact_quality
+    from openkb.application.generators import GenerationOptions, generate_artifact
+
+    compiled_kb(kb_dir)
+    literal = "```md\n[evidence:literal]\n```\n`[evidence:example]`\n"
+
+    async def produce(agent, *args, **kwargs):
+        write = next(tool for tool in agent.tools if tool.name == "write_skill_file")
+        for path, content in {
+            "SKILL.md": "---\nname: demo\ndescription: Check sources\n---\n# Demo",
+            "references/details.md": literal + "Claim [evidence:unobserved]\n",
+        }.items():
+            await invoke_write(write, json.dumps({"path": path, "content": content}))
+        return SimpleNamespace(final_output="Everything is correct.")
+
+    monkeypatch.setattr(Runner, "run", produce)
+    result = asyncio.run(generate_artifact(kb_dir, GenerationOptions("skill", "demo", "Explain")))
+    assert result.status == "completed", result
+    quality = artifact_quality(kb_dir, "output/skills/demo")
+    assert quality["checks"]["citations"] == "failed"
+    assert quality["checks"]["semantics"] == "not_checked"
+    assert any("unobserved" in issue for issue in quality["issues"])
+    assert not any("literal" in issue or "example" in issue for issue in quality["issues"])
+    support = kb_dir / "output/skills/demo/references/details.md"
+    assert support.read_text().startswith(literal)
+    support.write_text("Human edit")
+    assert artifact_quality(kb_dir, "output/skills/demo")["status"] == "stale"
+
+
+def test_quality_record_failure_keeps_authorized_files_and_reports_unknown(kb_dir, monkeypatch):
+    from openkb.application.artifacts import artifact_quality
+    from openkb.application.generators import GenerationOptions, generate_artifact
+
+    compiled_kb(kb_dir)
+
+    async def produce(agent, *args, **kwargs):
+        write = next(tool for tool in agent.tools if tool.name == "write_skill_file")
+        await invoke_write(write, '{"path":"SKILL.md","content":"# Retained work"}')
+        return SimpleNamespace(final_output="Saved")
+
+    def fail_record(*args, **kwargs):
+        raise OSError("Cannot save quality record")
+
+    monkeypatch.setattr(Runner, "run", produce)
+    monkeypatch.setattr("openkb.artifact_quality.atomic_write_json", fail_record)
+    result = asyncio.run(generate_artifact(kb_dir, GenerationOptions("skill", "demo", "Produce")))
+    assert result.status == "failed"
+    assert (kb_dir / "output/skills/demo/SKILL.md").read_text() == "# Retained work"
+    assert "quality" in result.unfinished
+    assert artifact_quality(kb_dir, "output/skills/demo")["status"] == "unknown"
+
+
 def custom_deck(kb_dir, template="output/shared/index.html"):
     skill = kb_dir / "skills/custom/SKILL.md"
     skill.parent.mkdir(parents=True)

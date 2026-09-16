@@ -164,6 +164,14 @@ def _build_remove_plan(
     openkb_dir = kb_dir / ".openkb"
 
     actions: list[RemoveAction] = []
+    from openkb.artifact_quality import dependency_records
+
+    for relative, (_, record) in dependency_records(kb_dir).items():
+        if any(
+            item.get("reference", {}).get("source_id") == meta.get("source_id")
+            for item in record.get("references", [])
+        ):
+            actions.append(RemoveAction("RETAIN EVIDENCE", relative))
 
     summary_path = wiki_dir / "summaries" / f"{doc_name}.md"
     kept_summary = False

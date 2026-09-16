@@ -456,6 +456,8 @@ async def run_query(
     from openkb.processing import processing_checkpoint
 
     with visual_task_budget(kb_dir):
+        if run_config is None:
+            run_config = build_run_config_from_bundle(model, bundle)
         answer = await _run_query(
             question, kb_dir, model, stream, raw=raw, run_config=run_config, bundle=bundle
         )

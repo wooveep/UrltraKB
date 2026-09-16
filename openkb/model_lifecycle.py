@@ -1,4 +1,4 @@
-"""Bounded cleanup of model resources owned by the current compiler loop.
+"""Bounded cleanup of logging resources owned by the current compiler loop.
 
 The logging queue adapter follows the pinned LiteLLM implementation. It only
 observes that loop's queue; the isolated document worker supervises final exit.
@@ -14,7 +14,6 @@ from openkb.processing import cleanup_limit
 
 
 async def close_model_resources() -> None:
-    import litellm
     from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER as worker
 
     timeout = cleanup_limit()
@@ -24,8 +23,7 @@ async def close_model_resources() -> None:
     except Exception:
         report_auxiliary_warning("auxiliary_log_cleanup_failed")
         logging.getLogger(__name__).debug("Model logging cleanup failed", exc_info=True)
-    try:
-        await asyncio.wait_for(litellm.close_litellm_async_clients(), timeout=timeout)
-    except Exception:
-        report_auxiliary_warning("model_client_cleanup_failed")
-        logging.getLogger(__name__).debug("Model client cleanup failed", exc_info=True)
+    # Compiler transports are synchronous streams closed by their owning
+    # model_stream.collect thread. LiteLLM's async client cache is process-wide:
+    # closing it here also closes other tasks' clients and leaves closed handlers
+    # cached for their next request. Its lifetime belongs to the host process.

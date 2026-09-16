@@ -30,6 +30,10 @@ class RequestBudgetHooks(RunHooks):
             return
         # A UTF-8 byte bound is conservative when a custom tokenizer is unknown.
         inputs = len((system_prompt or "").encode()) + len(json.dumps(input_items).encode())
+        inputs += sum(
+            len(json.dumps(getattr(tool, "params_json_schema", {})).encode())
+            for tool in agent.tools
+        )
         usage = external_request_usage(inputs + limits["max_tokens"], "knowledge_model")
         self.pending.append((usage, usage.__enter__()))
 

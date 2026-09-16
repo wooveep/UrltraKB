@@ -21,6 +21,7 @@ def rollback_skill(kb_dir: Path, name: str, *, iteration: int | None = None) -> 
             skill_dir(root, name),
             skill_workspace_dir(root, name),
             root / ".claude-plugin/marketplace.json",
+            root / ".openkb/artifact-quality",
         ]
         file_versions(root, paths)
         with mutation_scope(root, paths, operation="restore-skill"):

@@ -1538,6 +1538,9 @@ def skill_new(ctx, name, intent, yes_flag):
             model=model,
         )
     )
+    from openkb.artifact_presentation import generation_summary
+
+    click.echo(generation_summary(gen))
     if gen.status != "completed":
         click.echo(f"[ERROR] {gen.message}", err=True)
         ctx.exit(1)
@@ -2016,6 +2019,9 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
             model=model,
         )
     )
+    from openkb.artifact_presentation import generation_summary
+
+    click.echo(generation_summary(gen))
     if gen.status != "completed":
         click.echo(f"[ERROR] {gen.message}", err=True)
         ctx.exit(1)
@@ -2083,6 +2089,9 @@ from openkb.cli_sources import sources
 from openkb.cli_image import image_commands
 from openkb.cli_ocr import ocr_commands
 
+from openkb.cli_artifacts import artifacts
+
+cli.add_command(artifacts)
 cli.add_command(sources)
 cli.add_command(image_commands)
 cli.add_command(ocr_commands)

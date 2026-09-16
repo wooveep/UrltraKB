@@ -92,6 +92,12 @@ def _capture(kb_dir):
 
 
 def source_tools(kb_dir):
+    from openkb.agent.source_session import task_tools
+
+    return task_tools(kb_dir, "original", _source_tools)
+
+
+def _source_tools(kb_dir):
     from openkb.agent.source_images import published_images
 
     with kb_read_lock(kb_dir / ".openkb"):
@@ -119,6 +125,13 @@ def source_tools(kb_dir):
         if source_id not in snapshots:
             raise ValueError("Source is not in this published snapshot")
         return snapshots[source_id]
+
+    def observe(rows):
+        from openkb.agent.source_session import current_source_session
+
+        if session := current_source_session(kb_dir):
+            session.observe(rows)
+        return rows
 
     @function_tool
     def list_sources(offset: int = 0, limit: int = 20) -> str:
@@ -227,7 +240,7 @@ def source_tools(kb_dir):
             {
                 "index": nav["id"],
                 "evidence_provenance": source_provenance(rows),
-                "evidence": rows,
+                "evidence": observe(rows),
                 "next": following,
             },
             ensure_ascii=False,
@@ -284,7 +297,7 @@ def source_tools(kb_dir):
                 "match_scope": "original_text_literal",
                 "evidence_provenance": source_provenance(rows),
                 "total_matches": len(matching),
-                "evidence": rows,
+                "evidence": observe(rows),
                 "next_offset": following if following < len(matching) else None,
             },
             ensure_ascii=False,

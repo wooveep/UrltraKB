@@ -1,6 +1,7 @@
 """Retain provider length stops that the pinned Agents adapter otherwise drops."""
 
 from contextvars import ContextVar
+from dataclasses import replace
 
 from agents.extensions.models.litellm_model import LitellmModel
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
@@ -23,8 +24,20 @@ def _incomplete(output):
 
 
 class CompletionAwareModel(LitellmModel):
-    async def _fetch_response(self, *args, **kwargs):
-        value = await super()._fetch_response(*args, **kwargs)
+    async def _fetch_response(self, system_instructions, input, model_settings, *args, **kwargs):
+        # One SDK request is one transport attempt. Hidden provider retries would
+        # bypass admission and charge multiple physical requests to one receipt.
+        model_settings = replace(
+            model_settings,
+            extra_args={
+                **(model_settings.extra_args or {}),
+                "num_retries": 0,
+                "max_retries": 0,
+            },
+        )
+        value = await super()._fetch_response(
+            system_instructions, input, model_settings, *args, **kwargs
+        )
         ending = _ENDING.get()
         if ending is None:
             return value

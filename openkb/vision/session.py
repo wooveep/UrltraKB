@@ -165,6 +165,12 @@ def image_provenance(root: Path, image_id: str) -> list[dict]:
 
 def image_tools(kb_dir: Path):
     """Expose the same textual visual interface to knowledge agents of any modality."""
+    from openkb.agent.source_session import task_tools
+
+    return task_tools(kb_dir, "visual", _image_tools)
+
+
+def _image_tools(kb_dir: Path):
     from agents import function_tool
 
     session = VisionSession(kb_dir)

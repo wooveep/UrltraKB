@@ -35,7 +35,8 @@ def test_docx_table_context_keeps_original_cells_separate_from_reader_status(
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.status == "added" and result.knowledge_compilation == "completed", result
-    assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
+    # Native table cells become literal facts without a model extraction request.
+    assert {p["stage"] for p in observed} == {"generation", "verification"}
     for payload in observed:
         assert "presentation_roles" not in payload["evidence_provenance"]
         rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
