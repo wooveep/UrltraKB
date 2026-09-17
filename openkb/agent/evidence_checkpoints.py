@@ -91,6 +91,11 @@ class CompilationCheckpoints:
             )
         }
         self.verification_options = compilation_model_options(settings, verification=True)
+        self.planning_options = compilation_model_options(settings, stage="planning")
+        self.correction_options = compilation_model_options(settings, stage="correction")
+        self.adjudication_options = compilation_model_options(
+            settings, stage="verification_adjudication"
+        )
         self.adjudication_thinking = settings.get("verification_adjudication_thinking")
         self.correction_thinking = settings.get("correction_thinking")
         self.stage_efforts = {
@@ -206,8 +211,16 @@ class CompilationCheckpoints:
                 {"request_policy": self.analysis_options} if payload.get("stage") != "facts" else {}
             ),
             **(
+                {"planning_options": self.planning_options}
+                if payload.get("stage") == "planning"
+                and self.planning_options != self.input["model_options"]
+                else {}
+            ),
+            **(
                 {
                     "verification_options": self.verification_options,
+                    "correction_options": self.correction_options,
+                    "adjudication_options": self.adjudication_options,
                     "adjudication_thinking": self.adjudication_thinking,
                     **({"stage_efforts": self.stage_efforts} if self.stage_efforts else {}),
                     **(

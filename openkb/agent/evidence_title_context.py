@@ -29,7 +29,9 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         view = reader.read(scope, max_chars=reader.complete_bound(scope))
         if view.next_start is not None:
             raise ValueError("Incomplete original title evidence")
-        contextual = context_fields(view) if view.context or view.context_data else {}
+        contextual = context_fields(view)
+        if not view.context and view.context_data is None:
+            contextual.pop("context", None)
         neighbors = []
         for item in fact.get("context_evidence", []):
             ref = Evidence(**item["reference"])
@@ -71,7 +73,11 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         passage = {
             "scope": scope,
             "text": item["text"],
-            **{k: item[k] for k in ("context", "context_data", "neighbors") if k in item},
+            **{
+                k: item[k]
+                for k in ("context", "context_data", "source_window", "neighbors")
+                if k in item
+            },
         }
         key = json.dumps(passage, ensure_ascii=False, sort_keys=True)
         if key not in seen:

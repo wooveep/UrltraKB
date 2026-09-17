@@ -15,6 +15,12 @@ Check all three: every factual claim in the content AND title is supported by th
 every supplied source quote is faithfully represented; and the candidate contains source
 knowledge suitable for publication, not the application's processing commentary.
 Original evidence is authoritative.
+Compare the complete conditional clause: AND/OR, negation, alternatives and exceptions
+must retain their meaning. An added inverse rule or exclusion needs its own source support.
+Check that titles do not turn a prerequisite state into an action or promised outcome.
+Original ancestor headings can establish a task's applicability. A heading with a
+version, reinstallation requirement or other necessary condition is not incidental
+detail: reject its omission when that broadens the retained instructions' scope.
 Check exact actors, operations, versions, numerical limits,
 commands, negations, prerequisites and exceptions. Do not accept a restriction transferred
 to another operation merely because of a heading or adjacent paragraph. If layout and

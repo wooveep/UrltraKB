@@ -23,6 +23,15 @@ windows by context_start and follow next until context_complete before interpret
 With context_format=legacy_display (or absent), context retains the legacy mixed display;
 do not guess that its parser annotations are source quotations."""
 
+_WINDOW_INSTRUCTIONS = (
+    "source_window gives the exact [start,end) character range\n"
+    "of text within a block of length total. If start > 0 or end < total, the edge is "
+    "a cut, not the end of a\n"
+    "word, value, command or condition. Never treat a cut literal as a complete value;\n"
+    "use the complete original occurrence or report insufficient evidence. Window\n"
+    "metadata is not source wording and must not appear in knowledge prose."
+)
+
 _IMAGE_CONTEXT_INSTRUCTIONS = """ Optional image_relations record original asset bytes, full
 normalized display frames (orientation/alpha/encoding may change), and assets returned
 by OCR for each frame. source_alt is author-supplied alternative text for the original;
@@ -33,7 +42,9 @@ visual contents; it does not establish the extent or contents of other OCR outpu
 Use these relationships to select an original/display frame when asked for its figure,
 without narrating processing metadata unless it is relevant to the user's question."""
 
-CONTEXT_INSTRUCTIONS = _TEXT_CONTEXT_INSTRUCTIONS + _IMAGE_CONTEXT_INSTRUCTIONS
+CONTEXT_INSTRUCTIONS = (
+    _TEXT_CONTEXT_INSTRUCTIONS + _IMAGE_CONTEXT_INSTRUCTIONS + "\n" + _WINDOW_INSTRUCTIONS
+)
 
 
 def context_instructions(value):
@@ -49,7 +60,21 @@ def context_instructions(value):
             return any(images(child) for child in item)
         return False
 
-    return CONTEXT_INSTRUCTIONS if images(value) else _TEXT_CONTEXT_INSTRUCTIONS
+    def windows(item):
+        if isinstance(item, dict):
+            return "source_window" in item or any(windows(child) for child in item.values())
+        if isinstance(item, (list, tuple)):
+            return any(windows(child) for child in item)
+        return False
+
+    parts = []
+    if has_structured_context(value):
+        parts.append(_TEXT_CONTEXT_INSTRUCTIONS)
+        if images(value):
+            parts.append(_IMAGE_CONTEXT_INSTRUCTIONS)
+    if windows(value):
+        parts.append(_WINDOW_INSTRUCTIONS)
+    return "\n".join(parts)
 
 
 def has_structured_context(value):
@@ -124,12 +149,27 @@ def validate_context_data(value):
         raise invalid
 
 
-def context_fields(value):
-    """Models consume typed context when available; legacy context is never guessed apart."""
+def window_fields(start, end, total):
+    """Keep bounded original text distinguishable from a complete source block."""
+    if total is not None and (start > 0 or end < total):
+        return {"source_window": {"start": start, "end": end, "total": total}}
+    return {}
+
+
+def context_fields(value, *, start=None, end=None):
+    """Models consume typed context and know when original text is only a window."""
     details = getattr(value, "context_data", None)
-    if details is not None:
-        return {"context_data": copy.deepcopy(details)}
-    return {"context": value.context}
+    result = (
+        {"context_data": copy.deepcopy(details)}
+        if details is not None
+        else {"context": value.context}
+    )
+    total = getattr(value, "block_chars", None)
+    if total is not None:
+        first = value.reference.start if start is None else start
+        last = value.reference.start + len(value.text) if end is None else end
+        result.update(window_fields(first, last, total))
+    return result
 
 
 def model_context(value):

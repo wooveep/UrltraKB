@@ -20,6 +20,7 @@ _CONFIRMABLE = {"blank_or_illustration", "ocr_blank_or_illustration", "image_con
 EVIDENCE_PROVENANCE = {
     "text": "parsed_source_text",
     "context": "reader_context_with_source_excerpts",
+    "source_window": "reader_character_extent_not_author_statements",
     "context_data": {
         "source_excerpts": "parsed_source_text",
         "structure": "document_structure",
@@ -346,6 +347,7 @@ class EvidenceSlice:
     context: str
     next_start: int | None
     context_data: dict[str, Any] | None = None
+    block_chars: int | None = None
 
 
 def complete_read_bound(block):
@@ -701,6 +703,7 @@ class EvidenceReader:
                 block.context,
                 following if following < end else None,
                 copy.deepcopy(block.context_data),
+                block.chars,
             )
 
 

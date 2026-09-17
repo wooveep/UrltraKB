@@ -476,7 +476,7 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     from openkb.navigation_options import validate_navigation_options
 
     validate_navigation_options(config.get("navigation"))
-    for stage in ("verification_adjudication", "correction"):
+    for stage in ("planning", "verification_adjudication", "correction"):
         compilation_model_options(config, stage=stage)
     for key in ("model", "language"):
         value = config.get(key)
@@ -515,10 +515,12 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "image_understanding",
     "navigation",
     "compilation_thinking",
+    "planning_thinking",
     "verification_thinking",
     "verification_adjudication_thinking",
     "correction_thinking",
     "compilation_reasoning_effort",
+    "planning_reasoning_effort",
     "verification_reasoning_effort",
     "verification_adjudication_reasoning_effort",
     "correction_reasoning_effort",
