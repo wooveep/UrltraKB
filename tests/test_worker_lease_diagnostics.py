@@ -62,3 +62,37 @@ def test_execution_errors_still_keep_a_traceback(kb_dir, tmp_path):
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
+
+
+def _worker_with_failed_preparation_cleanup(*args):
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    from openkb.runtime.input_store import child_preparation
+    from openkb.runtime.worker import run_unit
+
+    @contextmanager
+    def failing_cleanup(path):
+        with child_preparation(path):
+            yield
+        raise OSError("Input lease cleanup failed")
+
+    with patch("openkb.runtime.input_store.child_preparation", failing_cleanup):
+        run_unit(*args)
+
+
+def test_deferred_worker_cleanup_failure_is_not_requeued(kb_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr("openkb.runtime.tasks.run_unit", _worker_with_failed_preparation_cleanup)
+    manager = TaskManager(history_dir=tmp_path / "history")
+    try:
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            task_id = manager.submit(kb_dir, [ContinueSource("a" * 32, "b" * 64)])
+            failed = manager.wait(task_id, timeout=3)
+            assert failed.state == "failed" and failed.processes_reaped
+            assert len(failed.results) == 1
+            text = read_task_log(manager.history_dir / "logs" / task_id)
+            assert "Input lease cleanup failed" in text
+            assert "Traceback" in text
+    finally:
+        manager.shutdown(stop=True)
+        assert manager.join(10)

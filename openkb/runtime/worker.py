@@ -475,6 +475,7 @@ def run_unit(
     context.on_committed = committed
     try:
         try:
+            deferred = False
             with (
                 DocumentCancellation(
                     channel.stopped,
@@ -524,16 +525,23 @@ def run_unit(
                     # This is scheduler control flow before business work, not
                     # a failure for the diagnostics context to render as a traceback.
                     diagnostics.emit("等待知识库可用，任务已排队；稍后自动继续")
-                    channel.send("deferred")
-                    return
-                business_result = result
-                # Persist business facts before auxiliary log/client teardown.
-                # The parent still waits for exit and recovery before claiming
-                # stop or cleanup confirmation.
-                save_receipt(receipt_dir, identity, result)
-                channel.send(
-                    "result", result=result, truncated=channel.truncated, sequence=channel.sequence
-                )
+                    deferred = True
+                else:
+                    business_result = result
+                    # Persist business facts before auxiliary log/client teardown.
+                    # The parent still waits for exit and recovery before claiming
+                    # stop or cleanup confirmation.
+                    save_receipt(receipt_dir, identity, result)
+                    channel.send(
+                        "result",
+                        result=result,
+                        truncated=channel.truncated,
+                        sequence=channel.sequence,
+                    )
+            if deferred:
+                # Teardown failures must become failed results, not retries.
+                channel.send("deferred")
+                return
         except InputChanged:
             if isinstance(request, ImportFile) and request.wait_for_stable:
                 # Input preparation has not begun business or fixed new
