@@ -30,6 +30,7 @@ class OcrInstallationPanel(QWidget):
     def __init__(self, io):
         super().__init__()
         self.io = io
+        self._closed = False
         self.stop = Event()
         self.busy = False
         body = QVBoxLayout(self)
@@ -77,7 +78,7 @@ class OcrInstallationPanel(QWidget):
             self.start(Path(path))
 
     def start(self, offline=None):
-        if self.busy:
+        if self.busy or self._closed:
             return
         self.busy = True
         self.stop.clear()
@@ -93,12 +94,26 @@ class OcrInstallationPanel(QWidget):
                 destination=directory,
                 offline=offline,
                 cancelled=self.stop.is_set,
-                progress=lambda n, d, t: self.progress.emit(f"{n}：{d:,} / {t:,} 字节"),
+                progress=self.report_progress,
             ),
             self.finished,
+            obsolete=lambda: self._closed,
         )
 
+    def report_progress(self, name, done, total):
+        if self._closed:
+            return
+        try:
+            self.progress.emit(f"{name}：{done:,} / {total:,} 字节")
+        except RuntimeError:
+            # The GUI can retire/delete this widget between the worker's check
+            # and signal emission. Other signal errors must remain visible.
+            if not self._closed:
+                raise
+
     def finished(self, value, error):
+        if self._closed:
+            return
         self.busy = False
         self.install_button.setEnabled(True)
         self.offline_button.setEnabled(True)
@@ -111,8 +126,12 @@ class OcrInstallationPanel(QWidget):
         if not error:
             self.installed.emit(value["id"])
 
-    def closeEvent(self, event):
+    def retire(self):
+        self._closed = True
         self.stop.set()
+
+    def closeEvent(self, event):
+        self.retire()
         super().closeEvent(event)
 
 

@@ -3,6 +3,7 @@
 import threading
 from copy import deepcopy
 
+from openkb.agent.checkpoint_contracts import PendingContracts
 from openkb.config import compilation_model_options
 from openkb.evidence import EVIDENCE_PROVENANCE
 from openkb.implementation import module_revision
@@ -75,8 +76,7 @@ def publication_settings(settings, bundle):
 class CompilationCheckpoints:
     def __init__(self, kb_dir, source, parsed, settings, bundle):
         self._write_lock = threading.RLock()
-        self._contracts = {}
-        self._records = {}
+        self._contracts = PendingContracts()
         self.invalidations = []
         from openkb.processing import RequestLimits
 
@@ -121,7 +121,7 @@ class CompilationCheckpoints:
         record = self._key_record(system, payload, dependencies=dependencies)
         key = content_id(record)
         with self._write_lock:
-            self._contracts[key] = deepcopy(record)
+            self._contracts.save(key, record)
         return key
 
     def previous_fact_key(self, system, payload):
@@ -247,8 +247,6 @@ class CompilationCheckpoints:
 
     def record(self, key):
         processing_checkpoint()
-        if key in self._records:
-            return deepcopy(self._records[key])
         path = self.store.owned_path(self.root / f"{valid_id(key)}.json")
         if not path.exists():
             return None
@@ -272,34 +270,44 @@ class CompilationCheckpoints:
         except (ValueError, FileNotFoundError):
             self.invalidations.append({"key": key, "reason": "checkpoint_invalid"})
             return None
-        self._records[key] = deepcopy(record)
-        return deepcopy(record)
+        # Each read already owns its decoded value. Retaining whole contracts
+        # here makes a resumed long document accumulate every previous prompt.
+        return record
 
     def load(self, key):
         record = self.record(key)
         return record["value"] if record else None
 
     def checkpoint_keys(self, stage):
+        keys, stages = self._checkpoint_index()
+        if stage in stages:
+            return list(dict.fromkeys([*stages[stage], *stages.get("unknown", [])]))
+        return keys
+
+    def _checkpoint_index(self):
         try:
             index = read_object(self.latest)
             keys = index["checkpoints"]
             if not isinstance(keys, list):
                 raise ValueError("Invalid checkpoint index")
             keys = [valid_id(key) for key in keys]
+            known = set(keys)
             stages = index.get("stages", {})
             if not isinstance(stages, dict):
                 raise ValueError("Invalid checkpoint stages")
             for name, selected in stages.items():
                 if not isinstance(name, str) or not isinstance(selected, list):
                     raise ValueError("Invalid checkpoint stage")
-                if not {valid_id(key) for key in selected} <= set(keys):
+                if not {valid_id(key) for key in selected} <= known:
                     raise ValueError("Unknown checkpoint in stage index")
-            if stage in stages:
-                return list(dict.fromkeys([*stages[stage], *stages.get("unknown", [])]))
-            return keys
+            indexed = {key for selected in stages.values() for key in selected}
+            if missing := known - indexed:
+                stages["unknown"] = sorted(set(stages.get("unknown", [])) | missing)
+            return keys, stages
         except (ValueError, KeyError, FileNotFoundError):
             self.invalidations.append({"reason": "checkpoint_index_rebuilt"})
             keys = []
+            stages = {}
             for path in self.root.glob("*.json"):
                 try:
                     valid_id(path.stem)
@@ -308,8 +316,11 @@ class CompilationCheckpoints:
                 record = self.record(path.stem)
                 if record is not None:
                     keys.append(path.stem)
-            atomic_write_json(self.latest, {"checkpoints": sorted(keys)})
-            return keys
+                    stage = record.get("contract", {}).get("payload", {}).get("stage")
+                    stages.setdefault(stage or "unknown", []).append(path.stem)
+            keys.sort()
+            atomic_write_json(self.latest, {"checkpoints": keys, "stages": stages})
+            return keys, stages
 
     def save(self, key, value, *, receipt=None):
         with self._write_lock:
@@ -322,7 +333,7 @@ class CompilationCheckpoints:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         if not path.exists():
-            contract = self._contracts.get(key)
+            contract = self._contracts.read(key)
             if kind == "draft" and contract and contract["payload"].get("stage") == "generation":
                 from openkb.agent.legacy_checkpoints import generation_keys
 
@@ -373,8 +384,9 @@ class CompilationCheckpoints:
 
     def _save(self, key, value, *, receipt=None):
         processing_checkpoint()
+        contract = self._contracts.read(key)
         record = {
-            **({"contract": self._contracts[key]} if key in self._contracts else {}),
+            **({"contract": contract} if contract is not None else {}),
             "input": self.input,
             "key": key,
             "value": value,
@@ -390,6 +402,8 @@ class CompilationCheckpoints:
             prior = self.record(key)
             if prior is not None and prior["value"] != value:
                 raise ValueError("Immutable compilation checkpoint changed")
+            if prior is not None:
+                record = prior
             if prior is None:
                 import hashlib
 
@@ -403,13 +417,13 @@ class CompilationCheckpoints:
                 atomic_write_json(path, record)
         else:
             atomic_write_json(path, record)
-        self._records[key] = deepcopy(record)
-        keys = self.checkpoint_keys("") if self.latest.exists() else []
+        keys, stages = self._checkpoint_index() if self.latest.exists() else ([], {})
         if key not in keys:
             keys = sorted([*keys, key])
-        stages = {}
-        for item in keys:
-            saved = self.record(item)
-            stage = (saved or {}).get("contract", {}).get("payload", {}).get("stage")
-            stages.setdefault(stage or "unknown", []).append(item)
+        # The validated compact index already classifies previous requests.
+        # Appending one result must not decode/copy all previous request bodies.
+        stages = {name: [item for item in items if item != key] for name, items in stages.items()}
+        stage = record.get("contract", {}).get("payload", {}).get("stage")
+        stages.setdefault(stage or "unknown", []).append(key)
         atomic_write_json(self.latest, {"checkpoints": keys, "stages": stages})
+        self._contracts.discard(key)

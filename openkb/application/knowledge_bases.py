@@ -300,7 +300,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
 
         by_identity = {row["hash"]: row for row in documents}
         for source in SourceStore(kb_dir).list_sources():
-            details = source_status(kb_dir, source.source_id)
+            details = source_status(kb_dir, source.source_id, include_details=False)
             result = details["result"]
             row: dict[str, Any]
             if source.source_id not in by_identity:

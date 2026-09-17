@@ -18,6 +18,7 @@ class ImageField(SettingsSection):
         from openkb.desktop.settings import SettingField
 
         self.io, self.kb = io, kb
+        self._closed = False
         self._saved = {}
         self.enabled = QCheckBox("启用图片理解")
         self.enabled.toggled.connect(self.changed)
@@ -124,6 +125,8 @@ class ImageField(SettingsSection):
         self.status.setText("正在向已保存的图片模型发送内置样本…")
 
         def finished(result, error):
+            if self._closed:
+                return
             self.test.setEnabled(True)
             self.status.setText(
                 "图片连接测试失败"
@@ -136,4 +139,8 @@ class ImageField(SettingsSection):
             finished,
             kb=self.kb,
             global_settings=True,
+            obsolete=lambda: self._closed,
         )
+
+    def retire(self):
+        self._closed = True

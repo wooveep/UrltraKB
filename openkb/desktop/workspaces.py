@@ -519,6 +519,9 @@ class Workspaces:
             panel.done(QDialog.DialogCode.Rejected)
             scroll.hide()
             scroll.setParent(self.window)
+            for view in scroll.findChildren(MarkdownView):
+                view.stop_rendering()
+            scroll.deleteLater()
             del self.panels[key]
         while self.chat_stack.count() > 1:
             self.chat_stack.removeTab(1)

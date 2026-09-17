@@ -52,6 +52,7 @@ from openkb.runtime.requests import (
 class SourceReview(SourceStages, QDialog):
     def __init__(self, window, kb, source_id, *, stage=None, saved=None):
         super().__init__(window)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.window, self.kb, self.source_id = window, kb, source_id
         self._closed, self._generation = False, 0
         self._saved = self._review = self._task = None

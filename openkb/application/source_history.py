@@ -68,13 +68,15 @@ def record_source_result(kb_dir: Path, result: DocumentResult) -> None:
         atomic_write_json(store.owned_path(latest), {"attempt": attempt})
 
 
-def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
+def source_status(kb_dir: Path, source_id: str, *, include_details: bool = True) -> dict[str, Any]:
+    """Read saved outcomes; materialize optional detail views only when requested."""
     with kb_read_lock(kb_dir / ".openkb"):
         store = SourceStore(kb_dir)
         version = store.current(source_id)
         directory = store.owned_path(store.root / "runs" / valid_id(source_id, source=True))
         latest = store.owned_path(directory / "latest.json")
         current = None
+        attempt = None
         if latest.exists():
             record = read_object(latest)
             if set(record) != {"attempt"}:
@@ -97,7 +99,11 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
             if path.name == "latest.json":
                 continue
             valid_id(path.stem, source=True)
-            result = DocumentResult.from_summary(read_object(store.owned_path(path)))
+            result = (
+                current
+                if path.stem == attempt and current is not None
+                else DocumentResult.from_summary(read_object(store.owned_path(path)))
+            )
             if result.source_id != source_id:
                 raise ValueError("Source history identity mismatch")
             totals["runs"] += 1
@@ -111,7 +117,6 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
         unreported, pending_requests = unreported_source_usage(store, source_id, reported_ids)
         for field in totals:
             totals[field] += unreported[field]
-        from openkb.navigation import read_navigation
         from openkb.navigation_usage import navigation_usage
 
         indexed_usage = navigation_usage(store, source_id)
@@ -145,14 +150,38 @@ def source_status(kb_dir: Path, source_id: str) -> dict[str, Any]:
                     source_id=source_id,
                     parse_id=parsed.id,
                 )
-        return {
+        result_view = None
+        if current and current.input_version == version.id:
+            result_view = (
+                asdict(current)
+                if include_details
+                else {
+                    key: getattr(current, key)
+                    for key in (
+                        "knowledge_compilation",
+                        "stage",
+                        "reason",
+                        "parse_id",
+                        "resume",
+                        "omissions",
+                        "coverage",
+                    )
+                }
+            )
+        status = {
             "source": asdict(version),
             "original": str(store.original(version)),
-            "result": asdict(current) if current and current.input_version == version.id else None,
+            "result": result_view,
             "cumulative_usage": totals,
             "unconfirmed_requests": pending_requests,
-            "cloud_jobs": cloud_jobs(store, source_id),
-            "local_ocr": local_ocr_usage(store, source_id),
-            "navigation": read_navigation(kb_dir, version),
             "navigation_usage": indexed_usage,
         }
+        if include_details:
+            from openkb.navigation import read_navigation
+
+            status.update(
+                cloud_jobs=cloud_jobs(store, source_id),
+                local_ocr=local_ocr_usage(store, source_id),
+                navigation=read_navigation(kb_dir, version),
+            )
+        return status

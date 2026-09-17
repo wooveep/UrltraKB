@@ -426,6 +426,8 @@ class OcrField(SettingsSection):
         self.check_status.setText("正在检查完整管线与内置样本…")
 
         def finished(result, error):
+            if cancelled():
+                return
             self.check_button.setEnabled(True)
             if error:
                 self.check_status.setText("检查未完成；请核对安装或连接设置。")

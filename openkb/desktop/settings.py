@@ -376,6 +376,8 @@ class SettingsDialog(ManagementPanel):
             return repair_knowledge_base(self.kb) if self.kb else repair_global_settings()
 
         def repaired(result, error):
+            if self._closed:
+                return
             self._saving = False
             self.buttons.setEnabled(True)
             if error or not result.repaired:
@@ -402,14 +404,16 @@ class SettingsDialog(ManagementPanel):
 
     def reject(self):
         if not self._saving:
-            self._closed = True
-            self.fields["parsing"].installer.stop.set()
             super().reject()
+
+    def done(self, result):
+        self._closed = True
+        self.fields["parsing"].installer.retire()
+        self.fields["image_understanding"].retire()
+        super().done(result)
 
     def closeEvent(self, event):
         if self._saving:
             event.ignore()
         else:
-            self._closed = True
-            self.fields["parsing"].installer.stop.set()
             super().closeEvent(event)
