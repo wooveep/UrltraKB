@@ -1,18 +1,12 @@
 """Bind extracted references to their parent and import each child independently."""
 
-from dataclasses import replace
-
 from openkb.attachments import DocumentAttachment
-from openkb.evidence import ParseStore
 from openkb.sources import SourceStore, content_id
 
 
-def with_document_attachments(kb_dir, result):
-    if not result.input_version or not result.parse_id:
-        return result
+def document_attachments(kb_dir, source, parsed):
+    """Bind all child sources before model work or a parent publication can begin."""
     store = SourceStore(kb_dir)
-    source = store.version(result.input_version)
-    parsed = ParseStore(kb_dir).load(result.parse_id)
     if parsed.input_key != source.input_key:
         raise ValueError("Attachment references do not belong to the parent version")
     children = {}
@@ -29,7 +23,7 @@ def with_document_attachments(kb_dir, result):
             children[child.id] = DocumentAttachment(
                 child.source_id, child.id, item["part"], item["name"]
             )
-    return replace(result, attachments=tuple(children.values()))
+    return tuple(children.values())
 
 
 def import_attachment(kb_dir, request, *, context):

@@ -85,7 +85,10 @@ def emf_label(*lines):
 
 
 @pytest.mark.parametrize("damaged", [False, True])
-def test_body_uses_the_displayed_filename_from_the_object_icon(kb_dir, tmp_path, damaged):
+@pytest.mark.parametrize("standalone_icon", [False, True])
+def test_body_uses_the_displayed_filename_from_the_object_icon(
+    kb_dir, tmp_path, damaged, standalone_icon
+):
     from tests.docx_attachment_fixtures import docx_with_parts
 
     child = tmp_path / "child.docx"
@@ -96,7 +99,15 @@ def test_body_uses_the_displayed_filename_from_the_object_icon(kb_dir, tmp_path,
         '<w:r><w:object><v:shape xmlns:v="urn:schemas-microsoft-com:vml">'
         '<v:imagedata r:id="icon"/></v:shape>'
         '<o:OLEObject xmlns:o="urn:schemas-microsoft-com:office:office" '
-        'Type="Embed" r:id="object"/></w:object></w:r></w:p>',
+        'Type="Embed" r:id="object"/></w:object></w:r></w:p>'
+        + (
+            '<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml">'
+            '<v:imagedata xmlns:r="http://schemas.openxmlformats.org/'
+            'officeDocument/2006/relationships" '
+            'r:id="icon"/></v:shape></w:pict></w:r></w:p>'
+            if standalone_icon
+            else ""
+        ),
         parts={
             "word/embeddings/generated.docx": b"broken container"
             if damaged
@@ -117,10 +128,10 @@ def test_body_uses_the_displayed_filename_from_the_object_icon(kb_dir, tmp_path,
     text = "\n".join(store.asset(block.blob).read_text() for block in parsed.blocks)
     assert "云平台附件.docx" in text
     assert "generated.docx" not in text
-    assert "![" not in text
+    assert text.count("![") == int(standalone_icon)
     if damaged:
         assert len(store.list_sources()) == 1
-        assert "asset:" not in text
+        assert text.count("asset:") == int(standalone_icon)
 
 
 def test_stopping_parent_stops_its_running_attachment(kb_dir, tmp_path, model_service):
@@ -245,3 +256,82 @@ def test_shared_parent_parse_binds_child_imports_to_each_origin(kb_dir, tmp_path
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
+
+
+def test_queued_parent_update_does_not_lose_an_unchanged_attachment(
+    kb_dir, tmp_path, model_service
+):
+    import json
+    import threading
+    from zipfile import ZipFile
+
+    from http_model_fixture import evidence_response
+
+    from openkb.runtime.attachment_tasks import task_family
+    from openkb.runtime.requests import ImportFile
+    from openkb.runtime.tasks import TaskManager
+
+    started, release = threading.Event(), threading.Event()
+
+    def response(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload.get("stage") == "facts" and not started.is_set():
+            started.set()
+            release.wait(30)
+        return evidence_response(payload)
+
+    model_service.respond = response
+    child = tmp_path / "child.docx"
+    write_docx(child, "<w:p><w:r><w:t>Recovery port 9473.</w:t></w:r></w:p>")
+    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
+    manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
+    try:
+        first = manager.submit(kb_dir, [ImportFile(str(parent))])
+        assert started.wait(20)
+        with ZipFile(parent) as archive:
+            parts = {name: archive.read(name) for name in archive.namelist()}
+        parts["word/document.xml"] = parts["word/document.xml"].replace(b"Follow", b"First follow")
+        with ZipFile(parent, "w") as archive:
+            for name, content in parts.items():
+                archive.writestr(name, content)
+        second = manager.submit(kb_dir, [ImportFile(str(parent))])
+        release.set()
+        manager.wait(first, timeout=30)
+        manager.wait(second, timeout=30)
+        manager.shutdown(stop=False)
+        assert manager.join(30)
+        family = task_family(manager, second)
+        assert len(family) == 2
+        assert family[1].state == "completed"
+        assert family[1].results[0].document.knowledge_compilation == "completed"
+        assert family[1].parent_task_id == second
+    finally:
+        release.set()
+        manager.shutdown(stop=True)
+        assert manager.join(10)
+
+
+def test_attachment_binding_failure_precedes_parent_publication(
+    kb_dir, tmp_path, model_service, monkeypatch
+):
+    from openkb.application.documents import import_document
+
+    child = tmp_path / "child.docx"
+    write_docx(child, "<w:p><w:r><w:t>Recovery port 9473.</w:t></w:r></w:p>")
+    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
+    intake = SourceStore.intake_attachment
+    calls = 0
+
+    def fail_binding(store, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # Parsing succeeds; subsequent source binding cannot be saved.
+            raise OSError("Fixture attachment storage unavailable")
+        return intake(store, *args, **kwargs)
+
+    monkeypatch.setattr(SourceStore, "intake_attachment", fail_binding)
+    result = import_document(kb_dir, parent)
+    assert result.status == "failed"
+    assert result.source_intake == "saved"
+    assert not list((kb_dir / "wiki").rglob("*.md"))
+    assert not model_service, "Binding must finish before model work or publication"

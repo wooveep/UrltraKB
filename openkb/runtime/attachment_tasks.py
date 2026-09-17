@@ -21,7 +21,13 @@ def enqueue_attachments(manager, parent, result, identity):
     try:
         for child in document.attachments:
             binding = content_id(
-                ["attachment-import-v1", identity.kb_dir, identity.generation, child.version_id]
+                [
+                    "attachment-import-v2",
+                    identity.kb_dir,
+                    identity.generation,
+                    document.input_version,
+                    child.version_id,
+                ]
             )
             task_id = binding[:32]
             if task_id not in related and len(related) >= 10000:

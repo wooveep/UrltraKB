@@ -120,6 +120,24 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
     monkeypatch.setattr(requests.Session, "request", service)
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", (result.reason, result.warnings)
+    if nested:
+        from openkb.application.attachment_imports import import_attachment
+        from openkb.application.execution import ExecutionContext
+        from openkb.runtime.requests import ImportAttachment
+
+        assert len(result.attachments) == 1
+        assert not {hashlib.sha256(data).hexdigest() for data in originals} & {
+            row["id"] for row in result.coverage["assets"]
+        }
+        child = result.attachments[0]
+        result = import_attachment(
+            kb_dir,
+            ImportAttachment(
+                child.source_id, child.version_id, result.input_version, child.part, child.name
+            ),
+            context=ExecutionContext(),
+        )
+        assert result.knowledge_compilation == "completed", (result.reason, result.warnings)
     assets = {row["id"]: row for row in result.coverage["assets"]}
     first, second = (assets[hashlib.sha256(data).hexdigest()] for data in originals)
     assert first["transcription"] == "available"

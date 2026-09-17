@@ -565,8 +565,10 @@ recovered, the embedded filename is used. Other object handling remains unchange
 Attachment classification still parses supported child documents under the parent's
 existing parsing limits and OCR policy, retaining reusable child parse artifacts.
 The independent import then reuses those artifacts. Repeated parent imports reuse
-the existing child task for the same retained version within task history; they do
-not automatically retry failed or stopped children. Use the child source's Continue
+the existing child task for the same parent version and attachment version within
+task history; they do not automatically retry failed or stopped children. A changed
+parent version can queue a fresh child task even if the attachment bytes are unchanged.
+Use the child source's Continue
 action to retry it. Opening task history never starts work. Stopping an active parent
 also stops children owned by it, and the CLI waits for all related imports before
 exiting. A child's failure does not change a completed parent's result. Existing

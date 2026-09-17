@@ -119,7 +119,8 @@ def parse_docx(
                 return "\n"
             digest = store.put_bytes(content)
             if digest in prepared.icons:
-                return ""
+                assets.append(digest)
+                return f"![{node.alt_text or 'Attachment icon'}](asset:{digest})"
             from openkb.docx_images import read_image
 
             text, images, checks = read_image(

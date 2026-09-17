@@ -96,7 +96,6 @@ def attachment_quality(quality, attachment, position):
     return [
         {
             "status": row["status"],
-            **({"transcriptions": row["transcriptions"]} if "transcriptions" in row else {}),
             **({"count": row["count"]} if "count" in row else {}),
             **(
                 {"location": _bind_location(row["location"], attachment, position)}

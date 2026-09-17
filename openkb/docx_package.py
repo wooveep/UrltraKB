@@ -132,6 +132,10 @@ def prepare_docx(
                 label.text, label.tail = text, node.tail
                 parent.insert(list(parent).index(node), label)
                 parent.remove(node)
+                # Remove this object's icon, not other occurrences of the same image.
+                for shape in list(parent.iter(V + "shape")):
+                    if shape.find(V + "imagedata") is not None:
+                        parents[shape].remove(shape)
 
             changed_part = False
             for index, node in enumerate(list(tree.iter(OFFICE + "OLEObject")), 1):

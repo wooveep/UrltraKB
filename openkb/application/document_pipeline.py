@@ -36,10 +36,8 @@ def compile_version(kb_dir, source, settings, **options):
 
 
 def finish_compilation(kb_dir, source, settings, result, *, bundle=None):
-    from openkb.application.attachment_imports import with_document_attachments
     from openkb.application.source_history import finish_source_result, source_results_deferred
 
-    result = with_document_attachments(kb_dir, result)
     if source_results_deferred():
         return result
     result = finish_source_result(kb_dir, result)
@@ -74,6 +72,7 @@ def _compile_version(
     store = SourceStore(kb_dir)
     originals = (str(store.original(source)),)
     parsed = None
+    attachments = ()
     proposal = None
     stage = "parsing"
     with collect_compile_report() as report:
@@ -101,6 +100,9 @@ def _compile_version(
                     resume_ocr=False,
                     page_overrides=page_overrides,
                 )
+                from openkb.application.attachment_imports import document_attachments
+
+                attachments = document_attachments(kb_dir, source, parsed)
                 for row in parsed.quality:
                     if row["status"] == "needs_review" or (
                         "docx_conversion_warning:" in row["reason"]
@@ -129,6 +131,7 @@ def _compile_version(
                         usage=report.usage,
                         warnings=tuple(report.warnings),
                         coverage=source_coverage(source, parsed, report),
+                        attachments=attachments,
                     )
                 registry = HashRegistry(kb_dir / ".openkb/hashes.json")
                 previous = registry.get(source.source_id)
@@ -171,6 +174,7 @@ def _compile_version(
                         parse_id=parsed.id,
                         usage=report.usage,
                         coverage=previous_coverage,
+                        attachments=attachments,
                     )
                 name = document_name or (previous.get("doc_name") if previous else None)
                 name = name or f"{_sanitize_stem(Path(source.name).stem)[:100]}-{source.source_id}"
@@ -294,6 +298,7 @@ def _compile_version(
                     source_id=source.source_id,
                     parse_id=parsed.id,
                     coverage=coverage,
+                    attachments=attachments,
                 )
         except ProcessingIncomplete as exc:
             reason, stage, status = exc.reason, exc.stage, "unfinished"
@@ -330,6 +335,7 @@ def _compile_version(
             source_id=source.source_id,
             parse_id=parsed.id if parsed else None,
             coverage=source_coverage(source, parsed, report),
+            attachments=attachments,
         )
 
 
