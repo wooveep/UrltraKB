@@ -1,6 +1,21 @@
 """Original DOCX cell excerpts without display-only notices or attachment markers."""
 
 
+def with_inline_annotations(context, node, *, notes, comments, attachments):
+    """Keep native note/comment roles beside the inline display at their paragraph."""
+    annotations = [
+        item
+        for item in cell_excerpts(node, notes=notes, comments=comments, attachments=attachments)
+        if item.get("source_kind") in {"footnote", "endnote", "editorial_comment"}
+    ]
+    if not annotations:
+        return context
+    return {
+        **(context or {"source_excerpts": [], "structure": {}, "reader_status": {}}),
+        "inline_annotations": annotations,
+    }
+
+
 def cell_excerpts(cell, *, notes, comments, attachments):
     """Walk original nodes without OCR, storage writes, or generated display wrappers."""
     from mammoth import documents as nodes

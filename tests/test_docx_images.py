@@ -15,7 +15,7 @@ from openkb.sources import SourceStore
 from tests.document_fixtures import write_docx
 
 
-def _png(color, *, size=(240, 120), text=True):
+def _png(color, *, size=(320, 180), text=True):
     stream = io.BytesIO()
     picture = Image.new("RGB", size, color)
     if text:

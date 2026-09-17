@@ -48,9 +48,9 @@ def parse_document(
         profile["xlsx"] = "openkb-xlsx-v2-row-relations"
         profile["openpyxl"] = package_version("openpyxl")
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v15-separate-attachments"
+        profile["docx"] = "openkb-docx-v16-image-resolution-inline-roles"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v5-conservative-table-context"
+        profile["pdf"] = "openkb-pdf-v6-image-resolution"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
         profile["text"] = "openkb-text-v3-heading-markers"
     store = ParseStore(kb_dir)

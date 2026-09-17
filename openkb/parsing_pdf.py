@@ -9,6 +9,7 @@ from typing import Any
 import pymupdf
 
 from openkb.evidence import BlockDraft
+from openkb.image_resolution import low_resolution
 from openkb.ocr.eligibility import decorative_path, ocr_candidate
 from openkb.ocr.optional import recognize
 from openkb.parsing_pdf_tables import table_cells
@@ -41,6 +42,8 @@ def parse_pdf(
                 verified_by = "native_text_layer"
                 native = []
                 image_candidate = False
+                has_regular_image = False
+                skipped_small_image = False
                 try:
                     cells, tables = table_cells(page, number)
                 except Exception:
@@ -82,6 +85,10 @@ def parse_pdf(
                         from PIL import Image
 
                         with Image.open(io.BytesIO(_page_read(pixmap.tobytes, "png"))) as picture:
+                            if low_resolution(picture.size):
+                                skipped_small_image = True
+                            else:
+                                has_regular_image = True
                             image_candidate |= ocr_candidate(picture)
                 native.extend(cells)
                 native.sort(
@@ -90,8 +97,10 @@ def parse_pdf(
                 readable_text = any(
                     block.kind != "image" and block.text.strip() for block in native
                 )
-                if image_candidate or (native and not readable_text):
+                if image_candidate or (has_regular_image and not readable_text):
                     reason = reason or "image_content_requires_ocr"
+                if not reason and skipped_small_image:
+                    verified_by = "pdf_image_ocr_skipped_low_resolution"
                 if not native:
                     reason = reason or "blank_or_illustration"
                 elif any(trace.get("type") == 3 for trace in _page_read(page.get_texttrace)):

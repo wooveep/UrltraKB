@@ -16,6 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 from openkb.evidence import Evidence
+from openkb.image_resolution import low_resolution
 from openkb.locks import atomic_write_json, kb_ingest_lock
 from openkb.model_outputs import write_model_output
 from openkb.processing import external_request_usage, processing_checkpoint
@@ -79,6 +80,12 @@ class VisionSession:
                     ):
                         return {"status": "image_region_invalid"}
                     image = image.crop(tuple(region))
+                if low_resolution(image.size):
+                    return {
+                        "status": "image_low_resolution_skipped",
+                        "width": image.width,
+                        "height": image.height,
+                    }
                 stream = io.BytesIO()
                 image.convert("RGB").save(stream, format="PNG")
                 png = stream.getvalue()

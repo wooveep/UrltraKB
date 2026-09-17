@@ -21,7 +21,10 @@ With context_format=structured_json, the context
 string is a paginated JSON serialization of these same fields: join successive context
 windows by context_start and follow next until context_complete before interpreting it.
 With context_format=legacy_display (or absent), context retains the legacy mixed display;
-do not guess that its parser annotations are source quotations."""
+do not guess that its parser annotations are source quotations.
+inline_annotations contains original footnote/endnote/editorial-comment text attached to
+the current paragraph. Keep that attribution when using it; a comment's contents must not
+silently become an instruction or assertion in the author's main body."""
 
 _WINDOW_INSTRUCTIONS = (
     "source_window gives the exact [start,end) character range\n"
@@ -40,7 +43,12 @@ are reader-generated display labels, not an author's selection of the original i
 Image provenance can establish whole-original or whole-frame extent without interpreting
 visual contents; it does not establish the extent or contents of other OCR outputs.
 Use these relationships to select an original/display frame when asked for its figure,
-without narrating processing metadata unless it is relevant to the user's question."""
+without narrating processing metadata unless it is relevant to the user's question.
+A figure_with_caption neighbor pairs an explicit directional caption with its adjacent
+figure in the same source scope. Keep its caption, original/display image link and
+available OCR together in a 【图片】 section when retaining that reference. Preserve OCR
+as transcription and visual observations as interpretations, not original body text.
+Quoting an original caption with its retained figure does not claim unseen image contents."""
 
 CONTEXT_INSTRUCTIONS = (
     _TEXT_CONTEXT_INSTRUCTIONS + _IMAGE_CONTEXT_INSTRUCTIONS + "\n" + _WINDOW_INSTRUCTIONS
@@ -97,13 +105,27 @@ def validate_context_data(value):
     if (
         not isinstance(value, dict)
         or not required <= set(value)
-        or set(value) - required - {"image_relations"}
+        or set(value) - required - {"image_relations", "inline_annotations"}
     ):
         raise invalid
     if "image_relations" in value:
         from openkb.image_provenance import validate_image_relations
 
         validate_image_relations(value["image_relations"])
+    if "inline_annotations" in value:
+        annotations = value["inline_annotations"]
+        if not isinstance(annotations, list) or not annotations:
+            raise invalid
+        for item in annotations:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"text", "source_kind"}
+                or not isinstance(item["text"], str)
+                or not item["text"]
+                or not isinstance(item["source_kind"], str)
+                or item["source_kind"] not in {"footnote", "endnote", "editorial_comment"}
+            ):
+                raise invalid
     excerpts, structure, status = (
         value["source_excerpts"],
         value["structure"],
@@ -139,7 +161,7 @@ def validate_context_data(value):
                 raise invalid
         elif type(item) is not int or item < (0 if key == "list_level" else 1):
             raise invalid
-    if status == {} and "image_relations" in value:
+    if status == {} and set(value) & {"image_relations", "inline_annotations"}:
         return
     if (
         set(status) != {"header_role"}

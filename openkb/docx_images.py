@@ -6,6 +6,7 @@ import io
 import re
 from typing import Any
 
+from openkb.image_resolution import low_resolution
 from openkb.ocr.eligibility import ocr_candidate
 from openkb.ocr.image_session import ImageOcrSession
 from openkb.ocr.optional import recognize
@@ -58,6 +59,14 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text=None, r
                 relation["frames"].append(frame_relation)
                 if index == 0:
                     text = f"![{label}](asset:{preview})"
+                if low_resolution(background.size):
+                    quality.append(
+                        {
+                            "status": "verified",
+                            "reason": "docx_image_ocr_skipped:" + original + ":low_resolution",
+                        }
+                    )
+                    continue
                 if not ocr_candidate(background):
                     quality.append(
                         {"status": "verified", "reason": "docx_image_ocr_skipped:" + original}

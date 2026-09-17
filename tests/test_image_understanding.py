@@ -119,7 +119,7 @@ async def test_text_only_question_uses_visual_observation_without_receiving_imag
     from openkb.application.image_understanding import test_image_connection
 
     image_path = "sources/images/chart.png"
-    Image.new("RGB", (40, 40), "red").save(kb_dir / "wiki" / image_path)
+    Image.new("RGB", (320, 180), "red").save(kb_dir / "wiki" / image_path)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(

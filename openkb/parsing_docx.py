@@ -164,6 +164,15 @@ def parse_docx(
                     kind = "table" if position else "heading" if level is not None else "paragraph"
                     context = header
                     details = with_image_relations(context_data, image_relations)
+                    from openkb.docx_context import with_inline_annotations
+
+                    details = with_inline_annotations(
+                        details,
+                        node,
+                        notes=notes,
+                        comments=comments,
+                        attachments=prepared.attachments,
+                    )
                     if node.numbering:
                         context += (
                             f"\nList level {node.numbering.level_index}; "

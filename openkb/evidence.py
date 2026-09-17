@@ -26,6 +26,7 @@ EVIDENCE_PROVENANCE = {
         "structure": "document_structure",
         "reader_status": "reader_metadata_not_author_statements",
         "image_relations": "recorded_asset_derivations;_source_alt_is_author_supplied",
+        "inline_annotations": "original_note_or_comment_text_with_its_native_role",
     },
     "context_format": "structured_json_uses_context_data_roles;_legacy_display_mixes_roles",
     "location": "document_position",

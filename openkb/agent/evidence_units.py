@@ -169,9 +169,11 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     heading = []
     levels = []
     bridge = min(128, max(1, limits.context_tokens // 32))
+    from openkb.agent.figure_context import figure_pairs
     from openkb.agent.table_objects import source_table_objects
 
     table_objects = source_table_objects(parsed, source)
+    figures = figure_pairs(reader, source, parsed)
     table_headings = {}
 
     def neighbor(block, start, end, relation):
@@ -184,6 +186,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             "text": view.text,
             "location": view.location,
             "relation": relation,
+            **(context_fields(view) if view.context_data is not None or view.context else {}),
             **window_fields(start, end, block.chars),
         }
 
@@ -233,6 +236,11 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             if following
             else None
         )
+        figure_neighbors = [
+            neighbor(item, 0, item.chars, "figure_with_caption")
+            for item in figures.get(block.id, [])
+        ]
+        figure_ids = {item.id for item in figures.get(block.id, [])}
         start = 0
         block_units = []
         while start < block.chars:
@@ -293,7 +301,12 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                     "headings": [] if detached_image else block.location.get("headings", heading),
                     "span": {"block": block.id, "start": start, "end": end, "total": block.chars},
                     "assets": list(block.assets),
-                    "neighbors": [item for item in (before, after) if item],
+                    "neighbors": [
+                        item
+                        for item in (before, after)
+                        if item and item["reference"]["block_id"] not in figure_ids
+                    ]
+                    + figure_neighbors,
                     "heading_evidence": heading_evidence,
                 }
                 if object_info:

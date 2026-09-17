@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from openkb.image_resolution import low_resolution
+
 
 def ocr_candidate(image) -> bool:
     """Exclude tiny icons, narrow toolbars and flat fills, without claiming OCR accuracy."""
-    if min(image.size) <= 48 or max(image.size) < 160:
+    if min(image.size) <= 48 or low_resolution(image.size):
         return False
     low, high = image.convert("L").getextrema()
     return high - low >= 24
