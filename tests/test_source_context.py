@@ -191,13 +191,21 @@ def test_declared_header_in_embedded_docx_retains_original_attachment_positions(
     source = save_source(kb_dir, parent)
     parsed = parse_document(kb_dir, source)
     store = ParseStore(kb_dir)
+    from openkb.sources import SourceStore
+
+    reference = parsed.blocks[0].location["attachment_files"][0]
+    assert reference["part"] == "word/embeddings/object.bin"
+    source = next(
+        v for v in SourceStore(kb_dir).list_sources() if v.origin.startswith("attachment:")
+    )
+    parsed = store.selected(source)
+    assert parsed is not None
     views = [
         store.read(Evidence(source.source_id, source.id, parsed.id, block.id), max_chars=4000)
         for block in parsed.blocks
     ]
     view = next(view for view in views if view.text == "7 days")
-    assert view.location["attachment"]["part"] == "word/embeddings/object.bin"
-    position = view.location["attachment"]["position"]
+    position = view.location
     assert position["row"] == 2 and position["cell"] == 1
     assert view.context_data["source_excerpts"] == [
         {"text": "Retention", "row": 1, "cell": 1, "relation": "declared_header"}
