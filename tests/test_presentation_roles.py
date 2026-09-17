@@ -36,9 +36,6 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
     if embedded:
         path = attached_docx(tmp_path / "parent.docx", path.read_bytes(), name=path.name)
 
-    def native_location(location):
-        return location["attachment"]["position"] if embedded else location
-
     observed = []
 
     def respond(body):
@@ -50,16 +47,26 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
     model_service.respond = respond
     result = import_document(kb_dir, path)
     assert result.status == "added" and result.knowledge_compilation == "completed", result
+    if embedded:
+        from openkb.application.attachment_imports import import_attachment
+        from openkb.application.execution import ExecutionContext
+        from openkb.runtime.requests import ImportAttachment
+
+        observed.clear()
+        child = result.attachments[0]
+        result = import_attachment(
+            kb_dir,
+            ImportAttachment(
+                child.source_id, child.version_id, result.input_version, child.part, child.name
+            ),
+            context=ExecutionContext(),
+        )
+        assert result.knowledge_compilation == "completed", result
     parsed = ParseStore(kb_dir).load(result.parse_id)
-    block = next(
-        b
-        for b in parsed.blocks
-        if (not embedded or "attachment" in b.location)
-        and native_location(b.location).get("object_id") == heading.shape_id
-    )
-    assert native_location(block.location)["placeholder_type"] == role
-    assert native_location(block.location)["title_object_id"] == title_id
-    assert native_location(block.location)["title_placeholder_count"] == (1 if role else 0)
+    block = next(b for b in parsed.blocks if b.location.get("object_id") == heading.shape_id)
+    assert block.location["placeholder_type"] == role
+    assert block.location["title_object_id"] == title_id
+    assert block.location["title_placeholder_count"] == (1 if role else 0)
     assert block.kind == ("heading" if role else "paragraph")
     assert "Slide title: Slide 1" not in block.context
     assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
@@ -67,8 +74,8 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
         assert "presentation_roles" in payload["evidence_provenance"]
         rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
         row = next(r for r in rows if r["text"] == heading.text)
-        assert native_location(row["location"])["placeholder_type"] == role
-        assert native_location(row["location"])["title_object_id"] == title_id
+        assert row["location"]["placeholder_type"] == role
+        assert row["location"]["title_object_id"] == title_id
 
     tools = {t.name: t for t in source_tools(kb_dir)[0]}
 
@@ -98,8 +105,8 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
     )
     row = response["evidence"][0]
     assert "presentation_roles" in response["evidence_provenance"]
-    assert native_location(row["location"])["placeholder_type"] == role
-    assert native_location(row["location"])["title_object_id"] == title_id
+    assert row["location"]["placeholder_type"] == role
+    assert row["location"]["title_object_id"] == title_id
     assert len(row["text"]) + len(row["context"]) <= 128
     matching = invoke("search_source_text", source_id=result.source_id, query=heading.text)
     assert "presentation_roles" in matching["evidence_provenance"]

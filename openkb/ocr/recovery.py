@@ -6,21 +6,38 @@ from openkb.sources import content_id, read_object
 
 
 def _family(store, source, parsed, settings, retries, overrides):
+    from openkb.evidence import ParseStore
+
     family = {source.id: (retries, overrides)}
-    if not any("attachment" in block.location for block in parsed.blocks):
-        return family
     current = {version.origin: version for version in store.list_sources()}
-    for block in parsed.blocks:
-        parent = source
-        location = block.location
-        while attachment := location.get("attachment"):
-            origin = f"attachment:{parent.source_id}/{content_id(attachment['part'])}"
-            child = current.get(origin)
-            if child is None or child.blob != attachment["blob"]:
-                break  # A replacement attachment cannot supply work to this retained one.
-            if child.id not in family:
-                family[child.id] = effective_attempts(store, child, settings)
-            parent, location = child, attachment["position"]
+    pending = [(source, parsed, 0)]
+
+    def include(parent, attachment, depth):
+        origin = f"attachment:{parent.source_id}/{content_id(attachment['part'])}"
+        child = current.get(origin)
+        if child is None or child.blob != attachment["blob"]:
+            return None  # A replacement cannot supply work to the retained attachment.
+        if child.id not in family:
+            family[child.id] = effective_attempts(store, child, settings)
+            if depth < 8:
+                selected = ParseStore(store.kb_dir).selected(child)
+                if selected is not None:
+                    pending.append((child, selected, depth + 1))
+        return child
+
+    while pending:
+        parent, interpretation, depth = pending.pop()
+        processing_checkpoint("parsing")
+        for block in interpretation.blocks:
+            for attachment in block.location.get("attachment_files", []):
+                include(parent, attachment, depth)
+            # Historical parses embedded child locations directly in the parent.
+            location, ancestor = block.location, parent
+            while attachment := location.get("attachment"):
+                ancestor = include(ancestor, attachment, depth)
+                if ancestor is None:
+                    break
+                location = attachment["position"]
     return family
 
 

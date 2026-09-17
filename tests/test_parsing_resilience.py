@@ -217,7 +217,14 @@ def test_detached_missing_images_keep_the_count_without_inheriting_an_unlocated_
     one = parse_document(kb_dir, source)
     missing = [row for row in one.quality if row["reason"].endswith("docx_image_asset_missing")]
     assert sum(row["count"] for row in missing) == 2
-    assert any("Retained instructions." in sources.asset(b.blob).read_text() for b in one.blocks)
+    content = one
+    if nested:
+        child = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
+        content = parses.selected(child)
+        assert content is not None
+    assert any(
+        "Retained instructions." in sources.asset(b.blob).read_text() for b in content.blocks
+    )
     parses.accept_missing_images(source, one)
     assert parses.accepted_missing_images(source, one)
     previous = parsing.package_version
@@ -332,7 +339,10 @@ def test_nested_missing_image_decision_uses_omission_position_not_literal_text(k
     location = missing[0]["location"]
     assert location["paragraph"] == 1
     assert location["attachment"]["position"]["paragraph"] == 1
-    assert any(sources.asset(b.blob).read_text().strip() == literal for b in one.blocks)
+    child_source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
+    child_parse = parses.selected(child_source)
+    assert child_parse is not None
+    assert any(sources.asset(b.blob).read_text().strip() == literal for b in child_parse.blocks)
     parses.accept_missing_images(source, one)
     two = parses.save(
         source,

@@ -354,11 +354,16 @@ def test_known_job_resumes_download_without_repeating_ocr(
     else:
         from openkb.sources import SourceStore
 
+        store = SourceStore(kb_dir)
+        child_parse = ParseStore(kb_dir).selected(store.current(job_source))
+        assert child_parse is not None
         assert any(
-            "Scanned: timeout 42 seconds." in SourceStore(kb_dir).asset(b.blob).read_text()
-            for b in parsed.blocks
-            if "attachment" in b.location
+            "Scanned: timeout 42 seconds." in store.asset(b.blob).read_text()
+            for b in child_parse.blocks
         )
+        assert not any(
+            "Scanned: timeout 42 seconds." in store.asset(b.blob).read_text() for b in parsed.blocks
+        ), "The attachment's OCR text belongs to its own source"
 
     # Installing new result assembly rules must revalidate retained raw output,
     # while preserving the paid job and the old evidence version.
