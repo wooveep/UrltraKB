@@ -518,7 +518,14 @@ def run_unit(
                 context.on_snapshot = observed_snapshot
                 context.on_event = observed_event
                 diagnostics.emit(f"开始第 {int(identity.unit_id) + 1} 项：{type(request).__name__}")
-                result = _execute(request, identity, context, prepared_dir)
+                try:
+                    result = _execute(request, identity, context, prepared_dir)
+                except WaitingForLease:
+                    # This is scheduler control flow before business work, not
+                    # a failure for the diagnostics context to render as a traceback.
+                    diagnostics.emit("等待知识库可用，任务已排队；稍后自动继续")
+                    channel.send("deferred")
+                    return
                 business_result = result
                 # Persist business facts before auxiliary log/client teardown.
                 # The parent still waits for exit and recovery before claiming
@@ -527,9 +534,6 @@ def run_unit(
                 channel.send(
                     "result", result=result, truncated=channel.truncated, sequence=channel.sequence
                 )
-        except WaitingForLease:
-            channel.send("deferred")
-            return
         except InputChanged:
             if isinstance(request, ImportFile) and request.wait_for_stable:
                 # Input preparation has not begun business or fixed new
