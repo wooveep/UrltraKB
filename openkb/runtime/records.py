@@ -140,12 +140,31 @@ class TaskView:
     diagnostics: str = field(default="", repr=False)
     last_activity_at: str | None = None
     progress: tuple[ProgressStep, ...] = ()
+    parent_task_id: str | None = None
+    child_task_ids: tuple[str, ...] = ()
+    source_name: str | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):
             raise ValueError("Invalid task identity")
         if self.retry_of is not None and not re.fullmatch(r"[0-9a-f]{32}", self.retry_of):
             raise ValueError("Invalid retry task identity")
+        if self.parent_task_id is not None and (
+            not isinstance(self.parent_task_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", self.parent_task_id)
+            or self.parent_task_id == self.id
+        ):
+            raise ValueError("Invalid parent task identity")
+        if (
+            not isinstance(self.child_task_ids, tuple)
+            or len(self.child_task_ids) > 10000
+            or any(not isinstance(item, str) for item in self.child_task_ids)
+            or len(set(self.child_task_ids)) != len(self.child_task_ids)
+            or any(not re.fullmatch(r"[0-9a-f]{32}", item) for item in self.child_task_ids)
+            or self.id in self.child_task_ids
+            or (self.source_name is not None and not isinstance(self.source_name, str))
+        ):
+            raise ValueError("Invalid attachment task relationship")
         if not all(isinstance(v, str) for v in (self.kb_dir, self.operation, self.stage)):
             raise ValueError("Invalid task description")
         if self.state not in TERMINAL | {"queued", "waiting", "running", "stopping"}:
@@ -191,6 +210,7 @@ class TaskView:
         value.pop("text")
         value.pop("diagnostics")
         value["results"] = [result.summary() for result in self.results]
+        value["child_task_ids"] = list(self.child_task_ids)
         value["progress"] = [asdict(step) for step in self.progress]
         return value
 
@@ -198,6 +218,9 @@ class TaskView:
     def from_summary(cls, value: dict[str, Any]) -> TaskView:
         value = dict(value)
         value["results"] = tuple(UnitResult.from_summary(row) for row in value["results"])
+        if not isinstance(value.get("child_task_ids", []), list):
+            raise ValueError("Invalid attachment task relationship")
+        value["child_task_ids"] = tuple(value.get("child_task_ids", []))
         value["progress"] = read_progress(value.get("progress", []))
         if value["state"] not in TERMINAL:
             value.update(state="interrupted", stage="interrupted", error="Previous run interrupted")

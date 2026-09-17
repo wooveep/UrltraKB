@@ -76,6 +76,22 @@ class ImportFile:
 
 
 @dataclass(frozen=True)
+class ImportAttachment:
+    source_id: str
+    version_id: str
+    parent_version_id: str
+    part: str
+    name: str
+
+    def __post_init__(self) -> None:
+        from openkb.attachments import DocumentAttachment
+        from openkb.sources import valid_id
+
+        DocumentAttachment(self.source_id, self.version_id, self.part, self.name)
+        valid_id(self.parent_version_id)
+
+
+@dataclass(frozen=True)
 class RemoveDocument:
     identifier: str
     version: str
@@ -285,6 +301,7 @@ UnitRequest = (
     | AskQuestion
     | ContinueConversation
     | ImportFile
+    | ImportAttachment
     | ImportUrl
     | RemoveDocument
     | RecompileDocument
@@ -305,6 +322,7 @@ REQUEST_TYPES = (
     AskQuestion,
     ContinueConversation,
     ImportFile,
+    ImportAttachment,
     ImportUrl,
     RemoveDocument,
     RecompileDocument,

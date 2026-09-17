@@ -56,6 +56,7 @@ _OPERATIONS = {
     "AskQuestion": "问答",
     "ContinueConversation": "对话",
     "ImportFile": "导入资料",
+    "ImportAttachment": "导入附件资料",
     "RemoveDocument": "删除资料",
     "RecompileDocument": "重编译资料",
     "ImportUrl": "导入网址",
@@ -623,7 +624,8 @@ class Workbench(QMainWindow):
             )
             values = [
                 Path(task.kb_dir).name,
-                _OPERATIONS.get(task.operation, task.operation),
+                _OPERATIONS.get(task.operation, task.operation)
+                + (f" · {task.source_name}" if task.source_name else ""),
                 _STATES.get(task.state, task.state)
                 + (f" · {quality_count} 项质量提示" if quality_count else ""),
                 f"成功 {task.succeeded} · 跳过 {task.skipped} · "

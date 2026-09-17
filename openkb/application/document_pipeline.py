@@ -36,8 +36,10 @@ def compile_version(kb_dir, source, settings, **options):
 
 
 def finish_compilation(kb_dir, source, settings, result, *, bundle=None):
+    from openkb.application.attachment_imports import with_document_attachments
     from openkb.application.source_history import finish_source_result, source_results_deferred
 
+    result = with_document_attachments(kb_dir, result)
     if source_results_deferred():
         return result
     result = finish_source_result(kb_dir, result)
@@ -343,6 +345,8 @@ def _materialize(
     destination = workspace / "wiki/sources" / f"{name}.md"
     attachments = {}
     for block in parsed.blocks:
+        for attachment in block.location.get("attachment_files", []):
+            attachments[attachment["blob"]] = Path(attachment["name"]).suffix.lower()
         position = block.location
         while "attachment" in position:
             attachment = position["attachment"]

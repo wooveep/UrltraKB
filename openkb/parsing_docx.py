@@ -61,6 +61,7 @@ def parse_docx(
         if isinstance(node, nodes.Text):
             attachment = prepared.attachments.get(node.value)
             if attachment is not None:
+                from openkb.attachments import filename_text
                 from openkb.docx_attachments import document_name
 
                 name = document_name(attachment)
@@ -71,13 +72,13 @@ def parse_docx(
                             "reason": "non_document_attachment_skipped:" + attachment.name,
                         }
                     )
-                    return f"[Skipped non-document attachment: {attachment.name}]"
+                    return filename_text(attachment.name)
                 from dataclasses import replace
 
                 attachment = replace(attachment, name=name)
                 pending_attachments.append(attachment)
                 assets.append(attachment.blob)
-                return f"[Embedded attachment: {attachment.name}](asset:{attachment.blob})"
+                return f"[{filename_text(attachment.name)}](asset:{attachment.blob})"
             return node.value
         if isinstance(node, nodes.Tab):
             return "\t"
@@ -118,8 +119,7 @@ def parse_docx(
                 return "\n"
             digest = store.put_bytes(content)
             if digest in prepared.icons:
-                assets.append(digest)
-                return f"![{node.alt_text or 'Attachment icon'}](asset:{digest})"
+                return ""
             from openkb.docx_images import read_image
 
             text, images, checks = read_image(
@@ -188,17 +188,21 @@ def parse_docx(
                                 quality.append(
                                     {"status": "needs_review", "reason": "docx_list_level_omitted"}
                                 )
-                    blocks.append(BlockDraft(text, kind, location, tuple(assets), context, details))
                     for attachment in pending_attachments:
                         from openkb.docx_attachments import (
                             ATTACHMENT_CONTENT_ERRORS,
                             attachment_quality,
-                            bind_blocks,
                             parse_attachment,
                         )
 
+                        reference = {
+                            "part": attachment.part,
+                            "name": attachment.name,
+                            "blob": attachment.blob,
+                            "parseable": False,
+                        }
                         try:
-                            drafts, checks = parse_attachment(
+                            _drafts, checks = parse_attachment(
                                 attachment,
                                 store,
                                 budget,
@@ -208,38 +212,20 @@ def parse_docx(
                                 options=_options,
                                 resume_ocr=resume_ocr,
                             )
-                            if not drafts:
-                                drafts = [
-                                    BlockDraft(
-                                        "[Embedded document has no readable content; "
-                                        "original retained]",
-                                        "paragraph",
-                                        {"kind": "converted", "line": 1},
-                                    )
-                                ]
-                            blocks.extend(bind_blocks(drafts, attachment, location))
+                            reference["parseable"] = not any(
+                                row["reason"].startswith("source_content_unparsed:")
+                                for row in checks
+                            )
                             quality.extend(attachment_quality(checks, attachment, location))
                         except ATTACHMENT_CONTENT_ERRORS:
-                            blocks.extend(
-                                bind_blocks(
-                                    [
-                                        BlockDraft(
-                                            "[Embedded document could not be parsed; "
-                                            "original retained]",
-                                            "paragraph",
-                                            {"kind": "converted", "line": 1},
-                                        )
-                                    ],
-                                    attachment,
-                                    location,
-                                )
-                            )
                             quality.append(
                                 {
                                     "status": "needs_review",
                                     "reason": "docx_attachment_unparsed:" + attachment.part,
                                 }
                             )
+                        location.setdefault("attachment_files", []).append(reference)
+                    blocks.append(BlockDraft(text, kind, location, tuple(assets), context, details))
                 progress.advance()
             elif isinstance(node, nodes.Image):
                 # VML extras can follow intervening textbox paragraphs. Their

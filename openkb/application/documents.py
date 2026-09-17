@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.application.execution import ExecutionContext
+from openkb.attachments import DocumentAttachment
 from openkb.compilation_report import collect_compile_report
 from openkb.config import resolve_effective_config
 from openkb.inputs import SUPPORTED_EXTENSIONS, prepared_input, validate_source_root
@@ -92,6 +93,7 @@ class DocumentResult:
     parse_id: str | None = None
     omissions: tuple[dict[str, Any], ...] = ()
     coverage: dict[str, Any] = field(default_factory=dict)
+    attachments: tuple[DocumentAttachment, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, str) or not isinstance(self.stage, str):
@@ -125,12 +127,23 @@ class DocumentResult:
         from openkb.source_coverage import validate_coverage
 
         validate_coverage(self.coverage, self.source_id, self.input_version, self.parse_id)
+        if not isinstance(self.attachments, tuple) or not all(
+            isinstance(item, DocumentAttachment) for item in self.attachments
+        ):
+            raise ValueError("Invalid pending document imports")
+        if self.attachments and (self.source_id is None or self.input_version is None):
+            raise ValueError("Document attachments require their parent's source identity")
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> DocumentResult:
         if not isinstance(value, dict):
             raise ValueError("Invalid document result")
         value = dict(value)
+        if not isinstance(value.get("attachments", []), list):
+            raise ValueError("Invalid pending document imports")
+        value["attachments"] = tuple(
+            DocumentAttachment(**item) for item in value.get("attachments", [])
+        )
         from openkb.compilation_omissions import validate_omissions
 
         value["omissions"] = validate_omissions(value.get("omissions", []))

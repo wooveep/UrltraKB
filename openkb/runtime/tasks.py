@@ -174,32 +174,17 @@ class TaskManager:
                 ):
                     raise ValueError("Task identifier is already bound to different input")
                 return task_id
-            view = TaskView(
-                task_id,
-                str(root),
-                type(units[0]).__name__,
-                "queued",
-                "queued",
-                len(units),
-                (),
-                False,
-                True,
-                retry_of=retry_of,
-            )
-            task = _Task(
-                view,
+            from openkb.runtime.task_submission import enqueue_task
+
+            return enqueue_task(
+                self,
+                root,
                 units,
-                tuple(
-                    UnitIdentity.create(task_id, i, str(root), r, generation=generation)
-                    for i, r in enumerate(units)
-                ),
+                task_id=task_id,
+                generation=generation,
+                retry_of=retry_of,
                 input_binding=input_binding,
             )
-            self._persist(task)  # A failed initial record means nothing was accepted.
-            self._tasks[task_id] = task
-            self._pending.append(task_id)
-            self._condition.notify_all()
-            return task_id
 
     def get(self, task_id: str) -> TaskView:
         with self._condition:
@@ -278,6 +263,10 @@ class TaskManager:
     def stop(self, task_id: str) -> None:
         with self._condition:
             task = self._tasks[task_id]
+            for child_id in task.view.child_task_ids:
+                child = self._tasks.get(child_id)
+                if child is not None and child.view.parent_task_id == task_id:
+                    self.stop(child_id)
             if task.view.state in TERMINAL:
                 return
             self._update(task, stop_requested=True)
@@ -420,6 +409,7 @@ class TaskManager:
                 task.snapshot = snapshot
                 if task.view.operation in {
                     "ImportFile",
+                    "ImportAttachment",
                     "ImportUrl",
                     "RecompileDocument",
                     "ContinueSource",
@@ -605,6 +595,12 @@ class TaskManager:
                 and attempt.terminal_sequence != attempt.last_sequence
             ),
         )
+        if exitcode == 0:
+            from openkb.runtime.attachment_tasks import enqueue_attachments
+
+            if not enqueue_attachments(self, task, result, attempt.identity):
+                self._update(task, state="partial", stage="attachment-imports")
+                return
         if exitcode != 0:
             self._update(
                 task,

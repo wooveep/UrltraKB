@@ -548,11 +548,29 @@ source, input version, parse version, block and span.
 
 Reliable PDF text is parsed locally, with physical page and available coordinates.
 DOCX evidence uses headings, paragraphs and table cells, without invented Word
-page numbers. Embedded document attachments are imported as separate retained
-sources and included at their positions in the parent evidence. Supported document
-extensions follow the normal import formats; scripts, executables, generic ZIP
-archives and other non-document attachments are skipped, including those inside
-document attachments. Generic archives are not recursively expanded.
+page numbers. The parent body retains an embedded attachment's displayed filename
+at its original position; the attachment's contents are not mixed into that body.
+Recognizable supported documents become separate retained sources. After the parent
+worker finishes and its result is confirmed, the task manager automatically queues
+one independent document import per attachment. Each child has its own compilation,
+result and task progress, linked to the parent task. Nested document attachments
+follow the same rule. Supported extensions follow the normal import formats.
+
+Scripts, executables, generic ZIP archives, damaged or unreadable attachments and
+other non-document files produce no child import; the parent body shows only their
+filenames. Generic archives are not recursively expanded. Literal filenames in
+supported Word attachment icons are read locally; when the displayed name cannot be
+recovered, the embedded filename is used. Other object handling remains unchanged.
+
+Attachment classification still parses supported child documents under the parent's
+existing parsing limits and OCR policy, retaining reusable child parse artifacts.
+The independent import then reuses those artifacts. Repeated parent imports reuse
+the existing child task for the same retained version within task history; they do
+not automatically retry failed or stopped children. Use the child source's Continue
+action to retry it. Opening task history never starts work. Stopping an active parent
+also stops children owned by it, and the CLI waits for all related imports before
+exiting. A child's failure does not change a completed parent's result. Existing
+imports need an explicit reparse to adopt the new body/attachment separation.
 
 DOCX pictures are retained. OCR is selective and advisory: small icons, narrow
 toolbars (short edge at most 48 pixels), images whose long edge is below 160 pixels,

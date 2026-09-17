@@ -37,6 +37,7 @@ def import_path(kb_dir: Path, path: str) -> int:
 def run_requests(kb_dir: Path, requests: list[UnitRequest]) -> int:
     """Run explicit source work with the same stop and receipt behavior as imports."""
     from openkb.config import GLOBAL_CONFIG_DIR
+    from openkb.runtime.attachment_tasks import task_family
 
     manager = TaskManager(history_dir=GLOBAL_CONFIG_DIR / "cli/tasks")
     previous = None
@@ -50,14 +51,17 @@ def run_requests(kb_dir: Path, requests: list[UnitRequest]) -> int:
                 if view.stage != previous:
                     click.echo(f"  {view.stage} ({len(view.results)}/{view.total})")
                     previous = view.stage
-                if view.state in TERMINAL and view.processes_reaped:
+                family = task_family(manager, task_id)
+                if all(item.state in TERMINAL and item.processes_reaped for item in family):
                     break
                 time.sleep(0.1)
             except KeyboardInterrupt:
                 interrupted = True
                 manager.stop(task_id)
                 click.echo("Stopping; waiting for execution and recovery confirmation…")
-        for result in view.results:
+        for child in family[1:]:
+            click.echo(f"Attachment task: {child.id} · {child.source_name or ''} · {child.state}")
+        for result in (result for item in family for result in item.results):
             document = result.document
             if document:
                 click.echo(
@@ -82,7 +86,7 @@ def run_requests(kb_dir: Path, requests: list[UnitRequest]) -> int:
             click.echo(view.error)
         if interrupted or view.state == "stopped":
             return 130
-        return 0 if view.state == "completed" else 1
+        return 0 if all(item.state == "completed" for item in family) else 1
     finally:
         manager.shutdown(stop=True)
         while not manager.join(1):

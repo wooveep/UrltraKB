@@ -19,7 +19,7 @@ from tests.docx_attachment_fixtures import (
 )
 
 
-def test_embedded_docx_is_read_with_container_and_original_positions(kb_dir, tmp_path):
+def test_embedded_docx_keeps_independent_content_and_parent_position(kb_dir, tmp_path):
     child = tmp_path / "child.docx"
     write_docx(child, "<w:p><w:r><w:t>Recovery requires port 9473.</w:t></w:r></w:p>")
     parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
@@ -31,22 +31,29 @@ def test_embedded_docx_is_read_with_container_and_original_positions(kb_dir, tmp
         store.read(Evidence(version.source_id, version.id, parsed.id, b.id), max_chars=2000)
         for b in parsed.blocks
     ]
-    child_content = next(
-        (item for item in contents if "Recovery requires port 9473." in item.text), None
-    )
-    assert child_content is not None, "Embedded instructions were discarded with the OLE element"
-    assert child_content.location["paragraph"] == 1
-    attachment = child_content.location["attachment"]
+    assert not any("Recovery requires port 9473." in item.text for item in contents)
+    reference = next(item for item in contents if "object.docx" in item.text)
+    assert reference.location["paragraph"] == 1
+    attachment = reference.location["attachment_files"][0]
     assert attachment["part"] == "word/embeddings/object.bin"
-    assert attachment["position"]["paragraph"] == 1
-    assert attachment["blob"] in child_content.assets
+    assert attachment["parseable"] is True
+    assert attachment["blob"] in reference.assets
     assert store.complete(version, parsed)
     sources = SourceStore(kb_dir).list_sources()
     assert len(sources) == 2
     child_source = next(s for s in sources if s.id != version.id)
     assert child_source.origin.startswith("attachment:" + version.source_id + "/")
     assert child_source.suffix == ".docx"
-    assert ParseStore(kb_dir).selected(child_source) is not None
+    child_parse = ParseStore(kb_dir).selected(child_source)
+    assert child_parse is not None
+    child_contents = [
+        store.read(
+            Evidence(child_source.source_id, child_source.id, child_parse.id, block.id),
+            max_chars=2000,
+        )
+        for block in child_parse.blocks
+    ]
+    assert any("Recovery requires port 9473." in item.text for item in child_contents)
     assert parse_document(kb_dir, version).id == parsed.id
     assert len(SourceStore(kb_dir).list_sources()) == 2
 
@@ -66,7 +73,7 @@ def test_embedded_documents_materialize_as_documents_and_have_parse_status(kb_di
     workspace = tmp_path / "workspace"
     output = _materialize(workspace, store, source, parsed, "parent")
     text = output.read_text()
-    assert "Attachment instructions." in text
+    assert "Attachment instructions." not in text
     assert f"attachments/{imported.blob}.docx" in text
     assert (output.parent / "attachments" / f"{imported.blob}.docx").read_bytes() == store.original(
         imported
@@ -118,10 +125,10 @@ def test_only_document_attachments_become_sources(kb_dir, tmp_path):
         version = store.intake(ready)
     parsed = parse_document(kb_dir, version)
     text = "\n".join(store.asset(b.blob).read_text() for b in parsed.blocks)
-    assert "Document-only fact 9473." in text
+    assert "Document-only fact 9473." not in text
     assert "DO_NOT_IMPORT_SCRIPT" not in text and "DO_NOT_OPEN_ARCHIVE" not in text
-    assert "Skipped non-document attachment: run.sh" in text
-    assert "Skipped non-document attachment: bundle.zip" in text
+    assert "run.sh" in text and "bundle.zip" in text
+    assert "Skipped non-document attachment:" not in text
     assert len(store.list_sources()) == 2
     assert ParseStore(kb_dir).complete(version, parsed)
     for data in (b"DO_NOT_IMPORT_SCRIPT\n" * 300, b"DO_NOT_OPEN_ARCHIVE\n" * 300):

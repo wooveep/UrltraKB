@@ -21,6 +21,7 @@ from openkb.runtime.requests import (
     ExportConversation,
     GenerateArtifact,
     GenerateGraph,
+    ImportAttachment,
     ImportFile,
     ImportUrl,
     RebuildSourceNavigation,
@@ -321,11 +322,23 @@ def _execute(
             halt=removal.status == "blocked",
         )
     if isinstance(
-        request, (ImportFile, ImportUrl, ContinueSource, ReparseSource, ReprocessSourcePage)
+        request,
+        (
+            ImportFile,
+            ImportAttachment,
+            ImportUrl,
+            ContinueSource,
+            ReparseSource,
+            ReprocessSourcePage,
+        ),
     ):
         from openkb.application.documents import import_document
 
-        if isinstance(request, ReprocessSourcePage):
+        if isinstance(request, ImportAttachment):
+            from openkb.application.attachment_imports import import_attachment
+
+            result = import_attachment(root, request, context=context)
+        elif isinstance(request, ReprocessSourcePage):
             from openkb.application.source_actions import reprocess_source_page
 
             result = reprocess_source_page(
@@ -469,6 +482,7 @@ def run_unit(
                         request,
                         (
                             ImportFile,
+                            ImportAttachment,
                             ImportUrl,
                             RecompileDocument,
                             ContinueSource,

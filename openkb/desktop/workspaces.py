@@ -600,9 +600,9 @@ class Workspaces:
         for key, (panel, _) in self.panels.items():
             if panel._closed:
                 continue
-            if (key == "资料" and task.operation in {"ImportFile", "ImportUrl"}) or (
-                key == "对话" and task.operation == "ContinueConversation"
-            ):
+            if (
+                key == "资料" and task.operation in {"ImportFile", "ImportUrl", "ImportAttachment"}
+            ) or (key == "对话" and task.operation == "ContinueConversation"):
                 panel.reload(preserve_result=bool(panel.details.toPlainText()))
             elif key == "产物" and task.operation in {
                 "AskQuestion",

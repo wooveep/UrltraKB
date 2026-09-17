@@ -113,8 +113,29 @@ def prepare_docx(
                 except (ValueError, KeyError):
                     return None
 
+            def icon_label(node) -> str | None:
+                from openkb.docx_labels import icon_filename
+
+                labels = set()
+                for shape in parents[node].iter(V + "shape"):
+                    digest = image_digest(shape)
+                    if digest:
+                        icons.add(digest)
+                        label = icon_filename(store.asset(digest).read_bytes())
+                        if label:
+                            labels.add(label)
+                return labels.pop() if len(labels) == 1 else None
+
+            def replace_object(node, text):
+                parent = parents[node]
+                label = Element(W + "t")
+                label.text, label.tail = text, node.tail
+                parent.insert(list(parent).index(node), label)
+                parent.remove(node)
+
             changed_part = False
             for index, node in enumerate(list(tree.iter(OFFICE + "OLEObject")), 1):
+                member = None
                 try:
                     if node.get("Type") != "Embed":
                         raise ValueError("docx_linked_object_has_no_content")
@@ -127,26 +148,36 @@ def prepare_docx(
                     attachment = Attachment(member, name, content, original, blob)
                     from openkb.docx_attachments import document_name
 
-                    if document_name(attachment) is not None:
+                    recognized_name = document_name(attachment)
+                    if name == "embedded.docx" and recognized_name:
+                        label = icon_label(node)
+                        if (
+                            label
+                            and posixpath.splitext(label)[1].lower()
+                            == posixpath.splitext(recognized_name)[1]
+                        ):
+                            attachment = Attachment(member, label, content, original, blob)
+                    if recognized_name is not None:
                         store.put_bytes(container)
                         store.put_bytes(content)
                     marker = "[openkb-attachment-" + content_id([part, index, original]) + "]"
                     if marker.encode() in raw:
                         raise ValueError("docx_attachment_marker_collision")
                     attachments[marker] = attachment
-                    parent = parents[node]
-                    label = Element(W + "t")
-                    label.text, label.tail = marker, node.tail
-                    parent.insert(list(parent).index(node), label)
-                    parent.remove(node)
-                    for shape in parent.iter(V + "shape"):
-                        digest = image_digest(shape)
-                        if digest:
-                            icons.add(digest)
+                    icon_label(node)
+                    replace_object(node, marker)
                     changed_part = True
                 except (ValueError, KeyError, BadZipFile) as exc:
                     reason = str(exc) if str(exc).startswith("docx_") else "docx_attachment_missing"
                     quality.append({"status": "needs_review", "reason": reason})
+                    if node.get("Type") == "Embed":
+                        from openkb.attachments import filename_text
+
+                        fallback_name = icon_label(node) or (
+                            posixpath.basename(member) if member else "未命名附件"
+                        )
+                        replace_object(node, filename_text(fallback_name))
+                        changed_part = True
             # VML style/path properties only become advisory when their complete
             # image representation is present. Uncovered vector shapes still block.
             for shape in tree.iter(V + "shape"):

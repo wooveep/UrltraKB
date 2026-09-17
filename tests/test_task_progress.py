@@ -69,7 +69,7 @@ def test_docx_attachment_progress_keeps_independent_totals(kb_dir, tmp_path):
         for s in snapshots
     )
     assert (ProgressStep("docx", 1, 1, "paragraphs"),) in snapshots
-    assert len(parsed.blocks) == 4
+    assert len(parsed.blocks) == 1  # Child content belongs to its own source and import task.
 
 
 def test_pdf_counter_only_advances_after_page_result(kb_dir, tmp_path):

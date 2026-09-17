@@ -94,6 +94,7 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "bbox",
         "display_bbox",
         "attachment",
+        "attachment_files",
         "sheet",
         "sheet_index",
         "cell_address",
@@ -109,6 +110,12 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
     }
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
+    if "attachment_files" in location:
+        from openkb.attachments import validate_attachment_files
+
+        if location["kind"] != "docx":
+            raise ValueError("Document attachment references require a DOCX position")
+        validate_attachment_files(location["attachment_files"])
     if location["kind"] == "xlsx":
         from openkb.office_locations import validate_spreadsheet_location
 
@@ -200,6 +207,10 @@ class BlockDraft:
         from openkb.image_provenance import validate_image_bindings
 
         validate_image_bindings(self.context_data, self.assets)
+        if "attachment_files" in self.location:
+            from openkb.attachments import validate_attachment_files
+
+            validate_attachment_files(self.location["attachment_files"], self.assets)
 
 
 @dataclass(frozen=True)

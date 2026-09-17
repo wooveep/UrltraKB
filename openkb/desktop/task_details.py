@@ -47,6 +47,12 @@ def _status_text(task) -> str:
         lines.append(f"最近进度输出：{task.last_activity_at}（存活提示不代表业务进度）")
     if task.retry_of:
         lines.append(f"重试来源：{task.retry_of}（独立的新任务）")
+    if task.source_name:
+        lines.append(f"附件文件：{task.source_name}")
+    if task.parent_task_id:
+        lines.append(f"来源任务：{task.parent_task_id}")
+    if task.child_task_ids:
+        lines.append("附件导入任务：" + "、".join(task.child_task_ids))
     pending = [
         row.document
         for row in task.results
