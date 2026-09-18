@@ -239,13 +239,13 @@ def test_unresolved_omitted_scope_cannot_be_overwritten_by_other_independence(
 
     monkeypatch.setattr(dependency_preflight, "known_omissions", separate_omissions)
 
-    def fits(rows, settings):
+    def fits(rows, settings, **kwargs):
         nonlocal capacity_checks
         if generated:
             capacity_checks += 1
             if capacity_checks == 1:
                 return False
-        return initial_fits(rows, settings)
+        return initial_fits(rows, settings, **kwargs)
 
     monkeypatch.setattr(dependency_preflight, "source_fits", fits)
 

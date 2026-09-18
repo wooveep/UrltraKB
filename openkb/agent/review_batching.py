@@ -108,7 +108,12 @@ class ReviewBatcher:
                 for row in rows
                 for review in self._dispatch([row], system, settings, checkpoints, bundle)
             ]
-        key = checkpoints.review_key(request, settings["model"], options, 0)
+        key = checkpoints.review_key(
+            [*request, {"candidate_identities": [row["id"] for row in candidates]}],
+            settings["model"],
+            options,
+            0,
+        )
         saved = checkpoints.load_recovery(key, "review")
         if saved is None:
             raw = _llm_call(settings["model"], request, "verification", bundle=bundle, **options)
@@ -142,8 +147,11 @@ class ReviewBatcher:
 
     @staticmethod
     def _individual_key(payload, system, settings, checkpoints):
+        request = messages(system, payload)
         return checkpoints.review_key(
-            messages(system, payload),
+            [*request, {"omission_identity": content_id(payload["known_omissions"])}]
+            if payload.get("known_omissions")
+            else request,
             settings["model"],
             compilation_model_options(settings, verification=True),
             0,

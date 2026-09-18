@@ -164,6 +164,7 @@ def compile_evidence(
                     "knowledge_evidence_mismatch",
                     "generated_asset_evidence_invalid",
                     "provider_temporarily_unavailable",
+                    "provider_context_exceeded",
                     "topic_context_exceeds_request_budget",
                     "topic_evidence_exceeds_request_budget",
                 }:

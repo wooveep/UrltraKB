@@ -59,6 +59,13 @@ class InputTooLarge(ProcessingIncomplete):
         super().__init__("input_budget_exceeded")
 
 
+class ProviderContextExceeded(InputTooLarge):
+    """A provider rejected capacity before completion; resize without replaying it."""
+
+    def __init__(self, stage: str) -> None:
+        ProcessingIncomplete.__init__(self, "provider_context_exceeded", stage)
+
+
 @dataclass(frozen=True)
 class RequestLimits:
     context_tokens: int
@@ -312,6 +319,8 @@ class ExecutionBudget:
                     raise
 
     def expand(self, previous: RequestLimits, kwargs: dict[str, Any], reason: str) -> bool:
+        if reason == "provider_context_exceeded":
+            return False  # A larger local estimate cannot enlarge the provider's capacity.
         # Explicit per-operation output limits (e.g. navigation) remain binding.
         if "max_tokens" in kwargs or "max_completion_tokens" in kwargs:
             return False
@@ -433,6 +442,8 @@ class ExecutionBudget:
                     self.incomplete = exc
                 raise
             except Exception as exc:
+                if _provider_capacity(exc):
+                    raise ProviderContextExceeded(self.stage) from None
                 if _uncertain_transport(exc):
                     if retries.retry(exc, activity, done):
                         continue
@@ -525,6 +536,8 @@ class ExecutionBudget:
                     self.incomplete = exc
                 raise
             except Exception as exc:
+                if _provider_capacity(exc):
+                    raise ProviderContextExceeded(self.stage) from None
                 if _uncertain_transport(exc):
                     with self.lock:
                         self.incomplete = ProcessingIncomplete(
@@ -546,6 +559,12 @@ class ExecutionBudget:
                 self.permits.release()
             await asyncio.sleep(min(0.25 * 2**attempt, self.checkpoint()))
         raise AssertionError("Positive attempt limit required")
+
+
+def _provider_capacity(exc: Exception) -> bool:
+    import litellm
+
+    return isinstance(exc, litellm.ContextWindowExceededError)
 
 
 def _transient(exc: Exception) -> bool:

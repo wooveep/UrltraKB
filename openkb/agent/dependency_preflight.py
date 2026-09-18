@@ -38,7 +38,7 @@ def known_omissions(parsed):
     return omissions
 
 
-def source_fits(source, settings):
+def source_fits(source, settings, *, omissions=()):
     """Measure complete serialized originals with the configured output reserve.
 
     Growing checkpoints bound work for impossible inputs. Candidate splitting
@@ -58,7 +58,12 @@ def source_fits(source, settings):
 
     def fits():
         payload = dependency_payload(
-            {"stage": "dependencies", "source": selected, "omissions": [], "candidates": []}
+            {
+                "stage": "dependencies",
+                "source": selected,
+                "omissions": list(omissions),
+                "candidates": [],
+            }
         )
         try:
             limits.request(settings["model"], messages(SYSTEM, payload), options)
@@ -83,6 +88,7 @@ def preflight_dependencies(reader, source, parsed, groups, facts, settings, on_e
         return groups
     from openkb.agent.dependency_scope import review_scopes
     from openkb.agent.dependency_sources import OriginalRows, SourceSelection
+    from openkb.agent.evidence_dependencies import located_omissions
 
     original = SourceSelection(OriginalRows(reader, source, parsed))
     candidates = [
@@ -90,10 +96,14 @@ def preflight_dependencies(reader, source, parsed, groups, facts, settings, on_e
         for group in groups
     ]
     blocked = set()
-    for required, _, affected in review_scopes(
+    for required, missing, affected in review_scopes(
         original, omissions, candidates, facts.routes.values(), groups
     ):
-        if not source_fits(required, settings):
+        if not source_fits(
+            required,
+            settings,
+            omissions=located_omissions(missing, original, facts.routes.values(), groups),
+        ):
             blocked.update(row["path"] for row in affected)
     if blocked:
         report_content_omission(

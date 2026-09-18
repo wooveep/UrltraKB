@@ -23,7 +23,10 @@ exceptions, table headers/subjects and the identity of embedded attachments. A v
 candidate's content is ordered text, reference and source-boundary segments; structured
 references replace generated HTML annotations only. Read every segment and its facts.
 The supplied source contains complete selected sections, their parent conditions and explicit
-reference targets, or the whole document when the gap cannot be located. Review ONLY whether
+reference targets, or the whole document when the gap cannot be located. Each located omission
+includes original source_references: use those ranges to identify what was withdrawn, rather
+than inferring its scope from a generated topic name. Unresolved locations are not proof of
+independence. Review ONLY whether
 an identified omission changes a retained claim's meaning; do not recheck style, secondary
 coverage or all facts already reviewed. Missing unrelated material is not a dependency. A
 candidate is not safe merely because its own quotation is supported. If an omitted condition
@@ -95,6 +98,31 @@ def _decisions(value, paths):
     return result
 
 
+def located_omissions(omissions, original, facts, groups):
+    """Bind missing contributions to original blocks, never to failed prose."""
+    from openkb.agent.dependency_scope import _omitted_blocks
+
+    located = []
+    for omission in omissions:
+        blocks = _omitted_blocks(omission, original.by_id, facts, groups)
+        located.append(
+            {
+                **omission,
+                "scope_resolution": "located" if blocks else "unknown",
+                "source_references": [
+                    {
+                        "reference": row["reference"],
+                        "location": row["location"],
+                    }
+                    for bid in original.by_id
+                    if blocks and bid in blocks
+                    for row in [original.by_id[bid]]
+                ],
+            }
+        )
+    return located
+
+
 def protect_dependencies(
     reader, source, parsed, accepted, facts, settings, checkpoints, bundle, on_event, *, groups=()
 ):
@@ -158,8 +186,14 @@ def protect_dependencies(
                 }
                 for row in candidates
             ]
+        located = located_omissions(payload["omissions"], original, routing, groups)
         return dependency_payload(
-            {**payload, "source": list(payload["source"]), "candidates": candidates}
+            {
+                **payload,
+                "source": list(payload["source"]),
+                "omissions": located,
+                "candidates": candidates,
+            }
         )
 
     def review_key(candidates):
@@ -243,7 +277,11 @@ def protect_dependencies(
         ) as progress:
             for selected_source, selected_omissions, candidates in scopes:
                 nonlocal payload
-                if not source_fits(selected_source, settings):
+                if not source_fits(
+                    selected_source,
+                    settings,
+                    omissions=located_omissions(selected_omissions, original, routing, groups),
+                ):
                     from openkb.processing import ProcessingIncomplete
 
                     pending(
