@@ -69,6 +69,7 @@ def compilation_profile(settings, bundle):
                     "request_analysis",
                     "shared_analysis",
                     "evidence_wire",
+                    "source_protocol",
                     "model_json",
                     "evidence_verifier",
                     "evidence_review",
@@ -304,6 +305,7 @@ class CompilationCheckpoints:
             "implementation": module_revision("openkb.agent.compiler"),
             "message_format": module_revision("openkb.agent.evidence_units"),
             "source_context": module_revision("openkb.source_context"),
+            "source_protocol": module_revision("openkb.agent.source_protocol"),
             "model_json": module_revision("openkb.agent.model_json"),
             "stage_implementation": {
                 name: module_revision("openkb.agent." + name, stage=payload.get("stage"))

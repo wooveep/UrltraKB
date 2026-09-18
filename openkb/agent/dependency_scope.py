@@ -25,12 +25,16 @@ def _sections(original):
     paths, titles, stack = {}, {}, []
     for row in original:
         location = row["location"]
-        if "attachment" in location or location.get("kind") not in {"text", "docx"}:
+        if "attachment" in location or location.get("kind") not in {"text", "docx", "html", "xml"}:
             return None
         bid = row["reference"]["block_id"]
         if row["kind"] == "heading":
             match = re.match(r"^(#{1,6})\s+(.+)", row["text"])
-            depth = len(match[1]) if match else len(location.get("headings", []))
+            depth = (
+                len(match[1])
+                if match
+                else location.get("heading_level", len(location.get("headings", [])))
+            )
             if not depth:
                 return None
             title = match[2] if match else row["text"].strip()

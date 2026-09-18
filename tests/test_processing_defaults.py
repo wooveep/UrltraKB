@@ -67,7 +67,11 @@ def test_legacy_recompile_reaches_review_without_manual_budgets(
     result = asyncio.run(recompile_document(legacy_kb, "legacy"))
     assert result.message == "needs_acceptance", result
     assert result.document.parse_id is not None
-    assert result.document.usage["observable_attempts"] == len(calls) == 4
+    assert result.document.usage["observable_attempts"] == len(calls) == 6
+    assert [json.loads(call["messages"][-1]["content"])["stage"] for call in calls[:2]] == [
+        "index_structure",
+        "index_summary",
+    ]
     assert all(call["max_tokens"] > 0 and call["timeout"] > 0 for call in calls)
     # Resolving defaults must not pin an override into the legacy library.
     saved = yaml.safe_load((legacy_kb / ".openkb/config.yaml").read_text())

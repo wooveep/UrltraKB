@@ -6,8 +6,11 @@ def validate_navigation_options(value):
         return
     if (
         not isinstance(value, dict)
-        or set(value) - {"enabled", "processing"}
+        or set(value) - {"enabled", "processing", "window_tokens", "summaries"}
         or type(value.get("enabled", True)) is not bool
+        or type(value.get("summaries", True)) is not bool
+        or type(value.get("window_tokens", 200000)) is not int
+        or value.get("window_tokens", 200000) <= 0
     ):
         raise ValueError("Invalid navigation configuration")
     if value.get("processing") is not None:

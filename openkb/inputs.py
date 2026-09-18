@@ -82,15 +82,13 @@ class PreparedInput:
     identity: Path
 
     def is_current(self) -> bool:
-        from openkb.images import relative_image_paths
-
         if self.source.resolve() != self.identity:
             return False
         if HashRegistry.hash_file(self.source) != self.digest:
             return False
-        if self.source.suffix.lower() not in {".md", ".markdown", ".json"}:
+        if self.source.suffix.lower() not in {".md", ".markdown", ".json", ".html", ".htm"}:
             return True
-        paths = relative_image_paths(_related_text(self.path), self.source.parent)
+        paths = _related_images(self.path, self.source.parent)
         if paths.keys() != self.images.keys():
             return False
         for reference, path in paths.items():
@@ -105,8 +103,6 @@ class PreparedInput:
 
 
 def _prepare(source: Path, directory: Path) -> PreparedInput:
-    from openkb.images import relative_image_paths
-
     # Freeze identity with the bytes. Later conversion/registration must not
     # follow a replacement symlink at this pathname to another document.
     identity = source.resolve()
@@ -117,9 +113,9 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
     if resources.exists():
         shutil.rmtree(resources)
     images = {}
-    if source.suffix.lower() in {".md", ".markdown", ".json"}:
+    if source.suffix.lower() in {".md", ".markdown", ".json", ".html", ".htm"}:
         for index, (reference, original) in enumerate(
-            relative_image_paths(_related_text(frozen), source.parent).items()
+            _related_images(frozen, source.parent).items()
         ):
             target = None
             image_digest = None
@@ -142,6 +138,20 @@ def _related_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _related_images(path, directory):
+    from openkb.images import relative_image_paths
+
+    if path.suffix.lower() in {".html", ".htm"}:
+        from openkb.parsing_dom import html_images
+
+        return html_images(path.read_bytes(), directory)
+    if path.suffix.lower() in {".md", ".markdown"}:
+        from openkb.parsing_markup import markdown_images
+
+        return markdown_images(_related_text(path), directory)
+    return relative_image_paths(_related_text(path), directory)
+
+
 @contextmanager
 def prepared_input(source: Path) -> Iterator[PreparedInput]:
     """Freeze primary bytes, image bytes and missing-image state before business."""
@@ -162,4 +172,5 @@ SUPPORTED_EXTENSIONS = {
     ".htm",
     ".txt",
     ".csv",
+    ".xml",
 }

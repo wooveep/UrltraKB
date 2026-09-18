@@ -362,7 +362,7 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
     )
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"].update(context_tokens=4096, output_tokens=1024)
+    config["processing"].update(context_tokens=6144, output_tokens=1024)
     config_path.write_text(yaml.safe_dump(config))
     (kb_dir / "wiki/AGENTS.md").write_text("Preserve original technical claims.")
     reviews = []
@@ -404,7 +404,7 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
         tokens += litellm.token_counter(
             model="gpt-4o-mini", text=json.dumps(call["response_format"])
         )
-        assert tokens + call["max_tokens"] <= 4096
+        assert tokens + call["max_tokens"] <= 6144
     content = (kb_dir / "wiki/concepts/notes.md").read_text()
     assert all(f"Valve {i}." in content for i in range(4))
 
@@ -424,7 +424,7 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
     )
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"].update(context_tokens=4096, output_tokens=1024, max_requests=100)
+    config["processing"].update(context_tokens=6144, output_tokens=1024, max_requests=100)
     config_path.write_text(yaml.safe_dump(config))
     generated = []
     reviewed = []

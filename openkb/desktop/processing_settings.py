@@ -136,25 +136,38 @@ class NavigationField(SettingsSection):
         )
         self.enabled = QCheckBox("启用本地导航增强")
         self.enabled.toggled.connect(self.changed)
+        self.window = ValueForm([("window_tokens", "原文窗口目标（tokens）", int)])
+        self.window.inputs["window_tokens"].textEdited.connect(self.changed)
+        self.summaries = QCheckBox("生成可选导航摘要")
+        self.summaries.toggled.connect(self.changed)
         self.budget = ProcessingField()
         self.budget.controls.hide()
         self.enabled.toggled.connect(self.budget.setVisible)
         self.budget.hide()
         self.body.addWidget(self.enabled)
+        self.body.addWidget(self.window)
+        self.body.addWidget(self.summaries)
         self.body.addWidget(self.budget)
         for entry in self.budget.values.inputs.values():
             entry.textEdited.connect(self.changed)
 
     def load(self, value, source):
         self.enabled.setChecked(value.enabled)
+        self.window.load({"window_tokens": value.window_tokens})
+        self.summaries.setChecked(value.summaries)
         self.budget.load(value.processing, source)
         self.loaded(value, source)
 
     def value(self):
         if self.action.currentIndex() == 2:
             return None
+        window = self.window.value()["window_tokens"]
+        if window <= 0:
+            raise ValueError("原文窗口目标须为正整数")
         return {
             "enabled": self.enabled.isChecked(),
+            "window_tokens": window,
+            "summaries": self.summaries.isChecked(),
             "processing": self.budget.value() if self.enabled.isChecked() else None,
         }
 

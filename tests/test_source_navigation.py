@@ -200,7 +200,7 @@ def test_navigation_retries_cannot_spend_the_compiler_reserve(
     def completion(**kwargs):
         stage = json.loads(kwargs["messages"][-1]["content"])["stage"]
         stages.append(stage)
-        if stage == "index_summary":
+        if stage == "index_structure":
             if uncertain:
                 # Connection loss remains unknown; stream timeouts have their
                 # own bounded retry policy and are a different contract.
@@ -217,11 +217,11 @@ def test_navigation_retries_cannot_spend_the_compiler_reserve(
     if uncertain:
         assert result.knowledge_compilation == "unfinished", result
         assert result.reason == "request_outcome_unknown"
-        assert stages == ["index_summary"]
+        assert stages == ["index_structure"]
         assert result.usage["unknown_usage"] == 1
         return
     assert result.knowledge_compilation == "completed", result
-    assert stages.count("index_summary") == 1
+    assert stages.count("index_structure") == 1
     assert len(stages) == 5
     assert result.usage["unknown_usage"] == 1
 

@@ -166,7 +166,7 @@ def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, proce
     assert calls[0]["max_tokens"] == 1024
 
 
-def test_small_pdf_uses_native_ranges_without_paid_navigation(
+def test_small_pdf_preserves_native_ranges_through_unified_navigation(
     kb_dir, monkeypatch, processing_config
 ):
     import fitz
@@ -211,8 +211,11 @@ def test_small_pdf_uses_native_ranges_without_paid_navigation(
     navigation = source_status(kb_dir, result.source_id)["navigation"]
     assert navigation["status"] == "enhanced", navigation
     assert {position["location"]["page"] for position in navigation["positions"]} == {1, 2}
-    assert navigation["usage"]["observable_attempts"] == 0
-    assert not any(stage.startswith("index_") for stage in stages)
+    assert navigation["usage"]["observable_attempts"] == 2
+    assert [stage for stage in stages if stage.startswith("index_")] == [
+        "index_structure",
+        "index_summary",
+    ]
 
 
 def test_client_cleanup_warning_does_not_change_committed_result(

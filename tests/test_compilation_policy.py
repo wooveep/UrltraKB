@@ -51,8 +51,12 @@ def test_bounded_stronger_review_is_explicit_measured_and_reusable(kb_dir, tmp_p
         json.loads(row["messages"][-1]["content"])["stage"] != "facts"
         for row in model_service[before:]
     )
-    assert any(
+    assert not any(
         json.loads(row["messages"][-1]["content"])["stage"] == "index_summary_verification"
+        for row in model_service
+    )
+    assert any(
+        json.loads(row["messages"][-1]["content"])["stage"] == "verification"
         and row["reasoning_effort"] == "high"
         for row in model_service[before:]
     )

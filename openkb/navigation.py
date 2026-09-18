@@ -46,7 +46,7 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
         return None
     identity, record = next(iter(records.items()))
     if (
-        set(record)
+        set(record) - {"windows"}
         != {
             "schema",
             "source_id",
@@ -72,6 +72,9 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
     parsed = ParseStore(kb_dir).load(valid_id(record["parse"]))
     if parsed.input_key != source.input_key:
         raise ValueError("PageIndex navigation parsing identity mismatch")
+    from openkb.navigation_evidence import validate_windows
+
+    validate_windows(source, parsed, record.get("windows", []))
     rows = _location_rows(source, parsed)
     record["nodes"] = load_nodes(kb_dir, record["pageindex"])
     validate_nodes(record["nodes"], len(rows))
@@ -146,6 +149,10 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 "enhancement": module_revision("openkb.navigation_enhancement"),
                 "verification": module_revision("openkb.navigation_verification"),
                 "structure": module_revision("openkb.navigation_structure"),
+                "requests": module_revision("openkb.navigation_requests"),
+                "toc": module_revision("openkb.navigation_toc"),
+                "evidence_groups": module_revision("openkb.navigation_evidence"),
+                "source_protocol": module_revision("openkb.agent.source_protocol"),
                 "wire": module_revision("openkb.agent.evidence_wire"),
                 "source_context": module_revision("openkb.source_context"),
                 "model_json": module_revision("openkb.agent.model_json"),
@@ -183,6 +190,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
             "positions": _location_rows(source, parsed),
             "usage": {},
             "nodes": basic_tree(kb_dir, source, parsed),
+            "windows": [],
         }
         from openkb.navigation_enhancement import enhance_ranges
         from openkb.navigation_usage import NavigationRun

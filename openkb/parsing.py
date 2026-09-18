@@ -48,11 +48,17 @@ def parse_document(
         profile["xlsx"] = "openkb-xlsx-v2-row-relations"
         profile["openpyxl"] = package_version("openpyxl")
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v18-inline-vml-ownership"
+        profile["docx"] = "openkb-docx-v19-declared-toc"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v6-image-resolution"
+        profile["pdf"] = "openkb-pdf-v7-declared-toc"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
         profile["text"] = "openkb-text-v3-heading-markers"
+    if source.suffix in {".md", ".markdown"}:
+        profile["text"] = "openkb-markdown-v4-native-structures"
+    if source.suffix == ".csv":
+        profile["text"] = "openkb-csv-v1-records"
+    if source.suffix in {".html", ".htm", ".xml"}:
+        profile["markup"] = "openkb-dom-v1-native-positions"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
     if _budget is None and source.origin.startswith("attachment:"):
@@ -69,6 +75,14 @@ def parse_document(
         try:
             with pymupdf.open(path) as pdf:
                 profile["physical_pages"] = pdf.page_count
+                profile["toc"] = [
+                    {"title": title, "level": level, "physical_page": page}
+                    for level, title, page in pdf.get_toc()
+                    if page > 0
+                ]
+                profile["page_labels"] = {
+                    str(i + 1): page.get_label() for i, page in enumerate(pdf) if page.get_label()
+                }
         except pymupdf.FileDataError:
             # No trustworthy page count exists. The parser below records a
             # document-level omission; never invent a physical-page denominator.
@@ -179,6 +193,18 @@ def parse_document(
         from openkb.parsing_office import parse_xlsx
 
         blocks, quality = read_document(parse_xlsx, path, originals)
+    elif source.suffix == ".csv":
+        from openkb.parsing_csv import parse_csv
+
+        blocks, quality = read_document(parse_csv, path, originals)
+    elif source.suffix in {".html", ".htm"}:
+        from openkb.parsing_dom import parse_html
+
+        blocks, quality = read_document(parse_html, path, source, originals)
+    elif source.suffix == ".xml":
+        from openkb.parsing_dom import parse_xml
+
+        blocks, quality = read_document(parse_xml, path, originals)
     else:
         blocks, quality = read_document(parse_text, path, source, originals)
     processing_checkpoint()
@@ -228,6 +254,10 @@ def parse_text(
             text = MarkItDown().convert_stream(stream, file_extension=source.suffix).text_content
         kind = "converted"
     quality: list[dict[str, Any]] = []
+    if source.suffix in {".md", ".markdown"}:
+        from openkb.parsing_markup import parse_markdown
+
+        return parse_markdown(text, source, store)
     assets = []
     for reference, digest in source.assets.items():
         if digest is None:

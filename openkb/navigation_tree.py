@@ -171,10 +171,15 @@ def validate_nodes(nodes, count):
             not isinstance(parent, str)
             or parent not in seen
             or not seen[parent]["start"] <= node["start"] <= node["end"] <= seen[parent]["end"]
-            or node["start"] < last_sibling.get(parent, 0)
+            or (
+                parent in last_sibling
+                and node["start"] < last_sibling[parent]["end"]
+                and node["start"] != last_sibling[parent]["start"]
+                and node["start"] != last_sibling[parent]["end"] - 1
+            )
         ):
             raise ValueError("Invalid navigation parent or overlapping sibling")
-        last_sibling[parent] = node["end"]
+        last_sibling[parent] = node
         seen[node["id"]] = node
         previous = node["start"]
 

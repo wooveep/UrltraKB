@@ -17,6 +17,8 @@ _IDENTITY_FIELDS = {
     "block_id",
     "fact_id",
     "block",
+    "start_block",
+    "toc_block",
     "index",
 }
 _IDENTITY_LISTS = {"covered"}
@@ -101,6 +103,36 @@ def encode_payload(payload, identity_values=()):
             ),
         }
     return wire, identities
+
+
+def encode_frozen_payload(payload, identity_values=()):
+    """Freeze source identity/context encoding before visiting dynamic task fields."""
+    keys = ("evidence",) if "evidence" in payload else ("units",) if "units" in payload else ()
+    evidence = {key: payload[key] for key in keys}
+    namespace = None
+    if payload.get("stage") in {"generation", "verification"}:
+        namespace = "@r:"
+        original = json.dumps(evidence, ensure_ascii=False)
+        while namespace in original:
+            namespace = namespace[:-1] + "_:"
+    identities = {}
+    prefix = _map(evidence, identities, create=True, namespace=namespace)
+    prefix = share_contexts(prefix)
+    for value in identity_values:
+        identities.setdefault(value, f"{namespace or 'r'}{len(identities) + 1}")
+    suffix = _map(
+        {key: value for key, value in payload.items() if key not in keys},
+        identities,
+        create=True,
+        namespace=namespace,
+    )
+    if namespace:
+        suffix["identity_protocol"] = {
+            "namespace": namespace,
+            "instruction": "Private identity markers belong only in structured identity fields. "
+            "Never write them in titles, headings, Markdown or quotations. They are not citations.",
+        }
+    return {**prefix, **suffix}, identities
 
 
 def _check_identity_placement(value, namespace, field=""):

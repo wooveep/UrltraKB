@@ -305,7 +305,7 @@ def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publicati
     original.write_text("\n\n".join(facts))
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
-    config["processing"].update(context_tokens=4096, max_requests=80, max_tokens=200000)
+    config["processing"].update(context_tokens=6144, max_requests=80, max_tokens=200000)
     path.write_text(yaml.safe_dump(config))
     parts = []
 
@@ -383,7 +383,7 @@ def test_oversized_unbroken_command_is_omitted_without_partial_generation(
     assert original.read_text() == text
     for request in model_service:
         measured = litellm.token_counter(model=request["model"], messages=request["messages"])
-        assert measured + request["max_tokens"] <= 4096
+        assert measured + request["max_tokens"] <= config["processing"]["context_tokens"]
 
 
 def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabulary(
@@ -471,7 +471,7 @@ def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
     config["processing"].update(
-        context_tokens=4096,
+        context_tokens=6144,
         max_requests=400,
         max_tokens=1500000,
         stage_timeout=40,
@@ -513,7 +513,7 @@ def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
     )
     for request in model_service:
         measured = litellm.token_counter(model=request["model"], messages=request["messages"])
-        assert measured + request["max_tokens"] <= 4096
+        assert measured + request["max_tokens"] <= config["processing"]["context_tokens"]
 
 
 def test_new_source_version_retracts_its_retired_topic_without_deleting_other_sources(

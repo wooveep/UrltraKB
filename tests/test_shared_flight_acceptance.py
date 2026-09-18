@@ -217,7 +217,7 @@ def test_shared_http_calls_are_counted_once_and_all_occurrences_are_bound(
     path = kb_dir / ".openkb/config.yaml"
     settings = yaml.safe_load(path.read_text())
     settings["processing"].update(
-        context_tokens=4096, concurrency=8, max_tokens=1000000, max_requests=100
+        context_tokens=6144, concurrency=8, max_tokens=1000000, max_requests=100
     )
     path.write_text(yaml.safe_dump(settings))
     source = tmp_path / "repeated.md"

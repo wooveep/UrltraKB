@@ -40,6 +40,8 @@ ProcessingSettings = Annotated[dict[str, Any], BeforeValidator(_processing_setti
 class NavigationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = Field(default=False, strict=True)
+    window_tokens: int = Field(default=200000, strict=True, gt=0)
+    summaries: bool = Field(default=True, strict=True)
     processing: ProcessingSettings | None = None
 
 

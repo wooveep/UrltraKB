@@ -87,6 +87,8 @@ def evidence_response(payload):
             ]
         }
     elif isinstance(payload, dict) and payload.get("stage") == "index_structure":
+        if "evidence" in payload:
+            return {"sections": []}
         return {
             "sections": [
                 {

@@ -66,6 +66,10 @@ def position_text(location):
     if location.get("line"):
         label = "转换产物行" if location["kind"] == "converted" else "行"
         parts.append(f"{label} {location['line']}")
+    if location.get("dom_path"):
+        parts.append("DOM " + location["dom_path"])
+    if location.get("element_path"):
+        parts.append("XML " + location["element_path"])
     return " · ".join(parts) or "原文片段"
 
 

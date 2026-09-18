@@ -1,4 +1,4 @@
-"""Model navigation cannot silently publish a reversed field relationship."""
+"""Navigation hints do not replace source evidence or trigger an extra model review."""
 
 import json
 
@@ -12,7 +12,9 @@ from tests.http_model_fixture import evidence_response
 from tests.test_adaptive_processing import response
 
 
-def test_rejected_navigation_summary_retains_original_navigation(kb_dir, tmp_path, model_service):
+def test_navigation_summary_stays_a_hint_and_facts_still_read_originals(
+    kb_dir, tmp_path, model_service
+):
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
     config["processing"].update(context_tokens=32768, output_tokens=4096, max_requests=30)
@@ -30,18 +32,8 @@ def test_rejected_navigation_summary_retains_original_navigation(kb_dir, tmp_pat
         if payload["stage"] == "index_summary":
             for row in result["summaries"]:
                 row["summary"] = "The left field is the maximum."
-        elif payload["stage"] == "index_summary_verification":
+        elif payload["stage"] == "facts":
             checked.append(payload)
-            return {
-                "summaries": [
-                    {
-                        "id": row["id"],
-                        "verdict": "unsupported",
-                        "reason": "Minimum and maximum are reversed.",
-                    }
-                    for row in payload["candidates"]
-                ]
-            }
         return result
 
     model_service.respond = respond
@@ -49,14 +41,16 @@ def test_rejected_navigation_summary_retains_original_navigation(kb_dir, tmp_pat
     assert result.knowledge_compilation == "completed", result
     assert checked
     navigation = source_status(kb_dir, result.source_id)["navigation"]
-    assert navigation["status"] == "degraded"
-    assert all(node["summary"] != "The left field is the maximum." for node in navigation["nodes"])
-    assert any("minimum" in node["summary"] for node in navigation["nodes"])
+    assert navigation["status"] == "enhanced"
+    assert any(node["summary"] == "The left field is the maximum." for node in navigation["nodes"])
+    assert any("left field is the minimum" in unit["text"] for p in checked for unit in p["units"])
+    assert not any(
+        json.loads(body["messages"][-1]["content"])["stage"] == "index_summary_verification"
+        for body in model_service
+    )
 
 
-@pytest.mark.parametrize(
-    "broken_stage", ["index_structure", "index_summary", "index_summary_verification"]
-)
+@pytest.mark.parametrize("broken_stage", ["index_structure", "index_summary"])
 def test_duplicate_navigation_fields_keep_originals_and_continue(
     kb_dir, tmp_path, model_service, monkeypatch, broken_stage
 ):

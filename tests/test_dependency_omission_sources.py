@@ -155,7 +155,12 @@ def test_import_binds_withdrawn_mixed_topic_to_its_original_global_prerequisite(
             if "concepts/management-recovery" in row.get("items", [])
         )
         original = next(row for row in request["source"] if row["text"] == PREPARATION)
-        assert original["location"] == {"kind": "text", "line": 3}
+        assert original["location"] == {
+            "kind": "text",
+            "line": 3,
+            "line_end": 3,
+            "headings": ["Preparation"],
+        }
         assert original["reference"] in list(_references(missing)), (
             "An omitted topic name is insufficient: its original global prerequisite "
             "must be bound to the same source/version/parse/block in the dependency request."

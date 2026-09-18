@@ -20,7 +20,7 @@ def test_repeated_batches_share_one_executor_and_recover_its_failure(
 ):
     path = kb_dir / ".openkb/config.yaml"
     settings = yaml.safe_load(path.read_text())
-    settings["processing"].update(context_tokens=4096, output_tokens=1024, concurrency=8)
+    settings["processing"].update(context_tokens=6144, output_tokens=1024, concurrency=8)
     path.write_text(yaml.safe_dump(settings))
     source = tmp_path / "repeated.md"
     source.write_text("\n\n".join(["Pressure must remain below 37 kPa."] * 120))

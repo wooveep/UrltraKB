@@ -162,6 +162,9 @@ def parse_docx(
                     **({"heading_level": level} if level is not None else {}),
                     **(position or {}),
                 }
+                toc = re.fullmatch(r"toc\s*([1-9])", node.style_id or "", re.IGNORECASE)
+                if toc:
+                    location.update(role="toc", toc_level=int(toc[1]))
                 locate_missing_images(quality_start, location)
                 if text.strip() or assets:
                     kind = "table" if position else "heading" if level is not None else "paragraph"

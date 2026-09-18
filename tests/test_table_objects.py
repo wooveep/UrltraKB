@@ -264,7 +264,7 @@ def test_split_table_keeps_its_preceding_condition_in_every_row_batch(
 
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"].update(context_tokens=8192, output_tokens=512)
+    config["processing"].update(context_tokens=8192, output_tokens=512, max_requests=40)
     config_path.write_text(yaml.safe_dump(config))
     path = tmp_path / "scoped.docx"
     condition = "Only applicable to Linux version 7."

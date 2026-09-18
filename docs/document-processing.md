@@ -4,6 +4,73 @@ Imports use one isolated task runtime in the CLI, REST API and desktop. A task
 captures settings before document processing begins and keeps that configuration
 for the rest of its batch. Updating settings applies to a new task.
 
+## Second-step parsing and index handoff
+
+The second step reuses the registered source version and saved parse, then saves
+the source index in the existing PageIndex database. `prepare_navigation` returns
+the source, parse and index identities, ordered positions, quality status and
+lightweight `windows` descriptors. A later consumer can use `indexed_reader` or
+`read_evidence_group` to read those saved originals without reparsing. The index
+status (`basic`, `enhanced`, or `degraded`) describes navigation availability;
+it does not indicate knowledge publication. Cancelled, unknown, hard-budget and
+storage failures still stop the task before a new index can authorize handoff.
+
+```yaml
+navigation:
+  enabled: true
+  window_tokens: 200000
+  summaries: true
+```
+
+`window_tokens` is a positive integer target for the serialized original evidence
+package, including positions, stable context and overlap. Short inputs are not
+padded. The complete request also includes the fixed system, task suffix and
+output reservation. Configured processing ceilings, optional navigation allowance,
+compilation reserve and memory checks can reduce the adopted window; each manifest
+records its target, actual range and limitations. The target is neither a model
+capacity declaration nor the batch size for all compilation tasks.
+
+Declared contents are mapped to body headings in code. Missing or unusable
+entries use body analysis, with at most one local semantic positioning attempt
+per candidate. Documents without usable contents use the same sequential body
+window executor whether or not they have native headings. Responses contain new
+section starts, levels, source/inferred title roles and short original anchors;
+code derives hierarchy and ends across windows. An empty continuation is valid.
+Unusable enhancement leaves complete base evidence and a specific degradation
+reason. Completed requests have source-bound recovery identities; later windows
+bind their accepted predecessor state. A truncated response is never a completed
+structure, even when it contains parseable JSON.
+Unresolved contents entries remain in the affected window's `unlocated` list,
+with their source positions and reason, even when body fallback yields no new starts.
+
+Navigation uses the configured effective output reservation, without a special
+2,048-token ceiling. Summaries are optional selection hints with shape and source
+checks, and do not trigger a separate summary model review. Knowledge generation
+and its original-evidence verification retain their own rules.
+
+The `source-prefix-v1` protocol fixes the public system and encodes frozen source
+identities and context before task data. Structure and summary requests can reuse
+the same evidence package; generation and verification can reuse their smaller
+evidence groups. Changing candidates, stage rules and continuation state affects
+the task suffix and result recovery identity. Prefix equality is an opportunity
+for provider caching, not a hit guarantee. No cache warmup requests are sent.
+Question answering retains its existing tool-driven request organization.
+The fixed full context contract adds request overhead; very small explicit
+context limits can leave no room for a compilation task. Those limits remain
+binding and produce the existing capacity/omission result, rather than growing
+without an authorized adaptive ceiling.
+
+Markdown retains ATX/Setext headings, lists, fenced code, tables, metadata and
+native line extents, with images bound to their own blocks. CSV records retain
+quoted newlines and field/header relationships. Local HTML uses explicit body
+selection and DOM paths, and freezes local images during intake. XML retains
+element paths, namespaces, attributes and mixed-text order. These formats use the
+existing import, watcher, attachment and evidence paths. Parser profiles change
+when these contracts change; old references stay bound to their original parse.
+
+See [second-step validation](second-step-validation.md) for tested handoffs,
+controlled transport coverage and the limits of the performance evidence.
+
 ## Results and stopping
 
 Each document reports `source_intake`, `knowledge_compilation`, `stage`, `reason`,
@@ -1044,8 +1111,8 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 这些配置不改变默认策略，也不增加纠正轮数；实际发出的设置进入复用条件和费用记录。
 较轻核验仍覆盖所有新候选，只有未通过且增强选项不同的候选才增加一次增强核验。
 
-新生成的导航摘要也逐项独立核对原文。错误、含糊或协议无效的摘要退回原文预览，
-不会成为事实依据。纯副本显示名称和随机导航措辞不再进入事实请求；版本、对象、
+导航摘要保留为可选线索，只检查返回形状与来源引用，不再默认逐项调用模型复审，
+也不会成为事实依据。纯副本显示名称和随机导航措辞不再进入事实请求；版本、对象、
 表头、顺序和必要上下文仍约束共享分析。每个来源保留自己的证据绑定。
 
 费用按实际请求记录输入、缓存 hit/miss、总输出和供应商提供的思考明细，以及实际模型

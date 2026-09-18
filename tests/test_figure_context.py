@@ -109,6 +109,7 @@ def test_adjacency_alone_does_not_bind_a_caption(kb_dir, tmp_path, model_service
             archive.writestr(name, data)
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert all(
-        "figure_with_caption" not in request["messages"][-1]["content"] for request in model_service
-    )
+    for request in model_service:
+        payload = json.loads(request["messages"][-1]["content"])
+        payload.pop("task_rules", None)  # Rules mention the role; evidence must not claim it.
+        assert "figure_with_caption" not in json.dumps(payload)

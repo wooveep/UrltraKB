@@ -2406,7 +2406,12 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "image_understanding": VisionSettings().model_dump(),
         "processing": DEFAULT_CONFIG["processing"],
         "parsing": ParsingSettings().model_dump(),
-        "navigation": {"enabled": False, "processing": None},
+        "navigation": {
+            "enabled": False,
+            "processing": None,
+            "window_tokens": 200000,
+            "summaries": True,
+        },
         "compilation_thinking": None,
         "planning_thinking": None,
         "verification_thinking": None,

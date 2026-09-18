@@ -44,6 +44,13 @@ _COMPATIBLE_REVISIONS = {
 # the later joint-omission plan, not candidate generation or its initial review.
 # Whole-compilation and dependency receipts MUST keep the real new revision.
 _STAGE_COMPATIBLE_REVISIONS = {
+    # Native markup scope positions affect dependency analysis. Generation's
+    # assembled evidence and rules remain bound by their own full request key.
+    (
+        "generation",
+        "openkb.agent.dependency_scope",
+        "b78b30fa6ca077fd40051ab79d9bb042c8553baff8b64efae26c5c18b7e14f57",
+    ): "dbf7c177906b3d45cd0d34ae87dbf8276dc8da45cb064d6d49e0a4a35ac302f0",
     (
         "generation",
         "openkb.agent.dependency_scope",

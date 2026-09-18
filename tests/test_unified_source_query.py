@@ -192,9 +192,9 @@ def test_index_summary_runs_before_compilation_with_shared_request_accounting(
     model_service.respond = respond
     imported = import_document(kb_dir, source)
     assert imported.knowledge_compilation == "completed", imported
-    assert stages[0] == "index_summary"
+    assert stages[:2] == ["index_structure", "index_summary"]
     assert stages.count("index_summary") == 1
-    assert stages.count("index_summary_verification") == 1
+    assert stages.count("index_summary_verification") == 0
     assert imported.usage["observable_attempts"] == len(stages)
     nav = source_status(kb_dir, imported.source_id)["navigation"]
     assert nav["status"] == "enhanced"
@@ -238,18 +238,21 @@ def test_unstructured_original_gets_bounded_inferred_ranges_and_rejects_unknown_
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "index_structure":
             requests.append(payload)
-            blocks = payload["blocks"]
+            blocks = payload["evidence"]["blocks"]
             return {
                 "sections": [
                     {
-                        "start": "invented" if broken else block["id"],
-                        "end": block["id"],
+                        "start_block": "invented" if broken else block["id"],
+                        "anchor": block["text"][:100],
+                        "title_origin": "inferred",
                         "level": 1,
                         "title": "Derived section",
                     }
                     for block in blocks
                 ]
             }
+        if payload["stage"] == "index_location":
+            return {"locations": [{"id": c["id"], "location": None} for c in payload["candidates"]]}
         if payload["stage"] == "index_summary":
             return {
                 "summaries": [
@@ -270,7 +273,7 @@ def test_unstructured_original_gets_bounded_inferred_ranges_and_rejects_unknown_
     assert second.knowledge_compilation == "completed", second
     nav = source_status(kb_dir, second.source_id)["navigation"]
     assert nav["status"] == "degraded"
-    assert nav["reason"] == "index_structure_invalid"
+    assert nav["reason"] == "index_unlocated_sections"
     assert all(node["structure_origin"] != "inferred" for node in nav["nodes"])
     assert len(requests) == 2
 

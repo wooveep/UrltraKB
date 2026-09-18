@@ -10,8 +10,8 @@ from openkb.evidence import Evidence, complete_read_bound, source_provenance
 from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits, processing_checkpoint
 from openkb.source_context import (
+    CONTEXT_INSTRUCTIONS,
     context_fields,
-    context_instructions,
     has_structured_context,
     window_fields,
 )
@@ -60,12 +60,13 @@ JSON_FORMAT = {"type": "json_object"}
 
 
 def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
-    from openkb.agent.evidence_wire import WireMessages, encode_payload, share_contexts
+    from openkb.agent.evidence_wire import WireMessages, encode_frozen_payload
+    from openkb.agent.source_protocol import SYSTEM
 
     structured_context = has_structured_context(payload)
-    instructions = context_instructions(payload)
-    if instructions and instructions not in system:
-        system += "\n" + instructions
+    # The full context contract is already fixed in the common system prefix.
+    # Keep only stage-specific rules in the suffix, without repeating that contract.
+    system = system.removesuffix("\n" + CONTEXT_INSTRUCTIONS)
     if payload.get("stage") == "facts":
         from openkb.agent.shared_analysis import fact_input
 
@@ -82,8 +83,7 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
             if structured_context or key not in {"context_data", "context_format"}
         }
         payload = {**payload, "evidence_provenance": provenance}
-    wire, identities = encode_payload(payload, identity_values)
-    wire = share_contexts(wire)
+    wire, identities = encode_frozen_payload(payload, identity_values)
     contract = {
         "facts": (
             'Return {"units":[...]} with every input id exactly once. Every unit must have '
@@ -100,11 +100,11 @@ def messages(system: str, payload: dict, *, identity_values=()) -> list[dict]:
     }.get(payload.get("stage", ""))
     return WireMessages(
         [
-            {"role": "system", "content": system},
+            {"role": "system", "content": SYSTEM},
             {
                 "role": "user",
                 "content": json.dumps(
-                    {**wire, "output_contract": contract},
+                    {**wire, "task_rules": system, "output_contract": contract},
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),

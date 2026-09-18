@@ -81,6 +81,9 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "converted",
         "xlsx",
         "pptx",
+        "csv",
+        "html",
+        "xml",
     }:
         raise ValueError("Invalid source location")
     allowed = {
@@ -91,6 +94,18 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
         "row",
         "cell",
         "line",
+        "line_end",
+        "columns",
+        "delimiter",
+        "dom_path",
+        "dom_id",
+        "selection",
+        "element_path",
+        "namespaces",
+        "attributes",
+        "text_role",
+        "role",
+        "toc_level",
         "headings",
         "heading_level",
         "bbox",
@@ -112,6 +127,25 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
     }
     if set(location) - allowed:
         raise ValueError("Unknown source location field")
+    from openkb.markup_locations import validate_markup_location
+
+    validate_markup_location(location)
+    if "role" in location and location["role"] not in {"toc", "header", "footer", "metadata"}:
+        raise ValueError("Invalid native content role")
+    if "toc_level" in location and (
+        location.get("role") != "toc"
+        or type(location["toc_level"]) is not int
+        or not 1 <= location["toc_level"] <= 9
+    ):
+        raise ValueError("Invalid contents level")
+    if set(location) & {"columns", "delimiter"}:
+        if (
+            location["kind"] != "csv"
+            or not isinstance(location.get("columns"), list)
+            or not all(isinstance(c, str) for c in location["columns"])
+            or location.get("delimiter") not in {",", ";", "\t", "|"}
+        ):
+            raise ValueError("Invalid CSV position")
     if "attachment_files" in location:
         from openkb.attachments import validate_attachment_files
 
@@ -156,6 +190,12 @@ def validate_location(location: dict[str, Any], *, _depth: int = 0) -> None:
     for key in ("page", "paragraph", "table", "row", "cell", "line"):
         if key in location and (type(location[key]) is not int or location[key] < 1):
             raise ValueError("Invalid source position")
+    if "line_end" in location and (
+        type(location["line_end"]) is not int
+        or "line" not in location
+        or location["line_end"] < location["line"]
+    ):
+        raise ValueError("Invalid source line range")
     if location["kind"] == "pdf" and "page" not in location:
         raise ValueError("PDF evidence needs a physical page")
     if location["kind"] != "pdf" and "page" in location:
@@ -199,7 +239,7 @@ class BlockDraft:
         if not isinstance(self.text, str) or not isinstance(self.context, str):
             raise ValueError("Invalid parsed text")
         validate_context_data(self.context_data)
-        if self.kind not in {"heading", "paragraph", "table", "code", "image"}:
+        if self.kind not in {"heading", "paragraph", "table", "code", "image", "metadata", "list"}:
             raise ValueError("Invalid content block kind")
         validate_location(self.location)
         if not isinstance(self.assets, tuple):
