@@ -90,9 +90,9 @@ def topic_title_context(facts, reader, *, title="", limits=None, model=None):
         context,
         title,
         model,
-        # Keep this auxiliary retrieval below one twelfth of the input budget;
+        # Keep this auxiliary retrieval below one quarter of the input budget;
         # generation, correction and review must still fit intact body quotes.
-        max(1, min(4096, (limits.context_tokens - limits.output_tokens) // 12)),
+        max(1, min(4096, (limits.context_tokens - limits.output_tokens) // 4)),
     )
 
 

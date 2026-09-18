@@ -10,6 +10,7 @@ from collections import Counter
 from copy import deepcopy
 
 from openkb.agent.evidence_retry import ResponseIncomplete
+from openkb.agent.evidence_selection import DETAIL_CONTRACT, detail_occurrences
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.evidence_units import messages as base_messages
 from openkb.config import compilation_model_options
@@ -19,16 +20,16 @@ SCOPED_CONTRACT = (
     'Return JSON {"title":"neutral topic covering all tasks","covered":[every fact id],'
     '"fragments":[{"scope":"s1","occurrences":["e1"],"heading":"task label",'
     '"content":"Markdown for these occurrences"}]}. '
-    "Use each occurrence exactly once, only inside its assigned source scope. "
+    "Assign each occurrence exactly once, either to its source-scope fragment or source_details. "
     "Keep every fact id in covered, including repeated ids. Do not return a separate content. "
-    "Keep short labels verbatim, even when other facts contain commands. "
+    "Keep necessary short labels faithful; incidental labels may remain in source_details. "
     "Reproduce commands exactly; avoid extra explanations of their purpose or effect. "
     "Do not introduce before/after relationships absent from the original wording. "
     "Do not turn different tasks into prerequisites for one another. "
     "Use concise natural task headings; do not print provenance IDs or full source paths. "
     "The application joins fragments as sibling task sections in this single knowledge page. "
     "Keep title exactly unchanged when title_fixed is true."
-)
+) + DETAIL_CONTRACT
 
 
 def source_mapping(evidence):
@@ -62,7 +63,14 @@ def generation_payload(base, facts, evidence):
         **{
             key: value
             for key, value in base.items()
-            if key not in {"_topic_fact_ids", "_title_context", "_table_catalog"}
+            if key
+            not in {
+                "_topic_fact_ids",
+                "_title_context",
+                "_table_catalog",
+                "_operation_context",
+                "known_omissions",
+            }
         },
         "facts": facts,
         "evidence": evidence,
@@ -77,6 +85,7 @@ def generation_payload(base, facts, evidence):
     if base.get("_title_context") and {fact["id"] for fact in facts} != base["_topic_fact_ids"]:
         result["title_context"] = base["_title_context"]
     mapping = source_mapping(evidence)
+    result["occurrences"] = mapping["occurrences"]
     if len(mapping["source_scopes"]) > 1:
         result.update(mapping)
     return result
@@ -90,6 +99,8 @@ def messages(system, payload):
     wire = json.loads(result[-1]["content"])
     if payload.get("stage") == "generation" and payload.get("source_scopes"):
         wire["output_contract"] = SCOPED_CONTRACT
+    elif payload.get("stage") == "generation":
+        wire["output_contract"] += DETAIL_CONTRACT
     if payload.get("stage") == "generation" and payload.get("revision"):
         if not payload.get("title_fixed"):
             # A rejected title belongs to the rejected candidate. Repeating it
@@ -98,9 +109,10 @@ def messages(system, payload):
             wire["title_instruction"] = (
                 "Return a corrected, source-faithful neutral title in the title field. "
                 "revision.title is rejected candidate data, not a required title. "
-                "Resolve the review's specific discrepancy. Preserve every required "
-                "quote and keep each operation bound to its original target. "
-                "Preserve short source labels as literal quotations in the body; "
+                "Resolve the review's specific discrepancy. Preserve essential meaning "
+                "and keep each operation bound to its original target. "
+                "Keep necessary source labels faithful; secondary labels may stay in "
+                "source_details; "
                 "do not promote a quoted label into a heading governing a different "
                 "operation. Use neutral section headings when the original label "
                 "and the adjacent operation conflict."
@@ -222,6 +234,7 @@ def _body_headings(content):
 
 def normalize_output(output, payload):
     """Validate before deriving the internal Markdown representation or receipts."""
+    details = detail_occurrences(output, payload)
     if not payload.get("source_scopes"):
         return output
     invalid = ResponseIncomplete("topic_generation_incomplete", "generation")
@@ -235,7 +248,7 @@ def normalize_output(output, payload):
     ):
         raise invalid
     expected = {o["id"]: o["scope"] for o in payload["occurrences"]}
-    assigned, sections = [], []
+    assigned, sections = list(details), []
     for fragment in output["fragments"]:
         if not isinstance(fragment, dict):
             raise invalid

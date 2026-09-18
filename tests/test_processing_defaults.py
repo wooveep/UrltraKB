@@ -78,7 +78,7 @@ def test_default_budgets_are_visible_overridable_and_restored_on_clear(legacy_kb
     default = read_settings_view(legacy_kb)
     limits = default.values.processing
     RequestLimits.from_config({"processing": limits})
-    assert limits["concurrency"] == 8
+    assert limits["concurrency"] == 2
     assert default.sources["processing"] == "default"
     assert read_settings_view().values.processing == limits
     global_limits = {**limits, "max_requests": 17, "concurrency": 4}

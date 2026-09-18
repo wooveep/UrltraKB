@@ -33,7 +33,7 @@ DEFAULT_PROCESSING = {
     "max_attempts": 2,
     "max_requests": None,
     "max_tokens": None,
-    "concurrency": 8,
+    "concurrency": 2,
 }
 
 
@@ -117,6 +117,7 @@ class RequestLimits:
             numbers[key] = value
         if numbers["max_output_tokens"] >= numbers["max_context_tokens"]:
             raise ProcessingIncomplete("model_capabilities_required", "configuration")
+        numbers["concurrency"] = min(numbers["concurrency"], 4)
         return cls(context, output, **numbers)
 
     def expanded(self, *, reason: str | None = None) -> RequestLimits:
@@ -137,6 +138,14 @@ class RequestLimits:
         self, model: str, messages: list[dict], kwargs: dict[str, Any]
     ) -> tuple[dict[str, Any], int]:
         import litellm
+
+        from openkb.resource_budget import check_memory
+
+        check_memory(
+            sum(len(str(message.get("content", ""))) for message in messages) * 12
+            + self.output_tokens * 32,
+            stage="model_input",
+        )
 
         try:
             tokens = litellm.token_counter(
@@ -185,6 +194,7 @@ class ExecutionBudget:
 
     def __post_init__(self) -> None:
         self.permits = threading.BoundedSemaphore(self.limits.concurrency)
+        self.family_reservations: dict[int, Any] = {}
 
     def checkpoint(self, stage: str | None = None) -> float:
         if self.incomplete is not None:
@@ -241,6 +251,16 @@ class ExecutionBudget:
                 raise ProcessingIncomplete("token_budget_exhausted", self.stage)
             if allowance := active_allowance():
                 allowance.before_reserve(options, reserved)
+            from openkb.runtime.family_budget import current_family
+
+            family = current_family()
+            family_key = (
+                family.reserve(self.limits, reserved, self.stage, options["timeout"])
+                if family
+                else None
+            )
+            if family_key:
+                options["timeout"] = family_key["timeout"]
             self.attempts += 1
             self.charged_tokens += reserved
             observation = {
@@ -253,6 +273,8 @@ class ExecutionBudget:
                 "usage": None,
                 "transport_attempts": None,
             }
+            if family_key:
+                self.family_reservations[self.attempts] = family_key
             self.observations.append(observation)
             self.on_observation(self)
         return options, observation
@@ -269,6 +291,10 @@ class ExecutionBudget:
             ):
                 self.charged_tokens += input_tokens + output_tokens - observation["reserved_tokens"]
                 observation["usage"] = {"input": input_tokens, "output": output_tokens}
+                if family_key := self.family_reservations.pop(observation["attempt"], None):
+                    from openkb.runtime.family_budget import current_family
+
+                    current_family().settle(family_key, input_tokens + output_tokens, self.stage)
             self.on_observation(self)
         self.checkpoint()
         if self.limits.max_tokens is not None and self.charged_tokens > self.limits.max_tokens:
@@ -363,11 +389,20 @@ class ExecutionBudget:
 
                 threading.Thread(target=request, name="openkb-budgeted-model", daemon=True).start()
                 deadline = time.monotonic() + options["timeout"]
+                family_reservation = self.family_reservations.get(observation["attempt"])
+                family_deadline = (
+                    family_reservation["started"] + family_reservation["timeout"]
+                    if family_reservation
+                    else math.inf
+                )
                 while not done.wait(min(0.05, max(0, deadline - time.monotonic()))):
                     self.checkpoint()
                     if activity is not None:
                         measured["response_activity"] = activity.snapshot()
-                        deadline = time.monotonic() + max(0, activity.remaining(options["timeout"]))
+                        deadline = min(
+                            family_deadline,
+                            time.monotonic() + max(0, activity.remaining(options["timeout"])),
+                        )
                     if time.monotonic() >= deadline:
                         # A retry must first finish this local stream transport.
                         if allowance := active_allowance():
@@ -705,69 +740,6 @@ def validate_usage(value: Any) -> None:
             raise ValueError("Invalid model usage observation")
 
 
-@contextmanager
-def external_request_usage(reservation: int, stage: str = "external"):
-    """Reserve and settle a secondary protocol request inside the active task budget."""
-    active = _ACTIVE.get()
-    receipt: dict[str, Any] = {}
-    if active is None:
-        yield receipt
-        return
-    active.checkpoint()
-    with active.lock:
-        if active.limits.max_requests is not None and active.attempts >= active.limits.max_requests:
-            active.incomplete = ProcessingIncomplete("request_budget_exhausted", active.stage)
-            raise active.incomplete
-        if (
-            active.limits.max_tokens is not None
-            and active.charged_tokens + reservation > active.limits.max_tokens
-        ):
-            active.incomplete = ProcessingIncomplete("token_budget_exhausted", active.stage)
-            raise active.incomplete
-        active.attempts += 1
-        active.charged_tokens += reservation
-        observation = {
-            "attempt": active.attempts,
-            "stage": stage,
-            "reserved_tokens": reservation,
-            "usage": None,
-            "transport_attempts": None,
-            "input_estimate": reservation,
-            "output_reserve": 0,
-            "timeout": min(active.checkpoint(), active.limits.request_timeout),
-        }
-        active.observations.append(observation)
-        active.on_observation(active)
-    measured = active.measurement.begin_request(observation, 0.0, 0.0)
-    try:
-        yield receipt
-    finally:
-        active.measurement.finish_request(measured)
-        for field in ("cache_read_tokens", "cache_write_tokens"):
-            value = receipt.get(field)
-            if type(value) is int and value >= 0:
-                measured[field] = value
-        with active.lock:
-            tokens = receipt.get("tokens")
-            if type(tokens) is int and tokens >= 0:
-                active.charged_tokens += tokens - reservation
-                observation["usage"] = (
-                    {"input": receipt["input"], "output": receipt["output"]}
-                    if type(receipt.get("input")) is int and type(receipt.get("output")) is int
-                    else {"total": tokens}
-                )
-            else:
-                active.unknown_usage += 1
-            active.on_observation(active)
-        processing_checkpoint()
-        if (
-            active.limits.max_tokens is not None
-            and active.charged_tokens > active.limits.max_tokens
-        ):
-            active.incomplete = ProcessingIncomplete("token_budget_exhausted", active.stage)
-            raise active.incomplete
-
-
 def request_budget_settings() -> dict[str, Any] | None:
     """Read per-request caps without exposing the mutable task budget."""
     active = _ACTIVE.get()
@@ -777,3 +749,9 @@ def request_budget_settings() -> dict[str, Any] | None:
         "max_tokens": active.limits.output_tokens,
         "timeout": min(active.checkpoint(), active.limits.request_timeout),
     }
+
+
+def external_request_usage(reservation: int, stage: str = "external"):
+    from openkb.external_request_usage import external_request_usage as usage
+
+    return usage(reservation, stage)

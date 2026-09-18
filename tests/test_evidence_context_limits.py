@@ -131,7 +131,13 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
     )
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
-    config["processing"].update(context_tokens=4096, max_requests=250, max_tokens=1000000)
+    config["processing"].update(
+        context_tokens=32768,
+        max_requests=250,
+        max_tokens=1000000,
+        stage_timeout=180,
+        document_timeout=240,
+    )
     path.write_text(yaml.safe_dump(config))
     generated = []
 

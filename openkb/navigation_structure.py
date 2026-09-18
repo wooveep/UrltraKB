@@ -136,52 +136,54 @@ def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, c
                 "boundary": {"start": 0, "end": len(blocks)},
                 "blocks": blocks,
             }
-            key = checkpoints.key(SYSTEM, payload, dependencies=record["profile"])
-            saved = checkpoints.load(key)
-            try:
-                if saved is None:
-                    request = messages(SYSTEM, payload)
-                    if not allowance.fits(settings["model"], request):
-                        raise IndexAllowanceExceeded("index_structure_exceeds_context")
-                    kwargs = {
-                        "max_tokens": min(
-                            2048,
-                            allowance.limits.output_tokens,
-                            allowance.budget.limits.output_tokens,
-                        ),
-                        "response_format": {"type": "json_object"},
-                        **compilation_model_options(settings),
-                    }
-                    analysis = RequestAnalysis(
-                        checkpoints, "index_structure", request, kwargs, rules=(__name__,)
-                    )
-
-                    def produce():
-                        allowance.request(settings["model"], request)
-                        return _llm_call(
-                            settings["model"],
-                            request,
-                            "index_structure",
-                            bundle=bundle,
-                            **kwargs,
+            with checkpoints.request(SYSTEM, payload, dependencies=record["profile"]) as key:
+                saved = checkpoints.load(key)
+                try:
+                    if saved is None:
+                        request = messages(SYSTEM, payload)
+                        if not allowance.fits(settings["model"], request):
+                            raise IndexAllowanceExceeded("index_structure_exceeds_context")
+                        kwargs = {
+                            "max_tokens": min(
+                                2048,
+                                allowance.limits.output_tokens,
+                                allowance.budget.limits.output_tokens,
+                            ),
+                            "response_format": {"type": "json_object"},
+                            **compilation_model_options(settings),
+                        }
+                        analysis = RequestAnalysis(
+                            checkpoints, "index_structure", request, kwargs, rules=(__name__,)
                         )
 
-                    try:
-                        with allowance.enforce():
-                            saved = analysis.run(produce, lambda value: _sections(value, blocks))
-                    except (ValueError, TypeError):
-                        # A bounded invalid result is remembered for these exact
-                        # inputs; continuation cannot repeatedly sample until valid.
-                        saved = {"invalid": "index_structure_invalid"}
-                    checkpoints.save(key, saved)
-                if saved == {"invalid": "index_structure_invalid"}:
-                    raise IndexAllowanceExceeded("index_structure_invalid")
-                sections = _sections(saved, blocks)
-                additions[node["id"]] = _children(
-                    {**node, "end": end}, sections, {block.id: block.order for block in members}
-                )
-            except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
-                record_optional_failure(record, exc)
+                        def produce():
+                            allowance.request(settings["model"], request)
+                            return _llm_call(
+                                settings["model"],
+                                request,
+                                "index_structure",
+                                bundle=bundle,
+                                **kwargs,
+                            )
+
+                        try:
+                            with allowance.enforce():
+                                saved = analysis.run(
+                                    produce, lambda value: _sections(value, blocks)
+                                )
+                        except (ValueError, TypeError):
+                            # A bounded invalid result is remembered for these exact
+                            # inputs; continuation cannot repeatedly sample until valid.
+                            saved = {"invalid": "index_structure_invalid"}
+                        checkpoints.save(key, saved)
+                    if saved == {"invalid": "index_structure_invalid"}:
+                        raise IndexAllowanceExceeded("index_structure_invalid")
+                    sections = _sections(saved, blocks)
+                    additions[node["id"]] = _children(
+                        {**node, "end": end}, sections, {block.id: block.order for block in members}
+                    )
+                except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
+                    record_optional_failure(record, exc)
     expanded = [item for node in nodes for item in [node, *additions.get(node["id"], [])]]
     validate_nodes(expanded, len(parsed.blocks))
     record["nodes"] = expanded

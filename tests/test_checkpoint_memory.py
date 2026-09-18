@@ -21,6 +21,118 @@ def checkpoints(kb):
     )
 
 
+def test_completed_cache_adoption_releases_all_temporary_inputs(kb_dir, tmp_path, monkeypatch):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with checkpoints(kb_dir) as writer:
+        for number in range(16):
+            payload = {"stage": "generation", "text": f"{number}:" + "x" * (1024 * 1024)}
+            with writer.request("fixture", payload) as key:
+                writer.save(key, {"number": number})
+        for number in range(16):
+            payload = {"stage": "generation", "text": f"{number}:" + "x" * (1024 * 1024)}
+            with writer.request("fixture", payload) as key:
+                assert writer.load(key) == {"number": number}
+            assert not list(tmp_path.glob("openkb-checkpoint-contracts/.inputs/*/data/*.json"))
+    assert not list(tmp_path.glob("openkb-checkpoint-contracts/.inputs/*/owner.json"))
+    assert checkpoints(kb_dir).load(key) == {"number": 15}
+
+
+def test_another_consumer_can_save_after_same_key_owner_exits(kb_dir):
+    with checkpoints(kb_dir) as writer:
+        payload = {"stage": "generation", "text": "shared source"}
+        with writer.request("fixture", payload) as active:
+            with writer.request("fixture", payload) as adopting:
+                assert adopting == active
+            writer.save(active, {"pages": ["verified"]})
+            assert writer.record(active)["contract"]["payload"] == payload
+
+
+def test_insufficient_temporary_disk_stops_before_allocating_a_contract(kb_dir, monkeypatch):
+    import shutil
+
+    from openkb.processing import ProcessingIncomplete
+
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: SimpleNamespace(total=2**30, used=2**30, free=0)
+    )
+    with checkpoints(kb_dir) as writer:
+        with pytest.raises(ProcessingIncomplete, match="resource_disk_insufficient"):
+            with writer.request("fixture", {"stage": "generation", "text": "source"}):
+                pytest.fail("A request was admitted with no disk space")
+
+
+def test_contract_capacity_preserves_active_input_and_releases_capacity():
+    from openkb.agent.checkpoint_contracts import PendingContracts
+    from openkb.processing import ProcessingIncomplete
+    from openkb.sources import content_id
+
+    first = {"payload": {"stage": "generation", "text": "x" * 600}}
+    second = {"payload": {"stage": "generation", "text": "y" * 600}}
+    store = PendingContracts(max_bytes=1000)
+    try:
+        store.save(content_id(first), first)
+        with pytest.raises(ProcessingIncomplete, match="resource_input_exceeds_budget"):
+            store.save(content_id(second), second)
+        assert store.read(content_id(first)) == first
+        assert store.read(content_id(second)) is None
+        store.discard(content_id(first))
+        store.save(content_id(second), second)
+        assert store.read(content_id(second)) == second
+    finally:
+        store.close()
+
+
+def test_restart_reclaims_crashed_contracts_without_removing_live_inputs(
+    kb_dir, tmp_path, monkeypatch
+):
+    import subprocess
+    import sys
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    program = """
+import os, sys, tempfile
+from pathlib import Path
+from tests.test_checkpoint_memory import checkpoints
+tempfile.tempdir = sys.argv[1]
+writer = checkpoints(Path(sys.argv[2]))
+writer.key('crashed', {'stage': 'generation', 'text': 'private crash input'})
+os._exit(86)
+"""
+    crashed = subprocess.run([sys.executable, "-c", program, str(tmp_path), str(kb_dir)])
+    assert crashed.returncode == 86
+    abandoned = set(tmp_path.glob("openkb-checkpoint-contracts*/**/*.json"))
+    assert abandoned
+    with checkpoints(kb_dir) as live:
+        with live.request("live", {"stage": "generation", "text": "still needed"}) as key:
+            with checkpoints(kb_dir) as restarted:
+                with restarted.request("next", {"stage": "generation", "text": "next"}):
+                    assert not any(path.exists() for path in abandoned)
+            live.save(key, {"ok": True})
+            assert live.record(key)["contract"]["payload"]["text"] == "still needed"
+
+
+def test_private_rows_preserve_order_and_values_without_retaining_all_bodies(kb_dir):
+    with checkpoints(kb_dir) as writer:
+        rows = writer.private_rows("source_units")
+        tracemalloc.start()
+        try:
+            for number in range(16):
+                rows[str(number)] = {"text": f"{number}:" + "x" * 1024**2}
+            gc.collect()
+            retained, _ = tracemalloc.get_traced_memory()
+            assert retained < 4 * 1024**2
+        finally:
+            tracemalloc.stop()
+        assert list(rows) == [str(number) for number in range(16)]
+        assert rows["15"]["text"].startswith("15:")
+        assert len(rows) == 16
+        del rows["0"]
+        assert "0" not in rows and len(rows) == 15
+
+
 def test_resuming_many_large_requests_has_bounded_retained_memory(kb_dir):
     writer = checkpoints(kb_dir)
     keys = []

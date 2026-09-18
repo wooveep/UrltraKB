@@ -66,7 +66,9 @@ def _compile_version(
 ):
     from openkb.agent.evidence_checkpoints import publication_settings
     from openkb.application.documents import DocumentResult
+    from openkb.runtime.family_budget import register_source_family
 
+    register_source_family(kb_dir, source)
     bound_settings = publication_settings(settings, bundle)
 
     store = SourceStore(kb_dir)
@@ -158,6 +160,8 @@ def _compile_version(
                     and previous.get("compilation_profile")
                     == bound_settings["_compilation_profile"]
                 ):
+                    from openkb.agent.evidence_review import stored_review_warnings
+
                     return DocumentResult(
                         source.origin,
                         "skipped",
@@ -167,6 +171,7 @@ def _compile_version(
                         knowledge_compilation="completed",
                         stage="committed",
                         warnings=tuple(report.warnings)
+                        + stored_review_warnings(previous)
                         + (("knowledge_content_omitted",) if previous_omissions else ()),
                         omissions=previous_omissions,
                         resume=source.id if has_gaps else None,
@@ -240,6 +245,9 @@ def _compile_version(
                     omissions = validate_omissions(report.omissions)
                     coverage = source_coverage(source, parsed, report, published=True)
                     body += compilation_notice(omissions)
+                    from openkb.agent.evidence_review import review_notice
+
+                    body += review_notice(report)
                     # Only this newly generated summary is owned by the source.
                     # Later cross-source link cleanup must not absorb manual text.
                     body = (
@@ -267,6 +275,13 @@ def _compile_version(
                         "compilation_profile": bound_settings["_compilation_profile"],
                         "compilation_omissions": json.dumps(omissions, ensure_ascii=False),
                         "compilation_coverage": json.dumps(coverage, ensure_ascii=False),
+                        "compilation_review_warnings": json.dumps(
+                            [
+                                code
+                                for code in report.warnings
+                                if code.startswith("knowledge_review_")
+                            ]
+                        ),
                     }
                     proposal = workspace.proposal(document, replaces=replaces)
                 stage = "committing"

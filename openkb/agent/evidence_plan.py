@@ -107,7 +107,7 @@ def plan_topics(
     # not a claim that a request with a different catalogue has the same inputs.
     # New facts/topics, parsing, model, schema and planning rules still bind it;
     # generation independently rechecks other-source contributions and targets.
-    retained_key = checkpoints.key(
+    retained_key = checkpoints.identity(
         "retained-source-plan-v1",
         {
             "stage": "planning",
@@ -194,57 +194,57 @@ def plan_topics(
         if candidates is not None:
             request.update(mode="coordination", candidates=candidates)
         dependencies = {"catalog_window": request["existing_pages"], "schema": schema}
-        key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
-        value = checkpoints.load(key)
-        if value is None and hasattr(checkpoints, "preceding_plan_key"):
-            value = checkpoints.load(
-                checkpoints.preceding_plan_key(
-                    PLAN_SYSTEM,
-                    request,
-                    dependencies=dependencies,
+        with checkpoints.request(PLAN_SYSTEM, request, dependencies=dependencies) as key:
+            value = checkpoints.load(key)
+            if value is None and hasattr(checkpoints, "preceding_plan_key"):
+                value = checkpoints.load(
+                    checkpoints.preceding_plan_key(
+                        PLAN_SYSTEM,
+                        request,
+                        dependencies=dependencies,
+                    )
                 )
-            )
-        if value is None:
-            previous = checkpoints.previous_plan_key(
-                PLAN_SYSTEM, request, dependencies=dependencies
-            )
-            value = checkpoints.load(previous) if previous else None
-        on_event({"stage": "planning", "topics": len(batch), "cached": value is not None})
-        if value is None:
-            from openkb.agent.request_analysis import RequestAnalysis
+            if value is None:
+                previous = checkpoints.previous_plan_key(
+                    PLAN_SYSTEM, request, dependencies=dependencies
+                )
+                value = checkpoints.load(previous) if previous else None
+            on_event({"stage": "planning", "topics": len(batch), "cached": value is not None})
+            if value is None:
+                from openkb.agent.request_analysis import RequestAnalysis
 
-            request_messages = messages(PLAN_SYSTEM, request)
-            options = {
-                "response_format": JSON_FORMAT,
-                **compilation_model_options(settings, stage="planning"),
-            }
-            if candidates is not None:
-                limits.request(model, request_messages, options)
-            analysis = RequestAnalysis(
-                checkpoints, "planning", request_messages, options, rules=(__name__,)
-            )
-            try:
-                value = analysis.run(
-                    lambda: _llm_call(
-                        model,
-                        request_messages,
-                        "planning_coordination" if candidates else "planning",
-                        bundle=bundle,
-                        **options,
-                    ),
-                    lambda value: _validate(decode_members(value, batch), batch, entity_types),
+                request_messages = messages(PLAN_SYSTEM, request)
+                options = {
+                    "response_format": JSON_FORMAT,
+                    **compilation_model_options(settings, stage="planning"),
+                }
+                if candidates is not None:
+                    limits.request(model, request_messages, options)
+                analysis = RequestAnalysis(
+                    checkpoints, "planning", request_messages, options, rules=(__name__,)
                 )
-                value = decode_members(value, batch)
-            except (ValueError, TypeError):
-                raise ResponseIncomplete("topic_plan_invalid", "planning") from None
-        groups = _validate(value, batch, entity_types)
-        checkpoints.save(key, value)
-        return groups
+                try:
+                    value = analysis.run(
+                        lambda: _llm_call(
+                            model,
+                            request_messages,
+                            "planning_coordination" if candidates else "planning",
+                            bundle=bundle,
+                            **options,
+                        ),
+                        lambda value: _validate(decode_members(value, batch), batch, entity_types),
+                    )
+                    value = decode_members(value, batch)
+                except (ValueError, TypeError):
+                    raise ResponseIncomplete("topic_plan_invalid", "planning") from None
+            groups = _validate(value, batch, entity_types)
+            checkpoints.save(key, value)
+            return groups
 
     def recovery_key(batch):
         request = payload(batch)
         dependencies = {"catalog_window": request["existing_pages"], "schema": schema}
-        key = checkpoints.key(PLAN_SYSTEM, request, dependencies=dependencies)
+        key = checkpoints.identity(PLAN_SYSTEM, request, dependencies=dependencies)
         if checkpoints.load_recovery(key, "split") is None:
             previous = checkpoints.previous_plan_key(
                 PLAN_SYSTEM, request, dependencies=dependencies

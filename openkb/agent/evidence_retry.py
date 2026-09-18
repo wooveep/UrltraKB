@@ -135,19 +135,22 @@ def split_span(value):
     text = value["text"]
     if len(text) < 2:
         return []
-    middle = len(text) // 2
-    boundary = text.rfind("\n", 0, middle)
-    if boundary > middle // 2:
-        middle = boundary + 1
+    from openkb.agent.semantic_spans import boundaries
+
+    options = [position for position in boundaries(text) if position < len(text)]
+    if not options:
+        return []
+    middle = min(options, key=lambda position: abs(position - len(text) // 2))
     start = value["reference"]["start"]
     parts = []
     for left, right in ((0, middle), (middle, len(text))):
         reference = {**value["reference"], "start": start + left, "end": start + right}
         part = {**value, "reference": reference, "text": text[left:right]}
         neighbors = list(value.get("neighbors", []))
+        points = [0, *boundaries(text)]
         for begin, end, relation in (
-            (max(0, left - 128), left, "previous_span"),
-            (right, min(len(text), right + 128), "following_span"),
+            (max((p for p in points if p < left), default=0), left, "previous_span"),
+            (right, min((p for p in points if p > right), default=len(text)), "following_span"),
         ):
             if end > begin:
                 neighbors.append(

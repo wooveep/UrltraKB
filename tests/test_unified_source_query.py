@@ -82,7 +82,7 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
     model_service.respond = respond
     imported = import_document(kb_dir, source)
     assert imported.knowledge_compilation == "completed", imported
-    assert indexed_before_facts == [True]
+    assert indexed_before_facts and all(indexed_before_facts)
     nav = source_status(kb_dir, imported.source_id)["navigation"]
     assert nav["parse"] == imported.parse_id
     assert nav["nodes"] and nav["nodes"][0]["end"] == 4

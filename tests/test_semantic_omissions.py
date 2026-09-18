@@ -14,6 +14,55 @@ from tests.http_model_fixture import evidence_response
 from tests.test_adaptive_processing import response
 
 
+def test_known_oversized_dependency_context_is_omitted_before_page_generation(
+    kb_dir, tmp_path, monkeypatch
+):
+    config = {
+        **DEFAULT_CONFIG,
+        "model": "openai/offline-test",
+        "navigation": {"enabled": False},
+        "processing": {
+            **DEFAULT_CONFIG["processing"],
+            "context_tokens": 8192,
+            "output_tokens": 2048,
+            "max_context_tokens": 8192,
+            "max_output_tokens": 2048,
+        },
+    }
+    (kb_dir / ".openkb/config.yaml").write_text(yaml.safe_dump(config))
+    source = tmp_path / "oversized.md"
+    source.write_text(
+        "A global maintenance prerequisite is required for every operation.\n\n"
+        + "\n\n".join("Historical background. " * 30 for _ in range(100))
+        + "\n\nRestart alpha only after the maintenance prerequisite."
+    )
+    calls = Counter()
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        calls[payload["stage"]] += 1
+        value = evidence_response(payload)
+        if payload["stage"] == "facts":
+            rows = []
+            for unit, row in zip(payload["units"], value["units"], strict=True):
+                if "global maintenance" in unit["text"]:
+                    continue
+                if "Restart alpha" not in unit["text"]:
+                    row.update(facts=[], empty_reason="Non-operational background")
+                rows.append(row)
+            value = {"units": rows}
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    assert calls["generation"] == 0
+    assert calls["dependencies"] == 0
+    assert any(
+        row["reason"] == "dependency_context_exceeds_request_budget" for row in result.omissions
+    )
+
+
 @pytest.mark.parametrize("long_context", [False, True])
 def test_failed_prerequisite_withdraws_dependent_action_but_retains_independent_topic(
     kb_dir, tmp_path, monkeypatch, long_context

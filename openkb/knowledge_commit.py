@@ -103,6 +103,7 @@ class KnowledgeProposal:
                     "compilation_profile",
                     "compilation_omissions",
                     "compilation_coverage",
+                    "compilation_review_warnings",
                     "navigation_id",
                     "compilation_navigation_id",
                 }
@@ -112,6 +113,9 @@ class KnowledgeProposal:
             from openkb.compilation_omissions import stored_omissions
 
             stored_omissions(self.document)
+            from openkb.agent.evidence_review import stored_review_warnings
+
+            stored_review_warnings(self.document)
             from openkb.source_coverage import validate_coverage
 
             validate_coverage(

@@ -45,7 +45,7 @@ def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
 ):
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
-    config["processing"]["max_requests"] = 4
+    config["processing"]["max_requests"] = 6
     config["navigation"] = {
         "enabled": True,
         "processing": {
@@ -69,8 +69,8 @@ def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
     assert {item["block_id"] for item in navigation["positions"]} == {
         block.id for block in ParseStore(kb_dir).load(result.parse_id).blocks
     }
-    assert result.usage["observable_attempts"] == 4
-    assert navigation["usage"]["observable_attempts"] == 0
+    assert result.usage["observable_attempts"] == 6
+    assert navigation["usage"]["observable_attempts"] == 1
 
 
 def test_worker_loss_during_navigation_stays_unpublished_and_preserves_unknown_cost(
@@ -186,7 +186,7 @@ def test_navigation_retries_cannot_spend_the_compiler_reserve(
 
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"]["max_requests"] = 5
+    config["processing"]["max_requests"] = 6
     config["navigation"] = {
         "enabled": True,
         "processing": {**config["processing"], "max_requests": 1},

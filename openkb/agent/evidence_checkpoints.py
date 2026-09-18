@@ -1,6 +1,7 @@
 """Validated compilation responses keyed by their actual immutable inputs."""
 
 import threading
+from contextlib import contextmanager
 from copy import deepcopy
 
 from openkb.agent.checkpoint_contracts import PendingContracts
@@ -9,6 +10,7 @@ from openkb.evidence import EVIDENCE_PROVENANCE
 from openkb.implementation import module_revision
 from openkb.locks import atomic_write_json
 from openkb.processing import processing_checkpoint
+from openkb.resource_checks import check_disk, json_size, resource_operation
 from openkb.sources import SourceStore, content_id, read_object, valid_id
 
 
@@ -48,10 +50,12 @@ def compilation_profile(settings, bundle):
                     "table_objects",
                     "table_recovery",
                     "evidence_dependencies",
+                    "dependency_scope",
                     "evidence_retry",
                     "evidence_pages",
                     "evidence_topic_cache",
                     "evidence_generation_protocol",
+                    "evidence_selection",
                     "evidence_title_context",
                     "evidence_plan",
                     "planning_resume",
@@ -61,6 +65,7 @@ def compilation_profile(settings, bundle):
                     "evidence_wire",
                     "model_json",
                     "evidence_verifier",
+                    "evidence_review",
                     "evidence_markup",
                     "compiler",
                 )
@@ -77,6 +82,8 @@ class CompilationCheckpoints:
     def __init__(self, kb_dir, source, parsed, settings, bundle):
         self._write_lock = threading.RLock()
         self._contracts = PendingContracts()
+        self._owners: dict[str, int] = {}
+        self._storage = None
         self.invalidations = []
         from openkb.processing import RequestLimits
 
@@ -116,6 +123,47 @@ class CompilationCheckpoints:
             "headers": content_id(getattr(bundle, "extra_headers", None)),
         }
         self.latest = self.store.owned_path(self.root / "latest" / f"{source.id}.json")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        with self._write_lock:
+            if self._owners:
+                raise RuntimeError("Cannot close checkpoints with active requests")
+            self._contracts.close()
+            if self._storage is not None:
+                self._storage.close()
+
+    def private_rows(self, name):
+        from openkb.agent.compilation_storage import CompilationStorage
+
+        with self._write_lock:
+            if self._storage is None:
+                self._storage = CompilationStorage()
+            return self._storage.rows(name)
+
+    def identity(self, system, payload, *, dependencies=None):
+        """Computing a cache or split identity never allocates temporary input."""
+        return content_id(self._key_record(system, payload, dependencies=dependencies))
+
+    @contextmanager
+    def request(self, system, payload, *, dependencies=None):
+        """Keep a contract through cache adoption, migration and durable save."""
+        with self._write_lock:
+            key = self.key(system, payload, dependencies=dependencies)
+            self._owners[key] = self._owners.get(key, 0) + 1
+        try:
+            yield key
+        finally:
+            with self._write_lock:
+                self._owners[key] -= 1
+                if not self._owners[key]:
+                    del self._owners[key]
+                    self._contracts.discard(key)
 
     def key(self, system, payload, *, dependencies=None):
         record = self._key_record(system, payload, dependencies=dependencies)
@@ -185,9 +233,11 @@ class CompilationCheckpoints:
                 "evidence_pages",
                 "table_objects",
                 "evidence_generation_protocol",
+                "evidence_selection",
                 "evidence_wire",
                 "evidence_title_context",
                 "evidence_verifier",
+                "evidence_review",
                 "evidence_markup",
                 "evidence_retry",
             ),
@@ -324,7 +374,8 @@ class CompilationCheckpoints:
 
     def save(self, key, value, *, receipt=None):
         with self._write_lock:
-            self._save(key, value, receipt=receipt)
+            with resource_operation("checkpoint", "save_completed"):
+                self._save(key, value, receipt=receipt)
 
     def load_recovery(self, key, kind):
         """Mutable workflow state is never treated as a verified model result."""
@@ -370,6 +421,7 @@ class CompilationCheckpoints:
         if kind not in {"split", "draft", "review", "plan", "topic"}:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
+        check_disk(path, json_size(value), stage="checkpoint", operation="save_" + kind)
         with self._write_lock:
             atomic_write_json(
                 path,
@@ -398,6 +450,7 @@ class CompilationCheckpoints:
             ),
         }
         path = self.store.owned_path(self.root / f"{valid_id(key)}.json")
+        check_disk(path, json_size(record), stage="checkpoint", operation="save_completed")
         if path.exists():
             prior = self.record(key)
             if prior is not None and prior["value"] != value:
@@ -426,4 +479,5 @@ class CompilationCheckpoints:
         stage = record.get("contract", {}).get("payload", {}).get("stage")
         stages.setdefault(stage or "unknown", []).append(key)
         atomic_write_json(self.latest, {"checkpoints": keys, "stages": stages})
-        self._contracts.discard(key)
+        if key not in self._owners:
+            self._contracts.discard(key)

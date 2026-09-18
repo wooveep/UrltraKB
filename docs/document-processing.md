@@ -120,8 +120,9 @@ acceptance.
 - Planning excludes only exhausted isolated input members. It never repairs a
   plan by inventing membership or silently accepting missing members.
 - Generation excludes the entire failed topic, so partially verified steps do
-  not appear as a complete task. Retained content still requires original
-  evidence, full coverage of its selected facts and semantic verification.
+  not appear as a complete task. Retained content requires original evidence
+  and a check for material factual errors. Nonessential omissions and explicitly
+  noncritical uncertainty use the focused review policy below.
 - If no usable facts, plan or verified topic remains, source registration and the
   editable zero-knowledge summary still complete. Confirmed temporary service
   failures use bounded backoff, then isolate affected content. Unknown model execution,
@@ -143,7 +144,74 @@ extraction and whole-topic receipts when their evidence, grouping, other-source
 content and verification contract are unchanged. A new parse, model or contract
 may invalidate reuse. Desktop stages show exclusions while publication remains
 completed, and Continue remains available. Success describes the available
-verified content, not full original-document coverage.
+usable content, not full original-document coverage or resolution of every review notice.
+
+## Concise knowledge pages — revised 2026-09-16
+
+Generation prioritizes the core concept, useful conclusions, key steps and necessary
+restrictions. Secondary background, repeated examples and incidental labels can stay
+in the original source. The existing generation request selects those occurrences in
+`source_details`; there is no additional selection or rewriting model pass. The application
+adds a visible source link to each affected contribution and retains exact evidence references.
+Native tables keep their complete rows and relationships; individual cells are not deferred.
+
+`covered` accounts for every input fact through prose or explicit source references; it
+does not require a transcript of every quote. Mixed-source fragments retain their own
+conditions, while a secondary scope may be represented by a source reference alone.
+The existing semantic check evaluates the selection too: a missing core fact or necessary
+condition remains a blocking error. Safe secondary selections need no omission warning.
+Unexplained omissions and uncertain claims retain the focused review policy below.
+
+Coverage distinguishes `referenced` ranges (some secondary detail retained in the source)
+from `verified` prose and unresolved `pending` ranges. References can complete analysis
+coverage without claiming all original detail was written into the page. Generation and
+whole-topic receipts retain the selection across Continue; only accepted topics contribute
+to published coverage. Updated generation contracts invalidate prior page receipts while
+unchanged fact extraction and topic planning remain reusable.
+
+This improves the writing policy and permits shorter responses; actual length, latency and
+semantic quality still depend on the model and should be evaluated on representative documents.
+
+## Focused content verification — revised 2026-09-16
+
+Import reviews focus on material errors: invented or contradicted claims, wrong
+subjects/operations, numbers, units, versions, commands, negations, and missing
+conditions or table relationships that change retained meaning. Neutral titles,
+faithful paraphrases, repetition and ordinary presentation commentary do not block
+publication. Reader metadata must still not become an original author's claim.
+Generation continues to account for its input identities; semantic review no
+longer demands that every secondary detail be repeated in the resulting prose.
+
+Nonessential coverage gaps and presentation concerns are advisories. Noncritical
+uncertainty may publish with an explicit `advisory` verdict and located notice;
+it is not relabeled fully verified. A bare `uncertain` verdict still means an
+unresolved key fact or condition and cannot authorize publication. Notices appear
+in the source summary and warnings. Affected facts remain pending in coverage,
+even after publication, identical reimport or cached Continue. Presentation-only
+advice does not make original coverage incomplete. Invalid review shapes and
+source bindings remain errors.
+
+One ordinary semantic decision is sufficient. Identical evidence is not rerolled
+merely because the verdict is uncertain. An unusable response or a mechanically
+located missing-path error permits at most one ordinary retry, within configured
+limits. Explicitly configured stronger adjudication remains available; ordinary
+advisories do not trigger it. A concrete rejection retains the existing single
+correction and review allowance. Valid decisions and notices are reusable.
+
+Omission dependency review selects complete headed text/DOCX sections, parent
+conditions and explicitly related sections; only affected topics are reviewed.
+Named references are followed in both directions and candidate links retain their
+dependency closure. Unrelated sections are omitted from those model requests.
+This structural routing is not proof of all possible semantic dependencies.
+Unstructured documents, embedded attachments, unlocated gaps, global conditions
+and unresolved cross-references keep the document-wide fallback. Selected blocks
+and their necessary conditions are never clipped to achieve a smaller request.
+PDF, spreadsheets and slides currently retain the conservative fallback.
+
+These changes revise the earlier exhaustive semantic coverage requirement. Source
+identity, original citations, immutable versions, transaction integrity and manual
+edit protection remain unchanged. Performance must be measured with the changed
+quality policy identified; fewer checks alone do not prove equal semantic recall.
 
 ## General import optimization contract
 
@@ -186,10 +254,11 @@ Publication and source-link audits do not establish complete semantic recall or
 perfect accuracy. Performance comparisons must also report source-grounded
 coverage and known omissions. Excluding a prerequisite must not make a retained
 procedure or conclusion misleading. Before partial publication, a bounded dependency
-review checks candidates against the complete available original and recorded parsing
-omissions. Dependent or unresolved candidates are also excluded, including transitive
-dependencies. Capacity or protocol failures split the candidates while preserving
-the complete ordered original and omissions in each request. Minimum candidates
+review checks affected candidates against complete selected original sections and
+recorded omissions, using the document-wide fallback described above. Dependent or
+unresolved candidates are also excluded, including transitive dependencies.
+Capacity or protocol failures split candidates while preserving the selected
+ordered original and applicable omissions in each request. Minimum candidates
 that cannot be reviewed remain pending; with no usable candidate, source registration
 and the zero-knowledge summary still complete. Split recovery and valid refusals
 survive Continue.
@@ -331,7 +400,7 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `max_attempts` | 2 | Maximum attempts for other retryable failures at each request size |
 | `max_requests` | `null` | Optional cumulative model-attempt limit; no default cap |
 | `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
-| `concurrency` | 8 | Maximum concurrent model calls within one document |
+| `concurrency` | 2 | Shared model concurrency; effective maximum 4 |
 
 These are starting allowances and explicit ceilings, not measured model capacities or a
 guarantee that every document will finish in one run. Models with smaller context
@@ -369,7 +438,7 @@ omit the two new ceiling fields retain their original request caps; clear their
 override to inherit this profile, or set explicit ceilings for that model.
 
 Within one document, fact extraction runs up to `concurrency` batches at a
-time (default 8). Independent knowledge pages use at most four workers, bounded
+time (default 2, maximum 4). Independent knowledge pages use at most four workers, bounded
 by that same setting and the number of pages. Each page's generation, correction
 and verification stay ordered. All workers share model allowances, cancellation
 and elapsed-time controls. The lease owner captures validated original evidence
@@ -947,12 +1016,12 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 
 
 当有效的定位审查仅指出公共标题错误时，纠正只请求新标题。程序保留原正文、事实覆盖
-和来源片段对应关系，只同步修改与旧公共标题完全匹配的开头标题，然后重新核对完整
-候选。涉及正文或缺失覆盖的审查继续使用完整纠正，不能借标题修正绕过事实检查。
+和来源片段对应关系，只同步修改与旧公共标题完全匹配的开头标题，然后复核标题变化及其影响的条件。正文纠错也携带明确差异，只复核修改与受影响的条件；
+公共前提变化仍需检查依赖操作，不能借局部修正绕过事实检查。
 
 同一主题拆成多个请求时，子请求的校验另带从整主题原文选择的标题依据，只用于共同标题。
 它不替代当前正文的原文证据或片段对应关系，也不能将不同任务变成前置依赖。
-标题依据最多占可用输入预算的 1/12，且不超过 4096 tokens；保留完整上下文片段，
+标题依据软预算为可用输入的 1/4，且不超过 4096 tokens；保留完整上下文片段，
 空间不足时可仅保留原文章节标题。整主题一次完成的请求不增加该字段。
 首部分通过后，程序固定共同标题；后续模型提出改名时仍按固定标题核对其正文。
 正文生成与完整纠正不接收这些其他片段的原文，避免将标题依据误写入当前正文。
@@ -1058,3 +1127,35 @@ characters, not billed tokens. Reasoning text is neither displayed nor stored by
 activity recorder; final provider usage supplies token counts when available.
 Completed planning batches update progress immediately and retain their validated
 checkpoints when a later batch stops. Continue reuses matching completed inputs.
+
+
+## 2026-09-18：长文档资源与遗漏传播
+
+请求 key 的计算不再保存临时输入。真实活跃请求通过引用计数持有输入合同，缓存采用、
+保存、拆分、取消和异常均退出持有范围；同 key 的另一消费者仍可继续保存。任务结束显式
+关闭私有存储。遗留清理只回收现有所有者锁确认已失效的私有目录，不处理旧式无归属目录、
+原件、持久检查点或发布成果。
+
+展开的资料单元、事实、完成候选及页面片段按需从私有工作区读取。主题到事实的 ID 索引
+避免反复加载整篇事实。并发证据快照保留不可变来源身份，正文保存在私有文件中，按范围
+读取并共用 64 MiB 字节缓存。活跃合同共用 256 MiB 上限；工作进程及其子进程的启动内存
+软预算为可用物理内存的 50%，最高 2 GiB。达到 80% 时清缓存并减少调入，等待在途批次结束；
+单批仍放不下则保存恢复状态并报告资源不足。这是调入策略，不是精确的 RSS 硬封顶。
+临时、私有与持久写入检查实际目标卷，保留量为 1 GiB 和预计新增写入两倍中的较大值。
+
+主任务、关联附件及重试沿用同一持久费用账本，未知用量保留预约值。模型并发默认 2，
+有效上限 4；同一知识库仍只有一个活跃工作进程，重解析也串行。附件新 OCR 页次同样累计。
+失败或重启不重置这些上限。直接应用用例仍受其执行上下文约束；真实验收另有整轮费用账本。
+
+原文批次软目标约 4000 tokens，同一操作可更长，仍检查完整序列化请求和后续审核容量。
+长命令、代码围栏、带续行或 AND/OR 的行不按字符截断。不能完整容纳的范围明确记为遗漏。
+表格继续保留完整行、表头及合并关系，批注、图注、原图和附件沿用其不可变位置与来源角色。
+
+共享精确原文范围的小候选可合并一次审核，最多 3 个且各自返回结论。已有遗漏进入初次
+审核合同；一次有依据的纠错后只复核差异与相关条件。有效否定及关键不确定结果可恢复，
+没有新证据时不重新抽样。发布前按完整遗漏范围与候选范围判断依赖；标题或关键词只帮助
+定位，不能据此免审。新排除的候选继续作为遗漏传播，直到稳定。无法定位的条件扩大原文
+范围，必要原文本身超限则提前记录遗漏，避免生成之后反复拆小候选。
+
+零知识入口仍表示原件已登记、内容有遗漏，不能作为部署手册已获得可用知识的证据。
+此次真实材料、Windows 具体版本、资源与预算结果另行记录，离线测试不代替实际发布验收。

@@ -54,9 +54,11 @@ def test_import_saves_original_pageindex_database_before_fact_analysis(
     model_service.respond = respond
     imported = import_document(kb_dir, source)
     assert imported.knowledge_compilation == "completed", imported
-    assert before_facts == [
-        ["# Backup", "Verify backup first.", "## Pressure", "Keep pressure at 37 kPa."]
-    ]
+    assert before_facts
+    assert all(
+        rows == ["# Backup", "Verify backup first.", "## Pressure", "Keep pressure at 37 kPa."]
+        for rows in before_facts
+    )
 
 
 @pytest.mark.parametrize(

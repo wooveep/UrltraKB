@@ -168,8 +168,8 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
 
     heading = []
     levels = []
-    bridge = min(128, max(1, limits.context_tokens // 32))
     from openkb.agent.figure_context import figure_pairs
+    from openkb.agent.semantic_spans import boundaries
     from openkb.agent.table_objects import source_table_objects
 
     table_objects = source_table_objects(parsed, source)
@@ -226,48 +226,39 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
         )
         previous = parsed.blocks[index - 1] if index else None
         following = parsed.blocks[index + 1] if index + 1 < len(parsed.blocks) else None
-        before_block = (
-            neighbor(previous, max(0, previous.chars - bridge), previous.chars, "previous_block")
-            if previous
-            else None
-        )
+        before_block = neighbor(previous, 0, previous.chars, "previous_block") if previous else None
         after_block = (
-            neighbor(following, 0, min(bridge, following.chars), "following_block")
-            if following
-            else None
+            neighbor(following, 0, following.chars, "following_block") if following else None
         )
         figure_neighbors = [
             neighbor(item, 0, item.chars, "figure_with_caption")
             for item in figures.get(block.id, [])
         ]
         figure_ids = {item.id for item in figures.get(block.id, [])}
-        start = 0
+        start = previous_start = 0
         block_units = []
         while start < block.chars:
             # This is a read bound, not a truncation: subsequent spans continue
             # until the complete block has been accounted for.
-            available = (
-                block.chars if object_info else min(block.chars - start, limits.context_tokens * 4)
-            )
+            available = block.chars - start
             reference = Evidence(
                 source.source_id,
                 source.id,
                 parsed.id,
                 block.id,
                 start,
-                min(block.chars, start + available + bridge),
+                block.chars,
             )
-            view = reader.read(
-                reference, max_chars=max(available + bridge, complete_read_bound(block))
-            )
+            view = reader.read(reference, max_chars=complete_read_bound(block))
             before = (
-                neighbor(block, max(0, start - bridge), start, "previous_span")
-                if start
-                else before_block
+                neighbor(block, previous_start, start, "previous_span") if start else before_block
             )
 
             def unit(size):
                 end = start + size
+                next_end = min(
+                    (p for p in boundaries(view.text) if p > size), default=len(view.text)
+                )
                 after = (
                     after_block
                     if end == block.chars
@@ -279,13 +270,13 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                                 parsed.id,
                                 block.id,
                                 end,
-                                min(block.chars, end + bridge),
+                                start + next_end,
                             )
                         ),
-                        "text": view.text[size : size + bridge],
+                        "text": view.text[size:next_end],
                         "location": block.location,
                         "relation": "following_span",
-                        **window_fields(end, min(block.chars, end + bridge), block.chars),
+                        **window_fields(end, start + next_end, block.chars),
                     }
                 )
                 value = {
@@ -329,13 +320,18 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                 # object is packed for generation with its complete row relations.
                 block_units.append(unit(available))
                 break
-            low, high = 0, available
-            while low < high:
-                size = (low + high + 1) // 2
-                if facts_fit([unit(size)], limits, model):
-                    low = size
-                else:
-                    high = size - 1
+            points = boundaries(view.text)
+            if facts_fit([unit(available)], limits, model):
+                low = available
+            else:
+                left, right = 0, len(points)
+                while left < right:
+                    middle = (left + right + 1) // 2
+                    if facts_fit([unit(points[middle - 1])], limits, model):
+                        left = middle
+                    else:
+                        right = middle - 1
+                low = points[left - 1] if left else 0
             if not low:
                 from openkb.compilation_report import report_content_omission
 
@@ -344,13 +340,8 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
                 )
                 block_units.clear()
                 break
-            # Prefer complete lines/steps where possible. A long line remains
-            # linked by its block identity and exact contiguous character span.
-            if low < len(view.text):
-                boundary = view.text.rfind("\n", 0, low)
-                if boundary > low // 2:
-                    low = boundary + 1
             block_units.append(unit(low))
+            previous_start = start
             start += low
         yield from block_units
 
@@ -362,11 +353,20 @@ def fact_batches(units, limits, model):
 
 
 def _ordinary_fact_batches(units, limits, model):
+    import litellm
+
     batch = []
+    tokens = 0
     for unit in units:
-        if batch and not facts_fit(batch + [unit], limits, model):
+        size = litellm.token_counter(model=model, text=unit["text"])
+        changed_scope = batch and unit.get("headings") != batch[-1].get("headings")
+        if batch and (
+            changed_scope or tokens + size > 4000 or not facts_fit(batch + [unit], limits, model)
+        ):
             yield batch
             batch = []
+            tokens = 0
         batch.append(unit)
+        tokens += size
     if batch:
         yield batch

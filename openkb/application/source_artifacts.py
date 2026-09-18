@@ -86,7 +86,18 @@ def compilation_artifacts(kb_dir, source_id, version_id, parse_id, stage, *, off
 def _preview(value, stage):
     if stage == "generation":
         receipt = value.get("_verification") or {}
-        verdict = "已通过原文校验" if receipt.get("verdict") == "supported" else "尚未通过校验"
+        notes = value.get("review_notes", receipt.get("advisories", []))
+        kinds = {note.get("kind") for note in notes if isinstance(note, dict)}
+        if receipt.get("verdict") == "advisory" or "uncertainty" in kinds:
+            verdict = "已完成事实核对，存在待复核内容"
+        elif "coverage" in kinds:
+            verdict = "已完成事实核对，有次要遗漏"
+        elif receipt.get("verdict") == "supported" or "review_notes" in value:
+            verdict = "已通过原文校验"
+        else:
+            verdict = "尚未通过校验"
+        if value.get("source_details"):
+            verdict += "；次要细节保留在原文"
         return verdict + "\n\n" + str(value.get("title", "")) + "\n\n" + str(value["content"])
     parts = []
     if stage == "facts":

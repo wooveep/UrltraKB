@@ -42,6 +42,10 @@ def enqueue_task(
         snapshot=snapshot,
         input_binding=input_binding,
     )
+    from openkb.runtime.family_budget import bind_family, source_family
+
+    related = parent_task_id or retry_of or source_family(manager.receipt_dir, root, units)
+    bind_family(manager.receipt_dir, task_id, related)
     manager._persist(task)
     manager._tasks[task_id] = task
     manager._pending.append(task_id)

@@ -52,12 +52,25 @@ followed by current validation. These
 boundaries cost metadata and conservative cache misses, but keep position movement,
 source deletion, process interruption and rule changes from silently changing evidence.
 
-Dependency review keeps the complete ordered original and candidates. Generated ownership
-annotations become ordered structured segments, and repeated full references use a
-reversible dictionary. Capacity checks may expand only within configured limits; input
-growth alone does not increase an already sufficient output reservation. A dependency
-receipt binds the actual verification options and message rules. Representation savings
-do not authorize an independent verdict or remove unresolved original content.
+Dependency review keeps complete operation and omission scopes, with ancestor conditions
+and explicit reference targets. Structure locates evidence; a missing heading or keyword
+match never proves independence. Every candidate receives a semantic decision against the
+known omitted scopes. Unlocated conditions expand to the whole original; if that required
+input alone cannot fit, capacity preflight records a content omission before generation.
+Generated ownership annotations become ordered structured segments, and repeated full
+references use a reversible dictionary. Batches contain at most three candidates, each
+with an independent decision. Newly withdrawn candidates propagate as new omissions until
+the remaining decisions are stable. Receipts bind the actual original scopes, candidate
+bytes, omissions, verification options and message rules; an unknown result stays unknown.
+
+Private compilation bodies and detached source ranges are disposable, bounded working
+storage, not another source index. Completed facts and candidates retain their existing
+durable checkpoints, and only the Wiki mutation transaction grants publication permission.
+Request identity computation does not allocate a temporary contract. Active contracts use
+reference-counted ownership; explicit close releases their private store. Crash collection
+uses the existing process/owner lease and never deletes a live owner or persistent result.
+The bounded task scheduler serializes work in one KB, including reparses and attachments;
+its task family shares cumulative request, token and model-time reservations across retries.
 
 Removing a source withdraws its explicitly delimited contribution inside the same Wiki
 mutation transaction. Both the current publication baseline and the source’s own completed
@@ -69,4 +82,4 @@ remain intact. Modified, crossed or nested ownership ranges cannot authorize rem
 current and historical citations plus surviving analysis bindings; the producer identity
 alone does not keep an otherwise unreferenced original alive.
 
-依赖检查仅将通过完整候选身份及覆盖协议的返回保存为可复用语义结论。无效返回按响应身份保存原文与诊断，继续可重新请求；超出最大输入上下文保持执行未完成。有效否定和未知结论保留理由，不能通过继续反复抽样。旧开发索引提示包含制品 ID 的空事实收据没有迁移桥，升级后保守重做一次；零请求预算恢复适用于当前提示协议。
+依赖检查仅将通过完整候选身份及覆盖协议的返回保存为可复用语义结论。无效返回按响应身份保存原文与诊断，继续可有界重试。普通内容无法容纳时按已接受的内容遗漏政策排除；请求、tokens、时间硬额度、身份或保存故障仍使任务未完成。有效否定和未知结论保留理由，不能通过继续反复抽样。已明确列出的历史事实合同只有在原文、完整上下文、模型选项、输出校验均仍匹配时才能恢复，不进行宽泛的旧缓存迁移。

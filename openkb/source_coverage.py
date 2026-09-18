@@ -32,7 +32,7 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
         if (
             not isinstance(row, dict)
             or set(row) != {"block_id", "start", "end", "kind", "location", "status", "reason"}
-            or row["status"] not in {"verified", "no_facts", "pending"}
+            or row["status"] not in {"verified", "referenced", "no_facts", "pending"}
             or not isinstance(row["kind"], str)
             or not isinstance(row["location"], dict)
             or not isinstance(row["reason"], str)
@@ -105,6 +105,11 @@ def source_coverage(source, parsed, report, *, published=False):
     if parsed is None:
         return {}
     units = {}
+    from openkb.agent.evidence_review import unverified_facts
+    from openkb.agent.evidence_selection import referenced_facts
+
+    review_pending = unverified_facts(report)
+    referenced = referenced_facts(report) - review_pending
     for unit in report.source_units.values():
         units.setdefault(unit["reference"]["block_id"], []).append(unit)
     ranges = []
@@ -133,13 +138,25 @@ def source_coverage(source, parsed, report, *, published=False):
             if ref["start"] > cursor:
                 append(cursor, ref["start"], "pending", "analysis_pending")
             facts = set(unit["facts"])
-            complete = facts <= report.published_facts
-            status = "verified" if facts and complete else "no_facts" if not facts else "pending"
+            complete = facts <= report.published_facts | referenced
+            status = (
+                "referenced"
+                if facts and complete and facts & referenced
+                else "verified"
+                if facts and complete
+                else "no_facts"
+                if not facts
+                else "pending"
+            )
             reason = (
                 "verified_contribution"
                 if status == "verified"
+                else "secondary_details_in_source"
+                if status == "referenced"
                 else unit["empty_reason"]
                 if status == "no_facts"
+                else "knowledge_review_pending"
+                if facts & review_pending
                 else "knowledge_content_omitted"
             )
             append(ref["start"], ref["end"], status, reason)
@@ -166,6 +183,17 @@ def source_coverage(source, parsed, report, *, published=False):
                 entry["transcription"] = "available"
     issues = parsing_gaps(parsed)
     issues.extend(dict(row) for row in report.omissions)
+    issues.extend(
+        {
+            "stage": "verification",
+            "reason": "knowledge_review_" + note["kind"],
+            "topic": path,
+            "items": note["facts"],
+        }
+        for path, notes in report.review_notes.items()
+        for note in notes
+        if note["kind"] in {"coverage", "uncertainty"}
+    )
     pending = bool(issues) or any(row["status"] == "pending" for row in ranges) or bool(assets)
     value = {
         "source_id": source.source_id,
@@ -184,7 +212,7 @@ def coverage_window(coverage, reference):
     start, end = reference.get("start", 0), reference.get("end")
     if type(start) is not int or type(end) is not int or end <= start:
         return {"status": "unknown"}
-    counts = {"verified": 0, "no_facts": 0, "pending": 0}
+    counts = {"verified": 0, "referenced": 0, "no_facts": 0, "pending": 0}
     for row in coverage.get("ranges", []):
         if row["block_id"] == reference["block_id"]:
             counts[row["status"]] += max(0, min(end, row["end"]) - max(start, row["start"]))
@@ -210,6 +238,6 @@ def parsing_gaps(parsed):
 def coverage_text(coverage):
     return {
         "complete": "原文分析覆盖完整",
-        "partial": "知识部分可用，仍有内容缺失或图片待理解",
+        "partial": "知识部分可用，仍有内容缺失、待复核或图片待理解",
         "pending": "分析尚未完成，可继续处理",
     }.get((coverage or {}).get("status"), "分析覆盖未知")

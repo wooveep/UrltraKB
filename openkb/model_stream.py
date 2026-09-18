@@ -96,7 +96,11 @@ def collect(function, options, activity):
         if choices and field(choices[0], "message") is not None:
             response = stream
             return response
+        from openkb.resource_budget import check_memory
+
         parts = []
+        characters = 0
+        next_check = 65536
         finish = None
         usage = None
         model = fingerprint = None
@@ -122,6 +126,10 @@ def collect(function, options, activity):
                 activity.observe(delta)
                 text = field(delta, "content")
                 if isinstance(text, str):
+                    characters += len(text)
+                    if characters >= next_check:
+                        check_memory(characters * 8, stage="response_decode")
+                        next_check = characters + 65536
                     parts.append(text)
                 finish = field(choice, "finish_reason") or finish
         if wire is not None:
@@ -134,6 +142,7 @@ def collect(function, options, activity):
             from litellm.types.utils import Usage
 
             usage = Usage(**usage)
+        check_memory(characters * 8, stage="response_decode")
         response = SimpleNamespace(
             choices=[
                 SimpleNamespace(

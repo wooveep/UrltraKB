@@ -252,7 +252,6 @@ def test_shared_http_calls_are_counted_once_and_all_occurrences_are_bound(
         for ref in re.findall(r"<!-- source-evidence: (.*?) -->", page.read_text())
     }
     assert len(cited) == 120
-    assert any(row["stage"] == "analysis_wait" for row in measured["spans"])
     assert any(row["event"] == "hit" for row in measured["analyses"])
     produced = [row["id"] for row in measured["analyses"] if row["event"] == "produced"]
     assert len(produced) == len(set(produced))

@@ -172,9 +172,18 @@ def literal_table_row(unit):
 
 def object_batches(units, ordinary_batches):
     """Table retention is local work; it must not use a model's output-size limit."""
-    for key, batch in object_runs(units):
+    from itertools import islice
+
+    from openkb.agent.compilation_storage import UnitInventory
+
+    runs = units.runs() if isinstance(units, UnitInventory) else object_runs(units)
+    for key, batch in runs:
         if key is not None:
-            yield batch
+            # Literal cell retention makes no semantic decision. Preserve each
+            # cell's complete identity here; generation still groups whole rows.
+            cells = iter(batch)
+            while part := list(islice(cells, 128)):
+                yield part
         else:
             yield from ordinary_batches(batch)
 

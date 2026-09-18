@@ -217,7 +217,13 @@ def test_unusable_review_cannot_publish_or_be_reused(
         json.loads(call["messages"][-1]["content"])["stage"]
         for call in model_service[events_before:]
     ]
-    assert "facts" not in stages and "verification" in stages
+    assert "facts" not in stages
+    if review.get("verdict") == "uncertain":
+        assert stages == []
+        assert any(row["reason"] == reason for row in continued.omissions)
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    else:
+        assert "verification" in stages
 
 
 def test_review_uses_existing_request_budget_and_verified_work_is_reusable(
@@ -663,7 +669,9 @@ def test_compilation_keeps_reader_annotations_separate_from_original_text(
     assert result.status == "added" and result.knowledge_compilation == "completed", result
     assert result.omissions
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
+    # Native tables now retain literal cells locally; no model fact-extraction
+    # request is needed. Generation and review must still carry provenance.
+    assert {p["stage"] for p in observed} == {"generation", "verification"}
     for payload in observed:
         provenance = payload["evidence_provenance"]
         assert provenance["text"] == "parsed_source_text"

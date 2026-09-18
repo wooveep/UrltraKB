@@ -26,6 +26,7 @@ def test_single_document_uses_bounded_parallel_batches_and_keeps_all_checkpoints
     source.write_text(
         "\n\n".join(f"Condition {i}: pressure must remain below 37 kPa." for i in range(160))
     )
+    concurrency = min(concurrency, 4)
     guard = threading.Lock()
     overlap = threading.Event()
     active = peak = 0
@@ -80,6 +81,7 @@ def test_stop_cancels_all_inflight_batches_without_publishing(
     source = tmp_path / "cancel-parallel.md"
     source.write_text("\n\n".join(f"Condition {i}: mandatory requirement." for i in range(160)))
     all_started, release, stopped = threading.Event(), threading.Event(), threading.Event()
+    concurrency = min(concurrency, 4)
     guard = threading.Lock()
     calls = []
 
@@ -91,19 +93,21 @@ def test_stop_cancels_all_inflight_batches_without_publishing(
         release.wait(10)
         return response({})
 
+    stopped_at = []
+
     def cancel():
         all_started.wait(3)
+        stopped_at.append(time.monotonic())
         stopped.set()
 
     monkeypatch.setattr(litellm, "completion", completion)
     canceller = threading.Thread(target=cancel)
     canceller.start()
-    started = time.monotonic()
     try:
         with cancellation_scope(stopped.is_set):
             result = import_document(kb_dir, source)
         assert result.knowledge_compilation == "stopped", result
-        assert time.monotonic() - started < 2
+        assert time.monotonic() - stopped_at[0] < 2
         assert len(calls) == result.usage["observable_attempts"] == concurrency
         assert result.usage["unknown_usage"] == concurrency
         assert not list((kb_dir / "wiki/concepts").glob("*.md"))

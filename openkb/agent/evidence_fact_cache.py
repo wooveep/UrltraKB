@@ -39,9 +39,9 @@ class FactCache:
         self.shared = SharedAnalysis(checkpoints, "facts", system)
         self.shared_hits = set()
         self.checkpoints, self.system, self.validate = checkpoints, system, validate
-        self.units = {unit["id"]: unit for unit in units}
-        self.order = {unit["id"]: index for index, unit in enumerate(units)}
-        self.rows = {}
+        self.units = units.by_id
+        self.order = units.order
+        self.rows = checkpoints.private_rows("fact_results")
         self.contexts = {}
         self._restore()
 
@@ -59,7 +59,7 @@ class FactCache:
         return {"unit": fact_input(unit), "batch": self.contexts[unit["id"]]}
 
     def _key(self, units):
-        return self.checkpoints.key(self.system, {"stage": "facts", "units": units})
+        return self.checkpoints.identity(self.system, {"stage": "facts", "units": units})
 
     def _restore(self):
         cp = self.checkpoints
@@ -146,7 +146,8 @@ class FactCache:
     def save(self, units, rows, *, receipt=None):
         for unit, row in zip(units, rows, strict=True):
             self.validate(unit, row)
-        self.checkpoints.save(self._key(units), {"units": rows}, receipt=receipt)
+        with self.checkpoints.request(self.system, {"stage": "facts", "units": units}) as key:
+            self.checkpoints.save(key, {"units": rows}, receipt=receipt)
         self.rows.update({row["id"]: row for row in rows})
         actual = getattr(receipt, "output_tokens", None)
         if type(actual) is not int or actual <= 0:

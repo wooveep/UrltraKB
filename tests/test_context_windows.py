@@ -20,7 +20,7 @@ def _objects(value):
 
 
 @pytest.mark.parametrize("navigation", [False, True])
-def test_import_marks_partial_context_at_every_model_stage(
+def test_import_keeps_complete_neighbor_conditions_at_every_model_stage(
     kb_dir, tmp_path, model_service, navigation
 ):
     # A bounded neighbor ends one character before the literal ends. Without
@@ -44,9 +44,8 @@ def test_import_marks_partial_context_at_every_model_stage(
         if stage not in {"facts", "generation", "verification"}:
             continue
         for item in _objects(payload):
-            if item.get("text") == original[:128]:
-                assert item.get("source_window") == {"start": 0, "end": 128, "total": len(original)}
-                assert "source_window" in request["messages"][0]["content"]
+            assert item.get("text") != original[:128]
+            if item.get("text") == original:
                 seen.add(stage)
     assert seen == {"facts", "generation", "verification"}
     assert source.read_bytes() == original_bytes

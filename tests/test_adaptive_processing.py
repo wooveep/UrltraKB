@@ -218,7 +218,7 @@ def test_single_long_span_splits_without_gaps_and_progress_counts_only_finished_
         context_tokens=8192, output_tokens=1024, max_context_tokens=32768, max_output_tokens=3072
     )["processing"]
     config_path.write_text(yaml.safe_dump(config))
-    text = "甲条件 37 kPa；乙条件不能重试。" * 5
+    text = "\n".join(["甲条件 37 kPa；乙条件不能重试。"] * 5)
     source = tmp_path / "span.md"
     source.write_text(text, encoding="utf-8")
     completed, events = [], []
@@ -276,9 +276,9 @@ def test_split_span_keeps_assets_headings_and_exact_neighbor_locations():
 
     unit = {
         "id": "old",
-        "text": "甲乙丙丁戊己",
-        "reference": {"block_id": "block", "start": 15, "end": 21},
-        "span": {"block": "block", "start": 15, "end": 21, "total": 80},
+        "text": "甲乙丙\n丁戊己",
+        "reference": {"block_id": "block", "start": 15, "end": 22},
+        "span": {"block": "block", "start": 15, "end": 22, "total": 80},
         "assets": ["image-digest"],
         "location": {"page": 3},
         "headings": ["安装"],

@@ -35,7 +35,7 @@ def test_bounded_stronger_review_is_explicit_measured_and_reusable(kb_dir, tmp_p
         for row in model_service
         if json.loads(row["messages"][-1]["content"])["stage"] == "verification"
     ]
-    assert [row["reasoning_effort"] for row in reviews] == ["low", "low", "high"]
+    assert [row["reasoning_effort"] for row in reviews] == ["low", "high"]
     measured = first.usage["measurement"]["requests"]
     assert any(row["effective_options"].get("reasoning_effort") == "high" for row in measured)
     before = len(model_service)

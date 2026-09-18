@@ -77,3 +77,33 @@ def test_snapshot_checks_original_blob_integrity_before_concurrent_work(kb_dir, 
     reader.sources.asset(reader.parsed.blocks[0].blob).write_text("corruption")
     with pytest.raises(ValueError, match="digest"):
         EvidenceSnapshot(reader)
+
+
+def test_snapshot_keeps_large_completed_source_text_out_of_retained_memory(kb_dir, tmp_path):
+    import gc
+    import tracemalloc
+
+    original = tmp_path / "long.txt"
+    original.write_text("immutable source")
+    version = save_source(kb_dir, original)
+    store = ParseStore(kb_dir)
+    parsed = store.save(
+        version,
+        {"parser": "bounded-snapshot-test"},
+        [
+            BlockDraft(f"Block {i}: " + "x" * 1024**2, "paragraph", {"kind": "text", "line": i + 1})
+            for i in range(16)
+        ],
+    )
+    reader = store.reader(version, parsed)
+    gc.collect()
+    tracemalloc.start()
+    try:
+        with EvidenceSnapshot(reader) as snapshot:
+            gc.collect()
+            retained, _ = tracemalloc.get_traced_memory()
+            assert retained < 4 * 1024**2
+            ref = Evidence(version.source_id, version.id, parsed.id, parsed.blocks[-1].id)
+            assert snapshot.read(ref, max_chars=10).text == "Block 15: "
+    finally:
+        tracemalloc.stop()

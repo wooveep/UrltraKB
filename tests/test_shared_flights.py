@@ -66,4 +66,4 @@ def test_repeated_batches_share_one_executor_and_recover_its_failure(
     }
     assert len(cited) == 120
     assert len(calls) < 10  # Shared middle batches do not each dispatch a duplicate.
-    assert any(span["stage"] == "analysis_wait" for span in result.usage["measurement"]["spans"])
+    assert any(row["event"] == "hit" for row in result.usage["measurement"]["analyses"])

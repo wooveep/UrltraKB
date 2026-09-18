@@ -9,12 +9,28 @@ from openkb.sources import content_id, read_object, valid_id
 PREVIOUS_CACHE = "44430bf332be4dddc1dc276ce8009ca9d43b79de39c8288a8986995725e0fed5"
 
 
+# Exact deployed revisions before resource storage and semantic batching changed.
+# Adoption still requires identical full units, quotes, settings and source identity.
+PRE_RESOURCE_MODULES = {
+    "evidence_facts": "888499f5063dbcd1d91911bfb86c98a934f785c445791138af48e90b39b15e8b",
+    "evidence_fact_cache": "92eb0bfe0b55ead0c01e7377539fe1e96a78a6f4aa082cc332797c15452f80de",
+    "fact_resume": "94c797fdf41d928bb43b84bd8a8e773addd2965a59d5abc37616de811f8a8d60",
+    "evidence_units": "2bd1116516920c7f1a5b554be751cd9b1d80209d01b8ce13a02047b46e57fa57",
+    "table_objects": "709e6bdec337bfd762b4c6df0d4606c9b077d57750f2e4df4ec0f24b1f0e2a3b",
+    "evidence_retry": "027452431f4c20f9b3e7cb98012e73ae85b7842d3a6727f1307e8a6dbf85117f",
+}
+
+
 def _compatible(cache, key, contract):
     from openkb.agent.table_recovery import PRE_TABLE_MODULES
 
     cp = cache.checkpoints
     expected = cp._key_record(cache.system, contract["payload"])
     expected["input"] = {**cp.input, "parse": contract["input"]["parse"]}
+    if expected == contract:
+        return "current"
+    expected["stage_implementation"].update(PRE_RESOURCE_MODULES)
+    expected["message_format"] = PRE_RESOURCE_MODULES["evidence_units"]
     if expected == contract:
         return "current"
     expected["stage_implementation"].pop("fact_resume")
@@ -145,13 +161,28 @@ def _records(cache, keys):
             mode = _compatible(cache, key, contract)
             if mode is None:
                 continue
-            records.append((record, mode))
+            records.append((key, mode, before["parse"], record["value_digest"]))
         except (ValueError, KeyError, TypeError, FileNotFoundError):
             continue
     # Prefer the original valid progress with the current extraction rules.
     # A superseded pre-table extractor must not replace a newer result merely
     # because its content hash sorts first in the checkpoint index.
-    return sorted(
-        records,
-        key=lambda item: (item[1] == "pre_table", item[0]["input"]["parse"] == cp.input["parse"]),
-    )
+    for key, mode, previous, digest in sorted(
+        records, key=lambda item: (item[1] == "pre_table", item[2] == cp.input["parse"])
+    ):
+        processing_checkpoint("facts")
+        try:
+            record = read_object(cp.store.owned_path(cp.root / f"{key}.json"))
+            contract = record.get("contract", {})
+            if (
+                record.get("key") != key
+                or content_id(contract) != key
+                or contract.get("input") != record.get("input")
+                or record["input"].get("parse") != previous
+                or record.get("value_digest") != digest
+                or content_id(record.get("value")) != digest
+            ):
+                continue
+            yield record, mode
+        except (ValueError, KeyError, TypeError, FileNotFoundError):
+            continue

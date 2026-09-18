@@ -446,6 +446,7 @@ def run_unit(
     from openkb.mutation import RecoveryRequired
     from openkb.processing import ProcessingIncomplete
     from openkb.runtime.diagnostics import WorkerDiagnostics
+    from openkb.runtime.family_budget import family_scope
     from openkb.runtime.input_store import child_preparation, reap_orphaned_inputs
     from openkb.runtime.model_cancellation import DocumentCancellation
 
@@ -500,6 +501,7 @@ def run_unit(
                 ) as diagnostics,
                 child_preparation(prepared_dir),
                 preparation_directory(prepared_dir),
+                family_scope(receipt_dir, identity.task_id),
                 expected_generation(Path(identity.kb_dir), identity.generation),
             ):
                 if snapshot is not None:

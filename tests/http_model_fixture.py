@@ -10,6 +10,13 @@ import yaml
 
 
 def evidence_response(payload):
+    if isinstance(payload, dict) and payload.get("stage") == "verification_batch":
+        return {
+            "reviews": [
+                {"id": row["id"], "review": {"verdict": "supported", "reason": "Fixture evidence"}}
+                for row in payload["candidates"]
+            ]
+        }
     if isinstance(payload, dict) and payload.get("stage") == "facts":
         return {
             "units": [

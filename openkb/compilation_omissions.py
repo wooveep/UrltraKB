@@ -32,7 +32,7 @@ def omission_notice(rows):
     # Identities and fixed reason codes only; rejected claims are never published.
     return (
         "\n\n## 内容遗漏\n\n"
-        "> 部分内容未通过处理或核验，已排除。本次发布仅包含通过核验的内容；"
+        "> 部分内容未通过处理或核验，已排除。已保留内容的待复核问题另行提示；"
         "遗漏不代表原文没有相关信息。原件保留，可通过继续处理重新检查。\n\n"
         + "\n".join(
             "- " + json.dumps(row, ensure_ascii=False).replace("<", "&lt;").replace("]", "&#93;")

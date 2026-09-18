@@ -15,8 +15,13 @@ def parallel_batches(batches, operation, concurrency, *, stage="facts"):
     the shared execution budget, so abandoned requests cannot publish knowledge.
     The caller coordinates progress and restores source order before later stages.
     """
+    from openkb.resource_budget import current_resources
+
+    resources = current_resources()
     if concurrency == 1:
         for index, batch in enumerate(batches):
+            if resources:
+                resources.admit(stage=stage)
             yield index, operation(batch)
         return
     stopped = Event()
@@ -32,6 +37,8 @@ def parallel_batches(batches, operation, concurrency, *, stage="facts"):
 
         def submit():
             processing_checkpoint(stage)
+            if resources and not resources.admit(stage=stage, active=bool(pending)):
+                return
             try:
                 index, batch = next(iterator)
             except StopIteration:

@@ -24,6 +24,8 @@ from openkb.agent.evidence_retry import (
     split_generation,
     split_generation_response,
 )
+from openkb.agent.evidence_review import ACCEPTED, record_review
+from openkb.agent.evidence_selection import detail_occurrences, record_details
 from openkb.agent.evidence_units import JSON_FORMAT, output_fits
 from openkb.evidence import Evidence
 from openkb.evidence_context import enclosing_code
@@ -140,6 +142,14 @@ def _evidence_windows(fact, reader, base, limits, model):
                 **context_fields(view),
             }
         )
+    if context := base.get("_operation_context"):
+        complete = [
+            {key: value for key, value in item.items() if key != "kind"}
+            for item in context.read(fact["scope"])
+        ]
+        blocks = {item["reference"]["block_id"] for item in complete}
+        neighbors = [item for item in neighbors if item["reference"]["block_id"] not in blocks]
+        neighbors.extend(complete)
     existing_refs = {content_id(item["reference"]) for item in neighbors}
     neighbors.extend(
         item
@@ -178,10 +188,11 @@ def _evidence_windows(fact, reader, base, limits, model):
                 high = size - 1
         if not low:
             raise ProcessingIncomplete("topic_evidence_exceeds_request_budget", "generation")
-        if low < len(view.text):
-            boundary = view.text.rfind("\n", 0, low)
-            if boundary > low // 2:
-                low = boundary + 1
+        from openkb.agent.semantic_spans import split_before
+
+        low = split_before(view.text, low)
+        if not low:
+            raise ProcessingIncomplete("topic_evidence_exceeds_request_budget", "generation")
         yield window(low)
         start += low
 
@@ -226,7 +237,7 @@ def _generation_fits(base, facts, evidence, limits, model):
         "reason": (
             "Correct unsupported claims in the title and body using the original evidence. "
             "Keep exact actors, operations, versions, numerical limits, commands, negations, "
-            "prerequisites and exceptions. Preserve every supplied fact. A heading cannot "
+            "prerequisites and exceptions. Preserve essential meaning. A heading cannot "
             "transfer a restriction to another operation. Describe ambiguity explicitly, "
             "without inventing explanations, requirements, permissions or missing steps."
         ),
@@ -250,6 +261,7 @@ def _generation_fits(base, facts, evidence, limits, model):
                 evidence,
                 bindings=bindings,
                 title_context=title_context,
+                omission_context=base.get("known_omissions"),
             ),
         )
         and fits(limits, model, PAGE_SYSTEM, {**payload, "revision": revision})
@@ -264,6 +276,7 @@ def _generation_fits(base, facts, evidence, limits, model):
                 evidence,
                 bindings=bindings,
                 title_context=title_context,
+                omission_context=base.get("known_omissions"),
                 review_context={
                     "present_paths": [s["headings"] for s in payload.get("source_scopes", [])],
                     "previous_reason": revision["reason"],
@@ -354,6 +367,8 @@ def generate_topic(
     on_event=lambda event: None,
     known_targets=frozenset(),
     assets=None,
+    omission_context=None,
+    operation_context=None,
 ):
     from openkb.agent.compiler import _llm_call
     from openkb.agent.evidence_verifier import verify_content
@@ -372,10 +387,12 @@ def generate_topic(
         "existing": _existing_window(retained, group["title"], model, limits),
         "schema": get_agents_md(wiki),
         "known_targets": _target_window(known_targets, group["title"], model, limits),
+        **({"known_omissions": omission_context} if omission_context else {}),
     }
     from openkb.agent.table_objects import generation_batches, table_catalog, table_limits
 
     base["_table_catalog"] = table_catalog(facts, reader)
+    base["_operation_context"] = operation_context
     if len(facts) > 1:
         from openkb.agent.evidence_title_context import topic_title_context
 
@@ -384,233 +401,264 @@ def generate_topic(
             facts, reader, title=group["title"], limits=limits, model=model
         )
     batch, evidence = [], []
-    contributions = []
+    contributions = checkpoints.private_rows("fragments:" + group["path"])
 
     def generate_once(pairs):
         batch, evidence = map(list, zip(*pairs))
         processing_checkpoint("generation")
         payload = generation_payload(base, _model_facts(batch), list(evidence))
-        key = checkpoints.key(PAGE_SYSTEM, payload, dependencies=content_id(existing))
-        output = checkpoints.load(key)
-        cached = output is not None
-        revision = None
-        correction = 0
-        if not cached:
-            draft = checkpoints.load_recovery(key, "draft")
-            if draft is not None:
-                if (
-                    not isinstance(draft, dict)
-                    or type(draft.get("correction")) is not int
-                    or draft.get("correction") not in (0, 1)
-                    or not {"output", "revision", "correction"} <= draft.keys()
-                ):
-                    raise ValueError("Invalid generation draft")
-                output, revision, correction = (
-                    draft["output"],
-                    draft["revision"],
-                    draft["correction"],
-                )
-                if correction and revision:
-                    current_request = content_id(
+        dependencies = content_id({"existing": existing, "known_omissions": omission_context})
+        with checkpoints.request(PAGE_SYSTEM, payload, dependencies=dependencies) as key:
+            output = checkpoints.load(key)
+            cached = output is not None
+            revision = None
+            correction = 0
+            if not cached:
+                draft = checkpoints.load_recovery(key, "draft")
+                if draft is not None:
+                    if (
+                        not isinstance(draft, dict)
+                        or type(draft.get("correction")) is not int
+                        or draft.get("correction") not in (0, 1)
+                        or not {"output", "revision", "correction"} <= draft.keys()
+                    ):
+                        raise ValueError("Invalid generation draft")
+                    output, revision, correction = (
+                        draft["output"],
+                        draft["revision"],
+                        draft["correction"],
+                    )
+                    if correction and revision:
+                        current_request = content_id(
+                            {
+                                "messages": messages(
+                                    PAGE_SYSTEM, {**payload, "revision": revision}
+                                ),
+                                "options": generation_options(settings, correction=True),
+                            }
+                        )
+                        if draft.get("request_digest") != current_request:
+                            # A changed correction contract must not re-use a failed
+                            # response produced by the old request. Its valid review
+                            # remains recorded against that unchanged old candidate.
+                            output = None
+                    on_event(
                         {
-                            "messages": messages(PAGE_SYSTEM, {**payload, "revision": revision}),
-                            "options": generation_options(settings, correction=True),
+                            "stage": "generation",
+                            "operation": "resume_draft",
+                            "topic": group["title"],
                         }
                     )
-                    if draft.get("request_digest") != current_request:
-                        # A changed correction contract must not re-use a failed
-                        # response produced by the old request. Its valid review
-                        # remains recorded against that unchanged old candidate.
-                        output = None
-                on_event(
-                    {"stage": "generation", "operation": "resume_draft", "topic": group["title"]}
-                )
-        on_event({"stage": "generation", "topic": group["title"], "cached": cached})
-        # One evidence-based correction is allowed; each request and review is
-        # charged to the same document and generation-stage budgets.
-        for attempt in range(correction, 2):
-            request = {**payload, "revision": revision} if revision else payload
-            from openkb.agent.request_analysis import RequestAnalysis
+            on_event({"stage": "generation", "topic": group["title"], "cached": cached})
+            # One evidence-based correction is allowed; each request and review is
+            # charged to the same document and generation-stage budgets.
+            for attempt in range(correction, 2):
+                request = {**payload, "revision": revision} if revision else payload
+                from openkb.agent.request_analysis import RequestAnalysis
 
-            request_messages = messages(PAGE_SYSTEM, request)
-            options = {
-                "response_format": JSON_FORMAT,
-                **generation_options(settings, correction=bool(revision)),
-            }
-            analysis = RequestAnalysis(
-                checkpoints,
-                "generation",
-                request_messages,
-                options,
-                rules=(
-                    __name__,
-                    "openkb.agent.evidence_generation_protocol",
-                    "openkb.agent.evidence_markup",
-                ),
-            )
-            dispatched = None
-            with analysis.pending() if output is None else nullcontext(None) as shared_response:
-                if output is None:
-                    try:
-                        dispatched = shared_response
-                        if dispatched is None:
-                            dispatched = _llm_call(
-                                model,
-                                request_messages,
-                                "generation",
-                                bundle=bundle,
-                                **options,
-                            )
-                        output = json.loads(dispatched)
-                    except (ValueError, TypeError):
-                        raise ResponseIncomplete("evidence_output_invalid", "generation") from None
-                response_candidate = output
-                output = normalize_output(apply_title_correction(output, request), payload)
-                if (
-                    not isinstance(output, dict)
-                    or not isinstance(output.get("content"), str)
-                    or not output["content"].strip()
-                    or not isinstance(output.get("covered"), list)
-                    or any(not isinstance(item, str) for item in output["covered"])
-                    or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
-                ):
-                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
-                title = output.get("title", base["title"])
-                if not isinstance(title, str) or not title.strip():
-                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
-                if contributions:
-                    # The coordinator owns the shared public title. A later model
-                    # suggestion cannot rename already verified parts. Its body is
-                    # still reviewed under this fixed title and its own source.
-                    title = base["title"]
-                citations = "\n".join(
-                    "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
-                    for passage in evidence
-                    for item in [passage, *passage.get("neighbors", [])]
-                )
-                from openkb.agent.evidence_markup import normalize_links
-
-                content = normalize_links(output["content"], known_targets, assets or {})
-                if title != base["title"]:
-                    # Propagate an explicit title correction to its matching opening
-                    # heading before review; unrelated evidence headings are preserved.
-                    content = re.sub(
-                        r"\A(#{1,6})[ \t]+" + re.escape(base["title"]) + r"[ \t]*(?=\n|$)",
-                        lambda match: f"{match[1]} {title}",
-                        content,
-                        count=1,
-                    )
-                if any(
-                    marker in title or marker in content
-                    for marker in (
-                        "<!-- openkb-source:",
-                        "<!-- /openkb-source:",
-                        "<!-- source-evidence:",
-                    )
-                ):
-                    raise ResponseIncomplete("topic_generation_incomplete", "generation")
-                publication_digest = content_id({"title": title, "content": content})
-                if not cached:
-                    analysis.save(
-                        json.dumps(
-                            {k: v for k, v in response_candidate.items() if k != "_verification"},
-                            ensure_ascii=False,
-                        ),
-                        receipt=dispatched,
-                    )
-            if cached:
-                receipt = output.get("_verification")
-                if (
-                    not isinstance(receipt, dict)
-                    or receipt.get("verdict") != "supported"
-                    or not isinstance(receipt.get("reason"), str)
-                    or not receipt["reason"].strip()
-                    or receipt.get("publication_digest") != publication_digest
-                ):
-                    raise ProcessingIncomplete("evidence_verification_invalid", "generation")
-            else:
-                checkpoints.save_recovery(
-                    key,
-                    "draft",
-                    {
-                        "output": output,
-                        "revision": revision,
-                        "correction": attempt,
-                        "request_digest": content_id(
-                            {
-                                "messages": messages(PAGE_SYSTEM, request),
-                                "options": generation_options(settings, correction=bool(revision)),
-                            }
-                        ),
-                    },
-                )
-                on_event(
-                    {"stage": "generation", "operation": "verification", "topic": group["title"]}
-                )
-                review = verify_content(
-                    title,
-                    content,
-                    payload["facts"],
-                    payload["evidence"],
-                    settings,
-                    bundle=bundle,
-                    bindings=fragment_bindings(output),
-                    checkpoints=checkpoints,
-                    **(
-                        {"title_context": payload["title_context"]}
-                        if payload.get("title_context")
-                        else {}
+                request_messages = messages(PAGE_SYSTEM, request)
+                options = {
+                    "response_format": JSON_FORMAT,
+                    **generation_options(settings, correction=bool(revision)),
+                }
+                analysis = RequestAnalysis(
+                    checkpoints,
+                    "generation",
+                    request_messages,
+                    options,
+                    rules=(
+                        __name__,
+                        "openkb.agent.evidence_generation_protocol",
+                        "openkb.agent.evidence_markup",
+                        "openkb.agent.evidence_selection",
                     ),
                 )
-                on_event(
-                    {
-                        "stage": "generation",
-                        "operation": "verification_result",
-                        "topic": group["title"],
-                        **review,
-                    }
-                )
-                if review["verdict"] != "supported":
-                    if review["verdict"] == "unsupported" and attempt == 0:
-                        revision = {
-                            "title": title,
-                            "content": content,
-                            "reason": review["reason"],
-                            "candidate": output,
+                dispatched = None
+                with analysis.pending() if output is None else nullcontext(None) as shared_response:
+                    if output is None:
+                        try:
+                            dispatched = shared_response
+                            if dispatched is None:
+                                dispatched = _llm_call(
+                                    model,
+                                    request_messages,
+                                    "generation",
+                                    bundle=bundle,
+                                    **options,
+                                )
+                            output = json.loads(dispatched)
+                        except (ValueError, TypeError):
+                            raise ResponseIncomplete(
+                                "evidence_output_invalid", "generation"
+                            ) from None
+                    response_candidate = output
+                    output = normalize_output(apply_title_correction(output, request), payload)
+                    details = detail_occurrences(output, payload)
+                    if (
+                        not isinstance(output, dict)
+                        or not isinstance(output.get("content"), str)
+                        or (
+                            not output["content"].strip()
+                            and len(details) != len(payload["occurrences"])
+                        )
+                        or not isinstance(output.get("covered"), list)
+                        or any(not isinstance(item, str) for item in output["covered"])
+                        or sorted(output["covered"]) != sorted(fact["id"] for fact in batch)
+                    ):
+                        raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                    title = output.get("title", base["title"])
+                    if not isinstance(title, str) or not title.strip():
+                        raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                    if contributions:
+                        # The coordinator owns the shared public title. A later model
+                        # suggestion cannot rename already verified parts. Its body is
+                        # still reviewed under this fixed title and its own source.
+                        title = base["title"]
+                    citations = "\n".join(
+                        "<!-- source-evidence: " + json.dumps(item["reference"]) + " -->"
+                        for passage in evidence
+                        for item in [passage, *passage.get("neighbors", [])]
+                    )
+                    from openkb.agent.evidence_markup import normalize_links
+
+                    content = normalize_links(output["content"], known_targets, assets or {})
+                    if title != base["title"]:
+                        # Propagate an explicit title correction to its matching opening
+                        # heading before review; unrelated evidence headings are preserved.
+                        content = re.sub(
+                            r"\A(#{1,6})[ \t]+" + re.escape(base["title"]) + r"[ \t]*(?=\n|$)",
+                            lambda match: f"{match[1]} {title}",
+                            content,
+                            count=1,
+                        )
+                    if any(
+                        marker in title or marker in content
+                        for marker in (
+                            "<!-- openkb-source:",
+                            "<!-- /openkb-source:",
+                            "<!-- source-evidence:",
+                        )
+                    ):
+                        raise ResponseIncomplete("topic_generation_incomplete", "generation")
+                    publication_digest = content_id(
+                        {"title": title, "content": content, "source_details": details}
+                    )
+                    if not cached:
+                        analysis.save(
+                            json.dumps(
+                                {
+                                    k: v
+                                    for k, v in response_candidate.items()
+                                    if k != "_verification"
+                                },
+                                ensure_ascii=False,
+                            ),
+                            receipt=dispatched,
+                        )
+                if cached:
+                    receipt = output.get("_verification")
+                    if (
+                        not isinstance(receipt, dict)
+                        or receipt.get("verdict") not in ACCEPTED
+                        or not isinstance(receipt.get("reason"), str)
+                        or not receipt["reason"].strip()
+                        or receipt.get("publication_digest") != publication_digest
+                    ):
+                        raise ProcessingIncomplete("evidence_verification_invalid", "generation")
+                else:
+                    checkpoints.save_recovery(
+                        key,
+                        "draft",
+                        {
+                            "output": output,
+                            "revision": revision,
+                            "correction": attempt,
+                            "request_digest": content_id(
+                                {
+                                    "messages": messages(PAGE_SYSTEM, request),
+                                    "options": generation_options(
+                                        settings, correction=bool(revision)
+                                    ),
+                                }
+                            ),
+                        },
+                    )
+                    on_event(
+                        {
+                            "stage": "generation",
+                            "operation": "verification",
+                            "topic": group["title"],
                         }
-                        if review.get("issues"):
-                            revision["issues"] = review["issues"]
-                        output = None
-                        checkpoints.save_recovery(
-                            key,
-                            "draft",
-                            {
-                                "output": None,
-                                "revision": revision,
-                                "correction": 1,
-                            },
-                        )
-                        on_event(
-                            {
-                                "stage": "generation",
-                                "operation": "correction",
-                                "topic": group["title"],
+                    )
+                    review = verify_content(
+                        title,
+                        content,
+                        payload["facts"],
+                        payload["evidence"],
+                        settings,
+                        bundle=bundle,
+                        bindings=fragment_bindings(output),
+                        source_details=details,
+                        checkpoints=checkpoints,
+                        omission_context=omission_context,
+                        correction_review=revision,
+                        **(
+                            {"title_context": payload["title_context"]}
+                            if payload.get("title_context")
+                            else {}
+                        ),
+                    )
+                    on_event(
+                        {
+                            "stage": "generation",
+                            "operation": "verification_result",
+                            "topic": group["title"],
+                            **review,
+                        }
+                    )
+                    if review["verdict"] not in ACCEPTED:
+                        if review["verdict"] == "unsupported" and attempt == 0:
+                            revision = {
+                                "title": title,
+                                "content": content,
+                                "reason": review["reason"],
+                                "candidate": output,
                             }
-                        )
-                        continue
-                    raise ProcessingIncomplete("knowledge_evidence_mismatch", "generation")
-                output = {
-                    **output,
-                    "title": title,
-                    "_verification": {**review, "publication_digest": publication_digest},
-                    "_revision": revision,
-                }
-            checkpoints.save(key, output)
-            group["title"] = base["title"] = title
-            base["title_fixed"] = True
-            contributions.append(content + "\n\n" + citations)
-            on_event({"stage": "generated", "topic": group["title"]})
-            return
+                            if review.get("issues"):
+                                revision["issues"] = review["issues"]
+                            output = None
+                            checkpoints.save_recovery(
+                                key,
+                                "draft",
+                                {
+                                    "output": None,
+                                    "revision": revision,
+                                    "correction": 1,
+                                },
+                            )
+                            on_event(
+                                {
+                                    "stage": "generation",
+                                    "operation": "correction",
+                                    "topic": group["title"],
+                                }
+                            )
+                            continue
+                        raise ProcessingIncomplete("knowledge_evidence_mismatch", "generation")
+                    output = {
+                        **output,
+                        "title": title,
+                        "_verification": {**review, "publication_digest": publication_digest},
+                        "_revision": revision,
+                    }
+                record_review(group["path"], output["_verification"], payload["evidence"])
+                record_details(group["path"], details, payload["evidence"])
+                checkpoints.save(key, output)
+                group["title"] = base["title"] = title
+                base["title_fixed"] = True
+                contributions[str(len(contributions))] = content + "\n\n" + citations
+                on_event({"stage": "generated", "topic": group["title"]})
+                return
 
     def generate():
         for _ in retry_batches(
@@ -621,7 +669,7 @@ def generate_topic(
             split=split_generation,
             response_split=split_generation_response,
             checkpoints=checkpoints,
-            recovery_key=lambda pairs: checkpoints.key(
+            recovery_key=lambda pairs: checkpoints.identity(
                 PAGE_SYSTEM,
                 generation_payload(
                     base,
@@ -642,4 +690,15 @@ def generate_topic(
     ):
         batch, evidence = map(list, zip(*pairs))
         generate()
-    return retained.rstrip() + "\n\n" + opening + "\n" + "\n\n".join(contributions) + "\n" + closing
+    from openkb.resource_budget import check_memory
+
+    check_memory(sum(len(value) * 8 for value in contributions.values()), stage="page_assembly")
+    return (
+        retained.rstrip()
+        + "\n\n"
+        + opening
+        + "\n"
+        + "\n\n".join(contributions.values())
+        + "\n"
+        + closing
+    )

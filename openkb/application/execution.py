@@ -46,6 +46,8 @@ class ExecutionContext:
 
     @contextmanager
     def begin(self, kb_dir: Path) -> Iterator[LlmCredentialBundle]:
+        from openkb.resource_budget import resource_scope
+
         self.check_stop()
         if self.snapshot is None:
             self.snapshot = capture_config(kb_dir, cancelled=self.cancelled, on_wait=self.waiting)
@@ -62,6 +64,7 @@ class ExecutionContext:
             self.snapshot.activate(),
             cancellation_scope(self.cancelled),
             progress_reporting(self.on_event),
+            resource_scope(),
         ):
             self.check_stop()
             token = _COMMITTED.set(self.on_committed)

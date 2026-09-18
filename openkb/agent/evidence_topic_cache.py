@@ -6,6 +6,9 @@ from urllib.parse import unquote, urlsplit
 from openkb.agent.answer_citations import _links
 from openkb.agent.evidence_markup import normalize_links
 from openkb.agent.evidence_pages import _previous_contribution
+from openkb.agent.evidence_review import restore_notes
+from openkb.agent.evidence_selection import restore_details
+from openkb.compilation_report import collect_compile_report
 from openkb.implementation import module_revision
 from openkb.schema import get_agents_md
 from openkb.sources import content_id
@@ -33,7 +36,9 @@ def _valid_page_links(content, page, targets):
     return True
 
 
-def verified_topic(group, facts, wiki, source, settings, checkpoints, targets, generate):
+def verified_topic(
+    group, facts, wiki, source, settings, checkpoints, targets, generate, *, omission_context=None
+):
     path = wiki / f"{group['path']}.md"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     retained, _, _ = _previous_contribution(existing, source.source_id)
@@ -54,38 +59,60 @@ def verified_topic(group, facts, wiki, source, settings, checkpoints, targets, g
     available = sorted(targets - {"index"})
 
     def receipt_key(links):
-        return checkpoints.key(
+        return checkpoints.identity(
             "verified-source-topic-v1", {**payload, "targets": links}, dependencies=dependencies
         )
 
-    key = receipt_key(available)
-    resume_key = checkpoints.key("retained-verified-topic-v1", payload, dependencies=dependencies)
-    saved = checkpoints.load(key)
-    if saved is None:
-        previous = checkpoints.load_recovery(resume_key, "topic")
-        if previous is not None:
-            if not isinstance(previous, list) or not all(
-                isinstance(link, str) for link in previous
+    with checkpoints.request(
+        "verified-source-topic-v1", {**payload, "targets": available}, dependencies=dependencies
+    ) as key:
+        resume_key = checkpoints.identity(
+            "retained-verified-topic-v1", payload, dependencies=dependencies
+        )
+        saved = checkpoints.load(key)
+        if saved is None:
+            previous = checkpoints.load_recovery(resume_key, "topic")
+            if previous is not None:
+                if not isinstance(previous, list) or not all(
+                    isinstance(link, str) for link in previous
+                ):
+                    raise ValueError("Invalid verified topic target receipt")
+                # The recovered targets locate the original immutable receipt; the
+                # current facts, group and other-source content still bind its key.
+                saved = checkpoints.load(receipt_key(previous))
+        if saved is not None:
+            if (
+                not isinstance(saved, dict)
+                or set(saved) != {"content", "title", "review_notes", "source_details"}
+                or not isinstance(saved["content"], str)
+                or not isinstance(saved["title"], str)
+                or not saved["title"].strip()
             ):
-                raise ValueError("Invalid verified topic target receipt")
-            # The recovered targets locate the original immutable receipt; the
-            # current facts, group and other-source content still bind its key.
-            saved = checkpoints.load(receipt_key(previous))
-    if saved is not None:
-        if (
-            not isinstance(saved, dict)
-            or set(saved) != {"content", "title"}
-            or not isinstance(saved["content"], str)
-            or not isinstance(saved["title"], str)
-            or not saved["title"].strip()
-        ):
-            raise ValueError("Invalid verified topic receipt")
-        # New unrelated targets need no new prose. Removing or renaming a link
-        # actually used by this content requires generation under current inputs.
-        if _valid_page_links(saved["content"], group["path"], targets):
-            group["title"] = saved["title"]
-            return saved["content"]
-    content = generate()
-    checkpoints.save(key, {"content": content, "title": group["title"]})
-    checkpoints.save_recovery(resume_key, "topic", available)
-    return content
+                raise ValueError("Invalid verified topic receipt")
+            # New unrelated targets need no new prose. Removing or renaming a link
+            # actually used by this content requires generation under current inputs.
+            # This is a factual candidate receipt, never publication permission.
+            # Current omissions are checked by protect_dependencies after adoption;
+            # a changed gap must not regenerate unchanged, already supported prose.
+            if _valid_page_links(saved["content"], group["path"], targets):
+                restore_notes(group["path"], saved["review_notes"], {fact["id"] for fact in facts})
+                restore_details(
+                    group["path"], saved["source_details"], {fact["id"] for fact in facts}
+                )
+                group["title"] = saved["title"]
+                return saved["content"]
+        content = generate()
+        with collect_compile_report() as report:
+            notes = report.review_notes.get(group["path"], [])
+            details = sorted(report.referenced_facts.get(group["path"], set()))
+        checkpoints.save(
+            key,
+            {
+                "content": content,
+                "title": group["title"],
+                "review_notes": notes,
+                "source_details": details,
+            },
+        )
+        checkpoints.save_recovery(resume_key, "topic", available)
+        return content

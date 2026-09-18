@@ -69,7 +69,7 @@ def test_recovered_split_ranges_cover_the_original_block(kb_dir, tmp_path, monke
     config = yaml.safe_load(config_path.read_text())
     config["processing"].update(output_tokens=1024, max_output_tokens=1024)
     config_path.write_text(yaml.safe_dump(config))
-    text = " ".join(f"Operation {i} requires its own approval." for i in range(12))
+    text = "\n".join(f"Operation {i} requires its own approval." for i in range(12))
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])

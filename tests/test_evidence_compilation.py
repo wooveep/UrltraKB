@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from openkb.application.documents import import_document
+from tests.http_model_fixture import evidence_response
 
 
 def test_compilation_thinking_mode_reaches_provider_and_invalidates_cached_facts(
@@ -58,7 +59,7 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
     config["processing"].update(
-        context_tokens=4096,
+        context_tokens=32768,
         output_tokens=1024,
         max_requests=80,
         max_tokens=200000,
@@ -101,6 +102,8 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
                     }
                 ]
             }
+        if payload["stage"] == "dependencies":
+            return evidence_response(payload)
         assert payload["stage"] == "generation"
         excerpts = "\n".join(item["text"] for item in payload["evidence"])
         selected = [fact for fact in facts if fact in excerpts]
@@ -121,7 +124,7 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
     assert "source-evidence" in content and result.parse_id in content
     for request in model_service:
         measured = litellm.token_counter(model=request["model"], messages=request["messages"])
-        assert measured + request["max_tokens"] <= 4096
+        assert measured + request["max_tokens"] <= 32768
 
 
 def test_changed_generation_language_reuses_facts_but_does_not_skip_completed_version(
@@ -349,7 +352,7 @@ def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publicati
     assert all(fact in content for fact in facts)
 
 
-def test_long_unbroken_block_is_automatically_split_again_for_generation(
+def test_oversized_unbroken_command_is_omitted_without_partial_generation(
     kb_dir, tmp_path, model_service
 ):
     from tests.http_model_fixture import evidence_response
@@ -374,10 +377,10 @@ def test_long_unbroken_block_is_automatically_split_again_for_generation(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    covered = set()
-    for scope in scopes:
-        covered.update(range(scope["start"], scope["end"]))
-    assert covered == set(range(len(text)))
+    assert not scopes
+    assert result.omissions
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert original.read_text() == text
     for request in model_service:
         measured = litellm.token_counter(model=request["model"], messages=request["messages"])
         assert measured + request["max_tokens"] <= 4096
@@ -391,6 +394,8 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification_batch":
+            return evidence_response(payload)
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "facts":

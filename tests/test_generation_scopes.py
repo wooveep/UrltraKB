@@ -143,7 +143,7 @@ def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(
 
     from openkb.agent import evidence_pages
 
-    text = "X" * 2501
+    text = "X" * 1250 + "\n" + "X" * 1250
     reference = {
         "source_id": "0" * 32,
         "version_id": "1" * 64,
@@ -175,6 +175,6 @@ def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(
         lambda base, facts, evidence, limits, model: len(evidence[0]["text"]) <= 2048,
     )
     result = list(evidence_pages._evidence_windows(fact, reader, {}, None, "test"))
-    assert [len(r["text"]) for r in result] == [2048, 453]
+    assert [len(r["text"]) for r in result] == [1251, 1250]
     assert "".join(r["text"] for r in result) == text
     assert result[0]["reference"]["end"] == result[1]["reference"]["start"]

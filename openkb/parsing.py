@@ -85,6 +85,9 @@ def parse_document(
                 store.select(source, cached)
                 return cached
     processing_checkpoint("parsing")
+    from openkb.resource_checks import check_parser
+
+    check_parser(path)
     if source.suffix == ".pdf":
         from openkb.parsing_pdf import parse_pdf
 

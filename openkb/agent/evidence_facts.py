@@ -77,7 +77,11 @@ def extract_facts(
 
     if not has_readable_content(checkpoints.store, parsed):
         return []
-    units = list(source_units(kb_dir, source, parsed, limits, model, navigation=navigation))
+    from openkb.agent.compilation_storage import FactInventory, UnitInventory
+
+    units = UnitInventory(
+        checkpoints, source_units(kb_dir, source, parsed, limits, model, navigation=navigation)
+    )
     cache = FactCache(checkpoints, FACTS_SYSTEM, units, validate_unit)
     progress_lock = threading.Lock()
     failures = []
@@ -88,7 +92,7 @@ def extract_facts(
 
     def failed(batch, error):
         with progress_lock:
-            failures.append((batch, error))
+            failures.append(([unit["reference"] for unit in batch], error))
         on_event(
             {
                 "stage": "facts",
@@ -194,7 +198,7 @@ def extract_facts(
             split=split_units,
             validation_attempts=limits.max_attempts,
             checkpoints=checkpoints,
-            recovery_key=lambda batch: checkpoints.key(
+            recovery_key=lambda batch: checkpoints.identity(
                 FACTS_SYSTEM, {"stage": "facts", "units": batch}
             ),
             on_unrecoverable=failed,
@@ -211,32 +215,32 @@ def extract_facts(
             results.extend(facts)
         return results
 
-    with progress_scope(
-        "facts", sum(len(unit["text"]) for unit in units), "characters"
-    ) as progress:
-        results = dict(
-            parallel_batches(fact_batches(units, limits, model), run_batch, limits.concurrency)
-        )
-    facts = [fact for index in sorted(results) for fact in results[index]]
+    results = checkpoints.private_rows("completed_fact_batches")
+    with progress_scope("facts", units.characters, "characters") as progress:
+        for index, completed in parallel_batches(
+            fact_batches(units, limits, model), run_batch, limits.concurrency
+        ):
+            results[index] = completed
+    facts = FactInventory(checkpoints)
+    for index in sorted(results):
+        for fact in results[index]:
+            facts.append(fact)
+        del results[index]
     if failures:
         from openkb.compilation_report import report_content_omission
 
         # A split sibling from a failed block must not turn an incomplete
         # extraction into an apparently complete source contribution.
-        excluded = {unit["reference"]["block_id"] for batch, _ in failures for unit in batch}
-        facts = [fact for fact in facts if fact["scope"]["block_id"] not in excluded]
+        excluded = {reference["block_id"] for batch, _ in failures for reference in batch}
+        facts.exclude_blocks(excluded)
         for batch, error in failures:
             report_content_omission(
-                "facts", error.reason, [unit["reference"]["block_id"] for unit in batch]
+                "facts", error.reason, [reference["block_id"] for reference in batch]
             )
     if not facts and not failures:
         from openkb.compilation_report import report_content_omission
 
-        missing = [
-            unit["reference"]["block_id"]
-            for unit in units
-            if unit["kind"] not in {"image", "heading"}
-        ]
+        missing = sorted(units.content_blocks)
         if missing:
             report_content_omission("facts", "source_facts_missing", missing)
     return facts

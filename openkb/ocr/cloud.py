@@ -72,6 +72,10 @@ class CloudJobs:
         self.requests += 1
         self.record["requests"] = self.record.get("requests", 0) + 1
         if method == "POST":
+            from openkb.runtime.family_budget import current_family
+
+            if family := current_family():
+                family.reserve_ocr_page(self.config.limits.max_pages)
             self.record["state"] = "submitting"
             # A prior explicit rejection cannot classify a new, lost response.
             self.record.pop("service_code", None)
@@ -85,15 +89,21 @@ class CloudJobs:
             self.config.limits.seconds - (time.monotonic() - self.started),
         )
         headers = {"Authorization": f"Bearer {self.token}"} if authenticated else {}
-        return self.session.request(
-            method,
-            url,
-            headers=headers,
-            timeout=timeout,
-            allow_redirects=False,
-            stream=True,
-            **kwargs,
-        )
+        from openkb.external_request_usage import external_request_usage
+
+        with external_request_usage(0, "ocr", model_time=False) as usage:
+            # OCR HTTP attempts share the request allowance, including polling
+            # and downloads. Their cost is pages, not text-model tokens/time.
+            usage["tokens"] = 0
+            return self.session.request(
+                method,
+                url,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+                **kwargs,
+            )
 
     def _data(self, response):
         try:

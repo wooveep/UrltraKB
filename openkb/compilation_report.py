@@ -21,6 +21,8 @@ class CompileReport:
     omissions: list[dict[str, Any]] = field(default_factory=list)
     source_units: dict[str, dict[str, Any]] = field(default_factory=dict)
     published_facts: set[str] = field(default_factory=set)
+    referenced_facts: dict[str, set[str]] = field(default_factory=dict)
+    review_notes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     usage: dict[str, Any] = field(default_factory=dict)
     stage: str = "converting"
     failure_reason: str | None = None
