@@ -43,9 +43,8 @@ def prepared(kb_dir, tmp_path, lines, locations=None):
     return store.reader(version, parsed), fact
 
 
-def windows(reader, fact, monkeypatch):
-    monkeypatch.setattr("openkb.agent.evidence_pages._generation_fits", lambda *args: True)
-    return list(_evidence_windows(fact, reader, {}, None, None))
+def windows(reader, fact):
+    return list(_evidence_windows(fact, reader, {}, lambda facts, evidence: True))
 
 
 @pytest.mark.parametrize("detached", [False, True])
@@ -66,9 +65,9 @@ def test_enclosing_config_reaches_generation_with_exact_original_references(
             reader = EvidenceSnapshot(reader)
             monkeypatch.setattr(SourceStore, "asset", lambda *args: pytest.fail("Live worker read"))
             with ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(windows, reader, fact, monkeypatch).result(timeout=2)
+                result = pool.submit(windows, reader, fact).result(timeout=2)
         else:
-            result = windows(reader, fact, monkeypatch)
+            result = windows(reader, fact)
         neighbors = result[0]["neighbors"]
         assert [n["text"] for n in neighbors] == lines[:-1]
         for neighbor in neighbors:
@@ -96,4 +95,4 @@ def test_code_context_never_crosses_source_scope_or_bounds(kb_dir, tmp_path, mon
     else:
         lines[0] = "root /other;"
     reader, fact = prepared(kb_dir, tmp_path, lines, locations)
-    assert windows(reader, fact, monkeypatch)[0]["neighbors"] == []
+    assert windows(reader, fact)[0]["neighbors"] == []

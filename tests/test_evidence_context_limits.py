@@ -3,11 +3,80 @@
 import json
 
 import litellm
+import pytest
 import yaml
 
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
 from tests.http_model_fixture import evidence_response
+
+
+@pytest.mark.parametrize("maximum", [4096, 32768])
+def test_required_operation_context_uses_configured_capacity_before_omission(
+    kb_dir, tmp_path, model_service, maximum
+):
+    source = tmp_path / "operation.md"
+    source.write_text(
+        "# Standby recovery\n\n"
+        + "\n\n".join(
+            f"Background note {number}. "
+            + "Retain this original context for the complete operation. " * 25
+            for number in range(20)
+        )
+        + "\n\nExecute deploy --timeout 42."
+    )
+    config_path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(
+        context_tokens=4096,
+        max_context_tokens=maximum,
+        output_tokens=1024,
+        max_output_tokens=1024,
+        max_requests=100,
+        max_tokens=1000000,
+    )
+    config_path.write_text(yaml.safe_dump(config))
+    generated = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        output = evidence_response(payload)
+        if payload["stage"] == "facts":
+            for unit, row in zip(payload["units"], output["units"], strict=True):
+                if not unit["text"].startswith("Execute"):
+                    row.update(facts=[], empty_reason="Reading context")
+        elif payload["stage"] == "generation":
+            generated.append(payload)
+            output["content"] = "Execute deploy --timeout 42."
+        return output
+
+    model_service.respond = respond
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed"
+    if maximum == 4096:
+        assert not generated
+        assert any(
+            row["reason"] == "topic_evidence_exceeds_request_budget" for row in result.omissions
+        )
+    else:
+        assert generated
+        assert list((kb_dir / "wiki/concepts").glob("*.md"))
+        requests = [
+            (call, json.loads(call["messages"][-1]["content"]))
+            for call in model_service
+            if json.loads(call["messages"][-1]["content"])["stage"]
+            in {"generation", "verification"}
+        ]
+        assert {payload["stage"] for _, payload in requests} == {"generation", "verification"}
+        for call, payload in requests:
+            text = json.dumps(payload)
+            assert all(f"Background note {number}." in text for number in range(20))
+            assert "Execute deploy --timeout 42." in text
+            assert call["max_tokens"] == 1024
+        before = len(model_service)
+        resumed = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+        assert resumed.knowledge_compilation == "completed"
+        assert len(model_service) == before
 
 
 def test_small_output_budget_splits_fact_and_generation_batches(kb_dir, tmp_path, model_service):

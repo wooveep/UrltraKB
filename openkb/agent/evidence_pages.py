@@ -118,13 +118,9 @@ def _existing_window(text, topic, model, limits):
     return "\n\n".join(part for _, part in selected)
 
 
-def _evidence_windows(fact, reader, base, limits, model):
+def _evidence_windows(fact, reader, base, fits_window):
     """Cover the full original scope even when generation has less room than extraction."""
     from dataclasses import replace
-
-    from openkb.agent.table_objects import table_limits
-
-    limits = table_limits(limits, [fact])
 
     scope = Evidence(**fact["scope"])
     neighbors = []
@@ -182,7 +178,7 @@ def _evidence_windows(fact, reader, base, limits, model):
 
         # Most original scopes fit intact. Avoid repeating all generation/review
         # token measurements in a binary search for an already fitting block.
-        if _generation_fits(base, [fact], [window(len(view.text))], limits, model):
+        if fits_window([fact], [window(len(view.text))]):
             yield window(len(view.text))
             start += len(view.text)
             continue
@@ -191,7 +187,7 @@ def _evidence_windows(fact, reader, base, limits, model):
         low, high = 0, len(view.text) - 1
         while low < high:
             size = (low + high + 1) // 2
-            if _generation_fits(base, [fact], [window(size)], limits, model):
+            if fits_window([fact], [window(size)]):
                 low = size
             else:
                 high = size - 1
@@ -685,12 +681,29 @@ def generate_topic(
         ):
             pass
 
+    def fits_generation(facts, evidence, *, required=False):
+        nonlocal limits
+        # A complete operation may need more than the initial batching target.
+        # Grow only for one required window, retaining this topic's new target
+        # for later batching. Output and configured context ceilings never grow.
+        while not _generation_fits(base, facts, evidence, table_limits(limits, facts), model):
+            if not required:
+                return False
+            expanded = limits.expanded(reason="input_budget_exceeded")
+            if expanded == limits:
+                return False
+            limits = expanded
+        return True
+
     for pairs in generation_batches(
         facts,
-        lambda fact: _evidence_windows(fact, reader, base, limits, model),
-        lambda batch, evidence: _generation_fits(
-            base, batch, evidence, table_limits(limits, batch), model
+        lambda fact: _evidence_windows(
+            fact,
+            reader,
+            base,
+            lambda batch, evidence: fits_generation(batch, evidence, required=True),
         ),
+        fits_generation,
     ):
         batch, evidence = map(list, zip(*pairs))
         generate()

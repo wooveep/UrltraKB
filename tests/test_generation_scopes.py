@@ -138,7 +138,7 @@ def test_large_catalog_does_not_fill_unrelated_prompt_space(monkeypatch):
     assert len(measured) <= 64
 
 
-def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(monkeypatch):
+def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless():
     from types import SimpleNamespace
 
     from openkb.agent import evidence_pages
@@ -161,20 +161,18 @@ def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(
     )
     checks = []
 
-    def fits(base, facts, evidence, limits, model):
+    def fits(facts, evidence):
         checks.append(len(evidence[0]["text"]))
         return checks[-1] <= 3000
 
-    monkeypatch.setattr(evidence_pages, "_generation_fits", fits)
-    result = list(evidence_pages._evidence_windows(fact, reader, {}, None, "test"))
+    result = list(evidence_pages._evidence_windows(fact, reader, {}, fits))
     assert [r["text"] for r in result] == [text]
     assert checks == [len(text)]
-    monkeypatch.setattr(
-        evidence_pages,
-        "_generation_fits",
-        lambda base, facts, evidence, limits, model: len(evidence[0]["text"]) <= 2048,
+    result = list(
+        evidence_pages._evidence_windows(
+            fact, reader, {}, lambda facts, evidence: len(evidence[0]["text"]) <= 2048
+        )
     )
-    result = list(evidence_pages._evidence_windows(fact, reader, {}, None, "test"))
     assert [len(r["text"]) for r in result] == [1251, 1250]
     assert "".join(r["text"] for r in result) == text
     assert result[0]["reference"]["end"] == result[1]["reference"]["start"]
