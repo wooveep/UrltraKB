@@ -306,7 +306,7 @@ class CompilationCheckpoints:
             "source_context": module_revision("openkb.source_context"),
             "model_json": module_revision("openkb.agent.model_json"),
             "stage_implementation": {
-                name: module_revision("openkb.agent." + name)
+                name: module_revision("openkb.agent." + name, stage=payload.get("stage"))
                 for name in stage_modules.get(payload.get("stage"), ())
             },
         }

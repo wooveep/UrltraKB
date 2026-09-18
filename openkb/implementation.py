@@ -40,6 +40,18 @@ _COMPATIBLE_REVISIONS = {
 }
 
 
+# Only generation's dependency-scope stamp is compatible. This revision changes
+# the later joint-omission plan, not candidate generation or its initial review.
+# Whole-compilation and dependency receipts MUST keep the real new revision.
+_STAGE_COMPATIBLE_REVISIONS = {
+    (
+        "generation",
+        "openkb.agent.dependency_scope",
+        "537acb56e35ba1f6a52cc6f7ddb14181c17fa7df187e753712b8f3f932ea478b",
+    ): "dbf7c177906b3d45cd0d34ae87dbf8276dc8da45cb064d6d49e0a4a35ac302f0",
+}
+
+
 def _code_value(value):
     if isinstance(value, CodeType):
         return {
@@ -69,7 +81,7 @@ def _code_value(value):
 
 
 @lru_cache(maxsize=32)
-def module_revision(name: str) -> str:
+def module_revision(name: str, *, stage: str | None = None) -> str:
     spec = find_spec(name)
     loader = spec.loader if spec else None
     get_code = getattr(loader, "get_code", None)
@@ -77,4 +89,7 @@ def module_revision(name: str) -> str:
     if not isinstance(code, CodeType):
         raise ValueError("Cannot identify the implementation of a persisted stage")
     revision = content_id(_code_value(code))
-    return _COMPATIBLE_REVISIONS.get((name, revision), revision)
+    revision = _COMPATIBLE_REVISIONS.get((name, revision), revision)
+    if stage is None:
+        return revision
+    return _STAGE_COMPATIBLE_REVISIONS.get((stage, name, revision), revision)

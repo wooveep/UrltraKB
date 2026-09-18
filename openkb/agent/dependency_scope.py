@@ -177,27 +177,12 @@ def _review_scope(original, omissions, candidates, facts, groups):
 
 
 def review_scopes(original, omissions, candidates, facts, groups):
-    """Review every candidate against each bounded omission scope.
+    """Review each candidate against the complete joint omission state.
 
-    Structural boundaries only organize the requests. An explicit model decision
-    against both complete scopes proves independence; no missing keyword does.
+    Independent decisions for separate gaps do not compose: either of two
+    alternative prerequisites may suffice, while losing both blocks an operation.
+    Structural scopes organize source transport, never split that joint decision.
     """
-    sections = _sections(original)
-    if sections is None:
-        return [(original, omissions, candidates)]
-    paths, _ = sections
-    blocks = {row["reference"]["block_id"] for row in original}
-    # Keep only the routing index; caller-owned bodies remain in private storage.
+    # Keep only routing data; caller-owned bodies remain in private storage.
     index = [{"topic": fact["topic"], "scope": fact["scope"]} for fact in facts]
-    grouped = {}
-    for omission in omissions:
-        absent = _omitted_blocks(omission, blocks, index, groups)
-        if absent is None:
-            return [(original, omissions, candidates)]
-        key = tuple(sorted({paths[bid] for bid in absent}))
-        grouped.setdefault(key, []).append(omission)
-    return [
-        scope
-        for rows in grouped.values()
-        for scope in _review_scope(original, rows, candidates, index, groups)
-    ]
+    return _review_scope(original, sorted(omissions, key=content_id), candidates, index, groups)

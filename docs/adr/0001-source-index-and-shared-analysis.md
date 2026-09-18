@@ -55,13 +55,21 @@ source deletion, process interruption and rule changes from silently changing ev
 Dependency review keeps complete operation and omission scopes, with ancestor conditions
 and explicit reference targets. Structure locates evidence; a missing heading or keyword
 match never proves independence. Every candidate receives a semantic decision against the
-known omitted scopes. Unlocated conditions expand to the whole original; if that required
+complete, cumulative set of known omissions. Separate independence decisions cannot be
+combined: an operation requiring either A or B fails when both are omitted, even if
+each omission alone is harmless. Transport may batch candidates, never divide that
+joint omission state into independent decisions. Unlocated conditions expand to the whole original; if that required
 input alone cannot fit, capacity preflight records a content omission before generation.
 Generated ownership annotations become ordered structured segments, and repeated full
 references use a reversible dictionary. Batches contain at most three candidates, each
-with an independent decision. Newly withdrawn candidates propagate as new omissions until
-the remaining decisions are stable. Receipts bind the actual original scopes, candidate
+with an independent decision. Newly withdrawn candidates join the existing omissions
+until the remaining decisions are stable; previous omissions stay in every propagation
+contract. Receipts bind the actual original scopes, candidate
 bytes, omissions, verification options and message rules; an unknown result stays unknown.
+A dependency-only implementation change invalidates those joint decisions. An explicitly
+listed, exact stage compatibility fingerprint may preserve unchanged generation and
+initial-review receipts, including refusals, without aliasing the new dependency or
+whole-compilation identity.
 
 Private compilation bodies and detached source ranges are disposable, bounded working
 storage, not another source index. Completed facts and candidates retain their existing

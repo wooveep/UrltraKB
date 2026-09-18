@@ -33,7 +33,9 @@ candidate is not safe merely because its own quotation is supported. If an omitt
 is necessary to interpret an action/conclusion, mark that candidate dependent. Independent
 means its meaning remains correct without the identified omitted content and without other
 withdrawn candidates. Use unknown only for an unresolved necessary condition,
-not independent. Do not generate or repair knowledge.
+not independent. All listed omissions coexist: evaluate their combined effect, including
+AND/OR alternatives. A remaining alternative cannot support the candidate when that
+alternative is also listed as omitted. Do not generate or repair knowledge.
 Return JSON {"topics":[{"path":"exact candidate path", "status":"independent|dependent|unknown",
 "reason":"explanation grounded in original context"}]} covering every candidate exactly once.
 Assess the transitive closure: a topic depending on any withdrawn topic is also dependent."""
@@ -307,6 +309,7 @@ def protect_dependencies(
                         progress.advance(len(batch))
 
     excluded = set()
+    accumulated_omissions = list(omissions)
     while scopes:
         assess(scopes)
         newly_excluded = {
@@ -327,7 +330,8 @@ def protect_dependencies(
                 "reason": "required_context_omitted",
             }
         ]
-        scopes = review_scopes(original, new_omissions, survivors, routing, groups)
+        accumulated_omissions.extend(new_omissions)
+        scopes = review_scopes(original, accumulated_omissions, survivors, routing, groups)
         on_event(
             {
                 "stage": "dependencies",

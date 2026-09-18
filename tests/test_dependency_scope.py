@@ -269,6 +269,6 @@ def test_unresolved_omitted_scope_cannot_be_overwritten_by_other_independence(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert capacity_checks >= 2
+    assert capacity_checks == 1  # One joint decision; never split the missing conditions.
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert any(row["reason"] == "dependency_scope_unresolved" for row in result.omissions)
