@@ -1,9 +1,27 @@
 """Document work drains active batches and preserves recovery at resource limits."""
 
 import json
+import os
+
+import pytest
 
 from openkb.application.documents import import_document
 from tests.http_model_fixture import evidence_response
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows process sampler")
+def test_repeated_native_memory_observation_does_not_retain_types():
+    import ctypes
+    import gc
+
+    from openkb.resource_memory import memory_sample
+
+    memory_sample()
+    before = len(ctypes._pointer_type_cache)
+    for _ in range(1000):
+        memory_sample()
+    gc.collect()
+    assert len(ctypes._pointer_type_cache) <= before + 3
 
 
 def test_memory_pressure_stops_before_model_work_without_losing_original(

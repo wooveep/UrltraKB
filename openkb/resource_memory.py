@@ -1,6 +1,7 @@
 """OS measurements for an isolated worker and its descendant processes."""
 
 import os
+from functools import cache
 from pathlib import Path
 
 
@@ -35,7 +36,10 @@ def memory_sample():
     return None
 
 
-def _windows():
+@cache
+def _windows_api():
+    # ctypes keeps pointer types in a process-wide cache. Defining structures
+    # per sample makes the observer itself retain memory on every admission.
     import ctypes
     from ctypes import wintypes
 
@@ -87,6 +91,11 @@ def _windows():
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     query = ctypes.WinDLL("psapi", use_last_error=True).GetProcessMemoryInfo
     query.argtypes = [wintypes.HANDLE, ctypes.POINTER(Memory), wintypes.DWORD]
+    return ctypes, Status, Process, Memory, kernel, query
+
+
+def _windows():
+    ctypes, Status, Process, Memory, kernel, query = _windows_api()
     status = Status()
     status.length = ctypes.sizeof(status)
     if not kernel.GlobalMemoryStatusEx(ctypes.byref(status)):
