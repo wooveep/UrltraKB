@@ -39,15 +39,29 @@ def source_mapping(evidence):
         headings = list(location.get("headings", []))
         if not headings:
             headings = [
-                p["text"] for p in item.get("neighbors", []) if p.get("relation") == "heading"
+                re.sub(r"^#{1,6}\s+", "", p["text"])
+                for p in item.get("neighbors", [])
+                if p.get("relation") == "heading"
             ]
+        positions = [{"role": "enclosing_document", "headings": list(headings)}]
         origin, nested = [], location
         while isinstance(nested.get("attachment"), dict):
             attachment = nested["attachment"]
             origin.append({k: attachment.get(k) for k in ("part", "name")})
             nested = attachment.get("position", {})
             headings.extend(nested.get("headings", []))
-        scope = {"origin": origin or "enclosing_document", "headings": headings}
+            positions.append(
+                {
+                    "role": "attachment",
+                    "name": attachment.get("name", ""),
+                    "headings": list(nested.get("headings", [])),
+                }
+            )
+        scope = {
+            "origin": origin or "enclosing_document",
+            "headings": headings,
+            "positions": positions,
+        }
         ref = item.get("reference", {})
         identity = {k: ref[k] for k in ("source_id", "version_id", "parse_id") if k in ref}
         key = json.dumps([identity, scope], ensure_ascii=False, sort_keys=True)
@@ -209,7 +223,7 @@ def fits(limits, model, system, payload):
         return False
 
 
-def _body_headings(content):
+def _body_headings(content, *, require_closed=True):
     """Keep fragment headings local without changing fenced command examples."""
     lines, fence = [], None
     for line in content.splitlines(keepends=True):
@@ -227,15 +241,49 @@ def _body_headings(content):
                 lines[-1] = "### " + lines[-1].lstrip()
                 continue
         lines.append(line)
-    if fence is not None:
+    if fence is not None and require_closed:
         raise ResponseIncomplete("topic_generation_incomplete", "generation")
     return "".join(lines).strip()
 
 
+def _section(fragment, scope, language, *, original=False):
+    from openkb.agent.source_positions import with_source_position
+
+    body = with_source_position(
+        _body_headings(fragment["content"], require_closed=not original), scope, language
+    )
+    return "## " + fragment["heading"].strip().lstrip("# ") + "\n\n" + body
+
+
+def representative_content(output, payload):
+    """Measure original text with publication framing, without model-output validation."""
+    from openkb.agent.source_positions import with_source_position
+
+    scopes = source_mapping(payload["evidence"])["source_scopes"]
+    language = payload.get("language", "en")
+    if not payload.get("source_scopes"):
+        return with_source_position(output["content"], scopes[0], language)
+    by_id = {scope["id"]: scope for scope in scopes}
+    return "\n\n".join(
+        _section(fragment, by_id[fragment["scope"]], language, original=True)
+        for fragment in output["fragments"]
+    )
+
+
 def normalize_output(output, payload):
     """Validate before deriving the internal Markdown representation or receipts."""
+    from openkb.agent.source_positions import with_source_position
+
     details = detail_occurrences(output, payload)
     if not payload.get("source_scopes"):
+        scopes = source_mapping(payload.get("evidence", []))["source_scopes"]
+        if len(scopes) == 1 and isinstance(output, dict) and isinstance(output.get("content"), str):
+            return {
+                **output,
+                "content": with_source_position(
+                    output["content"], scopes[0], payload.get("language", "en")
+                ),
+            }
         return output
     invalid = ResponseIncomplete("topic_generation_incomplete", "generation")
     if not isinstance(output, dict) or not isinstance(output.get("fragments"), list):
@@ -248,6 +296,7 @@ def normalize_output(output, payload):
     ):
         raise invalid
     expected = {o["id"]: o["scope"] for o in payload["occurrences"]}
+    scopes = {scope["id"]: scope for scope in payload["source_scopes"]}
     assigned, sections = list(details), []
     for fragment in output["fragments"]:
         if not isinstance(fragment, dict):
@@ -267,7 +316,7 @@ def normalize_output(output, payload):
         ):
             raise invalid
         assigned.extend(ids)
-        sections.append("## " + heading.strip().lstrip("# ") + "\n\n" + _body_headings(content))
+        sections.append(_section(fragment, scopes[scope], payload.get("language", "en")))
     if Counter(assigned) != Counter(expected.keys()):
         raise invalid
     content = "\n\n".join(sections)

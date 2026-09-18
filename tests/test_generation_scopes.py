@@ -178,3 +178,120 @@ def test_full_evidence_window_is_checked_once_and_budget_splits_remain_lossless(
     assert [len(r["text"]) for r in result] == [1251, 1250]
     assert "".join(r["text"] for r in result) == text
     assert result[0]["reference"]["end"] == result[1]["reference"]["start"]
+
+
+def test_each_fragment_preserves_its_original_recovery_position():
+    from openkb.agent.evidence_generation_protocol import normalize_output
+
+    base = ["管理节点恢复", "超融合（2管理主备+n计算节点）", "必须重装"]
+    p = payload(
+        [
+            {
+                "id": "same",
+                "text": "只需配置本主机。",
+                "location": {"headings": [*base, "UUID不变", "管理节点主备"]},
+            },
+            {
+                "id": "changed",
+                "text": "只需配置本主机。",
+                "location": {"headings": [*base, "UUID变更", "管理节点主备"]},
+            },
+        ]
+    )
+    p["language"] = "zh-cn"
+    result = normalize_output(response(p), p)
+    sections = result["content"].split("## Configuration ")[1:]
+    assert len(sections) == 2
+    for section in sections:
+        assert "管理节点恢复" in section and "超融合" in section and "必须重装" in section
+        assert "管理节点主备" in section
+    assert "UUID不变" in sections[0] and "UUID变更" not in sections[0]
+    assert "UUID变更" in sections[1] and "UUID不变" not in sections[1]
+    assert normalize_output(result, p) == result
+
+
+def test_single_scope_retains_context_without_changing_commands_or_heading():
+    from openkb.agent.evidence_generation_protocol import normalize_output
+
+    p = payload(
+        [
+            {
+                "id": "one",
+                "text": "restart --keep",
+                "location": {"headings": ["Standby only", "Reinstallation"]},
+            }
+        ]
+    )
+    output = {
+        "title": "Restart",
+        "covered": ["one"],
+        "content": "# Restart\n\n```sh\nrestart --keep\n```",
+    }
+    result = normalize_output(output, p)
+    assert result["content"].startswith("# Restart\n")
+    assert "Standby only" in result["content"] and "Reinstallation" in result["content"]
+    assert "```sh\nrestart --keep\n```" in result["content"]
+    assert normalize_output(result, p) == result
+
+
+def test_parent_document_position_is_distinct_from_attachment_position():
+    from openkb.agent.evidence_generation_protocol import normalize_output
+
+    p = payload(
+        [
+            {
+                "id": "child",
+                "text": "Child instruction",
+                "location": {
+                    "headings": ["Parent installation"],
+                    "attachment": {
+                        "name": "Driver.pdf",
+                        "part": "object1",
+                        "position": {"headings": ["Child troubleshooting"]},
+                    },
+                },
+            }
+        ]
+    )
+    output = {"title": "Driver", "covered": ["child"], "content": "Child instruction"}
+    result = normalize_output(output, p)["content"]
+    assert "enclosing document: Parent installation" in result
+    assert "attachment Driver.pdf: Child troubleshooting" in result
+    assert "Parent installation › Child troubleshooting" not in result
+
+
+def test_capacity_preflight_counts_application_retained_source_position(monkeypatch):
+    from openkb.agent import evidence_pages
+
+    evidence = [
+        {
+            "id": "one",
+            "text": "Original command",
+            "location": {"headings": ["Required scope " * 300]},
+        }
+    ]
+    facts = [{"id": "one", "quote": "Original command", "reference": {}}]
+    seen = []
+    monkeypatch.setattr(evidence_pages, "output_fits", lambda *a, **k: True)
+
+    def fits(limits, model, system, value):
+        seen.append(value)
+        return not (value.get("stage") == "verification" and "Required scope" in value["content"])
+
+    monkeypatch.setattr(evidence_pages, "fits", fits)
+    assert not evidence_pages._generation_fits(
+        {"stage": "generation", "title": "Task"}, facts, evidence, None, "test"
+    )
+    assert any(row.get("stage") == "verification" for row in seen)
+
+
+def test_capacity_preflight_does_not_validate_original_text_as_generated_markdown(monkeypatch):
+    from openkb.agent import evidence_pages
+
+    p = payload()
+    p["evidence"][0]["text"] = "```sh\nrestart"
+    monkeypatch.setattr(evidence_pages, "output_fits", lambda *a, **k: True)
+    monkeypatch.setattr(evidence_pages, "fits", lambda *a, **k: True)
+    assert evidence_pages._generation_fits(
+        {"stage": "generation", "title": "Task"}, p["facts"], p["evidence"], None, "test"
+    )

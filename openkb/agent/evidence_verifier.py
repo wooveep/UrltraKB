@@ -230,6 +230,7 @@ def _verify_once(
                 __name__,
                 "openkb.agent.evidence_review",
                 "openkb.agent.evidence_generation_protocol",
+                "openkb.agent.source_positions",
                 "openkb.agent.evidence_selection",
                 "openkb.agent.review_changes",
                 "openkb.agent.review_batching",

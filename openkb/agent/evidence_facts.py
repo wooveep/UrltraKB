@@ -92,7 +92,7 @@ def extract_facts(
 
     def failed(batch, error):
         with progress_lock:
-            failures.append(([unit["reference"] for unit in batch], error))
+            failures.append(([unit["reference"] for unit in batch], error.reason))
         on_event(
             {
                 "stage": "facts",
@@ -233,10 +233,8 @@ def extract_facts(
         # extraction into an apparently complete source contribution.
         excluded = {reference["block_id"] for batch, _ in failures for reference in batch}
         facts.exclude_blocks(excluded)
-        for batch, error in failures:
-            report_content_omission(
-                "facts", error.reason, [reference["block_id"] for reference in batch]
-            )
+        for batch, reason in failures:
+            report_content_omission("facts", reason, [reference["block_id"] for reference in batch])
     if not facts and not failures:
         from openkb.compilation_report import report_content_omission
 

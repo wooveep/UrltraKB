@@ -72,6 +72,13 @@ uses the existing process/owner lease and never deletes a live owner or persiste
 The bounded task scheduler serializes work in one KB, including reparses and attachments;
 its task family shares cumulative request, token and model-time reservations across retries.
 
+Ordinary failed batches retain only their omission reason and source references. Keeping
+an exception would also keep its traceback frames and completed request bodies alive.
+Validated source positions are rendered with each contribution before capacity checking
+and semantic review. Enclosing-document and attachment positions remain distinct. These
+positions preserve navigational context; they do not assert applicability or authorize
+publication without the existing semantic and dependency decisions.
+
 A parent DOCX retains and validates document attachment containers, then admits independent
 child tasks. It does not execute child parsing or OCR inside its own parser. Child quality
 diagnostics belong to that child source; a document attachment is not an unrecognized

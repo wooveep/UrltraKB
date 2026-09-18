@@ -13,6 +13,45 @@ from tests.http_model_fixture import evidence_response
 from tests.test_generation_scopes import payload
 
 
+@pytest.mark.parametrize("verdict", ["supported", "unsupported", "uncertain"])
+def test_original_position_is_reviewed_and_cannot_override_semantic_rejection(
+    kb_dir, tmp_path, model_service, verdict
+):
+    source = tmp_path / "scoped.md"
+    source.write_text("# Standby node\n\n## Reinstallation\n\nRestart the local service.")
+    reviewed = []
+
+    def respond(body):
+        request = json.loads(body["messages"][-1]["content"])
+        result = evidence_response(request)
+        if request["stage"] == "facts":
+            for unit, row in zip(request["units"], result["units"], strict=True):
+                if unit["kind"] == "heading":
+                    row.update(facts=[], empty_reason="Organization")
+        elif request["stage"] == "generation":
+            result["content"] = "Restart the local service."
+        elif request["stage"] == "verification":
+            reviewed.append(request["content"].removeprefix("# " + request["title"] + "\n\n"))
+            return {"verdict": verdict, "reason": "Controlled semantic decision."}
+        return result
+
+    model_service.respond = respond
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed"
+    assert len(reviewed) == 1
+    assert "Standby node › Reinstallation" in reviewed[0]
+    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
+    if verdict == "supported":
+        assert len(pages) == 1 and reviewed[0] in pages[0].read_text()
+    else:
+        assert not pages
+        assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
+    before = len(model_service)
+    resumed = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+    assert resumed.knowledge_compilation == "completed"
+    assert len(model_service) == before
+
+
 @pytest.mark.parametrize("kind", ["coverage", "uncertainty", "presentation"])
 def test_advisory_publishes_without_repair_and_preserves_coverage_on_reuse(
     kb_dir, tmp_path, model_service, kind

@@ -8,6 +8,13 @@ from openkb.sources import content_id, read_object, valid_id
 # This deployed implementation has the same extraction contract; only recovery changed.
 PREVIOUS_CACHE = "44430bf332be4dddc1dc276ce8009ca9d43b79de39c8288a8986995725e0fed5"
 
+# Deployed strict extractor before terminal failures stopped retaining traceback
+# bodies. Its successful extraction/validation semantics and full inputs are unchanged.
+PRE_FAILURE_BODY_RELEASE = {
+    "evidence_facts": "22cadb83914ee02d711446f3efe5af4539d4ba0cc49bdc6a71c4ed935f8d3b9b",
+    "fact_resume": "ae074ff389cf74dc08e76320ea2bbfed876f5929c28db9406c26d46a87c65f48",
+}
+
 
 # Exact deployed revisions before resource storage and semantic batching changed.
 # Adoption still requires identical full units, quotes, settings and source identity.
@@ -28,6 +35,12 @@ def _compatible(cache, key, contract):
     expected = cp._key_record(cache.system, contract["payload"])
     expected["input"] = {**cp.input, "parse": contract["input"]["parse"]}
     if expected == contract:
+        return "current"
+    preceding = {
+        **expected,
+        "stage_implementation": {**expected["stage_implementation"], **PRE_FAILURE_BODY_RELEASE},
+    }
+    if preceding == contract:
         return "current"
     expected["stage_implementation"].update(PRE_RESOURCE_MODULES)
     expected["stage_implementation"].pop("semantic_spans", None)

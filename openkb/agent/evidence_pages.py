@@ -16,6 +16,7 @@ from openkb.agent.evidence_generation_protocol import (
     generation_payload,
     messages,
     normalize_output,
+    representative_content,
     representative_output,
 )
 from openkb.agent.evidence_retry import (
@@ -143,8 +144,16 @@ def _evidence_windows(fact, reader, base, limits, model):
             }
         )
     if context := base.get("_operation_context"):
+        heading_refs = {
+            item["reference"]["block_id"] for item in neighbors if item["relation"] == "heading"
+        }
         complete = [
-            {key: value for key, value in item.items() if key != "kind"}
+            {
+                **{key: value for key, value in item.items() if key != "kind"},
+                "relation": "heading"
+                if item["reference"]["block_id"] in heading_refs
+                else item["relation"],
+            }
             for item in context.read(fact["scope"])
         ]
         blocks = {item["reference"]["block_id"] for item in complete}
@@ -215,7 +224,6 @@ def _model_facts(facts):
 def _generation_fits(base, facts, evidence, limits, model):
     from openkb.agent.evidence_verifier import verification_payload, verification_system
 
-    content = "\n\n".join(item["text"] for item in evidence)
     projected = _model_facts(facts)
     payload = generation_payload(base, projected, evidence)
     projected = payload["facts"]
@@ -223,11 +231,7 @@ def _generation_fits(base, facts, evidence, limits, model):
     review_system = verification_system(title_context)
     representative = representative_output(payload)
     bindings = fragment_bindings(representative)
-    if bindings:
-        content = "\n\n".join(
-            "## " + fragment["heading"] + "\n\n" + fragment["content"]
-            for fragment in representative["fragments"]
-        )
+    content = representative_content(representative, payload)
     # Plan the entire sequence with a lossless candidate and representative
     # review feedback. Unexpected provider expansion is still checked against
     # the actual request budget; it never authorizes a larger request.

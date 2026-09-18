@@ -264,7 +264,7 @@ def plan_topics(
             on_event=on_event,
             checkpoints=checkpoints,
             recovery_key=recovery_key,
-            on_unrecoverable=lambda batch, error: failures.append((batch, error)),
+            on_unrecoverable=lambda batch, error: failures.append((tuple(batch), error.reason)),
         ):
             groups.extend(result)
         return groups
@@ -336,10 +336,8 @@ def plan_topics(
         from openkb.compilation_report import report_content_omission
         from openkb.sources import content_id
 
-        for batch, error in failures:
-            report_content_omission(
-                "planning", error.reason, [content_id(topic) for topic in batch]
-            )
+        for batch, reason in failures:
+            report_content_omission("planning", reason, [content_id(topic) for topic in batch])
     groups = list(planned.values())
     # Keep completed members even when another planning window was omitted.
     # A partial plan is valid workflow progress, never complete topic coverage.

@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import dataclass
 
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.pageindex_store import indexed_reader
 from openkb.processing import ProcessingIncomplete, RequestLimits
 from openkb.progress import progress_scope
+
+
+@dataclass(frozen=True)
+class GenerationOmission:
+    """A completed failure must not retain traceback frames containing model bodies."""
+
+    reason: str
 
 
 def compile_evidence(
@@ -160,7 +168,7 @@ def compile_evidence(
                     "topic_evidence_exceeds_request_budget",
                 }:
                     raise
-                return group, exc
+                return group, GenerationOmission(exc.reason)
 
         from openkb.agent.review_batching import review_batching
 
@@ -168,8 +176,8 @@ def compile_evidence(
             for _, (group, content) in parallel_batches(
                 groups, generate, generation_concurrency, stage="generation"
             ):
-                if isinstance(content, ProcessingIncomplete):
-                    failures.append((group, content))
+                if isinstance(content, GenerationOmission):
+                    failures.append((group["path"], content.reason))
                     on_event(
                         {
                             "stage": "generation",
@@ -185,8 +193,8 @@ def compile_evidence(
         if failures:
             from openkb.compilation_report import report_content_omission
 
-            for group, error in failures:
-                report_content_omission("generation", error.reason, [group["path"]])
+            for path, reason in failures:
+                report_content_omission("generation", reason, [path])
         from openkb.agent.evidence_dependencies import protect_dependencies
 
         accepted = protect_dependencies(
