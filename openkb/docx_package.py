@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import io
 import posixpath
+import re
 from dataclasses import dataclass
-from xml.etree.ElementTree import Element, ParseError, tostring
+from xml.etree.ElementTree import Element, ParseError, SubElement, tostring
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from defusedxml import ElementTree as xml
@@ -189,6 +190,7 @@ def prepare_docx(
                         )
                         replace_object(node, filename_text(fallback_name))
                         changed_part = True
+            changed_part = _inline_vml_pictures(tree, relationships) or changed_part
             # VML style/path properties only become advisory when their complete
             # image representation is present. Uncovered vector shapes still block.
             for shape in tree.iter(V + "shape"):
@@ -214,3 +216,115 @@ def prepare_docx(
                 output.writestr(entry.filename, value)
     stream.seek(0)
     return PreparedDocx(stream, attachments, icons, quality)
+
+
+def _inline_vml_pictures(tree, relationships):
+    """Keep simple raster occurrences inside their owning OOXML paragraph.
+
+    Mammoth emits w:pict as paragraph extras, losing its position even when the
+    XML proves it is inline. Normalize only this unambiguous subset in the
+    private input copy. Mixed textboxes, unknown transforms and floating shapes
+    retain the existing unresolved-position path; no nearby paragraph is guessed.
+    """
+    wp = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
+    a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    pic = "{http://schemas.openxmlformats.org/drawingml/2006/picture}"
+    parents = {child: parent for parent in tree.iter() for child in parent}
+    declared_types = {"#" + node.get("id", "") for node in tree.iter(V + "shapetype")}
+    changed = False
+    for picture in list(tree.iter(W + "pict")):
+        run = parents.get(picture)
+        paragraph = parents.get(run)
+        if run is None or paragraph is None or run.tag != W + "r" or paragraph.tag != W + "p":
+            continue
+        images = []
+        for shape in picture:
+            if shape.get("type") in declared_types:
+                break  # A named picture frame can still inherit custom geometry.
+            image = _simple_inline_vml(shape, relationships)
+            if image is None:
+                break
+            images.append(image)
+        if not images or len(images) != len(picture):
+            continue
+        position = list(run).index(picture)
+        for offset, image in enumerate(images):
+            drawing = Element(W + "drawing")
+            inline = SubElement(drawing, wp + "inline")
+            properties = {"id": str(offset + 1), "name": ""}
+            if OFFICE + "title" in image.attrib:
+                properties["title"] = image.get(OFFICE + "title")
+            SubElement(inline, wp + "docPr", properties)
+            graphic = SubElement(inline, a + "graphic")
+            data = SubElement(graphic, a + "graphicData")
+            raster = SubElement(data, pic + "pic")
+            fill = SubElement(raster, pic + "blipFill")
+            SubElement(fill, a + "blip", {R + "embed": image.get(R + "id")})
+            if offset == len(images) - 1:
+                drawing.tail = picture.tail
+            run.insert(position + offset, drawing)
+        run.remove(picture)
+        changed = True
+    return changed
+
+
+def _simple_inline_vml(shape, relationships):
+    word = "{urn:schemas-microsoft-com:office:word}"
+    image = shape.find(V + "imagedata")
+    relationship = relationships.get(image.get(R + "id")) if image is not None else None
+    allowed = {
+        "id",
+        "type",
+        "style",
+        "filled",
+        "stroked",
+        "coordsize",
+        OFFICE + "spt",
+        OFFICE + "preferrelative",
+    }
+    if (
+        shape.tag != V + "shape"
+        or image is None
+        or len(shape.findall(V + "imagedata")) != 1
+        or relationship is None
+        or relationship.get("TargetMode", "Internal") != "Internal"
+        or not relationship.get("Type", "").endswith("/image")
+        or set(image.attrib) - {R + "id", OFFICE + "title"}
+        or set(shape.attrib) - allowed
+        or shape.get("type", "#_x0000_t75") != "#_x0000_t75"
+        or shape.get(OFFICE + "spt", "75") != "75"
+        or shape.get("filled", "f") not in {"f", "false"}
+        or shape.get("stroked", "f") not in {"f", "false"}
+        or (shape.text or "").strip()
+        or any(
+            not re.fullmatch(
+                r"(?:height|width)\s*:\s*[0-9]+(?:\.[0-9]+)?(?:pt|px|in|cm|mm)?",
+                value.strip(),
+                re.IGNORECASE,
+            )
+            for value in shape.get("style", "").split(";")
+            if value.strip()
+        )
+    ):
+        return None
+    for node in shape:
+        if (
+            node.tag
+            not in {
+                V + "imagedata",
+                V + "path",
+                V + "fill",
+                V + "stroke",
+                OFFICE + "lock",
+                word + "wrap",
+                word + "anchorlock",
+            }
+            or len(node)
+            or (node.tag == V + "path" and node.attrib)
+            or (node.tag in {V + "fill", V + "stroke"} and node.get("on") != "f")
+            or (node.tag == word + "wrap" and node.get("type") != "none")
+            or (node.text or "").strip()
+            or (node.tail or "").strip()
+        ):
+            return None
+    return image

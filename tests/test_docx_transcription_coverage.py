@@ -147,7 +147,7 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
     assert any("9473" in str(request["messages"][-1]["content"]) for request in model_service), (
         "Successful OCR text must reach knowledge compilation"
     )
-    if image_kind == "vml":
+    if image_kind == "vml" and not only_images:
         positions = [
             row["location"]
             for row in result.coverage["ranges"]

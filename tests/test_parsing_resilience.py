@@ -199,8 +199,8 @@ def test_detached_missing_images_keep_the_count_without_inheriting_an_unlocated_
         "<w:p><w:r><w:t>Retained instructions.</w:t>"
         '<w:pict xmlns:v="urn:schemas-microsoft-com:vml" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<v:shape><v:imagedata r:id="first"/></v:shape>'
-        '<v:shape><v:imagedata r:id="second"/></v:shape>'
+        '<v:shape style="position:absolute"><v:imagedata r:id="first"/></v:shape>'
+        '<v:shape style="position:absolute"><v:imagedata r:id="second"/></v:shape>'
         "</w:pict></w:r></w:p>",
         relationships="".join(
             f'<Relationship Id="{name}" '
