@@ -68,6 +68,53 @@ def document_name(attachment: Attachment) -> str | None:
     return name if PurePosixPath(name).suffix.lower() in SUPPORTED_EXTENSIONS else None
 
 
+def validate_container(attachment, name, budget, depth):
+    """Reject broken document containers without parsing their content or doing OCR."""
+    from defusedxml import ElementTree as xml
+
+    from openkb.docx_containers import read_member
+    from openkb.resource_budget import check_memory
+
+    check_memory(len(attachment.content) * 4, stage="parsing")
+    suffix = PurePosixPath(name).suffix.lower()
+    main = {
+        ".docx": "word/document.xml",
+        ".pptx": "ppt/presentation.xml",
+        ".xlsx": "xl/workbook.xml",
+    }
+    if suffix in main:
+        with ZipFile(io.BytesIO(attachment.content)) as archive:
+            for member in ("[Content_Types].xml", "_rels/.rels", main[suffix]):
+                check_memory(archive.getinfo(member).file_size * 8, stage="parsing")
+                xml.fromstring(read_member(archive, member, budget, depth), forbid_dtd=True)
+    elif suffix == ".pdf":
+        import pymupdf
+
+        try:
+            with pymupdf.open(stream=attachment.content, filetype="pdf") as document:
+                if document.is_encrypted or not document.page_count:
+                    raise ValueError("docx_attachment_unreadable_pdf")
+        except pymupdf.FileDataError as exc:
+            raise ValueError("docx_attachment_invalid_pdf") from exc
+    elif suffix == ".xls":
+        if not attachment.content.startswith(bytes.fromhex("d0cf11e0a1b11ae1")):
+            raise ValueError("docx_attachment_invalid_workbook")
+    else:
+        decode_text(attachment.content)
+
+
+def attachment_depth(store, source):
+    """Retain the nesting limit when each child is parsed by a separate worker."""
+    seen, depth = set(), 0
+    while source.origin.startswith("attachment:"):
+        if source.source_id in seen:
+            raise ValueError("docx_attachment_cycle")
+        seen.add(source.source_id)
+        source = store.current(source.origin.removeprefix("attachment:").split("/", 1)[0])
+        depth += 1
+    return depth
+
+
 def _bind_location(location, attachment, position):
     return {
         **position,
@@ -123,7 +170,6 @@ def parse_attachment(
     options=None,
     resume_ocr=False,
 ):
-    from openkb.parsing import parse_document
     from openkb.parsing_docx import parse_docx
 
     name = document_name(attachment)
@@ -133,28 +179,9 @@ def parse_attachment(
         ]
     budget.admit(0, depth)
     if source is not None:
-        child = store.intake_attachment(
-            source, part=attachment.part, name=name, content=attachment.content
-        )
-        parsed = parse_document(
-            store.kb_dir,
-            child,
-            options=options,
-            _budget=budget,
-            _depth=depth,
-            resume_ocr=resume_ocr,
-        )
-        return [
-            BlockDraft(
-                store.asset(b.blob).read_text(encoding="utf-8"),
-                b.kind,
-                b.location,
-                b.assets,
-                b.context,
-                b.context_data,
-            )
-            for b in parsed.blocks
-        ], parsed.quality
+        store.intake_attachment(source, part=attachment.part, name=name, content=attachment.content)
+        # The independently admitted child owns parsing, OCR and its diagnostics.
+        return [], []
     # Direct parser callers still receive document contents; only the application
     # entry point owns an immutable parent identity for importing child sources.
     path = store.asset(attachment.blob)

@@ -81,6 +81,13 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text=None, r
                     )
                     continue
                 if isinstance(ocr, ImageOcrSession) and ocr.skip_optional():
+                    quality.append(
+                        {
+                            "status": "verified",
+                            "reason": f"docx_image_ocr_notice:{original}:"
+                            f"frame_{index + 1}:{ocr.state.reason}",
+                        }
+                    )
                     continue
                 with pymupdf.open() as document:
                     page = document.new_page(width=image.width, height=image.height)
@@ -105,6 +112,13 @@ def read_image(content: bytes, store: SourceStore, ocr=None, *, alt_text=None, r
                         previous_context = block.context
                     text += "\n" + block.text
                 if reason == "ocr_optional_image_skipped" and isinstance(ocr, ImageOcrSession):
+                    quality.append(
+                        {
+                            "status": "verified",
+                            "reason": f"docx_image_ocr_notice:{original}:"
+                            f"frame_{index + 1}:{ocr.state.reason}",
+                        }
+                    )
                     continue
                 if reason or not any(transcribed_text(block.text) for block in blocks):
                     quality.append(

@@ -23,8 +23,9 @@ def test_parent_body_retains_attachment_name_without_child_contents(kb_dir, tmp_
     assert "Child-only recovery port 9473." not in text
     assert "Embedded attachment:" not in text
     child_source = next(row for row in store.list_sources() if row.id != source.id)
-    child_parse = ParseStore(kb_dir).selected(child_source)
-    assert child_parse is not None
+    assert ParseStore(kb_dir).selected(child_source) is None
+    assert not any("docx_attachment:" in row["reason"] for row in parsed.quality)
+    child_parse = parse_document(kb_dir, child_source)
     assert "Child-only recovery port 9473." in "\n".join(
         store.asset(block.blob).read_text() for block in child_parse.blocks
     )
@@ -335,3 +336,74 @@ def test_attachment_binding_failure_precedes_parent_publication(
     assert result.source_intake == "saved"
     assert not list((kb_dir / "wiki").rglob("*.md"))
     assert not model_service, "Binding must finish before model work or publication"
+
+
+def test_child_image_failure_is_owned_by_its_independent_parse(kb_dir, tmp_path):
+    from openkb.agent.dependency_preflight import known_omissions
+    from tests.docx_attachment_fixtures import docx_with_parts
+
+    child = docx_with_parts(
+        tmp_path / "child.docx",
+        "<w:p><w:r><w:t>Read child illustration.</w:t><w:pict "
+        'xmlns:v="urn:schemas-microsoft-com:vml" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<v:shape><v:imagedata r:id="missing"/></v:shape></w:pict></w:r></w:p>',
+        relationships='<Relationship Id="missing" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+        'Target="media/missing.png"/>',
+    )
+    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
+    store = SourceStore(kb_dir)
+    with prepared_input(parent) as ready:
+        source = store.intake(ready)
+    parsed = parse_document(kb_dir, source)
+    child_source = next(row for row in store.list_sources() if row.id != source.id)
+    assert ParseStore(kb_dir).selected(child_source) is None
+    assert not known_omissions(parsed), "A document attachment is not a pending image"
+    child_parse = parse_document(kb_dir, child_source)
+    assert any(row["reason"] == "docx_image_asset_missing" for row in child_parse.quality)
+    assert not any("docx_image_asset_missing" in row["reason"] for row in parsed.quality)
+
+
+@pytest.mark.parametrize("suffix,payload", [(".docx", b"broken zip"), (".pdf", b"broken pdf")])
+def test_broken_named_document_is_only_a_filename(kb_dir, tmp_path, suffix, payload):
+    parent = attached_docx(tmp_path / "parent.docx", payload * 600, name="broken" + suffix)
+    store = SourceStore(kb_dir)
+    with prepared_input(parent) as ready:
+        source = store.intake(ready)
+    parsed = parse_document(kb_dir, source)
+    assert len(store.list_sources()) == 1
+    assert not any(block.assets for block in parsed.blocks)
+    assert "broken" + suffix in "".join(store.asset(b.blob).read_text() for b in parsed.blocks)
+
+
+def test_independent_child_parse_keeps_parent_nesting_depth(kb_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr("openkb.docx_containers.MAX_EMBEDDED_DEPTH", 1)
+    middle = attached_docx(tmp_path / "middle.docx", b"Nested content.\n" * 300, name="leaf.txt")
+    parent = attached_docx(tmp_path / "parent.docx", middle.read_bytes())
+    store = SourceStore(kb_dir)
+    with prepared_input(parent) as ready:
+        source = store.intake(ready)
+    parse_document(kb_dir, source)
+    child = next(row for row in store.list_sources() if row.id != source.id)
+    child_parse = parse_document(kb_dir, child)
+    assert len(store.list_sources()) == 2
+    assert any(row["reason"] == "docx_attachment_depth_exceeded" for row in child_parse.quality)
+
+
+def test_document_attachment_alone_is_not_incomplete_image_coverage(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.application.documents import import_document
+
+    child = tmp_path / "child.docx"
+    write_docx(child, "<w:p><w:r><w:t>Child recovery details.</w:t></w:r></w:p>")
+    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
+    result = import_document(kb_dir, parent)
+    assert result.knowledge_compilation == "completed"
+    assert result.coverage["assets"]
+    assert all(
+        row["transcription"] == row["understanding"] == "not_required"
+        for row in result.coverage["assets"]
+    )
+    assert result.coverage["status"] == "complete"

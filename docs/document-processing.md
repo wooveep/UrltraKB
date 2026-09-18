@@ -631,9 +631,13 @@ filenames. Generic archives are not recursively expanded. Literal filenames in
 supported Word attachment icons are read locally; when the displayed name cannot be
 recovered, the embedded filename is used. Other object handling remains unchanged.
 
-Attachment classification still parses supported child documents under the parent's
-existing parsing limits and OCR policy, retaining reusable child parse artifacts.
-The independent import then reuses those artifacts. Repeated parent imports reuse
+Attachment classification validates the container and retains the child original without
+running its parser or OCR. The independent child import owns that work and its quality
+diagnostics; a child failure is not a missing paragraph or image in the parent.
+Container XML is checked against the memory allowance before decompression and tree
+construction. Separate child workers retain the source ancestry depth limit and share
+the task family's cumulative expansion bytes and file count. Existing valid child parsing
+and OCR artifacts remain reusable. Repeated parent imports reuse
 the existing child task for the same parent version and attachment version within
 task history; they do not automatically retry failed or stopped children. A changed
 parent version can queue a fresh child task even if the attachment bytes are unchanged.
@@ -641,7 +645,10 @@ Use the child source's Continue
 action to retry it. Opening task history never starts work. Stopping an active parent
 also stops children owned by it, and the CLI waits for all related imports before
 exiting. A child's failure does not change a completed parent's result. Existing
-imports need an explicit reparse to adopt the new body/attachment separation.
+imports need an explicit reparse to adopt DOCX v17 attachment parsing; continuing an
+older parse preserves its original identity and diagnostics. Each skipped image frame
+keeps its own diagnostic at the known source position. Floating image ownership remains
+unknown and still requires conservative document-wide dependency review.
 
 DOCX pictures are retained. OCR is selective and advisory: small icons, narrow
 toolbars (short edge at most 48 pixels), images whose long edge is below 160 pixels,

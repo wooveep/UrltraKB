@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from openkb.compilation_report import collect_compile_report, report_content_omission
 from openkb.processing import InputTooLarge, RequestLimits, processing_checkpoint
+from openkb.sources import content_id
 
 
 def known_omissions(parsed):
@@ -11,16 +12,28 @@ def known_omissions(parsed):
 
     with collect_compile_report() as report:
         omissions = list(report.omissions)
-    omissions += [{"stage": "parsing", **row} for row in parsing_gaps(parsed)]
+    locations = {}
+    for block in parsed.blocks:
+        locations.setdefault(content_id(block.location), []).append(block.id)
+    for row in parsing_gaps(parsed):
+        located = locations.get(content_id(row["location"]), []) if "location" in row else []
+        omissions.extend(
+            [{"stage": "parsing", **row, "block": bid} for bid in located]
+            if located and not row.get("block")
+            else [{"stage": "parsing", **row}]
+        )
     omissions += [
         {
             "stage": "image_understanding",
             "block": block.id,
             "reason": "original_image_retained_understanding_pending",
-            "assets": list(block.assets),
+            "assets": sorted(assets),
         }
         for block in parsed.blocks
-        if block.assets
+        if (
+            assets := set(block.assets)
+            - {item["blob"] for item in block.location.get("attachment_files", [])}
+        )
     ]
     return omissions
 

@@ -44,8 +44,8 @@ def test_embedded_docx_keeps_independent_content_and_parent_position(kb_dir, tmp
     child_source = next(s for s in sources if s.id != version.id)
     assert child_source.origin.startswith("attachment:" + version.source_id + "/")
     assert child_source.suffix == ".docx"
-    child_parse = ParseStore(kb_dir).selected(child_source)
-    assert child_parse is not None
+    assert ParseStore(kb_dir).selected(child_source) is None
+    child_parse = parse_document(kb_dir, child_source)
     child_contents = [
         store.read(
             Evidence(child_source.source_id, child_source.id, child_parse.id, block.id),
@@ -78,6 +78,8 @@ def test_embedded_documents_materialize_as_documents_and_have_parse_status(kb_di
     assert (output.parent / "attachments" / f"{imported.blob}.docx").read_bytes() == store.original(
         imported
     ).read_bytes()
+    assert ParseStore(kb_dir).selected(imported) is None
+    parse_document(kb_dir, imported)
     status = source_status(kb_dir, imported.source_id)
     assert status["result"]["stage"] == "parsed"
     assert status["result"]["knowledge_compilation"] == "not_started"

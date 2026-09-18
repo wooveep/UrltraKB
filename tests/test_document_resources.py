@@ -139,3 +139,32 @@ def test_new_continue_task_keeps_the_original_family_allowance(kb_dir, tmp_path,
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_compressed_office_xml_is_checked_before_expansion(
+    kb_dir, tmp_path, monkeypatch, model_service, embedded
+):
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    from openkb import resource_budget
+    from tests.document_fixtures import write_docx
+    from tests.docx_attachment_fixtures import attached_docx
+
+    monkeypatch.setattr(
+        resource_budget,
+        "memory_sample",
+        lambda: {"available": 128 * 1024**2, "resident": 16 * 1024**2, "private": None},
+    )
+    child = tmp_path / "large.docx"
+    write_docx(child, "<w:p><w:r><w:t>" + "x" * (8 * 1024**2) + "</w:t></w:r></w:p>")
+    with ZipFile(child) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    with ZipFile(child, "w", compression=ZIP_DEFLATED) as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data)
+    original = attached_docx(tmp_path / "parent.docx", child.read_bytes()) if embedded else child
+    result = import_document(kb_dir, original)
+    assert result.reason == "resource_memory_insufficient"
+    assert result.source_intake == "saved" and result.input_version
+    assert not model_service

@@ -47,7 +47,11 @@ def _family(store, source, parsed, settings, retries, overrides):
 
 def has_resumable_jobs(store, source, parsed, settings, retries, overrides):
     """Respect current per-page choices and retry identities without sending requests."""
-    family = _family(store, source, parsed, settings, retries, overrides)
+    family = (
+        {source.id: (retries, overrides)}
+        if parsed.profile.get("docx") == "openkb-docx-v17-independent-attachment-parsing"
+        else _family(store, source, parsed, settings, retries, overrides)
+    )
     for path in store.owned_path(store.root / "cloud-jobs").glob("*.json"):
         processing_checkpoint("parsing")
         record = read_object(store.owned_path(path))

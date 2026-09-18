@@ -48,6 +48,9 @@ def parse_docx(
     progress = None
 
     def locate_missing_images(start, location):
+        for row in quality[start:]:
+            if row["reason"].startswith("docx_image_"):
+                row.setdefault("location", location)
         missing = [row for row in quality[start:] if row["reason"] == "docx_image_asset_missing"]
         if missing:
             quality[start:] = [row for row in quality[start:] if row not in missing]
@@ -367,8 +370,8 @@ def parse_docx(
             convert_image=mammoth.images.img_element(image_source),
             external_file_access=False,
         )
-        if image_ocr is not None:
-            quality.extend(image_ocr.notices())
+        # Each skipped frame retains its own paragraph/image diagnostic above;
+        # a location-free total would incorrectly turn these into a global gap.
     if not blocks:
         quality.append({"status": "needs_review", "reason": "empty_content"})
     for message in result.messages:

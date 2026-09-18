@@ -72,6 +72,15 @@ uses the existing process/owner lease and never deletes a live owner or persiste
 The bounded task scheduler serializes work in one KB, including reparses and attachments;
 its task family shares cumulative request, token and model-time reservations across retries.
 
+A parent DOCX retains and validates document attachment containers, then admits independent
+child tasks. It does not execute child parsing or OCR inside its own parser. Child quality
+diagnostics belong to that child source; a document attachment is not an unrecognized
+parent image. Source ancestry and durable family expansion counters preserve the existing
+depth, byte and file limits across worker boundaries. DOCX v17 makes this an explicit new
+parse; older parse identities and citations remain unchanged. Precise image positions can
+locate omissions, while a known image asset with unknown original ownership still requires
+document-wide review.
+
 Removing a source withdraws its explicitly delimited contribution inside the same Wiki
 mutation transaction. Both the current publication baseline and the source’s own completed
 proposal must authorize ownership; accepting another source’s link cleanup cannot transfer

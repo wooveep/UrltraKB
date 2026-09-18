@@ -73,3 +73,19 @@ def test_recompilation_joins_original_allowance(kb_dir, tmp_path, model_service)
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
+
+
+def test_separate_child_parsers_share_expansion_allowance(tmp_path, monkeypatch):
+    from openkb.docx_containers import ExpansionBudget
+    from openkb.processing import ProcessingIncomplete
+    from openkb.runtime.family_budget import bind_family, family_scope
+
+    monkeypatch.setattr("openkb.docx_containers.MAX_EXPANDED_BYTES", 10)
+    receipts = tmp_path / "receipts"
+    bind_family(receipts, "a" * 32)
+    with family_scope(receipts, "a" * 32):
+        ExpansionBudget().admit(6, 0)
+    bind_family(receipts, "b" * 32, related="a" * 32)
+    with family_scope(receipts, "b" * 32):
+        with pytest.raises(ProcessingIncomplete, match="document_expansion_budget_exhausted"):
+            ExpansionBudget().admit(6, 1)

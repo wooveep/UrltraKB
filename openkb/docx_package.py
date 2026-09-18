@@ -140,12 +140,14 @@ def prepare_docx(
             changed_part = False
             for index, node in enumerate(list(tree.iter(OFFICE + "OLEObject")), 1):
                 member = None
+                display_name = None
                 try:
                     if node.get("Type") != "Embed":
                         raise ValueError("docx_linked_object_has_no_content")
                     member = internal(node.get(R + "id"))
                     container = read_member(archive, member, budget, depth + 1)
                     name, content = unpack_ole(container)
+                    display_name = name if name != "embedded.docx" else None
                     budget.admit(len(content), depth + 1)
                     original = hashlib.sha256(container).hexdigest()
                     blob = hashlib.sha256(content).hexdigest()
@@ -162,6 +164,9 @@ def prepare_docx(
                         ):
                             attachment = Attachment(member, label, content, original, blob)
                     if recognized_name is not None:
+                        from openkb.docx_attachments import validate_container
+
+                        validate_container(attachment, recognized_name, budget, depth + 1)
                         store.put_bytes(container)
                         store.put_bytes(content)
                     marker = "[openkb-attachment-" + content_id([part, index, original]) + "]"
@@ -171,14 +176,16 @@ def prepare_docx(
                     icon_label(node)
                     replace_object(node, marker)
                     changed_part = True
-                except (ValueError, KeyError, BadZipFile) as exc:
+                except (ValueError, KeyError, BadZipFile, ParseError, DefusedXmlException) as exc:
                     reason = str(exc) if str(exc).startswith("docx_") else "docx_attachment_missing"
                     quality.append({"status": "needs_review", "reason": reason})
                     if node.get("Type") == "Embed":
                         from openkb.attachments import filename_text
 
-                        fallback_name = icon_label(node) or (
-                            posixpath.basename(member) if member else "未命名附件"
+                        fallback_name = (
+                            icon_label(node)
+                            or display_name
+                            or (posixpath.basename(member) if member else "未命名附件")
                         )
                         replace_object(node, filename_text(fallback_name))
                         changed_part = True

@@ -12,13 +12,13 @@ DISK_RESERVE = 1024**3
 CONTRACT_BYTES = 256 * 1024**2
 
 
-def check_parser(path):
+def check_parser(path, *, suffix=None):
     from zipfile import BadZipFile, ZipFile
 
     from openkb.resource_budget import check_memory
 
     estimated = path.stat().st_size * 4
-    if path.suffix.lower() in {".docx", ".pptx", ".xlsx"}:
+    if (suffix or path.suffix).lower() in {".docx", ".pptx", ".xlsx"}:
         try:
             with ZipFile(path) as archive:
                 # XML object graphs and decompression buffers coexist briefly.

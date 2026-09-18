@@ -87,3 +87,12 @@ def ocr_counter(path):
     number(value["pages"], integer=True)
     number(value["limit"], integer=True, positive=True)
     return value
+
+
+def expansion_counter(path):
+    value = read_object(path)
+    if set(value) != {"bytes", "files"}:
+        raise ValueError("Invalid task family expansion counters")
+    for count in value.values():
+        number(count, integer=True)
+    return value

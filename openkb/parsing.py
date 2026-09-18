@@ -48,13 +48,17 @@ def parse_document(
         profile["xlsx"] = "openkb-xlsx-v2-row-relations"
         profile["openpyxl"] = package_version("openpyxl")
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v16-image-resolution-inline-roles"
+        profile["docx"] = "openkb-docx-v17-independent-attachment-parsing"
     if source.suffix == ".pdf":
         profile["pdf"] = "openkb-pdf-v6-image-resolution"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
         profile["text"] = "openkb-text-v3-heading-markers"
     store = ParseStore(kb_dir)
     originals = SourceStore(kb_dir)
+    if _budget is None and source.origin.startswith("attachment:"):
+        from openkb.docx_attachments import attachment_depth
+
+        _depth = max(_depth, attachment_depth(originals, source))
     retries, overrides = effective_attempts(originals, source, selected.ocr, page_overrides)
     if retries:
         profile["reprocessing"] = {str(page): attempt for page, attempt in retries.items()}
@@ -87,7 +91,7 @@ def parse_document(
     processing_checkpoint("parsing")
     from openkb.resource_checks import check_parser
 
-    check_parser(path)
+    check_parser(path, suffix=source.suffix)
     if source.suffix == ".pdf":
         from openkb.parsing_pdf import parse_pdf
 

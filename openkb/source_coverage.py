@@ -164,17 +164,22 @@ def source_coverage(source, parsed, report, *, published=False):
         if cursor < block.chars or not block.chars:
             append(cursor, block.chars, "pending", "analysis_pending")
         for digest in block.assets:
+            attachment = any(
+                item["blob"] == digest for item in block.location.get("attachment_files", [])
+            )
             entry = assets.setdefault(
                 digest,
                 {
                     "id": digest,
                     "blocks": [],
                     "original": "retained",
-                    "transcription": "pending",
-                    "understanding": "pending",
+                    "transcription": "not_required" if attachment else "pending",
+                    "understanding": "not_required" if attachment else "pending",
                 },
             )
             entry["blocks"].append(block.id)
+            if not attachment and entry["understanding"] == "not_required":
+                entry.update(transcription="pending", understanding="pending")
             # Transcription is separate from understanding the figure's relationships.
             if digest in transcriptions or (
                 block.context.startswith("OCR layout block")
@@ -194,7 +199,14 @@ def source_coverage(source, parsed, report, *, published=False):
         for note in notes
         if note["kind"] in {"coverage", "uncertainty"}
     )
-    pending = bool(issues) or any(row["status"] == "pending" for row in ranges) or bool(assets)
+    pending = (
+        bool(issues)
+        or any(row["status"] == "pending" for row in ranges)
+        or any(
+            row["transcription"] == "pending" or row["understanding"] == "pending"
+            for row in assets.values()
+        )
+    )
     value = {
         "source_id": source.source_id,
         "version_id": source.id,

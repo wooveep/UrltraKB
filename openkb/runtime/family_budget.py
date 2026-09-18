@@ -87,6 +87,10 @@ class FamilyBudget:
             charged = self.path.exists() and family_state.counters(self.path)["requests"]
             ocr = self.path.with_suffix(".ocr.json")
             charged = charged or (ocr.exists() and family_state.ocr_counter(ocr)["pages"])
+            expansion = self.path.with_suffix(".expansion.json")
+            charged = charged or (
+                expansion.exists() and family_state.expansion_counter(expansion)["files"]
+            )
             if charged:
                 # A mixed task must never abandon an already charged family.
                 raise ProcessingIncomplete("task_family_resume_conflict", "preparing")
@@ -109,6 +113,18 @@ class FamilyBudget:
             family_state.number(proposed, integer=True, positive=True)
             atomic_write_json(path, {"memory_bytes": proposed})
             return proposed
+
+    def expand_document(self, size, max_bytes, max_files):
+        """Count actual container reads across independently parsed descendants."""
+        path = self.path.with_suffix(".expansion.json")
+        with file_write_lock(path.with_suffix(".lock")):
+            value = (
+                family_state.expansion_counter(path) if path.exists() else {"bytes": 0, "files": 0}
+            )
+            family_state.number(size, integer=True)
+            if value["bytes"] + size > max_bytes or value["files"] + 1 > max_files:
+                raise ProcessingIncomplete("document_expansion_budget_exhausted", "parsing")
+            atomic_write_json(path, {"bytes": value["bytes"] + size, "files": value["files"] + 1})
 
     def reserve_ocr_page(self, limit):
         path = self.path.with_suffix(".ocr.json")

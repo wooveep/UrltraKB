@@ -30,6 +30,10 @@ class ExpansionBudget:
         self.files += 1
         if self.bytes > MAX_EXPANDED_BYTES or self.files > MAX_EMBEDDED_FILES:
             raise ValueError("docx_attachment_expansion_exceeded")
+        from openkb.runtime.family_budget import current_family
+
+        if family := current_family():
+            family.expand_document(size, MAX_EXPANDED_BYTES, MAX_EMBEDDED_FILES)
 
 
 def package_path(part: str, target: str) -> str:

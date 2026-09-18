@@ -214,14 +214,14 @@ def test_detached_missing_images_keep_the_count_without_inheriting_an_unlocated_
     sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
     with prepared_input(path) as ready:
         source = sources.intake(ready)
+    parent_parse = parse_document(kb_dir, source)
+    if nested:
+        assert not any("docx_image_asset_missing" in row["reason"] for row in parent_parse.quality)
+        source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
     one = parse_document(kb_dir, source)
     missing = [row for row in one.quality if row["reason"].endswith("docx_image_asset_missing")]
     assert sum(row["count"] for row in missing) == 2
     content = one
-    if nested:
-        child = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
-        content = parses.selected(child)
-        assert content is not None
     assert any(
         "Retained instructions." in sources.asset(b.blob).read_text() for b in content.blocks
     )
@@ -333,16 +333,15 @@ def test_nested_missing_image_decision_uses_omission_position_not_literal_text(k
     sources, parses = SourceStore(kb_dir), ParseStore(kb_dir)
     with prepared_input(path) as ready:
         source = sources.intake(ready)
+    parent_parse = parse_document(kb_dir, source)
+    assert not any("docx_image_asset_missing" in row["reason"] for row in parent_parse.quality)
+    assert parent_parse.blocks[0].location["paragraph"] == 1
+    source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
+    assert parses.selected(source) is None
     one = parse_document(kb_dir, source)
-    missing = [row for row in one.quality if row["reason"].endswith(":docx_image_asset_missing")]
-    assert len(missing) == 1
-    location = missing[0]["location"]
-    assert location["paragraph"] == 1
-    assert location["attachment"]["position"]["paragraph"] == 1
-    child_source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
-    child_parse = parses.selected(child_source)
-    assert child_parse is not None
-    assert any(sources.asset(b.blob).read_text().strip() == literal for b in child_parse.blocks)
+    missing = [row for row in one.quality if row["reason"] == "docx_image_asset_missing"]
+    assert len(missing) == 1 and missing[0]["location"]["paragraph"] == 1
+    assert any(sources.asset(b.blob).read_text().strip() == literal for b in one.blocks)
     parses.accept_missing_images(source, one)
     two = parses.save(
         source,
@@ -514,3 +513,37 @@ def test_paid_ocr_cache_remains_readable_after_the_remote_wait_budget(
         assert requests_seen == ["POST", "GET", "GET"]
     finally:
         jobs.close()
+
+
+@pytest.mark.parametrize("has_cache", [False, True])
+def test_optional_exhaustion_keeps_each_image_frame_diagnostic(kb_dir, has_cache):
+    import io
+
+    from PIL import Image
+
+    from openkb.docx_images import read_image
+    from openkb.ocr.image_session import image_ocr_scope
+    from tests.test_docx_images import _png
+
+    class ExhaustedOcr:
+        calls = 0
+
+        def page(self, *args, **kwargs):
+            self.calls += 1
+            return [], "ocr_page_budget_exhausted"
+
+    backend = ExhaustedOcr()
+    if has_cache:
+        backend.cached_page = lambda *args, **kwargs: None
+    pictures = [Image.open(io.BytesIO(_png(color))) for color in ("white", "black")]
+    output = io.BytesIO()
+    pictures[0].save(output, format="GIF", save_all=True, append_images=pictures[1:])
+    try:
+        with image_ocr_scope(backend) as scope:
+            _, _, quality = read_image(output.getvalue(), SourceStore(kb_dir), scope)
+            assert len(quality) == 2
+            assert all("ocr_page_budget_exhausted" in row["reason"] for row in quality)
+            assert backend.calls == 1
+    finally:
+        for picture in pictures:
+            picture.close()
