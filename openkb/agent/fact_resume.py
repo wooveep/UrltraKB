@@ -30,6 +30,7 @@ def _compatible(cache, key, contract):
     if expected == contract:
         return "current"
     expected["stage_implementation"].update(PRE_RESOURCE_MODULES)
+    expected["stage_implementation"].pop("semantic_spans", None)
     expected["message_format"] = PRE_RESOURCE_MODULES["evidence_units"]
     if expected == contract:
         return "current"

@@ -68,7 +68,6 @@ def _compile_version(
     from openkb.application.documents import DocumentResult
     from openkb.runtime.family_budget import register_source_family
 
-    register_source_family(kb_dir, source)
     bound_settings = publication_settings(settings, bundle)
 
     store = SourceStore(kb_dir)
@@ -79,6 +78,7 @@ def _compile_version(
     stage = "parsing"
     with collect_compile_report() as report:
         try:
+            register_source_family(kb_dir, source)
             with (
                 processing_scope(settings) as budget,
                 journal_source_requests(store, source, budget),

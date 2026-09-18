@@ -231,6 +231,9 @@ def _verify_once(
                 "openkb.agent.evidence_review",
                 "openkb.agent.evidence_generation_protocol",
                 "openkb.agent.evidence_selection",
+                "openkb.agent.review_changes",
+                "openkb.agent.review_batching",
+                "openkb.agent.operation_context",
             ),
         )
         if checkpoints

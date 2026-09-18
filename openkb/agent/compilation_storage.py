@@ -116,20 +116,30 @@ class FactInventory:
     def __init__(self, checkpoints):
         self.rows = checkpoints.private_rows("source_facts")
         self.topics = {}
+        self.routes = {}
 
     def append(self, fact):
         if fact["id"] not in self.rows:
             self.rows[fact["id"]] = fact
             self.topics.setdefault(fact["topic"], []).append(fact["id"])
+            self.routes[fact["id"]] = {
+                key: fact[key]
+                for key in ("id", "topic", "scope", "context_evidence")
+                if key in fact
+            }
 
     def for_topics(self, topics):
         return [self.rows[uid] for topic in topics for uid in self.topics.get(topic, ())]
 
+    def routing_for_topics(self, topics):
+        return [self.routes[uid] for topic in topics for uid in self.topics.get(topic, ())]
+
     def exclude_blocks(self, blocks):
         for uid in self.rows:
-            fact = self.rows[uid]
+            fact = self.routes[uid]
             if fact["scope"]["block_id"] in blocks:
                 del self.rows[uid]
+                del self.routes[uid]
                 self.topics[fact["topic"]].remove(uid)
                 if not self.topics[fact["topic"]]:
                     del self.topics[fact["topic"]]

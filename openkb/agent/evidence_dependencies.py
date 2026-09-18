@@ -126,7 +126,7 @@ def protect_dependencies(
                 "path": group["path"],
                 "content": content,
                 "facts": (
-                    facts.for_topics(group["members"])
+                    facts.routing_for_topics(group["members"])
                     if stored
                     else [fact for fact in facts if fact["topic"] in group["members"]]
                 ),
@@ -136,7 +136,8 @@ def protect_dependencies(
     }
     from openkb.agent.dependency_scope import review_scopes
 
-    scopes = review_scopes(original, omissions, payload["candidates"], facts, groups)
+    routing = facts.routes.values() if stored else facts
+    scopes = review_scopes(original, omissions, payload["candidates"], routing, groups)
     options = compilation_model_options(settings, verification=True)
     decisions = {row["path"]: "unknown" for row in payload["candidates"]}
 
@@ -147,24 +148,29 @@ def protect_dependencies(
         "model_options": options,
     }
 
-    def review_key(candidates):
+    def request_payload(candidates):
         if stored:
-            candidates = [{**row, "content": accepted.content(row["path"])} for row in candidates]
-        request = dependency_payload(
+            candidates = [
+                {
+                    **row,
+                    "content": accepted.content(row["path"]),
+                    "facts": facts.for_topics(accepted.groups[row["path"]]["members"]),
+                }
+                for row in candidates
+            ]
+        return dependency_payload(
             {**payload, "source": list(payload["source"]), "candidates": candidates}
         )
+
+    def review_key(candidates):
         return checkpoints.identity(
             SYSTEM,
-            request,
+            request_payload(candidates),
             dependencies=dependencies,
         )
 
     def review(candidates):
-        if stored:
-            candidates = [{**row, "content": accepted.content(row["path"])} for row in candidates]
-        request = dependency_payload(
-            {**payload, "source": list(payload["source"]), "candidates": candidates}
-        )
+        request = request_payload(candidates)
         paths = {candidate["path"] for candidate in candidates}
         with checkpoints.request(SYSTEM, request, dependencies=dependencies) as key:
             saved = checkpoints.load(key)
@@ -283,7 +289,7 @@ def protect_dependencies(
                 "reason": "required_context_omitted",
             }
         ]
-        scopes = review_scopes(original, new_omissions, survivors, facts, groups)
+        scopes = review_scopes(original, new_omissions, survivors, routing, groups)
         on_event(
             {
                 "stage": "dependencies",

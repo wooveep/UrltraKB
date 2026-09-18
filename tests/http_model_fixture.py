@@ -152,6 +152,18 @@ def model_service(kb_dir):
         def log_message(self, *args):
             pass
 
+        def send_body(self, content):
+            try:
+                if calls.drip_seconds:
+                    for start in range(0, len(content), 20):
+                        self.wfile.write(content[start : start + 20])
+                        self.wfile.flush()
+                        time.sleep(calls.drip_seconds)
+                else:
+                    self.wfile.write(content)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # A stopped caller intentionally closes its socket.
+
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             calls.append(body)
@@ -219,7 +231,7 @@ def model_service(kb_dir):
                     self.send_header("Content-Type", "text/event-stream")
                     self.send_header("Content-Length", str(len(content)))
                     self.end_headers()
-                    self.wfile.write(content)
+                    self.send_body(content)
                     return
             content = json.dumps(
                 {
@@ -275,16 +287,7 @@ def model_service(kb_dir):
             )
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
-            try:
-                if calls.drip_seconds:
-                    for start in range(0, len(content), 20):
-                        self.wfile.write(content[start : start + 20])
-                        self.wfile.flush()
-                        time.sleep(calls.drip_seconds)
-                else:
-                    self.wfile.write(content)
-            except (BrokenPipeError, ConnectionResetError):
-                pass  # A stopped model caller intentionally closes its socket.
+            self.send_body(content)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

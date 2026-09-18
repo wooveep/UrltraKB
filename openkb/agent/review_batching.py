@@ -32,6 +32,9 @@ class ReviewBatcher:
         self.pending = {}
 
     def review(self, payload, system, settings, checkpoints, bundle, single):
+        individual = self._individual_key(payload, system, settings, checkpoints)
+        if checkpoints.load_recovery(individual, "review") is not None:
+            return single()
         # Exact source occurrence identities are stronger than merely sharing a
         # heading. Different operations and corrected candidates remain separate.
         if payload.get("correction_review") or len(json.dumps(payload)) > 16000:
@@ -64,7 +67,10 @@ class ReviewBatcher:
                     chunk = rows[start : start + 3]
                     value = self._dispatch(chunk, system, settings, checkpoints, bundle)
                     for (_, waiting, _), review in zip(chunk, value, strict=True):
-                        waiting.set_result(review)
+                        if isinstance(review, BaseException):
+                            waiting.set_exception(review)
+                        else:
+                            waiting.set_result(review)
             except BaseException as exc:
                 for _, waiting, _ in rows:
                     if not waiting.done():
@@ -119,12 +125,29 @@ class ReviewBatcher:
                 mapping[row["id"]] = row["review"]
             if set(mapping) != {candidate["id"] for candidate in candidates}:
                 raise ValueError("Missing independent candidate verdict")
-            return [
-                _parse_review(json.dumps(mapping[candidate["id"]]), candidate)
-                for candidate in candidates
-            ]
+            reviews = []
+            for (individual, _, _), candidate in zip(rows, candidates, strict=True):
+                raw = json.dumps(mapping[candidate["id"]])
+                try:
+                    review = _parse_review(raw, candidate)
+                except ProcessingIncomplete as exc:
+                    reviews.append(exc)
+                else:
+                    key = self._individual_key(individual, system, settings, checkpoints)
+                    checkpoints.save_recovery(key, "review", {"response": raw})
+                    reviews.append(review)
+            return reviews
         except (ValueError, TypeError, KeyError):
             raise ProcessingIncomplete("evidence_verification_invalid", "generation") from None
+
+    @staticmethod
+    def _individual_key(payload, system, settings, checkpoints):
+        return checkpoints.review_key(
+            messages(system, payload),
+            settings["model"],
+            compilation_model_options(settings, verification=True),
+            0,
+        )
 
 
 def current_batcher():

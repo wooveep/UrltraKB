@@ -235,11 +235,7 @@ def test_unresolved_omitted_scope_cannot_be_overwritten_by_other_independence(
     known = dependency_preflight.known_omissions
 
     def separate_omissions(parsed):
-        return [
-            {**row, "items": [item]}
-            for row in known(parsed)
-            for item in row.get("items", [])
-        ]
+        return [{**row, "items": [item]} for row in known(parsed) for item in row.get("items", [])]
 
     monkeypatch.setattr(dependency_preflight, "known_omissions", separate_omissions)
 

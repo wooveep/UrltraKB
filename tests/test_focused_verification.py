@@ -147,8 +147,9 @@ def test_invalid_or_blocking_advisory_never_authorizes_publication(monkeypatch, 
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("malformed_neighbor", [False, True])
 def test_related_candidates_share_one_review_with_independent_decisions(
-    kb_dir, tmp_path, model_service
+    kb_dir, tmp_path, model_service, malformed_neighbor
 ):
     import threading
 
@@ -205,6 +206,10 @@ def test_related_candidates_share_one_review_with_independent_decisions(
                     for candidate in request["candidates"]
                 ]
             }
+            if malformed_neighbor:
+                for candidate, review in zip(request["candidates"], value["reviews"], strict=True):
+                    if candidate["title"] == "Alpha":
+                        review["review"] = {}
         elif request["stage"] == "dependencies":
             value = {
                 "topics": [
@@ -225,3 +230,20 @@ def test_related_candidates_share_one_review_with_independent_decisions(
     assert (kb_dir / "wiki/concepts/alpha.md").exists()
     assert not (kb_dir / "wiki/concepts/beta.md").exists()
     assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
+    individual_reviews = [
+        json.loads(row["messages"][-1]["content"])
+        for row in model_service
+        if json.loads(row["messages"][-1]["content"])["stage"] == "verification"
+    ]
+    assert [row["title"] for row in individual_reviews] == (["Alpha"] if malformed_neighbor else [])
+
+    before = len(model_service)
+    settings["processing"]["concurrency"] = 1
+    config.write_text(yaml.safe_dump(settings))
+    resumed = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+    assert resumed.knowledge_compilation == "completed", resumed
+    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert not any(
+        json.loads(row["messages"][-1]["content"])["stage"].startswith("verification")
+        for row in model_service[before:]
+    )

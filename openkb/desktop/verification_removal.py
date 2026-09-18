@@ -42,9 +42,13 @@ def verify_removal(window, kb, wait_until):
                 kb / "wiki/concepts/native-removal.md",
                 "---\nsources: [summaries/native-removal.md]\n---\n保留页面。\n",
             )
+        previous_item = dialog.table.item(0, 0)
         dialog.confirm_button.click()
         assert finished_document(tasks, dialog).failed == 1
         assert (kb / "wiki/summaries/native-removal.md").exists()
+        # Completion starts an asynchronous inventory refresh. Wait for its new
+        # row before previewing again, or that refresh invalidates the preview.
+        wait_until(lambda: dialog.table.item(0, 0) is not previous_item)
         dialog.table.selectRow(0)
         dialog.preview_button.click()
         wait_until(lambda: dialog.confirm_button.isEnabled())

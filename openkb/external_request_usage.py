@@ -1,5 +1,6 @@
 """Meter secondary protocols against both document and task-family allowances."""
 
+import time
 from contextlib import contextmanager
 from typing import Any
 
@@ -41,6 +42,10 @@ def external_request_usage(reservation: int, stage: str = "external", *, model_t
             if family
             else None
         )
+        timeout = min(active.checkpoint(), active.limits.request_timeout)
+        if family_key:
+            timeout = min(timeout, family_key["timeout"])
+        receipt.update(timeout=timeout, deadline=time.monotonic() + timeout)
         active.attempts += 1
         active.charged_tokens += reservation
         observation = {
@@ -51,7 +56,7 @@ def external_request_usage(reservation: int, stage: str = "external", *, model_t
             "transport_attempts": None,
             "input_estimate": reservation,
             "output_reserve": 0,
-            "timeout": min(active.checkpoint(), active.limits.request_timeout),
+            "timeout": timeout,
         }
         active.observations.append(observation)
         active.on_observation(active)

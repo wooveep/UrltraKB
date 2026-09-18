@@ -1,16 +1,42 @@
 """Account for knowledge-agent requests alongside secondary visual requests."""
 
+import asyncio
 import json
-from contextlib import contextmanager
+import time
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 
 from agents import RunHooks
 
 from openkb.config import resolve_effective_config
 from openkb.processing import (
+    ProcessingIncomplete,
     external_request_usage,
     processing_scope,
     request_budget_settings,
 )
+
+_REQUEST = ContextVar("knowledge_request_deadline", default=None)
+
+
+@asynccontextmanager
+async def model_deadline():
+    """Enforce a hook's allowance inside the actual SDK model task."""
+    current = _REQUEST.get()
+    deadline = current.get("receipt", {}).get("deadline") if current else None
+    timer = asyncio.timeout(None if deadline is None else max(0, deadline - time.monotonic()))
+    try:
+        async with timer:
+            yield
+    except TimeoutError:
+        if not timer.expired():
+            raise
+        from openkb.processing import _ACTIVE
+
+        error = ProcessingIncomplete("time_budget_exhausted", "knowledge_model")
+        if active := _ACTIVE.get():
+            active.incomplete = error
+        raise error from None
 
 
 @contextmanager
@@ -23,6 +49,10 @@ def visual_task_budget(kb_dir):
 class RequestBudgetHooks(RunHooks):
     def __init__(self):
         self.pending = []
+        # SDK hooks run through gather in a temporary child task. Mutate this
+        # run-owned holder so the model task sees the reserved deadline too.
+        self.current = {}
+        self.token = _REQUEST.set(self.current)
 
     async def on_llm_start(self, context, agent, system_prompt, input_items):
         limits = request_budget_settings()
@@ -35,12 +65,15 @@ class RequestBudgetHooks(RunHooks):
             for tool in agent.tools
         )
         usage = external_request_usage(inputs + limits["max_tokens"], "knowledge_model")
-        self.pending.append((usage, usage.__enter__()))
+        receipt = usage.__enter__()
+        self.current["receipt"] = receipt
+        self.pending.append((usage, receipt))
 
     async def on_llm_end(self, context, agent, response):
         if not self.pending:
             return
         usage, receipt = self.pending.pop()
+        self.current.clear()
         inputs = getattr(response.usage, "input_tokens", None)
         outputs = getattr(response.usage, "output_tokens", None)
         if type(inputs) is int and type(outputs) is int:
@@ -58,6 +91,12 @@ class RequestBudgetHooks(RunHooks):
         usage.__exit__(None, None, None)
 
     def close(self):
-        while self.pending:
-            usage, _ = self.pending.pop()
-            usage.__exit__(None, None, None)
+        try:
+            while self.pending:
+                usage, _ = self.pending.pop()
+                usage.__exit__(None, None, None)
+        finally:
+            self.current.clear()
+            if self.token is not None:
+                _REQUEST.reset(self.token)
+                self.token = None

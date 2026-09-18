@@ -127,7 +127,10 @@ class VisionSession:
         self.tokens += limits.output_tokens
         with external_request_usage(limits.output_tokens, "image_understanding") as usage:
             result = await request_image(
-                self.connection, png, question, seconds=min(remaining, limits.request_seconds)
+                self.connection,
+                png,
+                question,
+                seconds=min(remaining, limits.request_seconds, usage.get("timeout", float("inf"))),
             )
             if "tokens" in result:
                 usage["tokens"] = result["tokens"]

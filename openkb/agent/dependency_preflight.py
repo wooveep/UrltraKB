@@ -73,11 +73,13 @@ def preflight_dependencies(reader, source, parsed, groups, facts, settings, on_e
 
     original = SourceSelection(OriginalRows(reader, source, parsed))
     candidates = [
-        {"path": group["path"], "content": "", "facts": facts.for_topics(group["members"])}
+        {"path": group["path"], "content": "", "facts": facts.routing_for_topics(group["members"])}
         for group in groups
     ]
     blocked = set()
-    for required, _, affected in review_scopes(original, omissions, candidates, facts, groups):
+    for required, _, affected in review_scopes(
+        original, omissions, candidates, facts.routes.values(), groups
+    ):
         if not source_fits(required, settings):
             blocked.update(row["path"] for row in affected)
     if blocked:
@@ -93,22 +95,11 @@ def preflight_dependencies(reader, source, parsed, groups, facts, settings, on_e
 def omission_context(reader, source, parsed, omissions, group, facts, groups):
     if not omissions:
         return None
-    from openkb.agent.dependency_scope import review_scopes
-    from openkb.agent.dependency_sources import OriginalRows, SourceSelection
+    from openkb.agent.dependency_sources import OriginalRows
 
-    candidate = {"path": group["path"], "content": "", "facts": facts.for_topics(group["members"])}
-    scopes = review_scopes(
-        SourceSelection(OriginalRows(reader, source, parsed)), omissions, [candidate], facts, groups
-    )
     # The first factual review sees every known gap and originals inside its
     # own operation. Cross-scope relations are independently assessed by the
     # bounded dependency queue before any publication is authorized.
-    own = {fact["scope"]["block_id"] for fact in candidate["facts"]}
-    local = [
-        row
-        for selected, gaps, _ in scopes
-        for row in selected
-        if row["reference"]["block_id"] in own
-    ]
-    unique = {row["reference"]["block_id"]: row for row in local}
-    return {"omissions": omissions, "source": list(unique.values())}
+    own = {fact["scope"]["block_id"] for fact in facts.routing_for_topics(group["members"])}
+    original = OriginalRows(reader, source, parsed)
+    return {"omissions": omissions, "source": [original[bid] for bid in original if bid in own]}

@@ -110,9 +110,12 @@ def test_new_continue_task_keeps_the_original_family_allowance(kb_dir, tmp_path,
         for request in (
             ReparseSource(first.source_id, first.input_version),
             ContinueSource(first.source_id, first.input_version),
+            ImportFile(str(original)),
         ):
             followup = manager.submit(kb_dir, [request])
             result = manager.wait(followup, timeout=60).results[0].document
+            if not isinstance(request, ReparseSource):
+                assert result.reason == "request_budget_exhausted"
         assert result.reason == "request_budget_exhausted"
         assert len(model_service) == 1
     finally:

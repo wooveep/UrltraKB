@@ -50,6 +50,7 @@ class CompletionAwareModel(LitellmModel):
             observe(value)
             return value
         response, stream = value
+        ending["stream"] = stream
 
         async def observed():
             try:
@@ -63,10 +64,13 @@ class CompletionAwareModel(LitellmModel):
         return response, observed()
 
     async def get_response(self, *args, **kwargs):
+        from openkb.agent.request_budget import model_deadline
+
         ending = {}
         token = _ENDING.set(ending)
         try:
-            response = await super().get_response(*args, **kwargs)
+            async with model_deadline():
+                response = await super().get_response(*args, **kwargs)
             if ending.get("truncated"):
                 response.output = _incomplete(response.output)
             return response
@@ -74,20 +78,26 @@ class CompletionAwareModel(LitellmModel):
             _ENDING.reset(token)
 
     async def stream_response(self, *args, **kwargs):
+        from openkb.agent.request_budget import model_deadline
+
         ending = {}
         token = _ENDING.set(ending)
         try:
-            async for event in super().stream_response(*args, **kwargs):
-                if event.type == "response.completed" and ending.get("truncated"):
-                    event = event.model_copy(
-                        update={
-                            "response": event.response.model_copy(
-                                update={"output": _incomplete(event.response.output)}
-                            )
-                        }
-                    )
-                yield event
+            async with model_deadline():
+                async for event in super().stream_response(*args, **kwargs):
+                    if event.type == "response.completed" and ending.get("truncated"):
+                        event = event.model_copy(
+                            update={
+                                "response": event.response.model_copy(
+                                    update={"output": _incomplete(event.response.output)}
+                                )
+                            }
+                        )
+                    yield event
         finally:
+            stream = ending.get("stream")
+            if stream is not None and (close := getattr(stream, "aclose", None)):
+                await close()
             _ENDING.reset(token)
 
 
