@@ -1,12 +1,49 @@
 """Observe compact requests and original citations at the application seam."""
 
+import gc
 import json
+import weakref
 
 import pytest
 import yaml
 
 from openkb.application.documents import import_document
 from tests.http_model_fixture import evidence_response
+
+
+def test_request_construction_releases_source_bodies_without_waiting_for_cycle_collection():
+    from openkb.agent.evidence_units import messages
+
+    class Body(str):
+        pass
+
+    references = []
+    collection_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        for number in range(3):
+            body = Body(f"Operation {number}: " + "Retain the original condition. " * 2000)
+            references.append(weakref.ref(body))
+            neighbor = {
+                "reference": {"block_id": f"original-{number}"},
+                "relation": "operation_context",
+                "text": body,
+            }
+            payload = {
+                "stage": "generation",
+                "evidence": [{"text": "Restart the service.", "neighbors": [neighbor, neighbor]}],
+            }
+            request = messages("Use the original operation context.", payload)
+            assert body in request[-1]["content"]
+            del request, payload, neighbor, body
+
+        # Completed request construction must release originals promptly: a few
+        # cyclic objects can otherwise retain large bodies between GC runs.
+        assert sum(reference() is not None for reference in references) == 0
+    finally:
+        if collection_enabled:
+            gc.enable()
+        gc.collect()
 
 
 def test_transport_identity_in_prose_is_omitted_without_interrupting_publication(

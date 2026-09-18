@@ -126,40 +126,41 @@ def projected_response(value, payload):
     return _map(value, identities)
 
 
+def _visit_contexts(value, fields, counts, labels, pool, *, replace=False):
+    # Module-level recursion has no closure cycle retaining large context bodies
+    # and serialized identity keys after the request has finished using them.
+    if isinstance(value, list):
+        return [
+            _visit_contexts(row, fields, counts, labels, pool, replace=replace) for row in value
+        ]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for field, item in value.items():
+        if field in fields:
+            rows = []
+            for row in item if isinstance(item, list) else [item]:
+                key = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                if not replace:
+                    counts[key] += 1
+                if replace and counts[key] > 1 and len(key) > 256:
+                    label = labels.setdefault(key, f"c{len(labels) + 1}")
+                    pool[label] = row
+                    rows.append({"context_ref": label})
+                else:
+                    rows.append(row)
+            result[field] = rows if isinstance(item, list) else rows[0]
+        else:
+            result[field] = _visit_contexts(item, fields, counts, labels, pool, replace=replace)
+    return result
+
+
 def share_contexts(payload, *, fields=("heading_evidence", "neighbors")):
     """Intern exact repeated context values, retaining their complete source scope."""
     counts = Counter()
-
-    def identity(row):
-        return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-    def visit(value, replace=False):
-        if isinstance(value, list):
-            return [visit(row, replace) for row in value]
-        if not isinstance(value, dict):
-            return value
-        result = {}
-        for field, item in value.items():
-            if field in fields:
-                rows = []
-                for row in item if isinstance(item, list) else [item]:
-                    key = identity(row)
-                    if not replace:
-                        counts[key] += 1
-                    if replace and counts[key] > 1 and len(key) > 256:
-                        label = labels.setdefault(key, f"c{len(labels) + 1}")
-                        pool[label] = row
-                        rows.append({"context_ref": label})
-                    else:
-                        rows.append(row)
-                result[field] = rows if isinstance(item, list) else rows[0]
-            else:
-                result[field] = visit(item, replace)
-        return result
-
     labels, pool = {}, {}
-    visit(payload)
-    packed = visit(payload, True)
+    _visit_contexts(payload, fields, counts, labels, pool)
+    packed = _visit_contexts(payload, fields, counts, labels, pool, replace=True)
     if pool:
         packed["context_pool"] = pool
         packed["context_protocol"] = (

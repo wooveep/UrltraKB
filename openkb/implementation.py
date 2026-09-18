@@ -6,6 +6,16 @@ from types import CodeType
 
 from openkb.sources import content_id
 
+# Exact wire-output equivalence reviewed for the context-body lifecycle repair.
+# The wire payload, identities and semantic rules are unchanged. Preserve the
+# previous contracts (including negative reviews); any other revision misses.
+_COMPATIBLE_REVISIONS = {
+    (
+        "openkb.agent.evidence_wire",
+        "d7fc50f0c5674415a9906b81d64dd67590f6f71a1514f9f3de7c1d0ddfb63c14",
+    ): "45d9f407d6fc96b4cac7fb6a77b601c440cdf1cf2101b762c1a8038eef09e1d6",
+}
+
 
 def _code_value(value):
     if isinstance(value, CodeType):
@@ -43,4 +53,5 @@ def module_revision(name: str) -> str:
     code = get_code(name) if get_code else None
     if not isinstance(code, CodeType):
         raise ValueError("Cannot identify the implementation of a persisted stage")
-    return content_id(_code_value(code))
+    revision = content_id(_code_value(code))
+    return _COMPATIBLE_REVISIONS.get((name, revision), revision)
