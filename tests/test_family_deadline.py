@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -18,6 +19,32 @@ async def test_transport_timeout_does_not_masquerade_as_expired_allowance():
     with pytest.raises(TimeoutError, match="transport"):
         async with model_deadline():
             raise TimeoutError("transport")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["request", "token", "time"])
+async def test_exhausted_family_stops_before_stream_dispatch(
+    kb_dir, tmp_path, model_service, reason
+):
+    from openkb.application.conversations import ask_question
+
+    settings = load_config(kb_dir / ".openkb/config.yaml")
+    limits = RequestLimits.from_config(settings)
+    limits = replace(
+        limits,
+        **{
+            "request": {"max_requests": 1},
+            "token": {"max_tokens": 1},
+            "time": {"document_timeout": 1},
+        }[reason],
+    )
+    with family_scope(tmp_path / "history/receipts", uuid4().hex):
+        current_family().reserve(limits, 1, "earlier", 1)
+        result = await asyncio.wait_for(ask_question(kb_dir, "Question", save=True), 3)
+    assert result.status != "completed"
+    assert result.saved_path is None
+    assert reason + "_budget_exhausted" in result.error
+    assert len(model_service) == 0
 
 
 @pytest.mark.asyncio

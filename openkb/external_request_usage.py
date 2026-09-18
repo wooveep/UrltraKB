@@ -31,17 +31,21 @@ def external_request_usage(reservation: int, stage: str = "external", *, model_t
         from openkb.runtime.family_budget import current_family
 
         family = current_family()
-        family_key = (
-            family.reserve(
-                active.limits,
-                reservation,
-                stage,
-                active.limits.request_timeout,
-                model_time=model_time,
+        try:
+            family_key = (
+                family.reserve(
+                    active.limits,
+                    reservation,
+                    stage,
+                    active.limits.request_timeout,
+                    model_time=model_time,
+                )
+                if family
+                else None
             )
-            if family
-            else None
-        )
+        except ProcessingIncomplete as exc:
+            active.incomplete = exc
+            raise
         timeout = min(active.checkpoint(), active.limits.request_timeout)
         if family_key:
             timeout = min(timeout, family_key["timeout"])
