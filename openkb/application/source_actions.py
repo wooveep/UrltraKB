@@ -182,11 +182,9 @@ def continue_source(
             if proposal.source_id != source.source_id or proposal.version_id != source.id:
                 raise ValueError("Proposal does not belong to the selected source version")
             from openkb.agent.evidence_checkpoints import publication_settings
-            from openkb.application.attachment_imports import document_attachments
 
             config_id = content_id(publication_settings(settings, bundle))
             parsed = ParseStore(kb_dir).load(proposal.parse_id)
-            attachments = document_attachments(kb_dir, source, parsed)
             if accept_pages is not None:
                 accept_proposal(kb_dir, proposal.id, accept_pages, config_id=config_id)
             with collect_compile_report() as report, processing_scope(settings):
@@ -221,7 +219,6 @@ def continue_source(
                 warnings=("knowledge_content_omitted",) if omissions else (),
                 usage=report.usage,
                 coverage=coverage,
-                attachments=attachments,
             )
             from openkb.application.document_pipeline import finish_compilation
 

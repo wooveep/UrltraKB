@@ -48,7 +48,7 @@ def parse_document(
         profile["xlsx"] = "openkb-xlsx-v2-row-relations"
         profile["openpyxl"] = package_version("openpyxl")
     if source.suffix == ".docx":
-        profile["docx"] = "openkb-docx-v19-declared-toc"
+        profile["docx"] = "openkb-docx-v20-attachments-storage-only"
     if source.suffix == ".pdf":
         profile["pdf"] = "openkb-pdf-v7-declared-toc"
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:

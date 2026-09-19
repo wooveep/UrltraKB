@@ -32,11 +32,17 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
         if (
             not isinstance(row, dict)
             or set(row) != {"block_id", "start", "end", "kind", "location", "status", "reason"}
-            or row["status"] not in {"verified", "referenced", "no_facts", "pending"}
+            or row["status"] not in {"verified", "referenced", "no_facts", "pending", "stored"}
             or not isinstance(row["kind"], str)
             or not isinstance(row["location"], dict)
             or not isinstance(row["reason"], str)
             or not row["reason"]
+            or (
+                row["status"] == "stored"
+                and (
+                    "attachment" not in row["location"] or row["reason"] != "attachment_stored_only"
+                )
+            )
             or type(row["start"]) is not int
             or type(row["end"]) is not int
             or row["start"] != ends.get(row["block_id"], 0)
@@ -117,6 +123,7 @@ def source_coverage(source, parsed, report, *, published=False):
     transcriptions = {digest for row in parsed.quality for digest in row.get("transcriptions", [])}
     for block in parsed.blocks:
         cursor = 0
+        stored_attachment = "attachment" in block.location
 
         def append(start, end, status, reason):
             ranges.append(
@@ -131,7 +138,8 @@ def source_coverage(source, parsed, report, *, published=False):
                 }
             )
 
-        for unit in sorted(units.get(block.id, []), key=lambda row: row["reference"]["start"]):
+        block_units = [] if stored_attachment else units.get(block.id, [])
+        for unit in sorted(block_units, key=lambda row: row["reference"]["start"]):
             ref = unit["reference"]
             if ref["start"] < cursor:
                 continue  # A recovered split may overlap its earlier parent.
@@ -161,10 +169,12 @@ def source_coverage(source, parsed, report, *, published=False):
             )
             append(ref["start"], ref["end"], status, reason)
             cursor = ref["end"]
-        if cursor < block.chars or not block.chars:
+        if stored_attachment:
+            append(0, block.chars, "stored", "attachment_stored_only")
+        elif cursor < block.chars or not block.chars:
             append(cursor, block.chars, "pending", "analysis_pending")
         for digest in block.assets:
-            attachment = any(
+            attachment = stored_attachment or any(
                 item["blob"] == digest for item in block.location.get("attachment_files", [])
             )
             entry = assets.setdefault(
@@ -181,9 +191,12 @@ def source_coverage(source, parsed, report, *, published=False):
             if not attachment and entry["understanding"] == "not_required":
                 entry.update(transcription="pending", understanding="pending")
             # Transcription is separate from understanding the figure's relationships.
-            if digest in transcriptions or (
-                block.context.startswith("OCR layout block")
-                and "transcription=pending" not in block.context
+            if not stored_attachment and (
+                digest in transcriptions
+                or (
+                    block.context.startswith("OCR layout block")
+                    and "transcription=pending" not in block.context
+                )
             ):
                 entry["transcription"] = "available"
     issues = parsing_gaps(parsed)
@@ -224,7 +237,7 @@ def coverage_window(coverage, reference):
     start, end = reference.get("start", 0), reference.get("end")
     if type(start) is not int or type(end) is not int or end <= start:
         return {"status": "unknown"}
-    counts = {"verified": 0, "referenced": 0, "no_facts": 0, "pending": 0}
+    counts = {"verified": 0, "referenced": 0, "no_facts": 0, "pending": 0, "stored": 0}
     for row in coverage.get("ranges", []):
         if row["block_id"] == reference["block_id"]:
             counts[row["status"]] += max(0, min(end, row["end"]) - max(start, row["start"]))
@@ -238,12 +251,17 @@ def coverage_window(coverage, reference):
 
 def parsing_gaps(parsed):
     """A usable text layer does not resolve a failed image transcription."""
+    from openkb.attachments import attachment_diagnostic
+
     return [
         dict(row)
         for row in parsed.quality
-        if row["status"] == "needs_review"
-        or "image_ocr_notice:" in row["reason"]
-        or row["reason"].endswith("docx_image_position_unavailable")
+        if not attachment_diagnostic(row)
+        and (
+            row["status"] == "needs_review"
+            or "image_ocr_notice:" in row["reason"]
+            or row["reason"].endswith("docx_image_position_unavailable")
+        )
     ]
 
 

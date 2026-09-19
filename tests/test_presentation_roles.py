@@ -51,13 +51,26 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
         from openkb.application.attachment_imports import import_attachment
         from openkb.application.execution import ExecutionContext
         from openkb.runtime.requests import ImportAttachment
+        from openkb.sources import SourceStore
 
+        assert result.attachments == ()
+        assert heading.text not in str(observed)
         observed.clear()
-        child = result.attachments[0]
+        store = SourceStore(kb_dir)
+        parent = store.version(result.input_version)
+        assert store.list_sources() == (parent,)
+        parsed = ParseStore(kb_dir).load(result.parse_id)
+        item = parsed.blocks[0].location["attachment_files"][0]
+        child = store.intake_attachment(
+            parent,
+            part=item["part"],
+            name=item["name"],
+            content=store.asset(item["blob"]).read_bytes(),
+        )
         result = import_attachment(
             kb_dir,
             ImportAttachment(
-                child.source_id, child.version_id, result.input_version, child.part, child.name
+                child.source_id, child.id, result.input_version, item["part"], child.name
             ),
             context=ExecutionContext(),
         )

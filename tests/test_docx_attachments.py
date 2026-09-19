@@ -1,4 +1,4 @@
-"""Embedded file content reaches the same immutable evidence gate as the body."""
+"""Embedded files stay stored references at their immutable parent positions."""
 
 import hashlib
 import struct
@@ -19,7 +19,7 @@ from tests.docx_attachment_fixtures import (
 )
 
 
-def test_embedded_docx_keeps_independent_content_and_parent_position(kb_dir, tmp_path):
+def test_embedded_docx_keeps_bytes_and_parent_position_without_analysis(kb_dir, tmp_path):
     child = tmp_path / "child.docx"
     write_docx(child, "<w:p><w:r><w:t>Recovery requires port 9473.</w:t></w:r></w:p>")
     parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
@@ -36,31 +36,20 @@ def test_embedded_docx_keeps_independent_content_and_parent_position(kb_dir, tmp
     assert reference.location["paragraph"] == 1
     attachment = reference.location["attachment_files"][0]
     assert attachment["part"] == "word/embeddings/object.bin"
-    assert attachment["parseable"] is True
+    assert attachment["parseable"] is False
     assert attachment["blob"] in reference.assets
     assert store.complete(version, parsed)
     sources = SourceStore(kb_dir).list_sources()
-    assert len(sources) == 2
-    child_source = next(s for s in sources if s.id != version.id)
-    assert child_source.origin.startswith("attachment:" + version.source_id + "/")
-    assert child_source.suffix == ".docx"
-    assert ParseStore(kb_dir).selected(child_source) is None
-    child_parse = parse_document(kb_dir, child_source)
-    child_contents = [
-        store.read(
-            Evidence(child_source.source_id, child_source.id, child_parse.id, block.id),
-            max_chars=2000,
-        )
-        for block in child_parse.blocks
-    ]
-    assert any("Recovery requires port 9473." in item.text for item in child_contents)
+    assert sources == (version,)
+    assert SourceStore(kb_dir).asset(attachment["blob"]).read_bytes() == child.read_bytes().ljust(
+        4096, b"\0"
+    )
     assert parse_document(kb_dir, version).id == parsed.id
-    assert len(SourceStore(kb_dir).list_sources()) == 2
+    assert len(SourceStore(kb_dir).list_sources()) == 1
 
 
-def test_embedded_documents_materialize_as_documents_and_have_parse_status(kb_dir, tmp_path):
+def test_embedded_files_materialize_without_analysis(kb_dir, tmp_path):
     from openkb.application.document_pipeline import _materialize
-    from openkb.application.source_history import source_status
 
     child = tmp_path / "child.docx"
     write_docx(child, "<w:p><w:r><w:t>Attachment instructions.</w:t></w:r></w:p>")
@@ -69,21 +58,14 @@ def test_embedded_documents_materialize_as_documents_and_have_parse_status(kb_di
     with prepared_input(parent) as ready:
         source = store.intake(ready)
     parsed = parse_document(kb_dir, source)
-    imported = next(s for s in store.list_sources() if s.origin.startswith("attachment:"))
-    workspace = tmp_path / "workspace"
-    output = _materialize(workspace, store, source, parsed, "parent")
-    text = output.read_text()
-    assert "Attachment instructions." not in text
-    assert f"attachments/{imported.blob}.docx" in text
-    assert (output.parent / "attachments" / f"{imported.blob}.docx").read_bytes() == store.original(
-        imported
-    ).read_bytes()
-    assert ParseStore(kb_dir).selected(imported) is None
-    parse_document(kb_dir, imported)
-    status = source_status(kb_dir, imported.source_id)
-    assert status["result"]["stage"] == "parsed"
-    assert status["result"]["knowledge_compilation"] == "not_started"
-    assert status["result"]["parse_id"] == ParseStore(kb_dir).selected(imported).id
+    blob = parsed.blocks[0].location["attachment_files"][0]["blob"]
+    output = _materialize(tmp_path / "workspace", store, source, parsed, "parent")
+    assert "Attachment instructions." not in output.read_text()
+    assert f"attachments/{blob}.docx" in output.read_text()
+    assert (
+        output.parent / "attachments" / f"{blob}.docx"
+    ).read_bytes() == child.read_bytes().ljust(4096, b"\0")
+    assert store.list_sources() == (source,)
 
 
 def test_ole_package_keeps_counted_script_bytes_without_opening_paths():
@@ -95,7 +77,7 @@ def test_ole_package_keeps_counted_script_bytes_without_opening_paths():
     assert name == "run.sh" and result == script * 200
 
 
-def test_only_document_attachments_become_sources(kb_dir, tmp_path):
+def test_all_attachment_types_are_stored_without_becoming_sources(kb_dir, tmp_path):
     child = tmp_path / "child.docx"
     write_docx(child, "<w:p><w:r><w:t>Document-only fact 9473.</w:t></w:r></w:p>")
     files = [
@@ -131,29 +113,33 @@ def test_only_document_attachments_become_sources(kb_dir, tmp_path):
     assert "DO_NOT_IMPORT_SCRIPT" not in text and "DO_NOT_OPEN_ARCHIVE" not in text
     assert "run.sh" in text and "bundle.zip" in text
     assert "Skipped non-document attachment:" not in text
-    assert len(store.list_sources()) == 2
+    assert len(store.list_sources()) == 1
     assert ParseStore(kb_dir).complete(version, parsed)
     for data in (b"DO_NOT_IMPORT_SCRIPT\n" * 300, b"DO_NOT_OPEN_ARCHIVE\n" * 300):
         digest = hashlib.sha256(data).hexdigest()
-        assert not store.owned_path(store.root / "blobs" / digest[:2] / digest).exists()
+        assert store.asset(digest).read_bytes() == data
 
 
-def test_document_attachment_identity_survives_parent_updates(kb_dir, tmp_path):
+def test_attachment_references_survive_parent_updates(kb_dir, tmp_path):
     child = tmp_path / "child.docx"
     parent = tmp_path / "parent.docx"
     store = SourceStore(kb_dir)
-    children = []
+    references, contents = [], []
     for text in ("Old attachment detail", "Updated attachment detail"):
         write_docx(child, f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>")
-        attached_docx(parent, child.read_bytes())
+        contents.append(child.read_bytes())
+        attached_docx(parent, contents[-1])
         with prepared_input(parent) as ready:
             version = store.intake(ready)
-        parse_document(kb_dir, version)
-        children.append(next(s for s in store.list_sources() if s.origin.startswith("attachment:")))
-    assert children[0].source_id == children[1].source_id
-    assert children[0].id != children[1].id
-    assert children[0].revision == 1 and children[1].revision == 2
-    assert store.original(children[0]).is_file()
+        parsed = parse_document(kb_dir, version)
+        references.append(Evidence(version.source_id, version.id, parsed.id, parsed.blocks[0].id))
+    assert references[0].source_id == references[1].source_id
+    assert references[0].version_id != references[1].version_id
+    for reference, content in zip(references, contents):
+        block = ParseStore(kb_dir).read(reference, max_chars=2000)
+        item = block.location["attachment_files"][0]
+        assert store.asset(item["blob"]).read_bytes() == content.ljust(4096, b"\0")
+    assert len(store.list_sources()) == 1
 
 
 def test_document_attachments_compile_and_publish_as_downloadable_sources(

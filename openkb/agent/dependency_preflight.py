@@ -8,12 +8,13 @@ from openkb.sources import content_id
 
 
 def known_omissions(parsed):
+    from openkb.attachments import parent_blocks
     from openkb.source_coverage import parsing_gaps
 
     with collect_compile_report() as report:
         omissions = list(report.omissions)
     locations = {}
-    for block in parsed.blocks:
+    for block in parent_blocks(parsed):
         locations.setdefault(content_id(block.location), []).append(block.id)
     for row in parsing_gaps(parsed):
         located = locations.get(content_id(row["location"]), []) if "location" in row else []
@@ -29,7 +30,7 @@ def known_omissions(parsed):
             "reason": "original_image_retained_understanding_pending",
             "assets": sorted(assets),
         }
-        for block in parsed.blocks
+        for block in parent_blocks(parsed)
         if (
             assets := set(block.assets)
             - {item["blob"] for item in block.location.get("attachment_files", [])}

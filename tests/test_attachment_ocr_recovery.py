@@ -15,7 +15,7 @@ from tests.test_source_evidence import save_source
 
 
 @pytest.mark.parametrize("legacy_root", [False, True])
-def test_out_of_depth_descendant_does_not_invalidate_parent_cache(kb_dir, tmp_path, legacy_root):
+def test_attachment_jobs_do_not_invalidate_parent_cache(kb_dir, tmp_path, legacy_root):
     cloud_settings(kb_dir)
     settings = parsing_settings(
         yaml.safe_load((kb_dir / ".openkb/config.yaml").read_text())["parsing"]
@@ -74,4 +74,6 @@ def test_out_of_depth_descendant_does_not_invalidate_parent_cache(kb_dir, tmp_pa
     pending_job(versions[MAX_EMBEDDED_DEPTH + 1])
     assert not has_resumable_jobs(store, versions[0], parent, settings, {}, {})
     pending_job(versions[MAX_EMBEDDED_DEPTH])
-    assert has_resumable_jobs(store, versions[0], parent, settings, {}, {})
+    assert not has_resumable_jobs(store, versions[0], parent, settings, {}, {})
+    child = versions[MAX_EMBEDDED_DEPTH]
+    assert has_resumable_jobs(store, child, parses.selected(child), settings, {}, {})

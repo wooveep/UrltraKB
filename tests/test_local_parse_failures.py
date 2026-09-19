@@ -38,13 +38,9 @@ def test_broken_embedded_document_does_not_prevent_body_publication(
     parent = attached_docx(tmp_path / "parent.docx", _broken_child(tmp_path))
     result = import_document(kb_dir, parent)
     assert result.knowledge_compilation == "completed", result
-    assert any("source_content_unparsed:" in warning for warning in result.warnings)
     parsed = ParseStore(kb_dir).load(result.parse_id)
-    assert any(row["status"] == "needs_review" for row in parsed.quality)
-    assert any(
-        "无法解析" in p.read_text(encoding="utf-8")
-        for p in (kb_dir / "wiki/summaries").glob("*.md")
-    )
+    assert not any(row["status"] == "needs_review" for row in parsed.quality)
+    assert len(SourceStore(kb_dir).list_sources()) == 1
     assert list((kb_dir / "wiki/sources/attachments").glob("*.docx"))
 
 
@@ -68,7 +64,7 @@ def test_continuation_reuses_embedded_extraction_even_with_local_warnings(
     monkeypatch.setattr(docx, "prepare_docx", unexpected_unpack)
     second = parse_document(kb_dir, source)
     assert second.id == first.id
-    assert len(SourceStore(kb_dir).list_sources()) == 2
+    assert len(SourceStore(kb_dir).list_sources()) == 1
 
 
 def test_unknown_word_element_is_visible_but_does_not_block_body(kb_dir, tmp_path, model_service):
@@ -100,7 +96,7 @@ def test_unreadable_document_formats_are_isolated(kb_dir, tmp_path, model_servic
             archive.writestr(name, data)
     result = import_document(kb_dir, parent)
     assert result.knowledge_compilation == "completed", result
-    assert any(
+    assert not any(
         "docx_attachment_unparsed:" in warning or "source_content_unparsed:" in warning
         for warning in result.warnings
     )
@@ -168,7 +164,14 @@ def test_local_omission_handling_does_not_swallow_execution_failures(
             raise ProcessingIncomplete("document_time_budget_exceeded", "parsing")
         raise OSError("Storage unavailable")
 
-    monkeypatch.setattr("openkb.docx_attachments.parse_attachment", fail)
+    original = SourceStore.put_bytes
+
+    def save(store, content):
+        if content.startswith(b"PK\x03\x04"):
+            fail()
+        return original(store, content)
+
+    monkeypatch.setattr(SourceStore, "put_bytes", save)
     result = import_document(kb_dir, parent)
     assert result.knowledge_compilation != "completed"
     assert not model_service

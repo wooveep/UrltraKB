@@ -2,6 +2,8 @@
 
 import re
 
+from openkb.attachments import attachment_diagnostic, parent_blocks
+
 
 def local_omissions(source, parsed):
     """A saved parsing diagnostic is a content omission, independent of format.
@@ -9,7 +11,11 @@ def local_omissions(source, parsed):
     Execution exceptions and immutable-artifact validation are handled by their
     owners; this function does not catch or downgrade either of them.
     """
-    return [row["reason"] for row in parsed.quality if row["status"] == "needs_review"]
+    return [
+        row["reason"]
+        for row in parsed.quality
+        if row["status"] == "needs_review" and not attachment_diagnostic(row)
+    ]
 
 
 def has_readable_content(store, parsed):
@@ -19,7 +25,7 @@ def has_readable_content(store, parsed):
         if row["status"] == "verified"
         for asset in row.get("transcriptions", [])
     }
-    for block in parsed.blocks:
+    for block in parent_blocks(parsed):
         if block.kind == "image" and not transcribed.intersection(block.assets):
             continue
         text = store.asset(block.blob).read_text(encoding="utf-8")

@@ -6,6 +6,17 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 
+def parent_blocks(parsed):
+    """Retain historical parses, excluding expanded child bodies from new parent work."""
+    return tuple(block for block in parsed.blocks if "attachment" not in block.location)
+
+
+def attachment_diagnostic(row):
+    return "attachment" in row.get("location", {}) or row["reason"].startswith(
+        ("docx_attachment:", "docx_attachment_unparsed:")
+    )
+
+
 @dataclass(frozen=True)
 class DocumentAttachment:
     source_id: str
@@ -22,17 +33,18 @@ class DocumentAttachment:
 
 
 def _validate_document_path(part, name):
-    from openkb.inputs import SUPPORTED_EXTENSIONS
-
     if (
         not isinstance(part, str)
         or not part
         or PurePosixPath(part).is_absolute()
         or ".." in PurePosixPath(part).parts
+        or "\\" in part
+        or "\x00" in part
         or not isinstance(name, str)
+        or name in {"", ".", ".."}
         or PurePosixPath(name).name != name
         or "\\" in name
-        or PurePosixPath(name).suffix.lower() not in SUPPORTED_EXTENSIONS
+        or "\x00" in name
     ):
         raise ValueError("Invalid document attachment path")
 
@@ -45,10 +57,21 @@ def validate_attachment_files(files, assets=None):
     for item in files:
         if (
             not isinstance(item, dict)
-            or set(item) != {"part", "name", "blob", "parseable"}
+            or set(item)
+            not in (
+                {"part", "name", "blob", "parseable"},
+                {"part", "name", "blob", "parseable", "extraction", "reason"},
+            )
             or type(item["parseable"]) is not bool
         ):
             raise ValueError("Invalid document attachment reference")
+        if "extraction" in item and (
+            item["extraction"] != "raw_object"
+            or not isinstance(item["reason"], str)
+            or not item["reason"].startswith("docx_")
+            or item["parseable"]
+        ):
+            raise ValueError("Invalid raw attachment object reference")
         _validate_document_path(item["part"], item["name"])
         valid_id(item["blob"])
         if assets is not None and item["blob"] not in assets:

@@ -574,12 +574,13 @@ unrelated historical implementations and changed requests are not reused.
 
 Continue the saved source after a stopped or unfinished task. With unchanged
 source bytes, parsing settings and parser profile, the parser reuses its validated
-saved result, including embedded document contents and image/OCR results. When
+saved result, including retained attachment references and image/OCR results. When
 relevant cloud OCR work remains, Continue resumes accepted jobs and can submit
 pages left unstarted by a previous budget. An explicit queue-full or rate-limit
 rejection also permits a bounded new attempt; an uncertain submission does not.
 Each continuation uses the current allowance, retains earlier attempts and reuses
-completed OCR. Retained Word attachments participate in this recovery when needed.
+completed OCR. Attachment OCR jobs belong only to explicitly processed child sources;
+they do not invalidate or resume work in the parent.
 Explicit reparse, changed source or parsing configuration can request new parsing work.
 
 Compilation recovery has separate states:
@@ -691,36 +692,44 @@ Reliable PDF text is parsed locally, with physical page and available coordinate
 DOCX evidence uses headings, paragraphs and table cells, without invented Word
 page numbers. The parent body retains an embedded attachment's displayed filename
 at its original position; the attachment's contents are not mixed into that body.
-Recognizable supported documents become separate retained sources. After the parent
-worker finishes and its result is confirmed, the task manager automatically queues
-one independent document import per attachment. Each child has its own compilation,
-result and task progress, linked to the parent task. Nested document attachments
-follow the same rule. Supported extensions follow the normal import formats.
+All extractable files are saved as original bytes, including scripts, executables,
+generic archives and files whose contents are unreadable. Saving does not run their
+parser, OCR, navigation, summaries, compilation or executable content, and archives
+are not recursively expanded. The parent never registers child sources or schedules
+attachment imports, including when continuing an old parse or accepting a proposal.
 
-Scripts, executables, generic ZIP archives, damaged or unreadable attachments and
-other non-document files produce no child import; the parent body shows only their
-filenames. Generic archives are not recursively expanded. Literal filenames in
-supported Word attachment icons are read locally; when the displayed name cannot be
-recovered, the embedded filename is used. Other object handling remains unchanged.
+The authoritative relationship is `blocks[].location.attachment_files[]` in the
+parent's immutable `ParseVersion`. Each ordered reference retains `part`, `name`
+and `blob`; the same block's `assets` retains ownership of those bytes. Filenames
+and `asset:<blob>` links stay at their original paragraph/table position and heading
+path. Same-byte references can share storage while retaining every occurrence.
+Reads bind the parent source/version, parse ID and block ID, never just a filename
+or paragraph number. Moving the selected parse pointer does not rebind old evidence.
+The legacy `parseable` flag remains readable; new references set it to false because
+no content analysis is attempted. It never authorizes import or scheduling.
 
-Attachment classification validates the container and retains the child original without
-running its parser or OCR. The independent child import owns that work and its quality
-diagnostics; a child failure is not a missing paragraph or image in the parent.
-Container XML is checked against the memory allowance before decompression and tree
-construction. Separate child workers retain the source ancestry depth limit and share
-the task family's cumulative expansion bytes and file count. Existing valid child parsing
-and OCR artifacts remain reusable. Repeated parent imports reuse
-the existing child task for the same parent version and attachment version within
-task history; they do not automatically retry failed or stopped children. A changed
-parent version can queue a fresh child task even if the attachment bytes are unchanged.
-Use the child source's Continue
-action to retry it. Opening task history never starts work. Stopping an active parent
-also stops children owned by it, and the CLI waits for all related imports before
-exiting. A child's failure does not change a completed parent's result. Existing
-imports need an explicit reparse to adopt DOCX v17 attachment parsing; continuing an
-older parse preserves its original identity and diagnostics. Each skipped image frame
-keeps its own diagnostic at the known source position. Floating image ownership remains
-unknown and still requires conservative document-wide dependency review.
+When an embedded payload cannot be extracted, available raw object bytes remain
+attached to the same position. Such references add `extraction: raw_object` and a
+specific `reason`; downloads use `.bin` and do not claim successful file extraction.
+A retained but unanalyzed file does not make the parent's parsing incomplete.
+Attachment filenames drawn as literal text in supported icons are read locally;
+this is metadata extraction, without OCR or model requests. OPC/CFB resource bounds
+still apply to reading the parent package and splitting its stored payloads.
+
+DOCX v20 changes new parse identities without rewriting old JSON. Historical child
+sources, completed parses and task records are preserved. On restart, old automatic
+attachment tasks that were queued/waiting are shown as stopped; uncertain previous
+running tasks remain interrupted. History never starts work. Explicit processing of
+an existing child source remains separate, with its own request and results; this
+change adds no new attachment-processing UI.
+Historical parses may contain expanded child blocks at `location.attachment`.
+Those blocks and their original citations remain readable, but new parent indexing,
+fact extraction and dependency review exclude their content. Coverage labels them
+`stored` with `attachment_stored_only`; their images do not create parent OCR or
+understanding gaps. Real omissions in the parent body still produce partial coverage.
+Each skipped image frame keeps its own diagnostic at the known source position.
+Floating image ownership remains unknown and requires conservative document-wide
+dependency review.
 
 DOCX pictures are retained. OCR is selective and advisory: small icons, narrow
 toolbars (short edge at most 48 pixels), images whose long edge is below 160 pixels,
@@ -729,11 +738,11 @@ empty or unavailable recognition produces a warning, not a document-wide failure
 This size/contrast heuristic does not promise that every selected image has text
 or that every character is recognized. Original missing image data is explicitly
 marked. With usable body text, local DOCX omissions no longer block knowledge
-compilation: unreadable document attachments, missing pictures or notes, malformed
+compilation: missing pictures or notes, malformed
 optional comment/note parts and unsupported objects remain `needs_review` in the
 immutable parse. The task retains their diagnostics and the published summary names
-the omissions. A failed attachment retains its original document download and parent
-position; later content continues normally. A wholly unreadable/empty document,
+the omissions. Raw embedded-object retention is reported separately from failed body
+extraction; later content continues normally. A wholly unreadable/empty document,
 storage failure, cancellation or document deadline still stops processing. Historical
 missing-image decisions remain bound to their exact source and positions; local
 omissions are not relabeled as verified extraction.
@@ -742,15 +751,15 @@ Ordinary continuation reuses validated parse artifacts even if they contain loca
 warnings and even with automatic system/local OCR. It does not open the Word
 container, unpack embedded OLE objects or run OCR again. Changed original bytes,
 parsing/OCR configuration or parser profile select a different cache; an explicit
-reparse bypasses the parent cache. Unchanged, already parsed child documents can
-still reuse their own artifacts. A previously unreadable child without a parse is
-attempted again during parent reparse. Installing/updating an OCR runtime under the
+reparse bypasses the parent cache. Parent reparse saves attachment files again as
+needed, without retrying any child content work. Explicit child processing can
+still reuse its own artifacts. Installing/updating an OCR runtime under the
 same configuration requires explicit reparse to refresh previously retained results.
 These rules preserve source/parse identities and existing fact checkpoints.
 
 Optional DOCX image recognition stops after its resource budget is exhausted or
-credentials/quota prevent further work. This stop is shared with nested document
-attachments within the current parse and resets for the next document operation.
+credentials/quota prevent further work. This stop applies to the current document
+and resets for the next explicitly requested document operation.
 Subsequent candidate images reuse available validated cloud results, or retain their
 bytes and previews without new OCR calls; each document reports one count of skipped
 frames. An empty individual image

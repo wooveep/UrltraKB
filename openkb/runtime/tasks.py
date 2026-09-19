@@ -97,6 +97,18 @@ class TaskManager:
             try:
                 saved = json.loads(path.read_text(encoding="utf-8"))
                 view = TaskView.from_summary(saved["view"])
+                if (
+                    view.operation == "ImportAttachment"
+                    and view.parent_task_id is not None
+                    and saved["view"]["state"] in {"queued", "waiting"}
+                ):
+                    view = replace(
+                        view,
+                        state="stopped",
+                        stage="attachment-stored",
+                        stop_requested=True,
+                        error="Automatic attachment processing is disabled; original file retained",
+                    )
                 identities = tuple(UnitIdentity(**item) for item in saved["identities"])
                 # Recover lost delivery from correlated receipts, without
                 # replaying a request or guessing from artifact existence.
@@ -595,12 +607,6 @@ class TaskManager:
                 and attempt.terminal_sequence != attempt.last_sequence
             ),
         )
-        if exitcode == 0:
-            from openkb.runtime.attachment_tasks import enqueue_attachments
-
-            if not enqueue_attachments(self, task, result, attempt.identity):
-                self._update(task, state="partial", stage="attachment-imports")
-                return
         if exitcode != 0:
             self._update(
                 task,

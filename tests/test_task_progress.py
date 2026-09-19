@@ -46,7 +46,7 @@ def test_progress_boundary_rejects_invalid_counts(row):
         read_progress([row])
 
 
-def test_docx_attachment_progress_keeps_independent_totals(kb_dir, tmp_path):
+def test_docx_attachment_storage_does_not_start_child_progress(kb_dir, tmp_path):
     from openkb.inputs import prepared_input
     from openkb.parsing import parse_document
     from openkb.sources import SourceStore
@@ -62,14 +62,10 @@ def test_docx_attachment_progress_keeps_independent_totals(kb_dir, tmp_path):
     with progress_reporting(events.append):
         parsed = parse_document(kb_dir, source)
     snapshots = [read_progress(e["progress"]) for e in events]
-    assert any(
-        len(s) == 2
-        and s[0] == ProgressStep("docx", 0, 1, "paragraphs")
-        and s[1] == ProgressStep("docx", 3, 3, "paragraphs")
-        for s in snapshots
-    )
+    assert all(len(snapshot) <= 1 for snapshot in snapshots)
     assert (ProgressStep("docx", 1, 1, "paragraphs"),) in snapshots
-    assert len(parsed.blocks) == 1  # Child content belongs to its own source and import task.
+    assert len(parsed.blocks) == 1
+    assert SourceStore(kb_dir).list_sources() == (source,)
 
 
 def test_pdf_counter_only_advances_after_page_result(kb_dir, tmp_path):

@@ -1,57 +1,12 @@
-"""Find pending OCR work relevant to a cached source and its retained attachments."""
+"""Find pending OCR work for the explicitly selected source only."""
 
-from openkb.docx_containers import MAX_EMBEDDED_DEPTH
-from openkb.ocr.reprocessing import effective_attempts
 from openkb.processing import processing_checkpoint
 from openkb.sources import content_id, read_object
 
 
-def _family(store, source, parsed, settings, retries, overrides):
-    from openkb.evidence import ParseStore
-
-    family = {source.id: (retries, overrides)}
-    current = {version.origin: version for version in store.list_sources()}
-    pending = [(source, parsed, 0)]
-
-    def include(parent, attachment, depth):
-        child_depth = depth + 1
-        if child_depth > MAX_EMBEDDED_DEPTH:
-            return None
-        origin = f"attachment:{parent.source_id}/{content_id(attachment['part'])}"
-        child = current.get(origin)
-        if child is None or child.blob != attachment["blob"]:
-            return None  # A replacement cannot supply work to the retained attachment.
-        if child.id not in family:
-            family[child.id] = effective_attempts(store, child, settings)
-            selected = ParseStore(store.kb_dir).selected(child)
-            if selected is not None:
-                pending.append((child, selected, child_depth))
-        return child
-
-    while pending:
-        parent, interpretation, depth = pending.pop()
-        processing_checkpoint("parsing")
-        for block in interpretation.blocks:
-            for attachment in block.location.get("attachment_files", []):
-                include(parent, attachment, depth)
-            # Historical parses embedded child locations directly in the parent.
-            location, ancestor, ancestor_depth = block.location, parent, depth
-            while attachment := location.get("attachment"):
-                ancestor = include(ancestor, attachment, ancestor_depth)
-                if ancestor is None:
-                    break
-                ancestor_depth += 1
-                location = attachment["position"]
-    return family
-
-
 def has_resumable_jobs(store, source, parsed, settings, retries, overrides):
     """Respect current per-page choices and retry identities without sending requests."""
-    family = (
-        {source.id: (retries, overrides)}
-        if parsed.profile.get("docx") == "openkb-docx-v17-independent-attachment-parsing"
-        else _family(store, source, parsed, settings, retries, overrides)
-    )
+    family = {source.id: (retries, overrides)}
     for path in store.owned_path(store.root / "cloud-jobs").glob("*.json"):
         processing_checkpoint("parsing")
         record = read_object(store.owned_path(path))

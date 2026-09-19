@@ -292,6 +292,30 @@ def test_known_job_resumes_download_without_repeating_ocr(
 
     monkeypatch.setattr(requests.Session, "request", service)
     one = import_document(kb_dir, source)
+    parent_import = one
+    if "attachment" in container:
+        from openkb.application.source_actions import continue_source
+        from openkb.parsing import parse_document
+        from openkb.sources import SourceStore
+
+        store = SourceStore(kb_dir)
+        selected = store.version(one.input_version)
+        assert store.list_sources() == (selected,)
+        assert not calls, "Parent import must not start the attachment's OCR"
+        parsed = ParseStore(kb_dir).load(one.parse_id)
+        # Simulate an explicit choice to process each existing child source.
+        while selected.suffix == ".docx":
+            item = parsed.blocks[0].location["attachment_files"][0]
+            selected = store.intake_attachment(
+                selected,
+                part=item["part"],
+                name=item["name"],
+                content=store.asset(item["blob"]).read_bytes(),
+            )
+            if selected.suffix == ".docx":
+                parsed = parse_document(kb_dir, selected)
+                assert not calls
+        one = continue_source(kb_dir, selected.source_id, version_id=selected.id)
     if container == "page_override":
         from openkb.application.source_actions import reprocess_source_page
 
@@ -320,14 +344,7 @@ def test_known_job_resumes_download_without_repeating_ocr(
     ]
     from openkb.application.source_history import source_status
 
-    job_source = one.source_id
-    if "attachment" in container:
-        from openkb.sources import SourceStore
-
-        job_source = next(
-            s.source_id for s in SourceStore(kb_dir).list_sources() if s.suffix == ".pdf"
-        )
-    observed = source_status(kb_dir, job_source)
+    observed = source_status(kb_dir, one.source_id)
     assert observed["cloud_jobs"][0]["requests"] == 3
     assert observed["cloud_jobs"][0]["job_id"] == "job-one"
 
@@ -349,20 +366,18 @@ def test_known_job_resumes_download_without_repeating_ocr(
     assert two.stage == ("committed" if continuation else "parsed"), two
     assert downloads == 2 and sum(method == "POST" for method, _ in calls) == 1
     parsed = ParseStore(kb_dir).load(two.parse_id)
-    if "attachment" not in container:
-        assert all(block.location["page"] == 1 for block in parsed.blocks)
-    else:
+    assert all(block.location["page"] == 1 for block in parsed.blocks)
+    if "attachment" in container:
         from openkb.sources import SourceStore
 
         store = SourceStore(kb_dir)
-        child_parse = ParseStore(kb_dir).selected(store.current(job_source))
-        assert child_parse is not None
         assert any(
-            "Scanned: timeout 42 seconds." in store.asset(b.blob).read_text()
-            for b in child_parse.blocks
-        )
-        assert not any(
             "Scanned: timeout 42 seconds." in store.asset(b.blob).read_text() for b in parsed.blocks
+        )
+        parent_parse = ParseStore(kb_dir).load(parent_import.parse_id)
+        assert not any(
+            "Scanned: timeout 42 seconds." in store.asset(b.blob).read_text()
+            for b in parent_parse.blocks
         ), "The attachment's OCR text belongs to its own source"
 
     # Installing new result assembly rules must revalidate retained raw output,

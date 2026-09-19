@@ -1,4 +1,4 @@
-"""Embedded document imports are separate work; parent text retains file names."""
+"""Parent task completion retains attachments without creating child work."""
 
 import pytest
 
@@ -10,58 +10,83 @@ from tests.document_fixtures import write_docx
 from tests.docx_attachment_fixtures import attached_docx
 
 
-def test_parent_body_retains_attachment_name_without_child_contents(kb_dir, tmp_path):
-    child = tmp_path / "instructions.docx"
-    write_docx(child, "<w:p><w:r><w:t>Child-only recovery port 9473.</w:t></w:r></w:p>")
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    store = SourceStore(kb_dir)
-    with prepared_input(parent) as ready:
-        source = store.intake(ready)
-    parsed = parse_document(kb_dir, source)
-    text = "\n".join(store.asset(block.blob).read_text() for block in parsed.blocks)
-    assert "object.docx" in text
-    assert "Child-only recovery port 9473." not in text
-    assert "Embedded attachment:" not in text
-    child_source = next(row for row in store.list_sources() if row.id != source.id)
-    assert ParseStore(kb_dir).selected(child_source) is None
-    assert not any("docx_attachment:" in row["reason"] for row in parsed.quality)
-    child_parse = parse_document(kb_dir, child_source)
-    assert "Child-only recovery port 9473." in "\n".join(
-        store.asset(block.blob).read_text() for block in child_parse.blocks
-    )
-
-
-def test_document_attachment_gets_an_independent_import_task(kb_dir, tmp_path, model_service):
-    from openkb.application.source_history import source_status
+def test_parent_completion_and_reimport_do_not_schedule_attachments(
+    kb_dir, tmp_path, model_service
+):
     from openkb.runtime.requests import ImportFile
     from openkb.runtime.tasks import TaskManager
 
     child = tmp_path / "instructions.docx"
     write_docx(child, "<w:p><w:r><w:t>Child-only recovery port 9473.</w:t></w:r></w:p>")
     parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    manager = TaskManager(history_dir=tmp_path / "history")
+    history = tmp_path / "history"
+    manager = TaskManager(history_dir=history)
     try:
-        parent_id = manager.submit(kb_dir, [ImportFile(str(parent))])
-        parent_view = manager.wait(parent_id, timeout=60)
-        assert len(parent_view.child_task_ids) == 1
-        child_view = manager.wait(parent_view.child_task_ids[0], timeout=60)
-        assert child_view.parent_task_id == parent_id
-        assert child_view.operation == "ImportAttachment"
-        assert child_view.state == parent_view.state == "completed"
-        result = child_view.results[0].document
-        assert result is not None and result.source_id != parent_view.results[0].document.source_id
-        assert (
-            source_status(kb_dir, result.source_id)["result"]["knowledge_compilation"]
-            == "completed"
-        )
-        repeat = manager.submit(kb_dir, [ImportFile(str(parent))])
-        manager.wait(repeat, timeout=60)
-        assert len(manager.tasks()) == 3, (
-            "Repeating the parent must not create another child import"
-        )
+        for _ in range(2):
+            view = manager.wait(manager.submit(kb_dir, [ImportFile(str(parent))]), timeout=45)
+            assert view.state == "completed", view
+            assert view.child_task_ids == ()
+            assert view.results[0].document.attachments == ()
+        assert len(manager.tasks()) == 2
+        assert len(SourceStore(kb_dir).list_sources()) == 1
+        assert "Child-only recovery port 9473" not in str(model_service)
     finally:
-        manager.shutdown(stop=True)
+        manager.shutdown(stop=False)
         assert manager.join(10)
+    count = len(model_service)
+    restored = TaskManager(history_dir=history)
+    try:
+        assert len(restored.tasks()) == 2
+        assert all(
+            view.state == "completed" and not view.child_task_ids for view in restored.tasks()
+        )
+        assert not restored.has_work(kb_dir)
+        assert len(model_service) == count
+    finally:
+        restored.shutdown(stop=True)
+        assert restored.join(5)
+
+
+def test_cli_keeps_nested_attachments_opaque(kb_dir, tmp_path, model_service, monkeypatch, capsys):
+    from zipfile import ZipFile
+
+    from openkb.cli_import import import_path
+
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "global")
+    child = tmp_path / "leaf.docx"
+    write_docx(child, "<w:p><w:r><w:t>Nested recovery port 9473.</w:t></w:r></w:p>")
+    with ZipFile(child, "a") as archive:
+        archive.comment = b"fixture padding" * 300
+    middle = attached_docx(tmp_path / "middle.docx", child.read_bytes(), name="leaf.docx")
+    parent = attached_docx(tmp_path / "parent.docx", middle.read_bytes(), name="middle.docx")
+    assert import_path(kb_dir, str(parent)) == 0
+    assert "Attachment task:" not in capsys.readouterr().out
+    assert len(SourceStore(kb_dir).list_sources()) == 1
+    assert "Nested recovery port 9473" not in str(model_service)
+
+
+def test_shared_parent_parse_keeps_each_origin_without_registering_children(
+    kb_dir, tmp_path, model_service
+):
+    from openkb.application.documents import import_document
+    from openkb.evidence import Evidence
+
+    child = tmp_path / "child.docx"
+    write_docx(child, "<w:p><w:r><w:t>Recovery instructions.</w:t></w:r></w:p>")
+    first = attached_docx(tmp_path / "first.docx", child.read_bytes())
+    second = tmp_path / "second.docx"
+    second.write_bytes(first.read_bytes())
+    results = [import_document(kb_dir, path) for path in (first, second)]
+    assert all(result.knowledge_compilation == "completed" for result in results)
+    assert results[0].parse_id == results[1].parse_id
+    assert results[0].source_id != results[1].source_id
+    assert len(SourceStore(kb_dir).list_sources()) == 2
+    for result in results:
+        parsed = ParseStore(kb_dir).load(result.parse_id)
+        reference = Evidence(result.source_id, result.input_version, parsed.id, parsed.blocks[0].id)
+        block = ParseStore(kb_dir).read(reference, max_chars=2000)
+        assert block.location["attachment_files"][0]["part"] == "word/embeddings/object.bin"
+        assert "source_id" not in block.location
 
 
 def emf_label(*lines):
@@ -132,263 +157,7 @@ def test_body_uses_the_displayed_filename_from_the_object_icon(
     assert text.count("![") == int(standalone_icon)
     if damaged:
         assert len(store.list_sources()) == 1
-        assert text.count("asset:") == int(standalone_icon)
-
-
-def test_stopping_parent_stops_its_running_attachment(kb_dir, tmp_path, model_service):
-    import json
-    import threading
-
-    from http_model_fixture import evidence_response
-
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
-
-    child_started, release_child = threading.Event(), threading.Event()
-
-    def response(body):
-        payload = json.loads(body["messages"][-1]["content"])
-        if payload.get("stage") == "facts" and "Child-only" in json.dumps(payload):
-            child_started.set()
-            release_child.wait(30)
-        return evidence_response(payload)
-
-    model_service.respond = response
-    child = tmp_path / "child.docx"
-    write_docx(child, "<w:p><w:r><w:t>Child-only recovery instructions.</w:t></w:r></w:p>")
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    manager = TaskManager(history_dir=tmp_path / "history")
-    try:
-        parent_id = manager.submit(kb_dir, [ImportFile(str(parent))])
-        parent_view = manager.wait(parent_id, timeout=30)
-        assert child_started.wait(20)
-        assert parent_view.state == "completed"
-        manager.stop(parent_id)
-        child_view = manager.wait(parent_view.child_task_ids[0], timeout=20)
-        assert child_view.state == "stopped" and child_view.processes_reaped
-        assert manager.get(parent_id).state == "completed"
-    finally:
-        release_child.set()
-        manager.shutdown(stop=True)
-        assert manager.join(10)
-
-
-def test_graceful_drain_finishes_children_and_history_does_not_restart_them(
-    kb_dir, tmp_path, model_service
-):
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
-
-    child = tmp_path / "child.docx"
-    write_docx(child, "<w:p><w:r><w:t>Child recovery instructions.</w:t></w:r></w:p>")
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    history = tmp_path / "history"
-    manager = TaskManager(history_dir=history)
-    try:
-        parent_id = manager.submit(kb_dir, [ImportFile(str(parent))])
-        manager.shutdown(stop=False)
-        assert manager.join(45)
-        child_id = manager.get(parent_id).child_task_ids[0]
-        assert manager.get(child_id).state == "completed"
-    finally:
-        manager.shutdown(stop=True)
-        assert manager.join(10)
-    count = len(model_service)
-    restored = TaskManager(history_dir=history)
-    try:
-        assert restored.get(parent_id).child_task_ids == (child_id,)
-        assert restored.get(child_id).parent_task_id == parent_id
-        assert not restored.has_work(kb_dir)
-        assert len(model_service) == count
-    finally:
-        restored.shutdown(stop=True)
-        assert restored.join(5)
-
-
-def test_cli_waits_for_nested_attachment_imports(
-    kb_dir, tmp_path, model_service, monkeypatch, capsys
-):
-    from zipfile import ZipFile
-
-    from openkb.cli_import import import_path
-
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "global")
-    child = tmp_path / "leaf.docx"
-    write_docx(child, "<w:p><w:r><w:t>Nested recovery port 9473.</w:t></w:r></w:p>")
-    # The fixture CFB writer uses regular streams, whose minimum size is 4096.
-    with ZipFile(child, "a") as archive:
-        archive.comment = b"fixture padding" * 300
-    middle = attached_docx(tmp_path / "middle.docx", child.read_bytes(), name="leaf.docx")
-    parent = attached_docx(tmp_path / "parent.docx", middle.read_bytes(), name="middle.docx")
-    assert import_path(kb_dir, str(parent)) == 0
-    output = capsys.readouterr().out
-    assert output.count("Attachment task:") == 2
-    assert "leaf.docx · completed" in output
-    assert "middle.docx · completed" in output
-    assert len(SourceStore(kb_dir).list_sources()) == 3
-
-
-def test_shared_parent_parse_binds_child_imports_to_each_origin(kb_dir, tmp_path, model_service):
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
-
-    child = tmp_path / "child.docx"
-    write_docx(child, "<w:p><w:r><w:t>Recovery instructions.</w:t></w:r></w:p>")
-    first = attached_docx(tmp_path / "first.docx", child.read_bytes())
-    second = tmp_path / "second.docx"
-    second.write_bytes(first.read_bytes())
-    manager = TaskManager(history_dir=tmp_path / "history")
-    try:
-        parents, children = [], []
-        for path in (first, second):
-            view = manager.wait(manager.submit(kb_dir, [ImportFile(str(path))]), timeout=30)
-            parents.append(view.results[0].document)
-            imported = manager.wait(view.child_task_ids[0], timeout=30)
-            assert imported.state == "completed"
-            children.append(imported.results[0].document)
-        assert parents[0].parse_id == parents[1].parse_id
-        assert children[0].source_id != children[1].source_id
-        assert all(
-            SourceStore(kb_dir)
-            .version(child.input_version)
-            .origin.startswith("attachment:" + parent.source_id + "/")
-            for child, parent in zip(children, parents, strict=True)
-        )
-    finally:
-        manager.shutdown(stop=True)
-        assert manager.join(10)
-
-
-def test_queued_parent_update_does_not_lose_an_unchanged_attachment(
-    kb_dir, tmp_path, model_service
-):
-    import json
-    import threading
-    from zipfile import ZipFile
-
-    from http_model_fixture import evidence_response
-
-    from openkb.runtime.attachment_tasks import task_family
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
-
-    started, release = threading.Event(), threading.Event()
-
-    def response(body):
-        payload = json.loads(body["messages"][-1]["content"])
-        if payload.get("stage") == "facts" and not started.is_set():
-            started.set()
-            release.wait(30)
-        return evidence_response(payload)
-
-    model_service.respond = response
-    child = tmp_path / "child.docx"
-    write_docx(child, "<w:p><w:r><w:t>Recovery port 9473.</w:t></w:r></w:p>")
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
-    try:
-        first = manager.submit(kb_dir, [ImportFile(str(parent))])
-        assert started.wait(20)
-        with ZipFile(parent) as archive:
-            parts = {name: archive.read(name) for name in archive.namelist()}
-        parts["word/document.xml"] = parts["word/document.xml"].replace(b"Follow", b"First follow")
-        with ZipFile(parent, "w") as archive:
-            for name, content in parts.items():
-                archive.writestr(name, content)
-        second = manager.submit(kb_dir, [ImportFile(str(parent))])
-        release.set()
-        manager.wait(first, timeout=30)
-        manager.wait(second, timeout=30)
-        manager.shutdown(stop=False)
-        assert manager.join(30)
-        family = task_family(manager, second)
-        assert len(family) == 2
-        assert family[1].state == "completed"
-        assert family[1].results[0].document.knowledge_compilation == "completed"
-        assert family[1].parent_task_id == second
-    finally:
-        release.set()
-        manager.shutdown(stop=True)
-        assert manager.join(10)
-
-
-def test_attachment_binding_failure_precedes_parent_publication(
-    kb_dir, tmp_path, model_service, monkeypatch
-):
-    from openkb.application.documents import import_document
-
-    child = tmp_path / "child.docx"
-    write_docx(child, "<w:p><w:r><w:t>Recovery port 9473.</w:t></w:r></w:p>")
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    intake = SourceStore.intake_attachment
-    calls = 0
-
-    def fail_binding(store, *args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:  # Parsing succeeds; subsequent source binding cannot be saved.
-            raise OSError("Fixture attachment storage unavailable")
-        return intake(store, *args, **kwargs)
-
-    monkeypatch.setattr(SourceStore, "intake_attachment", fail_binding)
-    result = import_document(kb_dir, parent)
-    assert result.status == "failed"
-    assert result.source_intake == "saved"
-    assert not list((kb_dir / "wiki").rglob("*.md"))
-    assert not model_service, "Binding must finish before model work or publication"
-
-
-def test_child_image_failure_is_owned_by_its_independent_parse(kb_dir, tmp_path):
-    from openkb.agent.dependency_preflight import known_omissions
-    from tests.docx_attachment_fixtures import docx_with_parts
-
-    child = docx_with_parts(
-        tmp_path / "child.docx",
-        "<w:p><w:r><w:t>Read child illustration.</w:t><w:pict "
-        'xmlns:v="urn:schemas-microsoft-com:vml" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<v:shape><v:imagedata r:id="missing"/></v:shape></w:pict></w:r></w:p>',
-        relationships='<Relationship Id="missing" '
-        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
-        'Target="media/missing.png"/>',
-    )
-    parent = attached_docx(tmp_path / "parent.docx", child.read_bytes())
-    store = SourceStore(kb_dir)
-    with prepared_input(parent) as ready:
-        source = store.intake(ready)
-    parsed = parse_document(kb_dir, source)
-    child_source = next(row for row in store.list_sources() if row.id != source.id)
-    assert ParseStore(kb_dir).selected(child_source) is None
-    assert not known_omissions(parsed), "A document attachment is not a pending image"
-    child_parse = parse_document(kb_dir, child_source)
-    assert any(row["reason"] == "docx_image_asset_missing" for row in child_parse.quality)
-    assert not any("docx_image_asset_missing" in row["reason"] for row in parsed.quality)
-
-
-@pytest.mark.parametrize("suffix,payload", [(".docx", b"broken zip"), (".pdf", b"broken pdf")])
-def test_broken_named_document_is_only_a_filename(kb_dir, tmp_path, suffix, payload):
-    parent = attached_docx(tmp_path / "parent.docx", payload * 600, name="broken" + suffix)
-    store = SourceStore(kb_dir)
-    with prepared_input(parent) as ready:
-        source = store.intake(ready)
-    parsed = parse_document(kb_dir, source)
-    assert len(store.list_sources()) == 1
-    assert not any(block.assets for block in parsed.blocks)
-    assert "broken" + suffix in "".join(store.asset(b.blob).read_text() for b in parsed.blocks)
-
-
-def test_independent_child_parse_keeps_parent_nesting_depth(kb_dir, tmp_path, monkeypatch):
-    monkeypatch.setattr("openkb.docx_containers.MAX_EMBEDDED_DEPTH", 1)
-    middle = attached_docx(tmp_path / "middle.docx", b"Nested content.\n" * 300, name="leaf.txt")
-    parent = attached_docx(tmp_path / "parent.docx", middle.read_bytes())
-    store = SourceStore(kb_dir)
-    with prepared_input(parent) as ready:
-        source = store.intake(ready)
-    parse_document(kb_dir, source)
-    child = next(row for row in store.list_sources() if row.id != source.id)
-    child_parse = parse_document(kb_dir, child)
-    assert len(store.list_sources()) == 2
-    assert any(row["reason"] == "docx_attachment_depth_exceeded" for row in child_parse.quality)
+        assert text.count("asset:") == 1 + int(standalone_icon)
 
 
 def test_document_attachment_alone_is_not_incomplete_image_coverage(

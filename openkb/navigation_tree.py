@@ -41,6 +41,8 @@ def basic_tree(kb_dir, source, parsed):
             continue
         end = starts[i + 1] if i + 1 < len(starts) else len(parsed.blocks)
         block = parsed.blocks[start]
+        if "attachment" in block.location:
+            continue
         view = reader.read(
             Evidence(source.source_id, source.id, parsed.id, block.id),
             max_chars=complete_read_bound(block),
@@ -56,6 +58,8 @@ def basic_tree(kb_dir, source, parsed):
                 title = location["attachment"]["name"]
         preview = []
         for member in parsed.blocks[start:end]:
+            if "attachment" in member.location:
+                continue
             if sum(map(len, preview)) >= 256:
                 break
             text = reader.read(

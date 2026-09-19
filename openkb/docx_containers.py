@@ -114,12 +114,12 @@ def _native_package(data: bytes) -> tuple[str, bytes]:
     return PurePosixPath(label.replace("\\", "/")).name, data[offset : offset + size]
 
 
-def unpack_ole(data: bytes) -> tuple[str, bytes]:
+def unpack_ole(data: bytes) -> tuple[str | None, bytes]:
     """Return a Package file or embedded OOXML document from a CFB container."""
     if len(data) > MAX_EMBEDDED_BYTES:
         raise ValueError("docx_attachment_size_exceeded")
     if data.startswith(b"PK\x03\x04"):
-        return "embedded.docx", data
+        return None, data
     if not data.startswith(bytes.fromhex("d0cf11e0a1b11ae1")):
         raise ValueError("docx_ole_container_unsupported")
     from xlrd.compdoc import CompDoc, CompDocError
@@ -130,7 +130,7 @@ def unpack_ole(data: bytes) -> tuple[str, bytes]:
         if package is not None:
             if not package.startswith(b"PK\x03\x04"):
                 raise ValueError("docx_ole_package_unsupported")
-            return "embedded.docx", package
+            return None, package
         native = container.get_named_stream("\x01Ole10Native")
         if native is not None:
             return _native_package(native)

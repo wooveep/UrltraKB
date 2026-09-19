@@ -67,7 +67,9 @@ def test_shared_range_cache_evicts_by_bytes_and_is_released(monkeypatch):
     assert not budget.cache
 
 
-def test_attachment_and_retry_share_the_parent_request_allowance(kb_dir, tmp_path, model_service):
+def test_attachment_storage_does_not_spend_the_parent_retry_allowance(
+    kb_dir, tmp_path, model_service
+):
     import yaml
 
     from openkb.runtime.requests import ImportFile
@@ -87,15 +89,15 @@ def test_attachment_and_retry_share_the_parent_request_allowance(kb_dir, tmp_pat
     try:
         parent_id = manager.submit(kb_dir, [ImportFile(str(parent))])
         parent_view = manager.wait(parent_id, timeout=60)
-        assert len(parent_view.child_task_ids) == 1
-        child_view = manager.wait(parent_view.child_task_ids[0], timeout=60)
-        assert child_view.results[0].document.reason == "request_budget_exhausted"
+        assert parent_view.child_task_ids == ()
+        assert parent_view.results[0].document.reason == "request_budget_exhausted"
+        assert "Child-only recovery port 9473" not in str(model_service)
         before = len(model_service)
         # A retry keeps the original family, including after the manager restarts.
         manager.shutdown(stop=True)
         assert manager.join(10)
         manager = TaskManager(history_dir=history)
-        repeated = manager.submit(kb_dir, [ImportFile(str(child))], retry_of=child_view.id)
+        repeated = manager.submit(kb_dir, [ImportFile(str(parent))], retry_of=parent_view.id)
         retry_view = manager.wait(repeated, timeout=60)
         assert retry_view.results[0].document.reason == "request_budget_exhausted"
         assert len(model_service) == before == 3
@@ -165,6 +167,11 @@ def test_compressed_office_xml_is_checked_before_expansion(
             archive.writestr(name, data)
     original = attached_docx(tmp_path / "parent.docx", child.read_bytes()) if embedded else child
     result = import_document(kb_dir, original)
-    assert result.reason == "resource_memory_insufficient"
+    if embedded:
+        assert result.knowledge_compilation == "completed"
+        assert "x" * 1000 not in str(model_service)
+        assert result.attachments == ()
+    else:
+        assert result.reason == "resource_memory_insufficient"
+        assert not model_service
     assert result.source_intake == "saved" and result.input_version
-    assert not model_service

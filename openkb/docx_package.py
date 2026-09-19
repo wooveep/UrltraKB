@@ -30,6 +30,7 @@ class Attachment:
     content: bytes
     container: str
     blob: str
+    extraction_error: str | None = None
 
 
 @dataclass
@@ -142,34 +143,32 @@ def prepare_docx(
             for index, node in enumerate(list(tree.iter(OFFICE + "OLEObject")), 1):
                 member = None
                 display_name = None
+                container = None
                 try:
                     if node.get("Type") != "Embed":
                         raise ValueError("docx_linked_object_has_no_content")
                     member = internal(node.get(R + "id"))
                     container = read_member(archive, member, budget, depth + 1)
-                    name, content = unpack_ole(container)
-                    display_name = name if name != "embedded.docx" else None
-                    budget.admit(len(content), depth + 1)
                     original = hashlib.sha256(container).hexdigest()
+                    store.put_bytes(container)
+                    name, content = unpack_ole(container)
+                    display_name = name
+                    budget.admit(len(content), depth + 1)
                     blob = hashlib.sha256(content).hexdigest()
-                    attachment = Attachment(member, name, content, original, blob)
-                    from openkb.docx_attachments import document_name
+                    from openkb.docx_attachments import attachment_name
 
-                    recognized_name = document_name(attachment)
-                    if name == "embedded.docx" and recognized_name:
+                    stored_name = attachment_name(member, name, content)
+                    if name is None:
                         label = icon_label(node)
                         if (
                             label
                             and posixpath.splitext(label)[1].lower()
-                            == posixpath.splitext(recognized_name)[1]
+                            == posixpath.splitext(stored_name)[1]
                         ):
-                            attachment = Attachment(member, label, content, original, blob)
-                    if recognized_name is not None:
-                        from openkb.docx_attachments import validate_container
-
-                        validate_container(attachment, recognized_name, budget, depth + 1)
-                        store.put_bytes(container)
-                        store.put_bytes(content)
+                            stored_name = label
+                    attachment = Attachment(member, stored_name, content, original, blob)
+                    # Saving an embedded file never validates or parses its contents.
+                    store.put_bytes(content)
                     marker = "[openkb-attachment-" + content_id([part, index, original]) + "]"
                     if marker.encode() in raw:
                         raise ValueError("docx_attachment_marker_collision")
@@ -179,7 +178,6 @@ def prepare_docx(
                     changed_part = True
                 except (ValueError, KeyError, BadZipFile, ParseError, DefusedXmlException) as exc:
                     reason = str(exc) if str(exc).startswith("docx_") else "docx_attachment_missing"
-                    quality.append({"status": "needs_review", "reason": reason})
                     if node.get("Type") == "Embed":
                         from openkb.attachments import filename_text
 
@@ -188,8 +186,22 @@ def prepare_docx(
                             or display_name
                             or (posixpath.basename(member) if member else "未命名附件")
                         )
-                        replace_object(node, filename_text(fallback_name))
+                        if container is not None and member is not None:
+                            marker = (
+                                "[openkb-attachment-" + content_id([part, index, original]) + "]"
+                            )
+                            if marker.encode() in raw:
+                                raise ValueError("docx_attachment_marker_collision") from exc
+                            attachments[marker] = Attachment(
+                                member, fallback_name, container, original, original, reason
+                            )
+                            replace_object(node, marker)
+                        else:
+                            quality.append({"status": "needs_review", "reason": reason})
+                            replace_object(node, filename_text(fallback_name))
                         changed_part = True
+                    else:
+                        quality.append({"status": "needs_review", "reason": reason})
             changed_part = _inline_vml_pictures(tree, relationships) or changed_part
             # VML style/path properties only become advisory when their complete
             # image representation is present. Uncovered vector shapes still block.

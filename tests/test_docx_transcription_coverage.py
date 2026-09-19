@@ -7,6 +7,8 @@ import pytest
 import requests
 
 from openkb.application.documents import import_document
+from openkb.evidence import ParseStore
+from openkb.sources import SourceStore
 from tests.docx_attachment_fixtures import attached_docx, docx_with_parts
 from tests.test_cloud_ocr import cloud_settings
 from tests.test_docx_images import _png
@@ -125,15 +127,25 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
         from openkb.application.execution import ExecutionContext
         from openkb.runtime.requests import ImportAttachment
 
-        assert len(result.attachments) == 1
+        assert result.attachments == ()
+        assert not submissions, "Saving the parent must not OCR embedded images"
         assert not {hashlib.sha256(data).hexdigest() for data in originals} & {
             row["id"] for row in result.coverage["assets"]
         }
-        child = result.attachments[0]
+        store = SourceStore(kb_dir)
+        parent = store.version(result.input_version)
+        parent_parse = ParseStore(kb_dir).load(result.parse_id)
+        item = parent_parse.blocks[0].location["attachment_files"][0]
+        child = store.intake_attachment(
+            parent,
+            part=item["part"],
+            name=item["name"],
+            content=store.asset(item["blob"]).read_bytes(),
+        )
         result = import_attachment(
             kb_dir,
             ImportAttachment(
-                child.source_id, child.version_id, result.input_version, child.part, child.name
+                child.source_id, child.id, result.input_version, item["part"], child.name
             ),
             context=ExecutionContext(),
         )

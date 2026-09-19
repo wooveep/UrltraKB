@@ -174,7 +174,9 @@ def test_legacy_parse_identity_and_evidence_survive_typed_context_upgrade(kb_dir
     assert saved == parsed and artifact.read_bytes() == old_bytes
 
 
-def test_declared_header_in_embedded_docx_retains_original_attachment_positions(kb_dir, tmp_path):
+def test_explicit_child_parse_keeps_header_context_separate_from_parent_attachment(
+    kb_dir, tmp_path
+):
     from openkb.evidence import Evidence, ParseStore
     from openkb.parsing import parse_document
     from tests.docx_attachment_fixtures import attached_docx
@@ -195,11 +197,16 @@ def test_declared_header_in_embedded_docx_retains_original_attachment_positions(
 
     reference = parsed.blocks[0].location["attachment_files"][0]
     assert reference["part"] == "word/embeddings/object.bin"
-    source = next(
-        v for v in SourceStore(kb_dir).list_sources() if v.origin.startswith("attachment:")
+    sources = SourceStore(kb_dir)
+    assert sources.list_sources() == (source,)
+    assert "7 days" not in sources.asset(parsed.blocks[0].blob).read_text()
+    source = sources.intake_attachment(
+        source,
+        part=reference["part"],
+        name=reference["name"],
+        content=sources.asset(reference["blob"]).read_bytes(),
     )
-    parsed = store.selected(source)
-    assert parsed is not None
+    parsed = parse_document(kb_dir, source)
     views = [
         store.read(Evidence(source.source_id, source.id, parsed.id, block.id), max_chars=4000)
         for block in parsed.blocks

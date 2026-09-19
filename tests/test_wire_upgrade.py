@@ -46,9 +46,9 @@ def test_context_upgrade_compatibility_requires_the_exact_module_and_implementat
     loader = find_spec(name).loader
     code = loader.get_code(name)
     current = implementation.module_revision(name)
-    if name == "openkb.agent.evidence_wire":
-        # The frozen-prefix protocol changes wire semantics and cannot inherit
-        # the earlier lifetime-only compatibility stamp.
+    if name in {"openkb.agent.evidence_wire", "openkb.agent.dependency_preflight"}:
+        # Frozen-prefix transport and excluding old attachment bodies change
+        # semantic inputs; neither can inherit the lifetime-only stamp.
         assert current != previous
     else:
         assert current == previous

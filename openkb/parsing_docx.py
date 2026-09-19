@@ -65,20 +65,7 @@ def parse_docx(
             attachment = prepared.attachments.get(node.value)
             if attachment is not None:
                 from openkb.attachments import filename_text
-                from openkb.docx_attachments import document_name
 
-                name = document_name(attachment)
-                if name is None:
-                    quality.append(
-                        {
-                            "status": "verified",
-                            "reason": "non_document_attachment_skipped:" + attachment.name,
-                        }
-                    )
-                    return filename_text(attachment.name)
-                from dataclasses import replace
-
-                attachment = replace(attachment, name=name)
                 pending_attachments.append(attachment)
                 assets.append(attachment.blob)
                 return f"[{filename_text(attachment.name)}](asset:{attachment.blob})"
@@ -205,39 +192,22 @@ def parse_docx(
                                     {"status": "needs_review", "reason": "docx_list_level_omitted"}
                                 )
                     for attachment in pending_attachments:
-                        from openkb.docx_attachments import (
-                            ATTACHMENT_CONTENT_ERRORS,
-                            attachment_quality,
-                            parse_attachment,
-                        )
-
                         reference = {
                             "part": attachment.part,
                             "name": attachment.name,
                             "blob": attachment.blob,
                             "parseable": False,
                         }
-                        try:
-                            _drafts, checks = parse_attachment(
-                                attachment,
-                                store,
-                                budget,
-                                _depth + 1,
-                                ocr,
-                                source=_source,
-                                options=_options,
-                                resume_ocr=resume_ocr,
+                        if attachment.extraction_error:
+                            reference.update(
+                                extraction="raw_object", reason=attachment.extraction_error
                             )
-                            reference["parseable"] = not any(
-                                row["reason"].startswith("source_content_unparsed:")
-                                for row in checks
-                            )
-                            quality.extend(attachment_quality(checks, attachment, location))
-                        except ATTACHMENT_CONTENT_ERRORS:
                             quality.append(
                                 {
-                                    "status": "needs_review",
-                                    "reason": "docx_attachment_unparsed:" + attachment.part,
+                                    "status": "verified",
+                                    "reason": "docx_attachment_raw_object:"
+                                    + attachment.extraction_error,
+                                    "location": location.copy(),
                                 }
                             )
                         location.setdefault("attachment_files", []).append(reference)

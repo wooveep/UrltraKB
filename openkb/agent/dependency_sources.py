@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 
+from openkb.attachments import parent_blocks
 from openkb.evidence import Evidence, complete_read_bound
 from openkb.source_context import context_fields
 
@@ -11,7 +12,7 @@ class OriginalRows(Mapping):
     def __init__(self, reader, source, parsed):
         self.reader = reader
         self.identity = (source.source_id, source.id, parsed.id)
-        self.blocks = {block.id: block for block in parsed.blocks}
+        self.blocks = {block.id: block for block in parent_blocks(parsed)}
 
     def __getitem__(self, key):
         block = self.blocks[key]

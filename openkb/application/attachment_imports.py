@@ -1,29 +1,6 @@
-"""Bind extracted references to their parent and import each child independently."""
+"""Explicit processing of previously registered attachment sources."""
 
-from openkb.attachments import DocumentAttachment
 from openkb.sources import SourceStore, content_id
-
-
-def document_attachments(kb_dir, source, parsed):
-    """Bind all child sources before model work or a parent publication can begin."""
-    store = SourceStore(kb_dir)
-    if parsed.input_key != source.input_key:
-        raise ValueError("Attachment references do not belong to the parent version")
-    children = {}
-    for block in parsed.blocks:
-        for item in block.location.get("attachment_files", []):
-            if not item["parseable"]:
-                continue
-            child = store.intake_attachment(
-                source,
-                part=item["part"],
-                name=item["name"],
-                content=store.asset(item["blob"]).read_bytes(),
-            )
-            children[child.id] = DocumentAttachment(
-                child.source_id, child.id, item["part"], item["name"]
-            )
-    return tuple(children.values())
 
 
 def import_attachment(kb_dir, request, *, context):

@@ -33,6 +33,8 @@ def _scan(source, parsed, reader):
     entries, excluded, ambiguous = [], set(), []
     in_toc, toc_page, ambiguous_blocks = False, None, 0
     for block in parsed.blocks:
+        if "attachment" in block.location:
+            continue
         processing_checkpoint()
         check_memory(complete_read_bound(block) * 12, stage="index_structure")
         view = reader.read(
@@ -125,6 +127,8 @@ def _matches(source, parsed, reader, entries, excluded):
 
     matches = {normalized(entry["title"]): [] for entry in entries}
     for block in parsed.blocks:
+        if "attachment" in block.location:
+            continue
         if block.id in excluded or (block.kind != "heading" and block.location["kind"] != "pdf"):
             continue
         processing_checkpoint()

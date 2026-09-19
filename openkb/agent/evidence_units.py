@@ -164,6 +164,9 @@ def facts_fit(units, limits, model):
 def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
     """Every nonempty block is covered in order; large blocks retain exact spans."""
     reader = indexed_reader(kb_dir, source, parsed, navigation)
+    from openkb.attachments import parent_blocks
+
+    blocks = parent_blocks(parsed)
     from openkb.agent.source_semantics import document_label
 
     heading = []
@@ -190,7 +193,7 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             **window_fields(start, end, block.chars),
         }
 
-    for index, block in enumerate(parsed.blocks):
+    for index, block in enumerate(blocks):
         processing_checkpoint()
         object_info = table_objects.get(block.id)
         original_location = block.location
@@ -224,8 +227,8 @@ def source_units(kb_dir, source, parsed, limits, model, *, navigation=None):
             if not detached_image
             else []
         )
-        previous = parsed.blocks[index - 1] if index else None
-        following = parsed.blocks[index + 1] if index + 1 < len(parsed.blocks) else None
+        previous = blocks[index - 1] if index else None
+        following = blocks[index + 1] if index + 1 < len(blocks) else None
         before_block = neighbor(previous, 0, previous.chars, "previous_block") if previous else None
         after_block = (
             neighbor(following, 0, following.chars, "following_block") if following else None

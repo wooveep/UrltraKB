@@ -282,7 +282,7 @@ def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, c
 
     reader = ParseStore(kb_dir).reader(source, parsed)
     for block in parsed.blocks:
-        if block.kind != "heading" or block.id in excluded:
+        if block.kind != "heading" or block.id in excluded or "attachment" in block.location:
             continue
         if any(row["start_block"] == block.id for row in sections):
             continue

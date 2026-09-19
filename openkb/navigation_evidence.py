@@ -28,7 +28,11 @@ def read_evidence_group(kb_dir, source, parsed, descriptor):
         raise ValueError("Frozen evidence identity mismatch")
     from openkb.resource_budget import check_memory
 
-    members = parsed.blocks[descriptor["start"] : descriptor["end"]]
+    members = [
+        block
+        for block in parsed.blocks[descriptor["start"] : descriptor["end"]]
+        if "attachment" not in block.location
+    ]
     check_memory(sum(complete_read_bound(block) for block in members) * 12, stage="index_structure")
     reader = ParseStore(kb_dir).reader(source, parsed)
     blocks = []

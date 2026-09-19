@@ -217,7 +217,14 @@ def test_detached_missing_images_keep_the_count_without_inheriting_an_unlocated_
     parent_parse = parse_document(kb_dir, source)
     if nested:
         assert not any("docx_image_asset_missing" in row["reason"] for row in parent_parse.quality)
-        source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
+        assert sources.list_sources() == (source,)
+        item = parent_parse.blocks[0].location["attachment_files"][0]
+        source = sources.intake_attachment(
+            source,
+            part=item["part"],
+            name=item["name"],
+            content=sources.asset(item["blob"]).read_bytes(),
+        )
     one = parse_document(kb_dir, source)
     missing = [row for row in one.quality if row["reason"].endswith("docx_image_asset_missing")]
     assert sum(row["count"] for row in missing) == 2
@@ -336,7 +343,14 @@ def test_nested_missing_image_decision_uses_omission_position_not_literal_text(k
     parent_parse = parse_document(kb_dir, source)
     assert not any("docx_image_asset_missing" in row["reason"] for row in parent_parse.quality)
     assert parent_parse.blocks[0].location["paragraph"] == 1
-    source = next(v for v in sources.list_sources() if v.origin.startswith("attachment:"))
+    assert sources.list_sources() == (source,)
+    item = parent_parse.blocks[0].location["attachment_files"][0]
+    source = sources.intake_attachment(
+        source,
+        part=item["part"],
+        name=item["name"],
+        content=sources.asset(item["blob"]).read_bytes(),
+    )
     assert parses.selected(source) is None
     one = parse_document(kb_dir, source)
     missing = [row for row in one.quality if row["reason"] == "docx_image_asset_missing"]

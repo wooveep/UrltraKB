@@ -73,7 +73,6 @@ def _compile_version(
     store = SourceStore(kb_dir)
     originals = (str(store.original(source)),)
     parsed = None
-    attachments = ()
     proposal = None
     stage = "parsing"
     with collect_compile_report() as report:
@@ -102,13 +101,11 @@ def _compile_version(
                     resume_ocr=False,
                     page_overrides=page_overrides,
                 )
-                from openkb.application.attachment_imports import document_attachments
-
-                attachments = document_attachments(kb_dir, source, parsed)
                 for row in parsed.quality:
                     if row["status"] == "needs_review" or (
                         "docx_conversion_warning:" in row["reason"]
                         or "non_document_attachment_skipped:" in row["reason"]
+                        or "docx_attachment_raw_object:" in row["reason"]
                         or "docx_image_ocr_notice:" in row["reason"]
                         or "pdf_image_ocr_notice:" in row["reason"]
                     ):
@@ -133,7 +130,6 @@ def _compile_version(
                         usage=report.usage,
                         warnings=tuple(report.warnings),
                         coverage=source_coverage(source, parsed, report),
-                        attachments=attachments,
                     )
                 registry = HashRegistry(kb_dir / ".openkb/hashes.json")
                 previous = registry.get(source.source_id)
@@ -179,7 +175,6 @@ def _compile_version(
                         parse_id=parsed.id,
                         usage=report.usage,
                         coverage=previous_coverage,
-                        attachments=attachments,
                     )
                 name = document_name or (previous.get("doc_name") if previous else None)
                 name = name or f"{_sanitize_stem(Path(source.name).stem)[:100]}-{source.source_id}"
@@ -313,7 +308,6 @@ def _compile_version(
                     source_id=source.source_id,
                     parse_id=parsed.id,
                     coverage=coverage,
-                    attachments=attachments,
                 )
         except ProcessingIncomplete as exc:
             reason, stage, status = exc.reason, exc.stage, "unfinished"
@@ -350,7 +344,6 @@ def _compile_version(
             source_id=source.source_id,
             parse_id=parsed.id if parsed else None,
             coverage=source_coverage(source, parsed, report),
-            attachments=attachments,
         )
 
 
@@ -367,12 +360,19 @@ def _materialize(
     attachments = {}
     for block in parsed.blocks:
         for attachment in block.location.get("attachment_files", []):
-            attachments[attachment["blob"]] = Path(attachment["name"]).suffix.lower()
+            attachments[attachment["blob"]] = (
+                ".bin"
+                if attachment.get("extraction") == "raw_object"
+                else Path(attachment["name"]).suffix.lower()
+            )
         position = block.location
         while "attachment" in position:
             attachment = position["attachment"]
             attachments[attachment["blob"]] = Path(attachment["name"]).suffix.lower()
             position = attachment["position"]
+        if "attachment" in block.location:
+            for digest in block.assets:
+                attachments.setdefault(digest, ".bin")
     asset_paths = {}
     unrenderable = set()
     for block in parsed.blocks:
@@ -381,11 +381,7 @@ def _materialize(
             if digest in asset_paths:
                 continue
             if digest in attachments:
-                from openkb.inputs import SUPPORTED_EXTENSIONS
-
                 attachment_extension = attachments[digest]
-                if attachment_extension not in SUPPORTED_EXTENSIONS:
-                    raise ValueError("Unrecognized embedded document format")
                 asset = workspace / "wiki/sources/attachments" / f"{digest}{attachment_extension}"
                 _copy_file_atomic(store.asset(digest), asset)
                 asset_paths[digest] = "attachments/" + asset.name
@@ -431,7 +427,13 @@ def _materialize(
         processing_checkpoint()
         # Shared headers may refer to a figure owned by a different block. Map
         # context and body through the same validated source-wide asset catalog.
-        content = block.context + "\n" + store.asset(block.blob).read_text(encoding="utf-8")
+        if "attachment" in block.location:
+            from openkb.attachments import filename_text
+
+            attachment = block.location["attachment"]
+            content = f"[{filename_text(attachment['name'])}](asset:{attachment['blob']})"
+        else:
+            content = block.context + "\n" + store.asset(block.blob).read_text(encoding="utf-8")
         content = re.sub(r"!\[([^\]]*)\]\(asset:([0-9a-f]{64})\)", original_link, content)
         content = re.sub(r"asset:([0-9a-f]{64})", asset_link, content)
         reference = Evidence(source.source_id, source.id, parsed.id, block.id)
