@@ -47,6 +47,11 @@ Navigation uses the configured effective output reservation, without a special
 2,048-token ceiling. Summaries are optional selection hints with shape and source
 checks, and do not trigger a separate summary model review. Knowledge generation
 and its original-evidence verification retain their own rules.
+Summary requests number their selected sections locally (`"1"`, `"2"`, ...);
+code maps those numbers back to persistent navigation nodes, even when responses
+arrive in a different order. Rejected summary fields retain their JSON path and
+reason in checkpoints and the saved navigation/window status, for example
+`index_summary_invalid: $.summaries[0].id: unknown section number`.
 
 The `source-prefix-v1` protocol fixes the public system and encodes frozen source
 identities and context before task data. Structure and summary requests can reuse

@@ -82,3 +82,18 @@ unresolved TOC status after a successful empty body fallback.
 
 Final review: Standards — no blocking findings, two non-blocking notes;
 Spec — no remaining findings in reviewed corrections.
+
+## Summary follow-up
+
+Summary transport now uses request-local section numbers and maps validated
+responses back to persistent nodes in code. Rejections preserve the failing
+JSON field path and reason in the request checkpoint and saved navigation/window
+status. No summary-review model request was added.
+
+The follow-up's navigation, wire and file-size regression selection passed
+**64 tests**, including 19 new cases for reordered short-number responses,
+nullable hints, invalid fields, duplicate JSON fields, malformed JSON and
+persisted rejection diagnostics on resume.
+Ruff checks, formatting and mypy (373 modules) also passed. The earlier full-suite
+results and unrelated failures above remain the full-suite baseline.
+Follow-up review: Standards — no findings; Spec — no remaining findings.
