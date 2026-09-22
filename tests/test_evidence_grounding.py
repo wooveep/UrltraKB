@@ -72,12 +72,52 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            blocks = payload["evidence"]["blocks"]
+            target = payload["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            heading_block = next(block for block in blocks if block["text"] == heading)
+            wait_block = next(block for block in blocks if block["text"] == "Wait 15 seconds.")
+            quote_block = next(block for block in blocks if block["text"] == quote)
+            return {
+                "overview": {
+                    "text": "Controller shutdown scope.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "support",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/controller-support",
+                        "title": "Controller Support",
+                        "purpose": "Describe version-specific controller support.",
+                        "subject_ranges": [[quote_block["order"], quote_block["order"] + 1]],
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": [[heading_block["order"], heading_block["order"] + 1]],
+                                "basis": heading,
+                                "basis_ranges": [
+                                    [heading_block["order"], heading_block["order"] + 1]
+                                ],
+                            },
+                            {
+                                "relation": "explicit_reference",
+                                "ranges": [[wait_block["order"], wait_block["order"] + 1]],
+                                "basis": "Wait 15 seconds.",
+                                "basis_ranges": [[wait_block["order"], wait_block["order"] + 1]],
+                            },
+                        ],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, output in zip(payload["units"], response["units"]):
-                output.update(facts=[], empty_reason="Context for the version restriction.")
-                if quote in unit["text"]:
-                    output["facts"] = [{"topic": "Support", "statement": quote, "quote": quote}]
         if payload["stage"] in ("generation", "verification"):
             observed.append(payload)
         if payload["stage"] == "generation":
@@ -89,16 +129,23 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
     assert result.knowledge_compilation == "completed", result
     assert {payload["stage"] for payload in observed} == {"generation", "verification"}
     for payload in observed:
-        assert payload["facts"][0].get("quote") == quote
-        if payload["stage"] == "verification":
-            assert "statement" not in payload["facts"][0]
-        neighbors = payload["evidence"][0]["neighbors"]
+        assert "facts" not in payload
+        evidence = payload["evidence"]["blocks"]
         assert any(
-            item.get("relation") == "heading" and item["text"] == heading for item in neighbors
+            item["text"] == quote and any(route["route"] == "page_body" for route in item["routes"])
+            for item in evidence
         )
         assert any(
-            item.get("relation") == "previous_block" and item["text"] == "Wait 15 seconds."
-            for item in neighbors
+            item["text"] == heading
+            and {route["route"] for route in item["routes"]} == {"context_only"}
+            and item["routes"][0]["relation"] == "applicable_condition"
+            for item in evidence
+        )
+        assert any(
+            item["text"] == "Wait 15 seconds."
+            and {route["route"] for route in item["routes"]} == {"context_only"}
+            and item["routes"][0]["relation"] == "explicit_reference"
+            for item in evidence
         )
 
 
@@ -122,11 +169,6 @@ def test_extractor_interpretation_is_not_a_generation_authority(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, output in zip(payload["units"], response["units"], strict=True):
-                output["facts"] = [
-                    {"topic": "Assembly", "statement": invented, "quote": unit["text"]}
-                ]
         if payload["stage"] in {"generation", "verification"}:
             observed.append(payload)
         if payload["stage"] == "generation":
@@ -139,9 +181,10 @@ def test_extractor_interpretation_is_not_a_generation_authority(
     assert {p["stage"] for p in observed} == {"generation", "verification"}
     for payload in observed:
         assert invented not in json.dumps(payload)
-        assert payload["facts"][0]["quote"] == original_text
-        assert payload["facts"][0]["source_kind"] == (
-            "heading" if original_text.startswith("#") else "paragraph"
+        assert "facts" not in payload
+        assert any(
+            block["text"] == original_text and block["reference"]["parse_id"]
+            for block in payload["evidence"]["blocks"]
         )
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
     assert pages and original_text in pages[0].read_text()
@@ -160,16 +203,12 @@ def test_unsupported_draft_is_corrected_from_feedback_and_verified_before_public
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            response["units"][0]["facts"] = [
-                {"topic": "Support", "statement": quote, "quote": quote}
-            ]
         if payload["stage"] == "generation":
             response["content"] = quote if payload.get("revision") else incorrect
         if payload["stage"] == "verification":
-            checked.append(payload["content"].split("\n\n", 1)[1])
+            checked.append(payload["candidate"]["content"])
             return {
-                "verdict": "supported" if checked[-1] == quote else "unsupported",
+                "verdict": "supported" if quote in checked[-1] else "unsupported",
                 "reason": "The source restricts startup, not shutdown.",
             }
         return response
@@ -177,7 +216,11 @@ def test_unsupported_draft_is_corrected_from_feedback_and_verified_before_public
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert checked == [incorrect, quote]
+    # Formal review receives the exact private publication proposal, including
+    # its source binding, rather than an unbound body string.
+    assert len(checked) == 2
+    assert incorrect in checked[0]
+    assert quote in checked[1]
     content = (kb_dir / "wiki/concepts/notes.md").read_text()
     assert quote in content and incorrect not in content
 
@@ -189,9 +232,9 @@ def test_unsupported_draft_is_corrected_from_feedback_and_verified_before_public
             {"verdict": "uncertain", "reason": "Evidence cannot decide."},
             "knowledge_evidence_mismatch",
         ),
-        ({"verdict": "supported"}, "evidence_verification_invalid"),
-        ({"verdict": True, "reason": "Yes"}, "evidence_verification_invalid"),
-        ({"verdict": "supported", "reason": " "}, "evidence_verification_invalid"),
+        ({"verdict": "supported"}, "document_verification_invalid"),
+        ({"verdict": True, "reason": "Yes"}, "document_verification_invalid"),
+        ({"verdict": "supported", "reason": " "}, "document_verification_invalid"),
     ],
 )
 def test_unusable_review_cannot_publish_or_be_reused(
@@ -217,7 +260,7 @@ def test_unusable_review_cannot_publish_or_be_reused(
         json.loads(call["messages"][-1]["content"])["stage"]
         for call in model_service[events_before:]
     ]
-    assert "facts" not in stages
+    assert "planning" not in stages
     if review.get("verdict") == "uncertain":
         assert stages == []
         assert any(row["reason"] == reason for row in continued.omissions)
@@ -233,21 +276,23 @@ def test_review_uses_existing_request_budget_and_verified_work_is_reusable(
     original.write_text("The normal pressure limit is 37 kPa.")
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"]["max_requests"] = 3
+    config["processing"]["max_requests"] = 2
     config_path.write_text(yaml.safe_dump(config))
     result = import_document(kb_dir, original)
     assert result.reason == "request_budget_exhausted"
-    assert len(model_service) == 3
+    assert len(model_service) == 2
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
-    assert len(model_service) == 4  # The completed draft only needs verification.
+    assert len(model_service) == 3  # The completed draft only needs verification.
     again = import_document(kb_dir, original)
-    assert again.status == "skipped" and len(model_service) == 4
+    assert again.status == "skipped" and len(model_service) == 3
 
 
 @pytest.mark.parametrize("damage", ["missing", "verdict", "reason", "content"])
-def test_invalid_cached_verification_cannot_publish(kb_dir, tmp_path, model_service, damage):
+def test_corrupted_cached_page_response_is_revalidated_before_publication(
+    kb_dir, tmp_path, model_service, damage
+):
     original = tmp_path / "cache.md"
     original.write_text("The normal pressure limit is 37 kPa.")
 
@@ -257,31 +302,45 @@ def test_invalid_cached_verification_cannot_publish(kb_dir, tmp_path, model_serv
 
     result = import_document(kb_dir, original, context=ExecutionContext(on_event=stop))
     assert result.knowledge_compilation == "stopped"
-    # Corrupt a persisted boundary record while retaining its outer integrity hash.
+    # Corrupt a persisted formal page boundary while retaining its outer integrity hash.
     for path in (SourceStore(kb_dir).root / "compilation").glob("*.json"):
         record = json.loads(path.read_text())
         value = record.get("value", {})
-        if "_verification" not in value:
-            continue
-        if damage == "missing":
-            del value["_verification"]
-        elif damage == "verdict":
-            value["_verification"]["verdict"] = "unsupported"
-        elif damage == "reason":
-            value["_verification"]["reason"] = " "
-        else:
+        if damage == "content" and isinstance(value, dict) and {"content", "covered"} <= set(value):
             value["content"] = "The normal pressure limit is 999 kPa."
+        elif (
+            damage != "content" and isinstance(value, dict) and {"verdict", "reason"} <= set(value)
+        ):
+            if damage == "missing":
+                del value["reason"]
+            elif damage == "verdict":
+                value["verdict"] = True
+            else:
+                value["reason"] = " "
+        else:
+            continue
         record["value_digest"] = content_id(value)
         path.write_text(json.dumps(record))
         break
     else:
-        pytest.fail("No verified contribution was persisted")
+        pytest.fail("No formal page boundary was persisted")
+
+    def recheck(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "verification" and "999 kPa" in payload["candidate"]["content"]:
+            return {
+                "verdict": "unsupported",
+                "reason": "The cached candidate changes the original pressure limit.",
+            }
+        return evidence_response(payload)
+
+    model_service.respond = recheck
     before = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed"
-    assert any(row["reason"] == "evidence_verification_invalid" for row in continued.omissions)
-    assert len(model_service) == before
-    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert len(model_service) > before
+    page = (kb_dir / "wiki/concepts/notes.md").read_text()
+    assert "999 kPa" not in page
 
 
 def test_public_topic_title_is_verified_with_its_body(kb_dir, tmp_path, model_service):
@@ -293,12 +352,14 @@ def test_public_topic_title_is_verified_with_its_body(kb_dir, tmp_path, model_se
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
-            response["topics"][0]["title"] = bad_title
+            response["page_changes"][0]["title"] = bad_title
         elif payload["stage"] == "generation":
             response["content"] = original.read_text()
         elif payload["stage"] == "verification":
             return {
-                "verdict": "unsupported" if payload.get("title") == bad_title else "supported",
+                "verdict": (
+                    "unsupported" if payload["page"]["title"] == bad_title else "supported"
+                ),
                 "reason": "The title transfers the startup restriction to shutdown.",
             }
         return response
@@ -320,16 +381,16 @@ def test_corrected_title_is_verified_published_and_restored(kb_dir, tmp_path, mo
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
-            response["topics"][0]["title"] = bad_title
+            response["page_changes"][0]["title"] = good_title
         elif payload["stage"] == "generation":
             response["content"] = "# " + bad_title + "\n\n" + original.read_text()
             if payload.get("revision"):
-                response["title"] = good_title
+                response["content"] = original.read_text()
         elif payload["stage"] == "verification":
             return {
                 "verdict": (
                     "supported"
-                    if payload.get("title") == good_title and bad_title not in payload["content"]
+                    if bad_title not in payload["candidate"]["content"]
                     else "unsupported"
                 ),
                 "reason": "The public title must refer to startup support.",
@@ -370,15 +431,10 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, item in zip(payload["units"], response["units"]):
-                item["facts"] = [
-                    {"topic": "Pressure", "statement": f"Valve {i}.", "quote": f"Valve {i}."}
-                    for i in range(4)
-                    if f"Valve {i}." in unit["text"]
-                ]
-        elif payload["stage"] == "generation":
-            response["content"] = "\n\n".join(item["text"] for item in payload["evidence"])
+        if payload["stage"] == "generation":
+            response["content"] = "\n\n".join(
+                item["text"] for item in payload["evidence"]["blocks"]
+            )
             if payload.get("revision"):
                 response["content"] = "## Pressure limit\n\n" + response["content"]
         elif payload["stage"] == "verification":
@@ -432,11 +488,38 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
+        if payload["stage"] == "planning":
+            target = payload["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            registered = payload["carry"]["page_register"]
+            return {
+                "overview": {
+                    "text": "Version 6 startup and shutdown operations.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "version-6",
+                        "target_key": registered[0]["key"] if registered else "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/version-6-operations",
+                        "title": "Version 6 operations",
+                        "purpose": "Describe supported version 6 operations.",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         if payload["stage"] == "generation":
-            title = "Version 6 operations" if not generated else "Shutdown support"
-            generated.append(title)
+            generated.append(payload)
             response.update(
-                title=title, content="\n\n".join(e["text"] for e in payload["evidence"])
+                title="Shutdown support",
+                content="\n\n".join(e["text"] for e in payload["evidence"]["blocks"]),
             )
         elif payload["stage"] == "verification":
             reviewed.append(payload)
@@ -445,16 +528,14 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert len(generated) > 1
-    assert {p["title"] for p in reviewed} == {"Version 6 operations"}
-    assert all(p.get("title_context") for p in reviewed)
-    assert all(p["title_context"] == reviewed[0]["title_context"] for p in reviewed)
-    content = (kb_dir / "wiki/concepts/notes.md").read_text()
+    assert generated
+    assert {p["page"]["title"] for p in reviewed} == {"Version 6 operations"}
+    content = (kb_dir / "wiki/concepts/version-6-operations.md").read_text()
     assert 'description: "Version 6 operations"' in content
     assert "Shutdown support" not in content
 
 
-def test_verification_thinking_override_rechecks_pages_but_reuses_facts(
+def test_verification_thinking_change_rechecks_candidate_without_regenerating(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.settings import apply_kb_config_patch, read_kb_config
@@ -488,18 +569,14 @@ def test_verification_thinking_override_rechecks_pages_but_reuses_facts(
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
     calls = model_service[before:]
-    assert [json.loads(c["messages"][-1]["content"])["stage"] for c in calls] == [
-        "verification",
-    ]
+    assert [json.loads(c["messages"][-1]["content"])["stage"] for c in calls] == ["verification"]
     assert [c.get("thinking") for c in calls] == [{"type": "enabled"}]
     with pytest.raises(ValueError):
         update("invalid")
     assert read_kb_config(kb_dir).verification_thinking == "enabled"
 
 
-def test_generation_thinking_change_reuses_unchanged_explicit_verification(
-    kb_dir, tmp_path, model_service
-):
+def test_generation_thinking_change_replans_and_reverifies_page(kb_dir, tmp_path, model_service):
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
 
@@ -529,8 +606,7 @@ def test_generation_thinking_change_reuses_unchanged_explicit_verification(
     stages = [
         json.loads(call["messages"][-1]["content"])["stage"] for call in model_service[before:]
     ]
-    assert "generation" in stages
-    assert "verification" not in stages
+    assert stages == ["planning", "generation", "verification"]
 
 
 @pytest.mark.parametrize(
@@ -544,15 +620,15 @@ def test_title_cannot_inject_reserved_provenance_markers(kb_dir, tmp_path, model
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            response["title"] = (
-                "Startup " + marker + payload["evidence"][0]["reference"]["source_id"] + " -->"
-            )
+            response["content"] = "Startup " + marker + "opaque -->"
         return response
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed"
-    assert any(row["reason"] == "topic_generation_incomplete" for row in result.omissions), result
+    assert any(row["reason"] == "document_generation_incomplete" for row in result.omissions), (
+        result
+    )
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert all(
         json.loads(c["messages"][-1]["content"])["stage"] != "verification" for c in model_service
@@ -588,7 +664,7 @@ def test_link_examples_in_code_reach_review_and_publication_unchanged(
         if payload["stage"] == "generation":
             response["content"] = content
         if payload["stage"] == "verification":
-            reviewed.append(payload["content"])
+            reviewed.append(payload["candidate"]["content"])
         return response
 
     model_service.respond = respond
@@ -622,7 +698,7 @@ def test_missing_real_image_between_separate_code_markers_blocks_publication(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed"
-    assert any(row["reason"] == "generated_asset_evidence_invalid" for row in result.omissions)
+    assert any(row["reason"] == "document_generation_incomplete" for row in result.omissions)
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
@@ -649,15 +725,14 @@ def test_compilation_keeps_reader_annotations_separate_from_original_text(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
-        if payload["stage"] in {"facts", "generation", "verification"}:
+        if payload["stage"] in {"generation", "verification"}:
             observed.append(payload)
         if payload["stage"] == "generation":
-            if "fragments" in response:
-                for part in response["fragments"]:
-                    part["content"] += "\n" + claimed
-            else:
-                response["content"] += "\n" + claimed
-        if payload["stage"] == "verification" and payload.get("evidence_provenance"):
+            response["content"] += "\n" + claimed
+        if payload["stage"] == "verification" and any(
+            block.get("context_data", {}).get("reader_status")
+            for block in payload["evidence"]["blocks"]
+        ):
             return {
                 "verdict": "unsupported",
                 "reason": "The annotation belongs to the reader, not the original author.",
@@ -673,16 +748,10 @@ def test_compilation_keeps_reader_annotations_separate_from_original_text(
     # request is needed. Generation and review must still carry provenance.
     assert {p["stage"] for p in observed} == {"generation", "verification"}
     for payload in observed:
-        provenance = payload["evidence_provenance"]
-        assert provenance["text"] == "parsed_source_text"
-        assert provenance["context"] == "reader_context_with_source_excerpts"
-        assert (
-            provenance["context_data"]["reader_status"] == "reader_metadata_not_author_statements"
-        )
-        rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
+        rows = payload["evidence"]["blocks"]
         assert any(
             row["context_data"]["reader_status"] == {"header_role": "unconfirmed"} for row in rows
         )
-        assert all("context" not in row for row in rows)
+        assert all(claimed not in row["text"] for row in rows)
     store = SourceStore(kb_dir)
     assert store.original(store.version(result.input_version)).read_bytes() == original.read_bytes()

@@ -95,8 +95,8 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
-        if payload["stage"] == "facts":
-            compiled.extend(unit["text"] for unit in payload["units"])
+        if payload["stage"] == "planning":
+            compiled.extend(block["text"] for block in payload["evidence"]["blocks"])
             if moment == "model":
                 replace_input()
         return SimpleNamespace(

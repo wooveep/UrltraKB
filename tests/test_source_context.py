@@ -38,8 +38,8 @@ def test_docx_table_context_keeps_original_cells_separate_from_reader_status(
     # Native table cells become literal facts without a model extraction request.
     assert {p["stage"] for p in observed} == {"generation", "verification"}
     for payload in observed:
-        assert "presentation_roles" not in payload["evidence_provenance"]
-        rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
+        assert "evidence_provenance" not in payload
+        rows = payload["evidence"]["blocks"]
         cell = next(row for row in rows if row["text"] == "7 days")
         assert "context" not in cell, "Mixed display text must not compete with typed context."
         assert cell["context_data"]["reader_status"] == {"header_role": "unconfirmed"}

@@ -48,7 +48,17 @@ def test_prior_functional_plan_is_revalidated_before_cache_bridge(
     from openkb.processing import RequestLimits
     from openkb.schema import get_agents_md
 
-    settings = {**DEFAULT_CONFIG, "model": "openai/offline-test"}
+    settings = {
+        **DEFAULT_CONFIG,
+        "model": "openai/offline-test",
+        "processing": {
+            **DEFAULT_CONFIG["processing"],
+            "context_tokens": 32768,
+            "max_context_tokens": 32768,
+            "output_tokens": 4096,
+            "max_output_tokens": 4096,
+        },
+    }
     cp = CompilationCheckpoints(
         kb_dir,
         SimpleNamespace(source_id="a" * 32, id="b" * 64),
@@ -109,7 +119,17 @@ def test_added_topics_preserve_completed_windows_after_ocr_refresh(
     with prepared_input(path) as ready:
         source = SourceStore(kb_dir).intake(ready)
     parsed = parse_document(kb_dir, source)
-    settings = {**DEFAULT_CONFIG, "model": "openai/offline-test"}
+    settings = {
+        **DEFAULT_CONFIG,
+        "model": "openai/offline-test",
+        "processing": {
+            **DEFAULT_CONFIG["processing"],
+            "context_tokens": 32768,
+            "max_context_tokens": 32768,
+            "output_tokens": 4096,
+            "max_output_tokens": 4096,
+        },
+    }
     limits = RequestLimits.from_config(settings)
     calls = []
 

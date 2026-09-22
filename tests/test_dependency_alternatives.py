@@ -8,7 +8,6 @@ import yaml
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
 from tests.http_model_fixture import evidence_response
-from tests.test_dependency_omission_sources import _expanded
 
 
 @pytest.mark.parametrize("remote_state", ["initially_omitted", "withdrawn_later", "retained"])
@@ -27,93 +26,167 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
         "# Activation\n\nActivate with either Local approval or Remote approval.\n\n"
         "# Metrics\n\nMetrics listens on port 9342."
     )
-    decisions = []
+    plans = []
 
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         value = evidence_response(request)
-        if request["stage"] == "facts":
-            rows = []
-            for unit, row in zip(request["units"], value["units"], strict=True):
-                if (
-                    unit["text"] == "Obtain a signed local approval."
-                    or (
-                        remote_state != "retained"
-                        and unit["text"]
-                        == "Certify the remote approver before issuing Remote approval."
-                    )
-                    or (
-                        remote_state == "initially_omitted"
-                        and unit["text"] == "Obtain a signed remote approval."
-                    )
-                ):
-                    continue
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-                else:
-                    for fact in row["facts"]:
-                        fact.update(
-                            topic=unit["headings"][-1], statement=unit["text"], quote=unit["text"]
-                        )
-                rows.append(row)
-            value = {"units": rows}
-        elif request["stage"] == "planning":
-            value = {
-                "topics": [
-                    {
-                        "name": title.lower().replace(" ", "-"),
-                        "title": title,
-                        "kind": "concept",
-                        "members": [uid],
-                    }
-                    for uid, title in request["topic_labels"].items()
+        if request["stage"] == "planning":
+            plans.append(request)
+            blocks = request["evidence"]["blocks"]
+
+            def ranges(heading, body):
+                return [
+                    [row["order"], row["order"] + 1]
+                    for row in blocks
+                    if row["text"].lstrip("# ").strip() == heading or row["text"] == body
                 ]
+
+            def basis(selected):
+                return "\n".join(
+                    next(row["text"] for row in blocks if row["order"] == index)
+                    for start, end in selected
+                    for index in range(start, end)
+                )
+
+            certification = ranges(
+                "Certification", "Certify the remote approver before issuing Remote approval."
+            )
+            local = ranges("Local approval", "Obtain a signed local approval.")
+            remote = ranges("Remote approval", "Obtain a signed remote approval.")
+            activation = ranges(
+                "Activation", "Activate with either Local approval or Remote approval."
+            )
+            metrics = ranges("Metrics", "Metrics listens on port 9342.")
+            target = request["target"]
+            output = {
+                "overview": {
+                    "text": "Approval and activation requirements.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "activation",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/activation",
+                        "title": "Activation",
+                        "purpose": "Activate after a valid approval.",
+                        "subject_ranges": activation,
+                        "necessary_context": (
+                            [
+                                {
+                                    "relation": "explicit_reference",
+                                    "ranges": remote,
+                                    "basis": basis(remote),
+                                    "basis_ranges": remote,
+                                }
+                            ]
+                            if remote_state == "retained"
+                            else []
+                        ),
+                    },
+                    {
+                        "local_key": "metrics",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/metrics",
+                        "title": "Metrics",
+                        "purpose": "Metrics listener configuration.",
+                        "subject_ranges": metrics,
+                        "necessary_context": [],
+                    },
+                ],
+                "source_only": [
+                    {
+                        "ranges": local,
+                        "reason": "Local approval is retained as source-only procedural detail.",
+                    }
+                ],
+                "unresolved": [],
+                "resolutions": [],
             }
+            if remote_state == "retained":
+                output["page_changes"].extend(
+                    [
+                        {
+                            "local_key": "certification",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "name": "concepts/certification",
+                            "title": "Certification",
+                            "purpose": "Certify the remote approver.",
+                            "subject_ranges": certification,
+                            "necessary_context": [],
+                        },
+                        {
+                            "local_key": "remote",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "name": "concepts/remote-approval",
+                            "title": "Remote approval",
+                            "purpose": "Obtain a remote approval after certification.",
+                            "subject_ranges": remote,
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": certification,
+                                    "basis": basis(certification),
+                                    "basis_ranges": certification,
+                                }
+                            ],
+                        },
+                    ]
+                )
+            else:
+                output["source_only"].extend(
+                    [
+                        {
+                            "ranges": certification,
+                            "reason": (
+                                "Unavailable remote-approval prerequisite is retained in source."
+                            ),
+                        },
+                        {
+                            "ranges": remote,
+                            "reason": "Unavailable remote approval is retained in source.",
+                        },
+                    ]
+                )
+                output["unresolved"].append(
+                    {
+                        "location": activation,
+                        "problem_type": "missing_prerequisite",
+                        "missing_target": "a retained local or remote approval prerequisite",
+                        "affected_pages": ["activation"],
+                        "blocking": True,
+                        "reason": (
+                            "Activation cannot be published without one retained approval path."
+                        ),
+                    }
+                )
+            return output
         elif request["stage"] == "generation":
-            title = request.get("title") or request["revision"]["title"]
+            title = request["page"]["title"]
             content = {
                 "Certification": "Certify the remote approver before issuing Remote approval.",
                 "Activation": "Activate with either Local approval or Remote approval.",
-                "Remote approval": "Obtain a signed remote approval.",
+                "Remote approval": (
+                    "Obtain a signed remote approval after certifying the remote approver."
+                ),
                 "Metrics": "Metrics listens on port 9342.",
             }[title]
-            for fragment in value.get("fragments", []):
-                fragment["content"] = content
-            if "content" in value:
-                value["content"] = content
-        elif request["stage"] == "dependencies":
-            request = _expanded(request, request.get("context_pool", {}))
-            omitted = {
-                row["reference"]["block_id"]
-                for gap in request["omissions"]
-                for row in gap["source_references"]
+            return {
+                "content": content,
+                "covered": [row["id"] for row in request["occurrences"]],
             }
-            missing_text = {
-                row["text"] for row in request["source"] if row["reference"]["block_id"] in omitted
-            }
-            no_approval = {
-                "Obtain a signed local approval.",
-                "Obtain a signed remote approval.",
-            } <= missing_text
-            value = {"topics": []}
-            for candidate in request["candidates"]:
-                path = candidate["path"]
-                decisions.append((path, no_approval))
-                value["topics"].append(
-                    {
-                        "path": path,
-                        "status": "dependent"
-                        if (path == "concepts/activation" and no_approval)
-                        or (
-                            path == "concepts/remote-approval"
-                            and "Certify the remote approver before issuing Remote approval."
-                            in missing_text
-                        )
-                        else "independent",
-                        "reason": "Activation requires at least one retained approval; "
-                        "metrics has no approval prerequisite.",
-                    }
-                )
         return value
 
     model_service.respond = respond
@@ -121,12 +194,13 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
     assert result.knowledge_compilation == "completed", result
     assert (kb_dir / "wiki/concepts/activation.md").exists() == (remote_state == "retained")
     assert (kb_dir / "wiki/concepts/metrics.md").exists()
-    assert ("concepts/activation", remote_state != "retained") in decisions
+    assert plans
+    if remote_state == "retained":
+        assert not result.omissions
+    else:
+        assert any(row["reason"] == "unresolved_prerequisite_blocked" for row in result.omissions)
     before = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
     assert (kb_dir / "wiki/concepts/activation.md").exists() == (remote_state == "retained")
-    assert all(
-        json.loads(call["messages"][-1]["content"])["stage"] == "facts"
-        for call in model_service[before:]
-    )
+    assert len(model_service) == before

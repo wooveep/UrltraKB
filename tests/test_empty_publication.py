@@ -74,7 +74,7 @@ def test_unreadable_original_is_registered_and_next_document_continues(
     assert get_kb_list(kb_dir)["document_count"] == 2
 
 
-@pytest.mark.parametrize("failed_stage", ["facts", "planning", "generation", "verification"])
+@pytest.mark.parametrize("failed_stage", ["planning", "generation", "verification"])
 def test_all_failed_content_registers_source_and_omissions(
     kb_dir, tmp_path, model_service, failed_stage
 ):

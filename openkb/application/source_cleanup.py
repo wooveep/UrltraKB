@@ -85,9 +85,23 @@ def _compilation_references(path: Path) -> set[str]:
         and content_id(contract) == path.stem
         and content_id(value) == record.get("value_digest")
     ):
-        contract["payload"].pop("existing", None)
-        contract["payload"].pop("existing_pages", None)
-        return {match.decode("ascii") for match in _IDENTITY.findall(json.dumps(record).encode())}
+        # Existing/preserved contributions are prompt-only comparisons. They
+        # may contain a superseded contribution belonging to another source;
+        # treating their incidental citations as reachability roots would pin
+        # routine history forever. Pending publication/proposal state and the
+        # current Wiki remain independent strong roots for material bytes.
+        payload = {
+            key: item
+            for key, item in contract["payload"].items()
+            if key not in {"existing", "existing_pages", "preserved_contribution"}
+        }
+        sanitized = {
+            **record,
+            "contract": {**contract, "payload": payload},
+        }
+        return {
+            match.decode("ascii") for match in _IDENTITY.findall(json.dumps(sanitized).encode())
+        }
     return _references(path)
 
 
@@ -138,13 +152,26 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         except (ValueError, KeyError, TypeError):
             roots.add(identity)  # Unknown history remains available for diagnosis.
     current_versions = set()
+    from openkb.agent.compilation_index import (
+        checkpoint_keys as indexed_checkpoint_keys,
+    )
+    from openkb.agent.compilation_index import (
+        pending_checkpoint_keys as indexed_pending_checkpoint_keys,
+    )
+
     for source in store.list_sources():
         roots.add(source.id)
         current_versions.add(source.id)
         if parsed := ParseStore(kb_dir).selected(source):
             roots.add(parsed.id)
         progress = store.owned_path(store.root / "compilation/latest" / f"{source.id}.json")
-        if progress.exists():
+        # An interrupted first append has neither SQLite nor legacy aggregate
+        # index yet. Its authenticated handoff marker is the only durable link
+        # from this current source to the written immutable receipt.
+        roots.update(indexed_pending_checkpoint_keys(store, source.id, source_id=source.source_id))
+        if indexed := indexed_checkpoint_keys(store, source.id):
+            roots.update(indexed)
+        elif progress.exists():
             roots.update(_references(progress))
     wiki = wiki_version(kb_dir)
     # Generated snapshots are leaves reached by actual citations, not independent
@@ -310,6 +337,9 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
         for path in store.owned_path(store.root / kind / "latest").glob("*.json"):
             if path.stem in unused:
                 removable.add(store.owned_path(path))
+    for path in store.owned_path(store.root / "compilation/indexes").glob("*.sqlite3"):
+        if valid_id(path.stem) in unused:
+            removable.add(store.owned_path(path))
     # Any state change after the preview invalidates authorization, including a
     # citation in an unrelated page or an intake that starts sharing a blob.
     state = {}

@@ -506,6 +506,24 @@ class TaskManager:
                 diagnostics = (diagnostics + data["text"] + "\n")[-100_000:]
                 if data.get("activity", True):
                     last_activity = data["at"]
+            if data.get("event") == "planning_observation":
+                observation = data.get("observation")
+                if isinstance(observation, dict):
+                    try:
+                        target = json.dumps(
+                            observation["target_ranges"], ensure_ascii=False, separators=(",", ":")
+                        )[:512]
+                        line = (
+                            f"规划 {observation['event']} · W {observation['window']}/"
+                            f"{observation['total_windows']} · T {target} · "
+                            f"缓存 {'命中' if observation['cached'] else '未命中'} · "
+                            f"页面 {observation['pages']} · 未解决 {observation['unresolved']}"
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        line = ""
+                    if line:
+                        diagnostics = (diagnostics + line + "\n")[-100_000:]
+                        last_activity = datetime.now(timezone.utc).isoformat()
             if data.get("event") == "delta":
                 text += data["data"]["text"]
                 if len(text) > 1_000_000:

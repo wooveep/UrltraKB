@@ -79,7 +79,10 @@ def test_attachment_storage_does_not_spend_the_parent_retry_allowance(
 
     config = kb_dir / ".openkb/config.yaml"
     settings = yaml.safe_load(config.read_text())
-    settings["processing"]["max_requests"] = 3
+    # Planning, generation and critical verification are the three parent
+    # requests. Leave room for only two to ensure attachment storage itself
+    # cannot consume or reset the parent family's allowance.
+    settings["processing"]["max_requests"] = 2
     config.write_text(yaml.safe_dump(settings))
     child = tmp_path / "instructions.docx"
     write_docx(child, "<w:p><w:r><w:t>Child-only recovery port 9473.</w:t></w:r></w:p>")
@@ -100,7 +103,7 @@ def test_attachment_storage_does_not_spend_the_parent_retry_allowance(
         repeated = manager.submit(kb_dir, [ImportFile(str(parent))], retry_of=parent_view.id)
         retry_view = manager.wait(repeated, timeout=60)
         assert retry_view.results[0].document.reason == "request_budget_exhausted"
-        assert len(model_service) == before == 3
+        assert len(model_service) == before == 2
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)

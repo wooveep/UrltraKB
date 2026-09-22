@@ -96,7 +96,7 @@ def _existing_window(text, topic, model, limits):
     """Retrieve relevant existing context while preserving the entire page outside the model."""
     import litellm
 
-    allowance = max(1, (limits.context_tokens - limits.output_tokens) // 4)
+    allowance = max(1, limits.input_capacity // 4)
     if litellm.token_counter(model=model, text=text) <= allowance:
         return text
     words = set(re.findall(r"\w+", topic.casefold()))
@@ -298,7 +298,7 @@ def _target_window(targets, topic, model, limits):
         key=lambda value: (-sum(word in value.casefold() for word in words), value),
     )[:64]
     selected = []
-    allowance = max(1, (limits.context_tokens - limits.output_tokens) // 8)
+    allowance = max(1, limits.input_capacity // 8)
     for target in ranked:
         if litellm.token_counter(model=model, text=json.dumps([*selected, target])) <= allowance:
             selected.append(target)
@@ -317,10 +317,9 @@ def _previous_contribution(existing, source_id):
         raise ProcessingIncomplete("source_contribution_ambiguous", "generation") from None
 
 
-def retract_retired_topics(wiki, source, source_file, planned):
-    """Withdraw only this source's delimited contribution in the private proposal."""
-    from openkb.agent.compiler import _remove_source_from_frontmatter
-    from openkb.locks import atomic_write_text
+def retired_topic_targets(wiki, source, planned):
+    """Return source-owned pages that retraction will delete, without writing."""
+
     from openkb.source_refs import has_unowned_metadata
 
     removed = set()
@@ -335,13 +334,35 @@ def retract_retired_topics(wiki, source, source_file, planned):
                 continue
             retained, _, _ = _previous_contribution(existing, source.source_id)
             if not retained.strip() and not has_unowned_metadata(existing):
+                removed.add(target)
+    return removed
+
+
+def retract_retired_topics(wiki, source, source_file, planned):
+    """Withdraw only this source's delimited contribution in the private proposal."""
+    from openkb.agent.compiler import _remove_source_from_frontmatter
+    from openkb.locks import atomic_write_text
+
+    removed = set()
+    removable = retired_topic_targets(wiki, source, planned)
+    for folder in ("concepts", "entities"):
+        for path in (wiki / folder).glob("*.md"):
+            processing_checkpoint("generation")
+            target = path.relative_to(wiki).with_suffix("").as_posix()
+            if target in planned:
+                continue
+            existing = path.read_text(encoding="utf-8")
+            if f"<!-- openkb-source:{source.source_id} -->" not in existing:
+                continue
+            if target in removable:
                 path.unlink()
                 removed.add(target)
-            else:
-                parts = frontmatter.split(existing)
-                content = (parts[0] if parts else "") + retained
-                content, _ = _remove_source_from_frontmatter(content, source_file)
-                atomic_write_text(path, content)
+                continue
+            retained, _, _ = _previous_contribution(existing, source.source_id)
+            parts = frontmatter.split(existing)
+            content = (parts[0] if parts else "") + retained
+            content, _ = _remove_source_from_frontmatter(content, source_file)
+            atomic_write_text(path, content)
     if removed:
         index = wiki / "index.md"
         lines = index.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -590,24 +611,33 @@ def generate_topic(
                             "topic": group["title"],
                         }
                     )
-                    review = verify_content(
-                        title,
-                        content,
-                        payload["facts"],
-                        payload["evidence"],
-                        settings,
-                        bundle=bundle,
-                        bindings=fragment_bindings(output),
-                        source_details=details,
-                        checkpoints=checkpoints,
-                        omission_context=omission_context,
-                        correction_review=revision,
-                        **(
-                            {"title_context": payload["title_context"]}
-                            if payload.get("title_context")
-                            else {}
-                        ),
-                    )
+                    if settings.get("review_mode") == "none":
+                        review = {
+                            "verdict": "supported",
+                            "reason": "Draft candidate accepted without semantic review",
+                            "quality": "unverified",
+                            "issues": [],
+                            "advisories": [],
+                        }
+                    else:
+                        review = verify_content(
+                            title,
+                            content,
+                            payload["facts"],
+                            payload["evidence"],
+                            settings,
+                            bundle=bundle,
+                            bindings=fragment_bindings(output),
+                            source_details=details,
+                            checkpoints=checkpoints,
+                            omission_context=omission_context,
+                            correction_review=revision,
+                            **(
+                                {"title_context": payload["title_context"]}
+                                if payload.get("title_context")
+                                else {}
+                            ),
+                        )
                     on_event(
                         {
                             "stage": "generation",

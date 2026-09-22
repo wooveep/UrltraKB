@@ -39,17 +39,55 @@ def evidence_response(payload):
             ]
         }
     elif isinstance(payload, dict) and payload.get("stage") == "planning":
+        if "target" in payload:
+            target = payload["target"]
+            t_start = target.get("target_start", 0)
+            t_end = target.get("target_end", 1)
+            ranges = target.get("ranges", [[t_start, t_end]])
+            existing_target = (
+                "concepts/notes" if "concepts/notes" in payload.get("existing_targets", []) else ""
+            )
+            registered = payload.get("carry", {}).get("page_register", [])
+            return {
+                "overview": {
+                    "text": "Overview of document knowledge.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "c1",
+                        "target_key": registered[0]["key"] if registered else "",
+                        "target": existing_target,
+                        "kind": "concept",
+                        "name": "concepts/notes",
+                        "title": "Notes",
+                        "purpose": "Document notes and instructions",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         return {
             "topics": [
                 {
                     "name": "notes",
                     "title": "Notes",
                     "kind": "concept",
-                    "members": payload["topics"],
+                    "members": payload.get("topics", []),
                 }
             ]
         }
     elif isinstance(payload, dict) and payload.get("stage") == "generation":
+        if "page" in payload:
+            page = payload["page"]
+            return {
+                "content": "# " + page["title"] + "\nConfirmed knowledge.",
+                "covered": [occurrence["id"] for occurrence in payload.get("occurrences", [])],
+            }
         if payload.get("source_scopes"):
             return {
                 "title": payload.get("title", payload.get("revision", {}).get("title", "Topic")),

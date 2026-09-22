@@ -40,7 +40,7 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] in {"facts", "generation", "verification"}:
+        if payload["stage"] in {"planning", "generation", "verification"}:
             observed.append(payload)
         return evidence_response(payload)
 
@@ -82,10 +82,9 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
     assert block.location["title_placeholder_count"] == (1 if role else 0)
     assert block.kind == ("heading" if role else "paragraph")
     assert "Slide title: Slide 1" not in block.context
-    assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
+    assert {p["stage"] for p in observed} == {"planning", "generation", "verification"}
     for payload in observed:
-        assert "presentation_roles" in payload["evidence_provenance"]
-        rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
+        rows = payload["evidence"]["blocks"]
         row = next(r for r in rows if r["text"] == heading.text)
         assert row["location"]["placeholder_type"] == role
         assert row["location"]["title_object_id"] == title_id

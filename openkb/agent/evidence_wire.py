@@ -67,9 +67,15 @@ class WireMessages(list):
             raise ResponseIncomplete(reason, stage) from None
         except (ValueError, TypeError):
             return raw  # The stage's bounded format-recovery policy decides what to do.
-        payload = json.loads(self[-1]["content"])
-        if payload.get("stage") == "generation" and (protocol := payload.get("identity_protocol")):
-            _check_identity_placement(value, protocol["namespace"])
+        request_content = self[-1]["content"]
+        payload = json.loads(request_content)
+        stage = payload.get("stage", "generation")
+        if (
+            raw != request_content
+            and stage in {"generation", "verification"}
+            and (protocol := payload.get("identity_protocol"))
+        ):
+            _check_identity_placement(value, protocol["namespace"], stage=stage)
         return json.dumps(_map(value, self.inverse), ensure_ascii=False)
 
     def encode_response(self, raw):
@@ -81,7 +87,7 @@ class WireMessages(list):
 
 def encode_payload(payload, identity_values=()):
     namespace = None
-    if payload.get("stage") == "generation":
+    if payload.get("stage") in {"generation", "verification"}:
         # A private namespace absent from the entire original input cannot be
         # confused with a real source label such as r8, even inside literal code.
         namespace = "@r:"
@@ -135,14 +141,14 @@ def encode_frozen_payload(payload, identity_values=()):
     return {**prefix, **suffix}, identities
 
 
-def _check_identity_placement(value, namespace, field=""):
+def _check_identity_placement(value, namespace, field="", *, stage="generation"):
     if isinstance(value, dict):
         for key, item in value.items():
-            _check_identity_placement(key, namespace)
-            _check_identity_placement(item, namespace, key)
+            _check_identity_placement(key, namespace, stage=stage)
+            _check_identity_placement(item, namespace, key, stage=stage)
     elif isinstance(value, list):
         for item in value:
-            _check_identity_placement(item, namespace, field)
+            _check_identity_placement(item, namespace, field, stage=stage)
     elif (
         isinstance(value, str)
         and namespace in value
@@ -150,7 +156,12 @@ def _check_identity_placement(value, namespace, field=""):
     ):
         from openkb.agent.evidence_retry import ResponseIncomplete
 
-        raise ResponseIncomplete("topic_generation_incomplete", "generation")
+        reason = (
+            "evidence_verification_invalid"
+            if stage == "verification"
+            else "topic_generation_incomplete"
+        )
+        raise ResponseIncomplete(reason, stage)
 
 
 def projected_response(value, payload):

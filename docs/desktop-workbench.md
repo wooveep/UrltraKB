@@ -280,8 +280,7 @@ inspector at its current position. Multiple selection retains the batch actions.
 | --- | --- |
 | 原文接入 | Retained source status and original-file export |
 | 内容解析 | Original evidence, PDF page inspection, recognition settings and reparse |
-| 事实提取 | Saved facts and supporting quotes; continue unfinished processing |
-| 主题规划 | Saved topic-to-page plans; continue unfinished processing |
+| 文档规划 | Saved DocumentPlan records, exact original evidence ranges, and continuation |
 | 生成与校验 | Generated content, verification status and pending drafts |
 | 知识入库 | Published pages, proposed changes, acceptance and source navigation |
 
@@ -324,5 +323,5 @@ represent a rebuilt or deployed Windows package.
 | View | Native capture |
 | --- | --- |
 | Selected source and current position | [Source flow](desktop-evidence/workbench/source-flow-inventory.png) |
-| Inspecting saved facts while planning is paused | [Stage content](desktop-evidence/workbench/source-flow-facts.png) |
+| Historical pre-#52 facts/topics flow (not the current DocumentPlan UI) | [Stage content](desktop-evidence/workbench/source-flow-facts.png) |
 | Narrow, dark inspector with horizontal flow scrolling | [Narrow flow](desktop-evidence/workbench/source-flow-dark.png) |

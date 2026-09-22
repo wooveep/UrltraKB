@@ -1,5 +1,6 @@
-"""Optional summaries spend a bounded share of the same document execution budget."""
+"""Optional summaries share the selected document execution contract."""
 
+import math
 import time
 
 from openkb.agent.evidence_retry import ResponseIncomplete
@@ -38,29 +39,35 @@ def record_optional_failure(record, error):
 
 
 class IndexAllowance:
-    def __init__(self, budget, options, reserve_compilation):
+    def __init__(self, budget, options, _reserve_compilation):
         self.budget = budget
         configured = (
             RequestLimits.from_config(options) if options.get("processing") else budget.limits
         )
         self.limits = configured
-        self.requests = min(configured.max_requests or 32, 32)
-        self.tokens = min(configured.max_tokens or 262144, 262144)
+        # Navigation has no hidden 32-request/262K/120-second quota. Its only
+        # ceilings are the selected model contract and explicit execution caps.
+        # The active document budget remains the final admission authority.
+        self.requests = configured.max_requests or math.inf
+        self.tokens = configured.max_tokens or math.inf
         if budget.limits.max_requests is not None:
             self.requests = min(
                 self.requests,
-                max(
-                    0,
-                    budget.limits.max_requests
-                    - budget.attempts
-                    - (4 if reserve_compilation else 0),
-                ),
+                max(0, budget.limits.max_requests - budget.attempts),
             )
         if budget.limits.max_tokens is not None:
-            self.tokens = min(
-                self.tokens, max(0, (budget.limits.max_tokens - budget.charged_tokens) // 10)
+            self.tokens = min(self.tokens, max(0, budget.limits.max_tokens - budget.charged_tokens))
+        seconds = [
+            value
+            for value in (
+                configured.document_timeout,
+                configured.stage_timeout,
+                budget.limits.document_timeout,
+                budget.limits.stage_timeout,
             )
-        self.seconds = min(configured.document_timeout or 120, configured.stage_timeout or 120, 120)
+            if value is not None
+        ]
+        self.seconds = min(seconds) if seconds else math.inf
         self.started = time.monotonic()
         self.before_requests, self.before_tokens = budget.attempts, budget.charged_tokens
 

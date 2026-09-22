@@ -28,11 +28,11 @@ def saved(stage, state="unfinished", reason=None):
     [
         ("source_intake", "parsing", 1),
         ("parsing", "parsing", 1),
-        ("parsed", "facts", 2),
-        ("facts", "facts", 2),
-        ("planning", "planning", 3),
-        ("generation", "generation", 4),
-        ("committing", "publication", 5),
+        ("parsed", "planning", 2),
+        ("facts", "planning", 2),
+        ("planning", "planning", 2),
+        ("generation", "generation", 3),
+        ("committing", "publication", 4),
     ],
 )
 def test_flow_marks_only_recorded_preceding_stages_complete(phase, current, done):
@@ -53,7 +53,14 @@ def test_review_is_at_the_blocking_stage(phase, reason):
 def test_unknown_compilation_position_is_not_guessed():
     rows = flow_steps(saved("compiling"))
     assert not any(row.current for row in rows)
-    assert [row.state for row in rows[2:5]] == ["unknown"] * 3
+    assert [row.state for row in rows[2:4]] == ["unknown"] * 2
+
+
+def test_accepted_private_plan_is_shown_as_ready_for_generation():
+    rows = {row.key: row for row in flow_steps(saved("planned", "not_started"))}
+    assert rows["planning"].state == "completed" and rows["planning"].current
+    assert "计划已就绪" in rows["planning"].progress
+    assert rows["generation"].state == "pending"
 
 
 def test_publication_can_finish_while_original_coverage_is_pending():
@@ -135,4 +142,4 @@ def test_safe_stop_retains_last_measured_phase():
         "b" * 32, "stopping", "stopping", (ProgressStep("planning", 128, 300),)
     )
     rows = flow_steps(saved("facts"), activity)
-    assert rows[3].state == "stopping" and rows[3].current
+    assert rows[2].state == "stopping" and rows[2].current

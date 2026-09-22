@@ -56,7 +56,9 @@ def test_transport_identity_in_prose_is_omitted_without_interrupting_publication
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            response["content"] += f" ({payload['facts'][0]['id']})"
+            response["content"] += (
+                f" ({payload['evidence']['blocks'][0]['reference']['source_id']})"
+            )
         return response
 
     model_service.respond = respond
@@ -88,7 +90,7 @@ def test_source_words_resembling_transport_identities_remain_literal(
     for call in model_service:
         payload = json.loads(call["messages"][-1]["content"])
         if payload["stage"] == "generation":
-            assert payload["facts"][0]["quote"] == source.read_text()
+            assert payload["evidence"]["blocks"][0]["text"] == source.read_text()
             assert payload["identity_protocol"]["namespace"] not in source.read_text()
 
 
@@ -109,12 +111,14 @@ def test_transport_identity_cannot_escape_through_a_scoped_fragment(
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            if response.get("fragments"):
-                scoped_attempts.append(payload)
-                target = response if field == "title" else response["fragments"][0]
-                target[field] = f"A reference ({payload['facts'][0]['id']})"
+            scoped_attempts.append(payload)
+            identity = payload["evidence"]["blocks"][0]["reference"]["source_id"]
+            if field == "title":
+                response["title"] = f"A reference ({identity})"
+            elif field == "heading":
+                response["content"] = f"# A reference ({identity})"
             else:
-                response["content"] += f" ({payload['facts'][0]['id']})"
+                response["content"] += f" ({identity})"
         return response
 
     model_service.respond = respond
@@ -132,24 +136,11 @@ def test_short_wire_ids_preserve_literal_hex_and_every_occurrence(kb_dir, tmp_pa
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "facts":
-            observed.extend(payload["units"])
-            return {
-                "units": [
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {"topic": "Checksum", "statement": unit["text"], "quote": unit["text"]}
-                        ],
-                        "empty_reason": "",
-                    }
-                    for unit in payload["units"]
-                ]
-            }
         if payload["stage"] == "generation":
+            observed.extend(payload["evidence"]["blocks"])
             return {
-                "content": "\n\n".join(fact["quote"] for fact in payload["facts"]),
-                "covered": [fact["id"] for fact in payload["facts"]],
+                "content": "\n\n".join(block["text"] for block in payload["evidence"]["blocks"]),
+                "covered": [item["id"] for item in payload["occurrences"]],
             }
         return evidence_response(payload)
 
@@ -157,9 +148,9 @@ def test_short_wire_ids_preserve_literal_hex_and_every_occurrence(kb_dir, tmp_pa
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert len(observed) == 2
-    assert len({unit["id"] for unit in observed}) == 2
-    assert all(len(unit["id"]) < 10 for unit in observed)
-    assert all(literal in unit["text"] for unit in observed)
+    assert len({block["id"] for block in observed}) == 2
+    assert all(len(block["id"]) < 10 for block in observed)
+    assert all(literal in block["text"] for block in observed)
     text = "\n".join(path.read_text() for path in (kb_dir / "wiki/concepts").glob("*.md"))
     assert text.count(literal) >= 2
     assert result.input_version in text
@@ -179,29 +170,22 @@ def test_pooled_heading_context_keeps_distinct_actor_scopes(kb_dir, tmp_path, mo
         )
     )
     observed = []
-    pools = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "facts":
-            pool = payload.get("context_pool", {})
-            pools.append(pool)
-            for unit in payload["units"]:
-                if " step " not in unit["text"]:
+        if payload["stage"] == "generation":
+            for block in payload["evidence"]["blocks"]:
+                if " step " not in block["text"]:
                     continue
-                actor = unit["text"].split()[0]
-                context = [
-                    pool[row["context_ref"]] if "context_ref" in row else row
-                    for row in unit["heading_evidence"]
-                ]
-                assert len(context) == 1
-                assert headings[actor].strip() in context[0]["text"]
-                observed.append((actor, context[0]["text"]))
+                actor = block["text"].split()[0]
+                context = block["location"]["headings"]
+                assert context == [headings[actor].strip()]
+                observed.append((actor, context[0]))
         return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert any(pools) and len(observed) == 8
+    assert len(observed) == 8
     assert len({reference for _, reference in observed}) == 2
     assert all(sum(a == actor for a, _ in observed) == 4 for actor in headings)

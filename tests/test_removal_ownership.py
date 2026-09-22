@@ -127,7 +127,31 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
-            response["topics"][0].update(name="new-topic", title="New topic")
+            target = payload["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            response = {
+                "overview": {
+                    "text": "The current policy.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "new-topic",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/new-topic",
+                        "title": "New topic",
+                        "purpose": "The current policy.",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         return response
 
     model_service.respond = respond

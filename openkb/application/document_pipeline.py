@@ -24,7 +24,7 @@ from openkb.locks import LockCancelled, atomic_write_text
 from openkb.mutation import RecoveryRequired
 from openkb.parsing import parse_document
 from openkb.processing import ProcessingIncomplete, processing_checkpoint, processing_scope
-from openkb.source_coverage import source_coverage, stored_coverage
+from openkb.source_coverage import source_coverage
 from openkb.source_request_journal import journal_source_requests
 from openkb.sources import SourceStore, SourceVersion, content_id
 from openkb.state import HashRegistry
@@ -61,6 +61,7 @@ def _compile_version(
     document_name: str | None = None,
     replaces: str | None = None,
     parse_only: bool = False,
+    plan_only: bool = False,
     force_parse: bool = False,
     page_overrides=None,
 ):
@@ -68,18 +69,25 @@ def _compile_version(
     from openkb.application.documents import DocumentResult
     from openkb.runtime.family_budget import register_source_family
 
-    bound_settings = publication_settings(settings, bundle)
-
     store = SourceStore(kb_dir)
     originals = (str(store.original(source)),)
     parsed = None
     proposal = None
+    plan = None
     stage = "parsing"
     with collect_compile_report() as report:
         try:
+            # Capacity/profile validation is part of the normal compilation
+            # boundary. An unsafe model contract must leave the source intake
+            # durable and return the usual actionable configuration result.
+            bound_settings = publication_settings(settings, bundle)
+            document_settings = {
+                **bound_settings,
+                "model": bound_settings.get("model", DEFAULT_CONFIG["model"]),
+            }
             register_source_family(kb_dir, source)
             with (
-                processing_scope(settings) as budget,
+                processing_scope(bound_settings) as budget,
                 journal_source_requests(store, source, budget),
             ):
                 on_event({"stage": stage})
@@ -134,6 +142,7 @@ def _compile_version(
                 registry = HashRegistry(kb_dir / ".openkb/hashes.json")
                 previous = registry.get(source.source_id)
                 from openkb.compilation_omissions import stored_omissions, validate_omissions
+                from openkb.source_coverage import stored_coverage
 
                 previous_omissions = stored_omissions(previous)
                 previous_coverage = (
@@ -143,6 +152,29 @@ def _compile_version(
                     and previous.get("parse_id") == parsed.id
                     else {}
                 )
+                from openkb.agent.document_publication import repair_document_publication
+
+                if repair_document_publication(
+                    kb_dir, source, parsed, document_settings, bundle=bundle
+                ):
+                    on_event({"stage": "committing", "operation": "publication_receipt_recovered"})
+                    return DocumentResult(
+                        source.origin,
+                        "added",
+                        originals,
+                        input_version=source.id,
+                        source_intake="saved",
+                        knowledge_compilation="completed",
+                        stage="committed",
+                        omissions=previous_omissions,
+                        resume=source.id
+                        if previous_coverage.get("status") in {"partial", "pending"}
+                        else None,
+                        usage=report.usage,
+                        source_id=source.source_id,
+                        parse_id=parsed.id,
+                        coverage=previous_coverage,
+                    )
                 has_gaps = bool(previous_omissions) or previous_coverage.get("status") in {
                     "pending",
                     "partial",
@@ -182,13 +214,16 @@ def _compile_version(
                     raise ValueError("Invalid document name")
                 from openkb.navigation import prepare_navigation
 
-                navigation = prepare_navigation(kb_dir, source, parsed, settings, bundle=bundle)
+                navigation = prepare_navigation(
+                    kb_dir, source, parsed, bound_settings, bundle=bundle
+                )
                 if navigation["status"] == "degraded":
                     report_auxiliary_warning("navigation_degraded")
                 stage = "compiling"
                 on_event({"stage": stage})
                 processing_checkpoint(stage)
                 with KnowledgeWorkspace(kb_dir, source, parsed, bound_settings) as workspace:
+                    cleanup_paths: set[str] = set()
                     _materialize(workspace.path, store, source, parsed, name)
                     from openkb.navigation_tree import snapshot_markdown, snapshot_name
 
@@ -202,20 +237,40 @@ def _compile_version(
                     from openkb.agent.evidence_compiler import compile_evidence
 
                     try:
-                        compile_evidence(
+                        plan = compile_evidence(
                             kb_dir,
                             workspace.path,
                             source,
                             parsed,
                             name,
-                            {**settings, "model": settings.get("model", DEFAULT_CONFIG["model"])},
+                            document_settings,
                             bundle=bundle,
                             on_event=on_event,
+                            on_deterministic_cleanup=cleanup_paths.update,
                             navigation=navigation,
                             resume_plan=retry_omissions,
+                            allow_planning_omission=replaces is None,
+                            plan_only=plan_only,
                         )
                     finally:
                         asyncio.run(_close_async_llm_clients())
+                    if plan_only:
+                        return DocumentResult(
+                            source.origin,
+                            "unfinished",
+                            originals,
+                            input_version=source.id,
+                            source_intake="saved",
+                            knowledge_compilation="not_started",
+                            stage="planned",
+                            reason="document_plan_ready",
+                            resume=source.id,
+                            warnings=tuple(report.warnings),
+                            usage=report.usage,
+                            source_id=source.source_id,
+                            parse_id=parsed.id,
+                            coverage=source_coverage(source, parsed, report),
+                        )
                     require_complete_compilation()
                     summary = workspace.path / "wiki/summaries" / f"{name}.md"
                     # The complete byte baseline includes these generated metadata.
@@ -278,7 +333,29 @@ def _compile_version(
                             ]
                         ),
                     }
-                    proposal = workspace.proposal(document, replaces=replaces)
+                    if plan is not None:
+                        from openkb.agent.document_publication import publication_binding
+
+                        document["document_publication"] = json.dumps(
+                            publication_binding(plan), sort_keys=True
+                        )
+                    proposal = workspace.proposal(
+                        document,
+                        replaces=replaces,
+                        protected_paths=cleanup_paths,
+                    )
+                    if plan is not None:
+                        from openkb.agent.document_publication import prepare_document_publication
+
+                        prepare_document_publication(
+                            kb_dir,
+                            source,
+                            parsed,
+                            document_settings,
+                            plan,
+                            proposal,
+                            bundle=bundle,
+                        )
                 stage = "committing"
                 on_event({"stage": stage})
                 publication = publish_proposal(
@@ -289,6 +366,26 @@ def _compile_version(
                 )
                 if publication.status != "completed":
                     raise ProcessingIncomplete(publication.status, "committing")
+                if plan is not None:
+                    from openkb.agent.document_publication import record_document_publication
+
+                    try:
+                        record_document_publication(
+                            kb_dir,
+                            source,
+                            parsed,
+                            document_settings,
+                            plan,
+                            publication,
+                            bundle=bundle,
+                        )
+                    except (OSError, ValueError) as exc:
+                        # Publication is already durable, but its formal plan
+                        # receipt is not.  The pre-publication intent makes a
+                        # later Continue repairable without re-generation.
+                        raise ProcessingIncomplete(
+                            "document_publication_receipt_pending", "committing"
+                        ) from exc
                 try:
                     on_event({"stage": "committed"})
                 except (Exception, OperationCancelled):

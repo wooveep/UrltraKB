@@ -122,5 +122,9 @@ def validate_windows(source, parsed, windows):
             ):
                 raise ValueError("Invalid unresolved contents entry")
         following = end
+    # An empty manifest is the durable degraded/disabled-navigation form; the
+    # document planner then constructs its full fallback W/T itself.  Once a
+    # navigator supplies any window, however, it must account for the entire
+    # current parse and cannot silently truncate the tail.
     if windows and following != len(parsed.blocks):
         raise ValueError("Incomplete navigation window coverage")

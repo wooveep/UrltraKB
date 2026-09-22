@@ -24,11 +24,9 @@ def test_generation_opens_excluded_original_and_other_steps_have_specific_views(
     assert "未通过原文证据复核" in view.reason.text()
     assert "已排除 1 项" in view.status.text()
     assert "concepts/beta" in view.items.currentText()
-    panel.show_stage("facts")
-    assert panel.tabs.tabText(5) == "事实与引文" and panel.record_evidence.isVisible()
     panel.show_stage("planning")
-    assert panel.tabs.tabText(5) == "主题与对应事实"
-    assert "Beta requirement." in panel.record_evidence.toPlainText()
+    assert panel.tabs.tabText(5) == "文档计划" and panel.record_evidence.isVisible()
+    assert "正式文档计划" in panel.record_evidence.toPlainText()
     panel.show_stage("generation")
     assert panel.tabs.tabText(5) == "生成稿与校验"
     assert not panel.record_evidence.isVisible()

@@ -12,32 +12,18 @@ from typing import Any, Iterator
 
 import yaml
 
-from openkb.llm_runtime import (
-    get_extra_headers as get_extra_headers,
-)
-from openkb.llm_runtime import (
-    get_parallel_tool_calls as get_parallel_tool_calls,
-)
-from openkb.llm_runtime import (
-    get_timeout as get_timeout,
-)
-from openkb.llm_runtime import (
-    get_timeout_extra_args as get_timeout_extra_args,
-)
-from openkb.llm_runtime import (
-    resolve_model_settings as resolve_model_settings,
-)
-from openkb.llm_runtime import (
-    set_extra_headers as set_extra_headers,
-)
-from openkb.llm_runtime import (
-    set_parallel_tool_calls as set_parallel_tool_calls,
-)
-from openkb.llm_runtime import (
-    set_timeout as set_timeout,
-)
+from openkb import llm_runtime
 from openkb.locks import atomic_write_text
 from openkb.processing import DEFAULT_PROCESSING
+
+get_extra_headers = llm_runtime.get_extra_headers
+get_parallel_tool_calls = llm_runtime.get_parallel_tool_calls
+get_timeout = llm_runtime.get_timeout
+get_timeout_extra_args = llm_runtime.get_timeout_extra_args
+resolve_model_settings = llm_runtime.resolve_model_settings
+set_extra_headers = llm_runtime.set_extra_headers
+set_parallel_tool_calls = llm_runtime.set_parallel_tool_calls
+set_timeout = llm_runtime.set_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +38,6 @@ DEFAULT_ENTITY_TYPES: tuple[str, ...] = (
     "event",
     "other",
 )
-
 DEFAULT_CONFIG: dict[str, Any] = {
     "model": "gpt-5.4",
     "language": "en",
@@ -62,6 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # global/KB list overrides it wholesale; resolve_entity_types cleans the
     # effective value on read.
     "entity_types": list(DEFAULT_ENTITY_TYPES),
+    "review_mode": "critical",
     # Bounded operating defaults for existing and new KBs. Context/output are
     # request caps, not a claim about an arbitrary provider's model capacity.
     "processing": DEFAULT_PROCESSING,
@@ -484,6 +470,9 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
             continue
         if not isinstance(value, str):
             raise ValueError(f"Configuration field '{key}' must be a string")
+    review_mode = config.get("review_mode")
+    if not (allow_inherited and review_mode is None) and review_mode not in {"critical", "none"}:
+        raise ValueError("Configuration field 'review_mode' must be 'critical' or 'none'")
     threshold = config.get("pageindex_threshold")
     if threshold is None and allow_inherited:
         return
@@ -510,6 +499,7 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "language",
     "pageindex_threshold",
     "entity_types",
+    "review_mode",
     "processing",
     "parsing",
     "image_understanding",
@@ -581,6 +571,10 @@ def resolve_effective_config(kb_dir: Path) -> tuple[dict[str, Any], dict[str, st
             if key in GLOBAL_SCALAR_KEYS:
                 sources[key] = "kb"
 
+    # Keep this internal provenance bit with the execution snapshot so default
+    # capacity placeholders can be replaced by the selected model's declared
+    # limits, while a global or KB budget stays an explicit user boundary.
+    effective["_processing_explicit"] = sources["processing"] != "default"
     return effective, sources
 
 

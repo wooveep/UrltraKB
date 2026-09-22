@@ -14,7 +14,7 @@ def test_summary_preserves_bracketed_title_without_breaking_navigation(kb_dir, m
         payload = json.loads(body["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "planning":
-            value["topics"][0]["title"] = title
+            value["page_changes"][0]["title"] = title
         if payload["stage"] == "generation":
             value["content"] = "# " + title + "\nConfirmed knowledge."
         return value

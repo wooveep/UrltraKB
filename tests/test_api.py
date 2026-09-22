@@ -538,7 +538,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir, tmp_p
     assert response.json()["added_count"] == 2
     assert response.json()["skipped_count"] == 0
     assert response.json()["failed_count"] == 0
-    assert len(model_service) == 10  # The repeated content reuses facts and generation.
+    assert len(model_service) == 9  # Each import uses planning, generation and verification.
     assert len(list((kb_dir / "wiki/summaries").glob("*.md"))) == 3
 
 
@@ -1128,7 +1128,7 @@ def test_recompile_non_stream_short_doc(monkeypatch, kb_dir, tmp_path, model_ser
         assert body["status"] == "partial"
         assert body["recompiled"] == 0 and body["unfinished_count"] == 1
         assert body["docs"][0]["document"]["reason"] == "needs_acceptance"
-        assert len(model_service) == 4
+        assert len(model_service) == 3
 
 
 def test_recompile_non_stream_long_doc(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1249,7 +1249,7 @@ def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir, tmp_path, model
         body = response.json()
         assert body["total"] == 2
         assert body["recompiled"] == 0 and body["unfinished_count"] == 2
-        assert len(model_service) == 7  # Identical analysis can be shared across uploads.
+        assert len(model_service) == 6  # Each source uses plan, generation and verification.
 
 
 def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1292,14 +1292,14 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir, tmp_path, model_serv
         body = response.json()
         assert body["recompiled"] == 0
         assert body["unfinished_count"] == 2
-        assert len(model_service) == 4
+        assert len(model_service) == 3
         assert {row["message"] for row in body["docs"]} == {
             "needs_acceptance",
             "saved_original_missing",
         }
 
 
-def test_recompile_unreadable_original_keeps_unowned_summary_for_review(
+def test_recompile_unreadable_original_keeps_unowned_summary_on_failure(
     monkeypatch, kb_dir, tmp_path, model_service
 ):
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path / "config")
@@ -1316,9 +1316,9 @@ def test_recompile_unreadable_original_keeps_unowned_summary_for_review(
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["recompiled"] == 0
-        assert body["failed_count"] == 0 and body["skipped"] == 0
-        assert body["unfinished_count"] == 1
-        assert body["docs"][0]["message"] == "needs_acceptance"
+        assert body["failed_count"] == 1 and body["skipped"] == 0
+        assert body["unfinished_count"] == 0
+        assert body["docs"][0]["message"] == "compiling_failed:ValueError"
         assert (kb_dir / "wiki/summaries/paper.md").read_text().endswith("# Paper\n")
 
         assert not model_service
@@ -2417,6 +2417,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "verification_thinking": None,
         "verification_adjudication_thinking": None,
         "correction_thinking": None,
+        "review_mode": "critical",
         "compilation_reasoning_effort": None,
         "planning_reasoning_effort": None,
         "verification_reasoning_effort": None,

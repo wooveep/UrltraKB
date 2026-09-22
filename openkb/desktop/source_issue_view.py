@@ -127,8 +127,8 @@ class SourceIssueView(QWidget):
             return
         reason = _REASONS.get(row["reason"], REASONS.get(row["reason"], row["reason"]))
         stage = {
-            "facts": "事实提取",
-            "planning": "主题规划",
+            "facts": "旧版事实提取",
+            "planning": "文档规划",
             "generation": "生成与校验",
             "parsing": "内容解析",
         }.get(row["stage"], "原文覆盖")

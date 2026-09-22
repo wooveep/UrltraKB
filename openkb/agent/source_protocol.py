@@ -21,7 +21,13 @@ Return only the requested JSON, without commentary or step-by-step reasoning.
 
 def source_messages(evidence, task, rules):
     # Encode and intern the frozen evidence before traversing any task field.
-    prefix, identities = encode_payload({"protocol": PROTOCOL, "evidence": evidence})
+    # The stage belongs to the frozen envelope as well: generation and review
+    # need a private identity namespace before evidence is encoded, otherwise
+    # their source IDs would receive ordinary ``rN`` labels and could leak into
+    # Markdown without the wire decoder detecting it.
+    prefix, identities = encode_payload(
+        {"protocol": PROTOCOL, "evidence": evidence, "stage": task.get("stage")}
+    )
     prefix = share_contexts(
         prefix, fields=("context_data", "context", "neighbors", "heading_evidence")
     )

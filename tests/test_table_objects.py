@@ -68,7 +68,7 @@ def write_table(path, rows):
 
 
 @pytest.mark.parametrize("suffix", [".docx", ".pdf", ".pptx", ".xlsx"])
-def test_small_table_is_one_object_without_model_extracting_each_cell(
+def test_small_table_is_planned_in_one_document_request_without_fact_extraction(
     kb_dir, tmp_path, model_service, suffix
 ):
     path = tmp_path / ("limits" + suffix)
@@ -79,38 +79,26 @@ def test_small_table_is_one_object_without_model_extracting_each_cell(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         requests.append(payload)
-        output = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, result in zip(payload["units"], output["units"]):
-                if unit["kind"] in {"image", "heading"}:
-                    result.update(
-                        facts=[], empty_reason="Source navigation without additional facts"
-                    )
-                else:
-                    result["facts"][0]["topic"] = unit["text"]
-        return output
+        return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, path)
     assert result.knowledge_compilation == "completed", result
-    assert not [
-        unit
-        for request in requests
-        if request["stage"] == "facts"
-        for unit in request["units"]
-        if unit["kind"] == "table"
-    ]
+    assert not [request for request in requests if request["stage"] == "facts"]
     plans = [request for request in requests if request["stage"] == "planning"]
-    assert sum(len(request["topics"]) for request in plans) == 1
+    assert len(plans) == 1
+    assert {item["text"] for item in plans[0]["evidence"]["blocks"] if item["kind"] == "table"} == {
+        value for row in rows for value in row
+    }
     generated = [request for request in requests if request["stage"] == "generation"]
     assert len(generated) == 1
-    assert {item["text"] for item in generated[0]["evidence"]} == {v for row in rows for v in row}
-    assert len(generated[0]["table_objects"]) == 1
+    assert {
+        item["text"] for item in generated[0]["evidence"]["blocks"] if item["kind"] == "table"
+    } == {value for row in rows for value in row}
+    assert "table_objects" not in generated[0]
 
 
-def test_large_spreadsheet_batches_repeat_headers_and_keep_complete_rows(
-    kb_dir, tmp_path, model_service
-):
+def test_large_spreadsheet_generation_keeps_complete_table_rows(kb_dir, tmp_path, model_service):
     from collections import Counter
 
     from openpyxl.utils.cell import coordinate_to_tuple
@@ -122,28 +110,21 @@ def test_large_spreadsheet_batches_repeat_headers_and_keep_complete_rows(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        output = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit in output["units"]:
-                unit.update(facts=[], empty_reason="Worksheet heading")
         if payload["stage"] == "generation":
             generated.append(payload)
-        return output
+        return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, path)
     assert result.knowledge_compilation == "completed", result
     assert not result.omissions
-    assert len(generated) > 1
+    assert generated
     addresses = []
     for batch in generated:
-        (obj,) = batch["table_objects"]
-        assert {header["text"] for header in obj["headers"]} == set(rows[0])
-        cells = [item["location"]["cell_address"] for item in batch["evidence"]]
+        table_cells = [item for item in batch["evidence"]["blocks"] if item["kind"] == "table"]
+        cells = [item["location"]["cell_address"] for item in table_cells]
         positions = [coordinate_to_tuple(cell) for cell in cells]
         assert set(Counter(row for row, col in positions).values()) == {3}
-        assert obj["row_offset"] == min(row for row, col in positions) - 1
-        assert obj["columns"] == [1, 2, 3]
         addresses.extend(cells)
     assert len(addresses) == len(set(addresses)) == len(rows) * 3
 
@@ -161,62 +142,6 @@ def test_capacity_and_response_retry_do_not_split_a_row_or_merged_cell():
     for split in (split_generation, split_generation_response):
         assert split(merged) == []
         assert split(merged + [pair(3, 1), pair(3, 2)]) == [merged, [pair(3, 1), pair(3, 2)]]
-
-
-@pytest.mark.parametrize("changed_prompt", [False, True])
-def test_upgrade_reuses_only_unchanged_prose_from_a_mixed_old_table_batch(
-    kb_dir, tmp_path, model_service, monkeypatch, changed_prompt
-):
-    import yaml
-
-    from openkb.agent import table_objects
-    from openkb.agent.evidence_checkpoints import CompilationCheckpoints
-    from openkb.agent.table_recovery import PRE_TABLE_MODULES
-    from openkb.application.source_actions import continue_source
-
-    path = tmp_path / "old.docx"
-    write_docx(
-        path,
-        "<w:p><w:r><w:t>Required release is 7.</w:t></w:r></w:p>"
-        "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Timeout</w:t></w:r></w:p></w:tc>"
-        "<w:tc><w:p><w:r><w:t>37 seconds</w:t></w:r></w:p></w:tc></w:tr></w:tbl>",
-    )
-    current_key = CompilationCheckpoints._key_record
-    config_path = kb_dir / ".openkb/config.yaml"
-    original_config = config_path.read_text()
-    config = yaml.safe_load(original_config)
-    config["processing"]["max_requests"] = 1
-    config_path.write_text(yaml.safe_dump(config))
-
-    def previous_key(self, system, payload, **kwargs):
-        record = current_key(self, system, payload, **kwargs)
-        if payload.get("stage") == "facts":
-            record.update(
-                message_format=PRE_TABLE_MODULES["evidence_units"],
-                stage_implementation=PRE_TABLE_MODULES,
-            )
-        return record
-
-    with monkeypatch.context() as old:
-        old.setattr(table_objects, "source_table_objects", lambda parsed, source: {})
-        old.setattr(CompilationCheckpoints, "_key_record", previous_key)
-        first = import_document(kb_dir, path)
-    assert first.reason == "request_budget_exhausted", first
-    config_path.write_text(original_config)
-    before = len(model_service)
-    if changed_prompt:
-        from openkb.agent import evidence_facts
-
-        monkeypatch.setattr(
-            evidence_facts, "FACTS_SYSTEM", evidence_facts.FACTS_SYSTEM + "\nNew extraction policy."
-        )
-    second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
-    assert second.knowledge_compilation == "completed", second
-    assert second.parse_id == first.parse_id
-    calls = [json.loads(call["messages"][-1]["content"]) for call in model_service[before:]]
-    facts = [call for call in calls if call["stage"] == "facts"]
-    assert bool(facts) == changed_prompt
-    assert all(unit["kind"] != "table" for call in facts for unit in call["units"])
 
 
 def test_unmarked_worksheet_regions_and_embedded_tables_keep_distinct_identity():
@@ -257,9 +182,7 @@ def test_unmarked_worksheet_regions_and_embedded_tables_keep_distinct_identity()
     assert objects["embedded1"]["id"] != objects["embedded2"]["id"]
 
 
-def test_split_table_keeps_its_preceding_condition_in_every_row_batch(
-    kb_dir, tmp_path, model_service
-):
+def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_path, model_service):
     import yaml
 
     config_path = kb_dir / ".openkb/config.yaml"
@@ -280,27 +203,42 @@ def test_split_table_keeps_its_preceding_condition_in_every_row_batch(
         )
         + "</w:tbl>",
     )
-    generated = []
+    generated, reviewed = [], []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "generation" and payload.get("table_objects"):
+        if payload["stage"] == "generation":
             generated.append(payload)
+        if payload["stage"] == "verification":
+            reviewed.append(payload)
         return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, path)
     assert result.knowledge_compilation == "completed", result
-    assert not result.omissions
-    assert len(generated) > 1
-    assert all(
-        any(
-            neighbor["text"] == condition
-            for item in batch["evidence"]
-            for neighbor in item["neighbors"]
-        )
-        for batch in generated
+    # At this capacity the complete assembled page cannot receive its required
+    # critical review. Preserve the generated source rows privately and report
+    # a page-local continuation item; never substitute fragment verification.
+    assert any(
+        row["stage"] == "generation"
+        and row["reason"] == "input_budget_exceeded"
+        and row["items"] == ["concepts/notes"]
+        for row in result.omissions
+    ), result.omissions
+    assert not (kb_dir / "wiki/concepts/notes.md").exists()
+    assert generated
+    assert not reviewed
+    assert any(
+        item["text"] == condition for batch in generated for item in batch["evidence"]["blocks"]
     )
+    for batch in generated:
+        rows_in_batch = {}
+        for item in batch["evidence"]["blocks"]:
+            if item["kind"] != "table":
+                continue
+            location = item["location"]
+            rows_in_batch[location["row"]] = rows_in_batch.get(location["row"], 0) + 1
+        assert set(rows_in_batch.values()) <= {2}
 
 
 def test_document_table_uses_configured_context_headroom_before_row_splitting(

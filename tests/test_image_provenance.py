@@ -80,7 +80,7 @@ def test_image_origins_reach_compiler_and_bounded_query_without_guessing_from_al
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] in {"facts", "generation", "verification"}:
+        if payload["stage"] in {"planning", "generation", "verification"}:
             observed.append(payload)
         return evidence_response(payload)
 
@@ -100,11 +100,14 @@ def test_image_origins_reach_compiler_and_bounded_query_without_guessing_from_al
     assert store.asset(relation["original_asset"]).read_bytes() == original
     with Image.open(io.BytesIO(original)) as raw, Image.open(store.asset(frame["asset"])) as shown:
         assert raw.convert("RGB").tobytes() == shown.convert("RGB").tobytes()
-    assert {p["stage"] for p in observed} == {"facts", "generation", "verification"}
+    assert {p["stage"] for p in observed} == {"planning", "generation", "verification"}
     for payload in observed:
-        rows = payload["units"] if payload["stage"] == "facts" else payload["evidence"]
+        rows = payload["evidence"]["blocks"]
         row = next(r for r in rows if "Visible panel text." in r["text"])
-        assert row["context_data"]["image_relations"] == [relation]
+        context = row["context_data"]
+        if "context_ref" in context:
+            context = payload["context_pool"][context["context_ref"]]
+        assert context["image_relations"] == [relation]
 
     tools = {t.name: t for t in source_tools(kb_dir)[0]}
 

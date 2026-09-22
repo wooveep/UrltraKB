@@ -1,12 +1,24 @@
 """Long resumptions must not retain every completed request or reread old bodies."""
 
 import gc
+import json
 import tracemalloc
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
 
+from openkb.agent.compilation_index import (
+    artifact_page,
+    artifact_summaries,
+    index_path,
+    pending_index_path,
+    recover_pending_entries,
+    verified_candidates,
+)
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+from openkb.application.source_artifacts import saved_compilation_artifact_index
 from openkb.locks import atomic_write_json
 from openkb.processing import DEFAULT_PROCESSING
 
@@ -16,7 +28,16 @@ def checkpoints(kb):
         kb,
         SimpleNamespace(source_id="1" * 32, id="2" * 64),
         SimpleNamespace(id="3" * 64),
-        {"model": "openai/offline", "processing": DEFAULT_PROCESSING},
+        {
+            "model": "openai/offline",
+            "processing": {
+                **DEFAULT_PROCESSING,
+                "context_tokens": 128_000,
+                "max_context_tokens": 128_000,
+                "output_tokens": 4_096,
+                "max_output_tokens": 4_096,
+            },
+        },
         None,
     )
 
@@ -178,6 +199,326 @@ def test_appending_checkpoint_uses_stage_index_without_reading_old_payloads(kb_d
     assert reader.checkpoint_keys("generation") == [current]
 
 
+def test_appending_checkpoint_does_not_read_or_rewrite_a_historical_json_index(kb_dir, monkeypatch):
+    """A new result writes one SQLite row instead of copying every saved summary."""
+
+    writer = checkpoints(kb_dir)
+    for number in range(128):
+        key = writer.key("fixture", {"stage": "facts", "text": f"saved {number}"})
+        writer.save(key, {"value": number})
+    assert not writer.latest.exists()
+
+    import openkb.agent.evidence_checkpoints as module
+
+    read = module.read_object
+
+    def reject_historical_index(path):
+        assert path != writer.latest, "Appending a checkpoint reread the aggregate history index"
+        return read(path)
+
+    monkeypatch.setattr(module, "read_object", reject_historical_index)
+    current = writer.key("fixture", {"stage": "generation", "text": "next source"})
+    writer.save(current, {"value": "next"})
+
+    assert writer.checkpoint_keys("generation") == [current]
+
+
+def test_interrupted_index_append_recovers_the_written_checkpoint(kb_dir, monkeypatch):
+    """A receipt that outlives its SQLite append remains resumable and retained."""
+
+    writer = checkpoints(kb_dir)
+    previous = writer.key("fixture", {"stage": "facts", "text": "previous source"})
+    writer.save(previous, {"value": 1})
+    current = writer.key("fixture", {"stage": "generation", "text": "next source"})
+
+    import openkb.agent.evidence_checkpoints as module
+
+    monkeypatch.setattr(
+        module,
+        "update_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("index interruption")),
+    )
+    with pytest.raises(OSError, match="index interruption"):
+        writer.save(current, {"value": 2})
+    assert writer.record(current) is not None
+    marker = pending_index_path(writer.store, writer.input["version"], current, "checkpoint")
+    assert marker.exists()
+
+    reader = checkpoints(kb_dir)
+    assert current in reader.checkpoint_keys("generation")
+    assert reader.record(current) is not None
+    assert not marker.exists()
+
+
+def test_pending_marker_for_another_parse_does_not_block_its_own_parse(kb_dir, monkeypatch):
+    """An interrupted parse A must not make parse B's artifact read fail."""
+
+    writer = checkpoints(kb_dir)
+    previous = writer.key("fixture", {"stage": "facts", "text": "previous source"})
+    writer.save(previous, {"value": 1})
+    current = writer.key("fixture", {"stage": "generation", "text": "next source"})
+
+    import openkb.agent.evidence_checkpoints as module
+
+    monkeypatch.setattr(
+        module,
+        "update_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("index interruption")),
+    )
+    with pytest.raises(OSError, match="index interruption"):
+        writer.save(current, {"value": 2})
+    marker = pending_index_path(writer.store, writer.input["version"], current, "checkpoint")
+
+    assert not recover_pending_entries(
+        writer.store,
+        writer.input["version"],
+        source_id=writer.input["source"],
+        parse_id="4" * 64,
+    )
+    assert marker.exists()
+    assert recover_pending_entries(
+        writer.store,
+        writer.input["version"],
+        source_id=writer.input["source"],
+        parse_id=writer.input["parse"],
+    )
+    assert not marker.exists()
+
+
+def test_concurrent_readers_recover_one_pending_index_marker(kb_dir, monkeypatch):
+    """Concurrent read-only resumes claim one marker without SQLite contention."""
+
+    writer = checkpoints(kb_dir)
+    previous = writer.key("fixture", {"stage": "facts", "text": "previous source"})
+    writer.save(previous, {"value": 1})
+    current = writer.key("fixture", {"stage": "generation", "text": "next source"})
+
+    import openkb.agent.evidence_checkpoints as module
+
+    monkeypatch.setattr(
+        module,
+        "update_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("index interruption")),
+    )
+    with pytest.raises(OSError, match="index interruption"):
+        writer.save(current, {"value": 2})
+    marker = pending_index_path(writer.store, writer.input["version"], current, "checkpoint")
+    gate = Barrier(2)
+
+    def resume():
+        gate.wait()
+        return checkpoints(kb_dir).checkpoint_keys("generation")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        resumed = list(workers.map(lambda _: resume(), range(2)))
+
+    assert all(current in keys for keys in resumed)
+    assert not marker.exists()
+
+
+def test_missing_sqlite_index_rebuilds_recovery_artifact_summaries(kb_dir):
+    """One exceptional rebuild retains draft and plan previews before the next save."""
+
+    writer = checkpoints(kb_dir)
+    draft = writer.key("fixture", {"stage": "generation", "text": "draft source"})
+    writer.save_recovery(
+        draft,
+        "draft",
+        {"output": {"page_key": "page", "content": "draft candidate"}},
+    )
+    plan = writer.key("fixture", {"stage": "planning", "text": "plan source"})
+    writer.save_recovery(
+        plan,
+        "plan",
+        {"metadata": {"protocol": "document-plan-v1"}, "page_changes": []},
+    )
+    index_path(writer.store, writer.input["version"]).unlink()
+
+    reader = checkpoints(kb_dir)
+    assert reader.checkpoint_keys("generation") == []
+    rows = saved_compilation_artifact_index(
+        reader.store,
+        reader.input["source"],
+        reader.input["version"],
+        reader.input["parse"],
+    )
+    assert {(row["storage"], row["key"]) for row in rows} >= {("draft", draft), ("plan", plan)}
+
+    current = reader.key("fixture", {"stage": "facts", "text": "next source"})
+    reader.save(current, {"value": "next"})
+    migrated = saved_compilation_artifact_index(
+        reader.store,
+        reader.input["source"],
+        reader.input["version"],
+        reader.input["parse"],
+    )
+    assert {(row["storage"], row["key"]) for row in migrated} >= {("draft", draft), ("plan", plan)}
+
+
+def test_corrupt_sqlite_index_rebuilds_checkpoint_and_artifact_projections(kb_dir):
+    """A corrupted derived database cannot hide valid immutable receipts."""
+
+    writer = checkpoints(kb_dir)
+    current = writer.key("fixture", {"stage": "facts", "text": "saved source"})
+    writer.save(current, {"value": "saved"})
+    path = index_path(writer.store, writer.input["version"])
+    path.write_bytes(b"not sqlite")
+
+    reader = checkpoints(kb_dir)
+    assert reader.checkpoint_keys("facts") == [current]
+    assert reader.load(current) == {"value": "saved"}
+    quarantine = writer.root / "quarantine"
+    assert list(quarantine.glob(f"{writer.input['version']}-index-*.sqlite3"))
+
+    path.write_bytes(b"not sqlite")
+    page = artifact_page(
+        writer.store,
+        writer.input["source"],
+        writer.input["version"],
+        writer.input["parse"],
+        "facts",
+        offset=0,
+        limit=10,
+    )
+    assert page is not None and page[1] == 1
+    assert [row["key"] for row in page[0]] == [current]
+
+
+def test_semantically_corrupt_sqlite_rows_rebuild_from_immutable_receipts(kb_dir):
+    """Valid SQLite bytes cannot make poisoned derived rows authoritative."""
+
+    import sqlite3
+
+    writer = checkpoints(kb_dir)
+    current = writer.key("fixture", {"stage": "facts", "text": "saved source"})
+    writer.save(current, {"value": "saved"})
+    path = index_path(writer.store, writer.input["version"])
+
+    with sqlite3.connect(path) as db, db:
+        db.execute("UPDATE checkpoints SET key = 'not-a-digest'")
+    assert checkpoints(kb_dir).checkpoint_keys("facts") == [current]
+
+    with sqlite3.connect(path) as db, db:
+        db.execute("UPDATE checkpoints SET stage = 'bogus'")
+    assert checkpoints(kb_dir).checkpoint_keys("facts") == [current]
+
+    with sqlite3.connect(path) as db, db:
+        db.execute("UPDATE artifacts SET summary = '{}'")
+    page = artifact_page(
+        writer.store,
+        writer.input["source"],
+        writer.input["version"],
+        writer.input["parse"],
+        "facts",
+        offset=0,
+        limit=10,
+    )
+    assert page is not None and [row["key"] for row in page[0]] == [current]
+
+    with sqlite3.connect(path) as db, db:
+        db.execute("UPDATE artifacts SET stage = 'generation'")
+    page = artifact_page(
+        writer.store,
+        writer.input["source"],
+        writer.input["version"],
+        writer.input["parse"],
+        "generation",
+        offset=0,
+        limit=10,
+    )
+    assert page == ((), 0)
+    page = artifact_page(
+        writer.store,
+        writer.input["source"],
+        writer.input["version"],
+        writer.input["parse"],
+        "facts",
+        offset=0,
+        limit=10,
+    )
+    assert page is not None and [row["key"] for row in page[0]] == [current]
+
+    poisoned = {
+        "schema": 1,
+        "storage": "checkpoint",
+        "key": current,
+        "stage": "verification",
+        "source": writer.input["source"],
+        "version": writer.input["version"],
+        "parse": writer.input["parse"],
+        "model": "openai/offline",
+        "draft": False,
+        "adopted": False,
+        "verified": {},
+    }
+    with sqlite3.connect(path) as db, db:
+        db.execute(
+            "UPDATE artifacts SET stage = 'verification', verified_page_key = 'page', "
+            "verified_candidate = 'candidate', summary = ?",
+            (json.dumps(poisoned),),
+        )
+    assert (
+        verified_candidates(
+            writer.store,
+            writer.input["source"],
+            writer.input["version"],
+            writer.input["parse"],
+            [{"page_key": "page", "candidate": "candidate"}],
+        )
+        == {}
+    )
+
+
+def test_malformed_pending_marker_does_not_block_valid_index_reads(kb_dir):
+    """An unauthenticated marker is discarded without invalidating completed work."""
+
+    writer = checkpoints(kb_dir)
+    current = writer.key("fixture", {"stage": "facts", "text": "saved source"})
+    writer.save(current, {"value": "saved"})
+    marker = (
+        index_path(writer.store, writer.input["version"]).parent
+        / f"{writer.input['version']}-pending"
+        / "malformed.json"
+    )
+    atomic_write_json(marker, {})
+
+    assert checkpoints(kb_dir).checkpoint_keys("facts") == [current]
+    assert not marker.exists()
+
+
+def test_artifact_stream_repairs_a_later_bad_row_without_repeating_prior_rows(kb_dir):
+    """A streaming projection resumes after its verified cursor on repair."""
+
+    import sqlite3
+
+    writer = checkpoints(kb_dir)
+    keys = []
+    for text in ("first source", "second source"):
+        key = writer.key("fixture", {"stage": "facts", "text": text})
+        writer.save(key, {"value": text})
+        keys.append(key)
+    path = index_path(writer.store, writer.input["version"])
+    with sqlite3.connect(path) as db:
+        later = db.execute(
+            "SELECT artifact_key FROM artifacts WHERE stage = 'facts' "
+            "ORDER BY artifact_key DESC LIMIT 1"
+        ).fetchone()[0]
+        db.execute("UPDATE artifacts SET summary = '{}' WHERE artifact_key = ?", (later,))
+        db.commit()
+
+    streamed = tuple(
+        artifact_summaries(
+            writer.store,
+            writer.input["source"],
+            writer.input["version"],
+            writer.input["parse"],
+            stages=("facts",),
+        )
+        or ()
+    )
+    assert [row["key"] for row in streamed] == sorted(keys)
+
+
 def test_pending_contracts_do_not_accumulate_prompt_bodies(kb_dir):
     writer = checkpoints(kb_dir)
     keys = []
@@ -207,8 +548,9 @@ def test_index_recovery_preserves_previous_results(kb_dir, index_state):
     writer = checkpoints(kb_dir)
     previous = writer.key("fixture", {"stage": "facts", "text": "saved source"})
     writer.save(previous, {"facts": ["original"]})
+    index_path(writer.store, writer.input["version"]).unlink()
     if index_state == "missing":
-        writer.latest.unlink()
+        pass
     else:
         index = {"checkpoints": [previous]}
         if index_state == "invalid":

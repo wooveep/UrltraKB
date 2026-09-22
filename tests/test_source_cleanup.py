@@ -175,3 +175,64 @@ def test_cleanup_preview_covers_sdk_companion_files(kb_dir, tmp_path, model_serv
     assert companion.read_text() == "Review this managed companion before cleanup."
     cleanup_history(kb_dir, preview_history_cleanup(kb_dir).id)
     assert not companion.parent.exists()
+
+
+def test_cleanup_retains_a_receipt_pending_its_first_compilation_index(
+    kb_dir, tmp_path, model_service, monkeypatch
+):
+    """A current source keeps its authenticated handoff before SQLite exists."""
+
+    from openkb.agent.compilation_index import index_path
+    from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+    from openkb.application.source_cleanup import cleanup_history, preview_history_cleanup
+    from openkb.processing import DEFAULT_PROCESSING
+
+    original = tmp_path / "pending-index.md"
+    original.write_text("Current source with a resumable checkpoint.")
+    result = import_document(kb_dir, original)
+    store = SourceStore(kb_dir)
+    source = store.version(result.input_version)
+    parsed = ParseStore(kb_dir).load(result.parse_id)
+    settings = {
+        "model": "openai/offline",
+        "processing": {
+            **DEFAULT_PROCESSING,
+            "context_tokens": 128_000,
+            "max_context_tokens": 128_000,
+            "output_tokens": 4_096,
+            "max_output_tokens": 4_096,
+        },
+    }
+    writer = CompilationCheckpoints(
+        kb_dir,
+        source,
+        parsed,
+        settings,
+        None,
+    )
+    index_path(store, source.id).unlink()
+    writer.latest.unlink(missing_ok=True)
+    current = writer.key("fixture", {"stage": "facts", "text": "pending source"})
+
+    import openkb.agent.evidence_checkpoints as checkpoints_module
+
+    monkeypatch.setattr(
+        checkpoints_module,
+        "update_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("index interruption")),
+    )
+    with pytest.raises(OSError, match="index interruption"):
+        writer.save(current, {"value": "saved"})
+
+    preview = preview_history_cleanup(kb_dir)
+    cleanup_history(kb_dir, preview.id)
+
+    reader = CompilationCheckpoints(
+        kb_dir,
+        source,
+        parsed,
+        settings,
+        None,
+    )
+    assert current in reader.checkpoint_keys("facts")
+    assert reader.load(current) == {"value": "saved"}

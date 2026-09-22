@@ -3,6 +3,68 @@
 import pytest
 
 
+def test_global_endpoint_clear_validates_the_post_clear_endpoint(tmp_path, monkeypatch):
+    from openkb import config
+    from openkb.application.settings import apply_global_config_patch
+    from openkb.application.settings_data import GlobalConfigPatchRequest
+    from openkb.model_capabilities import ModelCapabilities
+
+    global_dir = tmp_path / "global"
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", global_dir)
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_dir / "global.yaml")
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    processing = {**config.DEFAULT_CONFIG["processing"], "output_tokens": 1024}
+    config.save_global_config({"model": "endpoint-bound", "processing": processing})
+    (global_dir / ".env").write_text("OPENAI_API_BASE=https://old.example/v1\n")
+
+    def capabilities(model, endpoint):
+        return (
+            ModelCapabilities(8192, None, 2048, True)
+            if (model, endpoint) == ("endpoint-bound", "https://old.example/v1")
+            else None
+        )
+
+    monkeypatch.setattr("openkb.processing_limits.selected_model_capabilities", capabilities)
+
+    with pytest.raises(ValueError, match="selected model and endpoint"):
+        apply_global_config_patch(GlobalConfigPatchRequest(openai_api_base=None))
+
+    assert (global_dir / ".env").read_text() == "OPENAI_API_BASE=https://old.example/v1\n"
+
+
+def test_global_model_patch_validates_registered_kb_local_processing(tmp_path, monkeypatch):
+    """A KB-local request budget cannot be left bound to an unknown model."""
+
+    from openkb import config
+    from openkb.application.settings import apply_global_config_patch
+    from openkb.application.settings_data import GlobalConfigPatchRequest
+    from openkb.model_capabilities import ModelCapabilities
+
+    global_dir = tmp_path / "global"
+    kb_dir = tmp_path / "kb"
+    (kb_dir / ".openkb").mkdir(parents=True)
+    (kb_dir / "wiki").mkdir()
+    config_path = kb_dir / ".openkb" / "config.yaml"
+    config_path.write_text(
+        "processing:\n" + "  context_tokens: 8192\n" + "  output_tokens: 1024\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", global_dir)
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_dir / "global.yaml")
+    config.save_global_config({"model": "known", "known_kbs": [str(kb_dir)]})
+    monkeypatch.setattr(
+        "openkb.processing_limits.selected_model_capabilities",
+        lambda model, endpoint: ModelCapabilities(8192, None, 2048, True)
+        if model == "known"
+        else None,
+    )
+
+    with pytest.raises(ValueError, match="selected model and endpoint"):
+        apply_global_config_patch(GlobalConfigPatchRequest(config={"model": "unknown"}))
+
+    assert config.load_global_config()["model"] == "known"
+
+
 def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_path, monkeypatch):
     from openkb import config
     from openkb.application.knowledge_bases import initialize_kb

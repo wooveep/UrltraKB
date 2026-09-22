@@ -5,8 +5,7 @@ from dataclasses import dataclass
 STAGES = (
     ("intake", "原文接入", "保存原始文件，保留独立的资料版本。"),
     ("parsing", "内容解析", "读取正文、图片和文档附件；缺失内容单独标记。"),
-    ("facts", "事实提取", "从原文提取事实，并保存可回读的引文。"),
-    ("planning", "主题规划", "整理主题与知识页面的对应关系。"),
+    ("planning", "文档规划", "将原文范围安排到知识页面、必要上下文或待决项。"),
     ("generation", "生成与校验", "生成页面并对照原文校验；草稿不代表已入库。"),
     ("publication", "知识入库", "提交已验证的知识变更，供浏览和问答使用。"),
 )
@@ -20,8 +19,10 @@ PHASES = {
     "image_ocr": "parsing",
     "cloud_ocr": "parsing",
     "parse_cache": "parsing",
-    "facts": "facts",
+    # Existing source histories can still report the retired extraction phase.
+    "facts": "planning",
     "planning": "planning",
+    "planned": "planning",
     "generation": "generation",
     "verification": "generation",
     "generated": "generation",
@@ -92,7 +93,9 @@ def flow_steps(saved, activity=None):
     if state == "stopping" and current is None:
         current = next((PHASES[p.phase] for p in progress if p.phase in PHASES), None)
     if phase == "parsed":
-        current, state = "facts", "pending"
+        current, state = "planning", "pending"
+    if phase == "planned" and not activity:
+        current, state = "planning", "planned"
     if state == "not_started" and current in {None, "intake"}:
         current = "parsing"
     if phase in {"waiting", "waiting-input", "queued", "starting"}:
@@ -124,12 +127,13 @@ def flow_steps(saved, activity=None):
                 "unfinished": "paused",
                 "interrupted": "paused",
                 "blocked": "review",
+                "planned": "completed",
             }.get(state, "pending")
             if reason in {"source_quality_needs_review", "needs_acceptance", "input_conflict"}:
                 status = "review"
         elif (
             current is None
-            and key in {"facts", "planning", "generation"}
+            and key in {"planning", "generation"}
             and state not in {"not_started", "queued", "waiting"}
         ):
             status = "unknown"
@@ -157,6 +161,8 @@ def flow_steps(saved, activity=None):
                     if omitted
                     else "原文仍有待分析内容"
                     if coverage_pending
+                    else "计划已就绪，等待生成与校验"
+                    if phase == "planned" and key == "planning" and not activity
                     else ""
                 ),
             )

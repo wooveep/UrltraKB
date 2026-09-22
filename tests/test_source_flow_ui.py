@@ -81,7 +81,6 @@ def test_stage_clicks_show_saved_content_and_do_not_submit_work(window, kb_dir, 
     for key, tab in [
         ("intake", 0),
         ("parsing", 1),
-        ("facts", 5),
         ("planning", 5),
         ("generation", panel.issue_tab),
         ("publication", 6),
@@ -89,10 +88,12 @@ def test_stage_clicks_show_saved_content_and_do_not_submit_work(window, kb_dir, 
         QTest.mouseClick(panel.flow.buttons[key], Qt.MouseButton.LeftButton)
         assert panel._selected_stage == key and panel.tabs.currentIndex() == tab
         assert panel.flow.buttons[key].isChecked()
-    panel.flow.buttons["facts"].click()
-    assert "37 kPa" in panel.record_text.toPlainText()
-    assert panel.tabs.tabText(5) == "事实与引文"
-    assert "37 kPa" in panel.record_evidence.toPlainText()
+    panel.flow.buttons["planning"].click()
+    assert "Notes" in panel.record_text.toPlainText()
+    assert panel.tabs.tabText(5) == "文档计划"
+    assert "文档计划" in panel.records.currentText()
+    assert "生成稿" not in panel.records.currentText()
+    assert "正式文档计划" in panel.record_evidence.toPlainText()
     assert panel.stage_buttons["continue"].isVisible()
     assert not panel.stage_buttons["reparse"].isVisible()
     assert not window.manager.requests and calls == before
@@ -169,6 +170,26 @@ def test_published_omissions_stay_visible_and_can_be_continued(window, kb_dir, s
     assert not window.io.errors
 
 
+def test_published_partial_coverage_can_be_continued_without_omissions(window, kb_dir, source_run):
+    from dataclasses import replace
+
+    from openkb.application.source_history import record_source_result
+
+    result, _, _ = source_run()
+    record_source_result(
+        kb_dir,
+        replace(result, omissions=(), coverage={**result.coverage, "status": "partial"}),
+    )
+    panel = SourceReview(window, kb_dir, result.source_id)
+    panel.show()
+
+    assert panel.stage_buttons["continue"].isEnabled()
+    assert {step.key: step for step in panel.flow._steps}["generation"].state == "review"
+    panel.stage_buttons["continue"].click()
+    assert window.manager.requests[0].source_id == result.source_id
+    assert not window.io.errors
+
+
 def test_late_artifact_response_cannot_replace_the_newly_selected_stage(window, kb_dir, source_run):
     result, _, _ = source_run()
     panel = SourceReview(window, kb_dir, result.source_id)
@@ -178,16 +199,17 @@ def test_late_artifact_response_cannot_replace_the_newly_selected_stage(window, 
         pending.append((callback, operation()))
 
     window.io.submit = defer
-    panel.show_stage("facts")
+    panel.issue_view.load = lambda: None
     panel.show_stage("planning")
+    panel.show_stage("generation")
     assert len(pending) == 2
     callback, value = pending[1]
     callback(value, None)
-    planned = panel.record_text.toPlainText()
-    assert "涵盖主题" in planned
+    generated = panel.record_text.toPlainText()
+    assert "Confirmed knowledge." in generated
     callback, value = pending[0]
     callback(value, None)
-    assert panel._selected_stage == "planning" and panel.record_text.toPlainText() == planned
+    assert panel._selected_stage == "generation" and panel.record_text.toPlainText() == generated
 
 
 def test_inventory_preserves_selection_after_refresh_and_resets_stage_for_another_source(

@@ -32,7 +32,7 @@ def test_navigation_summary_stays_a_hint_and_facts_still_read_originals(
         if payload["stage"] == "index_summary":
             for row in result["summaries"]:
                 row["summary"] = "The left field is the maximum."
-        elif payload["stage"] == "facts":
+        elif payload["stage"] == "planning":
             checked.append(payload)
         return result
 
@@ -43,7 +43,11 @@ def test_navigation_summary_stays_a_hint_and_facts_still_read_originals(
     navigation = source_status(kb_dir, result.source_id)["navigation"]
     assert navigation["status"] == "enhanced"
     assert any(node["summary"] == "The left field is the maximum." for node in navigation["nodes"])
-    assert any("left field is the minimum" in unit["text"] for p in checked for unit in p["units"])
+    assert any(
+        "left field is the minimum" in block["text"]
+        for request in checked
+        for block in request["evidence"]["blocks"]
+    )
     assert not any(
         json.loads(body["messages"][-1]["content"])["stage"] == "index_summary_verification"
         for body in model_service

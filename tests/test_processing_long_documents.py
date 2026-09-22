@@ -12,12 +12,20 @@ from openkb.processing import (
     RequestLimits,
 )
 
+TEST_PROCESSING = {
+    **DEFAULT_PROCESSING,
+    # These unit tests exercise deadline/request accounting, not provider
+    # discovery. Make their otherwise model-less shared envelope explicit.
+    "context_tokens": 32_768,
+    "max_context_tokens": 32_768,
+}
+
 
 def test_default_planning_keeps_working_after_thirty_minutes(monkeypatch):
     now = [0.0]
     monkeypatch.setattr("openkb.processing.time.monotonic", lambda: now[0])
     budget = ExecutionBudget(
-        RequestLimits.from_config({"processing": DEFAULT_PROCESSING}),
+        RequestLimits.from_config({"processing": TEST_PROCESSING}),
         started=0,
         stage_started=0,
         stage="planning",
@@ -31,7 +39,7 @@ def test_default_document_can_finish_more_than_two_hundred_requests_after_an_hou
     monkeypatch.setattr("openkb.processing.time.monotonic", lambda: 3700)
     monkeypatch.setattr("litellm.token_counter", lambda **kwargs: 1)
     budget = ExecutionBudget(
-        RequestLimits.from_config({"processing": DEFAULT_PROCESSING}),
+        RequestLimits.from_config({"processing": TEST_PROCESSING}),
         started=0,
         stage_started=0,
         stage="generation",
@@ -51,7 +59,7 @@ def test_default_document_can_finish_more_than_two_hundred_requests_after_an_hou
 @pytest.mark.parametrize("field", ["stage_timeout", "document_timeout"])
 def test_explicit_time_caps_remain_binding(field, monkeypatch):
     monkeypatch.setattr("openkb.processing.time.monotonic", lambda: 11)
-    limits = replace(RequestLimits.from_config({"processing": DEFAULT_PROCESSING}), **{field: 10})
+    limits = replace(RequestLimits.from_config({"processing": TEST_PROCESSING}), **{field: 10})
     budget = ExecutionBudget(limits, started=0, stage_started=0, stage="planning")
     with pytest.raises(ProcessingIncomplete, match="time_budget_exhausted"):
         budget.checkpoint()
@@ -62,7 +70,7 @@ def test_parent_supervisor_uses_the_same_optional_deadlines(monkeypatch):
 
     monkeypatch.setattr("openkb.runtime.tasks.time.monotonic", lambda: 3700)
     attempt = SimpleNamespace(
-        limits=RequestLimits.from_config({"processing": DEFAULT_PROCESSING}),
+        limits=RequestLimits.from_config({"processing": TEST_PROCESSING}),
         process=SimpleNamespace(is_alive=lambda: True),
         recovery=False,
         started=0,
@@ -82,7 +90,7 @@ def test_parent_supervisor_uses_the_same_optional_deadlines(monkeypatch):
 def test_secondary_requests_support_an_unlimited_cumulative_request_budget():
     from openkb.processing import external_request_usage, processing_scope
 
-    with processing_scope({"processing": DEFAULT_PROCESSING}) as budget:
+    with processing_scope({"processing": TEST_PROCESSING}) as budget:
         with external_request_usage(100) as receipt:
             receipt["usage"] = {"input": 1, "output": 1}
         assert budget.attempts == 1

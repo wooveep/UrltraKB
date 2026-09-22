@@ -12,11 +12,18 @@ from openkb.config import DEFAULT_CONFIG
 from openkb.processing import ProcessingIncomplete
 from tests.test_generation_scopes import payload
 
+TEST_PROCESSING = {
+    **DEFAULT_CONFIG["processing"],
+    "context_tokens": 32_768,
+    "max_context_tokens": 32_768,
+}
+
 
 def test_repaired_review_parser_preserves_the_recorded_rejection(kb_dir, monkeypatch):
     settings = {
         **DEFAULT_CONFIG,
         "model": "openai/test",
+        "processing": TEST_PROCESSING,
         "compilation_thinking": "disabled",
         "verification_adjudication_thinking": "enabled",
     }
@@ -74,6 +81,7 @@ def test_separate_issue_object_recovers_recorded_adjudication_without_reroll(kb_
     settings = {
         **DEFAULT_CONFIG,
         "model": "openai/test",
+        "processing": TEST_PROCESSING,
         "compilation_thinking": "disabled",
         "verification_adjudication_thinking": "enabled",
     }

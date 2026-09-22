@@ -10,28 +10,65 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, SecretStr
 
-from openkb.compilation_settings import CompilationSettings
+from openkb.compilation_settings import CompilationSettings, Effort, ReviewMode, Thinking
 from openkb.ocr.config import ParsingSettings
 from openkb.vision.config import VisionSettings
 
 
 def _processing_settings(value):
-    from dataclasses import asdict
+    """Check a processing shape before its effective model is available.
 
-    from openkb.processing import ProcessingIncomplete, RequestLimits
+    A settings patch is validated before it is merged with the selected model
+    and endpoint.  Capacity is therefore checked by the application writer
+    after that merge; doing it here would either validate against an invented
+    model or reject a valid independent input/output declaration.
+    """
+    from openkb.processing import RequestLimits
 
     fields = set(RequestLimits.__dataclass_fields__)
-    optional = {"max_context_tokens", "max_output_tokens", "timeout_retries"}
+    optional = {
+        "context_tokens",
+        "max_context_tokens",
+        "max_output_tokens",
+        "timeout_retries",
+        "input_tokens",
+        "max_input_tokens",
+        "shared_context",
+    }
     if not isinstance(value, dict) or not fields - optional <= set(value) <= fields:
         raise ValueError("Provide all processing budget fields and no unknown fields")
-    try:
-        validated = asdict(RequestLimits.from_config({"processing": value}))
-        return {key: validated[key] for key in value}
-    except ProcessingIncomplete:
-        raise ValueError(
-            "Request limits must be finite, positive and fit the model context; "
-            "aggregate caps may be null and timeout_retries may be zero"
-        ) from None
+    if any(
+        isinstance(item, bool)
+        for key, item in value.items()
+        if key != "shared_context" and item is not None
+    ):
+        raise ValueError("Processing budget values must not use boolean values")
+    integer_fields = {
+        "context_tokens",
+        "output_tokens",
+        "max_context_tokens",
+        "max_output_tokens",
+        "timeout_retries",
+        "input_tokens",
+        "max_input_tokens",
+        "max_attempts",
+        "max_requests",
+        "max_tokens",
+        "concurrency",
+    }
+    if (
+        any(
+            key in value and value[key] is not None and type(value[key]) is not int
+            for key in integer_fields
+        )
+        or any(
+            key in value and value[key] is not None and not isinstance(value[key], (int, float))
+            for key in ("request_timeout", "stage_timeout", "document_timeout", "cleanup_timeout")
+        )
+        or ("shared_context" in value and type(value["shared_context"]) is not bool)
+    ):
+        raise ValueError("Processing budget fields have invalid types")
+    return dict(value)
 
 
 ProcessingSettings = Annotated[dict[str, Any], BeforeValidator(_processing_settings)]
@@ -45,7 +82,7 @@ class NavigationSettings(BaseModel):
     processing: ProcessingSettings | None = None
 
 
-class _KbConfigWritable(CompilationSettings):
+class _KbConfigWritable(BaseModel):
     """Typed schema for the writable ``config.yaml`` fields.
 
     All fields are optional so a partial merge-patch validates. Used to reject
@@ -55,6 +92,17 @@ class _KbConfigWritable(CompilationSettings):
     ``read_kb_config``/``KbConfigResponse`` read back.
     """
 
+    review_mode: ReviewMode | None = None
+    compilation_thinking: Thinking | None = None
+    planning_thinking: Thinking | None = None
+    verification_thinking: Thinking | None = None
+    verification_adjudication_thinking: Thinking | None = None
+    correction_thinking: Thinking | None = None
+    compilation_reasoning_effort: Effort | None = None
+    planning_reasoning_effort: Effort | None = None
+    verification_reasoning_effort: Effort | None = None
+    verification_adjudication_reasoning_effort: Effort | None = None
+    correction_reasoning_effort: Effort | None = None
     model: str | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
@@ -73,17 +121,11 @@ class _KbConfigWritable(CompilationSettings):
 _KB_CONFIG_WRITABLE_KEYS = set(_KbConfigWritable.model_fields)
 
 
-class GlobalConfigValues(CompilationSettings):
+class GlobalConfigValues(_KbConfigWritable):
     """Raw global-layer values (null where global.yaml is silent)."""
 
-    model: str | None = None
-    language: str | None = None
-    pageindex_threshold: int | None = None
-    entity_types: list[str] | None = None
-    parsing: ParsingSettings | None = None
-    image_understanding: VisionSettings | None = None
-    processing: ProcessingSettings | None = None
-    navigation: NavigationSettings | None = None
+    # Unlike effective settings, every field stays nullable so the settings UI
+    # can distinguish a silent global layer from an explicit default.
 
 
 class GlobalConfigResponse(CompilationSettings):

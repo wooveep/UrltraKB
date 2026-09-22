@@ -11,9 +11,9 @@ _PHASES = {
     "text": "文本解析",
     "image_ocr": "图片 OCR",
     "cloud_ocr": "等待云端 OCR",
-    "facts": "提取知识",
-    "planning": "规划知识主题",
-    "planning_coordination": "归并主题规划",
+    "facts": "旧版知识提取",
+    "planning": "规划文档与知识页面",
+    "planning_coordination": "归并文档规划",
     "generation": "生成知识页面",
     "parse_cache": "校验已保存解析",
     "answer_review": "核对回答原文与引用",
@@ -52,7 +52,7 @@ def progress_presentation(task):
                 f"{name}：{step.percent}%（{step.completed}/{step.total} {_UNITS[step.unit]}）"
             )
     if task.progress and task.progress[-1].phase == "planning_coordination":
-        return None, _STATES.get(task.state, "归并主题规划"), "\n".join(details)
+        return None, _STATES.get(task.state, "归并文档规划"), "\n".join(details)
     measured = next((step for step in task.progress if step.total is not None), None)
     if measured is not None:
         text = (

@@ -1,9 +1,7 @@
 """Concise contributions retain safe source references without hiding required facts."""
 
 import json
-import re
 from collections import Counter
-from urllib.parse import unquote
 
 import pytest
 
@@ -11,13 +9,12 @@ from openkb.agent.evidence_generation_protocol import normalize_output
 from openkb.agent.evidence_retry import ResponseIncomplete
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
-from tests.http_model_fixture import evidence_response
 from tests.test_generation_scopes import payload, response
 
 
-@pytest.mark.parametrize("pending_review", [False, True])
-def test_secondary_detail_stays_linked_and_is_reused_without_new_model_calls(
-    kb_dir, tmp_path, model_service, pending_review
+@pytest.mark.parametrize("advisory", [False, True])
+def test_source_only_detail_is_explicit_and_reused_without_new_model_calls(
+    kb_dir, tmp_path, model_service, advisory
 ):
     source = tmp_path / "brief.md"
     core = "Use port 9342 only on version 2."
@@ -28,54 +25,63 @@ def test_secondary_detail_stays_linked_and_is_reused_without_new_model_calls(
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         calls[request["stage"]] += 1
-        result = evidence_response(request)
+        if request["stage"] == "planning":
+            blocks = request["evidence"]["blocks"]
+            target = request["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            return {
+                "overview": {"text": "Port usage overview.", "ranges": ranges, "limitations": []},
+                "page_changes": [
+                    {
+                        "local_key": "port",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/port-usage",
+                        "title": "Port Usage",
+                        "purpose": "Port configuration requirement",
+                        "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
+                        "necessary_context": [],
+                    }
+                ],
+                "source_only": [
+                    {
+                        "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                        "reason": "UI label is source-only example metadata.",
+                    }
+                ],
+                "unresolved": [],
+                "resolutions": [],
+            }
         if request["stage"] == "generation":
-            assert "source_details" in request["output_contract"]
-            result.update(content=core, source_details=["e2"])
-        elif request["stage"] == "verification":
-            assert request["source_details"] == ["e2"]
-            assert detail in request["evidence"][1]["text"]
-            assert detail not in request["content"]
-            if pending_review:
-                result.update(
-                    verdict="advisory",
-                    advisories=[
-                        {
-                            "kind": "uncertainty",
-                            "candidate": "",
-                            "occurrences": ["e2"],
-                            "reason": "The optional label may require a later source review.",
-                        }
-                    ],
-                )
-        return result
+            assert detail not in "\n".join(row["text"] for row in request["evidence"]["blocks"])
+            return {
+                "content": core,
+                "covered": [row["id"] for row in request["occurrences"]],
+            }
+        assert request["stage"] == "verification"
+        assert detail not in "\n".join(row["text"] for row in request["evidence"]["blocks"])
+        assert detail not in request["candidate"]["content"]
+        return {
+            "verdict": "advisory" if advisory else "supported",
+            "reason": "The retained port guidance matches the supplied evidence.",
+        }
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert not result.omissions
-    assert bool(result.warnings) == pending_review
-    assert result.coverage["status"] == ("partial" if pending_review else "complete")
+    assert not result.warnings
+    assert result.coverage["status"] == "complete"
     assert [row["status"] for row in result.coverage["ranges"]] == [
         "verified",
-        "pending" if pending_review else "referenced",
+        "no_facts",
     ]
-    assert result.coverage["ranges"][1]["reason"] == (
-        "knowledge_review_pending" if pending_review else "secondary_details_in_source"
-    )
+    assert result.coverage["ranges"][1]["reason"] == "UI label is source-only example metadata."
     page = next((kb_dir / "wiki/concepts").glob("*.md"))
     text = page.read_text()
     assert core in text and detail not in text
-    link = re.search(r"\]\((\.\./sources/[^)]+\.md)\)", text)
-    assert link
-    assert detail in (page.parent / unquote(link[1])).read_text()
     assert calls["generation"] == calls["verification"] == 1
-    from openkb.application.source_artifacts import compilation_artifacts
-
-    previews = compilation_artifacts(
-        kb_dir, result.source_id, result.input_version, result.parse_id, "generation"
-    )["records"]
-    assert previews and all("次要细节保留在原文" in item["text"] for item in previews)
     before = calls.copy()
     duplicate = import_document(kb_dir, source)
     assert duplicate.status == "skipped"
@@ -98,13 +104,53 @@ def test_required_condition_cannot_be_waived_by_source_detail_selection(
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         stages[stage] += 1
-        result = evidence_response(request)
+        if stage == "planning":
+            blocks = request["evidence"]["blocks"]
+            target = request["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            return {
+                "overview": {
+                    "text": "Port requirement overview.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "port",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/port-configuration",
+                        "title": "Port Configuration",
+                        "purpose": "Restricted port configuration",
+                        "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                                "basis": blocks[1]["text"],
+                                "basis_ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                            }
+                        ],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         if stage == "generation":
             if "revision" not in request:
-                result.update(content="Use port 9342.", source_details=["e2"])
+                content = "Use port 9342."
             else:
-                result.update(content="Use port 9342 only on version 2.", source_details=[])
-        elif stage == "verification" and request.get("source_details"):
+                content = "Use port 9342 only on version 2."
+            return {
+                "content": content,
+                "covered": [row["id"] for row in request["occurrences"]],
+            }
+        if stage == "verification" and "only on version 2" not in request["candidate"]["content"]:
+            assert "This is available only on version 2." in "\n".join(
+                row["text"] for row in request["evidence"]["blocks"]
+            )
             return {
                 "verdict": "unsupported",
                 "reason": "The version condition is required for the retained instruction.",
@@ -117,13 +163,13 @@ def test_required_condition_cannot_be_waived_by_source_detail_selection(
                     }
                 ],
             }
-        return result
+        return {"verdict": "supported", "reason": "The corrected condition is retained."}
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert stages["generation"] == stages["verification"] == 2
-    assert all(row["status"] == "verified" for row in result.coverage["ranges"])
+    assert [row["status"] for row in result.coverage["ranges"]] == ["verified", "referenced"]
     text = next((kb_dir / "wiki/concepts").glob("*.md")).read_text()
     assert "only on version 2" in text
     assert "Details in source" not in text

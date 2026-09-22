@@ -33,7 +33,7 @@ def _references(value):
             yield from _references(item)
 
 
-def test_import_binds_withdrawn_mixed_topic_to_its_original_global_prerequisite(
+def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
     kb_dir, tmp_path, model_service
 ):
     source = tmp_path / "recovery.md"
@@ -43,139 +43,135 @@ def test_import_binds_withdrawn_mixed_topic_to_its_original_global_prerequisite(
         "# Compute recovery\n\n" + JOIN + "\n\n"
         "# Metrics\n\nMetrics listens on port 9342."
     )
-    dependency_inputs = []
+    compute_evidence = []
 
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         value = evidence_response(request)
-        if stage == "facts":
-            for unit, row in zip(request["units"], value["units"], strict=True):
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-                else:
-                    row["facts"] = [
-                        {
-                            "topic": unit["headings"][-1],
-                            "statement": unit["text"],
-                            "quote": unit["text"],
-                        }
-                    ]
-        elif stage == "planning":
-            ids = {title: uid for uid, title in request["topic_labels"].items()}
-            value = {
-                "topics": [
-                    {
-                        "name": "management-recovery",
-                        "title": "Management recovery",
-                        "kind": "concept",
-                        "members": [ids["Preparation"], ids["Management recovery"]],
-                    },
-                    {
-                        "name": "compute-recovery",
-                        "title": "Compute recovery",
-                        "kind": "concept",
-                        "members": [ids["Compute recovery"]],
-                    },
-                    {
-                        "name": "metrics",
-                        "title": "Metrics",
-                        "kind": "concept",
-                        "members": [ids["Metrics"]],
-                    },
+        if stage == "planning":
+            blocks = request["evidence"]["blocks"]
+
+            def ranges(heading, body):
+                return [
+                    [row["order"], row["order"] + 1]
+                    for row in blocks
+                    if row["text"].lstrip("# ").strip() == heading or row["text"] == body
                 ]
+
+            def basis(selected):
+                return "\n".join(
+                    next(row["text"] for row in blocks if row["order"] == index)
+                    for start, end in selected
+                    for index in range(start, end)
+                )
+
+            preparation = ranges("Preparation", PREPARATION)
+            management = ranges("Management recovery", "Restore the management database.")
+            compute = ranges("Compute recovery", JOIN)
+            metrics = ranges("Metrics", "Metrics listens on port 9342.")
+            target = request["target"]
+            return {
+                "overview": {
+                    "text": "Recovery procedures and prerequisites.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "management",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/management-recovery",
+                        "title": "Management recovery",
+                        "purpose": "Restore the management database safely.",
+                        "subject_ranges": management,
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": preparation,
+                                "basis": basis(preparation),
+                                "basis_ranges": preparation,
+                            }
+                        ],
+                    },
+                    {
+                        "local_key": "compute",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/compute-recovery",
+                        "title": "Compute recovery",
+                        "purpose": "Join the replacement compute node safely.",
+                        "subject_ranges": compute,
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": preparation,
+                                "basis": basis(preparation),
+                                "basis_ranges": preparation,
+                            }
+                        ],
+                    },
+                    {
+                        "local_key": "metrics",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/metrics",
+                        "title": "Metrics",
+                        "purpose": "Metrics listener configuration.",
+                        "subject_ranges": metrics,
+                        "necessary_context": [],
+                    },
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
         elif stage == "generation":
-            title = request.get("title") or request["revision"]["title"]
+            title = request["page"]["title"]
             content = {
                 "Management recovery": "Incorrect management recovery.",
-                "Compute recovery": JOIN,
+                "Compute recovery": PREPARATION + "\n\n" + JOIN,
                 "Metrics": "Metrics listens on port 9342.",
             }[title]
-            if "fragments" in value:
-                for fragment in value["fragments"]:
-                    fragment["content"] = content
-            else:
-                value["content"] = content
-        elif stage == "verification" and request["title"] == "Management recovery":
-            value = {
+            if title == "Compute recovery":
+                compute_evidence.append(
+                    "\n".join(row["text"] for row in request["evidence"]["blocks"])
+                )
+            return {
+                "content": content,
+                "covered": [row["id"] for row in request["occurrences"]],
+            }
+        if stage == "verification" and request["page"]["title"] == "Management recovery":
+            return {
                 "verdict": "unsupported",
                 "reason": "The candidate contradicts the original management procedure.",
-                "issues": [
-                    {
-                        "kind": "claim",
-                        "candidate": "Incorrect management recovery.",
-                        "occurrences": [request["occurrences"][0]["id"]],
-                        "reason": "The original requires restoring the database.",
-                    }
-                ],
+                "issues": ["The original requires restoring the database."],
             }
-        elif stage == "dependencies":
-            expanded = _expanded(request, request.get("context_pool", {}))
-            missing = next(
-                (
-                    row
-                    for row in expanded["omissions"]
-                    if "concepts/management-recovery" in row.get("items", [])
-                ),
-                None,
-            )
-            paths = {row["path"] for row in expanded["candidates"]}
-            located = False
-            if missing is not None and "concepts/compute-recovery" in paths:
-                dependency_inputs.append(expanded)
-                originals = [row for row in expanded["source"] if row["text"] == PREPARATION]
-                refs = list(_references(missing))
-                located = any(
-                    ref == original["reference"] for ref in refs for original in originals
-                )
-            value = {
-                "topics": [
-                    {
-                        "path": path,
-                        "status": "dependent"
-                        if path == "concepts/compute-recovery" and located
-                        else "independent",
-                        "reason": "Compute rejoin depends on the withdrawn preparation; "
-                        "the unrelated metric does not.",
-                    }
-                    for path in paths
-                ]
-            }
+        if stage == "verification" and request["page"]["title"] == "Compute recovery":
+            compute_evidence.append("\n".join(row["text"] for row in request["evidence"]["blocks"]))
         return value
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert dependency_inputs, "The withdrawn topic must be reviewed against compute rejoin."
-    for request in dependency_inputs:
-        missing = next(
-            row
-            for row in request["omissions"]
-            if "concepts/management-recovery" in row.get("items", [])
-        )
-        original = next(row for row in request["source"] if row["text"] == PREPARATION)
-        assert original["location"] == {
-            "kind": "text",
-            "line": 3,
-            "line_end": 3,
-            "headings": ["Preparation"],
-        }
-        assert original["reference"] in list(_references(missing)), (
-            "An omitted topic name is insufficient: its original global prerequisite "
-            "must be bound to the same source/version/parse/block in the dependency request."
-        )
+    assert compute_evidence and all(PREPARATION in evidence for evidence in compute_evidence)
     assert not (kb_dir / "wiki/concepts/management-recovery.md").exists()
-    assert not (kb_dir / "wiki/concepts/compute-recovery.md").exists()
+    assert (kb_dir / "wiki/concepts/compute-recovery.md").exists()
     assert (kb_dir / "wiki/concepts/metrics.md").exists()
     previous = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
     assert len(model_service) == previous
-    assert not (kb_dir / "wiki/concepts/compute-recovery.md").exists()
+    assert (kb_dir / "wiki/concepts/compute-recovery.md").exists()
 
 
-def test_import_checks_required_omission_reference_capacity_before_generation(
+def test_unresolved_prerequisites_block_only_recovery_before_generation(
     kb_dir, tmp_path, model_service
 ):
     source = tmp_path / "many-prerequisites.md"
@@ -197,31 +193,94 @@ def test_import_checks_required_omission_reference_capacity_before_generation(
         document_timeout=180,
     )
     config_path.write_text(yaml.safe_dump(settings))
-    stages, events = [], []
+    stages = []
 
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         stages.append(request["stage"])
         value = evidence_response(request)
-        if request["stage"] == "facts":
-            rows = []
-            for unit, row in zip(request["units"], value["units"], strict=True):
-                if "Missing preparation" in unit["text"]:
-                    continue
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-                rows.append(row)
-            value = {"units": rows}
+        if request["stage"] == "planning":
+            blocks = request["evidence"]["blocks"]
+            recovery = [row for row in blocks if "Metrics listens" not in row["text"]]
+            metrics = [row for row in blocks if "Metrics listens" in row["text"]]
+            target = request["target"]
+            registered = {
+                item["name"]: item
+                for item in request["carry"]["page_register"]
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+            }
+
+            def page(name, title, purpose, ranges):
+                prior = registered.get(name)
+                return {
+                    "local_key": name.rsplit("/", 1)[-1],
+                    "target_key": prior["key"] if prior else "",
+                    "target": prior.get("target", "") if prior else "",
+                    "kind": "concept",
+                    "name": name,
+                    "title": title,
+                    "purpose": purpose,
+                    "subject_ranges": ranges,
+                    "necessary_context": [],
+                }
+
+            output = {
+                "overview": {
+                    "text": "Recovery prerequisites and metrics configuration.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": ["Recovery prerequisites remain unresolved."],
+                },
+                "page_changes": [],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
+            if recovery:
+                recovery_ranges = [[recovery[0]["order"], recovery[-1]["order"] + 1]]
+                output["page_changes"].append(
+                    page(
+                        "concepts/recovery",
+                        "Recovery",
+                        "Perform recovery only after all prerequisites are known.",
+                        recovery_ranges,
+                    )
+                )
+                output["unresolved"].append(
+                    {
+                        "location": recovery_ranges,
+                        "problem_type": "missing_prerequisite",
+                        "missing_target": "complete recovery prerequisite material",
+                        "affected_pages": ["recovery"],
+                        "blocking": True,
+                        "reason": "Recovery prerequisites exceed the available source material.",
+                    }
+                )
+            if metrics:
+                output["page_changes"].append(
+                    page(
+                        "concepts/metrics",
+                        "Metrics",
+                        "Metrics listener configuration.",
+                        [[metrics[0]["order"], metrics[0]["order"] + 1]],
+                    )
+                )
+            return output
+        if request["stage"] == "generation":
+            return {
+                "content": "Metrics listens on port 9342.",
+                "covered": [row["id"] for row in request["occurrences"]],
+            }
         return value
 
     model_service.respond = respond
-    result = import_document(kb_dir, source, on_event=events.append)
+    result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert "planning" in stages
-    assert any(event.get("operation") == "capacity_preflight" for event in events), events
-    assert "generation" not in stages
-    assert "verification" not in stages
+    assert "generation" in stages
+    assert "verification" in stages
     assert "dependencies" not in stages
-    assert any(
-        row.get("reason") == "dependency_context_exceeds_request_budget" for row in result.omissions
-    )
+    assert result.coverage["status"] == "partial"
+    assert (kb_dir / "wiki/concepts/metrics.md").exists()
+    assert any(row.get("reason") == "unresolved_prerequisite_blocked" for row in result.omissions)

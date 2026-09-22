@@ -201,9 +201,10 @@ def test_adjudication_setting_reuses_generation_and_unchanged_supported_review(
     config_path.write_text(yaml.safe_dump(config))
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed"
-    assert len(model_service) == count
-    # No rejected draft needs adjudication. The unchanged body and ordinary
-    # supported review are validated from their independent records.
+    resumed = model_service[count:]
+    assert resumed == []
+    # The private candidate and its supported ordinary review are already
+    # durable. Adjudication settings matter only after an ordinary rejection.
 
 
 @pytest.mark.parametrize("key", ["verification_adjudication_thinking", "correction_thinking"])
@@ -213,6 +214,14 @@ def test_invalid_adjudication_mode_is_rejected_at_config_boundary(mode, key):
 
     with pytest.raises(ValueError, match=key):
         validate_runtime_config({**DEFAULT_CONFIG, key: mode})
+
+
+@pytest.mark.parametrize("mode", [None, "advisory", True, 1])
+def test_invalid_document_review_mode_is_rejected_at_config_boundary(mode):
+    from openkb.config import DEFAULT_CONFIG, validate_runtime_config
+
+    with pytest.raises(ValueError, match="review_mode"):
+        validate_runtime_config({**DEFAULT_CONFIG, "review_mode": mode})
 
 
 @pytest.mark.parametrize("final_verdict", ["supported", "unsupported"])

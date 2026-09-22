@@ -14,7 +14,7 @@ from openkb.config import resolve_effective_config
 from openkb.evidence import Evidence, EvidenceSlice, ParseStore
 from openkb.knowledge_commit import accept_proposal, load_proposal, publish_proposal
 from openkb.locks import kb_ingest_lock, kb_read_lock
-from openkb.processing import processing_scope
+from openkb.processing import ProcessingIncomplete, processing_scope
 from openkb.sources import SourceStore, content_id
 
 
@@ -183,13 +183,29 @@ def continue_source(
                 raise ValueError("Proposal does not belong to the selected source version")
             from openkb.agent.evidence_checkpoints import publication_settings
 
-            config_id = content_id(publication_settings(settings, bundle))
+            bound_settings = publication_settings(settings, bundle)
+            config_id = content_id(bound_settings)
             parsed = ParseStore(kb_dir).load(proposal.parse_id)
             if accept_pages is not None:
                 accept_proposal(kb_dir, proposal.id, accept_pages, config_id=config_id)
             with collect_compile_report() as report, processing_scope(settings):
                 publication = publish_proposal(kb_dir, proposal.id, config_id=config_id)
             complete = publication.status == "completed"
+            receipt_pending = False
+            if complete:
+                from openkb.agent.document_publication import repair_document_publication
+
+                try:
+                    repair_document_publication(
+                        kb_dir,
+                        source,
+                        parsed,
+                        bound_settings,
+                        bundle=bundle,
+                        proposal_id=proposal.id,
+                    )
+                except ProcessingIncomplete:
+                    complete, receipt_pending = False, True
             from openkb.compilation_omissions import stored_omissions
 
             omissions = stored_omissions(proposal.document)
@@ -207,7 +223,13 @@ def continue_source(
                 source_intake="saved",
                 knowledge_compilation="completed" if complete else "unfinished",
                 stage="committed" if complete else "committing",
-                reason=None if complete else publication.status,
+                reason=None
+                if complete
+                else (
+                    "document_publication_receipt_pending"
+                    if receipt_pending
+                    else publication.status
+                ),
                 resume=(
                     source.id
                     if omissions or coverage.get("status") in {"partial", "pending"}

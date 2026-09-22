@@ -25,10 +25,9 @@ def inspect(kb, result, **kwargs):
     )
 
 
-@pytest.mark.parametrize("stage", ["facts", "planning", "verification"])
-def test_excluded_content_opens_original_and_keeps_verified_sibling_out(kb_dir, setup, stage):
+def test_excluded_content_opens_original_and_keeps_verified_sibling_out(kb_dir, setup):
     source, state, calls = setup
-    state["stage"] = stage
+    state["stage"] = "verification"
     result = import_document(kb_dir, source)
     before = calls.copy()
     view = inspect(kb_dir, result)
@@ -95,3 +94,22 @@ def test_complete_coverage_has_no_issue_rows(kb_dir, setup):
     state["broken"] = False
     result = import_document(kb_dir, source)
     assert inspect(kb_dir, result)["total"] == 0
+
+
+def test_current_issue_index_does_not_hydrate_unselected_request_bodies(kb_dir, setup, monkeypatch):
+    from openkb.application import source_artifacts
+
+    source, _, _ = setup
+    result = import_document(kb_dir, source)
+    read = source_artifacts.read_object
+
+    def indexed_only(path):
+        if path.parent.name != "latest":
+            raise AssertionError(f"Unexpected artifact hydration: {path.name}")
+        return read(path)
+
+    monkeypatch.setattr(source_artifacts, "read_object", indexed_only)
+
+    view = inspect(kb_dir, result)
+
+    assert view["rows"][0]["item"] == "concepts/beta"

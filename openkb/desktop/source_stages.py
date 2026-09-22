@@ -81,7 +81,7 @@ class SourceStages:
         self.record_split.addWidget(self.record_text)
         self.record_evidence = QPlainTextEdit()
         self.record_evidence.setReadOnly(True)
-        self.record_evidence.setAccessibleName("关联事实与原文引文")
+        self.record_evidence.setAccessibleName("关联计划记录与原文证据")
         self.record_split.addWidget(self.record_evidence)
         layout.addWidget(self.record_split, 1)
         self.record_empty_space = QWidget()
@@ -134,7 +134,6 @@ class SourceStages:
         allowed = {
             "intake": {"export"},
             "parsing": {"export", "ocr", "reparse", "continue"},
-            "facts": {"continue"},
             "planning": {"continue"},
             "generation": {"continue"},
             "publication": {"continue", "navigation"},
@@ -148,6 +147,7 @@ class SourceStages:
                 available &= (
                     result.get("knowledge_compilation") != "completed"
                     or bool(result.get("omissions"))
+                    or (result.get("coverage") or {}).get("status") in {"pending", "partial"}
                 ) and result.get("reason") != "needs_acceptance"
             if key == "navigation":
                 available &= bool(result.get("parse_id"))
@@ -164,7 +164,6 @@ class SourceStages:
         visible = {
             "intake": (0,),
             "parsing": (1, 2),
-            "facts": (5,),
             "planning": (5,),
             "generation": (self.issue_tab, 5),
             "publication": (6, 3, 4, 0),
@@ -179,12 +178,10 @@ class SourceStages:
             )
         ):
             visible = (5, self.issue_tab)
-        if key in {"facts", "planning", "generation"}:
+        if key in {"planning", "generation"}:
             self.tabs.setTabText(
                 5,
-                {"facts": "事实与引文", "planning": "主题与对应事实", "generation": "生成稿与校验"}[
-                    key
-                ],
+                {"planning": "文档计划", "generation": "生成稿与校验"}[key],
             )
             self.record_evidence.setVisible(key != "generation")
         if key == "parsing" and ((self._saved or {}).get("source") or {}).get("suffix") != ".pdf":
@@ -201,7 +198,7 @@ class SourceStages:
             return
         if key == "parsing":
             self.load_parse(0)
-        elif key in {"facts", "planning", "generation"}:
+        elif key in {"planning", "generation"}:
             self.load_artifacts(0)
             if key == "generation":
                 self.issue_view.load()
@@ -252,8 +249,21 @@ class SourceStages:
                 widget.setVisible(bool(value["total"]))
             self.record_empty_space.setVisible(not value["total"])
             for index, record in enumerate(value["records"], offset + 1):
+                stage = record.get("stage")
+                label = {
+                    "planning": "文档计划",
+                    "verification": "校验记录",
+                    "generation": "生成稿",
+                }.get(stage, "阶段记录")
+                status = (
+                    "计划进度已保存"
+                    if stage == "planning"
+                    else "待校验草稿"
+                    if record["draft"]
+                    else "已保存结果"
+                )
                 self.records.addItem(
-                    f"第 {index} 组 · {'待校验草稿' if record['draft'] else '已保存结果'}",
+                    f"第 {index} 组 · {label} · {status}",
                     record,
                 )
             self.record_previous.setEnabled(offset > 0)
@@ -275,9 +285,9 @@ class SourceStages:
             )
             self.record_evidence.setPlainText(
                 (
-                    "已保存的相关事实与引文（含历史处理轮次）：\n\n"
+                    "已保存的文档计划直接绑定原始证据范围：\n\n"
                     if self._selected_stage == "planning"
-                    else "本组事实的原文引文：\n\n"
+                    else ""
                 )
                 + record.get("evidence", "")
             )

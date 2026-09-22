@@ -25,7 +25,7 @@ class ValueForm(QWidget):
         form = QFormLayout(self)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setSpacing(12)
-        for key, label, kind in definitions:
+        for key, label, kind, *_optional in definitions:
             entry = QLineEdit()
             entry.setAccessibleName(label)
             self.inputs[key] = entry
@@ -37,8 +37,10 @@ class ValueForm(QWidget):
 
     def value(self):
         values = {}
-        for key, label, kind in self.definitions:
+        for key, label, kind, *optional in self.definitions:
             text = self.inputs[key].text().strip()
+            if not text and optional and optional[0]:
+                continue
             try:
                 values[key] = kind(text)
             except (ValueError, TypeError):
@@ -82,12 +84,26 @@ class ProcessingField(SettingsSection):
             "通常保持默认即可。仅在模型有容量限制，或需要控制耗时与用量时调整。"
             "标注「0 不限」的项目可填 0。"
         )
+        self._model_context = {"model": "gpt-5.4", "_model_endpoint": None}
+        capacity = QWidget()
+        capacity_form = QFormLayout(capacity)
+        capacity_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        capacity_form.setSpacing(12)
+        self.capacity_mode = FocusComboBox()
+        self.capacity_mode.addItem("自动读取所选模型 / 端点", "auto")
+        self.capacity_mode.addItem("共享上下文窗口", "shared")
+        self.capacity_mode.addItem("独立输入 / 输出窗口", "independent")
+        self.capacity_mode.setAccessibleName("模型容量契约")
+        capacity_form.addRow("模型容量契约", self.capacity_mode)
+        self.body.addWidget(capacity)
         self.values = ValueForm(
             [
-                ("context_tokens", "初始上下文（token）", int),
+                ("context_tokens", "共享上下文起始值（token）", int, True),
                 ("output_tokens", "初始输出（token）", int),
-                ("max_context_tokens", "模型最大上下文（token）", int),
-                ("max_output_tokens", "模型最大输出（token）", int),
+                ("max_context_tokens", "共享上下文上限（token）", int, True),
+                ("input_tokens", "独立输入起始值（token）", int, True),
+                ("max_input_tokens", "独立输入上限（token）", int, True),
+                ("max_output_tokens", "模型最大输出（token）", int, True),
                 ("request_timeout", "模型无内容等待时限（秒）", float),
                 ("timeout_retries", "编译超时额外重试次数（0 关闭）", int),
                 ("stage_timeout", "阶段总时限（秒，0 不限）", lambda text: float(text) or None),
@@ -101,17 +117,32 @@ class ProcessingField(SettingsSection):
         )
         self.body.addWidget(self.values)
         self.body.addStretch()
+        self.capacity_mode.currentIndexChanged.connect(self.changed)
         for entry in self.values.inputs.values():
             entry.textEdited.connect(self.changed)
+
+    def set_model_context(self, model, endpoint):
+        """Use the model and endpoint currently selected in the parent settings form."""
+
+        self._model_context = {
+            "model": model if isinstance(model, str) and model else "gpt-5.4",
+            "_model_endpoint": endpoint if isinstance(endpoint, str) and endpoint else None,
+        }
 
     def load(self, value, source):
         values = dict(value or {})
         values.setdefault("timeout_retries", 5)
-        for key in ("context_tokens", "output_tokens"):
-            values.setdefault("max_" + key, values.get(key, ""))
         for key in ("stage_timeout", "document_timeout", "max_requests", "max_tokens"):
             if values.get(key) is None:
                 values[key] = 0
+        mode = (
+            "independent"
+            if {"input_tokens", "max_input_tokens", "shared_context"} & set(values)
+            else "shared"
+            if {"context_tokens", "max_context_tokens"} & set(values)
+            else "auto"
+        )
+        self.capacity_mode.setCurrentIndex(self.capacity_mode.findData(mode))
         self.values.load(values)
         self.loaded(value, source)
 
@@ -119,11 +150,33 @@ class ProcessingField(SettingsSection):
         if self.action.currentIndex() == 2:
             return None
         result = self.values.value()
+        mode = self.capacity_mode.currentData()
+        capacity_fields = {
+            "context_tokens",
+            "max_context_tokens",
+            "input_tokens",
+            "max_input_tokens",
+        }
+        if mode == "auto":
+            if capacity_fields & set(result):
+                raise ValueError("填写容量数值后，请选择共享或独立输入 / 输出容量契约")
+        elif mode == "shared":
+            result.pop("input_tokens", None)
+            result.pop("max_input_tokens", None)
+            result.pop("shared_context", None)
+        elif mode == "independent":
+            result.pop("context_tokens", None)
+            result.pop("max_context_tokens", None)
+            result["shared_context"] = False
+        else:
+            raise ValueError("请选择有效的模型容量契约")
         try:
-            RequestLimits.from_config({"processing": result})
+            RequestLimits.from_config({**self._model_context, "processing": result})
         except ProcessingIncomplete:
             raise ValueError(
-                "初始值不得超过模型最大值，输出须小于上下文；"
+                "容量须匹配所选模型与端点；未知模型需声明共享上下文，"
+                "或独立输入 / 输出容量。"
+                "初始值不得超过上限；"
                 "超时重试次数、阶段/资料总时限、累计请求和 token 可填 0，其余须为正数。"
             ) from None
         return result
@@ -157,6 +210,9 @@ class NavigationField(SettingsSection):
         self.summaries.setChecked(value.summaries)
         self.budget.load(value.processing, source)
         self.loaded(value, source)
+
+    def set_model_context(self, model, endpoint):
+        self.budget.set_model_context(model, endpoint)
 
     def value(self):
         if self.action.currentIndex() == 2:

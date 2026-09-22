@@ -43,7 +43,7 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
     assert [event["stage"] for event in events][-2:] == ["committing", "committed"]
-    assert {"parsing", "facts", "planning", "generation"} <= {event["stage"] for event in events}
+    assert {"parsing", "planning", "generation"} <= {event["stage"] for event in events}
 
 
 def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monkeypatch):
@@ -86,7 +86,7 @@ def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monke
     context = ExecutionContext()
     result = import_document(kb_dir, source, context=context)
     assert result.status == "added"
-    assert len(calls) == 4
+    assert len(calls) == 3
     assert all(call["model"] == "openai/initial" for call in calls)
     assert all(call["api_key"] == "initial-private-key" for call in calls)
     assert all(call["extra_headers"]["X-Profile"] == "initial" for call in calls)
@@ -142,7 +142,9 @@ def test_import_freezes_relative_images_at_the_business_boundary(
     store = SourceStore(kb_dir)
     saved = store.version(result.input_version)
     assert store.original(saved).read_bytes() == original
-    assert store.asset(saved.assets["图.png"]).read_bytes() == b"original image"
+    frozen_images = [asset for asset in saved.assets.values() if asset is not None]
+    assert len(frozen_images) == 1
+    assert store.asset(frozen_images[0]).read_bytes() == b"original image"
     assert saved.assets["later.png"] is None
     assert not list((kb_dir / "wiki/summaries").glob("*.md"))
 

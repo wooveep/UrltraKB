@@ -281,7 +281,7 @@ def test_legacy_expanded_attachment_text_never_enters_parent_model_input(
     assert "Parent instructions" in str(model_service)
     assert result.coverage["status"] == ("partial" if parent_gap else "complete")
     if parent_gap:
-        assert "dependencies" in str(model_service)
+        assert "docx_unreadable_parent_object" in str(model_service)
     assert all(
         row["status"] == "stored" and row["reason"] == "attachment_stored_only"
         for row in result.coverage["ranges"]

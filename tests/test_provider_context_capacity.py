@@ -9,6 +9,7 @@ import litellm
 import pytest
 import yaml
 
+from openkb.agent.document_windowing import bounded_windows
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
 from openkb.config import DEFAULT_CONFIG
@@ -75,6 +76,44 @@ def test_capacity_refusal_keeps_budget_available_for_a_smaller_request(asynchron
     assert len(calls) == 2
 
 
+def test_shared_context_windowing_expands_before_splitting_target_evidence():
+    """An explicit shared ceiling is exhausted before a W/T semantic split."""
+
+    limits = RequestLimits.from_config(
+        {
+            "processing": {
+                **DEFAULT_CONFIG["processing"],
+                "context_tokens": 1000,
+                "max_context_tokens": 10000,
+                "output_tokens": 100,
+                "max_output_tokens": 100,
+            }
+        }
+    )
+    source = SimpleNamespace(source_id="a" * 32, id="b" * 32)
+    parsed = SimpleNamespace(
+        id="c" * 32,
+        blocks=[
+            SimpleNamespace(
+                id="d" * 32,
+                order=0,
+                kind="paragraph",
+                location={},
+                assets=[],
+                context={},
+                chars=5000,
+            )
+        ],
+    )
+    windows = [{"target_start": 0, "target_end": 1, "status": "complete"}]
+
+    bounded, effective_limits = bounded_windows(source, parsed, windows, limits)
+
+    assert bounded == windows
+    assert effective_limits.context_tokens > limits.context_tokens
+    assert effective_limits.input_capacity <= effective_limits.max_context_tokens - 100
+
+
 def _refuse_context_requests(monkeypatch, refuse):
     calls = []
     transport_request = httpx.HTTPTransport.handle_request
@@ -113,7 +152,7 @@ def _refuse_context_requests(monkeypatch, refuse):
     return calls
 
 
-def test_import_splits_provider_context_refusal_and_continue_reuses_completed_work(
+def test_provider_refusal_omits_final_candidate_and_continue_reuses_generation(
     kb_dir, tmp_path, model_service, monkeypatch
 ):
     source = tmp_path / "provider-capacity.md"
@@ -131,7 +170,8 @@ def test_import_splits_provider_context_refusal_and_continue_reuses_completed_wo
     config_path.write_text(yaml.safe_dump(config))
     calls = _refuse_context_requests(
         monkeypatch,
-        lambda payload: payload["stage"] == "verification" and len(payload["facts"]) > 1,
+        lambda payload: payload["stage"] == "verification"
+        and len(payload["evidence"]["blocks"]) > 1,
     )
     result = import_document(kb_dir, source)
     assert result.source_intake == "saved"
@@ -145,9 +185,12 @@ def test_import_splits_provider_context_refusal_and_continue_reuses_completed_wo
         for _, payload, refused in calls
         if payload["stage"] == "verification" and not refused
     ]
-    assert {fact["quote"] for payload in verified for fact in payload["facts"]} == set(paragraphs)
-    assert all(len(payload["facts"]) == 1 for payload in verified)
-    assert list((kb_dir / "wiki/concepts").glob("*.md"))
+    # The final candidate must be verified as a whole.  A provider refusal
+    # therefore omits it instead of proving separate fragments and publishing
+    # a result that was never reviewed in its assembled form.
+    assert not verified
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert any(row["reason"] == "provider_context_exceeded" for row in result.omissions)
     assert result.usage["observable_attempts"] == len(calls)
     assert result.usage["unknown_usage"] == len(rejected)
     assert len(model_service) == len(calls) - len(rejected)
@@ -157,64 +200,67 @@ def test_import_splits_provider_context_refusal_and_continue_reuses_completed_wo
     resumed = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert resumed.source_intake == "saved"
     assert resumed.knowledge_compilation == "completed", resumed
-    assert len(calls) == before
+    # The unsupported final candidate remains retryable, but Continue must not
+    # regenerate it or substitute fragment-level verification.
+    assert len(calls) == before + 1
+    assert calls[-1][1]["stage"] == "verification"
+    assert calls[-1][2]
+    assert len(model_service) == before - len(rejected)
 
 
-def test_unsplittable_provider_refusal_omits_only_affected_and_dependent_candidates(
+def test_unsplittable_provider_refusal_omits_only_affected_planned_page(
     kb_dir, tmp_path, model_service, monkeypatch
 ):
     source = tmp_path / "capacity-dependencies.md"
     source.write_text(
-        "# Alpha\n\nAlpha condition.\n\n"
-        "# Beta\n\nBeta operation requires Alpha.\n\n"
-        "# Gamma\n\nGamma listens on port 9342."
+        "Alpha condition.\n\nBeta operation requires Alpha.\n\nGamma listens on port 9342."
     )
     config_path = kb_dir / ".openkb/config.yaml"
     settings = yaml.safe_load(config_path.read_text())
     settings["processing"].update(concurrency=1, max_requests=40, max_tokens=1000000)
     config_path.write_text(yaml.safe_dump(settings))
-    dependency_requests = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, row in zip(payload["units"], value["units"], strict=True):
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-                else:
-                    for fact in row["facts"]:
-                        fact["topic"] = unit["headings"][-1]
-        elif payload["stage"] == "planning":
+        if payload["stage"] == "planning":
             value = {
-                "topics": [
+                "overview": {
+                    "text": "Three independent operating conditions.",
+                    "ranges": [[0, 3]],
+                    "limitations": [],
+                },
+                "page_changes": [
                     {
-                        "name": title.lower(),
+                        "local_key": title.lower(),
+                        "target_key": "",
+                        "target": "",
                         "title": title,
                         "kind": "concept",
-                        "members": [identity],
+                        "name": f"concepts/{title.lower()}",
+                        "purpose": f"{title} operating condition.",
+                        "subject_ranges": [[start, start + 1]],
+                        "necessary_context": [],
                     }
-                    for identity, title in payload["topic_labels"].items()
-                ]
+                    for start, title in enumerate(("Alpha", "Beta", "Gamma"))
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
-        elif payload["stage"] == "dependencies":
-            dependency_requests.append(payload)
+        elif payload["stage"] == "generation":
             value = {
-                "topics": [
-                    {
-                        "path": row["path"],
-                        "status": "dependent" if row["path"] == "concepts/beta" else "independent",
-                        "reason": "Beta requires the missing Alpha condition; Gamma is unrelated.",
-                    }
-                    for row in payload["candidates"]
-                ]
+                "content": "\n".join(block["text"] for block in payload["evidence"]["blocks"]),
+                "covered": [row["id"] for row in payload["occurrences"]],
             }
+        elif payload["stage"] == "verification":
+            value = {"verdict": "supported", "reason": "Faithful original evidence.", "issues": []}
         return value
 
     model_service.respond = respond
     calls = _refuse_context_requests(
         monkeypatch,
-        lambda payload: payload["stage"] == "verification" and payload["title"] == "Alpha",
+        lambda payload: payload["stage"] == "verification" and payload["page"]["title"] == "Alpha",
     )
     result = import_document(kb_dir, source)
     assert result.source_intake == "saved"
@@ -227,15 +273,9 @@ def test_unsplittable_provider_refusal_omits_only_affected_and_dependent_candida
         and row["reason"] == "provider_context_exceeded"
         and row["items"] == ["concepts/alpha"]
         for row in result.omissions
-    )
-    assert dependency_requests
-    assert any(
-        "concepts/alpha" in row.get("items", [])
-        for request in dependency_requests
-        for row in request["omissions"]
-    )
+    ), result.omissions
     assert not (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert (kb_dir / "wiki/concepts/beta.md").exists()
     assert (kb_dir / "wiki/concepts/gamma.md").exists()
     assert result.usage["observable_attempts"] == len(calls)
     assert result.usage["unknown_usage"] == 1

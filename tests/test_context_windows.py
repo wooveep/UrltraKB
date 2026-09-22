@@ -41,13 +41,13 @@ def test_import_keeps_complete_neighbor_conditions_at_every_model_stage(
     for request in model_service:
         payload = json.loads(request["messages"][-1]["content"])
         stage = payload.get("stage")
-        if stage not in {"facts", "generation", "verification"}:
+        if stage not in {"planning", "generation", "verification"}:
             continue
         for item in _objects(payload):
             assert item.get("text") != original[:128]
             if item.get("text") == original:
                 seen.add(stage)
-    assert seen == {"facts", "generation", "verification"}
+    assert seen == {"planning", "generation", "verification"}
     assert source.read_bytes() == original_bytes
 
 

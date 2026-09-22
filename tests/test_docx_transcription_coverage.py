@@ -173,16 +173,22 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
             row["reason"].endswith("docx_image_position_unavailable")
             for row in result.coverage["issues"]
         )
-        image_units = []
+        image_blocks = []
         for request in model_service:
             try:
                 payload = json.loads(request["messages"][-1]["content"])
             except ValueError:
                 continue
-            if payload.get("stage") == "facts":
-                image_units.extend(unit for unit in payload["units"] if unit["kind"] == "image")
-        assert image_units
-        assert all(not unit["headings"] and not unit["heading_evidence"] for unit in image_units)
+            if payload.get("stage") == "planning":
+                image_blocks.extend(
+                    block for block in payload["evidence"]["blocks"] if block["kind"] == "image"
+                )
+        assert image_blocks
+        assert all(
+            "paragraph" not in block["location"] and not block["location"].get("headings")
+            for block in image_blocks
+        )
+        assert all("UNRELATED TEXTBOX" not in str(block) for block in image_blocks)
     before = list(submissions)
     assert import_document(kb_dir, source).status == "skipped"
     assert submissions == before

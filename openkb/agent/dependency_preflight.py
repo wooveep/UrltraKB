@@ -50,7 +50,13 @@ def source_fits(source, settings, *, omissions=()):
     from openkb.config import compilation_model_options
 
     limits = RequestLimits.from_config(settings)
-    limits = replace(limits, context_tokens=limits.max_context_tokens or limits.context_tokens)
+    limits = replace(
+        limits,
+        context_tokens=limits.max_context_tokens or limits.context_tokens,
+        input_tokens=(limits.max_input_tokens or limits.input_tokens)
+        if not limits.shared_context
+        else None,
+    )
     options = {
         "response_format": JSON_FORMAT,
         **compilation_model_options(settings, verification=True),

@@ -1,4 +1,4 @@
-"""Dependency-only upgrades reuse unchanged candidate decisions before new joint review."""
+"""Document-protocol upgrades reuse unchanged candidate decisions."""
 
 import json
 
@@ -9,13 +9,14 @@ from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
 from tests.http_model_fixture import evidence_response
 
-# Portable code fingerprint of dependency_scope at 6408203. The first run uses
-# current behavior but old generation/topic key identity; it is not an old build replay.
-PREVIOUS_SCOPE = "dbf7c177906b3d45cd0d34ae87dbf8276dc8da45cb064d6d49e0a4a35ac302f0"
+# Portable code fingerprint used to simulate an earlier document protocol
+# profile. The first run uses current behavior but an older profile identity;
+# it is not an old build replay.
+PREVIOUS_DOCUMENT_PROTOCOL = "dbf7c177906b3d45cd0d34ae87dbf8276dc8da45cb064d6d49e0a4a35ac302f0"
 
 
 @pytest.mark.parametrize("verdict", ["supported", "unsupported", "uncertain"])
-def test_dependency_upgrade_reuses_unchanged_generation_and_negative_review(
+def test_document_protocol_upgrade_reuses_unchanged_generation_and_negative_review(
     kb_dir, tmp_path, model_service, monkeypatch, verdict
 ):
     source = tmp_path / "approval.md"
@@ -44,7 +45,7 @@ def test_dependency_upgrade_reuses_unchanged_generation_and_negative_review(
                     {
                         "kind": "claim",
                         "candidate": candidate,
-                        "occurrences": [payload["occurrences"][0]["id"]],
+                        "occurrences": [payload["evidence"]["blocks"][0]["id"]],
                         "reason": "The original requires approval before proceeding.",
                     }
                 ]
@@ -55,12 +56,12 @@ def test_dependency_upgrade_reuses_unchanged_generation_and_negative_review(
     queried_old = []
 
     def previous_identity(name, **kwargs):
-        if name == "openkb.agent.dependency_scope":
+        if name == "openkb.agent.document_protocol":
             queried_old.append(name)
-            return PREVIOUS_SCOPE
+            return PREVIOUS_DOCUMENT_PROTOCOL
         return revision(name, **kwargs)
 
-    assert revision("openkb.agent.dependency_scope") != PREVIOUS_SCOPE
+    assert revision("openkb.agent.document_protocol") != PREVIOUS_DOCUMENT_PROTOCOL
     with monkeypatch.context() as previous:
         previous.setattr(evidence_checkpoints, "module_revision", previous_identity)
         first = import_document(kb_dir, source)

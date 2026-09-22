@@ -147,6 +147,30 @@ def test_truncated_empty_response_remains_a_declared_basic_fallback(
     assert saved["windows"][0]["reason"] == "output_budget_exhausted"
 
 
+def test_exhausted_navigation_windowing_coalesces_the_remaining_document(
+    kb_dir, tmp_path, model_service, monkeypatch
+):
+    """An optional-index failure cannot manufacture one planner task per block."""
+
+    from openkb.navigation_enhancement import IndexAllowanceExceeded
+
+    path = tmp_path / "exhausted-navigation.md"
+    path.write_text("\n\n".join(f"Paragraph {index}." for index in range(128)))
+
+    def exhausted(*_args, **_kwargs):
+        raise IndexAllowanceExceeded("index_allowance_exhausted")
+
+    monkeypatch.setattr("openkb.navigation_structure._window", exhausted)
+    _, parsed, _, saved = prepare(kb_dir, path, {})
+
+    assert len(parsed.blocks) >= 128
+    assert len(saved["windows"]) == 1
+    assert saved["windows"][0]["target_start"] == 0
+    assert saved["windows"][0]["target_end"] == len(parsed.blocks)
+    assert saved["windows"][0]["status"] == "basic"
+    assert len(model_service) == 0
+
+
 def test_unlocated_starts_get_one_local_attempt_and_remain_resolved_on_resume(
     kb_dir, tmp_path, model_service
 ):
@@ -254,5 +278,6 @@ def test_compile_and_verify_reuse_the_final_evidence_prefix(kb_dir, tmp_path, mo
     generation = json.loads(messages["generation"][-1]["content"])
     verification = json.loads(messages["verification"][-1]["content"])
     assert generation["evidence"] == verification["evidence"]
-    assert messages["generation"][-1]["content"].startswith('{"evidence":')
-    assert messages["verification"][-1]["content"].startswith('{"evidence":')
+    prefix = '{"protocol":"source-prefix-v1","evidence":'
+    assert messages["generation"][-1]["content"].startswith(prefix)
+    assert messages["verification"][-1]["content"].startswith(prefix)

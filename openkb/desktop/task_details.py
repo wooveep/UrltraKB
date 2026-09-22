@@ -64,7 +64,7 @@ def _status_text(task) -> str:
         document = pending[0]
         lines.insert(1, f"停止原因：{document.stage} · {document.reason}")
         if document.source_intake == "saved" and document.knowledge_compilation != "completed":
-            lines.insert(2, "原文已保留；继续处理将校验并复用已有解析、事实和生成检查点。")
+            lines.insert(2, "原文已保留；继续处理将校验并复用已有解析、文档计划和生成检查点。")
     for number, result in enumerate(task.results, 1):
         lines.extend(["", f"第 {number} 项：{result.status}"])
         if result.error:

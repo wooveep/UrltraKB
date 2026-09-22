@@ -13,6 +13,10 @@ OFFLINE_PROCESSING = {
     "concurrency": 5,
     "context_tokens": 128000,
     "output_tokens": 4096,
+    # Offline tests intentionally exercise fixed request limits rather than
+    # inheriting a locally discovered provider's larger completion ceiling.
+    "max_context_tokens": 128000,
+    "max_output_tokens": 4096,
 }
 
 

@@ -70,23 +70,20 @@ def test_caption_receives_complete_ocr_and_image_link_at_each_model_stage(
     for request in model_service:
         payload = json.loads(request["messages"][-1]["content"])
         stage = payload.get("stage")
-        if stage not in {"facts", "generation", "verification"}:
+        if stage not in {"planning", "generation", "verification"}:
             continue
-        rows = payload["units"] if stage == "facts" else payload["evidence"]
-        for row in rows:
-            if row["text"] != "如下状态为恢复完成。":
-                continue
-            neighbors = [
-                payload["context_pool"][n["context_ref"]] if "context_ref" in n else n
-                for n in row["neighbors"]
-            ]
-            figures = [n for n in neighbors if n["relation"] == "figure_with_caption"]
-            assert len(figures) == image_count
-            for figure in figures:
-                assert "asset:" in figure["text"] and transcription in figure["text"]
-                assert "image_relations" in figure["context_data"]
-            seen.add(stage)
-    assert seen == {"facts", "generation", "verification"}
+        rows = payload["evidence"]["blocks"]
+        assert any(row["text"] == "如下状态为恢复完成。" for row in rows)
+        figures = [row for row in rows if "asset:" in row["text"]]
+        assert len(figures) == image_count
+        for figure in figures:
+            assert transcription in figure["text"]
+            context = figure["context_data"]
+            if "context_ref" in context:
+                context = payload["context_pool"][context["context_ref"]]
+            assert "image_relations" in context
+        seen.add(stage)
+    assert seen == {"planning", "generation", "verification"}
 
 
 @pytest.mark.parametrize("boundary", ["ordinary_text", "new_section"])

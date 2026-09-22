@@ -11,7 +11,7 @@ from openkb.application.documents import DocumentResult, import_document
 from openkb.application.source_actions import continue_source
 from openkb.config import DEFAULT_CONFIG
 from openkb.processing import ProcessingIncomplete
-from tests.http_model_fixture import evidence_response
+from tests.processing_fixtures import OFFLINE_PROCESSING
 from tests.test_adaptive_processing import response
 
 
@@ -22,7 +22,7 @@ def setup(kb_dir, tmp_path, monkeypatch):
         "model": "openai/offline-test",
         "language": "en",
         "navigation": {"enabled": False},
-        "processing": {**DEFAULT_CONFIG["processing"], "concurrency": 2},
+        "processing": {**OFFLINE_PROCESSING, "concurrency": 2},
     }
     (kb_dir / ".openkb/config.yaml").write_text(yaml.safe_dump(config))
     source = tmp_path / "manual.md"
@@ -30,58 +30,93 @@ def setup(kb_dir, tmp_path, monkeypatch):
     calls = Counter()
     state = {"stage": "verification", "broken": True, "global": None}
 
+    def plan(payload):
+        changes = []
+        existing = set(payload.get("existing_targets", []))
+        registered = {
+            item["name"]: item
+            for item in payload["carry"]["page_register"]
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+        for block in payload["evidence"]["blocks"]:
+            text = block["text"]
+            title = "Alpha" if "Alpha" in text else "Beta"
+            name = f"concepts/{title.lower()}"
+            prior = registered.get(name)
+            changes.append(
+                {
+                    "local_key": title.lower(),
+                    "target_key": prior["key"] if prior else "",
+                    "target": prior.get("target", "")
+                    if prior
+                    else name
+                    if name in existing
+                    else "",
+                    "kind": "concept",
+                    "name": name,
+                    "title": title,
+                    "purpose": f"{title} requirement",
+                    "subject_ranges": [[block["order"], block["order"] + 1]],
+                    "necessary_context": [],
+                }
+            )
+        target = payload["target"]
+        ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+        return {
+            "overview": {"text": "Requirements overview.", "ranges": ranges, "limitations": []},
+            "page_changes": changes,
+            "source_only": [],
+            "unresolved": [],
+            "resolutions": [],
+        }
+
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         stage = payload["stage"]
         calls[stage] += 1
         if state["global"] and stage == "generation":
             raise state["global"]
-        value = evidence_response(payload)
-        if stage == "facts":
-            for row, unit in zip(value["units"], payload["units"], strict=True):
-                row["facts"][0]["topic"] = "Beta" if "Beta" in unit["text"] else "Alpha"
-            if state["broken"] and state["stage"] == stage:
-                value["units"] = [r for r in value["units"] if r["facts"][0]["topic"] != "Beta"]
         if stage == "planning":
-            value = {
-                "topics": [
-                    {"name": title.lower(), "title": title, "kind": "concept", "members": [uid]}
-                    for uid, title in payload["topic_labels"].items()
-                    if not (state["broken"] and state["stage"] == stage and title == "Beta")
-                ]
-            }
+            return response(plan(payload))
         if stage == "generation":
-            title = payload.get("title", payload.get("revision", {}).get("title", "Beta"))
+            title = payload["page"]["title"]
             if state.get("unavailable_topic") == title:
                 raise litellm.ServiceUnavailableError(
                     "Busy", model="offline-test", llm_provider="openai"
                 )
-            value = {
-                "content": "# "
-                + title
-                + "\n"
-                + title
-                + " requirement.\nSee [[concepts/beta|Beta]].\n`[[concepts/beta]]`",
-                "covered": [f["id"] for f in payload["facts"]],
-            }
+            if state["broken"] and state["stage"] == stage and title == "Beta":
+                return response({"content": "# Beta\nBeta requirement.", "covered": []})
+            content = f"# {title}\n{title} requirement."
+            if title == "Alpha":
+                content += "\nSee [[concepts/beta|Beta]].\n`[[concepts/beta]]`"
+            return response(
+                {
+                    "content": content,
+                    "covered": [item["id"] for item in payload["occurrences"]],
+                }
+            )
         if stage == "verification" and state["broken"] and state["stage"] == stage:
-            if payload.get("title") == "Beta" or "# Beta" in payload.get("candidate", ""):
-                value = {"verdict": "unsupported", "reason": "Unsupported claim."}
-        return response(value)
+            if payload["page"]["title"] == "Beta":
+                return response(
+                    {
+                        "verdict": "unsupported",
+                        "reason": "Unsupported claim.",
+                        "issues": ["Beta is intentionally unavailable in this test."],
+                    }
+                )
+        return response({"verdict": "supported", "reason": "Supported by the source."})
 
     monkeypatch.setattr(litellm, "completion", completion)
     return source, state, calls
 
 
-@pytest.mark.parametrize("stage", ["facts", "planning", "verification"])
+@pytest.mark.parametrize("stage", ["generation", "verification"])
 def test_local_failure_publishes_only_verified_content(kb_dir, setup, stage):
     source, state, calls = setup
     state["stage"] = stage
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", (result.reason, result)
-    assert result.omissions and result.omissions[0]["stage"] == (
-        "generation" if stage == "verification" else stage
-    )
+    assert result.omissions and result.omissions[0]["stage"] == "generation"
     assert "knowledge_content_omitted" in result.warnings
     assert result.coverage["status"] == "partial"
     assert result.coverage["ranges"]
@@ -103,7 +138,7 @@ def test_local_failure_publishes_only_verified_content(kb_dir, setup, stage):
 
 def test_explicit_continue_can_complete_excluded_work(kb_dir, setup):
     source, state, calls = setup
-    state["stage"] = "facts"
+    state["stage"] = "generation"
     first = import_document(kb_dir, source)
     assert first.omissions
     state["broken"] = False

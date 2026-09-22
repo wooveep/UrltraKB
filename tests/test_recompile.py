@@ -51,7 +51,7 @@ def test_recompile_legacy_source_requires_review_without_overwriting(kb_dir, mod
     assert "Resume:" in result.output
     assert "intake=saved, compilation=unfinished" in result.output
     assert _wiki_bytes(kb_dir) == before
-    assert len(model_service) == 4
+    assert len(model_service) == 3
 
 
 def test_recompile_uses_saved_original_after_external_file_disappears(kb_dir, model_service):
@@ -63,9 +63,9 @@ def test_recompile_uses_saved_original_after_external_file_disappears(kb_dir, mo
     result = _invoke(kb_dir, ["recompile", "notes.md"])
     assert result.exit_code == 0, result.output
     assert "intake=saved, compilation=completed" in result.output
-    # Replanning sees the new catalogue; an unchanged topic reuses its complete
-    # verified receipt, without regenerating or rerolling its review.
-    assert len(model_service) == 5
+    # Formal recompilation replays planning, generation, and review against the
+    # saved original; the external path is never needed after intake.
+    assert len(model_service) == 6
 
 
 @pytest.mark.parametrize("doc_id", [None, "old-local-doc"])
@@ -107,7 +107,7 @@ def test_recompile_all_continues_after_missing_original(kb_dir, model_service):
     assert "saved_original_missing" in result.output
     assert "needs_acceptance" in result.output
     assert "2 document(s)" in result.output
-    assert len(model_service) == 4
+    assert len(model_service) == 3
 
 
 def test_recompile_all_decline_has_no_model_calls_or_writes(kb_dir, model_service):

@@ -38,7 +38,7 @@ def test_disabled_import_preserves_stage_controls_and_invalidates_changed_correc
         result = evidence_response(payload)
         if payload["stage"] == "generation":
             result["content"] = original if payload.get("revision") else unsupported
-        elif payload["stage"] == "verification" and unsupported in payload["content"]:
+        elif payload["stage"] == "verification" and unsupported in payload["candidate"]["content"]:
             return {
                 "verdict": "unsupported",
                 "reason": "The version 2 condition was removed.",
@@ -64,7 +64,7 @@ def test_disabled_import_preserves_stage_controls_and_invalidates_changed_correc
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         correction = stage == "generation" and bool(request.get("revision"))
-        review = stage in {"verification", "index_summary_verification", "dependencies"}
+        review = stage == "verification"
         planning = stage == "planning" and planning_thinking == "enabled"
         if correction or review or planning:
             assert body["thinking"] == {"type": "enabled"}
@@ -73,7 +73,7 @@ def test_disabled_import_preserves_stage_controls_and_invalidates_changed_correc
             assert body["thinking"] == {"type": "disabled"}
             assert "reasoning_effort" not in body
         operations.append("correction" if correction else stage)
-    assert {"facts", "planning", "generation", "verification", "correction"} <= set(operations)
+    assert {"planning", "generation", "verification", "correction"} <= set(operations)
     before = len(model_service)
     apply_kb_config_patch(
         kb_dir,
@@ -84,7 +84,6 @@ def test_disabled_import_preserves_stage_controls_and_invalidates_changed_correc
     requests = [
         (body, json.loads(body["messages"][-1]["content"])) for body in model_service[before:]
     ]
-    assert all(payload["stage"] != "facts" for _, payload in requests)
     corrections = [
         body
         for body, payload in requests

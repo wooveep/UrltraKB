@@ -6,9 +6,11 @@ from pydantic import BaseModel
 
 Thinking = Literal["enabled", "disabled"]
 Effort = Literal["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+ReviewMode = Literal["critical", "none"]
 
 
 class CompilationSettings(BaseModel):
+    review_mode: ReviewMode = "critical"
     compilation_thinking: Thinking | None = None
     planning_thinking: Thinking | None = None
     verification_thinking: Thinking | None = None

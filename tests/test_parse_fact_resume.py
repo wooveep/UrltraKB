@@ -1,4 +1,4 @@
-"""OCR completion changes a parse identity without invalidating unrelated facts."""
+"""OCR completion changes a parse identity and requires a fresh document plan."""
 
 import json
 
@@ -12,7 +12,7 @@ from openkb.evidence import BlockDraft, ParseStore
 from openkb.sources import SourceStore
 
 
-def test_continue_reuses_unaffected_facts_after_a_parse_changes(kb_dir, tmp_path, model_service):
+def test_continue_replans_document_after_a_parse_changes(kb_dir, tmp_path, model_service):
     config_path = kb_dir / ".openkb/config.yaml"
     settings = yaml.safe_load(config_path.read_text())
     settings["navigation"] = {"enabled": False}
@@ -51,16 +51,16 @@ def test_continue_reuses_unaffected_facts_after_a_parse_changes(kb_dir, tmp_path
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed
     requests = [json.loads(call["messages"][-1]["content"]) for call in model_service[before:]]
-    extracted = [
-        unit["text"]
+    planned = [
+        block["text"]
         for request in requests
-        if request.get("stage") == "facts"
-        for unit in request["units"]
+        if request.get("stage") == "planning"
+        for block in request["evidence"]["blocks"]
     ]
-    assert "Unit 0 requires version 1." not in extracted, extracted
-    assert "Unit 3 requires version 4." not in extracted, extracted
-    assert "Unit 4 requires version 5." in extracted  # Its immediate neighbor changed.
-    assert "Unit 5 requires corrected version 12." in extracted
+    assert "Unit 0 requires version 1." in planned
+    assert "Unit 4 requires version 5." in planned
+    assert "Unit 5 requires corrected version 12." in planned
+    assert "Unit 5 requires version 6." not in planned
     assert resumed.parse_id == new.id
 
 

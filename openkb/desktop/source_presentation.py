@@ -126,7 +126,7 @@ def status_text(value):
     warnings = result.get("warnings", result.get("auxiliary_warnings"))
     if result.get("omissions"):
         rows.extend(["", "内容遗漏：已排除未通过处理或核验的内容，其余已验证内容可用。"])
-        stages = {"facts": "事实提取", "planning": "主题规划", "generation": "生成与校验"}
+        stages = {"facts": "旧版事实提取", "planning": "文档规划", "generation": "生成与校验"}
         for row in result["omissions"]:
             reason = REASONS.get(row["reason"], row["reason"]).partition("，本轮知识")[0]
             rows.append(f"{stages[row['stage']]} · {len(row['items'])} 项 · {reason}")

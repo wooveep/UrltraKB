@@ -117,14 +117,14 @@ completion.
 The subsequent accepted requirement also keeps ordinary content exhaustion on the
 normal import completion path: retain a registered, editable source and omission
 notice even when no knowledge can be generated. Users may fill gaps afterward.
-The implementation now uses the same publication transaction even when no facts,
-plan or verified topic survives. The source summary states zero generated knowledge,
+The implementation now uses the same publication transaction even when no formal
+DocumentPlan, generated page candidate or verified page contribution survives. The source summary states zero generated knowledge,
 keeps omissions visible, and remains editable. See the
 [repair and small-file validation plan](import-repair-plan.md) for implementation
 order, exact acceptance cases and issue closure conditions. New validation uses
 small fixed files; full large-document reruns are not a prerequisite for this work.
 
-The latest acceptance retains key-fact, source-identity and manual-edit protections,
+The latest acceptance retains original-evidence, source-identity and manual-edit protections,
 while accepting explicit omissions, answer refusals and a small set of registered
 model semantic defects for later correction by users. Redundant but supported wording
 is an improvement item. A new fully passing independent sample group, a valid new cold
@@ -180,22 +180,21 @@ disabling checks or declaring every format and error path fully validated.
 
 ### Conservative compilation omissions — accepted revision
 
-The current acceptance preserves key facts and provenance while allowing explicit
+The current acceptance preserves original evidence and provenance while allowing explicit
 omissions and registered model limitations. Uncertain content may be excluded instead
 of requiring document-specific debugging. Existing bounded
 validation retries, splitting, one correction and configured adjudication remain
 in place. A valid rejection is retained; repeated import must not reroll it into
 acceptance.
 
-- Fact extraction excludes the entire original block if an isolated unit still
-  fails, including otherwise successful split siblings from that block.
-- Planning excludes only exhausted isolated input members. It never repairs a
-  plan by inventing membership or silently accepting missing members.
-- Generation excludes the entire failed topic, so partially verified steps do
-  not appear as a complete task. Retained content requires original evidence
+- Document planning records every original range as page body, necessary
+  context, source-only material or an unresolved item. It never repairs a plan
+  by inventing a destination or silently accepting a missing target range.
+- Generation excludes the entire failed page contribution, so partially
+  verified steps do not appear as a complete task. Retained content requires original evidence
   and a check for material factual errors. Nonessential omissions and explicitly
   noncritical uncertainty use the focused review policy below.
-- If no usable facts, plan or verified topic remains, source registration and the
+- If no usable plan or verified page remains, source registration and the
   editable zero-knowledge summary still complete. Confirmed temporary service
   failures use bounded backoff, then isolate affected content. Unknown model execution,
   account failures, cancellation, identity corruption and global budgets retain their
@@ -211,12 +210,14 @@ longer verified for the new version; other sources and manual-change protection
 remain effective.
 
 An ordinary identical import returns the prior publication and omissions without
-new model calls. Explicit **Continue** retries excluded work, reusing valid
-extraction and whole-topic receipts when their evidence, grouping, other-source
-content and verification contract are unchanged. A new parse, model or contract
-may invalidate reuse. Desktop stages show exclusions while publication remains
-completed, and Continue remains available. Success describes the available
-usable content, not full original-document coverage or resolution of every review notice.
+new model calls. Explicit **Continue** retries excluded work, reusing accepted
+`DocumentPlan` windows, generated page candidates and review receipts only when
+their exact evidence ranges, frozen W input, plan ledger, other-source content
+and verification contract are unchanged. A new parse, model, endpoint capability
+snapshot or contract may invalidate reuse. Desktop stages show exclusions while
+publication remains completed, and Continue remains available. Success describes
+the available usable content, not full original-document coverage or resolution
+of every review notice.
 
 ## Concise knowledge pages — revised 2026-09-16
 
@@ -227,8 +228,8 @@ in the original source. The existing generation request selects those occurrence
 adds a visible source link to each affected contribution and retains exact evidence references.
 Native tables keep their complete rows and relationships; individual cells are not deferred.
 
-`covered` accounts for every input fact through prose or explicit source references; it
-does not require a transcript of every quote. Mixed-source fragments retain their own
+`covered` accounts for every supplied original-range occurrence through prose or explicit source
+references; it does not require a transcript of every source excerpt. Mixed-source fragments retain their own
 conditions, while a secondary scope may be represented by a source reference alone.
 The existing semantic check evaluates the selection too: a missing core fact or necessary
 condition remains a blocking error. Safe secondary selections need no omission warning.
@@ -237,9 +238,9 @@ Unexplained omissions and uncertain claims retain the focused review policy belo
 Coverage distinguishes `referenced` ranges (some secondary detail retained in the source)
 from `verified` prose and unresolved `pending` ranges. References can complete analysis
 coverage without claiming all original detail was written into the page. Generation and
-whole-topic receipts retain the selection across Continue; only accepted topics contribute
-to published coverage. Updated generation contracts invalidate prior page receipts while
-unchanged fact extraction and topic planning remain reusable.
+per-page review receipts retain the selection across Continue; only accepted page candidates
+contribute to published coverage. Updated generation contracts invalidate prior page receipts
+while an unchanged `DocumentPlan` and unchanged page-range inputs remain reusable.
 
 This improves the writing policy and permits shorter responses; actual length, latency and
 semantic quality still depend on the model and should be evaluated on representative documents.
@@ -258,7 +259,7 @@ Nonessential coverage gaps and presentation concerns are advisories. Noncritical
 uncertainty may publish with an explicit `advisory` verdict and located notice;
 it is not relabeled fully verified. A bare `uncertain` verdict still means an
 unresolved key fact or condition and cannot authorize publication. Notices appear
-in the source summary and warnings. Affected facts remain pending in coverage,
+in the source summary and warnings. Affected original ranges remain pending in coverage,
 even after publication, identical reimport or cached Continue. Presentation-only
 advice does not make original coverage incomplete. Invalid review shapes and
 source bindings remain errors.
@@ -271,7 +272,7 @@ advisories do not trigger it. A concrete rejection retains the existing single
 correction and review allowance. Valid decisions and notices are reusable.
 
 Omission dependency review selects complete headed text/DOCX sections, parent
-conditions and explicitly related sections; only affected topics are reviewed.
+conditions and explicitly related sections; only affected planned pages are reviewed.
 Named references are followed in both directions and candidate links retain their
 dependency closure. Unrelated sections are omitted from those model requests.
 This structural routing is not proof of all possible semantic dependencies.
@@ -288,8 +289,8 @@ quality policy identified; fewer checks alone do not prove equal semantic recall
 ## General import optimization contract
 
 Native Word, PDF and PowerPoint tables are knowledge objects. Compilation retains
-their literal cell evidence locally under one table topic instead of asking a model
-to extract a separate topic from each label or value. Original cell/block references,
+their literal cell evidence locally under one table contribution instead of asking a model
+to extract a separate page contribution from each label or value. Original cell/block references,
 headings, attachment identities and merge spans remain available for citations.
 Generation and semantic verification still apply before publication.
 
@@ -308,13 +309,13 @@ when no table is declared. Batches retain sheet/range identity, original row and
 numbers, merge spans, first-row/header evidence and the row offset within the object.
 Declared multirow Word headers repeat in every batch; unmarked first rows retain an
 unconfirmed header role. Batch size follows the measured input, output and review
-capacity, not a fixed cell count. All batches still contribute to the same table topic.
+capacity, not a fixed cell count. All batches still contribute to the same planned table page.
 
-This upgrade reuses the original parse. Unchanged, nonempty prose facts from the
-preceding deployed extractor may resume after validating their complete saved request
-contract, current unit identity and exact quotes. Old cell interpretations do not
-authorize the new table grouping. Changed topics invalidate their retained plan and
-generation receipts; no prior publication decision bypasses current verification.
+This upgrade reuses the original parse. For compatibility, unchanged nonempty prose
+facts from the preceding deployed extractor may resume after validating their complete
+saved request contract, current unit identity and exact quotes. Old cell interpretations
+do not authorize the new table grouping. Changed legacy topic groupings invalidate their
+retained plan and generation receipts; no prior publication decision bypasses current verification.
 
 Production import decisions must follow document structure, source identity,
 available evidence and explicit runtime budgets. Validation filenames, source
@@ -345,7 +346,8 @@ anchors are required to evaluate general improvements.
 ## Source indexing and original citations
 
 Markdown, text, PDF, DOCX, XLSX and PPTX use the same import and Continue operations.
-Each parsed version gets a complete ordered source index before facts are extracted.
+Each parsed version gets a complete ordered source index before its formal
+`DocumentPlan` is accepted.
 Native Markdown/DOCX headings, PDF physical pages, spreadsheet sheets/cells and slide
 objects keep their own position types. Spreadsheet values retain formula text, merge
 relationships and declared table headers; formulas are not executed. Undeclared column
@@ -355,7 +357,7 @@ or original attachments; successful parsing does not prove semantic completeness
 Source indexing is enabled by default. Every new index uses the original local
 PageIndex collection and SQLite storage at `.openkb/pageindex.db`. The SDK stores
 its document tree and original block text there; source/version/parse bindings
-and reusable index lookups live in the same database. Facts, generation, verification,
+and reusable index lookups live in the same database. Planning, generation, verification,
 question and chat read indexed originals through PageIndex's collection API, in
 batches of at most 1,000 native ranges. Native range numbers are mapped back to the
 actual paragraph, cell, slide or physical page before citations are returned.
@@ -368,13 +370,13 @@ The release does not read, migrate or fall back to
 originals, parsing, assets and usage receipts. Index storage and retrieval use the
 database regardless of document length or the former PDF threshold.
 
-Native structure is preferred. Missing structure and long range summaries may use
-bounded model requests: at most 32 requests, 262144 tokens and 120 seconds for optional
-index work, further bounded by its configured allowance and the remaining import
-budget. Import reserves at least four requests for necessary compilation and limits
-indexing to at most 10% of remaining finite tokens. Small ranges retain an original-text
-preview. Exhausted optional allowance leaves a basic or degraded index; account,
-identity, cancellation and global budget failures still end the operation.
+Native structure is preferred. Missing structure and long-range summaries may use
+bounded model requests under the separately configured navigation allowance. Each
+request is measured against the selected model and endpoint's declared capacity (or an
+explicit shared/independent capacity contract); there is no fixed global navigation
+request, token or time quota. Small ranges retain an original-text preview. Exhausted
+optional allowance leaves a basic or degraded index; account, identity, cancellation
+and global budget failures still end the operation.
 
 Question and chat tools capture the published source/version/parse/index together.
 Provider length stops are retained even when the model SDK would otherwise discard
@@ -406,17 +408,16 @@ still be read; image destinations must not be constructed from document names.
 
 ## Reuse, continuation and measured cost
 
-Fact extraction, range structure, summaries, topic planning, generation and verification
+Document planning, range structure, private candidates, generation and verification
 keep distinct reusable results. Sharing requires equal complete inputs, including
 ordered batch context, subjects, versions, headings, neighboring evidence, table roles,
 candidate metadata, model options and validation rules. Request-local short identities
 and repeated context references reduce transport size while original text and every
 occurrence retain their evidence identity. Each adopting source receives its own binding.
 
-Topic-planning batches read one frozen existing-knowledge catalogue. A bounded second
-pass coordinates ambiguous candidate identities; uncertain groups retain separate,
-stable names and complete membership. Planning runs concurrently within the existing
-document budget. Page writes stay serialized. Generation and verification reuse are
+Planning reads one frozen existing-knowledge catalogue. A document's target windows execute
+serially so carry state, stable page identities and unresolved references are accepted before
+the next target. Page writes stay serialized. Generation and verification reuse are
 independent: a verification change can recheck a valid draft without regenerating it.
 Current evidence, coverage, structure and publication checks still apply to every hit.
 
@@ -446,24 +447,27 @@ unknown when the original field cannot be distinguished from absence.
 
 Default correction remains bounded to one repair plus configured review. Valid
 rejections persist, title-only repair preserves body text, and uncertain local
-dependencies require full affected-candidate review. Additional concurrency within a
-single topic remains disabled pending repeatable evidence of a useful tail-latency gain.
+dependencies require full affected-candidate review. Additional concurrency within one
+page candidate remains disabled pending repeatable evidence of a useful tail-latency gain.
 
 ## Default execution profile
 
 New and existing knowledge bases automatically inherit a processing profile;
-no manual setup or configuration migration is required. The desktop's
-**Settings → Processing budgets** shows the effective values. A complete
-`processing` mapping in global configuration overrides the built-in profile,
-and a knowledge-base mapping overrides the global profile. Clearing an override
-restores inheritance. Reading settings does not write defaults into a library.
+no manual setup or configuration migration is required for models whose selected
+endpoint has a local capability declaration. The desktop's **Settings → Processing
+budgets** shows the effective values and lets an operator choose automatic,
+shared-context, or independent input/output capacity. A complete `processing`
+mapping in global configuration overrides the built-in profile, and a knowledge-base
+mapping overrides the global profile. Clearing an override restores inheritance.
+Reading settings does not write defaults into a library.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `context_tokens` | 262144 (256K) | Initial total context cap for one complete request |
-| `output_tokens` | 131072 (128K) | Initial output reserve within that context cap |
-| `max_context_tokens` | 1048576 (1M) | Model context ceiling for adaptive retries |
-| `max_output_tokens` | 393216 (384K) | Model output ceiling for adaptive retries |
+| `output_tokens` | 16384 | Initial output reservation; clamped to the selected model's output limit |
+| `context_tokens`, `max_context_tokens` | unset | Explicit shared-context initial value and ceiling, for a provider/model whose shared capacity is known by the operator |
+| `input_tokens`, `max_input_tokens` | unset | Explicit independent input initial value and ceiling |
+| `max_output_tokens` | unset | Optional operator ceiling below the selected model's declared output limit |
+| `shared_context` | inferred | The selected capability declaration chooses shared versus independent input/output; set `false` with explicit input fields for an unknown model |
 | `request_timeout` | 180 | Seconds without meaningful content during streamed compilation; elapsed seconds for other requests |
 | `timeout_retries` | 5 | Additional attempts after a streamed compiler timeout; 0 disables them, so 5 means at most 6 total attempts |
 | `stage_timeout` | `null` | Optional total seconds for one processing stage; no default cap |
@@ -474,11 +478,18 @@ restores inheritance. Reading settings does not write defaults into a library.
 | `max_tokens` | null | No cumulative document token ceiling; a positive override includes outstanding reservations |
 | `concurrency` | 2 | Shared model concurrency; effective maximum 4 |
 
-These are starting allowances and explicit ceilings, not measured model capacities or a
-guarantee that every document will finish in one run. Models with smaller context
-or output capacities need lower request caps. Explicit malformed or incomplete
-overrides still produce configuration errors before a model request; they are
-never silently replaced by defaults. Use the same profile when comparing runs.
+`review_mode` defaults to `critical`, which runs one range-bound semantic review for every
+new candidate and permits at most one local correction. Set `review_mode: none` only for an
+explicit private draft preview: deterministic schema, range, link and asset checks still run,
+but no unverified draft enters the normal publication transaction.
+
+These are starting allowances and explicit ceilings, not a generic context-window
+claim or a guarantee that every document will finish in one run. The selected model
+and endpoint provide the capacity snapshot used for planning and resume identity.
+An unknown model must declare either shared context capacity or independent input and
+output capacity before it can receive a request. Explicit malformed or incomplete
+overrides still produce configuration errors before a model request; they are never
+silently replaced by defaults. Use the same profile when comparing runs.
 
 A valid explicit per-request timeout retains existing configuration precedence;
 remaining stage and document time always bound it. The complete request includes
@@ -492,10 +503,10 @@ retries transient transport/service errors within the configured limits.
 Observable attempts and unknown internal transport attempts are distinct fields.
 
 A confirmed `finish_reason: length` discards that response and increases request
-allowances from 256K/128K to 512K/256K, then 1M/384K (K = 1024 tokens). The increased
+allowances within the configured per-model ceilings. The increased
 allowances remain in effect for the rest of that document operation; the next
-document starts at the initial values. At the ceiling, fact extraction, topic
-planning, generation and verification retry smaller batches. A single long
+document starts at the initial values. At the ceiling, document planning,
+generation and verification retry smaller exact ranges. A single long
 source span can be split at exact character positions while retaining heading,
 neighbor and asset associations. Persistent truncation of an indivisible unit becomes
 an explicit omission after bounded recovery; independent reliable content still publishes.
@@ -509,28 +520,29 @@ Explicit per-operation output caps remain binding. Older complete profiles that
 omit the two new ceiling fields retain their original request caps; clear their
 override to inherit this profile, or set explicit ceilings for that model.
 
-Within one document, fact extraction runs up to `concurrency` batches at a
-time (default 2, maximum 4). Independent knowledge pages use at most four workers, bounded
-by that same setting and the number of pages. Each page's generation, correction
-and verification stay ordered. All workers share model allowances, cancellation
+Within one document, planning is serial and independent ready knowledge pages use at most four
+workers (default 2), bounded by the same shared setting and the number of pages. Each page's
+generation, correction and verification share one resource admission pool and stay ordered.
+All workers share model allowances, cancellation
 and elapsed-time controls. The lease owner captures validated original evidence
 before parallel generation; worker reads use detached text and metadata, avoiding
 cross-thread KB lock waits. Wiki writes and final publication remain serialized.
 
 A persistent local response defect records pending work while other independent
-units or pages finish and save checkpoints. Cancellation, transport uncertainty,
+pages finish and save checkpoints. Cancellation, transport uncertainty,
 budget exhaustion and storage/integrity errors still stop admission and cancel
-siblings. Facts are restored to source order before planning. Checkpoint files and
+siblings. Accepted planning targets are restored in source order before later targets. Checkpoint files and
 their catalogue are serialized so concurrent completion cannot lose entries.
 The setting limits simultaneous requests; it is not an RPM quota and does not
 multiply context caps or the document-wide request allowance. Explicit global or
 knowledge-base concurrency overrides remain in effect until cleared.
 
-Topic planning uses at most 128 candidate topics per batch, with additional input
-and output capacity checks. Completed batches advance a topic counter; retries do
-not inflate it. Independent batches are restored to source order and their page
-identities are reconciled afterward. This reduces large response bursts but does not guarantee a provider
-will respond within a particular time.
+Formal planning is strictly serial. Each request carries one frozen evidence W,
+the durable cumulative S ledger and one movable target T; an accepted response
+becomes the next ledger state before the next target starts. Planning first grows
+within the selected model/endpoint capacity contract. Only an output-bound
+response may split T, and every child retains the same frozen W receipt. There is
+no fixed topic-batch size or topic counter in the current compiler.
 
 Semantic review responses are recorded separately from accepted page checkpoints.
 The record binds the exact candidate, evidence, prompt, model options, endpoint
@@ -543,20 +555,21 @@ supported publication receipt must still validate.
 
 Planning groups parameters, prerequisites, steps and exceptions into stable
 functional or deployment-task pages while retaining independent central entities.
-Requests separate short batch-local member IDs from their full topic labels.
-The model returns those IDs; the compiler maps them back to exact labels and
-rejects unknown, missing or duplicate members. Existing page names and titles
-can guide identity reuse but cannot enlarge the batch's membership. Accepted
-results from the precisely identified preceding functional planner can be resumed
-only with identical inputs and catalogue dependencies and full current validation.
+The model returns a range-bound `DocumentPlan` increment with stable local/page
+keys; the compiler rejects unknown keys, duplicate identities and any uncovered
+target range. Existing page names and titles can guide identity reuse but cannot
+enlarge the supplied evidence or target. Accepted windows resume only with
+identical frozen evidence, predecessor ledger, catalogue dependencies and full
+current validation.
 
-A complete model response can still omit or duplicate source IDs. These coverage
-errors now trigger smaller batches instead of immediately ending the document.
-An indivisible unit gets at most `max_attempts` validation attempts; persistent
-content failure becomes an explicit omission at the applicable block/topic boundary.
-Independent reliable content still publishes, including source registration with zero
-knowledge when nothing survives. Invalid source quotations and malformed fact results
-follow the same bounded recovery. No missing unit is silently accepted or hidden.
+A complete model response can still omit or duplicate planned source ranges.
+Coverage errors retry the same formal request within its declared capacity, then
+split only where the protocol permits. An indivisible range or page candidate gets
+at most `max_attempts` validation attempts; persistent content failure becomes an
+explicit omission at that exact range/page boundary. Independent reliable content
+still publishes, including source registration with zero knowledge when nothing
+survives. Invalid source quotations and malformed plan or candidate responses
+follow the same bounded recovery. No missing range is silently accepted or hidden.
 Logs include expected/received/missing/duplicate/unexpected counts, the requested
 output limit and the provider finish reason, without recording document content.
 
@@ -565,9 +578,9 @@ space with an ordinary space. Outside code blocks, a unique match differing only
 by these one-character spaces resolves to the exact original spelling and
 character offsets. This does not collapse whitespace, fold punctuation/digits,
 accept neighboring text or choose an ambiguous match. Code quotations remain
-strict. Fact failures identify the unit, block and invalid field without logging
-source text. Completed batches from the preceding strict-quotation contract can
-be reused only with their exact request identity and after current validation;
+strict. Range-validation failures identify the planned range, block and invalid
+field without logging source text. Completed formal windows and page candidates
+can be reused only with their exact request identity and after current validation;
 unrelated historical implementations and changed requests are not reused.
 
 ## Resume saved work
@@ -585,14 +598,14 @@ Explicit reparse, changed source or parsing configuration can request new parsin
 
 Compilation recovery has separate states:
 
-- Individually valid fact rows survive a malformed sibling row. Restore matches
-  the exact source/version/parse, model settings, endpoint and known executable
-  contract, then validates quotes and coverage again. Different transport batch
-  sizes do not require sending already validated units again.
-- Saved split decisions lead directly to smaller batches; a known failed parent
-  request is not resent simply to rediscover its split.
-- Completed planning batches and verified generated parts are reusable with
-  unchanged inputs and existing knowledge dependencies.
+- Accepted `DocumentPlan` W/S/T windows survive a malformed later response.
+  Restore matches the exact source/version/parse, model settings, endpoint
+  capability snapshot, frozen evidence and predecessor ledger, then validates
+  ranges and coverage again.
+- Saved T-only split decisions lead directly to their child targets; a known
+  failed parent request is not resent simply to rediscover its split.
+- Generated page candidates and their verified review receipts are reusable only
+  with unchanged formal-plan inputs and existing-knowledge dependencies.
 - A structurally valid generated draft is saved before semantic verification.
   Interruption during verification resumes from that draft. Correction state is
   also retained. A draft is never a verified publication receipt.
@@ -604,11 +617,11 @@ limits above still apply. Reaching one does not start another task automatically
 Repeated semantic rejection remains pending; continuing does not authorize weaker
 verification or an unbounded retry loop.
 
-Empty extraction from a factual document cannot report successful compilation.
-An empty body unit containing recognized numerical limits, requirements or
-negations is retried instead of accepting an arbitrary `empty_reason`. This is a
-conservative omission check, not proof of complete factual recall. Exact quotation,
-source position, asset identity and title/body semantic checks remain in force.
+An empty readable planned range cannot report successful compilation. A range
+containing recognized numerical limits, requirements or negations is retried
+instead of accepting an arbitrary empty result. This is a conservative omission
+check, not proof of complete factual recall. Exact quotation, source position,
+asset identity and title/body semantic checks remain in force.
 
 Known local parse defects can retain usable content with an omission notice:
 missing Markdown assets, an unclosed code fence, or a PDF page decoder failure.
@@ -621,9 +634,10 @@ Persistent detected factual or semantic defects exclude the affected candidates 
 necessary dependent operations, while independent verified content still reaches atomic
 publication. With no verified knowledge, the retained original and editable omission
 summary still register normally. Valid checkpoints remain available for continuation.
-A stage percentage measures processed units/topics, not factual recall or whole
-source publication. Desktop task details show the document's stopping reason and
-recovery hint near the top, separately from worker cleanup status.
+A stage percentage measures accepted W/S/T windows and processed page candidates,
+not factual recall or whole source publication. Desktop task details show the
+document's stopping reason and recovery hint near the top, separately from worker
+cleanup status.
 
 For providers that accept a `thinking.type` option, the optional top-level
 `compilation_thinking` setting selects `enabled` or `disabled`. For example:
@@ -635,11 +649,11 @@ verification_thinking: enabled
 ```
 
 Set it in global or library YAML, or through the existing configuration REST
-endpoints. `compilation_thinking` applies to extraction, planning, generation and,
-unless separately set, verification. `verification_thinking` overrides only the
-independent evidence review; it accepts the same two values. Navigation and chat
-have separate model behavior. If neither mode is set, no override is sent and
-the provider default is preserved. Library
+endpoints. `compilation_thinking` applies to DocumentPlan planning and candidate
+generation and, unless separately set, verification. `verification_thinking`
+overrides only the independent evidence review; it accepts the same two values.
+Navigation and chat have separate model behavior. If neither mode is set, no
+override is sent and the provider default is preserved. Library
 overrides inherit global settings; a null REST patch removes the override.
 Changing this setting invalidates affected compilation checkpoints and completion
 profiles without changing the source or parse version. There is no automatic
@@ -649,8 +663,8 @@ is a provider option, not a guarantee of technical accuracy; see the
 
 Before a contribution is published, an independent model request checks its
 public title and cleaned body against the retained original passages and quotes.
-The request preserves the roles of headings and neighboring blocks. Proposed
-fact statements are planning aids; the original evidence remains authoritative.
+The request preserves the roles of headings and neighboring blocks. Planned
+claims are only organizational aids; the original evidence remains authoritative.
 Unsupported drafts receive at most one correction using the review feedback,
 followed by another review. Uncertain, malformed or still-unsupported results become
 explicit content omissions after bounded recovery; they do not prevent reliable siblings
@@ -663,15 +677,15 @@ retain their literal links and original line endings; real image links must
 resolve to retained source assets, with their titles preserved.
 
 Generation, verification and correction share the same generation-stage and
-document budgets. Batch planning includes all three complete request shapes,
+document budgets. Formal planning accounts for all three complete request shapes,
 using a lossless candidate and representative review feedback. Unexpected output
 expansion is checked against the actual request limit; an exhausted local content path
 records an omission, while the global execution cap still stops execution. No text is
 truncated to make it fit. Successful checkpoints bind the
 review verdict to the final public title and body digest. The first accepted title
 is fixed for subsequent parts; changing it later requires a new coherent proposal.
-Changing only `verification_thinking` rechecks generation while retaining valid
-facts. Model review can make mistakes, including false positives and false
+Changing only `verification_thinking` rechecks an existing valid generation without
+regenerating it. Model review can make mistakes, including false positives and false
 negatives, so a completed result is not a proof of arbitrary technical accuracy.
 
 Every task retains its own usage observations. Each source also keeps cumulative
@@ -724,7 +738,8 @@ an existing child source remains separate, with its own request and results; thi
 change adds no new attachment-processing UI.
 Historical parses may contain expanded child blocks at `location.attachment`.
 Those blocks and their original citations remain readable, but new parent indexing,
-fact extraction and dependency review exclude their content. Coverage labels them
+`DocumentPlan` planning, generation and dependency review exclude their content.
+Coverage labels them
 `stored` with `attachment_stored_only`; their images do not create parent OCR or
 understanding gaps. Real omissions in the parent body still produce partial coverage.
 Each skipped image frame keeps its own diagnostic at the known source position.
@@ -755,7 +770,7 @@ reparse bypasses the parent cache. Parent reparse saves attachment files again a
 needed, without retrying any child content work. Explicit child processing can
 still reuse its own artifacts. Installing/updating an OCR runtime under the
 same configuration requires explicit reparse to refresh previously retained results.
-These rules preserve source/parse identities and existing fact checkpoints.
+These rules preserve source/parse identities and existing legacy fact checkpoints.
 
 Optional DOCX image recognition stops after its resource budget is exhausted or
 credentials/quota prevent further work. This stop applies to the current document
@@ -769,7 +784,7 @@ remains independent because a scan may have no other readable text.
 For PDF, bitmap and uncovered vector content can use the selected OCR backend.
 OCR exceptions, timeouts and missing service-side assets are advisory when the original
 page is retained. They do not block compilation of available document content; an
-image-only page may have no known textual facts. The original visual remains available
+image-only page may have no known textual evidence. The original visual remains available
 for later inspection. Local native-content errors, unresolved source assets and
 uncertain text/table extraction retain independent quality diagnostics. Under the
 accepted publication policy, these ordinary issues do not block publication of
@@ -855,38 +870,40 @@ available; old cloud environment variables cannot route OpenKB to that service.
 
 ## Whole-document evidence compilation
 
-Every nonempty structural block participates in fact extraction. Large blocks
-and batches split according to the complete request and a representative JSON
-output envelope. Spans keep their block identity and exact character positions;
-table headers, row/cell locations, surrounding spans and hierarchical heading
-evidence remain available. Each unit must return facts with verbatim quotes or
-an explicit reason for having no facts. Persistent missing coverage, invalid quotes and
-truncated output become explicit content omissions after bounded recovery. Reliable siblings
-still publish, or the retained original registers with zero knowledge if none survive.
-Global execution caps and source-storage integrity failures retain their stopping outcomes.
+Every non-attachment structural block enters one durable `DocumentPlan` through
+an exact whole-block or character-range route: page body, necessary context,
+source-only material, or a named unresolved item. The planner receives frozen
+saved evidence plus a cumulative overview, page register and open-reference view;
+it returns the overview and page-plan increment in one response. Large request
+groups are derived only when the complete request cannot fit the selected model
+configuration. Spans retain immutable block identities and exact character
+positions; table, heading and figure context stay available without treating
+reader annotations or attachments as source claims.
 
-The compiler merges topic plans across sections and generates concept/entity
-contributions from reread original spans. Facts are a plan, not a replacement
-for the original's conditions. Large topics use bounded parts within one source
-contribution. The complete prior page is preserved outside model context; a
-bounded relevant window and link catalog guide generation. Required figures
+After global planning converges, concept/entity contributions are generated from
+their planned body and necessary original context, never from an intermediate fact
+inventory. Large page inputs split into exact range fragments when necessary. Each
+new candidate receives one critical semantic review by default; an unsupported
+candidate gets at most one local correction and re-review. Explicit `review_mode:
+none` stores an unverified private draft but never publishes it. Required figures
 resolve to retained immutable assets. This source's previously generated
-contribution is replaced, and retired topics lose only its marked contribution.
-All changes remain private until the whole-source publication checks pass.
+contribution is replaced, and retired pages lose only its marked contribution.
+All wiki writes remain private until the existing publication transaction succeeds.
 
-Validated fact, plan and generation responses become checkpoints. Keys include
+Validated plan, candidate and review responses become checkpoints. Keys include
 source and parse identity, actual prompts/payloads, the model endpoint and
-relevant compiler code. Planning and generation also include their Wiki inputs.
-Changing the language can reuse independent facts; changing the source, model,
-prompt or affected implementation invalidates the corresponding work. Progress
-events expose checkpoint hits. Resuming starts a new bounded run while source
+relevant compiler code. Planning and generation also include their actual Wiki inputs.
+Changing the language changes both planning and page-generation contracts, so it
+invalidates affected plan and candidate work. Changing the source, model, prompt or
+affected implementation likewise invalidates the corresponding work. Progress events
+expose checkpoint hits. Resuming starts a new bounded run while source
 history retains earlier usage. A completed version is skipped only when its
 compilation profile still matches.
 
 ## Rebuild source navigation
 
 `navigation.enabled` defaults to true. Optional structure and summary enhancement
-shares the import's bounded execution allowance and finishes before fact analysis.
+shares the import's bounded execution allowance and finishes before document planning.
 Disabling enhancement still saves a complete basic PageIndex database index.
 
 Each successful generation has an immutable database binding. Continue can reuse a
@@ -986,15 +1003,18 @@ their outcomes and unresolved semantic failures are in the
 user documents and broader OCR accuracy measurements remain outstanding. The
 second-batch code checkpoint is not final acceptance of those external gates.
 
-## Third-batch verification record
+## Third-batch verification record (historical pre-#52 path)
 
-The same two systems exercised complete source compilation with a deterministic
-model adapter through `scripts/benchmark_document_compilation.py`. Each case
-extracts the manifest's three prescribed facts, stops before planning, then
-continues from validated fact checkpoints. Every original block/span was
-accounted for, all three facts were reread during generation and present in
-published knowledge, and every worker was reaped. These are control-flow and
-evidence-coverage measurements, not real model accuracy or throughput estimates.
+This record describes the retired facts-first pipeline that preceded #52; it
+does not validate the current `DocumentPlan` orchestration. The same two
+systems then exercised complete source compilation with a deterministic model
+adapter through `scripts/benchmark_document_compilation.py`. Each case
+extracted the manifest's three prescribed facts, stopped before the old
+planning step, then continued from validated fact checkpoints. Every original
+block/span was accounted for, all three facts were reread during generation and
+present in published knowledge, and every worker was reaped. These are
+control-flow and evidence-coverage measurements, not real model accuracy or
+throughput estimates.
 
 | Fixed input | Blocks | Debian operation seconds | Windows operation seconds | Model-adapter attempts, Debian / Windows |
 | --- | ---: | ---: | ---: | ---: |
@@ -1061,11 +1081,11 @@ acceptance. The provider checks do not establish a production processing profile
 
 ### 来源片段与有界复核
 
-同一知识主题可以包含正文不同任务和文档附件中的事实。生成请求明确列出来源范围，
-每个原文窗口具有独立 occurrence ID（同一个事实被分为多个窗口时也保留各自身份）。
-混合来源响应按片段返回对应关系；缺失、重复、未知编号及越范围分配不能进入发布。
-程序组装的内容及片段对应关系一起交给语义核对。来源片段仍属于同一个知识页面，
-中性公共标题和合理任务归类不构成自动拒绝理由。
+同一知识页面可以包含正文中不同任务的精确原文范围；附件内容只作为已保存资产，
+不进入 `DocumentPlan`、生成或依赖判断。生成请求明确列出来源范围，每个原文窗口
+具有独立 occurrence ID（同一范围被拆分时也保留各自身份）。混合正文范围的响应按片段
+返回对应关系；缺失、重复、未知编号及越范围分配不能进入发布。程序组装的内容及片段
+对应关系一起交给语义核对。中性公共标题和合理任务归类不构成自动拒绝理由。
 
 原文完整窗口能放入请求时只测量一次预算；只有放不下才搜索切分边界。
 生成时最多提供 64 个标题词相关链接候选，完整目录仍用于本地目标校验。
@@ -1078,12 +1098,12 @@ compilation_thinking: disabled
 verification_adjudication_thinking: enabled
 ```
 
-这是知识库级高级设置，默认不启用，不改变事实提取、规划或正常生成的思考模式。
+这是知识库级高级设置，默认不启用，不改变 `DocumentPlan` 规划或正常候选生成的思考模式。
 普通核对未通过时，同一候选最多增加一次指定思考模式的独立复核；复核仍拒绝则
 继续有限纠正，仍不能可靠处理的候选记为内容缺失，独立可靠内容继续发布；全候选
 排除也正常登记原件与零知识缺失入口。不会循环重试直到通过。所有调用共用原请求、token、
 时间和取消预算。普通核对与深度复核各自绑定实际请求和思考模式；改变深度复核设置
-不会使未改变的事实、规划或初次生成失效。已有普通肯定结论无需额外复核，旧深度
+不会使未改变的正式计划、候选或初次生成失效。已有普通肯定结论无需额外复核，旧深度
 复核记录不能冒充新模式下的结果。
 
 
@@ -1091,26 +1111,26 @@ verification_adjudication_thinking: enabled
 重试位置共同决定身份。恢复时用当前规则重新验证记录；同一份已拒绝的候选不会
 因为重新导入就再次抽签。格式无效或仍不确定的响应继续走已有的有界恢复路径。
 
-DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生成阶段会在相同章节及
-附件中回读最小完整配置片段，最多向前 32 段、8192 字符；引号或注释中的括号不参与
+DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生成阶段会在相同正文章节中
+回读最小完整配置片段，最多向前 32 段、8192 字符；引号或注释中的括号不参与
 匹配，无法确定配对时不补造上下文。附加段落带精确原文引用，进入原有请求预算和
 语义核对。并发工作从已验证的只读快照读取，避免在工作线程中访问持有写锁的知识库。
 
 
 知识库还可显式设置 `correction_thinking: enabled`，使原有的一次纠正请求使用深度模式。
-未设置时沿用正常生成模式；此选项不改变初次生成、事实提取、规划或语义核对。
+未设置时沿用正常生成模式；此选项不改变初次生成、正式计划或语义核对。
 它不会增加纠正轮数，仍使用相同输出、累计 token、时间和取消预算。失败稿的恢复记录
 绑定实际纠正消息及模式，修改纠正策略后重新处理旧纠正稿；有效语义拒绝仍绑定原候选。
 
 
-当有效的定位审查仅指出公共标题错误时，纠正只请求新标题。程序保留原正文、事实覆盖
+当有效的定位审查仅指出公共标题错误时，纠正只请求新标题。程序保留原正文、范围覆盖
 和来源片段对应关系，只同步修改与旧公共标题完全匹配的开头标题，然后复核标题变化及其影响的条件。正文纠错也携带明确差异，只复核修改与受影响的条件；
-公共前提变化仍需检查依赖操作，不能借局部修正绕过事实检查。
+公共前提变化仍需检查依赖操作，不能借局部修正绕过原文证据检查。
 
-同一主题拆成多个请求时，子请求的校验另带从整主题原文选择的标题依据，只用于共同标题。
+同一页面候选因容量拆成多个范围请求时，子请求的校验另带从完整候选原文选择的标题依据，只用于共同标题。
 它不替代当前正文的原文证据或片段对应关系，也不能将不同任务变成前置依赖。
 标题依据软预算为可用输入的 1/4，且不超过 4096 tokens；保留完整上下文片段，
-空间不足时可仅保留原文章节标题。整主题一次完成的请求不增加该字段。
+空间不足时可仅保留原文章节标题。完整候选一次完成的请求不增加该字段。
 首部分通过后，程序固定共同标题；后续模型提出改名时仍按固定标题核对其正文。
 正文生成与完整纠正不接收这些其他片段的原文，避免将标题依据误写入当前正文。
 只有程序保证正文不变的标题专用纠正可以读取它们。
@@ -1146,13 +1166,14 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 历史发布内容：接受其他来源的链接清理，不代表允许以后覆盖这里保留的人工内容。
 摘要中可编辑的来源字段或正文标记被删除，不能绕过此检查；归属不明时要求审阅。
 
-仅增加总请求数、总 token 或总运行时间后继续，同一原件中已完成且上下文未变的
-事实单元可恢复，包括已确认不含独立事实的标题。索引的执行记录变化本身不使这些
-结果失效；原文、必要上下文、节点含义或核验规则改变时仍重新验证。空结果不跨资料共享。
+仅增加总请求数、总 token 或总运行时间后继续，同一原件中已接受且上下文未变的
+`DocumentPlan` 窗口、页面候选与复核回执可恢复。索引的执行记录变化本身不使这些
+结果失效；原文范围、冻结 W、必要上下文、节点含义或核验规则改变时仍重新验证。
+空结果不跨资料共享。
 
 存在未解析内容时，发布前还要检查知识是否依赖缺失的前提、例外或表头。该检查保留
 完整原文与候选内容，在允许的上下文范围内压缩重复引用。有效判定后，省略依赖缺失
-内容或仍不确定的主题，发布其余独立主题；容量或协议问题有界拆分，最小候选仍无法
+内容或仍不确定的页面候选，发布其余独立页面；容量或协议问题有界拆分，最小候选仍无法
 确认时跳过并保留诊断；没有可保留主题时仍完成来源登记及零知识摘要。请求、token 与时间上限仍然
 生效，压缩本身不能证明知识独立或完整。
 
@@ -1161,9 +1182,9 @@ DOCX 的代码可能分成多个普通段落。遇到独立结束括号时，生
 依赖检查的返回若缺少候选、含未知路径或格式无效，单独保存原始返回及协议诊断，
 有界拆分和重试后隔离无法确认的候选；继续可在原额度内补缺口。有效的依赖或未知
 判定保留原理由并复用，不能通过重跑已拆分的父批次绕过子批次的拒绝。
-请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带索引制品
-ID 的空事实收据升级后可能重做一次；新版本内仅调整总请求、token 或时限不使这些
-已完成单元失效。
+请求超出显式最大上下文属于执行限制，不记录为模型拒绝。旧开发快照中带有旧式
+事实收据的记录仅作历史兼容，升级后可能重做一次；当前版本只复用正式计划、候选和
+复核回执，且仅调整总请求、token 或时限不会使这些已完成记录失效。
 
 
 ## 2026-09-14：完成带缺失的导入与限定范围的回答修正
@@ -1176,14 +1197,15 @@ ID 的空事实收据升级后可能重做一次；新版本内仅调整总请�
 人工修改后的原页与自动生成基线分别保存。相同候选的 Continue 不覆盖人工补写，
 也不把人工文字重新认领为自动生成；真正的新差异继续走既有人工覆盖保护。
 
-Continue 保留同一来源版本与解析下已完成的主题规划，不因该来源刚发布的页面进入
-现有目录而重新命名、分组和生成已完成主题。这是来源处理的恢复状态，不将目录不同
-的模型请求当作相同请求缓存；规划成员、模型、schema、导航和规划规则仍参与绑定，
-生成时仍检查当前事实、其他来源贡献和有效链接。显式重新编译会重新读取当前目录。
-规划仅部分完成时保留已完成成员，继续只规划剩余成员；单个主题超出请求容量时
-记录缺失，其他主题与零知识登记仍正常发布。补出新主题或新增无关页面不会使已核验
-主题重复生成；复用保留原核验回执，并检查正文实际引用，已用链接失效时重新生成。
-升级前没有该恢复记录的来源不能凭空补造规划，仍需按现有有界流程建立有效记录。
+Continue 保留同一来源版本与解析下已接受的 `DocumentPlan` 窗口，不因该来源刚发布
+的页面进入现有目录而重新命名、分组或生成已完成页面候选。这是来源处理的恢复状态，
+不将目录不同的模型请求当作相同请求缓存；冻结 W、S 账本、T 范围、模型、端点能力、
+schema、导航和规划规则仍参与绑定，生成时仍检查当前原文范围、其他来源贡献和有效链接。
+显式重新编译会重新读取当前目录。规划仅部分完成时保留已接受窗口，继续只规划剩余
+窗口；单个页面候选超出请求容量时记录缺失，其他页面与零知识登记仍正常发布。补出
+新页面或新增无关页面不会使已核验页面重复生成；复用保留原核验回执，并检查正文实际
+引用，已用链接失效时重新生成。升级前没有该恢复记录的来源不能凭空补造规划，仍需按
+现有有界流程建立有效记录。
 历史清理同时保留待接受提案引用的原件，以及归属比较所必需的旧生成字节。
 
 原文读取工具提供 `short_citation` 标识。程序只根据已观察的来源工具结果展开为
@@ -1213,8 +1235,9 @@ Task diagnostics distinguish no content yet, reasoning activity and answer activ
 with character counts and time since the last meaningful delta. These are observed
 characters, not billed tokens. Reasoning text is neither displayed nor stored by this
 activity recorder; final provider usage supplies token counts when available.
-Completed planning batches update progress immediately and retain their validated
-checkpoints when a later batch stops. Continue reuses matching completed inputs.
+Accepted formal planning windows update progress immediately and retain their
+validated checkpoints when a later window stops. Continue reuses matching
+completed inputs.
 
 
 ## 2026-09-18：长文档资源与遗漏传播
@@ -1225,11 +1248,11 @@ checkpoints when a later batch stops. Continue reuses matching completed inputs.
 原件、持久检查点或发布成果。
 
 普通内容失败只在后续遗漏记录中保留原因与原文引用，不保留异常对象及其 traceback。
-事实、规划和生成的失败批次在下一批调入前释放正文；否则 traceback 会间接持有已完成
+规划、候选生成和审核的失败批次在下一批调入前释放正文；否则 traceback 会间接持有已完成
 请求与响应，使长文档的内存随失败数累积。硬额度、保存或身份错误仍向上传播。
 
-展开的资料单元、事实、完成候选及页面片段按需从私有工作区读取。主题到事实的 ID 索引
-避免反复加载整篇事实。并发证据快照保留不可变来源身份，正文保存在私有文件中，按范围
+展开的资料证据、DocumentPlan、完成候选及页面片段按需从私有工作区读取。页面到原文范围的
+账目避免反复加载整篇资料。并发证据快照保留不可变来源身份，正文保存在私有文件中，按范围
 读取并共用 64 MiB 字节缓存。活跃合同共用 256 MiB 上限；工作进程及其子进程的启动内存
 软预算为可用物理内存的 50%，最高 2 GiB。达到 80% 时清缓存并减少调入，等待在途批次结束；
 单批仍放不下则保存恢复状态并报告资源不足。这是调入策略，不是精确的 RSS 硬封顶。
@@ -1242,7 +1265,7 @@ checkpoints when a later batch stops. Continue reuses matching completed inputs.
 原文批次软目标约 4000 tokens，同一操作可更长，仍检查完整序列化请求和后续审核容量。
 长命令、代码围栏、带续行或 AND/OR 的行不按字符截断。不能完整容纳的范围明确记为遗漏。
 单个完整操作的必要上下文超过初始请求目标时，生成预检在已配置的最大上下文以内逐级
-扩大，再判断是否切分或遗漏；后续合批沿用该主题已增长的容量，不因追加候选自行扩大。
+扩大，再判断是否切分或遗漏；后续分片沿用该页面已增长的容量，不因追加候选自行扩大。
 输出预留与用户硬额度保持不变，初始软目标不冒充服务或配置的最终容量上限。
 表格继续保留完整行、表头及合并关系，批注、图注、原图和附件沿用其不可变位置与来源角色。
 
@@ -1251,11 +1274,12 @@ checkpoints when a later batch stops. Continue reuses matching completed inputs.
 前提。此定位信息不替代正文语义审核，也不使错误标题、矛盾声明或未知依赖获得通过。
 容量预检、审核、纠错与发布使用同一正文；旧生成与审核结果按更新后的完整规则重新核对。
 
-共享精确原文范围的小候选可合并一次审核，最多 3 个且各自返回结论。已有遗漏进入初次
-审核合同；一次有依据的纠错后只复核差异与相关条件。有效否定及关键不确定结果可恢复，
-没有新证据时不重新抽样。发布前按完整遗漏范围与候选范围判断依赖；标题或关键词只帮助
-定位，不能据此免审。新排除的候选继续作为遗漏传播，直到稳定。无法定位的条件扩大原文
-范围，必要原文本身超限则提前记录遗漏，避免生成之后反复拆小候选。
+每个新候选都以组装后的完整正文单独进行一次关键审核；审核容量不足时保留对应页面为
+明确遗漏，绝不把整体审核降级为分片审核。已有遗漏进入初次审核合同；一次有依据的纠错后
+只复核差异与相关条件。有效否定及关键不确定结果可恢复，没有新证据时不重新抽样。发布前
+按完整遗漏范围与候选范围判断依赖；标题或关键词只帮助定位，不能据此免审。新排除的候选
+继续作为遗漏传播，直到稳定。无法定位的条件扩大原文范围，必要原文本身超限则提前记录
+遗漏，避免生成之后反复拆小候选。
 
 零知识入口仍表示原件已登记、内容有遗漏，不能作为部署手册已获得可用知识的证据。
 此次真实材料、Windows 具体版本、资源与预算结果另行记录，离线测试不代替实际发布验收。

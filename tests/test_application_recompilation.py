@@ -36,7 +36,7 @@ def test_unknown_transport_recompile_retains_previous_summary(kb_dir, monkeypatc
     assert result.status == "unfinished"
     assert result.error_type is None
     assert result.document.reason == "request_outcome_unknown"
-    assert result.document.stage == "facts"
+    assert result.document.stage == "planning"
     assert not result.changes
     assert "private provider detail" not in repr(result)
     assert summary.read_text() == original
@@ -101,7 +101,7 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     )
     assert skipped.status == "skipped"
     assert context.snapshot is None
-    assert len(calls) == 4
+    assert len(calls) == 3
 
 
 def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
@@ -123,7 +123,7 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
     (kb_dir / ".openkb/hashes.json").write_text(
         json.dumps({"h": {"doc_name": "note", "type": "md"}})
     )
-    (kb_dir / "wiki/sources/note.md").write_text("Original note")
+    (kb_dir / "wiki/sources/note.md").write_text("One.\n\nTwo.\n\nThree.")
 
     def response(content):
         return SimpleNamespace(
@@ -140,18 +140,31 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
         time.sleep(0.03)
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for item, unit in zip(value["units"], payload["units"]):
-                item["facts"] = [
-                    {"topic": name, "statement": unit["text"], "quote": unit["text"]}
-                    for name in ("one", "two", "three")
-                ]
-        elif payload["stage"] == "planning":
+        if payload["stage"] == "planning":
+            target = payload["target"]
+            start, end = target["target_start"], target["target_end"]
             value = {
-                "topics": [
-                    {"name": name, "title": name, "kind": "concept", "members": [name]}
-                    for name in payload["topics"]
-                ]
+                "overview": {
+                    "text": "Three independent notes.",
+                    "ranges": [[start, end]],
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": f"page-{index}",
+                        "target_key": "",
+                        "kind": "concept",
+                        "name": f"concepts/page-{index}",
+                        "title": f"Page {index}",
+                        "purpose": f"Source note {index}",
+                        "subject_ranges": [[index, index + 1]],
+                        "necessary_context": [],
+                    }
+                    for index in range(start, end)
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
         active -= 1
         return response(value)
@@ -203,14 +216,12 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
 @pytest.mark.parametrize(
     "plan, code",
     [
-        ("not JSON", "topic_plan_invalid"),
-        (json.dumps({"topics": "not-a-list"}), "topic_plan_invalid"),
-        (json.dumps({"topics": [{"name": ["bad"]}]}), "topic_plan_invalid"),
+        ("not JSON", "document_plan_invalid"),
+        (json.dumps({"topics": "not-a-list"}), "document_plan_invalid"),
+        (json.dumps({"topics": [{"name": ["bad"]}]}), "document_plan_invalid"),
     ],
 )
-def test_degraded_compile_reports_omissions_and_preserves_unowned_summary(
-    kb_dir, monkeypatch, plan, code
-):
+def test_invalid_document_plan_preserves_unowned_summary(kb_dir, monkeypatch, plan, code):
     import litellm
 
     from openkb.application.recompilation import recompile_document
@@ -221,7 +232,7 @@ def test_degraded_compile_reports_omissions_and_preserves_unowned_summary(
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
-        content = json.dumps(evidence_response(payload)) if payload["stage"] == "facts" else plan
+        content = plan if payload["stage"] == "planning" else json.dumps(evidence_response(payload))
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -230,6 +241,6 @@ def test_degraded_compile_reports_omissions_and_preserves_unowned_summary(
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, "h"))
     assert result.status == "unfinished"
-    assert result.message == "needs_acceptance"
-    assert any(row["reason"] == code for row in result.document.omissions)
+    assert result.message == code
+    assert result.document.reason == code
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

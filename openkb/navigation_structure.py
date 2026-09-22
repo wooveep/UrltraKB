@@ -315,20 +315,26 @@ def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, c
             )
         except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
             record_optional_failure(record, exc)
-            descriptor = evidence_descriptor(source, parsed, start, start + 1)
+            # A spent optional allowance must not turn the remaining document
+            # into one artificial navigation group per block.  Preserve one
+            # contiguous degraded W; DocumentPlan later splits its movable T
+            # with the selected model's actual capacity before any request.
+            end = len(parsed.blocks)
+            descriptor = evidence_descriptor(source, parsed, start, end)
             record["windows"].append(
                 {
                     "evidence": descriptor,
                     "target_start": start,
-                    "target_end": start + 1,
+                    "target_end": end,
                     "status": "basic",
                     "reason": str(exc),
                     "target_tokens": options.get("window_tokens", 200000),
-                    "unlocated": [row for row in unresolved if row["start"] <= start < row["end"]],
+                    "unlocated": [
+                        row for row in unresolved if row["start"] < end and start < row["end"]
+                    ],
                 }
             )
-            start += 1
-            continue
+            break
         manifest = {
             "evidence": descriptor,
             "target_start": start,

@@ -33,11 +33,14 @@ def test_comment_role_reaches_every_compilation_stage(kb_dir, tmp_path, model_se
     for request in model_service:
         payload = json.loads(request["messages"][-1]["content"])
         stage = payload.get("stage")
-        if stage not in {"facts", "generation", "verification"}:
+        if stage not in {"planning", "generation", "verification"}:
             continue
-        rows = payload["units"] if stage == "facts" else payload["evidence"]
+        rows = payload["evidence"]["blocks"]
         row = next(row for row in rows if "File change record." in row["text"])
-        assert row["context_data"]["inline_annotations"] == expected
+        context = row["context_data"]
+        if "context_ref" in context:
+            context = payload["context_pool"][context["context_ref"]]
+        assert context["inline_annotations"] == expected
         assert "inline_annotations" in request["messages"][0]["content"]
         seen.add(stage)
-    assert seen == {"facts", "generation", "verification"}
+    assert seen == {"planning", "generation", "verification"}

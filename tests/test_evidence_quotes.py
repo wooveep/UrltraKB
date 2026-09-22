@@ -23,12 +23,10 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
+        if payload["stage"] == "planning":
             calls.append(payload)
-            for unit in value["units"]:
-                unit["facts"][0]["quote"] = "dpkg -i"
         if payload["stage"] == "generation":
-            generated.extend(payload["facts"])
+            generated.extend(payload["evidence"]["blocks"])
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -36,8 +34,9 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
     assert result.knowledge_compilation == "completed", result
     assert len(calls) == 1
     assert generated
-    for fact in generated:
-        assert fact["quote"] == original
+    for block in generated:
+        assert original in block["text"]
+        assert block["reference"]["parse_id"]
     from openkb.agent.evidence_units import source_units
     from openkb.config import resolve_effective_config
     from openkb.navigation import read_navigation
@@ -78,29 +77,16 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
         ("Local evidence.", "Neighbor evidence."),
     ],
 )
-def test_quote_repair_does_not_accept_rewrites_or_ambiguous_positions(
-    kb_dir, tmp_path, monkeypatch, text, quote
-):
-    source = tmp_path / "invalid.md"
-    source.write_text(text, encoding="utf-8")
-    events = []
+def test_quote_repair_does_not_accept_rewrites_or_ambiguous_positions(text, quote):
+    from openkb.agent.evidence_quotes import fact_quote
+    from openkb.agent.evidence_retry import ResponseIncomplete
 
-    def completion(**kwargs):
-        payload = json.loads(kwargs["messages"][-1]["content"])
-        value = evidence_response(payload)
-        for unit in value["units"]:
-            unit["facts"][0]["quote"] = quote
-        return response(value)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    result = import_document(kb_dir, source, on_event=events.append)
-    assert result.knowledge_compilation == "completed"
-    assert any(row["reason"] == "fact_evidence_invalid" for row in result.omissions)
-    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-    failures = [e for e in events if e.get("operation") == "response_invalid"]
-    assert failures[-1]["field"] == "quote"
-    assert failures[-1]["unit_id"]
-    assert "quote" not in failures[-1] and "text" not in failures[-1]
+    unit = {"id": "unit", "reference": {"block_id": "block"}, "kind": "paragraph", "text": text}
+    fact = {"topic": "Example", "statement": "Source requirement", "quote": quote}
+    with pytest.raises(ResponseIncomplete, match="fact_evidence_invalid") as error:
+        fact_quote(unit, fact)
+    assert error.value.details["field"] == "quote"
+    assert error.value.details["unit_id"] == "unit"
 
 
 def test_code_quotes_keep_strict_whitespace():
@@ -115,39 +101,30 @@ def test_code_quotes_keep_strict_whitespace():
     assert fact_quote(unit, fact) == (unit["text"], 0, len(unit["text"]))
 
 
-def test_previous_valid_fact_checkpoint_is_revalidated_and_reused(kb_dir, tmp_path, monkeypatch):
-    from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+def test_accepted_document_plan_is_reused_after_stop(kb_dir, tmp_path, monkeypatch):
+    from openkb.application.execution import ExecutionContext
+    from openkb.application.source_actions import continue_source
+    from openkb.cancellation import OperationCancelled
 
     source = tmp_path / "resume.md"
-    source.write_text("Previously validated source facts.", encoding="utf-8")
-    current_key = CompilationCheckpoints.key
-
-    def previous_key(self, system, payload, **kwargs):
-        if payload["stage"] == "facts":
-            return self.previous_fact_key(system, payload)
-        return current_key(self, system, payload, **kwargs)
+    source.write_text("Previously planned source knowledge.", encoding="utf-8")
 
     calls = []
-    first_run = True
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         calls.append(payload["stage"])
-        return response(
-            evidence_response(payload), truncated=first_run and payload["stage"] == "planning"
-        )
+        return response(evidence_response(payload))
 
-    monkeypatch.setattr(CompilationCheckpoints, "key", previous_key)
+    def stop_after_plan(event):
+        if event.get("stage") == "planning" and event.get("status") == "accepted":
+            raise OperationCancelled()
+
     monkeypatch.setattr(litellm, "completion", completion)
-    first = import_document(kb_dir, source)
-    assert first.knowledge_compilation == "completed"
-    assert any(row["reason"] == "output_budget_exhausted" for row in first.omissions)
-    assert calls.count("facts") == 1
+    first = import_document(kb_dir, source, context=ExecutionContext(on_event=stop_after_plan))
+    assert first.knowledge_compilation == "stopped"
+    assert calls == ["planning"]
     calls.clear()
-    first_run = False
-    monkeypatch.setattr(CompilationCheckpoints, "key", current_key)
-    from openkb.application.source_actions import continue_source
-
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
-    assert "facts" not in calls and "planning" in calls
+    assert calls == ["generation", "verification"]

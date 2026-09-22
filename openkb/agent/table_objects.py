@@ -56,7 +56,14 @@ def table_limits(limits, facts):
         fact.get("table_object", {}).get("position", {}).get("kind") in {"docx", "pdf", "pptx"}
         for fact in facts
     ):
-        return replace(limits, context_tokens=limits.max_context_tokens or limits.context_tokens)
+        context = limits.max_context_tokens or limits.context_tokens
+        return replace(
+            limits,
+            context_tokens=context,
+            input_tokens=(limits.max_input_tokens or limits.input_tokens)
+            if not limits.shared_context
+            else None,
+        )
     return limits
 
 

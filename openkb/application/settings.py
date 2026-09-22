@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -46,6 +47,206 @@ _SECRET_ENV_FIELDS = {
     "image_api_key": IMAGE_API_KEY_ENV,
 }
 _CREDENTIAL_FIELDS = (*_SECRET_ENV_FIELDS, "openai_api_base")
+
+
+def _inherited_endpoint() -> str | None:
+    """Resolve the endpoint below a local/global patch without writing it first."""
+
+    from dotenv import dotenv_values
+
+    values: dict[str, str | None] = {}
+    path = _config_module.GLOBAL_CONFIG_DIR / ".env"
+    if path.exists():
+        values = dict(dotenv_values(str(path)))
+    return os.environ.get("OPENAI_API_BASE") or values.get("OPENAI_API_BASE") or None
+
+
+def _endpoint_after_patch(
+    kb_dir: Path | None, request: KbConfigPatchRequest | GlobalConfigPatchRequest
+) -> str | None:
+    """Return the endpoint the selected model will use after this patch."""
+
+    if "openai_api_base" in request.model_fields_set:
+        if request.openai_api_base:
+            return request.openai_api_base
+        if kb_dir is None:
+            # A global clear removes the file this pre-write validation would
+            # otherwise consult.  Only an explicit process-level override can
+            # still supply an endpoint after the mutation is committed.
+            return os.environ.get("OPENAI_API_BASE") or None
+        # A KB-level clear deliberately inherits the global endpoint.
+        return _inherited_endpoint()
+    if kb_dir is not None:
+        return resolve_credential_bundle(kb_dir).base_url
+    return _inherited_endpoint()
+
+
+def _post_global_endpoint_for_kb(kb_dir: Path, request: GlobalConfigPatchRequest) -> str | None:
+    """Resolve a KB's endpoint against a not-yet-written global env patch."""
+
+    from dotenv import dotenv_values
+
+    values = dict(dotenv_values(str(kb_dir / ".env"))) if (kb_dir / ".env").exists() else {}
+    return (
+        values.get("OPENAI_API_BASE")
+        or os.environ.get("OPENAI_API_BASE")
+        or _endpoint_after_patch(None, request)
+    )
+
+
+def _global_validation_kbs(global_config: dict[str, object]) -> list[Path]:
+    """Return existing registered and active-root KBs without re-reading global.yaml.
+
+    Global changes are validated while the candidate global mapping is still
+    private to the mutation.  Calling ``registered_kbs()`` here would reload the
+    old on-disk mapping, so build the same bounded path set from the candidate
+    values instead.
+    """
+
+    candidates: list[Path] = []
+    for key in ("known_kbs", "default_kb"):
+        values = global_config.get(key)
+        if isinstance(values, str):
+            values = [values]
+        if isinstance(values, list):
+            candidates.extend(
+                Path(value).expanduser() for value in values if isinstance(value, str)
+            )
+    aliases = global_config.get("kb_aliases")
+    if isinstance(aliases, dict):
+        candidates.extend(
+            Path(value).expanduser() for value in aliases.values() if isinstance(value, str)
+        )
+
+    root_value = os.environ.get("OPENKB_KB_ROOT") or global_config.get("kb_root")
+    root = (
+        Path(root_value).expanduser()
+        if isinstance(root_value, str) and root_value.strip()
+        else _config_module.GLOBAL_CONFIG_DIR / "kbs"
+    )
+    try:
+        if root.is_dir():
+            candidates.extend(child for child in root.iterdir() if child.is_dir())
+    except OSError:
+        pass
+
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not (resolved / ".openkb" / "config.yaml").is_file():
+            continue
+        seen.add(resolved)
+        result.append(resolved)
+    return result
+
+
+def _raw_kb_config_for_global_validation(kb_dir: Path) -> dict[str, object]:
+    """Load just one KB's own layer; defaults must remain inherited."""
+
+    try:
+        with (kb_dir / ".openkb" / "config.yaml").open("r", encoding="utf-8") as fh:
+            value = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError("Registered knowledge-base config cannot be read") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Registered knowledge-base config must be a mapping")
+    return value
+
+
+def _validate_registered_effective_processing(
+    global_config: dict[str, object], request: GlobalConfigPatchRequest, changed: set[str]
+) -> None:
+    """Reject a global mutation that invalidates a registered KB's local limits."""
+
+    for kb_dir in _global_validation_kbs(global_config):
+        _validate_effective_processing(
+            global_config,
+            kb_config=_raw_kb_config_for_global_validation(kb_dir),
+            endpoint=_post_global_endpoint_for_kb(kb_dir, request),
+            changed=changed,
+        )
+
+
+def _effective_capacity_values(
+    global_config: dict[str, object], kb_config: dict[str, object] | None = None
+) -> tuple[str, dict[str, object], dict[str, object], bool]:
+    """Merge just the model and processing fields needed for capacity validation."""
+
+    model = DEFAULT_CONFIG["model"]
+    processing = deepcopy(DEFAULT_CONFIG["processing"])
+    navigation = deepcopy(DEFAULT_CONFIG.get("navigation", {}))
+    processing_explicit = False
+    for layer in (global_config, kb_config or {}):
+        value = layer.get("model")
+        if value is not None:
+            model = value
+        value = layer.get("processing")
+        if value is not None:
+            processing = value
+            processing_explicit = True
+        value = layer.get("navigation")
+        if value is not None:
+            navigation = value
+    if (
+        not isinstance(model, str)
+        or not isinstance(processing, dict)
+        or not isinstance(navigation, dict)
+    ):
+        raise ValueError("Invalid effective processing settings")
+    return model, processing, navigation, processing_explicit
+
+
+def _validate_effective_processing(
+    global_config: dict[str, object],
+    *,
+    kb_config: dict[str, object] | None = None,
+    endpoint: str | None,
+    changed: set[str],
+) -> None:
+    """Validate changed effective request contracts against the selected endpoint.
+
+    A bare model switch may intentionally precede an explicit capacity declaration
+    for an unknown provider.  Once a processing contract is set (or an existing
+    explicit contract is affected by model/endpoint/navigation changes), it must
+    be valid for the model and endpoint that will actually receive requests.
+    """
+
+    from openkb.processing import ProcessingIncomplete, RequestLimits
+
+    model, processing, navigation, processing_explicit = _effective_capacity_values(
+        global_config, kb_config
+    )
+    navigation_processing = navigation.get("processing")
+    main_changed = bool(changed & {"model", "processing", "openai_api_base"})
+    navigation_changed = bool(changed & {"model", "navigation", "openai_api_base"})
+
+    def validate(value: object, label: str) -> None:
+        if value is None:
+            return
+        if not isinstance(value, dict):
+            raise ValueError(f"{label} must be a processing budget mapping")
+        try:
+            RequestLimits.from_config(
+                {
+                    "model": model,
+                    "_model_endpoint": endpoint,
+                    "processing": value,
+                }
+            )
+        except ProcessingIncomplete as exc:
+            raise ValueError(
+                f"{label} must fit the selected model and endpoint; for an unknown "
+                "model, declare either shared context or independent input/output capacity"
+            ) from exc
+
+    if main_changed and processing_explicit:
+        validate(processing, "Processing limits")
+    if navigation_changed and navigation_processing is not None:
+        validate(navigation_processing, "Navigation processing limits")
 
 
 def _has_line_separator(value: str) -> bool:
@@ -193,7 +394,9 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
     """
     fields_set = request.model_fields_set
     _reject_credential_newlines(request)
-
+    dumped: dict[str, object] = {}
+    config: dict[str, object] | None = None
+    config_path = kb_dir / ".openkb" / "config.yaml"
     if request.config is not None:
         unknown = set(request.config) - _KB_CONFIG_WRITABLE_KEYS
         if unknown:
@@ -206,7 +409,6 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
             first = exc.errors()[0]
             field = ".".join(str(p) for p in first.get("loc", ())) or "config"
             raise ValueError(f"Invalid type for config field '{field}': {first['msg']}") from exc
-        config_path = kb_dir / ".openkb" / "config.yaml"
         # RAW read of the KB's own config.yaml — NOT load_config(), which
         # merges in DEFAULT_CONFIG. Merging defaults here would materialize
         # every default key (model/language/pageindex_threshold/...) into
@@ -235,6 +437,28 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
                 config.pop(key, None)
             else:
                 config[key] = value
+
+    if request.config is not None or "openai_api_base" in fields_set:
+        if config is None:
+            if config_path.exists():
+                with config_path.open("r", encoding="utf-8") as fh:
+                    config = yaml.safe_load(fh) or {}
+            else:
+                config = {}
+            if not isinstance(config, dict):
+                raise ValueError("Knowledge-base config must be a mapping")
+        changed = set(dumped)
+        if "openai_api_base" in fields_set:
+            changed.add("openai_api_base")
+        _validate_effective_processing(
+            _load_global_config_unlocked(),
+            kb_config=config,
+            endpoint=_endpoint_after_patch(kb_dir, request),
+            changed=changed,
+        )
+
+    if request.config is not None:
+        assert config is not None
         save_config(config_path, config)
 
     if fields_set.intersection(_CREDENTIAL_FIELDS):
@@ -283,7 +507,9 @@ def _read_global_config() -> GlobalConfigResponse:
             gc["processing"] if gc.get("processing") is not None else DEFAULT_CONFIG["processing"]
         ),
         navigation=gc.get("navigation") or {},
-        **setting_values(gc),
+        # Response defaults represent effective global settings; a silent raw
+        # value must not override ``CompilationSettings.review_mode`` with None.
+        **{key: value for key, value in setting_values(gc).items() if value is not None},
         language=gc.get("language", DEFAULT_CONFIG["language"]),
         pageindex_threshold=gc.get("pageindex_threshold", DEFAULT_CONFIG["pageindex_threshold"]),
         # Effective global vocabulary (cleaned; defaults to DEFAULT_ENTITY_TYPES).
@@ -351,7 +577,8 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
             lock_path=_config_module.GLOBAL_CONFIG_DIR / "global.lock",
         ),
     ):
-        if dumped is not None or write_kb_root:
+        gc: dict[str, object] | None = None
+        if dumped is not None or write_kb_root or "openai_api_base" in fields_set:
             gc = _load_global_config_unlocked()
             if dumped is not None:
                 for key, value in dumped.items():
@@ -370,6 +597,17 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
                     gc.pop("kb_root", None)
                 else:
                     gc["kb_root"] = request.kb_root
+            changed = set(dumped or {})
+            if "openai_api_base" in fields_set:
+                changed.add("openai_api_base")
+            _validate_effective_processing(
+                gc,
+                endpoint=_endpoint_after_patch(None, request),
+                changed=changed,
+            )
+            _validate_registered_effective_processing(gc, request, changed)
+        if dumped is not None or write_kb_root:
+            assert gc is not None
             # GLOBAL_CONFIG_PATH is read through the module object (not imported
             # by name) because tests monkeypatch openkb.config.GLOBAL_CONFIG_PATH
             # per test; a `from openkb.config import GLOBAL_CONFIG_PATH` would

@@ -147,7 +147,12 @@ class WorkerDiagnostics:
             self.emit(f"事实提取：复用 {reused}/{total} 个片段；待处理 {total - reused} 个")
             return
         if value.get("stage") == "planning" and value.get("cached"):
-            self.emit(f"主题规划：复用 {value['topics']} 个主题的已完成规划")
+            if "pages" in value:
+                self.emit(f"文档规划：复用 {value['pages']} 个页面的已完成规划")
+            elif "topics" in value:
+                self.emit(f"主题规划：复用 {value['topics']} 个主题的已完成规划")
+            else:
+                self.emit("规划：复用已完成结果")
             return
         if value.get("stage"):
             source = Path(value["source"]).name if value.get("source") else ""

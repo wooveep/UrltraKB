@@ -5,7 +5,9 @@ import json
 from openkb.sources import valid_id
 
 
-def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, parsed=None):
+def validate_coverage(
+    value, source_id=None, version_id=None, parse_id=None, *, parsed=None, streaming=False
+):
     if not isinstance(value, dict):
         raise ValueError("Invalid source coverage")
     if not value:
@@ -28,6 +30,9 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
         if expected is not None and value[field] != expected:
             raise ValueError("Source coverage binding mismatch")
     ends = {}
+    block_rows = iter(parsed.blocks) if streaming and parsed is not None else None
+    block = next(block_rows, None) if block_rows is not None else None
+    block_end = 0
     for row in value["ranges"]:
         if (
             not isinstance(row, dict)
@@ -45,12 +50,40 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
             )
             or type(row["start"]) is not int
             or type(row["end"]) is not int
-            or row["start"] != ends.get(row["block_id"], 0)
+            or (
+                row["start"]
+                != (block_end if block_rows is not None else ends.get(row["block_id"], 0))
+            )
             or row["end"] < row["start"]
+            or (
+                block_rows is not None
+                and (
+                    block is None
+                    or row["block_id"] != block.id
+                    or row["end"] > block.chars
+                    or row["kind"] != block.kind
+                    or row["location"] != block.location
+                )
+            )
         ):
+            # The streaming path has already bound this row to the current
+            # parsed block.  A typed span that fails that binding is a broken
+            # denominator, not merely an unparseable manifest field.
+            if (
+                block_rows is not None
+                and isinstance(row, dict)
+                and type(row.get("start")) is int
+                and type(row.get("end")) is int
+            ):
+                raise ValueError("Source coverage denominator mismatch")
             raise ValueError("Invalid source coverage range")
         valid_id(row["block_id"])
-        ends[row["block_id"]] = row["end"]
+        if block_rows is None:
+            ends[row["block_id"]] = row["end"]
+        else:
+            block_end = row["end"]
+            if block_end == block.chars:
+                block, block_end = next(block_rows, None), 0
     for row in value["assets"]:
         if (
             not isinstance(row, dict)
@@ -60,7 +93,7 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
             or row["understanding"] not in {"pending", "not_required"}
             or not isinstance(row["blocks"], list)
             or not row["blocks"]
-            or any(block not in ends for block in row["blocks"])
+            or (block_rows is None and any(block not in ends for block in row["blocks"]))
         ):
             raise ValueError("Invalid source asset coverage")
         valid_id(row["id"])
@@ -76,7 +109,10 @@ def validate_coverage(value, source_id=None, version_id=None, parse_id=None, *, 
     )
     if value["status"] == "complete" and pending:
         raise ValueError("Incomplete original coverage cannot be complete")
-    if parsed is not None:
+    if parsed is not None and block_rows is not None:
+        if block is not None:
+            raise ValueError("Source coverage denominator mismatch")
+    elif parsed is not None:
         blocks = {block.id: block for block in parsed.blocks}
         if ends != {block.id: block.chars for block in parsed.blocks} or any(
             row["kind"] != blocks[row["block_id"]].kind
@@ -106,10 +142,165 @@ def stored_coverage(document, source, parsed):
     )
 
 
+def _record_block_assets(assets, block, *, stored_attachment, transcriptions):
+    """Keep attachment and OCR status identical for formal and legacy coverage paths."""
+
+    for digest in block.assets:
+        attachment = stored_attachment or any(
+            item["blob"] == digest for item in block.location.get("attachment_files", [])
+        )
+        entry = assets.setdefault(
+            digest,
+            {
+                "id": digest,
+                "blocks": [],
+                "original": "retained",
+                "transcription": "not_required" if attachment else "pending",
+                "understanding": "not_required" if attachment else "pending",
+            },
+        )
+        entry["blocks"].append(block.id)
+        if not attachment and entry["understanding"] == "not_required":
+            entry.update(transcription="pending", understanding="pending")
+        if not stored_attachment and (
+            digest in transcriptions
+            or (
+                block.context.startswith("OCR layout block")
+                and "transcription=pending" not in block.context
+            )
+        ):
+            entry["transcription"] = "available"
+
+
+def _document_plan_coverage(source, parsed, report, *, published):
+    """Derive coverage from original planning occurrences, not legacy facts."""
+
+    by_block = {}
+    for identity, occurrence in report.source_occurrences.items():
+        reference = occurrence["reference"]
+        by_block.setdefault(reference["block_id"], []).append((identity, occurrence))
+
+    ranges, assets = [], {}
+    transcriptions = {digest for row in parsed.quality for digest in row.get("transcriptions", [])}
+    for block in parsed.blocks:
+        stored_attachment = "attachment" in block.location
+        if stored_attachment:
+            ranges.append(
+                {
+                    "block_id": block.id,
+                    "start": 0,
+                    "end": block.chars,
+                    "kind": block.kind,
+                    "location": block.location,
+                    "status": "stored",
+                    "reason": "attachment_stored_only",
+                }
+            )
+        else:
+            rows = by_block.get(block.id, [])
+            if not block.chars:
+                ranges.append(
+                    {
+                        "block_id": block.id,
+                        "start": 0,
+                        "end": 0,
+                        "kind": block.kind,
+                        "location": block.location,
+                        "status": "pending",
+                        "reason": "analysis_pending",
+                    }
+                )
+                rows = []
+            boundaries = {0, block.chars}
+            for _, occurrence in rows:
+                reference = occurrence["reference"]
+                boundaries.update((reference["start"], reference["end"]))
+            for start, end in zip(sorted(boundaries), sorted(boundaries)[1:]):
+                applicable = [
+                    (identity, occurrence)
+                    for identity, occurrence in rows
+                    if occurrence["reference"]["start"] <= start
+                    and occurrence["reference"]["end"] >= end
+                ]
+                route_order = {
+                    "page_body": 0,
+                    "context_only": 1,
+                    "source_only": 2,
+                    "unresolved": 3,
+                }
+                applicable.sort(key=lambda row: route_order.get(row[1].get("route"), 3))
+                if not applicable:
+                    status, reason = "pending", "analysis_pending"
+                else:
+                    identity, occurrence = applicable[0]
+                    route = occurrence.get("route")
+                    accepted = identity in report.published_occurrences
+                    if route == "page_body":
+                        status = "verified" if accepted else "pending"
+                        reason = (
+                            "verified_contribution" if accepted else "knowledge_content_omitted"
+                        )
+                    elif route == "context_only":
+                        status = "referenced" if accepted else "pending"
+                        reason = (
+                            "resolved_dependency_evidence"
+                            if accepted
+                            and occurrence.get("reason") == "resolved_dependency_evidence"
+                            else "necessary_page_context"
+                            if accepted
+                            else "knowledge_review_pending"
+                        )
+                    elif route == "source_only":
+                        status, reason = "no_facts", occurrence["reason"]
+                    elif route == "unresolved":
+                        status, reason = "pending", occurrence["reason"]
+                    else:
+                        status, reason = "pending", occurrence.get("reason", "analysis_pending")
+                ranges.append(
+                    {
+                        "block_id": block.id,
+                        "start": start,
+                        "end": end,
+                        "kind": block.kind,
+                        "location": block.location,
+                        "status": status,
+                        "reason": reason,
+                    }
+                )
+        _record_block_assets(
+            assets,
+            block,
+            stored_attachment=stored_attachment,
+            transcriptions=transcriptions,
+        )
+    issues = parsing_gaps(parsed)
+    issues.extend(dict(row) for row in report.omissions)
+    pending = (
+        bool(issues)
+        or any(row["status"] == "pending" for row in ranges)
+        or any(
+            row["transcription"] == "pending" or row["understanding"] == "pending"
+            for row in assets.values()
+        )
+    )
+    value = {
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "status": ("partial" if pending else "complete") if published else "pending",
+        "ranges": ranges,
+        "assets": list(assets.values()),
+        "issues": issues,
+    }
+    return validate_coverage(value, source.source_id, source.id, parsed.id, parsed=parsed)
+
+
 def source_coverage(source, parsed, report, *, published=False):
     """The denominator is the immutable parse plus its explicit original-content gaps."""
     if parsed is None:
         return {}
+    if report.source_occurrences:
+        return _document_plan_coverage(source, parsed, report, published=published)
     units = {}
     from openkb.agent.evidence_review import unverified_facts
     from openkb.agent.evidence_selection import referenced_facts
@@ -173,32 +364,12 @@ def source_coverage(source, parsed, report, *, published=False):
             append(0, block.chars, "stored", "attachment_stored_only")
         elif cursor < block.chars or not block.chars:
             append(cursor, block.chars, "pending", "analysis_pending")
-        for digest in block.assets:
-            attachment = stored_attachment or any(
-                item["blob"] == digest for item in block.location.get("attachment_files", [])
-            )
-            entry = assets.setdefault(
-                digest,
-                {
-                    "id": digest,
-                    "blocks": [],
-                    "original": "retained",
-                    "transcription": "not_required" if attachment else "pending",
-                    "understanding": "not_required" if attachment else "pending",
-                },
-            )
-            entry["blocks"].append(block.id)
-            if not attachment and entry["understanding"] == "not_required":
-                entry.update(transcription="pending", understanding="pending")
-            # Transcription is separate from understanding the figure's relationships.
-            if not stored_attachment and (
-                digest in transcriptions
-                or (
-                    block.context.startswith("OCR layout block")
-                    and "transcription=pending" not in block.context
-                )
-            ):
-                entry["transcription"] = "available"
+        _record_block_assets(
+            assets,
+            block,
+            stored_attachment=stored_attachment,
+            transcriptions=transcriptions,
+        )
     issues = parsing_gaps(parsed)
     issues.extend(dict(row) for row in report.omissions)
     issues.extend(

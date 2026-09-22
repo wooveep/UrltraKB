@@ -40,29 +40,27 @@ earlier response. A stable coordination identity covers the complete adaptive at
 including retries. Shared drafts never grant publication permission, and generation and
 verification have independent reuse contracts.
 
-Completed facts for the same immutable source may resume after batch budgets change when
-their complete extraction contract and original quotations still validate. Fact context
-retains node meaning and original ranges, without the index artifact's execution-budget
-identity. Valid empty results remain recoverable for their own source and complete batch;
-they do not become evidence for another source. Other local
-stages retain their configured request policy, including previously successful adaptive
-expansion. A new shared consumer matches the actual expected request cap. Legacy records
-without sufficient provenance can supply only explicitly supported recovery inputs,
-followed by current validation. These
-boundaries cost metadata and conservative cache misses, but keep position movement,
-source deletion, process interruption and rule changes from silently changing evidence.
+An accepted `DocumentPlan` W/S/T prefix may resume after future scheduling budgets change
+when its frozen evidence, predecessor ledger and original ranges still validate. The
+ledger retains only a bounded projection and an immutable accepted-delta proof; it cannot
+silently relabel a baseline catalogue page as a source addition. Page candidates retain
+separate generation and critical-review receipts, and a new shared consumer matches the
+actual expected request cap. Legacy facts-first records are historical compatibility
+inputs only and cannot authorize a current `DocumentPlan` publication. These boundaries
+cost metadata and conservative cache misses, but keep position movement, source deletion,
+process interruption and rule changes from silently changing evidence.
 
 Dependency review keeps complete operation and omission scopes, with ancestor conditions
 and explicit reference targets. Structure locates evidence; a missing heading or keyword
 match never proves independence. Every candidate receives a semantic decision against the
 complete, cumulative set of known omissions. Separate independence decisions cannot be
 combined: an operation requiring either A or B fails when both are omitted, even if
-each omission alone is harmless. Transport may batch candidates, never divide that
-joint omission state into independent decisions. Unlocated conditions expand to the whole original; if that required
-input alone cannot fit, capacity preflight records a content omission before generation.
-Generated ownership annotations become ordered structured segments, and repeated full
-references use a reversible dictionary. Batches contain at most three candidates, each
-with an independent decision. Newly withdrawn candidates join the existing omissions
+each omission alone is harmless. Transport may batch independent work, but every newly
+assembled candidate receives its own critical review and cannot inherit fragment-level
+proof. Unlocated conditions expand to the whole original; if that required input alone
+cannot fit, capacity preflight records a content omission before generation. Generated
+ownership annotations become ordered structured segments, and repeated full references
+use a reversible dictionary. Newly withdrawn candidates join the existing omissions
 until the remaining decisions are stable; previous omissions stay in every propagation
 contract. Receipts bind the actual original scopes, candidate
 bytes, omissions, verification options and message rules; an unknown result stays unknown.
@@ -72,13 +70,14 @@ initial-review receipts, including refusals, without aliasing the new dependency
 whole-compilation identity.
 
 Private compilation bodies and detached source ranges are disposable, bounded working
-storage, not another source index. Completed facts and candidates retain their existing
-durable checkpoints, and only the Wiki mutation transaction grants publication permission.
-Request identity computation does not allocate a temporary contract. Active contracts use
-reference-counted ownership; explicit close releases their private store. Crash collection
-uses the existing process/owner lease and never deletes a live owner or persistent result.
-The bounded task scheduler serializes work in one KB, including reparses and attachments;
-its task family shares cumulative request, token and model-time reservations across retries.
+storage, not another source index. Accepted `DocumentPlan` prefixes and page candidates
+retain their separate durable checkpoints, and only the Wiki mutation transaction grants
+publication permission. Request identity computation does not allocate a temporary
+contract. Active contracts use reference-counted ownership; explicit close releases their
+private store. Crash collection uses the existing process/owner lease and never deletes a
+live owner or persistent result. The bounded task scheduler serializes work in one KB,
+including reparses and attachments; its task family shares cumulative request, token and
+model-time reservations across retries.
 
 Ordinary failed batches retain only their omission reason and source references. Keeping
 an exception would also keep its traceback frames and completed request bodies alive.

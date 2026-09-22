@@ -168,11 +168,10 @@ navigation indexes. See [source indexing and citations](docs/document-processing
 
 When you add a document, the LLM:
 
-1. Generates a **summary** page
-2. Reads existing **concept** and **entity** pages
-3. Creates or updates concepts with cross-document synthesis
-4. Creates or updates **entity** pages (people, orgs, places, products)
-5. Updates the **index** and **log**
+1. Builds a private, document-wide **DocumentPlan** over frozen original evidence
+2. Routes every exact source range to a page body, necessary context, source-only record, or named unresolved item
+3. Generates concept/entity candidates from that plan and critically reviews each assembled candidate against the original evidence
+4. Atomically publishes the verified page changes, source summary, index, and log
 
 A single source might touch 10--15 wiki pages. Knowledge accumulates: each document enriches the existing wiki rather than sitting in isolation.
 

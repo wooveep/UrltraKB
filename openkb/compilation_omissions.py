@@ -42,14 +42,21 @@ def omission_notice(rows):
 
 
 def prune_withdrawn_links(wiki, withdrawn):
-    """Remove only navigation to withdrawn pages in the private publication clone."""
+    """Prepare deterministic navigation cleanup in the private proposal clone.
+
+    ``KnowledgeWorkspace`` marks changed pages not owned by the current source
+    as protected, so a cross-source cleanup is shown for explicit acceptance
+    rather than silently rewriting an already reviewed contribution.
+    """
+
     if not withdrawn:
-        return
+        return set()
     from openkb.agent.evidence_markup import normalize_links
     from openkb.lint import _extract_wikilinks, list_existing_wiki_targets
     from openkb.locks import atomic_write_text
 
     existing = list_existing_wiki_targets(wiki)
+    changed = set()
     for folder in ("concepts", "entities", "summaries"):
         for path in (wiki / folder).glob("*.md"):
             content = path.read_text(encoding="utf-8")
@@ -60,3 +67,5 @@ def prune_withdrawn_links(wiki, withdrawn):
                 )
                 if cleaned != content:
                     atomic_write_text(path, cleaned)
+                    changed.add(path.relative_to(wiki).as_posix())
+    return changed

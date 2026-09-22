@@ -262,6 +262,30 @@ class SettingsDialog(ManagementPanel):
             "正在保存…" if self._saving else f"{count} 项未保存" if count else "所有更改已保存"
         )
 
+    def _set_capacity_context(self, *, pending=False):
+        """Bind budget editors to the model/endpoint they will validate against."""
+
+        if self._view is None:
+            return
+        model = self._view.values.model
+        endpoint = self._view.values.openai_api_base
+        if pending:
+            for key in ("model", "openai_api_base"):
+                field = self.fields[key]
+                if field.action.currentIndex() == 1:
+                    value = field.value()
+                    if key == "model":
+                        model = value
+                    else:
+                        endpoint = value
+                elif field.action.currentIndex() == 2:
+                    if key == "model" and self.kb:
+                        model = self._view.values.global_values.model or "gpt-5.4"
+                    elif key == "openai_api_base":
+                        endpoint = None
+        self.fields["processing"].set_model_context(model, endpoint)
+        self.fields["navigation"].set_model_context(model, endpoint)
+
     def discard(self):
         if self._view is not None and not self._saving and not self._loading:
             self.loaded(self._view, None)
@@ -315,6 +339,7 @@ class SettingsDialog(ManagementPanel):
         for key, field in self.fields.items():
             value = getattr(view.values, _SECRET_FIELDS.get(key, key))
             field.load(value, view.sources[key])
+        self._set_capacity_context()
         self._update_pending()
         if was_saving:
             self.save_state.setText("已保存 · 下次任务生效")
@@ -323,6 +348,7 @@ class SettingsDialog(ManagementPanel):
         if not self._loaded or self._saving or self._loading or not self.form.isEnabled():
             return
         try:
+            self._set_capacity_context(pending=True)
             changes = {
                 key: field.value()
                 for key, field in self.fields.items()

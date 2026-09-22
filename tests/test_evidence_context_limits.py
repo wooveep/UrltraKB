@@ -17,13 +17,12 @@ def test_required_operation_context_uses_configured_capacity_before_omission(
 ):
     source = tmp_path / "operation.md"
     source.write_text(
-        "# Standby recovery\n\n"
+        "# Standby recovery\n\nExecute deploy --timeout 42.\n\n"
         + "\n\n".join(
             f"Background note {number}. "
             + "Retain this original context for the complete operation. " * 25
             for number in range(20)
         )
-        + "\n\nExecute deploy --timeout 42."
     )
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
@@ -40,12 +39,74 @@ def test_required_operation_context_uses_configured_capacity_before_omission(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            target = payload["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            frozen_ranges = [
+                [block["order"], block["order"] + 1] for block in payload["evidence"]["blocks"]
+            ]
+
+            def basis(selected):
+                return "\n".join(
+                    next(
+                        block["text"]
+                        for block in payload["evidence"]["blocks"]
+                        if block["order"] == index
+                    )
+                    for start, end in selected
+                    for index in range(start, end)
+                )
+
+            operation = next(
+                (
+                    block
+                    for block in payload["evidence"]["blocks"]
+                    if block["text"].startswith("Execute deploy --timeout 42.")
+                ),
+                None,
+            )
+            registered = payload["carry"]["page_register"]
+            assert operation or registered
+            return {
+                "overview": {
+                    "text": "Standby recovery deployment procedure.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "operation",
+                        "target_key": registered[0]["key"] if registered else "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/standby-recovery",
+                        "title": "Standby Recovery",
+                        "purpose": "Run the standby recovery deployment operation.",
+                        # Each serial planner increment may add only its own T
+                        # as body and its frozen W as necessary context. This
+                        # accumulates the complete operation without claiming
+                        # a later window as already-read evidence.
+                        "subject_ranges": ranges,
+                        "necessary_context": (
+                            [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": frozen_ranges,
+                                    "basis": basis(frozen_ranges),
+                                    "basis_ranges": frozen_ranges,
+                                }
+                            ]
+                            if not registered
+                            else []
+                        ),
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
         output = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, row in zip(payload["units"], output["units"], strict=True):
-                if not unit["text"].startswith("Execute"):
-                    row.update(facts=[], empty_reason="Reading context")
-        elif payload["stage"] == "generation":
+        if payload["stage"] == "generation":
             generated.append(payload)
             output["content"] = "Execute deploy --timeout 42."
         return output
@@ -56,7 +117,8 @@ def test_required_operation_context_uses_configured_capacity_before_omission(
     if maximum == 4096:
         assert not generated
         assert any(
-            row["reason"] == "topic_evidence_exceeds_request_budget" for row in result.omissions
+            row["reason"] == "planned_page_evidence_exceeds_request_budget"
+            for row in result.omissions
         )
     else:
         assert generated
@@ -79,7 +141,7 @@ def test_required_operation_context_uses_configured_capacity_before_omission(
         assert len(model_service) == before
 
 
-def test_small_output_budget_splits_fact_and_generation_batches(kb_dir, tmp_path, model_service):
+def test_small_output_budget_keeps_formal_responses_within_limit(kb_dir, tmp_path, model_service):
     source = tmp_path / "parameters.md"
     source.write_text("\n\n".join(f"Parameter {i}: value 37." for i in range(30)))
     config_path = kb_dir / ".openkb/config.yaml"
@@ -99,22 +161,33 @@ def test_small_output_budget_splits_fact_and_generation_batches(kb_dir, tmp_path
     assert result.knowledge_compilation == "completed", result
     assert max(sizes) <= 256
     extracted = [json.loads(call["messages"][-1]["content"]) for call in model_service]
-    units = [unit for call in extracted if call["stage"] == "facts" for unit in call["units"]]
-    assert len(units) == 30
+    assert [call["stage"] for call in extracted] == ["planning", "generation", "verification"]
+    assert len(extracted[0]["evidence"]["blocks"]) == 30
 
 
-def test_large_existing_catalog_leaves_room_for_new_evidence(kb_dir, tmp_path, model_service):
+def test_large_existing_catalog_is_projected_before_planning_request(
+    kb_dir, tmp_path, model_service
+):
     for number in range(600):
-        (kb_dir / f"wiki/concepts/catalog-{number:04}.md").write_text(f"# Catalog {number}\n")
+        (kb_dir / f"wiki/concepts/catalog-{number:04}.md").write_text(
+            f"# Catalog {number}\n" + "Catalog detail. " * 20
+        )
     source = tmp_path / "small.md"
     source.write_text("Required version is 7.")
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["processing"].update(context_tokens=4096)
+    config["processing"].update(context_tokens=8192)
     config_path.write_text(yaml.safe_dump(config))
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert len(list((kb_dir / "wiki/concepts").glob("*.md"))) == 601
+    planning = next(
+        json.loads(call["messages"][-1]["content"])
+        for call in model_service
+        if json.loads(call["messages"][-1]["content"])["stage"] == "planning"
+    )
+    assert len(planning["existing_targets"]) < 600
+    assert len(planning["existing_pages"].splitlines()) < 600
+    assert len(list((kb_dir / "wiki/concepts").glob("catalog-*.md"))) == 600
 
 
 def test_distant_heading_conditions_are_reread_as_generation_evidence(
@@ -129,11 +202,53 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            blocks = payload["evidence"]["blocks"]
+            target = payload["target"]
+            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            heading = next(block for block in blocks if "Linux version 7" in block["text"])
+            command = next(block for block in blocks if block["text"].startswith("Execute"))
+            background = [
+                block
+                for block in blocks
+                if block["order"] not in {heading["order"], command["order"]}
+            ]
+            return {
+                "overview": {
+                    "text": "Linux-specific standby recovery procedure.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "deployment",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/standby-deployment",
+                        "title": "Standby Deployment",
+                        "purpose": "Run the deployment command safely.",
+                        "subject_ranges": [[command["order"], command["order"] + 1]],
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": [[heading["order"], heading["order"] + 1]],
+                                "basis": heading["text"],
+                                "basis_ranges": [[heading["order"], heading["order"] + 1]],
+                            }
+                        ],
+                    }
+                ],
+                "source_only": [
+                    {
+                        "ranges": [[block["order"], block["order"] + 1] for block in background],
+                        "reason": "Background prose does not add an operation or condition.",
+                    }
+                ],
+                "unresolved": [],
+                "resolutions": [],
+            }
         response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, output in zip(payload["units"], response["units"]):
-                if not unit["text"].startswith("Execute"):
-                    output.update(facts=[], empty_reason="Context for the command")
         if payload["stage"] == "generation":
             generated.append(payload)
         return response
@@ -143,10 +258,11 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
     assert result.knowledge_compilation == "completed", result
     assert generated and all("Linux version 7" in json.dumps(item) for item in generated)
     assert any(
-        "Linux version 7" in context["text"] and context["reference"]["parse_id"]
+        "Linux version 7" in context["text"]
+        and context["reference"]["parse_id"]
+        and any(route["route"] == "context_only" for route in context["routes"])
         for call in generated
-        for passage in call["evidence"]
-        for context in passage["neighbors"]
+        for context in call["evidence"]["blocks"]
     )
     pages = "\n".join(path.read_text() for path in (kb_dir / "wiki/concepts").glob("*.md"))
     assert result.parse_id in pages  # Wire identities are rebound before publication.
@@ -169,7 +285,7 @@ def test_invalid_figure_output_is_not_reused_after_model_correction(
     model_service.respond = respond
     first = import_document(kb_dir, source)
     assert first.knowledge_compilation == "completed"
-    assert any(row["reason"] == "generated_asset_evidence_invalid" for row in first.omissions)
+    assert any(row["reason"] == "document_generation_incomplete" for row in first.omissions)
     valid = True
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed
@@ -213,7 +329,7 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "generation":
-            generated.extend(payload["evidence"])
+            generated.extend(payload["evidence"]["blocks"])
         return evidence_response(payload)
 
     model_service.respond = respond
@@ -233,7 +349,7 @@ def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_pa
         for item in table
         if item["location"]["row"] != 1
     )
-    assert all("context" not in item for item in table)
+    assert all(item["reference"]["parse_id"] for item in table)
     for item in table:
         if item["location"]["row"] == 1:
             expected = "Parameter" if item["location"]["cell"] == 1 else "Required value"

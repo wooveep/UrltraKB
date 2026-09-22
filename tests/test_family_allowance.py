@@ -35,7 +35,20 @@ def test_corrupt_allowance_cannot_authorize_a_request(tmp_path, change):
     before = path.read_bytes()
     with pytest.raises(ValueError):
         FamilyBudget(path).reserve(
-            RequestLimits.from_config({"processing": DEFAULT_PROCESSING}), 50, "facts", 10
+            RequestLimits.from_config(
+                {
+                    "processing": {
+                        **DEFAULT_PROCESSING,
+                        "context_tokens": 128,
+                        "max_context_tokens": 128,
+                        "output_tokens": 16,
+                        "max_output_tokens": 16,
+                    }
+                }
+            ),
+            50,
+            "facts",
+            10,
         )
     assert path.read_bytes() == before
 

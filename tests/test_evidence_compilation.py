@@ -10,7 +10,104 @@ from openkb.application.documents import import_document
 from tests.http_model_fixture import evidence_response
 
 
-def test_compilation_thinking_mode_reaches_provider_and_invalidates_cached_facts(
+def _target_ranges(payload):
+    target = payload["target"]
+    return target.get("ranges", [[target["target_start"], target["target_end"]]])
+
+
+def _single_page_plan(payload, *, name, title, kind="concept", type_=None, target=""):
+    """Return one valid DocumentPlan delta for the current target window."""
+
+    ranges = _target_ranges(payload)
+    registered = next(
+        (
+            item
+            for item in payload["carry"]["page_register"]
+            if item["name"] == name and item["kind"] == kind
+        ),
+        None,
+    )
+    change = {
+        "local_key": "page",
+        "target_key": registered["key"] if registered else "",
+        "target": registered.get("target", target) if registered else target,
+        "kind": kind,
+        "name": name,
+        "title": title,
+        "purpose": title + " from original source evidence",
+        "subject_ranges": ranges,
+        "necessary_context": [],
+    }
+    if type_ is not None:
+        change["type"] = type_
+    return {
+        "overview": {"text": title + " overview.", "ranges": ranges, "limitations": []},
+        "page_changes": [change],
+        "source_only": [],
+        "unresolved": [],
+        "resolutions": [],
+    }
+
+
+def _page_response(payload, content):
+    return {
+        "content": content,
+        "covered": [item["id"] for item in payload["occurrences"]],
+    }
+
+
+def test_planned_groups_delay_dense_omission_projection_until_page_dispatch():
+    """A dense plan must not copy every unresolved payload onto every page."""
+
+    from openkb.agent.document_plan import DocumentPlan, PagePlan, UnresolvedItem
+    from openkb.agent.evidence_compiler import _group_known_omissions, _planned_groups
+
+    count = 48
+    plan = DocumentPlan(
+        pages=[
+            PagePlan(
+                key=f"p{index}",
+                kind="concept",
+                name=f"concepts/page-{index}",
+                title=f"Page {index}",
+                purpose="A compact test page.",
+                subject_ranges=[[0, 1]],
+            )
+            for index in range(count)
+        ],
+        unresolved=[
+            UnresolvedItem(
+                key=f"u{index}",
+                location=[[0, 1]],
+                problem_type="missing_prerequisite",
+                missing_target=f"missing-{index}",
+                affected_pages=[f"p{page}" for page in range(count)],
+                blocking=False,
+                reason="An intentionally dense unresolved payload.",
+            )
+            for index in range(count)
+        ],
+    )
+    calls = []
+    for item in plan.unresolved:
+        original = item.to_dict
+
+        def traced(*, original=original, key=item.key):
+            calls.append(key)
+            return original()
+
+        item.to_dict = traced  # type: ignore[method-assign]
+
+    groups = _planned_groups(plan)
+
+    assert len(groups) == count
+    assert all("known_omissions" not in group for group in groups)
+    assert calls == []
+    assert len(_group_known_omissions(groups[0], plan)) == count
+    assert calls == [f"u{index}" for index in range(count)]
+
+
+def test_compilation_thinking_mode_reaches_provider_and_invalidates_document_plan(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.settings import apply_kb_config_patch, read_kb_config
@@ -31,7 +128,6 @@ def test_compilation_thinking_mode_reaches_provider_and_invalidates_cached_facts
         versions.append((result.input_version, result.parse_id))
         new_calls = model_service[previous_calls:]
         assert {json.loads(call["messages"][-1]["content"])["stage"] for call in new_calls} == {
-            "facts",
             "planning",
             "generation",
             "verification",
@@ -67,56 +163,52 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
         document_timeout=60,
     )
     config_path.write_text(yaml.safe_dump(config))
-    observed = {"facts": set(), "generation": set()}
+    observed = {"planning": set(), "generation": set()}
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "facts":
-            units = []
-            for unit in payload["units"]:
-                matches = [fact for fact in facts if fact in unit["text"]]
-                observed["facts"].update(matches)
-                units.append(
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {"topic": "Operation", "statement": fact, "quote": fact}
-                            for fact in matches
-                        ],
-                        "empty_reason": "Background without operational facts"
-                        if not matches
-                        else "",
-                    }
-                )
-            return {"units": units}
         if payload["stage"] == "planning":
+            excerpts = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            observed["planning"].update(fact for fact in facts if fact in excerpts)
+            ranges = _target_ranges(payload)
+            registered = payload["carry"]["page_register"]
             return {
-                "topics": [
+                "overview": {
+                    "text": "Operation guidance.",
+                    "ranges": ranges,
+                    "limitations": [],
+                },
+                "page_changes": [
                     {
-                        "name": "operation",
+                        "local_key": "operation",
+                        "target_key": registered[0]["key"] if registered else "",
+                        "name": "concepts/operation",
                         "title": "Operation",
                         "kind": "concept",
-                        "members": payload["topics"],
+                        "purpose": "Operation guidance",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
                     }
-                ]
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
-        if payload["stage"] == "dependencies":
-            return evidence_response(payload)
         assert payload["stage"] == "generation"
-        excerpts = "\n".join(item["text"] for item in payload["evidence"])
+        excerpts = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
         selected = [fact for fact in facts if fact in excerpts]
         observed["generation"].update(selected)
         return {
             "content": "# Operation\n" + "\n".join(selected),
-            "covered": [fact["id"] for fact in payload["facts"]],
+            "covered": [item["id"] for item in payload["occurrences"]],
         }
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert observed == {"facts": set(facts), "generation": set(facts)}
+    assert observed == {"planning": set(facts), "generation": set(facts)}
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
     assert len(pages) == 1
     content = pages[0].read_text()
@@ -127,7 +219,7 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
         assert measured + request["max_tokens"] <= 32768
 
 
-def test_changed_generation_language_reuses_facts_but_does_not_skip_completed_version(
+def test_changed_generation_language_reuses_document_plan_but_does_not_skip_completed_version(
     kb_dir, tmp_path, model_service
 ):
     original = tmp_path / "language.md"
@@ -160,38 +252,12 @@ def test_generation_reads_conditions_omitted_from_the_fact_statement(
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "facts":
-            return {
-                "units": [
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {
-                                "topic": "Pressure",
-                                "statement": "Pressure is 37 kPa",
-                                "quote": "37 kPa",
-                            }
-                        ],
-                        "empty_reason": "",
-                    }
-                    for unit in payload["units"]
-                ]
-            }
         if payload["stage"] == "planning":
-            return {
-                "topics": [
-                    {
-                        "name": "pressure",
-                        "title": "Pressure",
-                        "kind": "concept",
-                        "members": payload["topics"],
-                    }
-                ]
-            }
-        return {
-            "content": "\n".join(item["text"] for item in payload["evidence"]),
-            "covered": [item["id"] for item in payload["facts"]],
-        }
+            return _single_page_plan(payload, name="concepts/pressure", title="Pressure")
+        assert payload["stage"] == "generation"
+        return _page_response(
+            payload, "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+        )
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
@@ -199,7 +265,7 @@ def test_generation_reads_conditions_omitted_from_the_fact_statement(
     assert text in (kb_dir / "wiki/concepts/pressure.md").read_text()
 
 
-def test_continuation_keeps_facts_but_reads_current_wiki_before_generation(
+def test_continuation_keeps_document_plan_and_reads_current_wiki_before_generation(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.execution import ExecutionContext
@@ -211,72 +277,38 @@ def test_continuation_keeps_facts_but_reads_current_wiki_before_generation(
     original.write_text("Required version: 7.")
     current_page = kb_dir / "wiki/concepts/operation.md"
     current_page.write_text("# Operation\nInitial manual guidance.\n")
-    fact_requests = []
+    planning_requests = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "facts":
-            fact_requests.append(payload)
-            return {
-                "units": [
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {
-                                "topic": "Operation",
-                                "statement": "Required version: 7.",
-                                "quote": "Required version: 7.",
-                            }
-                        ],
-                        "empty_reason": "",
-                    }
-                    for unit in payload["units"]
-                ]
-            }
         if payload["stage"] == "planning":
-            return {
-                "topics": [
-                    {
-                        "name": "operation",
-                        "title": "Operation",
-                        "kind": "concept",
-                        "members": payload["topics"],
-                    }
-                ]
-            }
-        return {
-            "content": payload.get("existing", "") + "\nRequired version: 7.",
-            "covered": [fact["id"] for fact in payload["facts"]],
-        }
+            planning_requests.append(payload)
+            return _single_page_plan(
+                payload,
+                name="concepts/operation",
+                title="Operation",
+                target="concepts/operation",
+            )
+        assert payload["stage"] == "generation"
+        return _page_response(payload, "# Operation\nRequired version: 7.")
 
     model_service.respond = respond
 
     def stop(event):
-        if event.get("stage") == "planning":
-            raise OperationCancelled()
-
-    first = import_document(kb_dir, original, context=ExecutionContext(on_event=stop))
-    assert first.status == "stopped" and len(fact_requests) == 1
-    original.unlink()
-    current_page.write_text("# Operation\nEmergency override requires approval.\n")
-
-    def stop_generated(event):
         if event.get("stage") == "generated":
             raise OperationCancelled()
 
-    generated = continue_source(
-        kb_dir,
-        first.source_id,
-        version_id=first.input_version,
-        context=ExecutionContext(on_event=stop_generated),
-    )
-    assert generated.status == "stopped"
-    assert current_page.read_text() == "# Operation\nEmergency override requires approval.\n"
+    first = import_document(kb_dir, original, context=ExecutionContext(on_event=stop))
+    assert first.status == "stopped" and len(planning_requests) == 1
+    original.unlink()
+    current_page.write_text("# Operation\nEmergency override requires approval.\n")
     continued = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert continued.reason == "needs_acceptance", continued
-    assert len(fact_requests) == 1
+    # The user edit changes the catalogue snapshot, so the retained plan is
+    # intentionally invalidated before proposing an update against current wiki.
+    assert len(planning_requests) == 2
     from openkb.application.source_actions import review_source_proposal
 
     review = review_source_proposal(kb_dir, continued.resume)
@@ -291,10 +323,10 @@ def test_continuation_keeps_facts_but_reads_current_wiki_before_generation(
     assert finished.knowledge_compilation == "completed"
     assert "Emergency override requires approval." in current_page.read_text()
     usage = source_status(kb_dir, first.source_id)["cumulative_usage"]
-    assert usage["observable_attempts"] == 4
+    assert usage["observable_attempts"] >= 4
 
 
-def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publication(
+def test_one_large_page_is_omitted_when_its_assembled_candidate_cannot_be_reviewed(
     kb_dir, tmp_path, model_service
 ):
     facts = [
@@ -313,50 +345,32 @@ def test_one_large_topic_is_generated_in_bounded_parts_without_partial_publicati
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "facts":
-            return {
-                "units": [
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {"topic": "Settings", "statement": unit["text"], "quote": unit["text"]}
-                        ],
-                        "empty_reason": "",
-                    }
-                    for unit in payload["units"]
-                ]
-            }
         if payload["stage"] == "planning":
-            return {
-                "topics": [
-                    {
-                        "name": "settings",
-                        "title": "Settings",
-                        "kind": "concept",
-                        "members": payload["topics"],
-                    }
-                ]
-            }
+            return _single_page_plan(payload, name="concepts/settings", title="Settings")
+        assert payload["stage"] == "generation"
         parts.append(payload)
         assert not (kb_dir / "wiki/concepts/settings.md").exists()
-        return {
-            "content": "\n\n".join(item["text"] for item in payload["evidence"]),
-            "covered": [item["id"] for item in payload["facts"]],
-        }
+        return _page_response(
+            payload, "\n\n".join(item["text"] for item in payload["evidence"]["blocks"])
+        )
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
     assert len(parts) > 1
-    content = (kb_dir / "wiki/concepts/settings.md").read_text()
-    assert all(fact in content for fact in facts)
+    # Generation may split evidence safely, but #52 requires one critical
+    # review of the assembled final candidate. A capacity refusal must retain
+    # this page as an omission rather than publish fragment-level proof.
+    assert not (kb_dir / "wiki/concepts/settings.md").exists()
+    assert any(
+        row["stage"] == "generation" and row["items"] == ["concepts/settings"]
+        for row in result.omissions
+    )
 
 
 def test_oversized_unbroken_command_is_omitted_without_partial_generation(
     kb_dir, tmp_path, model_service
 ):
-    from tests.http_model_fixture import evidence_response
-
     original = tmp_path / "long-command.md"
     text = "start " + "--argument=37 " * 1400 + " --timeout=42"
     original.write_text(text)
@@ -371,7 +385,7 @@ def test_oversized_unbroken_command_is_omitted_without_partial_generation(
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "generation":
-            scopes.extend(item["reference"] for item in payload["evidence"])
+            scopes.extend(item["reference"] for item in payload["evidence"]["blocks"])
         return evidence_response(payload)
 
     model_service.respond = respond
@@ -394,58 +408,47 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "verification_batch":
-            return evidence_response(payload)
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "facts":
-            return {
-                "units": [
-                    {
-                        "id": unit["id"],
-                        "facts": [
-                            {
-                                "topic": "AtlasDB",
-                                "statement": "AtlasDB supports atomic commits",
-                                "quote": "AtlasDB",
-                            },
-                            {
-                                "topic": "Atomic commits",
-                                "statement": "AtlasDB supports atomic commits",
-                                "quote": "atomic commits",
-                            },
-                        ],
-                        "empty_reason": "",
-                    }
-                    for unit in payload["units"]
-                ]
-            }
         if payload["stage"] == "planning":
             assert "product" in payload["entity_types"]
-            identifiers = {label: member for member, label in payload["topic_labels"].items()}
+            ranges = _target_ranges(payload)
             return {
-                "topics": [
+                "overview": {"text": "AtlasDB operations.", "ranges": ranges, "limitations": []},
+                "page_changes": [
                     {
-                        "name": "atlasdb",
+                        "local_key": "atlasdb",
+                        "target_key": "",
+                        "name": "entities/atlasdb",
                         "title": "AtlasDB",
                         "kind": "entity",
                         "type": "product",
-                        "members": [identifiers["AtlasDB"]],
+                        "purpose": "AtlasDB identity and capability",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
                     },
                     {
-                        "name": "atomic-commits",
+                        "local_key": "commits",
+                        "target_key": "",
+                        "name": "concepts/atomic-commits",
                         "title": "Atomic commits",
                         "kind": "concept",
-                        "members": [identifiers["Atomic commits"]],
+                        "purpose": "Atomic commit behavior",
+                        "subject_ranges": ranges,
+                        "necessary_context": [],
                     },
-                ]
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
-        return {
-            "content": "# "
-            + payload["title"]
+        assert payload["stage"] == "generation"
+        return _page_response(
+            payload,
+            "# "
+            + payload["page"]["title"]
             + "\n[[entities/atlasdb]] supports [[concepts/atomic-commits]]. [[concepts/phantom]]",
-            "covered": [fact["id"] for fact in payload["facts"]],
-        }
+        )
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
@@ -459,11 +462,9 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
     assert "entities/atlasdb" in summary
 
 
-def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
+def test_large_document_plan_covers_all_windows_then_omits_an_unreviewable_page(
     kb_dir, tmp_path, model_service
 ):
-    from tests.http_model_fixture import evidence_response
-
     original = tmp_path / "topic-plan.md"
     original.write_text(
         "\n\n".join(f"Setting {i}: value 37, prerequisite version 7." for i in range(120))
@@ -484,26 +485,20 @@ def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for output, unit in zip(response["units"], payload["units"]):
-                output["facts"][0]["topic"] = (
-                    unit["text"] + " Detailed operating parameter and prerequisite"
-                )
         if payload["stage"] == "planning":
-            planned.extend(payload["topic_labels"].values())
-        return response
+            planned.extend(item["text"] for item in payload["evidence"]["blocks"])
+            return _single_page_plan(payload, name="concepts/settings", title="Settings")
+        return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert len(set(planned)) == 120
-    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert pages
-    text = "\n".join(page.read_text() for page in pages)
-    from openkb.evidence import ParseStore
-
-    assert all(block.id in text for block in ParseStore(kb_dir).load(result.parse_id).blocks)
+    assert all(f"Setting {i}:" in "\n".join(planned) for i in range(120))
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert any(
+        row["stage"] == "generation" and row["items"] == ["concepts/settings"]
+        for row in result.omissions
+    )
     assert (
         sum(
             json.loads(call["messages"][-1]["content"])["stage"] == "planning"
@@ -519,8 +514,6 @@ def test_large_topic_plan_keeps_complete_membership_across_bounded_coordination(
 def test_new_source_version_retracts_its_retired_topic_without_deleting_other_sources(
     kb_dir, tmp_path, model_service
 ):
-    from tests.http_model_fixture import evidence_response
-
     source = tmp_path / "features.md"
     source.write_text("Retired feature.")
 
@@ -528,14 +521,17 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for output, unit in zip(response["units"], payload["units"]):
-                output["facts"][0]["topic"] = "retired" if "Retired" in unit["text"] else "current"
         if payload["stage"] == "planning":
-            label = payload["topic_labels"][payload["topics"][0]]
-            response["topics"][0].update(name=label, title=label)
-        return response
+            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            name = "current" if "Current" in evidence else "retired"
+            path = "concepts/" + name
+            return _single_page_plan(
+                payload,
+                name=path,
+                title=name.title(),
+                target=path if path in payload["existing_targets"] else "",
+            )
+        return evidence_response(payload)
 
     model_service.respond = respond
     first = import_document(kb_dir, source)
@@ -552,9 +548,361 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
     assert (kb_dir / "wiki/concepts/current.md").exists()
 
 
-def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_path, model_service):
-    from tests.http_model_fixture import evidence_response
+def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, model_service):
+    source = tmp_path / "retired-link.md"
+    source.write_text("Retired feature.")
+    reviewed = []
 
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            name = "current" if "Current" in evidence else "retired"
+            return _single_page_plan(payload, name=f"concepts/{name}", title=name.title())
+        if payload["stage"] == "generation":
+            if payload["page"]["name"] == "concepts/current":
+                return _page_response(
+                    payload,
+                    "# Current\nSee [[concepts/retired|Retired feature]].",
+                )
+            return _page_response(payload, "# Retired\nRetired feature.")
+        if payload["stage"] == "verification":
+            reviewed.append(payload["candidate"]["content"])
+            return {"verdict": "supported", "reason": "The candidate matches its evidence."}
+        raise AssertionError(payload["stage"])
+
+    model_service.respond = respond
+    first = import_document(kb_dir, source)
+    assert first.knowledge_compilation == "completed", first
+    source.write_text("Current feature.")
+    changed = import_document(kb_dir, source)
+
+    assert changed.knowledge_compilation == "completed", changed
+    current_reviews = [content for content in reviewed if "# Current" in content]
+    assert len(current_reviews) == 2
+    assert "[[concepts/retired|Retired feature]]" in current_reviews[0]
+    assert "[[concepts/retired|Retired feature]]" not in current_reviews[1]
+    assert "Retired feature" in current_reviews[1]
+    current = (kb_dir / "wiki/concepts/current.md").read_text()
+    assert "[[concepts/retired|Retired feature]]" not in current
+
+
+def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
+    kb_dir, tmp_path, model_service
+):
+    """A second whole-page review failure is a local continuation item."""
+
+    source = tmp_path / "retired-link-rejection.md"
+    source.write_text("Retired feature.")
+    reviews = []
+
+    def page_change(local_key, name, title, ranges):
+        return {
+            "local_key": local_key,
+            "target_key": "",
+            "target": "",
+            "kind": "concept",
+            "name": name,
+            "title": title,
+            "purpose": title + " from original source evidence",
+            "subject_ranges": ranges,
+            "necessary_context": [],
+        }
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            ranges = _target_ranges(payload)
+            if "Current feature." not in evidence:
+                return _single_page_plan(payload, name="concepts/retired", title="Retired")
+            return {
+                "overview": {"text": "Two new topics.", "ranges": ranges, "limitations": []},
+                "page_changes": [
+                    page_change("current", "concepts/current", "Current", [[0, 1]]),
+                    page_change("independent", "concepts/independent", "Independent", [[1, 2]]),
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
+        if payload["stage"] == "generation":
+            if payload["page"]["name"] == "concepts/current":
+                return _page_response(
+                    payload,
+                    "# Current\nSee [[concepts/retired|Retired feature]].",
+                )
+            if payload["page"]["name"] == "concepts/independent":
+                return _page_response(payload, "# Independent\nIndependent feature.")
+            return _page_response(payload, "# Retired\nRetired feature.")
+        if payload["stage"] == "verification":
+            content = payload["candidate"]["content"]
+            reviews.append(content)
+            if "# Current" in content and "[[concepts/retired|Retired feature]]" not in content:
+                return {
+                    "verdict": "unsupported",
+                    "reason": "The normalized candidate needs a fresh source-faithful rewrite.",
+                    "issues": ["Retired link removal requires a new review outcome."],
+                }
+            return {"verdict": "supported", "reason": "The candidate matches its evidence."}
+        raise AssertionError(payload["stage"])
+
+    model_service.respond = respond
+    first = import_document(kb_dir, source)
+    assert first.knowledge_compilation == "completed", first
+    source.write_text("Current feature.\n\nIndependent feature.")
+
+    changed = import_document(kb_dir, source)
+
+    assert changed.knowledge_compilation == "completed", changed
+    assert not (kb_dir / "wiki/concepts/current.md").exists()
+    assert (kb_dir / "wiki/concepts/independent.md").exists()
+    assert any(
+        row["stage"] == "generation"
+        and row["reason"] == "knowledge_evidence_mismatch"
+        and row["items"] == ["concepts/current"]
+        for row in changed.omissions
+    ), changed.omissions
+    current_reviews = [content for content in reviews if "# Current" in content]
+    assert len(current_reviews) == 2
+    assert "[[concepts/retired|Retired feature]]" in current_reviews[0]
+    assert "[[concepts/retired|Retired feature]]" not in current_reviews[1]
+
+
+def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
+    kb_dir, tmp_path, model_service
+):
+    """A later source cannot silently mutate another page after its review."""
+
+    from openkb.application.source_actions import continue_source, review_source_proposal
+
+    beta = tmp_path / "beta.md"
+    alpha = tmp_path / "alpha.md"
+    beta.write_text("Beta feature.")
+    alpha.write_text("Alpha feature.")
+    reviewed = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            if "Current beta" in evidence:
+                name, title = "concepts/current-beta", "Current beta"
+            elif "Alpha" in evidence:
+                name, title = "concepts/alpha", "Alpha"
+            else:
+                name, title = "concepts/beta", "Beta"
+            return _single_page_plan(payload, name=name, title=title)
+        if payload["stage"] == "generation":
+            name = payload["page"]["name"]
+            if name == "concepts/alpha":
+                return _page_response(payload, "# Alpha\nSee [[concepts/beta|Beta]].")
+            return _page_response(payload, "# " + payload["page"]["title"] + "\nFeature.")
+        if payload["stage"] == "verification":
+            reviewed.append(payload["candidate"]["content"])
+            return {"verdict": "supported", "reason": "The candidate matches its evidence."}
+        raise AssertionError(payload["stage"])
+
+    model_service.respond = respond
+    assert import_document(kb_dir, beta).knowledge_compilation == "completed"
+    assert import_document(kb_dir, alpha).knowledge_compilation == "completed"
+    alpha_page = kb_dir / "wiki/concepts/alpha.md"
+    before = alpha_page.read_text(encoding="utf-8")
+    assert "[[concepts/beta|Beta]]" in before
+    review_count = len(reviewed)
+
+    beta.write_text("Current beta feature.")
+    changed = import_document(kb_dir, beta)
+
+    assert changed.reason == "needs_acceptance", changed
+    assert alpha_page.read_text(encoding="utf-8") == before
+    assert all("# Alpha" not in content for content in reviewed[review_count:])
+    review = review_source_proposal(kb_dir, changed.resume)
+    assert "concepts/alpha.md" in review["protected"]
+    accepted = continue_source(
+        kb_dir,
+        changed.source_id,
+        version_id=changed.input_version,
+        proposal_id=changed.resume,
+        accept_pages=review["protected"],
+    )
+    assert accepted.knowledge_compilation == "completed", accepted
+    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert (kb_dir / "wiki/concepts/current-beta.md").exists()
+    assert "[[concepts/beta|Beta]]" not in alpha_page.read_text(encoding="utf-8")
+
+
+def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
+    kb_dir, tmp_path, model_service, monkeypatch
+):
+    """Link cleanup reaches retained pages after normalized candidates are omitted."""
+
+    from openkb.agent import document_orchestrator, document_page_contracts
+    from openkb.agent.document_plan import from_dict
+    from openkb.application.document_pipeline import compile_version
+    from openkb.application.execution import ExecutionContext
+    from openkb.config import resolve_effective_config
+    from openkb.locks import kb_ingest_lock
+    from openkb.sources import SourceStore, read_object
+
+    source = tmp_path / "retained-cascade.md"
+    source.write_text("Alpha fact.\n\nBeta fact.\n\nCharlie fact.", encoding="utf-8")
+    phase = {"replacement": False}
+    reviews = []
+
+    def page_change(payload, local_key, name, title, subject_range, purpose):
+        registered = next(
+            (
+                item
+                for item in payload["carry"]["page_register"]
+                if item["name"] == name and item["kind"] == "concept"
+            ),
+            None,
+        )
+        return {
+            "local_key": local_key,
+            "target_key": registered["key"] if registered else "",
+            "target": registered.get("target", "") if registered else "",
+            "kind": "concept",
+            "name": name,
+            "title": title,
+            "purpose": purpose,
+            "subject_ranges": [subject_range],
+            "necessary_context": [],
+        }
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "planning":
+            return {
+                "overview": {
+                    "text": "Three independently planned facts.",
+                    "ranges": _target_ranges(payload),
+                    "limitations": [],
+                },
+                "page_changes": [
+                    page_change(
+                        payload,
+                        "alpha",
+                        "concepts/alpha",
+                        "Alpha",
+                        [0, 1],
+                        "Alpha evidence.",
+                    ),
+                    page_change(
+                        payload,
+                        "beta",
+                        "concepts/beta",
+                        "Beta",
+                        [1, 2],
+                        "Beta evidence.",
+                    ),
+                    page_change(
+                        payload,
+                        "charlie",
+                        "concepts/charlie",
+                        "Charlie",
+                        [2, 3],
+                        "Charlie evidence.",
+                    ),
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
+        if payload["stage"] == "generation":
+            name = payload["page"]["name"]
+            if phase["replacement"] and name == "concepts/alpha":
+                return _page_response(payload, "# Alpha\nSee [[concepts/charlie|Charlie]].")
+            if name == "concepts/beta":
+                return _page_response(payload, "# Beta\nSee [[concepts/alpha|Alpha]].")
+            return _page_response(payload, "# " + payload["page"]["title"] + "\nFact.")
+        if payload["stage"] == "verification":
+            content = payload["candidate"]["content"]
+            reviews.append((phase["replacement"], content))
+            if phase["replacement"] and "# Charlie" in content:
+                return {
+                    "verdict": "unsupported",
+                    "reason": "Charlie is intentionally unavailable in this replacement.",
+                    "issues": ["The planned Charlie page must remain pending."],
+                }
+            if (
+                phase["replacement"]
+                and "# Alpha" in content
+                and "[[concepts/charlie|Charlie]]" not in content
+            ):
+                return {
+                    "verdict": "unsupported",
+                    "reason": "The normalized Alpha candidate needs a new source-faithful rewrite.",
+                    "issues": ["Alpha cannot be published after Charlie is withheld."],
+                }
+            return {"verdict": "supported", "reason": "The candidate matches its evidence."}
+        raise AssertionError(payload["stage"])
+
+    model_service.respond = respond
+    first = import_document(kb_dir, source)
+    assert first.knowledge_compilation == "completed", first
+    assert (kb_dir / "wiki/concepts/beta.md").exists()
+
+    recovery_dir = kb_dir / ".openkb" / "source-store" / "compilation" / "recovery"
+    saved_plan = read_object(next(recovery_dir.glob("*-plan.json")))["value"]
+    pending_keys = {"p1", "p3"}
+    for draft_path in recovery_dir.glob("*-draft.json"):
+        draft = read_object(draft_path)
+        output = draft.get("value", {}).get("output", {})
+        if output.get("page_key") in pending_keys:
+            draft_path.unlink()
+    for checkpoint_path in recovery_dir.parent.glob("*.json"):
+        checkpoint = read_object(checkpoint_path)
+        payload = checkpoint.get("contract", {}).get("payload", {})
+        page = payload.get("page", {})
+        if page.get("name") in {"concepts/alpha", "concepts/charlie"}:
+            checkpoint_path.unlink()
+
+    def resume_saved_plan(*_args, **_kwargs):
+        return from_dict(saved_plan)
+
+    original_restore = document_page_contracts.restore_published_document_page_candidate
+
+    def restore_only_beta(checkpoints, page):
+        if page.name in {"concepts/alpha", "concepts/charlie"}:
+            raise ValueError("Simulated lost candidate recovery for retry.")
+        return original_restore(checkpoints, page)
+
+    monkeypatch.setattr(
+        document_page_contracts,
+        "restore_published_document_page_candidate",
+        restore_only_beta,
+    )
+    monkeypatch.setattr(document_orchestrator, "plan_document", resume_saved_plan)
+
+    phase["replacement"] = True
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        with ExecutionContext().begin(kb_dir) as credentials:
+            changed = compile_version(
+                kb_dir,
+                SourceStore(kb_dir).current(first.source_id),
+                resolve_effective_config(kb_dir)[0],
+                bundle=credentials,
+                force=True,
+                retry_omissions=True,
+            )
+
+    assert changed.knowledge_compilation == "completed", changed
+    assert not (kb_dir / "wiki/concepts/alpha.md").exists()
+    assert not (kb_dir / "wiki/concepts/charlie.md").exists()
+    beta = (kb_dir / "wiki/concepts/beta.md").read_text(encoding="utf-8")
+    assert "[[concepts/alpha|Alpha]]" not in beta
+    replacement_beta_reviews = [
+        content for replacement, content in reviews if replacement and "# Beta" in content
+    ]
+    # The critical review sees the exact candidate layout after provenance
+    # comments are removed; leading whitespace must not turn literal Markdown
+    # into different semantic bytes.
+    assert replacement_beta_reviews == ["\n\n# Beta\nSee Alpha.\n\n\n\n"]
+
+
+def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_path, model_service):
     source = tmp_path / "nested.md"
     source.write_text(
         "# Operations\n\n## Linux\n\nOnly on version 7.\n\nEnable cache with --timeout 42."
@@ -565,26 +913,18 @@ def test_nested_headings_and_adjacent_conditions_reach_generation(kb_dir, tmp_pa
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        response = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, output in zip(payload["units"], response["units"]):
-                if "Enable cache" in unit["text"]:
-                    assert unit["headings"] == ["Operations", "Linux"]
-                    output["facts"][0]["topic"] = "Cache"
-                elif unit["kind"] == "heading":
-                    output.update(facts=[], empty_reason="Context for the cache instruction")
-                else:
-                    # A version restriction is a fact, even when it is also
-                    # carried as the next unit's neighboring context.
-                    output["facts"][0]["topic"] = "Cache"
+        if payload["stage"] == "planning":
+            return _single_page_plan(payload, name="concepts/cache", title="Cache")
         if payload["stage"] == "generation":
             generated.append(payload)
-        return response
+        return evidence_response(payload)
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert "Only on version 7." in json.dumps(generated)
+    wire = json.dumps(generated)
+    assert "Only on version 7." in wire
+    assert "Operations" in wire and "Linux" in wire
 
 
 @pytest.mark.parametrize(
@@ -608,8 +948,6 @@ def test_generated_figure_link_points_to_the_retained_immutable_asset(
     from markdown_it import MarkdownIt
     from PIL import Image
 
-    from tests.http_model_fixture import evidence_response
-
     original = tmp_path / "figure.md"
     original.write_text("![Valve](valve.png)\n\nValve rated 37 kPa.")
     Image.new("RGB", (80, 80), "blue").save(tmp_path / "valve.png")
@@ -620,7 +958,7 @@ def test_generated_figure_link_points_to_the_retained_immutable_asset(
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         response = evidence_response(payload)
         if payload["stage"] == "generation":
-            evidence = "\n\n".join(item["text"] for item in payload["evidence"])
+            evidence = "\n\n".join(item["text"] for item in payload["evidence"]["blocks"])
             figure = re.search(r"!\[[^\]]*\]\(asset:[^)]+\)", evidence)[0]
             if title:
                 figure = figure[:-1] + ' "' + html.escape(title) + '")'

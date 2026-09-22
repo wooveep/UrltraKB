@@ -10,176 +10,22 @@ import asyncio
 import math
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar, copy_context
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
 from openkb.cancellation import check_cancelled
 from openkb.execution_allowance import active_allowance
 from openkb.execution_measurement import Measurement, measurement_scope, validate_measurement
-
-# Request capacities are configurable model ceilings, not provider discovery.
-DEFAULT_PROCESSING = {
-    "context_tokens": 262144,
-    "output_tokens": 131072,
-    "max_context_tokens": 1048576,
-    "max_output_tokens": 393216,
-    "request_timeout": 180,
-    "timeout_retries": 5,
-    "stage_timeout": None,
-    "document_timeout": None,
-    "cleanup_timeout": 10,
-    "max_attempts": 2,
-    "max_requests": None,
-    "max_tokens": None,
-    "concurrency": 2,
-}
-
-
-class ProcessingIncomplete(BaseException):
-    """A bounded operation is incomplete; its caller decides the recoverable scope."""
-
-    def __init__(self, reason: str, stage: str = "compiling") -> None:
-        super().__init__(reason)
-        self.reason, self.stage = reason, stage
-
-
-class OutputTruncated(ProcessingIncomplete):
-    """A settled response that may be retried with more room or less evidence."""
-
-    def __init__(self, stage: str) -> None:
-        super().__init__("output_budget_exhausted", stage)
-
-
-class InputTooLarge(ProcessingIncomplete):
-    """A measured request that has not been sent and can be safely resized."""
-
-    def __init__(self) -> None:
-        super().__init__("input_budget_exceeded")
-
-
-class ProviderContextExceeded(InputTooLarge):
-    """A provider rejected capacity before completion; resize without replaying it."""
-
-    def __init__(self, stage: str) -> None:
-        ProcessingIncomplete.__init__(self, "provider_context_exceeded", stage)
-
-
-@dataclass(frozen=True)
-class RequestLimits:
-    context_tokens: int
-    output_tokens: int
-    request_timeout: float
-    stage_timeout: float | None
-    document_timeout: float | None
-    cleanup_timeout: float
-    max_attempts: int
-    max_requests: int | None
-    max_tokens: int | None
-    concurrency: int
-    max_context_tokens: int | None = None
-    max_output_tokens: int | None = None
-    timeout_retries: int = 5
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> RequestLimits:
-        values = config.get("processing")
-        if not isinstance(values, dict):
-            raise ProcessingIncomplete("execution_budget_required", "configuration")
-        context = values.get("context_tokens")
-        output = values.get("output_tokens")
-        if type(context) is not int or type(output) is not int or not 0 < output < context:
-            raise ProcessingIncomplete("model_capabilities_required", "configuration")
-        numbers: dict[str, Any] = {}
-        retries = values.get("timeout_retries", DEFAULT_PROCESSING["timeout_retries"])
-        if type(retries) is not int or retries < 0:
-            raise ProcessingIncomplete("execution_budget_required", "configuration")
-        numbers["timeout_retries"] = retries
-        for key in ("request_timeout", "stage_timeout", "document_timeout", "cleanup_timeout"):
-            value = values.get(key)
-            if key in {"stage_timeout", "document_timeout"} and key in values and value is None:
-                numbers[key] = None
-                continue
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value <= 0
-            ):
-                raise ProcessingIncomplete("execution_budget_required", "configuration")
-            numbers[key] = value
-        for key in ("max_attempts", "max_requests", "max_tokens", "concurrency"):
-            value = values.get(key)
-            if key in {"max_tokens", "max_requests"} and key in values and value is None:
-                numbers[key] = None
-                continue
-            if type(value) is not int or value <= 0:
-                raise ProcessingIncomplete("execution_budget_required", "configuration")
-            numbers[key] = value
-        for key, initial in (("max_context_tokens", context), ("max_output_tokens", output)):
-            value = values.get(key, initial)
-            if type(value) is not int or value < initial:
-                raise ProcessingIncomplete("model_capabilities_required", "configuration")
-            numbers[key] = value
-        if numbers["max_output_tokens"] >= numbers["max_context_tokens"]:
-            raise ProcessingIncomplete("model_capabilities_required", "configuration")
-        numbers["concurrency"] = min(numbers["concurrency"], 4)
-        return cls(context, output, **numbers)
-
-    def expanded(self, *, reason: str | None = None) -> RequestLimits:
-        """Grow within explicit ceilings without enlarging an already sufficient output."""
-        return replace(
-            self,
-            context_tokens=min(
-                self.context_tokens * 2, self.max_context_tokens or self.context_tokens
-            ),
-            output_tokens=(
-                self.output_tokens
-                if reason == "input_budget_exceeded"
-                else min(self.output_tokens * 2, self.max_output_tokens or self.output_tokens)
-            ),
-        )
-
-    def request(
-        self, model: str, messages: list[dict], kwargs: dict[str, Any]
-    ) -> tuple[dict[str, Any], int]:
-        import litellm
-
-        from openkb.resource_budget import check_memory
-
-        check_memory(
-            sum(len(str(message.get("content", ""))) for message in messages) * 12
-            + self.output_tokens * 32,
-            stage="model_input",
-        )
-
-        try:
-            tokens = litellm.token_counter(
-                model=model, messages=messages, tools=kwargs.get("tools")
-            )
-        except Exception as exc:
-            raise ProcessingIncomplete("input_budget_unknown") from exc
-        output = kwargs.get("max_completion_tokens", kwargs.get("max_tokens", self.output_tokens))
-        if type(output) is not int or output <= 0:
-            raise ProcessingIncomplete("invalid_output_limit", "configuration")
-        output = min(output, self.output_tokens)
-        if kwargs.get("response_format"):
-            import json
-
-            tokens += litellm.token_counter(model=model, text=json.dumps(kwargs["response_format"]))
-        if tokens + output > self.context_tokens:
-            raise InputTooLarge()
-        # These parameters are execution invariants, not optional provider hints.
-        options = dict(kwargs)
-        options.pop("max_completion_tokens", None)
-        return {
-            **options,
-            "max_tokens": output,
-            "drop_params": False,
-            "num_retries": 0,
-            "max_retries": 0,
-        }, tokens
+from openkb.processing_limits import (
+    DEFAULT_PROCESSING,  # noqa: F401
+    InputTooLarge,
+    OutputTruncated,
+    ProcessingIncomplete,
+    ProviderContextExceeded,
+    RequestLimits,
+)
 
 
 @dataclass
@@ -329,10 +175,10 @@ class ExecutionBudget:
             and previous.output_tokens == previous.max_output_tokens
         ):
             return False
-        if (
-            reason == "input_budget_exceeded"
-            and previous.context_tokens == previous.max_context_tokens
-        ):
+        input_ceiling = previous.max_input_tokens or (
+            (previous.max_context_tokens or previous.context_tokens) - previous.output_tokens
+        )
+        if reason == "input_budget_exceeded" and previous.input_capacity >= input_ceiling:
             return False
         with self.lock:
             self.checkpoint()
@@ -358,6 +204,7 @@ class ExecutionBudget:
 
         retries = StreamTimeoutRetries(self)
         attempt = 0
+        admit_request = _REQUEST_ADMISSION.get()
         while True:
             waiting = time.monotonic()
             while not self.permits.acquire(timeout=0.05):
@@ -382,21 +229,6 @@ class ExecutionBudget:
                 values: list[Any] = []
                 errors: list[BaseException] = []
                 context = copy_context()
-
-                def request() -> None:
-                    try:
-                        values.append(
-                            context.run(collect, function, options, activity)
-                            if activity is not None
-                            else context.run(function, **options)
-                        )
-                    except BaseException as exc:
-                        errors.append(exc)
-                    finally:
-                        self.measurement.finish_request(measured)
-                        done.set()
-
-                threading.Thread(target=request, name="openkb-budgeted-model", daemon=True).start()
                 deadline = time.monotonic() + options["timeout"]
                 family_reservation = self.family_reservations.get(observation["attempt"])
                 family_deadline = (
@@ -404,6 +236,67 @@ class ExecutionBudget:
                     if family_reservation
                     else math.inf
                 )
+                # The outer budget may stop waiting while this worker is
+                # queued on a cross-page resource gate.  Keep an explicit
+                # latch at the transport boundary: an abandoned request is
+                # never allowed to acquire capacity later and become a fresh,
+                # unknown provider call.
+                dispatch_stopped = threading.Event()
+                dispatch_lock = threading.Lock()
+                dispatch_started = False
+
+                def dispatch_checkpoint() -> None:
+                    if dispatch_stopped.is_set() or time.monotonic() >= deadline:
+                        raise ProcessingIncomplete("request_timeout", self.stage)
+                    self.checkpoint()
+                    if dispatch_stopped.is_set() or time.monotonic() >= deadline:
+                        raise ProcessingIncomplete("request_timeout", self.stage)
+
+                def stop_queued_dispatch() -> None:
+                    # Atomically race the final checkpoint before the function
+                    # call.  If the worker has committed the transport entry,
+                    # it retains the existing unknown-outcome handling; if
+                    # this wins first, no transport can start.
+                    with dispatch_lock:
+                        if not dispatch_started:
+                            dispatch_stopped.set()
+
+                def request() -> None:
+                    try:
+
+                        def dispatch() -> None:
+                            nonlocal dispatch_started
+
+                            scope = (
+                                admit_request(options, dispatch_checkpoint)
+                                if admit_request
+                                else nullcontext()
+                            )
+                            with scope:
+                                dispatch_checkpoint()
+                                with dispatch_lock:
+                                    dispatch_checkpoint()
+                                    # The state transition is the dispatch
+                                    # boundary.  A concurrent timeout either
+                                    # sets the stop latch before this point or
+                                    # observes an already-started transport;
+                                    # it cannot slip a new call between the
+                                    # final checkpoint and this decision.
+                                    dispatch_started = True
+                                values.append(
+                                    collect(function, options, activity)
+                                    if activity is not None
+                                    else function(**options)
+                                )
+
+                        context.run(dispatch)
+                    except BaseException as exc:
+                        errors.append(exc)
+                    finally:
+                        self.measurement.finish_request(measured)
+                        done.set()
+
+                threading.Thread(target=request, name="openkb-budgeted-model", daemon=True).start()
                 while not done.wait(min(0.05, max(0, deadline - time.monotonic()))):
                     self.checkpoint()
                     if activity is not None:
@@ -414,11 +307,13 @@ class ExecutionBudget:
                         )
                     if time.monotonic() >= deadline:
                         # A retry must first finish this local stream transport.
+                        stop_queued_dispatch()
                         if allowance := active_allowance():
                             allowance.request_timed_out(options)
                         raise ProcessingIncomplete("request_timeout", self.stage)
                 self.checkpoint()
                 if activity is None and time.monotonic() >= deadline:
+                    stop_queued_dispatch()
                     if allowance := active_allowance():
                         allowance.request_timed_out(options)
                     raise ProcessingIncomplete("request_timeout", self.stage)
@@ -462,6 +357,8 @@ class ExecutionBudget:
                         "provider_temporarily_unavailable", self.stage
                     ) from None
             finally:
+                if done is not None:
+                    stop_queued_dispatch()
                 if measured is not None and activity is not None:
                     measured["response_activity"] = activity.snapshot()
                 if measured is not None and done is not None and not done.is_set():
@@ -588,6 +485,27 @@ def _uncertain_transport(exc: Exception) -> bool:
 
 
 _ACTIVE: ContextVar[ExecutionBudget | None] = ContextVar("openkb_processing", default=None)
+_REQUEST_ADMISSION: ContextVar[Callable[[dict[str, Any], Callable[[], None]], Any] | None] = (
+    ContextVar("openkb_request_admission", default=None)
+)
+
+
+@contextmanager
+def request_admission_scope(
+    admit: Callable[[dict[str, Any], Callable[[], None]], Any],
+) -> Iterator[None]:
+    """Bind a resource admission factory to the active physical request.
+
+    The second argument is a request-local checkpoint.  Admission must call it
+    while queued and immediately before dispatch so a timed out/cancelled
+    request cannot acquire capacity later and make a new transport call.
+    """
+
+    token = _REQUEST_ADMISSION.set(admit)
+    try:
+        yield
+    finally:
+        _REQUEST_ADMISSION.reset(token)
 
 
 @contextmanager
@@ -604,6 +522,7 @@ def processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBudget]:
     finally:
         from openkb.compilation_report import collect_compile_report
 
+        budget.measurement.finalize()
         with collect_compile_report() as report:
             report.usage.update(
                 observable_attempts=budget.attempts,
@@ -628,6 +547,7 @@ def independent_processing_scope(config: dict[str, Any]) -> Iterator[ExecutionBu
     try:
         yield budget
     finally:
+        budget.measurement.finalize()
         _ACTIVE.reset(token)
 
 
@@ -768,6 +688,19 @@ def request_budget_settings() -> dict[str, Any] | None:
         "max_tokens": active.limits.output_tokens,
         "timeout": min(active.checkpoint(), active.limits.request_timeout),
     }
+
+
+def active_request_limits() -> RequestLimits | None:
+    """Return the immutable limits selected by the active execution budget.
+
+    A length-finished call may enlarge its output reservation before a retry
+    discovers that the old W/S/T no longer fits.  Callers that own a
+    resizable request envelope can then re-admit that envelope at these exact
+    limits instead of treating the safe, unsent retry as terminal.
+    """
+
+    active = _ACTIVE.get()
+    return active.limits if active is not None else None
 
 
 def external_request_usage(reservation: int, stage: str = "external"):

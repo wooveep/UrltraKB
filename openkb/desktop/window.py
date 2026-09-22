@@ -71,8 +71,8 @@ _OPERATIONS = {
 
 _STAGES = {
     "parsing": "解析资料",
-    "facts": "提取知识",
-    "planning": "规划知识页面",
+    "facts": "旧版知识提取",
+    "planning": "规划文档与知识页面",
     "generation": "生成知识页面",
     "verification": "核对知识",
     "compiling": "知识编译",

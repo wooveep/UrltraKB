@@ -134,7 +134,7 @@ def test_runtime_persists_progress_without_heartbeat_inflation(kb_dir, tmp_path)
         assert manager.join(5)
 
 
-def test_compilation_counts_validated_source_text_and_generated_topics(
+def test_compilation_counts_validated_source_text_and_generated_pages(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.documents import import_document
@@ -151,7 +151,7 @@ def test_compilation_counts_validated_source_text_and_generated_topics(
         if e.get("event") == "progress"
         for step in read_progress(e["progress"])
     ]
-    for phase in ("text", "facts", "planning", "generation"):
+    for phase in ("text", "planning", "generation"):
         assert any(
             step.phase == phase and step.total and step.completed == step.total for step in steps
         )
@@ -224,6 +224,6 @@ def test_task_details_distinguishes_document_stop_from_completed_skip(unfinished
     text = _status_text(task)
     if unfinished:
         assert text.splitlines()[1] == "停止原因：planning · request_timeout"
-        assert "复用已有解析、事实和生成检查点" in text.splitlines()[2]
+        assert "复用已有解析、文档计划和生成检查点" in text.splitlines()[2]
     else:
         assert "停止原因：" not in text

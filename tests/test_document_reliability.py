@@ -33,7 +33,7 @@ def processing_config(kb_dir):
     return config
 
 
-def test_omitted_compilation_preserves_other_committed_knowledge(
+def test_invalid_document_plan_preserves_other_committed_knowledge(
     kb_dir, monkeypatch, processing_config
 ):
     import litellm
@@ -59,12 +59,12 @@ def test_omitted_compilation_preserves_other_committed_knowledge(
     previous.write_text("Previously committed knowledge")
     result = import_document(kb_dir, source)
 
-    assert result.status == "added"
-    assert result.knowledge_compilation == "completed"
-    assert any(row["reason"] == "topic_plan_invalid" for row in result.omissions)
+    assert result.status == "unfinished"
+    assert result.knowledge_compilation == "unfinished"
+    assert result.reason == "document_plan_invalid"
     assert previous.read_text() == "Previously committed knowledge"
     summaries = list((kb_dir / "wiki/summaries").glob("*.md"))
-    assert len(summaries) == 1 and "本次生成知识：0 条" in summaries[0].read_text()
+    assert not summaries
 
 
 def test_slow_compilation_keeps_async_recompile_callbacks_responsive(
@@ -109,7 +109,7 @@ def test_slow_compilation_keeps_async_recompile_callbacks_responsive(
 
 
 @pytest.mark.parametrize("suffix", ["md", "pdf"])
-def test_unfit_content_is_omitted_without_a_model_attempt(
+def test_unfit_planning_capacity_stops_without_a_model_attempt(
     kb_dir, monkeypatch, processing_config, suffix
 ):
     import litellm
@@ -133,12 +133,10 @@ def test_unfit_content_is_omitted_without_a_model_attempt(
     else:
         source.write_text("Tiny document; the schema and output reserve still count.")
     result = import_document(kb_dir, source)
-    assert result.status == "added"
-    assert any(
-        row["reason"] == "evidence_context_exceeds_request_budget" for row in result.omissions
-    )
+    assert result.status == "unfinished"
+    assert result.reason == "planning_context_exceeds_request_budget"
     summaries = list((kb_dir / "wiki/summaries").glob("*.md"))
-    assert len(summaries) == 1 and "本次生成知识：0 条" in summaries[0].read_text()
+    assert not summaries
 
 
 def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, processing_config):
@@ -218,7 +216,7 @@ def test_small_pdf_preserves_native_ranges_through_unified_navigation(
     ]
 
 
-def test_client_cleanup_warning_does_not_change_committed_result(
+def test_unknown_model_usage_does_not_change_committed_result(
     kb_dir, monkeypatch, processing_config
 ):
     import litellm
@@ -241,15 +239,11 @@ def test_client_cleanup_warning_does_not_change_committed_result(
         ),
     )
 
-    async def failed_close():
-        raise OSError("synthetic cleanup failure")
-
-    monkeypatch.setattr(litellm, "close_litellm_async_clients", failed_close)
     source = kb_dir / "notes.md"
     source.write_text("Notes")
     result = import_document(kb_dir, source)
     assert result.status == "added"
     assert result.knowledge_compilation == "completed"
-    assert result.warnings == ("model_client_cleanup_failed",)
-    assert result.usage["unknown_usage"] == 4
+    assert result.warnings == ()
+    assert result.usage["unknown_usage"] == 5
     assert all(row["transport_attempts"] is None for row in result.usage["requests"])

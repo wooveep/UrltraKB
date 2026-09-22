@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import yaml
 
+from openkb.config import DEFAULT_CONFIG
 from openkb.locks import atomic_write_text
 from openkb.runtime.requests import AskQuestion
 from openkb.runtime.tasks import TaskManager
@@ -71,6 +72,13 @@ def configure(kb, url, name):
                 "pageindex_threshold": 20,
                 "extra_headers": {"X-KB": name},
                 "timeout": 5,
+                "processing": {
+                    **DEFAULT_CONFIG["processing"],
+                    "context_tokens": 32_768,
+                    "max_context_tokens": 32_768,
+                    "output_tokens": 1_024,
+                    "max_output_tokens": 4_096,
+                },
             }
         ),
     )

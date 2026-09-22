@@ -22,6 +22,11 @@ class CompileReport:
     source_units: dict[str, dict[str, Any]] = field(default_factory=dict)
     published_facts: set[str] = field(default_factory=set)
     referenced_facts: dict[str, set[str]] = field(default_factory=dict)
+    # Document planning records original range occurrences directly.  The
+    # legacy fact fields above remain readable for historical reports, but new
+    # compilation never promotes a synthetic fact inventory to this contract.
+    source_occurrences: dict[str, dict[str, Any]] = field(default_factory=dict)
+    published_occurrences: set[str] = field(default_factory=set)
     review_notes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     usage: dict[str, Any] = field(default_factory=dict)
     stage: str = "converting"

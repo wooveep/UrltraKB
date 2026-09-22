@@ -36,7 +36,13 @@ def reviews(monkeypatch):
         "model": "openai/test",
         "compilation_thinking": "disabled",
         "verification_adjudication_thinking": "disabled",
-        "processing": {**DEFAULT_CONFIG["processing"], "output_tokens": 4096},
+        "processing": {
+            **DEFAULT_CONFIG["processing"],
+            "context_tokens": 16384,
+            "max_context_tokens": 16384,
+            "output_tokens": 4096,
+            "max_output_tokens": 4096,
+        },
     }
 
     def call(model, request, *args, **kwargs):

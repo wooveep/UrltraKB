@@ -29,16 +29,16 @@ def collection(kb_dir):
         yield client.collection()
 
 
-def test_import_saves_original_pageindex_database_before_fact_analysis(
+def test_import_saves_original_pageindex_database_before_document_planning(
     kb_dir, tmp_path, model_service
 ):
     source = tmp_path / "handbook.md"
     source.write_text("# Backup\n\nVerify backup first.\n\n## Pressure\n\nKeep pressure at 37 kPa.")
-    before_facts = []
+    before_planning = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "facts":
+        if payload["stage"] == "planning":
             assert (kb_dir / ".openkb/pageindex.db").is_file()
             assert not list((kb_dir / ".openkb/source-store/navigation").glob("*.json"))
             assert not (kb_dir / ".openkb/source-store/navigation/prepared").exists()
@@ -48,16 +48,16 @@ def test_import_saves_original_pageindex_database_before_fact_analysis(
                 doc_id = stored[0]["doc_id"]
                 assert documents.get_document_structure(doc_id)
                 pages = documents.get_page_content(doc_id, "1-4")
-                before_facts.append([page["content"] for page in pages])
+                before_planning.append([page["content"] for page in pages])
         return evidence_response(payload)
 
     model_service.respond = respond
     imported = import_document(kb_dir, source)
     assert imported.knowledge_compilation == "completed", imported
-    assert before_facts
+    assert before_planning
     assert all(
         rows == ["# Backup", "Verify backup first.", "## Pressure", "Keep pressure at 37 kPa."]
-        for rows in before_facts
+        for rows in before_planning
     )
 
 
@@ -188,7 +188,7 @@ def test_large_native_source_reaches_analysis_through_bounded_sdk_reads(
     def respond(body):
         nonlocal stopped
         payload = json.loads(body["messages"][-1]["content"])
-        assert payload["stage"] == "facts"
+        assert payload["stage"] == "planning"
         stopped = True
         return evidence_response(payload)
 

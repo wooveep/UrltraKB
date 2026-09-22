@@ -70,19 +70,22 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
     source.write_text(
         "# Start\n\nCheck the backup first.\n\n## Pressure\n\nSet pressure to 37 kPa."
     )
-    indexed_before_facts = []
+    planned_evidence = []
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
-        if payload.get("stage") == "facts":
-            assert indexed_reads, "Fact analysis must read original content from PageIndex"
-            indexed_before_facts.append(all("navigation" not in unit for unit in payload["units"]))
+        if payload.get("stage") == "planning":
+            blocks = payload["evidence"]["blocks"]
+            assert blocks, "Document planning must receive original source evidence"
+            planned_evidence.append(blocks)
         return evidence_response(payload)
 
     model_service.respond = respond
     imported = import_document(kb_dir, source)
     assert imported.knowledge_compilation == "completed", imported
-    assert indexed_before_facts and all(indexed_before_facts)
+    assert indexed_reads, "Navigation must read the frozen source tree from PageIndex"
+    assert planned_evidence
+    assert all("navigation" not in block for batch in planned_evidence for block in batch)
     nav = source_status(kb_dir, imported.source_id)["navigation"]
     assert nav["parse"] == imported.parse_id
     assert nav["nodes"] and nav["nodes"][0]["end"] == 4

@@ -12,6 +12,7 @@ from openkb.application.source_actions import continue_source
 from openkb.config import DEFAULT_CONFIG
 from openkb.processing import ExecutionBudget, ProcessingIncomplete, RequestLimits
 from tests.http_model_fixture import evidence_response
+from tests.processing_fixtures import OFFLINE_PROCESSING
 from tests.test_adaptive_processing import response
 
 
@@ -20,7 +21,17 @@ def offline_settings(kb_dir):
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
     config.update(model="openai/offline-test", language="en", navigation={"enabled": False})
-    config["processing"] = {**DEFAULT_CONFIG["processing"], "concurrency": 1}
+    # ``DEFAULT_CONFIG`` deliberately has no invented context capacity.  This
+    # controlled unknown test model therefore needs the explicit offline
+    # contract used by the rest of the document-compilation suite.
+    config["processing"] = {
+        **OFFLINE_PROCESSING,
+        # Keep explicit retry ceilings so tests that deliberately lower the
+        # starting request can exercise adaptive continuation.
+        "max_context_tokens": 128_000,
+        "max_output_tokens": 4_096,
+        "concurrency": 1,
+    }
     path.write_text(yaml.safe_dump(config))
 
 
@@ -57,7 +68,8 @@ def test_review_format_recovery_never_discards_a_conflicting_verdict(
     result = import_document(kb_dir, document(tmp_path))
     if envelope == "duplicate":
         assert result.knowledge_compilation == "completed", result
-        assert any(row["reason"] == "evidence_verification_invalid" for row in result.omissions)
+        assert calls["verification"] == 2
+        assert any(row["reason"] == "document_verification_invalid" for row in result.omissions)
         assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     else:
         assert result.knowledge_compilation == "completed", result
@@ -70,11 +82,18 @@ def test_recovered_split_ranges_cover_the_original_block(kb_dir, tmp_path, monke
     config["processing"].update(output_tokens=1024, max_output_tokens=1024)
     config_path.write_text(yaml.safe_dump(config))
     text = "\n".join(f"Operation {i} requires its own approval." for i in range(12))
+    generation_calls = 0
 
     def completion(**kwargs):
+        nonlocal generation_calls
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = response(evidence_response(payload))
-        if payload["stage"] == "facts" and any(len(u["text"]) > 200 for u in payload["units"]):
+        if payload["stage"] == "generation":
+            generation_calls += 1
+        if (
+            payload["stage"] == "generation"
+            and sum(len(item["text"]) for item in payload["evidence"]["blocks"]) > 200
+        ):
             value.choices[0].finish_reason = "length"
         return value
 
@@ -83,9 +102,34 @@ def test_recovered_split_ranges_cover_the_original_block(kb_dir, tmp_path, monke
     assert result.knowledge_compilation == "completed", result
     assert result.coverage["status"] == "complete"
     ranges = result.coverage["ranges"]
-    assert len(ranges) > 1
+    assert generation_calls > 1
     assert ranges[0]["start"] == 0 and ranges[-1]["end"] == len(text)
     assert all(left["end"] == right["start"] for left, right in zip(ranges, ranges[1:]))
+
+
+def test_completed_document_recompiles_when_the_effective_output_cap_is_tightened(
+    kb_dir, tmp_path, model_service
+):
+    source = document(tmp_path)
+    config_path = kb_dir / ".openkb/config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(output_tokens=4_096, max_output_tokens=4_096)
+    config_path.write_text(yaml.safe_dump(config))
+
+    first = import_document(kb_dir, source)
+    assert first.knowledge_compilation == "completed", first
+    calls = len(model_service)
+
+    config = yaml.safe_load(config_path.read_text())
+    config["processing"].update(output_tokens=1_024, max_output_tokens=1_024)
+    config_path.write_text(yaml.safe_dump(config))
+
+    repeated = import_document(kb_dir, source)
+
+    assert repeated.status == "added", repeated
+    assert repeated.knowledge_compilation == "completed"
+    assert len(model_service) > calls
+    assert all(call["max_tokens"] <= 1_024 for call in model_service[calls:])
 
 
 @pytest.mark.parametrize(
@@ -110,7 +154,7 @@ def test_one_bad_completed_response_can_recover(kb_dir, tmp_path, monkeypatch, s
         bad = current == stage and calls[current] == 1
         if bad and defect == "coverage":
             if stage == "planning":
-                value["topics"][0]["members"] = []
+                value["page_changes"][0]["subject_ranges"] = []
             else:
                 value["covered"] = []
         if bad and defect == "uncertain":
@@ -123,31 +167,34 @@ def test_one_bad_completed_response_can_recover(kb_dir, tmp_path, monkeypatch, s
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
     assert result.knowledge_compilation == "completed"
+    if defect == "uncertain":
+        assert calls["verification"] == 1
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    else:
+        assert calls[stage] == 2
 
 
-def test_resume_reuses_successful_split_children_without_parent_call(kb_dir, tmp_path, monkeypatch):
+def test_resume_reuses_accepted_document_plan_without_replanning(kb_dir, tmp_path, monkeypatch):
     phase = 1
-    calls = {1: [], 2: []}
+    calls = Counter()
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
+        calls[(phase, payload["stage"])] += 1
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            calls[phase].append(len(payload["units"]))
-            if len(payload["units"]) > 1:
-                value["units"].pop()
-        if payload["stage"] == "planning" and phase == 1:
-            value = {"topics": []}
+        if phase == 1 and payload["stage"] == "generation":
+            value = {"content": "Incomplete candidate", "covered": []}
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
     assert first.knowledge_compilation == "completed", first
-    assert any(row["stage"] == "planning" for row in first.omissions)
+    assert any(row["reason"] == "document_generation_incomplete" for row in first.omissions)
     phase = 2
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
-    assert calls[2] == []
+    assert calls[(2, "planning")] == 0
+    assert calls[(2, "generation")] == 1
 
 
 def test_resume_verification_does_not_regenerate_received_draft(kb_dir, tmp_path, monkeypatch):
@@ -165,7 +212,7 @@ def test_resume_verification_does_not_regenerate_received_draft(kb_dir, tmp_path
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
     assert first.knowledge_compilation == "completed", first
-    assert any(row["reason"] == "evidence_verification_invalid" for row in first.omissions)
+    assert any(row["reason"] == "document_verification_invalid" for row in first.omissions)
     phase = 2
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second
@@ -187,22 +234,41 @@ def test_markdown_usable_body_can_compile_with_omission_notice(
     assert result.knowledge_compilation == "completed"
 
 
-def test_persistent_local_fact_defect_publishes_verified_available_content(
+def test_explicit_source_only_range_publishes_verified_available_content(
     kb_dir, tmp_path, monkeypatch
 ):
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            bad = {u["id"] for u in payload["units"] if "Beta" in u["text"]}
-            value["units"] = [u for u in value["units"] if u["id"] not in bad]
+        if payload["stage"] == "planning":
+            value = {
+                "overview": {"text": "Alpha guidance.", "ranges": [[0, 2]], "limitations": []},
+                "page_changes": [
+                    {
+                        "local_key": "alpha",
+                        "target_key": "",
+                        "kind": "concept",
+                        "name": "concepts/alpha",
+                        "title": "Alpha",
+                        "purpose": "Alpha requirement",
+                        "subject_ranges": [[0, 1]],
+                        "necessary_context": [],
+                    }
+                ],
+                "source_only": [
+                    {"ranges": [[1, 2]], "reason": "The beta note remains source-only."}
+                ],
+                "unresolved": [],
+                "resolutions": [],
+            }
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
     assert result.knowledge_compilation == "completed"
-    assert result.omissions[0]["reason"] == "section_coverage_incomplete"
+    assert not result.omissions
+    assert [row["status"] for row in result.coverage["ranges"]] == ["verified", "no_facts"]
     assert pages
 
 
@@ -241,21 +307,33 @@ def test_semantic_unsupported_omits_knowledge_and_finishes_publication(
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
-def test_empty_extraction_of_factual_body_is_an_explicit_omission(kb_dir, tmp_path, monkeypatch):
+def test_source_only_document_is_recorded_without_creating_a_page(kb_dir, tmp_path, monkeypatch):
     calls = Counter()
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         calls[payload["stage"]] += 1
-        assert payload["stage"] == "facts"
-        return response(
-            {
-                "units": [
-                    {"id": u["id"], "facts": [], "empty_reason": "No useful facts."}
-                    for u in payload["units"]
-                ]
-            }
-        )
+        if payload["stage"] == "planning":
+            ranges = payload["target"].get(
+                "ranges",
+                [[payload["target"]["target_start"], payload["target"]["target_end"]]],
+            )
+            return response(
+                {
+                    "overview": {
+                        "text": "The source is retained as source-only guidance.",
+                        "ranges": ranges,
+                        "limitations": [],
+                    },
+                    "page_changes": [],
+                    "source_only": [
+                        {"ranges": ranges, "reason": "The note is not reusable knowledge."}
+                    ],
+                    "unresolved": [],
+                    "resolutions": [],
+                }
+            )
+        pytest.fail(f"Unexpected model stage: {payload['stage']}")
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(
@@ -264,7 +342,9 @@ def test_empty_extraction_of_factual_body_is_an_explicit_omission(kb_dir, tmp_pa
     )
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
     assert result.knowledge_compilation == "completed", result
-    assert any(row["reason"] == "source_facts_missing" for row in result.omissions)
+    assert not result.omissions
+    assert calls == {"planning": 1}
+    assert [row["status"] for row in result.coverage["ranges"]] == ["no_facts"]
     assert not pages
 
 
@@ -425,7 +505,7 @@ def test_fact_resume_reuses_old_batches_after_batch_size_change(kb_dir, tmp_path
     assert "facts" not in calls
 
 
-def test_parallel_pages_finish_independent_work_and_resume_only_failed_topic(
+def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
     kb_dir, tmp_path, monkeypatch
 ):
     import threading
@@ -435,41 +515,51 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_topic(
     config["processing"]["concurrency"] = 4
     config_path.write_text(yaml.safe_dump(config))
     source = document(tmp_path, "\n\n".join(f"Requirement {i}." for i in range(6)))
-    barrier = threading.Barrier(4)
     lock = threading.Lock()
     first = True
     calls = []
-    starts = 0
 
     def completion(**kwargs):
-        nonlocal starts
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for row, unit in zip(value["units"], payload["units"]):
-                row["facts"][0]["topic"] = "topic-" + unit["text"].split()[1].rstrip(".")
-        elif payload["stage"] == "planning":
+        if payload["stage"] == "planning":
+            target = payload["target"]
+            start, end = target["target_start"], target["target_end"]
             value = {
-                "topics": [
-                    {"name": label, "title": label, "kind": "concept", "members": [member]}
-                    for member, label in payload["topic_labels"].items()
-                ]
+                "overview": {
+                    "text": "Independent document requirements.",
+                    "ranges": [[start, end]],
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": f"topic-{index}",
+                        "target_key": "",
+                        "kind": "concept",
+                        "name": f"concepts/topic-{index}",
+                        "title": f"topic-{index}",
+                        "purpose": f"Requirement {index}",
+                        "subject_ranges": [[index, index + 1]],
+                        "necessary_context": [],
+                    }
+                    for index in range(start, end)
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
             }
         elif payload["stage"] == "generation":
             with lock:
-                starts += 1
-                number = starts
-                calls.append(payload["title"])
-            if first and number <= 4:
-                barrier.wait(timeout=3)
-            if first and payload["title"] == "topic-0":
+                title = payload["page"]["title"]
+                calls.append(title)
+            if first and title == "topic-0":
                 value["covered"] = []
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert result.omissions[0]["reason"] == "topic_generation_incomplete"
+    assert result.omissions[0]["reason"] == "document_generation_incomplete"
     assert set(calls) == {f"topic-{i}" for i in range(6)}
     first = False
     calls.clear()
@@ -530,19 +620,45 @@ def test_user_stop_resumes_without_parsing_or_repeating_completed_model_work(
     assert calls["verification"] == (1 if stop_at == "verification" else 0)
 
 
-def test_failed_fact_does_not_discard_or_prevent_later_valid_units(kb_dir, tmp_path, monkeypatch):
+def test_failed_page_does_not_discard_or_prevent_later_valid_pages(kb_dir, tmp_path, monkeypatch):
     first = True
     resumed = []
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            if first:
-                bad = {u["id"] for u in payload["units"] if "Alpha" in u["text"]}
-                value["units"] = [u for u in value["units"] if u["id"] not in bad]
-            else:
-                resumed.extend(unit["text"] for unit in payload["units"])
+        if payload["stage"] == "planning":
+            target = payload["target"]
+            start, end = target["target_start"], target["target_end"]
+            value = {
+                "overview": {
+                    "text": "Three independent requirements.",
+                    "ranges": [[start, end]],
+                    "limitations": [],
+                },
+                "page_changes": [
+                    {
+                        "local_key": name.lower(),
+                        "target_key": "",
+                        "kind": "concept",
+                        "name": f"concepts/{name.lower()}",
+                        "title": name,
+                        "purpose": f"{name} requirement",
+                        "subject_ranges": [[index, index + 1]],
+                        "necessary_context": [],
+                    }
+                    for index, name in enumerate(("Alpha", "Beta", "Gamma"), start=start)
+                ],
+                "source_only": [],
+                "unresolved": [],
+                "resolutions": [],
+            }
+        elif payload["stage"] == "generation":
+            title = payload["page"]["title"]
+            if first and title == "Alpha":
+                value["covered"] = []
+            elif not first:
+                resumed.append(title)
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -550,48 +666,49 @@ def test_failed_fact_does_not_discard_or_prevent_later_valid_units(kb_dir, tmp_p
         kb_dir, document(tmp_path, "Alpha requirement.\n\nBeta requirement.\n\nGamma requirement.")
     )
     assert result.knowledge_compilation == "completed", result
-    assert result.omissions[0]["reason"] == "section_coverage_incomplete"
+    assert result.omissions[0]["reason"] == "document_generation_incomplete"
+    assert {path.stem for path in (kb_dir / "wiki/concepts").glob("*.md")} == {"beta", "gamma"}
     first = False
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
-    assert resumed == ["Alpha requirement."]
+    assert resumed == ["Alpha"]
 
 
-def test_changed_correction_contract_replaces_only_the_stale_correction(
-    kb_dir, tmp_path, monkeypatch
-):
-    from openkb.agent import evidence_pages
-    from openkb.agent.evidence_units import messages as old_messages
-
-    current_messages = evidence_pages.messages
-    phase, calls = 1, Counter()
+def test_document_page_correction_rechecks_original_evidence(kb_dir, tmp_path, monkeypatch):
+    calls = Counter()
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         stage = payload["stage"]
-        calls[phase, stage] += 1
+        calls[stage] += 1
         value = evidence_response(payload)
         if stage == "generation":
-            value["title"] = "Correct topic" if "title_instruction" in payload else "Wrong claim"
+            value = {
+                "content": (
+                    "# Notes\nThe original requirement is preserved."
+                    if payload.get("revision")
+                    else "# Notes\nWrong claim."
+                ),
+                "covered": [item["id"] for item in payload["occurrences"]],
+            }
         elif stage == "verification":
             value = {"verdict": "supported", "reason": "Correct original quote."}
-            if payload["title"] == "Wrong claim":
-                value = {"verdict": "unsupported", "reason": "Correct the unsupported title."}
+            if "Wrong claim" in payload["candidate"]["content"]:
+                value = {
+                    "verdict": "unsupported",
+                    "reason": "Correct the unsupported claim.",
+                    "issues": [{"kind": "claim", "reason": "The claim is not in the source."}],
+                }
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(evidence_pages, "messages", old_messages)
     source = document(tmp_path, "One required fact.")
-    first = import_document(kb_dir, source)
-    assert first.knowledge_compilation == "completed", first
-    assert any(row["reason"] == "knowledge_evidence_mismatch" for row in first.omissions)
-    assert calls[1, "generation"] == 2 and calls[1, "verification"] == 1
-    phase = 2
-    monkeypatch.setattr(evidence_pages, "messages", current_messages)
-    second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
-    assert second.knowledge_compilation == "completed", second
-    assert calls[2, "generation"] == 1 and calls[2, "verification"] == 1
-    assert calls[2, "facts"] == calls[2, "planning"] == 0
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    assert calls == {"planning": 1, "generation": 2, "verification": 2}
+    page = (kb_dir / "wiki/concepts/notes.md").read_text(encoding="utf-8")
+    assert "The original requirement is preserved." in page
+    assert "Wrong claim" not in page
 
 
 def test_only_the_existing_correction_uses_explicit_deeper_mode(kb_dir, tmp_path, monkeypatch):
@@ -608,12 +725,23 @@ def test_only_the_existing_correction_uses_explicit_deeper_mode(kb_dir, tmp_path
         mode = kwargs.get("extra_body", {}).get("thinking", {}).get("type")
         if stage == "generation":
             generation_modes.append(mode)
-            value["title"] = "Correct topic" if payload.get("revision") else "Wrong claim"
+            value = {
+                "content": (
+                    "# Notes\nCorrect source claim."
+                    if payload.get("revision")
+                    else "# Notes\nWrong claim."
+                ),
+                "covered": [item["id"] for item in payload["occurrences"]],
+            }
         elif stage == "verification":
             review_modes.append(mode)
             value = {"verdict": "supported", "reason": "Original fact preserved."}
-            if payload["title"] == "Wrong claim":
-                value = {"verdict": "unsupported", "reason": "Title claims something absent."}
+            if "Wrong claim" in payload["candidate"]["content"]:
+                value = {
+                    "verdict": "unsupported",
+                    "reason": "Claim absent from source.",
+                    "issues": [{"kind": "claim", "reason": "Claim absent from source."}],
+                }
         return response(value)
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -623,31 +751,35 @@ def test_only_the_existing_correction_uses_explicit_deeper_mode(kb_dir, tmp_path
     assert review_modes == ["disabled", "disabled"]
 
 
-def test_located_title_correction_preserves_the_previously_reviewed_body(
-    kb_dir, tmp_path, monkeypatch
-):
+def test_correction_preserves_the_previously_reviewed_body(kb_dir, tmp_path, monkeypatch):
     reviewed = []
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "generation":
-            value["title"] = "Wrong claim"
+            value = {
+                "content": "# Notes\nFaithful body.\n\nWrong claim.",
+                "covered": [item["id"] for item in payload["occurrences"]],
+            }
             if payload.get("revision"):
-                value = {"title": "Correct topic"}
+                value = {
+                    "content": "# Notes\nFaithful body.",
+                    "covered": [item["id"] for item in payload["occurrences"]],
+                }
         elif payload["stage"] == "verification":
             reviewed.append(payload)
             value = {"verdict": "supported", "reason": "Original body is faithful."}
-            if payload["title"] == "Wrong claim":
+            if "Wrong claim" in payload["candidate"]["content"]:
                 value = {
                     "verdict": "unsupported",
-                    "reason": "Only the public title is unsupported.",
+                    "reason": "Only the final claim is unsupported.",
                     "issues": [
                         {
-                            "kind": "title",
+                            "kind": "claim",
                             "candidate": "Wrong claim",
-                            "occurrences": ["e1"],
-                            "reason": "Unsupported public title.",
+                            "occurrences": ["o1"],
+                            "reason": "Unsupported final claim.",
                         }
                     ],
                 }
@@ -657,6 +789,9 @@ def test_located_title_correction_preserves_the_previously_reviewed_body(
     result = import_document(kb_dir, document(tmp_path, "One required fact."))
     assert result.knowledge_compilation == "completed", result
     assert len(reviewed) == 2
-    assert (
-        reviewed[0]["content"].replace("# Wrong claim", "# Correct topic") == reviewed[1]["content"]
-    )
+    # Formal review sees the exact private publication proposal, including its
+    # source binding and provenance markers; the generated body still carries
+    # forward unchanged until the correction removes only the rejected claim.
+    assert "# Notes\nFaithful body.\n\nWrong claim." in reviewed[0]["candidate"]["content"]
+    assert "# Notes\nFaithful body." in reviewed[1]["candidate"]["content"]
+    assert "Wrong claim" not in reviewed[1]["candidate"]["content"]

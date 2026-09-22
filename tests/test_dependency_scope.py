@@ -9,7 +9,7 @@ from tests.http_model_fixture import evidence_response
 
 
 @pytest.mark.parametrize("cross_reference", [False, True])
-def test_import_reviews_only_affected_sections_and_keeps_original_conditions(
+def test_import_binds_conditions_only_to_affected_pages(
     kb_dir, tmp_path, model_service, cross_reference
 ):
     source = tmp_path / "scoped.md"
@@ -25,66 +25,122 @@ def test_import_reviews_only_affected_sections_and_keeps_original_conditions(
         "## Metrics\n\nMetrics uses port 9342.\n\n"
         "## Retention\n\nAudit records are kept for 30 days."
     )
-    reviews = []
+    page_evidence = []
 
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         value = evidence_response(request)
-        if stage == "facts":
-            rows = []
-            for unit, row in zip(request["units"], value["units"], strict=True):
-                if "verified backup" in unit["text"]:
-                    continue
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-                else:
-                    topic = (
-                        "Metrics"
-                        if "9342" in unit["text"]
-                        else ("Retention" if "30 days" in unit["text"] else "Migration")
-                    )
-                    for fact in row["facts"]:
-                        fact["topic"] = topic
-                rows.append(row)
-            value = {"units": rows}
-        elif stage == "planning":
-            value = {
-                "topics": [
-                    {"name": label.lower(), "title": label, "kind": "concept", "members": [uid]}
-                    for uid, label in request["topic_labels"].items()
+        if stage == "planning":
+            blocks = request["evidence"]["blocks"]
+
+            def ranges(*texts):
+                return [
+                    [row["order"], row["order"] + 1]
+                    for row in blocks
+                    if row["text"].lstrip("# ").strip() in texts or row["text"] in texts
                 ]
-            }
-        elif stage == "dependencies":
-            reviews.append(request)
-            paths = {row["path"] for row in request["candidates"]}
-            text = "\n".join(row["text"] for row in request["source"])
-            if "concepts/migration" in paths:
-                assert "verified backup" in text and "migrate --strict" in text
-            # Every decision sees the omitted scope; keywords cannot prove that
-            # another section is independent. Unrelated sections stay separate.
-            assert not ("9342" in text and "30 days" in text)
-            value = {
-                "topics": [
+
+            def basis(selected):
+                return "\n".join(
+                    next(row["text"] for row in blocks if row["order"] == index)
+                    for start, end in selected
+                    for index in range(start, end)
+                )
+
+            guide = ranges("Guide")
+            backup = ranges(
+                "Backup requirements", "A verified backup is required before migration."
+            )
+            migration = ranges(
+                "Migration", "See Backup requirements before migration.", "Run migrate --strict."
+            )
+            metrics = ranges("Metrics", "Metrics uses port 9342.")
+            retention = ranges("Retention", "Audit records are kept for 30 days.")
+            target = request["target"]
+            return {
+                "overview": {
+                    "text": "Migration, metrics and retention guidance.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": [],
+                },
+                "page_changes": [
                     {
-                        "path": path,
-                        "status": "dependent" if path == "concepts/migration" else "independent",
-                        "reason": "Migration needs backup; metrics and retention are independent.",
+                        "local_key": "migration",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/migration",
+                        "title": "Migration",
+                        "purpose": "Run migration with its prerequisite.",
+                        "subject_ranges": migration,
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": backup,
+                                "basis": basis(backup),
+                                "basis_ranges": backup,
+                            }
+                        ],
+                    },
+                    {
+                        "local_key": "metrics",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/metrics",
+                        "title": "Metrics",
+                        "purpose": "Metrics listener configuration.",
+                        "subject_ranges": metrics,
+                        "necessary_context": [],
+                    },
+                    {
+                        "local_key": "retention",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/retention",
+                        "title": "Retention",
+                        "purpose": "Audit record retention period.",
+                        "subject_ranges": retention,
+                        "necessary_context": [],
+                    },
+                ],
+                "source_only": [
+                    {
+                        "ranges": guide,
+                        "reason": "Document title is source-only navigation metadata.",
                     }
-                    for path in paths
-                ]
+                ],
+                "unresolved": [],
+                "resolutions": [],
             }
+        if stage in {"generation", "verification"}:
+            title = request["page"]["title"]
+            text = "\n".join(row["text"] for row in request["evidence"]["blocks"])
+            page_evidence.append((title, text))
+            if stage == "generation":
+                content = {
+                    "Migration": "A verified backup is required before running migrate --strict.",
+                    "Metrics": "Metrics uses port 9342.",
+                    "Retention": "Audit records are kept for 30 days.",
+                }[title]
+                return {
+                    "content": content,
+                    "covered": [row["id"] for row in request["occurrences"]],
+                }
         return value
 
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert {row["path"] for request in reviews for row in request["candidates"]} == {
-        "concepts/migration",
-        "concepts/metrics",
-        "concepts/retention",
-    }
-    assert not (kb_dir / "wiki/concepts/migration.md").exists()
+    migration_evidence = [text for title, text in page_evidence if title == "Migration"]
+    assert migration_evidence and all("verified backup" in text for text in migration_evidence)
+    assert all("migrate --strict" in text for text in migration_evidence)
+    assert all("9342" not in text and "30 days" not in text for text in migration_evidence)
+    assert (kb_dir / "wiki/concepts/migration.md").exists()
     assert (kb_dir / "wiki/concepts/metrics.md").exists()
     assert (kb_dir / "wiki/concepts/retention.md").exists()
 
@@ -146,7 +202,7 @@ def test_unknown_references_and_shared_conditions_remain_in_review(options):
     )
 
 
-def test_newly_excluded_operation_propagates_without_rerolling_known_rejections(
+def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.source_actions import continue_source
@@ -157,47 +213,101 @@ def test_newly_excluded_operation_propagates_without_rerolling_known_rejections(
         "# Beta\n\nRun Beta after Alpha.\n\n"
         "# Metrics\n\nMetrics listens on port 9342."
     )
-    reviewed = []
+    plans = []
 
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         value = evidence_response(request)
-        if request["stage"] == "facts":
-            rows = []
-            for unit, row in zip(request["units"], value["units"], strict=True):
-                if "verified backup" in unit["text"]:
-                    continue
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Heading")
-                else:
-                    for fact in row["facts"]:
-                        fact["topic"] = unit["headings"][-1]
-                rows.append(row)
-            value = {"units": rows}
-        elif request["stage"] == "planning":
-            value = {
-                "topics": [
-                    {"name": title.lower(), "title": title, "kind": "concept", "members": [uid]}
-                    for uid, title in request["topic_labels"].items()
+        if request["stage"] == "planning":
+            plans.append(request)
+            blocks = request["evidence"]["blocks"]
+
+            def ranges(*texts):
+                return [
+                    [row["order"], row["order"] + 1]
+                    for row in blocks
+                    if row["text"].lstrip("# ").strip() in texts or row["text"] in texts
                 ]
-            }
-        elif request["stage"] == "dependencies":
-            missing_alpha = any(
-                "concepts/alpha" in gap.get("items", []) for gap in request["omissions"]
-            )
-            value = {"topics": []}
-            for row in request["candidates"]:
-                path = row["path"]
-                reviewed.append((path, missing_alpha))
-                value["topics"].append(
-                    {
-                        "path": path,
-                        "status": "dependent"
-                        if path == "concepts/alpha" or (path == "concepts/beta" and missing_alpha)
-                        else "independent",
-                        "reason": "Check the controlled prerequisite chain against this omission.",
-                    }
+
+            def basis(selected):
+                return "\n".join(
+                    next(row["text"] for row in blocks if row["order"] == index)
+                    for start, end in selected
+                    for index in range(start, end)
                 )
+
+            alpha = ranges("Alpha", "Alpha requires a verified backup.", "Run Alpha.")
+            beta = ranges("Beta", "Run Beta after Alpha.")
+            metrics = ranges("Metrics", "Metrics listens on port 9342.")
+            target = request["target"]
+            return {
+                "overview": {
+                    "text": "Alpha, Beta and metrics procedures.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": ["The required verified backup is not available."],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "alpha",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/alpha",
+                        "title": "Alpha",
+                        "purpose": "Run Alpha after a verified backup.",
+                        "subject_ranges": alpha,
+                        "necessary_context": [],
+                    },
+                    {
+                        "local_key": "beta",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/beta",
+                        "title": "Beta",
+                        "purpose": "Run Beta after Alpha.",
+                        "subject_ranges": beta,
+                        "necessary_context": [
+                            {
+                                "relation": "explicit_reference",
+                                "ranges": alpha,
+                                "basis": basis(alpha),
+                                "basis_ranges": alpha,
+                            }
+                        ],
+                    },
+                    {
+                        "local_key": "metrics",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/metrics",
+                        "title": "Metrics",
+                        "purpose": "Metrics listener configuration.",
+                        "subject_ranges": metrics,
+                        "necessary_context": [],
+                    },
+                ],
+                "source_only": [],
+                "unresolved": [
+                    {
+                        "location": alpha,
+                        "problem_type": "missing_prerequisite",
+                        "missing_target": "a verified backup",
+                        "affected_pages": ["alpha", "beta"],
+                        "blocking": True,
+                        "reason": "The prerequisite backup has not been supplied.",
+                    }
+                ],
+                "resolutions": [],
+            }
+        if request["stage"] == "generation":
+            return {
+                "content": "Metrics listens on port 9342.",
+                "covered": [row["id"] for row in request["occurrences"]],
+            }
         return value
 
     model_service.respond = respond
@@ -206,69 +316,115 @@ def test_newly_excluded_operation_propagates_without_rerolling_known_rejections(
     assert not (kb_dir / "wiki/concepts/alpha.md").exists()
     assert not (kb_dir / "wiki/concepts/beta.md").exists()
     assert (kb_dir / "wiki/concepts/metrics.md").exists()
-    assert ("concepts/beta", True) in reviewed
+    assert plans and any(
+        row["reason"] == "unresolved_prerequisite_blocked" for row in result.omissions
+    )
     previous = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
-    assert all(
-        json.loads(call["messages"][-1]["content"])["stage"] == "facts"
-        for call in model_service[previous:]
-    )
+    assert len(model_service) == previous
     assert not (kb_dir / "wiki/concepts/alpha.md").exists()
     assert not (kb_dir / "wiki/concepts/beta.md").exists()
 
 
-def test_unresolved_omitted_scope_cannot_be_overwritten_by_other_independence(
-    kb_dir, tmp_path, model_service, monkeypatch
-):
-    from openkb.agent import dependency_preflight
-
+def test_multiple_unresolved_conditions_keep_operation_blocked(kb_dir, tmp_path, model_service):
     original = tmp_path / "two-gaps.md"
     original.write_text(
         "# First condition\n\nMissing condition one.\n\n"
         "# Second condition\n\nMissing condition two.\n\n"
         "# Operation\n\nRestart requires the applicable conditions."
     )
-    generated = False
-    capacity_checks = 0
-    initial_fits = dependency_preflight.source_fits
-    known = dependency_preflight.known_omissions
-
-    def separate_omissions(parsed):
-        return [{**row, "items": [item]} for row in known(parsed) for item in row.get("items", [])]
-
-    monkeypatch.setattr(dependency_preflight, "known_omissions", separate_omissions)
-
-    def fits(rows, settings, **kwargs):
-        nonlocal capacity_checks
-        if generated:
-            capacity_checks += 1
-            if capacity_checks == 1:
-                return False
-        return initial_fits(rows, settings, **kwargs)
-
-    monkeypatch.setattr(dependency_preflight, "source_fits", fits)
 
     def respond(body):
-        nonlocal generated
         payload = json.loads(body["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "facts":
-            for unit, row in zip(payload["units"], value["units"], strict=True):
-                if unit["kind"] == "heading":
-                    row.update(facts=[], empty_reason="Organizational heading")
-            value["units"] = [
-                row
-                for unit, row in zip(payload["units"], value["units"], strict=True)
-                if "Missing condition" not in unit["text"]
-            ]
-        if payload["stage"] == "generation":
-            generated = True
+        if payload["stage"] == "planning":
+            blocks = payload["evidence"]["blocks"]
+
+            def ranges(*texts):
+                return [
+                    [row["order"], row["order"] + 1]
+                    for row in blocks
+                    if row["text"].lstrip("# ").strip() in texts or row["text"] in texts
+                ]
+
+            def basis(selected):
+                return "\n".join(
+                    next(row["text"] for row in blocks if row["order"] == index)
+                    for start, end in selected
+                    for index in range(start, end)
+                )
+
+            first = ranges("First condition", "Missing condition one.")
+            second = ranges("Second condition", "Missing condition two.")
+            operation = ranges("Operation", "Restart requires the applicable conditions.")
+            target = payload["target"]
+            return {
+                "overview": {
+                    "text": "Restart conditions remain unresolved.",
+                    "ranges": target.get(
+                        "ranges", [[target["target_start"], target["target_end"]]]
+                    ),
+                    "limitations": ["Both applicable conditions are missing."],
+                },
+                "page_changes": [
+                    {
+                        "local_key": "operation",
+                        "target_key": "",
+                        "target": "",
+                        "kind": "concept",
+                        "name": "concepts/operation",
+                        "title": "Operation",
+                        "purpose": "Restart only after the applicable conditions are known.",
+                        "subject_ranges": operation,
+                        "necessary_context": [
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": first,
+                                "basis": basis(first),
+                                "basis_ranges": first,
+                            },
+                            {
+                                "relation": "applicable_condition",
+                                "ranges": second,
+                                "basis": basis(second),
+                                "basis_ranges": second,
+                            },
+                        ],
+                    }
+                ],
+                "source_only": [],
+                "unresolved": [
+                    {
+                        "location": first,
+                        "problem_type": "missing_prerequisite",
+                        "missing_target": "condition one",
+                        "affected_pages": ["operation"],
+                        "blocking": True,
+                        "reason": "The first applicable condition is missing.",
+                    },
+                    {
+                        "location": second,
+                        "problem_type": "missing_prerequisite",
+                        "missing_target": "condition two",
+                        "affected_pages": ["operation"],
+                        "blocking": True,
+                        "reason": "The second applicable condition is missing.",
+                    },
+                ],
+                "resolutions": [],
+            }
         return value
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert capacity_checks == 1  # One joint decision; never split the missing conditions.
+    assert not any(
+        json.loads(call["messages"][-1]["content"])["stage"] == "generation"
+        for call in model_service
+    )
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert any(row["reason"] == "dependency_scope_unresolved" for row in result.omissions)
+    assert {
+        "The first applicable condition is missing.",
+        "The second applicable condition is missing.",
+    } <= {row["reason"] for row in result.omissions}

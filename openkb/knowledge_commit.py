@@ -106,6 +106,7 @@ class KnowledgeProposal:
                     "compilation_review_warnings",
                     "navigation_id",
                     "compilation_navigation_id",
+                    "document_publication",
                 }
                 or not all(isinstance(value, str) for value in self.document.values())
             ):
@@ -129,6 +130,10 @@ class KnowledgeProposal:
                 or self.document["parse_id"] != self.parse_id
             ):
                 raise ValueError("Document projection identity mismatch")
+            if "document_publication" in self.document:
+                from openkb.agent.document_publication import proposal_binding
+
+                proposal_binding(self.document)
         if not isinstance(self.before, dict) or not isinstance(self.changes, dict):
             raise ValueError("Invalid knowledge proposal files")
         for group in (self.before, self.changes):
@@ -230,12 +235,19 @@ class KnowledgeWorkspace:
             self.temporary.cleanup()
 
     def proposal(
-        self, document: dict[str, Any] | None = None, *, replaces: str | None = None
+        self,
+        document: dict[str, Any] | None = None,
+        *,
+        replaces: str | None = None,
+        protected_paths: set[str] | None = None,
     ) -> KnowledgeProposal:
         with kb_ingest_lock(self.kb_dir / ".openkb"):
             from openkb.source_coverage import stored_coverage
 
             stored_coverage(document, self.source, self.parsed)
+            protected_paths = protected_paths or set()
+            if not all(isinstance(name, str) for name in protected_paths):
+                raise ValueError("Invalid protected proposal paths")
             after = wiki_version(self.path)
             changes = {
                 name: after.get(name)
@@ -260,6 +272,9 @@ class KnowledgeWorkspace:
             for name in changes:
                 previous = self.before.get(name)
                 if previous is None:
+                    continue
+                if name in protected_paths:
+                    protected.append(name)
                     continue
                 if self.baselines.get(name) == previous and not self.ownership.requires_review(
                     name, previous
@@ -337,6 +352,30 @@ class Publication:
     pages: tuple[str, ...] = ()
 
 
+def completed_publication(kb_dir: Path, source_id: str, proposal_id: Any) -> Publication | None:
+    """Return an already committed proposal only when its immutable receipt matches."""
+
+    try:
+        source_id = valid_id(source_id, source=True)
+        proposal_id = valid_id(proposal_id)
+        receipt = read_object(_directory(kb_dir, "completed", f"{source_id}.json"))
+        proposal = load_proposal(kb_dir, proposal_id)
+    except (FileNotFoundError, KeyError, TypeError, ValueError):
+        return None
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"proposal", "source_version", "parse", "ownership"}
+        or receipt["proposal"] != proposal.id
+        or receipt["source_version"] != proposal.version_id
+        or receipt["parse"] != proposal.parse_id
+        or proposal.source_id != source_id
+        or not isinstance(receipt["ownership"], str)
+        or len(receipt["ownership"]) != 64
+    ):
+        return None
+    return Publication("completed", proposal.id, tuple(proposal.changes))
+
+
 @measure_span("committing")
 def publish_proposal(
     kb_dir: Path,
@@ -347,6 +386,8 @@ def publish_proposal(
 ) -> Publication:
     with kb_ingest_lock(kb_dir / ".openkb"):
         proposal = load_proposal(kb_dir, proposal_id)
+        if completed := completed_publication(kb_dir, proposal.source_id, proposal.id):
+            return completed
         try:
             current = input_is_current()
         except OSError:

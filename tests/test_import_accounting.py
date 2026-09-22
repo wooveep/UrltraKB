@@ -31,14 +31,11 @@ def test_import_reports_stage_and_request_time_with_provider_cache_details(
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     measurement = result.usage["measurement"]
-    assert {"parsing", "facts", "planning", "generation", "committing"} <= {
-        span["stage"] for span in measurement["spans"]
-    }
+    assert {"parsing", "committing"} <= {span["stage"] for span in measurement["spans"]}
     requests = measurement["requests"]
-    assert len(requests) == len(model_service) == 4
-    assert len({row["id"] for row in requests}) == 4
+    assert len(requests) == len(model_service) == 3
+    assert len({row["id"] for row in requests}) == 3
     assert {row["operation"] for row in requests} == {
-        "facts",
         "planning",
         "generation",
         "verification",
@@ -51,7 +48,7 @@ def test_import_reports_stage_and_request_time_with_provider_cache_details(
     assert all(row["output_tokens"] == 30 and row["reasoning_tokens"] == 12 for row in requests)
     assert all(row["provider_model"] == "offline-test" for row in requests)
     assert all(row["effective_options"]["max_tokens"] == 1024 for row in requests)
-    assert result.usage["charged_tokens"] == 520
+    assert result.usage["charged_tokens"] == 390
     saved = source_status(kb_dir, result.source_id)["result"]
     assert saved["usage"]["measurement"] == measurement
     assert DocumentResult.from_summary(json.loads(json.dumps(saved))).usage == result.usage

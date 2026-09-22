@@ -164,6 +164,7 @@ def import_document(
     origin_url: str | None = None,
     source_root: Path | None = None,
     source_origin: str | None = None,
+    plan_only: bool = False,
     report=logger.info,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
@@ -210,4 +211,5 @@ def import_document(
                     bundle=bundle or credentials,
                     on_event=on_event or context.on_event,
                     input_is_current=ready.is_current,
+                    plan_only=plan_only,
                 )

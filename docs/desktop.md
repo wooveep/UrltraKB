@@ -70,6 +70,10 @@ or undo its pending edit. **撤销修改** discards the current scope's unsaved 
 Advanced content options start collapsed. Image connection details and navigation
 budgets appear when their features are enabled. API keys remain masked and are
 never read back into the form. Saved settings apply to subsequent tasks.
+The **处理限制** tab binds validation to the model and API endpoint selected in
+the same form. Choose automatic capacity for a locally declared model capability,
+or declare either a shared context window or independent input/output limits for
+an unknown/custom endpoint; the form never invents a generic context ceiling.
 
 See [implementation and evidence](desktop-workbench.md) for the scope, assets,
 actual application screenshots and reproducible source acceptance commands.
@@ -88,9 +92,10 @@ page recognition to refresh OCR. Identical images in different documents share
 recognition results within the KB, identified by the original image content and
 recognition settings, independently of OCR output text. Original figure positions
 and captions remain local to each document. If an explicit refresh changes a few
-blocks, unchanged facts and complete topic groups remain reusable; only affected
-content and its context need new work. Task logs show how many facts and topics
-were reused.
+blocks, unchanged accepted planning targets and range-bound page candidates remain
+reusable; only affected content and its context need new work. Task logs show
+planning, generation and verification reuse separately. A plan-only result is shown
+as **文档规划** ready, rather than as published knowledge.
 
 The document list supports removal and recompilation. Review the preview before
 confirming changes. Recompilation can rewrite knowledge pages; open editor drafts
@@ -189,6 +194,13 @@ outputs and quality diagnostics. Stopping prevents later units from starting
 and lets required recovery/commit work finish safely. It does not undo earlier
 completed work. A worker exit without a reliable result is shown as interrupted
 or unconfirmed, not inferred to be a success.
+
+During document planning, task diagnostics identify the frozen evidence window,
+its movable target range, cache status, accumulated page/unresolved counts and
+measured request linkage. They retain hashes and sizes rather than source text.
+Completed usage records show request latency percentiles, observed resident-memory
+peak when available, reservations and provider-reported token use; unavailable
+provider or OS measurements remain explicitly unknown.
 
 Manual retry previews what remains and creates a new task. Failed work is not
 automatically replayed. Clearing task history removes summaries, not generated
