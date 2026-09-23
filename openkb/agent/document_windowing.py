@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openkb.agent.document_plan import table_row_identity
+from openkb.agent.document_range_validation import validate_ranges
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.processing import InputTooLarge, ProcessingIncomplete, RequestLimits
 from openkb.sources import content_id
@@ -45,33 +46,21 @@ def target_intervals(window: dict[str, Any], parsed: Any) -> list[tuple[int, int
     values = window.get("target_ranges")
     if values is None:
         values = [[window["target_start"], window["target_end"]]]
+    validate_ranges(values, len(parsed.blocks), "bounded planning target")
     result = []
     for value in values:
         if isinstance(value, dict):
             index, start, end = (
-                value.get("block_index"),
-                value.get("start_char"),
-                value.get("end_char"),
+                value["block_index"],
+                value["start_char"],
+                value["end_char"],
             )
-            if not (
-                type(index) is int
-                and type(start) is int
-                and type(end) is int
-                and 0 <= index < len(parsed.blocks)
-                and 0 <= start < end <= parsed.blocks[index].chars
-            ):
+            if end > parsed.blocks[index].chars:
                 raise ValueError("Invalid bounded planning target range")
             if not target_start <= index < target_end:
                 raise ValueError("Bounded planning target range leaves its block window")
             result.append((index, start, end))
             continue
-        if (
-            not isinstance(value, (list, tuple))
-            or len(value) != 2
-            or any(type(item) is not int for item in value)
-            or not 0 <= value[0] < value[1] <= len(parsed.blocks)
-        ):
-            raise ValueError("Invalid bounded planning block range")
         if value[0] < target_start or value[1] > target_end:
             raise ValueError("Bounded planning target range leaves its block window")
         result.extend((index, 0, parsed.blocks[index].chars) for index in range(*value))

@@ -25,6 +25,48 @@ OFFLINE_PROCESSING = dict(
 )
 
 
+def test_ledger_persistence_and_proof_share_unicode_canonical_json(tmp_path):
+    import hashlib
+
+    from openkb.agent.document_planning_ledger_integrity import canonical_json, plan_state_digest
+
+    source, parsed = _DummySource(), _DummyParsed(1)
+    settings = {"model": "openai/offline-test", "processing": OFFLINE_PROCESSING}
+    payload = {"甲": 2, "乙": {"z": 1, "a": "值"}}
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        ledger = DocumentPlanningLedger(checkpoints, "c" * 64)
+        try:
+            ledger._set_meta("overview", payload)
+            stored = ledger.db.execute("SELECT value FROM meta WHERE name = 'overview'").fetchone()[
+                0
+            ]
+            assert stored == canonical_json(payload) == '{"乙":{"a":"值","z":1},"甲":2}'
+            digest = hashlib.sha256()
+            for table in ("pages", "source_only", "unresolved", "resolutions"):
+                digest.update(table.encode("ascii") + b"\n")
+            digest.update(b"overview\n")
+            digest.update(stored.encode("utf-8") + b"\n")
+            assert plan_state_digest(ledger) == digest.hexdigest()
+        finally:
+            ledger.close()
+
+
+@pytest.mark.parametrize(
+    "invalid_ranges",
+    [([0, 1],), [{"block_index": 0, "start_char": 0, "end_char": 1, "extra": True}]],
+)
+def test_windowing_and_protocol_reject_the_same_malformed_target_ranges(invalid_ranges):
+    from openkb.agent.document_range_validation import target_intervals as protocol_intervals
+    from openkb.agent.document_windowing import target_intervals as window_intervals
+
+    parsed = _DummyParsed(1)
+    window = {"target_start": 0, "target_end": 1, "target_ranges": invalid_ranges}
+    with pytest.raises(ValueError):
+        protocol_intervals(0, 1, target_ranges=invalid_ranges, block_chars=[parsed.blocks[0].chars])
+    with pytest.raises(ValueError):
+        window_intervals(window, parsed)
+
+
 def test_planning_admission_uses_a_constant_parser_condition_envelope():
     template = prompt_condition_template(
         [
@@ -233,6 +275,50 @@ def test_empty_document_persists_a_complete_overview_across_resume(tmp_path):
         )
     assert resumed.metadata["status"] == "accepted"
     assert resumed.overview.status == "complete"
+
+
+def test_plan_document_closes_ledger_on_success_and_exception(tmp_path, monkeypatch):
+    source, parsed = _DummySource(), _DummyParsed(0)
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    ledgers = []
+    closed = []
+    fail_initialize = False
+
+    class TrackedLedger(DocumentPlanningLedger):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            ledgers.append(self)
+
+        def initialize(self, *args, **kwargs):
+            if fail_initialize:
+                raise RuntimeError("synthetic initialization failure")
+            return super().initialize(*args, **kwargs)
+
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    monkeypatch.setattr("openkb.agent.document_orchestrator.DocumentPlanningLedger", TrackedLedger)
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            None,
+            settings,
+            checkpoints,
+            mock_caller=lambda *_args, **_kwargs: pytest.fail("empty document must not call model"),
+        )
+    assert closed == ledgers
+
+    fail_initialize = True
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        with pytest.raises(RuntimeError, match="synthetic initialization failure"):
+            plan_document(tmp_path, workspace, source, parsed, None, settings, checkpoints)
+    assert closed == ledgers and len(closed) == 2
 
 
 def test_corrupt_planning_ledger_is_quarantined_and_replanned(tmp_path):
@@ -1796,9 +1882,13 @@ def test_resume_resets_a_structurally_invalid_json_ledger_row(tmp_path, monkeypa
         # The payload stays valid JSON and its state digest is recomputed, so
         # only durable-row schema validation can distinguish this from a safe
         # accepted prefix.
-        with ledgers[0]._transaction():
-            ledgers[0].db.execute("UPDATE pages SET payload = ?", ('{"bad":"row"}',))
-            ledgers[0]._refresh_integrity()
+        tampered = original_ledger(checkpoints, ledgers[0].recovery_key)
+        try:
+            with tampered._transaction():
+                tampered.db.execute("UPDATE pages SET payload = ?", ('{"bad":"row"}',))
+                tampered._refresh_integrity()
+        finally:
+            tampered.close()
         interrupt_second = False
         plan = plan_document(
             tmp_path,

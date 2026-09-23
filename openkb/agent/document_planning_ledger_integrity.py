@@ -11,7 +11,9 @@ _PROOF_SYSTEM = "DocumentPlan accepted ledger state"
 _BASELINE_PROOF_SYSTEM = "DocumentPlan ledger catalog baseline"
 
 
-def _json(value: Any) -> str:
+def canonical_json(value: Any) -> str:
+    """Stable bytes shared by ledger persistence and immutable proof hashes."""
+
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
@@ -33,7 +35,7 @@ def catalog_baseline_digest(ledger: Any) -> str:
     for row in ledger.db.execute(
         "SELECT target, brief, digest, baseline FROM catalog WHERE baseline = 1 ORDER BY target"
     ):
-        digest.update(_json(list(row)).encode("utf-8"))
+        digest.update(canonical_json(list(row)).encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
 
@@ -76,10 +78,10 @@ def plan_state_digest(ledger: Any) -> str:
     ):
         digest.update(table.encode("ascii") + b"\n")
         for row in ledger.db.execute(f"SELECT {columns} FROM {table} ORDER BY 1"):
-            digest.update(_json(list(row)).encode("utf-8"))
+            digest.update(canonical_json(list(row)).encode("utf-8"))
             digest.update(b"\n")
     digest.update(b"overview\n")
-    digest.update(_json(ledger._meta("overview")).encode("utf-8"))
+    digest.update(canonical_json(ledger._meta("overview")).encode("utf-8"))
     digest.update(b"\n")
     return digest.hexdigest()
 

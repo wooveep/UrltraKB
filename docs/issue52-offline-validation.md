@@ -18,6 +18,20 @@ uv run mypy openkb
 uv run pytest -q
 ```
 
+## Recorded offline gates (2026-09-23)
+
+On `dev-1.1.0` after the two-axis review fixes, the focused document,
+concurrency, diagnostics and file-size set reported **152 passed, 1 skipped**.
+The complete suite reported **2668 passed, 2 skipped** in 16m14s. `ruff check .`,
+`ruff format --check .`, `mypy openkb`, and the module-size gate passed.
+Three non-failing warnings came from LiteLLM's logging-worker coroutine in
+`tests/test_provider_usage.py`. No online model request was made.
+
+The review identified and resolved three offline issues: ledger persistence
+and proof digests now share canonical Unicode/key-order JSON serialization;
+window scheduling and the planning protocol reject the same malformed range
+shapes; and the planning ledger closes on normal return and exceptions.
+
 The focused tests cover a second-step request **above 256,000 input tokens** without
 exceeding its configured 512,000-token model context; 1M/10M-token descriptor-scale
 window scheduling and durable restart without materializing source bodies; and a

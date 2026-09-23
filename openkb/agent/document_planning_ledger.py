@@ -18,6 +18,7 @@ from openkb.agent.document_plan import (
 from openkb.agent.document_planning_ledger_integrity import (
     accepted_proofs_valid as _accepted_proofs_valid,
 )
+from openkb.agent.document_planning_ledger_integrity import canonical_json as _json
 from openkb.agent.document_planning_ledger_integrity import (
     catalog_baseline_proof_valid as _catalog_baseline_proof_valid,
 )
@@ -62,10 +63,6 @@ from openkb.agent.document_planning_projection import _WIKILINK_TARGET, _mention
 from openkb.sources import content_id
 
 _VIEW_CANDIDATES = 32
-
-
-def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 class DocumentPlanningLedger:

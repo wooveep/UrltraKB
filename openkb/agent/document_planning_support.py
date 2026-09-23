@@ -382,6 +382,32 @@ def planning_contract(settings: dict[str, Any], limits: Any) -> dict[str, Any]:
     }
 
 
+def planning_implementation_revisions() -> dict[str, str]:
+    """Bind a recoverable plan to every rule that can change its meaning."""
+
+    from openkb.implementation import module_revision
+
+    return {
+        name: module_revision("openkb.agent." + name)
+        for name in (
+            "document_plan",
+            "document_protocol",
+            "document_range_validation",
+            "document_orchestrator",
+            "document_recovery",
+            "document_windowing",
+            "document_window_schedule",
+            "document_window_receipts",
+            "document_planning_events",
+            "document_planning_ledger",
+            "document_planning_ledger_integrity",
+            "document_planning_ledger_views",
+            "document_planning_projection",
+            "document_planning_support",
+        )
+    }
+
+
 def planning_identity(
     checkpoints: Any,
     *,

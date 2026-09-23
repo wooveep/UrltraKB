@@ -87,9 +87,13 @@ class Measurement:
 
             def group_total(field: str) -> int | None:
                 values = [row.get(field) for row in group_requests]
-                return (
-                    sum(values) if values and all(type(value) is int for value in values) else None
-                )
+                if not values or not all(type(value) is int for value in values):
+                    return None
+                total_value = 0
+                for value in values:
+                    assert isinstance(value, int)
+                    total_value += value
+                return total_value
 
             group_usage.append(
                 {
