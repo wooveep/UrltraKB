@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from openkb.agent import document_planning_projection, document_planning_support, document_windowing
 from openkb.agent.document_plan import DocumentPlan, to_dict
+from openkb.agent.document_plan_feedback import retry_messages
 from openkb.agent.document_planning_events import (
     emit_planning_observation,
     frozen_prefix,
@@ -24,6 +25,7 @@ from openkb.agent.document_protocol import (
 )
 from openkb.agent.document_window_receipts import accepted_window_receipt, window_receipt_id
 from openkb.agent.evidence_units import JSON_FORMAT
+from openkb.agent.evidence_wire import WireMessages
 from openkb.config import compilation_model_options, resolve_entity_types
 from openkb.execution_measurement import record_document_totals, request_after, request_marker
 from openkb.implementation import module_revision
@@ -401,6 +403,7 @@ def plan_document(
             target_t = {
                 "target_start": t_start,
                 "target_end": t_end,
+                "total_blocks": total_blocks,
                 **(
                     {"ranges": planning_target_ranges}
                     if target_ranges is not None or target_was_projected
@@ -408,12 +411,9 @@ def plan_document(
                 ),
             }
 
-            # Filter navigation hints for this window
-            nav_hints = [
-                {k: node.get(k) for k in ("title", "summary", "summary_origin") if k in node}
-                for node in (navigation.get("nodes", []) if navigation else [])
-                if t_start <= node.get("start", 0) < t_end
-            ][:12]
+            nav_hints = document_planning_support.select_navigation_hints(
+                navigation, planning_target_ranges, planning_limits
+            )
             page_register, open_references = ledger.projected_carry(relevant, t_start, t_end)
             terms = {
                 word.strip(".,:;()[]{}!?'\"").lower()
@@ -430,7 +430,7 @@ def plan_document(
                 visible_pages: list[dict[str, Any]],
                 visible_unresolved: list[dict[str, Any]],
                 visible_catalog: list[tuple[str, str]],
-            ) -> list[dict[str, Any]]:
+            ) -> WireMessages:
                 return plan_messages(
                     evidence=evidence,
                     carry_s={
@@ -516,10 +516,6 @@ def plan_document(
                 "prior_overview_ranges": cumulative_overview.ranges,
             }
             predecessor = ledger.state_digest()
-            request_reference = content_id(
-                {"system": msgs[0]["content"], "payload": json.loads(msgs[-1]["content"])}
-            )
-
             raw_response = None
             output_exhausted = False
             accepted_checkpoint = None
@@ -530,13 +526,16 @@ def plan_document(
             projection_required = False
             re_admit_after_expansion = False
 
-            def retry_invalid(key: str, attempt: int, cached: bool) -> None:
+            def retry_invalid(key: str, attempt: int, cached: bool, error: BaseException) -> None:
+                nonlocal msgs
+                msgs, feedback = retry_messages(msgs, value, error, decode_kwargs)
                 on_event(
                     {
                         "stage": "planning",
                         "operation": "retry_invalid_response",
                         "window": w_idx + 1,
                         "cached": cached,
+                        "invalid_fields": [issue["field"] for issue in feedback["issues"]],
                     }
                 )
                 emit_planning_observation(
@@ -585,10 +584,10 @@ def plan_document(
                         raise
                     output_exhausted = True
             else:
-                request = json.loads(msgs[-1]["content"])
                 # A bad response is never accepted into the normal cache: a bounded
                 # retry gets a distinct suffix identity while preserving the same W.
                 for attempt in range(limits.max_attempts):
+                    request = json.loads(msgs[-1]["content"])
                     dependencies = {
                         "catalog_view": content_id(view.catalog_entries),
                         "schema": schema,
@@ -646,18 +645,18 @@ def plan_document(
                                 raise ProcessingIncomplete(
                                     "document_plan_invalid", "planning"
                                 ) from None
-                            retry_invalid(key, attempt, cached)
+                            retry_invalid(key, attempt, cached, exc)
                             continue
                         except PlanningProjectionRequired as exc:
                             promote_projection(exc)
                             projection_required = True
                             break
-                        except (AttributeError, TypeError, ValueError):
+                        except (AttributeError, TypeError, ValueError) as exc:
                             if attempt + 1 == limits.max_attempts:
                                 raise ProcessingIncomplete(
                                     "document_plan_invalid", "planning"
                                 ) from None
-                            retry_invalid(key, attempt, cached)
+                            retry_invalid(key, attempt, cached, exc)
                             continue
                         if not cached:
                             checkpoints.save(key, value, receipt=raw_text)
@@ -730,7 +729,7 @@ def plan_document(
                 checkpoint=accepted_checkpoint,
                 attempt=accepted_attempt,
                 cached=accepted_cached,
-                request=request_reference,
+                request=document_planning_support.accepted_request_reference(msgs),
                 predecessor=predecessor,
                 delta=content_id(decoded),
                 dispatch_output_tokens=accepted_output_tokens,

@@ -408,6 +408,52 @@ def test_plan_messages_frozen_w_prefix_stability():
     assert prefix_w in user2
 
 
+def test_plan_rules_disambiguate_block_order_and_output_paths():
+    assert "blocks[].order" in PLAN_RULES
+    assert "rN" in PLAN_RULES
+    assert "[i,i+1)" in PLAN_RULES
+    assert "target.total_blocks" in PLAN_RULES
+    assert "[a-z0-9][a-z0-9-]{0,119}" in PLAN_RULES
+    assert "Every new unresolved record must set blocking=true" in PLAN_RULES
+    assert "necessary_context.ranges" in PLAN_RULES
+    assert "necessary_context.basis_ranges" in PLAN_RULES
+
+
+def test_retry_feedback_does_not_echo_arbitrary_exception_text():
+    from openkb.agent.document_plan_feedback import validation_feedback
+
+    candidate = {"overview": {"ranges": [[0, 0]]}}
+    feedback = validation_feedback(
+        candidate,
+        ValueError("Authorization: Bearer sentinel-secret"),
+        total_blocks=1,
+        block_chars=[10],
+        ignored_blocks=set(),
+    )
+    assert feedback["issues"][0]["code"] == "invalid_range"
+    assert "sentinel-secret" not in repr(feedback)
+
+
+def test_retry_feedback_names_missing_and_malformed_plan_sections():
+    from openkb.agent.document_plan_feedback import validation_feedback
+
+    feedback = validation_feedback(
+        {"page_changes": {}},
+        ValueError("untrusted text"),
+        total_blocks=1,
+        block_chars=[10],
+        ignored_blocks=set(),
+    )
+    assert {issue["field"] for issue in feedback["issues"]} >= {
+        "overview",
+        "page_changes",
+        "source_only",
+        "unresolved",
+        "resolutions",
+    }
+    assert "untrusted text" not in repr(feedback)
+
+
 def test_decode_plan_response_success():
     raw_response = {
         "overview": {

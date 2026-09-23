@@ -53,6 +53,42 @@ and document/group timing. Missing provider usage and monetary cost are `null`,
 not zero; an in-flight reservation is not billed usage. The first inspectable
 timestamp is taken only after an accepted/adopted plan observation is recorded.
 
+## Follow-up to the real-sample planning diagnosis (2026-09-23)
+
+The isolated three-step real-model run documented in
+[the three-step import report](research/import-review-20260923/steps01-03/report.md)
+failed at planning:
+both candidate plans were rejected, and no DocumentPlan was accepted. The first
+candidate had 31 invalid range occurrences and five non-blocking new unresolved
+records; the retry had 27 invalid range occurrences, seven invalid page paths,
+and seven non-blocking new unresolved records. The retry request had not included
+the first rejection's field-level reasons.
+
+This follow-up clarifies global block `order` versus opaque `rN` IDs, half-open
+single-block ranges, page-path slugs, new unresolved records, and the separate
+roles of necessary-context and basis ranges. A rejected plan now yields bounded
+field diagnostics in a dynamic retry suffix while the original evidence
+prefix stays unchanged. Navigation hints are selected across the target within
+the request budget instead of taking only the first twelve. Offline tests cover
+the formal import retry and the original rejected-response patterns. Planning
+windows continue to use the configured model capacity; this follow-up adds no
+context-length limit.
+
+The prior 4096-token synthetic pressure cases were removed from the test suite
+because they do not represent this application's configured import workload.
+Capacity-dependent import coverage instead uses the configured 131,072-token
+model context, while independent adaptive-budget behavior remains tested at
+larger model capacities.
+
+No real-model request was made after these changes. The historical rejected
+responses must remain rejected on replay; this fix cannot be counted as #64's
+semantic acceptance until the user performs the deferred manual review.
+
+After this follow-up, the complete offline suite reported **2670 passed,
+2 skipped** in 16m08s. `ruff check .`, `ruff format --check .`, `mypy openkb`,
+and the file-size gate passed. The three warnings were the existing LiteLLM
+logging-worker coroutine warnings in `tests/test_provider_usage.py`.
+
 ## Manual semantic acceptance still required for #64
 
 Before any real request, the reviewer should record the effective model and

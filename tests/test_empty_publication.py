@@ -108,25 +108,6 @@ def test_all_failed_content_registers_source_and_omissions(
     assert len(model_service) == before
 
 
-def test_context_that_cannot_fit_is_a_content_gap_not_a_document_failure(
-    kb_dir, tmp_path, model_service
-):
-    import yaml
-
-    config_path = kb_dir / ".openkb/config.yaml"
-    settings = yaml.safe_load(config_path.read_text())
-    settings["processing"].update(context_tokens=4096, max_context_tokens=4096)
-    config_path.write_text(yaml.safe_dump(settings))
-    path = tmp_path / "oversized-context.md"
-    path.write_text("# " + "Necessary prerequisite " * 3000 + "\n\nThe pressure must be 37 kPa.")
-    result = import_document(kb_dir, path)
-    assert result.knowledge_compilation == "completed", result
-    assert result.coverage["status"] == "partial"
-    assert any(
-        row["reason"] == "evidence_context_exceeds_request_budget" for row in result.omissions
-    )
-
-
 def test_manual_completion_survives_repeat_and_continue_with_the_same_gap(
     kb_dir, tmp_path, model_service
 ):

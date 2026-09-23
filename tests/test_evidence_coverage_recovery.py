@@ -42,6 +42,71 @@ def test_invalid_document_plan_response_retries_the_same_target(
     assert result.usage["unknown_usage"] == 0
 
 
+def test_invalid_plan_retry_reports_all_observed_contract_errors_without_changing_evidence(
+    kb_dir, tmp_path, monkeypatch
+):
+    source = tmp_path / "retry-feedback.md"
+    source.write_text("Recovery heading.\n\nRecovery step.")
+    requests = []
+    observed_codes = []
+    events = []
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        value = evidence_response(payload)
+        if payload["stage"] != "planning":
+            return response(value)
+        requests.append(kwargs["messages"][-1]["content"])
+        if len(requests) == 2:
+            feedback = payload.get("retry_feedback", {})
+            codes = {issue["code"] for issue in feedback.get("issues", [])}
+            observed_codes.append(codes)
+            if codes == {"invalid_range", "invalid_page_path", "nonblocking_unresolved"}:
+                return response(value)
+        value["page_changes"][0]["name"] = "concepts/恢复步骤"
+        value["page_changes"][0]["necessary_context"] = [
+            {
+                "relation": "explicit_reference",
+                "ranges": [[0, 0]],
+                "basis": "Recovery heading",
+                "basis_ranges": [[0, 1]],
+            }
+        ]
+        value["unresolved"] = [
+            {
+                "location": [[0, 1]],
+                "problem_type": "missing_external_material",
+                "missing_target": "External instructions",
+                "affected_pages": ["c1"],
+                "blocking": False,
+                "reason": "The referenced instructions were not supplied",
+            }
+        ]
+        return response(value)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    result = import_document(kb_dir, source, on_event=events.append)
+    assert result.knowledge_compilation == "completed", result
+    assert not any(row["reason"] == "document_plan_invalid" for row in result.omissions), (
+        observed_codes
+    )
+    assert len(requests) == 2
+    first, second = requests
+    assert first.partition(',"target":')[0] == second.partition(',"target":')[0]
+    assert json.loads(first)["target"]["total_blocks"] == json.loads(first)["target"]["target_end"]
+    feedback = json.loads(second)["retry_feedback"]
+    assert feedback["total_blocks"] == json.loads(first)["target"]["total_blocks"]
+    assert feedback["issue_counts"] == {
+        "invalid_range": 1,
+        "invalid_page_path": 1,
+        "nonblocking_unresolved": 1,
+    }
+    assert len(feedback["issues"]) <= 12
+    assert len(json.dumps(feedback)) <= 2000
+    retry_event = next(row for row in events if row.get("operation") == "retry_invalid_response")
+    assert {issue["field"] for issue in feedback["issues"]} == set(retry_event["invalid_fields"])
+
+
 def test_persistent_invalid_document_plan_stops_after_bounded_retry(kb_dir, tmp_path, monkeypatch):
     source = tmp_path / "broken.md"
     source.write_text("A requirement.")

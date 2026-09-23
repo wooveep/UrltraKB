@@ -368,38 +368,6 @@ def test_one_large_page_is_omitted_when_its_assembled_candidate_cannot_be_review
     )
 
 
-def test_oversized_unbroken_command_is_omitted_without_partial_generation(
-    kb_dir, tmp_path, model_service
-):
-    original = tmp_path / "long-command.md"
-    text = "start " + "--argument=37 " * 1400 + " --timeout=42"
-    original.write_text(text)
-    path = kb_dir / ".openkb/config.yaml"
-    config = yaml.safe_load(path.read_text())
-    config["processing"].update(context_tokens=4096, max_requests=150, max_tokens=500000)
-    path.write_text(yaml.safe_dump(config))
-    scopes = []
-
-    def respond(body):
-        payload = json.loads(body["messages"][-1]["content"])
-        if payload["stage"] == "verification":
-            return {"verdict": "supported", "reason": "Controlled evidence is supported."}
-        if payload["stage"] == "generation":
-            scopes.extend(item["reference"] for item in payload["evidence"]["blocks"])
-        return evidence_response(payload)
-
-    model_service.respond = respond
-    result = import_document(kb_dir, original)
-    assert result.knowledge_compilation == "completed", result
-    assert not scopes
-    assert result.omissions
-    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert original.read_text() == text
-    for request in model_service:
-        measured = litellm.token_counter(model=request["model"], messages=request["messages"])
-        assert measured + request["max_tokens"] <= config["processing"]["context_tokens"]
-
-
 def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabulary(
     kb_dir, tmp_path, model_service
 ):

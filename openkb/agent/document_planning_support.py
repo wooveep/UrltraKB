@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections import deque
 from dataclasses import asdict
 from typing import Any
 
@@ -10,6 +12,65 @@ from openkb.config import compilation_model_options
 from openkb.sources import content_id
 
 __all__ = ("no_readable_body", "valid_window_schedule")
+
+
+def select_navigation_hints(
+    navigation: dict[str, Any] | None, target_ranges: list[Any], limits: Any
+) -> list[dict[str, Any]]:
+    """Keep every target hint that fits; otherwise spread a bounded view across T."""
+
+    def in_target(node: dict[str, Any]) -> bool:
+        index = node.get("start")
+        return type(index) is int and any(
+            (row.get("block_index") == index if isinstance(row, dict) else row[0] <= index < row[1])
+            for row in target_ranges
+        )
+
+    rows = [
+        {key: node[key] for key in ("title", "summary", "summary_origin") if key in node}
+        for node in (navigation.get("nodes", []) if navigation else [])
+        if in_target(node)
+    ]
+    budget_chars = max(512, min(32_000, limits.input_capacity // 4))
+
+    def size(row: dict[str, Any]) -> int:
+        return len(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+
+    if sum(size(row) for row in rows) <= budget_chars:
+        return rows
+    # Summaries are hints, not evidence. Under pressure retain a short preview
+    # from sections across the whole target, including its end, not only its start.
+    compact = [
+        {**row, "summary": row["summary"][:239] + "…"}
+        if isinstance(row.get("summary"), str) and len(row["summary"]) > 240
+        else row
+        for row in rows
+    ]
+    priority = [0, len(rows) - 1]
+    pending = deque([(0, len(rows) - 1)])
+    while pending:
+        left, right = pending.popleft()
+        middle = (left + right) // 2
+        if middle not in (left, right):
+            priority.append(middle)
+            pending.extend(((left, middle), (middle, right)))
+    selected: dict[int, dict[str, Any]] = {}
+    remaining = budget_chars
+    for index in priority:
+        row = compact[index]
+        cost = size(row)
+        if index not in selected and cost <= remaining:
+            selected[index] = row
+            remaining -= cost
+    return [selected[index] for index in sorted(selected)]
+
+
+def accepted_request_reference(messages: Any) -> str:
+    """Bind an accepted receipt to the actual request, including any repair suffix."""
+
+    return content_id(
+        {"system": messages[0]["content"], "payload": json.loads(messages[-1]["content"])}
+    )
 
 
 def planning_admission_limits(limits: Any) -> Any:
@@ -392,6 +453,7 @@ def planning_implementation_revisions() -> dict[str, str]:
         for name in (
             "document_plan",
             "document_protocol",
+            "document_plan_feedback",
             "document_range_validation",
             "document_orchestrator",
             "document_recovery",

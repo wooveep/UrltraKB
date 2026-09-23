@@ -451,15 +451,15 @@ def test_invalid_limits_rejected_before_dispatch(changes):
         RequestLimits.from_config(profile(**changes))
 
 
-@pytest.mark.parametrize("input_tokens", [5000, 14500])
+@pytest.mark.parametrize("input_tokens", [50_000, 120_000])
 def test_larger_candidate_can_use_context_ceiling_before_verification(monkeypatch, input_tokens):
     monkeypatch.setattr(litellm, "token_counter", lambda **_: input_tokens)
     budget = ExecutionBudget(
         RequestLimits.from_config(
             profile(
-                context_tokens=4096,
+                context_tokens=32768,
                 output_tokens=1024,
-                max_context_tokens=16384,
+                max_context_tokens=131072,
                 max_output_tokens=3072,
             )
         )
@@ -474,7 +474,7 @@ def test_larger_candidate_can_use_context_ceiling_before_verification(monkeypatc
     assert len(calls) == 1
     assert calls[0]["max_tokens"] == 1024
     assert budget.attempts == 1
-    assert budget.limits.context_tokens == (8192 if input_tokens == 5000 else 16384)
+    assert budget.limits.context_tokens == (65536 if input_tokens == 50_000 else 131072)
 
 
 def test_deepseek_transport_sends_full_limits_and_recovers_from_length(

@@ -496,7 +496,7 @@ def test_fact_resume_reuses_old_batches_after_batch_size_change(kb_dir, tmp_path
     assert first.reason == "request_timeout"
     path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(path.read_text())
-    config["processing"].update(context_tokens=4096, output_tokens=1024)
+    config["processing"].update(context_tokens=128000, output_tokens=1024)
     path.write_text(yaml.safe_dump(config))
     calls.clear()
     stop = False

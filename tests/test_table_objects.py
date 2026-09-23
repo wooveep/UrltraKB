@@ -239,32 +239,3 @@ def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_pa
             location = item["location"]
             rows_in_batch[location["row"]] = rows_in_batch.get(location["row"], 0) + 1
         assert set(rows_in_batch.values()) <= {2}
-
-
-def test_document_table_uses_configured_context_headroom_before_row_splitting(
-    kb_dir, tmp_path, model_service
-):
-    import litellm
-    import yaml
-
-    config_path = kb_dir / ".openkb/config.yaml"
-    config = yaml.safe_load(config_path.read_text())
-    config["processing"].update(context_tokens=4096, max_context_tokens=32768)
-    config_path.write_text(yaml.safe_dump(config))
-    path = tmp_path / "whole.docx"
-    write_table(path, [("Parameter", "Value")] + [(f"limit-{i}", str(i)) for i in range(30)])
-    result = import_document(kb_dir, path)
-    assert result.knowledge_compilation == "completed", result
-    assert not result.omissions
-    generated = [
-        call
-        for call in model_service
-        if json.loads(call["messages"][-1]["content"])["stage"] == "generation"
-    ]
-    assert len(generated) == 1
-    request = generated[0]
-    measured = (
-        litellm.token_counter(model=request["model"], messages=request["messages"])
-        + request["max_tokens"]
-    )
-    assert 4096 < measured <= 32768

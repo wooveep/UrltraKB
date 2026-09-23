@@ -11,6 +11,7 @@ from typing import Any
 from openkb.agent.document_plan import table_row_identity
 from openkb.agent.document_range_validation import validate_ranges
 from openkb.agent.evidence_units import JSON_FORMAT
+from openkb.agent.evidence_wire import WireMessages
 from openkb.processing import InputTooLarge, ProcessingIncomplete, RequestLimits
 from openkb.sources import content_id
 
@@ -22,7 +23,7 @@ class PlanningView:
     page_register: list[dict[str, Any]]
     open_references: list[dict[str, Any]]
     catalog_entries: list[tuple[str, str]]
-    messages: list[dict[str, Any]]
+    messages: WireMessages
 
 
 def _table_row_key(block: Any, start: int, end: int) -> tuple[Any, ...] | None:
@@ -429,7 +430,7 @@ def project_planning_view(
     required_unresolved_keys: set[str] | None = None,
     required_catalog_targets: set[str] | None = None,
     assemble: Callable[
-        [list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, str]]], list[dict[str, Any]]
+        [list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, str]]], WireMessages
     ],
 ) -> PlanningView:
     """Project S and the catalog by actual request budget without discarding their ledger.
@@ -539,7 +540,11 @@ def planning_prompt_tokens(
                 "blocks": [],
             },
             carry_s={"overview": "", "page_register": [], "open_references": []},
-            target_t={"target_start": 0, "target_end": max(1, len(parsed.blocks))},
+            target_t={
+                "target_start": 0,
+                "target_end": max(1, len(parsed.blocks)),
+                "total_blocks": len(parsed.blocks),
+            },
             navigation_hints=[],
             catalog_window="",
             entity_types=entity_types,

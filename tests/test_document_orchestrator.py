@@ -1197,6 +1197,80 @@ def test_plan_document_uses_a_full_fallback_for_an_empty_navigation_manifest(tmp
     assert plan.metadata["status"] == "accepted"
 
 
+def test_single_window_planner_receives_late_navigation_summaries_when_they_fit(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(26)
+    navigation = {
+        "id": "nav-full-target",
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "status": "complete",
+        "windows": [
+            {
+                "evidence": evidence_descriptor(source, parsed, 0, 26),
+                "target_start": 0,
+                "target_end": 26,
+                "status": "complete",
+                "reason": "",
+                "target_tokens": 1000,
+            }
+        ],
+        "nodes": [
+            {"start": index, "title": f"Section {index}", "summary": f"Summary {index}"}
+            for index in range(26)
+        ],
+    }
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    seen_hints = []
+
+    def caller(messages, **_):
+        payload = json.loads(messages[-1]["content"])
+        seen_hints.extend(payload["navigation"]["hints"])
+        return {
+            "overview": {"text": "Complete target", "ranges": [[0, 26]], "limitations": []},
+            "page_changes": [],
+            "source_only": [{"ranges": [[0, 26]], "reason": "Retained with source."}],
+            "unresolved": [],
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            navigation,
+            settings,
+            checkpoints,
+            mock_caller=caller,
+        )
+
+    assert [hint["title"] for hint in seen_hints] == [f"Section {i}" for i in range(26)]
+
+
+def test_navigation_hints_follow_sparse_target_and_budget():
+    from types import SimpleNamespace
+
+    from openkb.agent.document_planning_support import select_navigation_hints
+
+    navigation = {
+        "nodes": [
+            {"start": index, "title": f"Section {index}", "summary": "x" * 1000}
+            for index in range(26)
+        ]
+    }
+    hints = select_navigation_hints(
+        navigation, [[0, 2], [24, 26]], SimpleNamespace(input_capacity=3000)
+    )
+    titles = {hint["title"] for hint in hints}
+    assert titles <= {"Section 0", "Section 1", "Section 24", "Section 25"}
+    assert {"Section 0", "Section 25"} <= titles
+    assert len(json.dumps(hints, ensure_ascii=False)) <= 800
+
+
 def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
     source = _DummySource()
     parsed = _DummyParsed(6)
@@ -1223,6 +1297,7 @@ def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
         call_count += 1
         user_body = json.loads(msgs[-1]["content"])
         target = user_body["target"]
+        assert target["total_blocks"] == 6
 
         if target["target_start"] == 0:
             # Window 1: returns overview (partial), page p1 with unresolved blocking dep
