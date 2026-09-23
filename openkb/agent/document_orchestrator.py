@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from openkb.agent import document_planning_projection, document_planning_support, document_windowing
 from openkb.agent.document_plan import DocumentPlan, to_dict
-from openkb.agent.document_plan_feedback import retry_messages
+from openkb.agent.document_plan_repair_state import PlanningRepairSession
 from openkb.agent.document_planning_events import (
     emit_planning_observation,
     frozen_prefix,
@@ -68,7 +68,6 @@ def plan_document(
     total_blocks = len(parsed.blocks) if hasattr(parsed, "blocks") else 0
     limits = RequestLimits.from_config(settings)
 
-    # Validate identity binding if navigation is present
     if navigation:
         if navigation.get("source_id") and navigation["source_id"] != source.source_id:
             raise ValueError("Navigation source_id mismatch")
@@ -79,7 +78,6 @@ def plan_document(
         if navigation_parse and navigation_parse != parsed.id:
             raise ValueError("Navigation parse_id mismatch")
 
-    # Durable recovery identity
     rules_rev = module_revision("openkb.agent.document_protocol")
     windowing_rev = module_revision("openkb.agent.document_windowing")
     planning_revisions = document_planning_support.planning_implementation_revisions()
@@ -106,14 +104,12 @@ def plan_document(
     planning_limits = document_planning_support.planning_admission_limits(limits)
     parser_conditions = document_planning_support.source_conditions(parsed)
     if total_blocks and not document_planning_support.no_readable_body(parsed):
-        # Determine navigation windows
         windows = navigation.get("windows", []) if navigation else []
         if navigation and "windows" in navigation:
-            from openkb.navigation_evidence import validate_windows
+            from openkb.navigation_evidence import planning_windows
 
-            validate_windows(source, parsed, windows)
+            windows = planning_windows(source, parsed, navigation)
         if not windows:
-            # Single window covering entire document
             windows = [
                 {
                     "evidence": None,
@@ -514,6 +510,7 @@ def plan_document(
                 "target_ranges": planning_target_ranges,
                 "evidence_ranges": evidence_ranges,
                 "prior_overview_ranges": cumulative_overview.ranges,
+                "context_contract": "document-plan-v2",
             }
             predecessor = ledger.state_digest()
             raw_response = None
@@ -528,7 +525,9 @@ def plan_document(
 
             def retry_invalid(key: str, attempt: int, cached: bool, error: BaseException) -> None:
                 nonlocal msgs
-                msgs, feedback = retry_messages(msgs, value, error, decode_kwargs)
+                msgs, feedback = repair.invalid(
+                    raw_text if raw_text is not None else value, error, attempt
+                )
                 on_event(
                     {
                         "stage": "planning",
@@ -584,9 +583,11 @@ def plan_document(
                         raise
                     output_exhausted = True
             else:
-                # A bad response is never accepted into the normal cache: a bounded
-                # retry gets a distinct suffix identity while preserving the same W.
-                for attempt in range(limits.max_attempts):
+                repair = PlanningRepairSession(
+                    msgs, decode_kwargs, checkpoints, window, predecessor, planning_limits
+                )
+                msgs = repair.messages
+                for attempt in range(repair.next_attempt, limits.max_attempts):
                     request = json.loads(msgs[-1]["content"])
                     dependencies = {
                         "catalog_view": content_id(view.catalog_entries),
@@ -614,11 +615,10 @@ def plan_document(
                                     )
                                 finally:
                                     request_details = request_after(marker, "planning")
-                                value = (
-                                    msgs.decode_response(raw_text)
-                                    if hasattr(msgs, "decode_response")
-                                    else json.loads(raw_text)
-                                )
+                                repair.authorize(raw_text)
+                                value = msgs.decode_response(raw_text)
+                            else:
+                                repair.authorize(value)
                             decoded = decode_plan_response(value, **decode_kwargs)
                             document_planning_support.canonicalize_context_bases(
                                 decoded, evidence, parsed
@@ -641,22 +641,22 @@ def plan_document(
                                     break
                             if exc.reason != "evidence_output_invalid":
                                 raise
+                            retry_invalid(key, attempt, cached, exc)
                             if attempt + 1 == limits.max_attempts:
                                 raise ProcessingIncomplete(
                                     "document_plan_invalid", "planning"
                                 ) from None
-                            retry_invalid(key, attempt, cached, exc)
                             continue
                         except PlanningProjectionRequired as exc:
                             promote_projection(exc)
                             projection_required = True
                             break
                         except (AttributeError, TypeError, ValueError) as exc:
+                            retry_invalid(key, attempt, cached, exc)
                             if attempt + 1 == limits.max_attempts:
                                 raise ProcessingIncomplete(
                                     "document_plan_invalid", "planning"
                                 ) from None
-                            retry_invalid(key, attempt, cached, exc)
                             continue
                         if not cached:
                             checkpoints.save(key, value, receipt=raw_text)

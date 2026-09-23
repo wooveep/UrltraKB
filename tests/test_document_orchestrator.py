@@ -14,6 +14,7 @@ from openkb.agent.document_window_receipts import accepted_window_receipt
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.navigation_evidence import evidence_descriptor
 from openkb.processing import DEFAULT_PROCESSING, ProcessingIncomplete, processing_scope
+from openkb.sources import content_id
 
 OFFLINE_PROCESSING = dict(
     DEFAULT_PROCESSING,
@@ -23,6 +24,57 @@ OFFLINE_PROCESSING = dict(
     max_output_tokens=4_096,
     concurrency=2,
 )
+
+
+def test_planning_reencodes_verified_legacy_navigation_before_budgeting(tmp_path, monkeypatch):
+    source, parsed = _DummySource(), _DummyParsed(1)
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    old_value = {
+        "protocol": "source-prefix-v1",
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "start": 0,
+        "end": 1,
+    }
+    record = {
+        "schema": 1,
+        "source_id": source.source_id,
+        "version": source.id,
+        "parse": parsed.id,
+        "profile": content_id("old profile"),
+        "status": "basic",
+        "reason": None,
+        "usage": {},
+        "pageindex": content_id("old pageindex"),
+        "windows": [
+            {
+                "evidence": {"id": content_id(old_value), **old_value},
+                "target_start": 0,
+                "target_end": 1,
+                "status": "complete",
+                "reason": None,
+                "target_tokens": 1000,
+            }
+        ],
+    }
+    navigation = {**record, "id": content_id(record)}
+
+    class BudgetReached(Exception):
+        pass
+
+    def inspect_budget_input(_source, _parsed, windows, _limits, *, prompt_tokens):
+        assert windows[0]["evidence"] == evidence_descriptor(source, parsed, 0, 1)
+        assert navigation["windows"][0]["evidence"]["protocol"] == "source-prefix-v1"
+        assert prompt_tokens > 0
+        raise BudgetReached
+
+    monkeypatch.setattr("openkb.agent.document_windowing.bounded_windows", inspect_budget_input)
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        with pytest.raises(BudgetReached):
+            plan_document(tmp_path, workspace, source, parsed, navigation, settings, checkpoints)
 
 
 def test_ledger_persistence_and_proof_share_unicode_canonical_json(tmp_path):
@@ -1372,7 +1424,7 @@ def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
                             {
                                 "relation": "explicit_reference",
                                 "ranges": [[4, 5]],
-                                "basis": "Content of block 4.",
+                                "rationale": "Block 4 supplies the reference.",
                                 "basis_ranges": [[4, 5]],
                             }
                         ],
@@ -1425,6 +1477,8 @@ def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
         assert p2.name == "concepts/setup-guide"
         assert p2.subject_ranges == [[4, 6]]
         assert p2.necessary_context[0]["basis"] == "Content of block 4. "
+        assert p2.necessary_context[0]["basis_quote"] == "Content of block 4. "
+        assert p2.necessary_context[0]["rationale"] == "Block 4 supplies the reference."
         assert p2.state == "ready"
 
         # Check resolution

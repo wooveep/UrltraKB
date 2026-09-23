@@ -90,7 +90,7 @@ def test_required_operation_context_reaches_generation_at_model_capacity(
                                 {
                                     "relation": "applicable_condition",
                                     "ranges": frozen_ranges,
-                                    "basis": basis(frozen_ranges),
+                                    "rationale": basis(frozen_ranges),
                                     "basis_ranges": frozen_ranges,
                                 }
                             ]
@@ -223,7 +223,7 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": [[heading["order"], heading["order"] + 1]],
-                                "basis": heading["text"],
+                                "rationale": "The heading is an applicable condition.",
                                 "basis_ranges": [[heading["order"], heading["order"] + 1]],
                             }
                         ],

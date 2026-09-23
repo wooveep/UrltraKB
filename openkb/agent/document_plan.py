@@ -84,7 +84,8 @@ def _context_dict(context: Any) -> dict[str, Any]:
     if not isinstance(context, dict):
         raise ValueError("Invalid necessary context")
     expected = {"relation", "basis", "ranges", "basis_ranges"}
-    if set(context) != expected:
+    optional = {"basis_quote", "rationale"}
+    if not expected <= set(context) or not set(context) <= expected | optional:
         raise ValueError("Invalid necessary context")
     relation = context.get("relation")
     basis = context.get("basis")
@@ -97,12 +98,24 @@ def _context_dict(context: Any) -> dict[str, Any]:
         or not isinstance(basis_ranges, list)
     ):
         raise ValueError("Invalid necessary context")
+    if "basis_quote" in context and context["basis_quote"] != basis:
+        raise ValueError("Invalid necessary context")
+    if "rationale" in context and not isinstance(context["rationale"], str):
+        raise ValueError("Invalid necessary context")
     return {
         "relation": relation,
         "basis": basis,
         "ranges": range_dicts(ranges),
         "basis_ranges": range_dicts(basis_ranges),
+        **{key: context[key] for key in optional if key in context},
     }
+
+
+def source_bound_contexts(contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose source-checked quotes to writers, never model-only rationales."""
+
+    fields = ("relation", "ranges", "basis_ranges", "basis", "basis_quote")
+    return [{key: context[key] for key in fields if key in context} for context in contexts]
 
 
 def is_character_range(value: Any) -> bool:
@@ -598,7 +611,10 @@ def validate_plan(
         for ctx in page.necessary_context:
             if not isinstance(ctx, dict):
                 raise ValueError(f"Invalid necessary_context in page {page.name}")
-            if set(ctx) != {"relation", "basis", "ranges", "basis_ranges"}:
+            required = {"relation", "basis", "ranges", "basis_ranges"}
+            if not required <= set(ctx) or not set(ctx) <= required | {"basis_quote", "rationale"}:
+                raise ValueError(f"Invalid necessary_context in page {page.name}")
+            if "basis_quote" in ctx and ctx["basis_quote"] != ctx["basis"]:
                 raise ValueError(f"Invalid necessary_context in page {page.name}")
             rel = ctx.get("relation")
             if rel not in {"explicit_reference", "applicable_condition"}:

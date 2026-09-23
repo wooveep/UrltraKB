@@ -294,6 +294,9 @@ class CompilationCheckpoints:
             "planning": (
                 "document_plan",
                 "document_protocol",
+                "document_plan_feedback",
+                "document_plan_issues",
+                "document_plan_repair_state",
                 "document_range_validation",
                 "document_orchestrator",
                 "document_recovery",
@@ -559,7 +562,7 @@ class CompilationCheckpoints:
     def load_recovery(self, key, kind):
         """Mutable workflow state is never treated as a verified model result."""
         processing_checkpoint()
-        if kind not in {"split", "draft", "review", "plan", "topic"}:
+        if kind not in {"split", "draft", "review", "plan", "topic", "plan_repair"}:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         if not path.exists():
@@ -597,7 +600,7 @@ class CompilationCheckpoints:
 
     def save_recovery(self, key, kind, value):
         processing_checkpoint()
-        if kind not in {"split", "draft", "review", "plan", "topic"}:
+        if kind not in {"split", "draft", "review", "plan", "topic", "plan_repair"}:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         check_disk(path, json_size(value), stage="checkpoint", operation="save_" + kind)

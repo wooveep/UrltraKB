@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import asdict
 from typing import Any
 
+from openkb.agent.document_plan_issues import reject
 from openkb.agent.document_window_schedule import no_readable_body, valid_window_schedule
 from openkb.config import compilation_model_options
 from openkb.sources import content_id
@@ -208,10 +209,10 @@ def canonicalize_context_bases(
 ) -> None:
     """Bind context prose to the exact original slices in frozen evidence.
 
-    Range authorization alone does not prove that a model-supplied ``basis``
-    is a quotation of that range.  Preserve the source's literal text only
-    after the response has quoted it faithfully. Resolution rows carry their
-    exact ranges durably, but never fabricate a page-context relation.
+    Legacy responses must quote their basis verbatim. In document-plan-v2 the
+    model only selects basis_ranges and may explain them in rationale; the
+    application derives the literal basis_quote. The durable ``basis`` alias
+    preserves existing page consumers, not a model-authored quote.
     """
 
     supplied: dict[int, list[tuple[int, int, str]]] = {}
@@ -251,11 +252,21 @@ def canonicalize_context_bases(
             raise ValueError("Context basis has no original source text")
         return result
 
-    for change in decoded["page_changes"]:
-        for context in change["necessary_context"]:
+    for page_index, change in enumerate(decoded["page_changes"]):
+        for context_index, context in enumerate(change["necessary_context"]):
             basis = literal(context["basis_ranges"])
-            if context["basis"].strip() != basis.strip():
-                raise ValueError("Necessary context basis must quote frozen source evidence")
+            if "basis" in context and context["basis"].strip() != basis.strip():
+                reject(
+                    "Necessary context basis must quote frozen source evidence",
+                    code="basis_quote_mismatch",
+                    path=f"page_changes[{page_index}].necessary_context[{context_index}].basis",
+                    category="evidence",
+                    expected=basis,
+                    actual=context["basis"],
+                    source_ranges=context["basis_ranges"],
+                    allowed_action="quote_repair",
+                )
+            context["basis_quote"] = basis
             context["basis"] = basis
     for resolution in decoded["resolutions"]:
         literal(resolution["basis_ranges"])
@@ -454,6 +465,8 @@ def planning_implementation_revisions() -> dict[str, str]:
             "document_plan",
             "document_protocol",
             "document_plan_feedback",
+            "document_plan_issues",
+            "document_plan_repair_state",
             "document_range_validation",
             "document_orchestrator",
             "document_recovery",

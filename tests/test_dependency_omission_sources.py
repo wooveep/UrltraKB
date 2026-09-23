@@ -93,7 +93,7 @@ def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": preparation,
-                                "basis": basis(preparation),
+                                "rationale": basis(preparation),
                                 "basis_ranges": preparation,
                             }
                         ],
@@ -111,7 +111,7 @@ def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": preparation,
-                                "basis": basis(preparation),
+                                "rationale": basis(preparation),
                                 "basis_ranges": preparation,
                             }
                         ],

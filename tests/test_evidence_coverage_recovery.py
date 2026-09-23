@@ -58,17 +58,21 @@ def test_invalid_plan_retry_reports_all_observed_contract_errors_without_changin
             return response(value)
         requests.append(kwargs["messages"][-1]["content"])
         if len(requests) == 2:
-            feedback = payload.get("retry_feedback", {})
-            codes = {issue["code"] for issue in feedback.get("issues", [])}
+            repair = payload.get("repair_request", {})
+            codes = {issue["code"] for issue in repair.get("issues", [])}
             observed_codes.append(codes)
             if codes == {"invalid_range", "invalid_page_path", "nonblocking_unresolved"}:
-                return response(value)
+                corrected = json.loads(repair["rejected_candidate"])
+                corrected["page_changes"][0]["name"] = "concepts/recovery-steps"
+                corrected["page_changes"][0]["necessary_context"][0]["ranges"] = [[0, 1]]
+                corrected["unresolved"][0]["blocking"] = True
+                return response(corrected)
         value["page_changes"][0]["name"] = "concepts/恢复步骤"
         value["page_changes"][0]["necessary_context"] = [
             {
                 "relation": "explicit_reference",
                 "ranges": [[0, 0]],
-                "basis": "Recovery heading",
+                "rationale": "The recovery heading supplies the reference.",
                 "basis_ranges": [[0, 1]],
             }
         ]
@@ -94,17 +98,11 @@ def test_invalid_plan_retry_reports_all_observed_contract_errors_without_changin
     first, second = requests
     assert first.partition(',"target":')[0] == second.partition(',"target":')[0]
     assert json.loads(first)["target"]["total_blocks"] == json.loads(first)["target"]["target_end"]
-    feedback = json.loads(second)["retry_feedback"]
-    assert feedback["total_blocks"] == json.loads(first)["target"]["total_blocks"]
-    assert feedback["issue_counts"] == {
-        "invalid_range": 1,
-        "invalid_page_path": 1,
-        "nonblocking_unresolved": 1,
-    }
-    assert len(feedback["issues"]) <= 12
-    assert len(json.dumps(feedback)) <= 2000
+    repair = json.loads(second)["repair_request"]
+    assert repair["candidate_hash"]
+    assert len(repair["issues"]) <= 12
     retry_event = next(row for row in events if row.get("operation") == "retry_invalid_response")
-    assert {issue["field"] for issue in feedback["issues"]} == set(retry_event["invalid_fields"])
+    assert {issue["field"] for issue in repair["issues"]} == set(retry_event["invalid_fields"])
 
 
 def test_persistent_invalid_document_plan_stops_after_bounded_retry(kb_dir, tmp_path, monkeypatch):

@@ -128,7 +128,7 @@ def test_required_condition_cannot_be_waived_by_source_detail_selection(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
-                                "basis": blocks[1]["text"],
+                                "rationale": blocks[1]["text"],
                                 "basis_ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
                             }
                         ],

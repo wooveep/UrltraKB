@@ -74,7 +74,7 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
         raise ValueError("PageIndex navigation parsing identity mismatch")
     from openkb.navigation_evidence import validate_windows
 
-    validate_windows(source, parsed, record.get("windows", []))
+    validate_windows(source, parsed, record.get("windows", []), allow_legacy=True)
     rows = _location_rows(source, parsed)
     record["nodes"] = load_nodes(kb_dir, record["pageindex"])
     validate_nodes(record["nodes"], len(rows))

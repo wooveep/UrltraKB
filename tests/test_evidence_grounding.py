@@ -99,7 +99,7 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": [[heading_block["order"], heading_block["order"] + 1]],
-                                "basis": heading,
+                                "rationale": "The heading limits this operation.",
                                 "basis_ranges": [
                                     [heading_block["order"], heading_block["order"] + 1]
                                 ],
@@ -107,7 +107,7 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
                             {
                                 "relation": "explicit_reference",
                                 "ranges": [[wait_block["order"], wait_block["order"] + 1]],
-                                "basis": "Wait 15 seconds.",
+                                "rationale": "The wait instruction applies here.",
                                 "basis_ranges": [[wait_block["order"], wait_block["order"] + 1]],
                             },
                         ],

@@ -7,11 +7,11 @@ from openkb.source_context import context_fields
 from openkb.sources import content_id
 
 
-def evidence_descriptor(source, parsed, start, end):
+def _descriptor(source, parsed, start, end, protocol):
     if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(parsed.blocks):
         raise ValueError("Invalid evidence group range")
     value = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "source_id": source.source_id,
         "version_id": source.id,
         "parse_id": parsed.id,
@@ -19,6 +19,62 @@ def evidence_descriptor(source, parsed, start, end):
         "end": end,
     }
     return {"id": content_id(value), **value}
+
+
+def evidence_descriptor(source, parsed, start, end):
+    return _descriptor(source, parsed, start, end, PROTOCOL)
+
+
+def planning_windows(source, parsed, navigation):
+    """Re-encode a verified legacy manifest for current planning requests.
+
+    The stored navigation identity and windows remain unchanged.  A v1 manifest
+    is accepted only when its complete persisted metadata still hashes to its
+    saved identity; ordinary v2 manifests keep their existing validation path.
+    """
+    windows = navigation.get("windows", [])
+    if not isinstance(windows, list):
+        raise ValueError("Invalid navigation window manifest")
+    if not any(
+        isinstance(row, dict)
+        and isinstance(row.get("evidence"), dict)
+        and row["evidence"].get("protocol") == "source-prefix-v1"
+        for row in windows
+    ):
+        validate_windows(source, parsed, windows)
+        return windows
+    keys = {
+        "schema",
+        "source_id",
+        "version",
+        "parse",
+        "profile",
+        "status",
+        "reason",
+        "usage",
+        "pageindex",
+        "windows",
+    }
+    if (
+        not keys <= navigation.keys()
+        or navigation.get("source_id") != source.source_id
+        or navigation.get("version") != source.id
+        or navigation.get("parse") != parsed.id
+        or content_id({key: navigation[key] for key in keys}) != navigation.get("id")
+    ):
+        raise ValueError("Legacy navigation identity mismatch")
+    validate_windows(source, parsed, windows, allow_legacy=True)
+    upgraded = [
+        {
+            **row,
+            "evidence": evidence_descriptor(
+                source, parsed, row["evidence"]["start"], row["evidence"]["end"]
+            ),
+        }
+        for row in windows
+    ]
+    validate_windows(source, parsed, upgraded)
+    return upgraded
 
 
 def read_evidence_group(kb_dir, source, parsed, descriptor):
@@ -63,7 +119,7 @@ def read_evidence_group(kb_dir, source, parsed, descriptor):
     }
 
 
-def validate_windows(source, parsed, windows):
+def validate_windows(source, parsed, windows, *, allow_legacy=False):
     if not isinstance(windows, list):
         raise ValueError("Invalid navigation window manifest")
     following = 0
@@ -84,7 +140,15 @@ def validate_windows(source, parsed, windows):
             or not start < end <= len(parsed.blocks)
             or not isinstance(descriptor, dict)
             or descriptor
-            != evidence_descriptor(source, parsed, descriptor.get("start"), descriptor.get("end"))
+            != _descriptor(
+                source,
+                parsed,
+                descriptor.get("start"),
+                descriptor.get("end"),
+                "source-prefix-v1"
+                if allow_legacy and descriptor.get("protocol") == "source-prefix-v1"
+                else PROTOCOL,
+            )
             or descriptor["start"] > start
             or descriptor["end"] != end
             or row["status"] not in {"complete", "basic"}

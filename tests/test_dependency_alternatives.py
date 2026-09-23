@@ -82,7 +82,7 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                                 {
                                     "relation": "explicit_reference",
                                     "ranges": remote,
-                                    "basis": basis(remote),
+                                    "rationale": basis(remote),
                                     "basis_ranges": remote,
                                 }
                             ]
@@ -138,7 +138,7 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                                 {
                                     "relation": "applicable_condition",
                                     "ranges": certification,
-                                    "basis": basis(certification),
+                                    "rationale": basis(certification),
                                     "basis_ranges": certification,
                                 }
                             ],

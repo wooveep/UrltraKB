@@ -401,8 +401,8 @@ def test_plan_messages_frozen_w_prefix_stability():
     # Because encode_payload and share_contexts are called on evidence first.
     user1 = msg1[1]["content"]
     user2 = msg2[1]["content"]
-    assert user1.startswith('{"protocol":"source-prefix-v1"')
-    assert user2.startswith('{"protocol":"source-prefix-v1"')
+    assert user1.startswith('{"protocol":"source-prefix-v2"')
+    assert user2.startswith('{"protocol":"source-prefix-v2"')
     prefix_w = '"evidence":{"group_id":"grp_1"'
     assert prefix_w in user1
     assert prefix_w in user2
@@ -410,13 +410,17 @@ def test_plan_messages_frozen_w_prefix_stability():
 
 def test_plan_rules_disambiguate_block_order_and_output_paths():
     assert "blocks[].order" in PLAN_RULES
-    assert "rN" in PLAN_RULES
+    assert "opaque source IDs" in PLAN_RULES
     assert "[i,i+1)" in PLAN_RULES
     assert "target.total_blocks" in PLAN_RULES
     assert "[a-z0-9][a-z0-9-]{0,119}" in PLAN_RULES
     assert "Every new unresolved record must set blocking=true" in PLAN_RULES
     assert "necessary_context.ranges" in PLAN_RULES
     assert "necessary_context.basis_ranges" in PLAN_RULES
+    normalized = " ".join(PLAN_RULES.split())
+    assert "source_only ranges must not overlap any page_changes[].subject_ranges" in normalized
+    assert "Multiple pages may share subject evidence" in normalized
+    assert "overview is a derived navigation summary" in normalized
 
 
 def test_retry_feedback_does_not_echo_arbitrary_exception_text():

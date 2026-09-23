@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openkb.agent.document_page_receipts import valid_critical_review_receipt
-from openkb.agent.document_plan import PagePlan
+from openkb.agent.document_plan import PagePlan, source_bound_contexts
 from openkb.agent.evidence_pages import _previous_contribution
 from openkb.implementation import module_revision
 from openkb.sources import content_id
@@ -46,7 +46,7 @@ def _page_input(page: PagePlan) -> dict[str, Any]:
         "purpose": page.purpose,
         "target": page.target,
         "subject_ranges": page.subject_ranges,
-        "necessary_context": page.necessary_context,
+        "necessary_context": source_bound_contexts(page.necessary_context),
     }
 
 

@@ -11,6 +11,7 @@ from openkb.locks import kb_ingest_lock
 from openkb.navigation import prepare_navigation, read_navigation
 from openkb.parsing import parse_document
 from openkb.processing import RequestLimits
+from openkb.sources import content_id
 from tests.test_native_parsing import source_version
 
 
@@ -27,6 +28,75 @@ def prepare(kb, path, options):
             kb, source, parsed, settings, bundle=resolve_credential_bundle(kb)
         )
     return source, parsed, settings, saved
+
+
+def test_verified_legacy_window_can_be_reencoded_for_planning_without_reindexing(kb_dir, tmp_path):
+    from copy import deepcopy
+
+    from openkb.navigation_evidence import evidence_descriptor, validate_windows
+    from openkb.navigation_tree import basic_tree
+    from openkb.pageindex_store import save_index
+
+    path = tmp_path / "legacy-window.md"
+    path.write_text("A source requirement.")
+    source = source_version(kb_dir, path)
+    parsed = parse_document(kb_dir, source)
+    old_value = {
+        "protocol": "source-prefix-v1",
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "start": 0,
+        "end": len(parsed.blocks),
+    }
+    old_descriptor = {"id": content_id(old_value), **old_value}
+    old_windows = [
+        {
+            "evidence": old_descriptor,
+            "target_start": 0,
+            "target_end": len(parsed.blocks),
+            "status": "complete",
+            "reason": None,
+            "target_tokens": 100_000,
+        }
+    ]
+    record = {
+        "schema": 1,
+        "source_id": source.source_id,
+        "version": source.id,
+        "parse": parsed.id,
+        "profile": content_id("legacy navigation profile"),
+        "status": "basic",
+        "reason": None,
+        "positions": [],
+        "usage": {},
+        "nodes": basic_tree(kb_dir, source, parsed),
+        "windows": old_windows,
+    }
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        legacy_id = save_index(kb_dir, source, parsed, record)
+    restored = read_navigation(kb_dir, source, identity=legacy_id)
+    from openkb.navigation_evidence import planning_windows
+
+    upgraded = planning_windows(source, parsed, restored)
+    assert upgraded[0]["evidence"] == evidence_descriptor(source, parsed, 0, len(parsed.blocks))
+    assert restored["windows"] == old_windows
+    validate_windows(source, parsed, upgraded)
+    with pytest.raises(ValueError):
+        validate_windows(source, parsed, restored["windows"])
+    forged_window = deepcopy(old_windows)
+    forged_window[0]["evidence"]["id"] = "0" * 64
+    with pytest.raises(ValueError):
+        validate_windows(source, parsed, forged_window, allow_legacy=True)
+    tampered = deepcopy(restored)
+    tampered["windows"][0]["evidence"]["id"] = "0" * 64
+    with pytest.raises(ValueError):
+        planning_windows(source, parsed, tampered)
+    tampered = deepcopy(restored)
+    tampered["profile"] = content_id("different profile")
+    with pytest.raises(ValueError):
+        planning_windows(source, parsed, tampered)
+    assert planning_windows(source, parsed, {"windows": upgraded}) == upgraded
 
 
 def test_native_headings_enter_windows_and_empty_continuation_hands_off(
@@ -320,6 +390,6 @@ def test_compile_and_verify_reuse_the_final_evidence_prefix(kb_dir, tmp_path, mo
     generation = json.loads(messages["generation"][-1]["content"])
     verification = json.loads(messages["verification"][-1]["content"])
     assert generation["evidence"] == verification["evidence"]
-    prefix = '{"protocol":"source-prefix-v1","evidence":'
+    prefix = '{"protocol":"source-prefix-v2","evidence":'
     assert messages["generation"][-1]["content"].startswith(prefix)
     assert messages["verification"][-1]["content"].startswith(prefix)

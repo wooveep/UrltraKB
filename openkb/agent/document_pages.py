@@ -20,7 +20,12 @@ from openkb.agent.document_page_contracts import (
 )
 from openkb.agent.document_page_evidence import page_evidence
 from openkb.agent.document_page_review import review_candidate
-from openkb.agent.document_plan import PagePlan, RangeValue, table_row_identity
+from openkb.agent.document_plan import (
+    PagePlan,
+    RangeValue,
+    source_bound_contexts,
+    table_row_identity,
+)
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.model_json import json_text
 from openkb.agent.source_protocol import source_messages
@@ -74,7 +79,7 @@ def _page_fields(page: PagePlan) -> dict[str, Any]:
         "purpose": page.purpose,
         "target": page.target,
         "subject_ranges": page.subject_ranges,
-        "necessary_context": page.necessary_context,
+        "necessary_context": source_bound_contexts(page.necessary_context),
     }
 
 

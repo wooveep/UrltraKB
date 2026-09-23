@@ -24,6 +24,18 @@ _IDENTITY_FIELDS = {
 _IDENTITY_LISTS = {"covered"}
 
 
+def _identity_label(namespace, index):
+    if namespace is None:
+        return f"r{index}"
+    if namespace.startswith("@e"):
+        letters = ""
+        while index:
+            index, remainder = divmod(index - 1, 26)
+            letters = chr(ord("a") + remainder) + letters
+        return namespace + letters
+    return f"{namespace}{index}"
+
+
 def _map(value, identities, *, field="", create=False, namespace=None):
     if isinstance(value, dict):
         return {
@@ -37,7 +49,7 @@ def _map(value, identities, *, field="", create=False, namespace=None):
         ]
     if isinstance(value, str) and field in _IDENTITY_FIELDS | _IDENTITY_LISTS:
         if create and re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", value):
-            label = f"{namespace}{len(identities) + 1}" if namespace else f"r{len(identities) + 1}"
+            label = _identity_label(namespace, len(identities) + 1)
             return identities.setdefault(value, label)
         return identities.get(value, value)
     return value
@@ -52,6 +64,10 @@ class WireMessages(list):
         self.inverse = MappingProxyType({value: key for key, value in identities.items()})
 
     def decode_response(self, raw):
+        if json.loads(self[-1]["content"]).get("stage") == "planning":
+            from openkb.agent.document_plan_issues import parse_plan_json
+
+            parse_plan_json(json_text(raw))
         try:
             raw = json_text(raw)
             value = json.loads(raw, object_pairs_hook=unique_fields)
@@ -87,25 +103,37 @@ class WireMessages(list):
 
 def encode_payload(payload, identity_values=()):
     namespace = None
-    if payload.get("stage") in {"generation", "verification"}:
+    stage = payload.get("stage")
+    if stage in {"generation", "verification", "planning"} or (
+        isinstance(stage, str) and stage.startswith("index_")
+    ):
         # A private namespace absent from the entire original input cannot be
         # confused with a real source label such as r8, even inside literal code.
-        namespace = "@r:"
+        namespace = "@r:" if stage in {"generation", "verification"} else "@e:"
         original = json.dumps(payload, ensure_ascii=False)
         while namespace in original:
             namespace = namespace[:-1] + "_:"
     identities = {
-        value: f"{namespace}{i}" if namespace else f"r{i}"
+        value: _identity_label(namespace, i)
         for i, value in enumerate(dict.fromkeys(identity_values), 1)
     }
     wire = _map(payload, identities, create=True, namespace=namespace)
-    if namespace:
+    if namespace and stage in {"generation", "verification"}:
         wire["identity_protocol"] = {
             "namespace": namespace,
             "instruction": (
                 "Private identity markers belong only in structured identity fields and covered. "
                 "Never write them in titles, headings, Markdown or quotations. They are not "
                 "citations. The application attaches original source references after review."
+            ),
+        }
+    elif namespace:
+        wire["identity_protocol"] = {
+            "namespace": namespace,
+            "instruction": (
+                "Opaque identity labels identify source objects, not block coordinates. "
+                "Use blocks[].block_range and text_extent for exact source positions. "
+                "Copy identity labels only into fields that explicitly request them."
             ),
         }
     return wire, identities

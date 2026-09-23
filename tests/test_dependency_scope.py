@@ -80,7 +80,7 @@ def test_import_binds_conditions_only_to_affected_pages(
                             {
                                 "relation": "applicable_condition",
                                 "ranges": backup,
-                                "basis": basis(backup),
+                                "rationale": basis(backup),
                                 "basis_ranges": backup,
                             }
                         ],
@@ -273,7 +273,7 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
                             {
                                 "relation": "explicit_reference",
                                 "ranges": alpha,
-                                "basis": basis(alpha),
+                                "rationale": basis(alpha),
                                 "basis_ranges": alpha,
                             }
                         ],
@@ -381,13 +381,13 @@ def test_multiple_unresolved_conditions_keep_operation_blocked(kb_dir, tmp_path,
                             {
                                 "relation": "applicable_condition",
                                 "ranges": first,
-                                "basis": basis(first),
+                                "rationale": basis(first),
                                 "basis_ranges": first,
                             },
                             {
                                 "relation": "applicable_condition",
                                 "ranges": second,
-                                "basis": basis(second),
+                                "rationale": basis(second),
                                 "basis_ranges": second,
                             },
                         ],
