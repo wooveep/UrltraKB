@@ -17,6 +17,9 @@ class ValidationIssue:
     source_ranges: list[Any] = field(default_factory=list)
     related_paths: list[str] = field(default_factory=list)
     allowed_action: str = "field_repair"
+    item_ref: str = "$"
+    allowed_operations: tuple[str, ...] = ("replace_field",)
+    blocking: bool = True
     line: int | None = None
     column: int | None = None
 
@@ -74,6 +77,9 @@ def reject(
     actual: Any = None,
     source_ranges: list[Any] | None = None,
     allowed_action: str = "field_repair",
+    item_ref: str = "$",
+    allowed_operations: tuple[str, ...] = ("replace_field",),
+    blocking: bool = True,
 ) -> NoReturn:
     raise PlanValidationError(
         message,
@@ -86,6 +92,9 @@ def reject(
                 actual=actual,
                 source_ranges=source_ranges or [],
                 allowed_action=allowed_action,
+                item_ref=item_ref,
+                allowed_operations=allowed_operations,
+                blocking=blocking,
             )
         ],
     )

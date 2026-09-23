@@ -187,12 +187,24 @@ def validate_target_ranges(
     authorized: dict[int, list[tuple[int, int]]],
     context_label: str,
     block_chars: list[int] | None,
+    *,
+    field_path: str | None = None,
+    item_ref: str = "$",
 ) -> None:
-    for value in ranges:
+    for position, value in enumerate(ranges):
         for index, start, end in range_intervals(value, block_chars=block_chars):
             if not interval_is_covered(index, start, end, authorized):
-                raise ValueError(
-                    f"Range in {context_label} must stay within the current target's exact ranges"
+                reject(
+                    f"Range in {context_label} must stay within the current target's exact ranges",
+                    code="target_range_violation",
+                    path=(f"{field_path}[{position}]" if field_path is not None else context_label),
+                    category="evidence",
+                    expected="range within the current target's exact intervals",
+                    actual=value,
+                    source_ranges=[value],
+                    allowed_action="reselect_evidence",
+                    item_ref=item_ref,
+                    allowed_operations=("replace_range",),
                 )
 
 
@@ -201,12 +213,24 @@ def validate_evidence_ranges(
     evidence_intervals: dict[int, list[tuple[int, int]]],
     context_label: str,
     block_chars: list[int] | None,
+    *,
+    field_path: str | None = None,
+    item_ref: str = "$",
 ) -> None:
-    for value in ranges:
+    for position, value in enumerate(ranges):
         for index, start, end in range_intervals(value, block_chars=block_chars):
             if not interval_is_covered(index, start, end, evidence_intervals):
-                raise ValueError(
-                    f"Range in {context_label} must stay within supplied frozen evidence"
+                reject(
+                    f"Range in {context_label} must stay within supplied frozen evidence",
+                    code="evidence_range_violation",
+                    path=(f"{field_path}[{position}]" if field_path is not None else context_label),
+                    category="evidence",
+                    expected="range within supplied frozen evidence",
+                    actual=value,
+                    source_ranges=[value],
+                    allowed_action="reselect_evidence",
+                    item_ref=item_ref,
+                    allowed_operations=("replace_range",),
                 )
 
 
