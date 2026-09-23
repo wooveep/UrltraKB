@@ -975,6 +975,59 @@ def _make_mock_windows(parsed):
     ]
 
 
+@pytest.mark.parametrize("described_tokens", [1_000_000, 10_000_000])
+def test_large_source_descriptors_keep_exact_bounded_durable_windows(tmp_path, described_tokens):
+    """Scale metadata without allocating synthetic source prose in memory."""
+    import tracemalloc
+
+    from openkb.agent.document_window_schedule import valid_window_schedule
+    from openkb.agent.document_windowing import bounded_windows
+    from openkb.processing import RequestLimits
+
+    source, parsed = _DummySource(), _DummyParsed(1)
+    parsed.blocks[0].text = ""
+    parsed.blocks[0].chars = 2 * described_tokens
+    original = {
+        "evidence": evidence_descriptor(source, parsed, 0, 1),
+        "target_start": 0,
+        "target_end": 1,
+        "status": "complete",
+        "reason": "",
+        "target_tokens": described_tokens,
+    }
+    settings = {"model": "openai/offline-test", "processing": OFFLINE_PROCESSING}
+    limits = RequestLimits.from_config(settings)
+
+    tracemalloc.start()
+    try:
+        schedule, _ = bounded_windows(source, parsed, [original], limits, prompt_tokens=1_000)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert len(schedule) > 1
+    assert peak < 20 * 1024 * 1024
+    assert all(len(json.dumps(window)) < 1_000 for window in schedule)
+    ranges = [window["target_ranges"][0] for window in schedule]
+    assert ranges[0]["start_char"] == 0
+    assert ranges[-1]["end_char"] == parsed.blocks[0].chars
+    assert all(left["end_char"] == right["start_char"] for left, right in zip(ranges, ranges[1:]))
+    assert valid_window_schedule(schedule, parsed, source=source, base_schedule=[original])
+    forged = [{**schedule[0], "derived_from": "f" * 64}, *schedule[1:]]
+    assert not valid_window_schedule(forged, parsed, source=source, base_schedule=[original])
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        ledger = DocumentPlanningLedger(checkpoints, "d" * 64)
+        ledger.replace_schedule(schedule, 0)
+        ledger.close()
+        restored = DocumentPlanningLedger(checkpoints, "d" * 64)
+        try:
+            assert restored.progress() == ("pending", schedule, 0)
+            assert restored.path.stat().st_size < 2_000_000
+        finally:
+            restored.close()
+
+
 def test_plan_document_rejects_an_incomplete_navigation_manifest(tmp_path):
     source, parsed = _DummySource(), _DummyParsed(2)
     navigation = {

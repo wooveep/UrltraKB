@@ -39,7 +39,7 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     assert receipt["checkpoint"] and len(receipt["result"]) == 64
     assert all(len(receipt[key]) == 64 for key in ("request", "predecessor", "delta"))
     measurement = result.usage["measurement"]
-    assert measurement["schema"] == 3
+    assert measurement["schema"] == 4
     planning = measurement["document_planning"]
     assert [row["event"] for row in planning] == ["accepted"]
     observation = planning[0]
@@ -56,6 +56,22 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     assert summary["input_tokens_total"] == 300
     assert summary["output_tokens_total"] == 90
     assert summary["peak_rss_bytes"] is None or summary["peak_rss_bytes"] > 0
+    assert summary["peak_inflight_tokens"] > 0
+    document = summary["document"]
+    assert document["evidence_groups"] == 1
+    assert document["planning_calls"] == 1
+    assert document["planned_pages"] == 1
+    assert document["http_attempts"] == len(measurement["requests"]) == 3
+    assert document["first_inspectable_seconds"] is not None
+    assert 0 <= document["first_inspectable_seconds"] <= document["wall_seconds"]
+    assert len(document["group_usage"]) == 1
+    group = document["group_usage"][0]
+    assert group["requests"] == 2
+    assert group["generation_requests"] == 1
+    assert group["verification_requests"] == 1
+    assert group["input_tokens"] == 200
+    assert group["output_tokens"] == 60
+    assert group["elapsed_seconds"] > 0
     summary_page = next((kb_dir / "wiki" / "summaries").glob("planned-*.md")).read_text()
     assert "Overview of document knowledge." not in summary_page
 

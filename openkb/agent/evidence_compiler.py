@@ -195,6 +195,7 @@ def compile_evidence(
     from openkb.agent.shared_resources import SharedResourcePool
     from openkb.compilation_report import collect_compile_report, report_content_omission
     from openkb.evidence_snapshot import EvidenceSnapshot
+    from openkb.execution_measurement import document_group_scope
     from openkb.lint import list_existing_wiki_targets
     from openkb.schema import get_agents_md
 
@@ -423,7 +424,7 @@ def compile_evidence(
         from openkb.agent.document_page_evidence import page_resolution_ranges
 
         def generate_once(group: dict[str, Any]):
-            with pool.get_page_lock(group["path"]):
+            with pool.get_page_lock(group["path"]), document_group_scope(group["key"]):
                 candidate = generate_document_page(
                     group["page"],
                     reader,
@@ -573,23 +574,24 @@ def compile_evidence(
                         destination.append((group, reference))
                         continue
                     try:
-                        candidate = reverify_normalized_candidate(
-                            group["page"],
-                            reader,
-                            source,
-                            parsed,
-                            checkpoints,
-                            wiki,
-                            page_settings,
-                            limits,
-                            candidate,
-                            content,
-                            bundle=bundle,
-                            on_event=on_event,
-                            known_omissions=_group_known_omissions(group, plan),
-                            resolution_ranges=page_resolution_ranges(plan, group["page"]),
-                            pool=pool,
-                        )
+                        with document_group_scope(group["key"]):
+                            candidate = reverify_normalized_candidate(
+                                group["page"],
+                                reader,
+                                source,
+                                parsed,
+                                checkpoints,
+                                wiki,
+                                page_settings,
+                                limits,
+                                candidate,
+                                content,
+                                bundle=bundle,
+                                on_event=on_event,
+                                known_omissions=_group_known_omissions(group, plan),
+                                resolution_ranges=page_resolution_ranges(plan, group["page"]),
+                                pool=pool,
+                            )
                     except ProcessingIncomplete as exc:
                         reason = page_omission_reason(exc)
                         failures.append((group["path"], reason))

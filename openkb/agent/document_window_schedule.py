@@ -119,6 +119,7 @@ def valid_window_schedule(
             frozen_ranges = window.get("frozen_ranges")
             frozen_identity = window.get("frozen_evidence_id")
             reloaded_from = window.get("reloaded_from")
+            derived_from = window.get("derived_from")
             w_spans = target_spans
             if descriptor is not None:
                 if not isinstance(descriptor, dict):
@@ -234,6 +235,14 @@ def valid_window_schedule(
                         return False
                 if not any(
                     reloaded_from in base["identities"] and covers(base["spans"], w_spans)
+                    for base in base_w
+                ):
+                    return False
+            elif derived_from is not None:
+                if not isinstance(derived_from, str) or not derived_from:
+                    return False
+                if base_w and not any(
+                    derived_from in base["identities"] and covers(base["spans"], w_spans)
                     for base in base_w
                 ):
                     return False

@@ -24,7 +24,7 @@ from openkb.agent.document_protocol import (
 from openkb.agent.document_window_receipts import accepted_window_receipt, window_receipt_id
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.config import compilation_model_options, resolve_entity_types
-from openkb.execution_measurement import request_after, request_marker
+from openkb.execution_measurement import record_document_totals, request_after, request_marker
 from openkb.implementation import module_revision
 from openkb.processing import (
     ProcessingIncomplete,
@@ -152,6 +152,7 @@ def plan_document(
         windows, planning_limits = document_windowing.bounded_windows(
             source, parsed, windows, planning_limits, prompt_tokens=prompt_tokens
         )
+    record_document_totals(evidence_groups=len(windows))
 
     ledger = DocumentPlanningLedger(checkpoints, retained_key)
 
@@ -225,6 +226,7 @@ def plan_document(
         # this recovery record with the successor's plan state.
         inherit_publication_state(final, checkpoints.load_recovery(retained_key, "plan"))
         checkpoints.save_recovery(retained_key, "plan", to_dict(final))
+        record_document_totals(planned_pages=len(final.pages))
         return final
 
     def reset_ledger() -> Any:

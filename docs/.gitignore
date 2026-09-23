@@ -24,6 +24,7 @@
 !second-step-validation.md
 !attachment-storage-validation.md
 !inflight-analysis-validation.md
+!issue52-offline-validation.md
 !small-document-calibration.md
 !adr/
 !adr/0001-source-index-and-shared-analysis.md

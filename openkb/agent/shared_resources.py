@@ -18,6 +18,7 @@ class SharedResourcePool:
         self.lock = threading.RLock()
         self.condition = threading.Condition(self.lock)
         self.current_inflight_tokens = 0
+        self.peak_inflight_tokens = 0
         self.max_inflight_tokens = max_inflight_tokens
         self.page_locks: dict[str, threading.Lock] = {}
 
@@ -66,7 +67,14 @@ class SharedResourcePool:
                     self.condition.wait(timeout=0.05)
                 checkpoint()
                 self.current_inflight_tokens += estimated_tokens
+                self.peak_inflight_tokens = max(
+                    self.peak_inflight_tokens, self.current_inflight_tokens
+                )
                 reserved = True
+                current = self.current_inflight_tokens
+            from openkb.execution_measurement import record_inflight_tokens
+
+            record_inflight_tokens(current)
             # Capacity can be freed just as an outer request expires.  Check
             # once more before exposing the transport to its caller.
             checkpoint()

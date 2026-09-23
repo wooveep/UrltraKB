@@ -13,6 +13,7 @@ from typing import Any
 _ACTIVE: ContextVar[Measurement | None] = ContextVar("execution_measurement", default=None)
 _PARENT: ContextVar[str | None] = ContextVar("measurement_parent", default=None)
 _OPERATION: ContextVar[str] = ContextVar("measurement_operation", default="")
+_GROUP: ContextVar[str | None] = ContextVar("measurement_document_group", default=None)
 
 
 class Measurement:
@@ -23,8 +24,13 @@ class Measurement:
         self.active_requests = 0
         self.analysis_events = set()
         self.peak_rss_bytes: int | None = None
+        self.peak_inflight_tokens = 0
+        self.evidence_groups: int | None = None
+        self.planned_pages: int | None = None
+        self.first_inspectable_seconds: float | None = None
+        self.group_elapsed: dict[str, float] = {}
         self.value: dict[str, Any] = {
-            "schema": 3,
+            "schema": 4,
             "spans": [],
             "requests": [],
             "peak_concurrency": 0,
@@ -70,12 +76,73 @@ class Measurement:
             values = [row.get(field) for row in rows]
             return sum(values) if values and all(type(value) is int for value in values) else None
 
+        requests_by_group: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            group = row.get("group")
+            if isinstance(group, str):
+                requests_by_group.setdefault(group, []).append(row)
+        group_usage = []
+        for group, elapsed in sorted(self.group_elapsed.items()):
+            group_requests = requests_by_group.get(group, [])
+
+            def group_total(field: str) -> int | None:
+                values = [row.get(field) for row in group_requests]
+                return (
+                    sum(values) if values and all(type(value) is int for value in values) else None
+                )
+
+            group_usage.append(
+                {
+                    "group": group,
+                    "elapsed_seconds": elapsed,
+                    "requests": len(group_requests),
+                    "generation_requests": sum(
+                        row["stage"] == "generation" for row in group_requests
+                    ),
+                    "verification_requests": sum(
+                        row["stage"] == "verification" for row in group_requests
+                    ),
+                    "correction_requests": sum(
+                        row["stage"] == "correction" for row in group_requests
+                    ),
+                    "input_tokens": group_total("input_tokens"),
+                    "output_tokens": group_total("output_tokens"),
+                }
+            )
+
+        planning = self.value.get("document_planning", []) if hasattr(self, "value") else []
+        accepted = [row for row in planning if row["event"] == "accepted"]
+        analyses = self.value.get("analyses", []) if hasattr(self, "value") else []
+        document = {
+            "evidence_groups": self.evidence_groups,
+            "planning_calls": len(accepted),
+            "extra_planning_calls": max(0, len(accepted) - (self.evidence_groups or 0))
+            + sum(row["event"] in {"split", "retry"} for row in planning),
+            "range_carry_count": sum(
+                max(0, len(row["completed_ranges"]) - len(row["target_ranges"])) for row in accepted
+            ),
+            "planned_pages": self.planned_pages,
+            "http_attempts": len(rows),
+            "local_result_adoptions": sum(
+                row["event"] == "adopted" or (row["event"] == "accepted" and row["cached"])
+                for row in planning
+            )
+            + sum(row["event"] == "hit" for row in analyses),
+            "first_inspectable_seconds": self.first_inspectable_seconds,
+            "wall_seconds": time.monotonic() - self.started,
+            "group_usage": group_usage,
+            # Model pricing is not part of this receipt. Unknown is not zero.
+            "cost_usd": None,
+        }
+
         return {
             "request_p50_seconds": self._percentile(completed, 0.5),
             "request_p95_seconds": self._percentile(completed, 0.95),
             "peak_rss_bytes": self.peak_rss_bytes,
+            "peak_inflight_tokens": self.peak_inflight_tokens,
             "input_tokens_total": total("input_tokens"),
             "output_tokens_total": total("output_tokens"),
+            "document": document,
         }
 
     def finalize(self) -> None:
@@ -91,6 +158,7 @@ class Measurement:
                 "id": f"{self.identity}:{observation['attempt']}",
                 "stage": observation["stage"],
                 "operation": _OPERATION.get() or observation["stage"],
+                "group": _GROUP.get(),
                 "parent": _PARENT.get(),
                 "started_seconds": time.monotonic() - self.started,
                 "queue_seconds": queue_seconds,
@@ -204,6 +272,44 @@ def measurement_scope(measurement):
     finally:
         _PARENT.reset(parent)
         _ACTIVE.reset(token)
+
+
+@contextmanager
+def document_group_scope(group: str):
+    """Attribute page work and its physical model attempts to one plan group."""
+
+    measurement = _ACTIVE.get()
+    token = _GROUP.set(group)
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        _GROUP.reset(token)
+        if measurement is not None:
+            with measurement.lock:
+                measurement.group_elapsed[group] = measurement.group_elapsed.get(group, 0.0) + (
+                    time.monotonic() - started
+                )
+
+
+def record_document_totals(*, evidence_groups: int | None = None, planned_pages: int | None = None):
+    measurement = _ACTIVE.get()
+    if measurement is None:
+        return
+    with measurement.lock:
+        if evidence_groups is not None:
+            measurement.evidence_groups = evidence_groups
+        if planned_pages is not None:
+            measurement.planned_pages = planned_pages
+
+
+def record_inflight_tokens(tokens: int) -> None:
+    """Observe an atomic shared-pool reservation, not provider-billed usage."""
+
+    measurement = _ACTIVE.get()
+    if measurement is not None:
+        with measurement.lock:
+            measurement.peak_inflight_tokens = max(measurement.peak_inflight_tokens, tokens)
 
 
 @contextmanager
@@ -381,6 +487,11 @@ def record_document_planning(row: dict[str, Any]) -> None:
         raise ValueError("Invalid document-planning observation")
     with measurement.lock:
         measurement.value["document_planning"].append(dict(row))
+        if (
+            row["event"] in {"accepted", "adopted"}
+            and measurement.first_inspectable_seconds is None
+        ):
+            measurement.first_inspectable_seconds = time.monotonic() - measurement.started
 
 
 def measurement_identity():
@@ -421,6 +532,75 @@ def request_after(marker: int, stage: str) -> dict[str, Any] | None:
         }
 
 
+def _valid_document_summary(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "evidence_groups",
+        "planning_calls",
+        "extra_planning_calls",
+        "range_carry_count",
+        "planned_pages",
+        "http_attempts",
+        "local_result_adoptions",
+        "first_inspectable_seconds",
+        "wall_seconds",
+        "group_usage",
+        "cost_usd",
+    }:
+        return False
+    for key in ("evidence_groups", "planned_pages"):
+        if value[key] is not None and (type(value[key]) is not int or value[key] < 0):
+            return False
+    for key in (
+        "planning_calls",
+        "extra_planning_calls",
+        "range_carry_count",
+        "http_attempts",
+        "local_result_adoptions",
+    ):
+        if type(value[key]) is not int or value[key] < 0:
+            return False
+    for key in ("first_inspectable_seconds", "wall_seconds", "cost_usd"):
+        number = value[key]
+        if number is not None and (
+            type(number) not in (int, float) or not math.isfinite(number) or number < 0
+        ):
+            return False
+    if not isinstance(value["group_usage"], list):
+        return False
+    for row in value["group_usage"]:
+        if not isinstance(row, dict) or set(row) != {
+            "group",
+            "elapsed_seconds",
+            "requests",
+            "generation_requests",
+            "verification_requests",
+            "correction_requests",
+            "input_tokens",
+            "output_tokens",
+        }:
+            return False
+        if not isinstance(row["group"], str) or not row["group"]:
+            return False
+        if (
+            type(row["elapsed_seconds"]) not in (int, float)
+            or not math.isfinite(row["elapsed_seconds"])
+            or row["elapsed_seconds"] < 0
+        ):
+            return False
+        for key in (
+            "requests",
+            "generation_requests",
+            "verification_requests",
+            "correction_requests",
+        ):
+            if type(row[key]) is not int or row[key] < 0:
+                return False
+        for key in ("input_tokens", "output_tokens"):
+            if row[key] is not None and (type(row[key]) is not int or row[key] < 0):
+                return False
+    return True
+
+
 def validate_measurement(value):
     if not isinstance(value, dict) or type(value.get("schema")) is not int:
         raise ValueError("Invalid execution measurement")
@@ -431,8 +611,8 @@ def validate_measurement(value):
     if (
         (value["schema"] == 1 and set(value) not in {legacy_fields, analysis_fields})
         or (value["schema"] == 2 and set(value) != current_fields)
-        or (value["schema"] == 3 and set(value) != summary_fields)
-        or value["schema"] not in {1, 2, 3}
+        or (value["schema"] in {3, 4} and set(value) != summary_fields)
+        or value["schema"] not in {1, 2, 3, 4}
     ):
         raise ValueError("Invalid execution measurement")
     if type(value["peak_concurrency"]) is not int or value["peak_concurrency"] < 0:
@@ -456,15 +636,25 @@ def validate_measurement(value):
         not _valid_document_planning_row(row) for row in planning
     ):
         raise ValueError("Invalid document-planning observations")
-    if value["schema"] == 3:
+    if value["schema"] in {3, 4}:
         summary = value["summary"]
-        if not isinstance(summary, dict) or set(summary) != {
+        old_summary = {
             "request_p50_seconds",
             "request_p95_seconds",
             "peak_rss_bytes",
             "input_tokens_total",
             "output_tokens_total",
-        }:
+        }
+        fields = (
+            old_summary
+            if value["schema"] == 3
+            else old_summary
+            | {
+                "peak_inflight_tokens",
+                "document",
+            }
+        )
+        if not isinstance(summary, dict) or set(summary) != fields:
             raise ValueError("Invalid execution measurement summary")
         for key in ("request_p50_seconds", "request_p95_seconds"):
             if summary[key] is not None and (
@@ -476,6 +666,14 @@ def validate_measurement(value):
         for key in ("peak_rss_bytes", "input_tokens_total", "output_tokens_total"):
             if summary[key] is not None and (type(summary[key]) is not int or summary[key] < 0):
                 raise ValueError("Invalid execution usage summary")
+        if value["schema"] == 4:
+            if (
+                type(summary["peak_inflight_tokens"]) is not int
+                or summary["peak_inflight_tokens"] < 0
+            ):
+                raise ValueError("Invalid inflight reservation peak")
+            if not _valid_document_summary(summary["document"]):
+                raise ValueError("Invalid document execution summary")
     for field in ("spans", "requests"):
         if not isinstance(value[field], list):
             raise ValueError("Invalid measured records")
@@ -505,6 +703,7 @@ def validate_measurement(value):
                 "system_fingerprint",
                 "effective_options",
                 "response_activity",
+                "group",
             }
             if not isinstance(row, dict) or (set(row) - metadata) not in (
                 common | extras,
@@ -531,6 +730,10 @@ def validate_measurement(value):
             else:
                 if not isinstance(row["operation"], str) or not row["operation"]:
                     raise ValueError("Invalid measured operation")
+                if row.get("group") is not None and (
+                    not isinstance(row["group"], str) or not row["group"]
+                ):
+                    raise ValueError("Invalid measured document group")
                 for key in (
                     "cache_read_tokens",
                     "cache_write_tokens",

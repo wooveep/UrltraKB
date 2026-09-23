@@ -513,11 +513,18 @@ class TaskManager:
                         target = json.dumps(
                             observation["target_ranges"], ensure_ascii=False, separators=(",", ":")
                         )[:512]
+                        completed = json.dumps(
+                            observation["completed_ranges"],
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )[:512]
                         line = (
                             f"规划 {observation['event']} · W {observation['window']}/"
-                            f"{observation['total_windows']} · T {target} · "
+                            f"{observation['total_windows']} · T {target} · 已完成 {completed} · "
                             f"缓存 {'命中' if observation['cached'] else '未命中'} · "
-                            f"页面 {observation['pages']} · 未解决 {observation['unresolved']}"
+                            f"页面 {observation['pages']} · "
+                            f"候选 {observation['candidate_count']} · "
+                            f"未解决 {observation['unresolved']}"
                         )
                     except (KeyError, TypeError, ValueError):
                         line = ""

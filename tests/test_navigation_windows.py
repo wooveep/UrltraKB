@@ -263,6 +263,48 @@ def test_real_200000_token_assembly_keeps_only_bounded_descriptors(kb_dir, tmp_p
     assert group["blocks"][-1]["id"] == parsed.blocks[-1].id
 
 
+def test_second_step_transmits_a_legal_request_above_256000_tokens(kb_dir, tmp_path, model_service):
+    path = tmp_path / "large-context.txt"
+    path.write_text("\n\n".join("word " * 3500 for _ in range(90)))
+
+    source, parsed, _, saved = prepare(
+        kb_dir,
+        path,
+        {
+            "window_tokens": 310_000,
+            "execution": {
+                "context_tokens": 512_000,
+                "max_context_tokens": 512_000,
+                "max_tokens": 1_000_000,
+                "request_timeout": 60,
+                "stage_timeout": 180,
+                "document_timeout": 240,
+            },
+        },
+    )
+
+    requests = [
+        body
+        for body in model_service
+        if json.loads(body["messages"][-1]["content"]).get("stage") == "index_structure"
+    ]
+    sizes = [
+        litellm.token_counter(model=body["model"], messages=body["messages"]) for body in requests
+    ]
+    assert saved["status"] == "enhanced", saved
+    assert sizes and 256_000 < max(sizes) < 512_000
+    assert all(body["max_tokens"] == 4096 for body in requests)
+    assert saved["windows"][-1]["target_end"] == len(parsed.blocks)
+    assert all(row["status"] == "complete" for row in saved["windows"])
+
+    from openkb.navigation_evidence import read_evidence_group
+
+    first = read_evidence_group(kb_dir, source, parsed, saved["windows"][0]["evidence"])
+    assert first["source_id"] == source.source_id
+    assert first["parse_id"] == parsed.id
+    assert first["blocks"][0]["id"] == parsed.blocks[0].id
+
+
 def test_compile_and_verify_reuse_the_final_evidence_prefix(kb_dir, tmp_path, model_service):
     from openkb.application.documents import import_document
 

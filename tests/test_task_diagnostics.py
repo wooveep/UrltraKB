@@ -145,13 +145,36 @@ def test_live_progress_is_saved_and_does_not_replace_answer_text(kb_dir, tmp_pat
                 },
             }
         )
+        events.put(
+            {
+                "identity": asdict(identity),
+                "sequence": 3,
+                "data": {
+                    "event": "planning_observation",
+                    "observation": {
+                        "event": "accepted",
+                        "window": 2,
+                        "total_windows": 3,
+                        "target_ranges": [[2, 3]],
+                        "completed_ranges": [[0, 1], [2, 3]],
+                        "cached": False,
+                        "pages": 2,
+                        "candidate_count": 2,
+                        "unresolved": 1,
+                    },
+                },
+            }
+        )
         with manager._condition:
             manager._progress(task, attempt)
         saved = json.loads((manager.history_dir / f"{task_id}.json").read_text())
         assert saved["view"]["stage"] == "indexing"
-        assert task.view.diagnostics == "LLM #1 started\n"
+        assert "LLM #1 started\n" in task.view.diagnostics
+        assert "W 2/3" in task.view.diagnostics
+        assert "已完成 [[0,1],[2,3]]" in task.view.diagnostics
+        assert "候选 2" in task.view.diagnostics
         assert task.view.text == ""
-        assert task.view.last_activity_at == "2026-09-09T00:00:00+00:00"
+        assert task.view.last_activity_at > "2026-09-09T00:00:00+00:00"
         assert "diagnostics" not in saved["view"]
     finally:
         manager.shutdown(stop=True)
