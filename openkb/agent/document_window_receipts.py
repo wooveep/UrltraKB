@@ -134,12 +134,13 @@ def valid_accepted_receipts(receipts: Any, windows: list[dict[str, Any]], comple
             "document-plan-window-settlement-v2"
         )
         if v2 and (
-            receipt.get("status") != "accepted"
+            receipt.get("status") not in {"accepted", "partial"}
             or not isinstance(receipt.get("omission_keys"), list)
             or any(
                 not isinstance(key, str) or not key.startswith("omission:")
                 for key in receipt["omission_keys"]
             )
+            or bool(receipt["omission_keys"]) != (receipt["status"] == "partial")
         ):
             return False
         core = (
@@ -194,7 +195,7 @@ def valid_accepted_receipts(receipts: Any, windows: list[dict[str, Any]], comple
             check = core["reference_check"]
             if (
                 not isinstance(check, dict)
-                or set(check)
+                or set(check) - {"attempts"}
                 not in (
                     {"protocol", "status", "candidate_count", "receipt_hash"},
                     {"protocol", "status", "candidate_count", "receipt_hash", "receipt_key"},
@@ -207,9 +208,12 @@ def valid_accepted_receipts(receipts: Any, windows: list[dict[str, Any]], comple
                     "document-reference-check-v2",
                     "document-reference-check-v3",
                 }
-                or check["status"] not in {"no_detected_candidates", "accounted"}
+                or check["status"] not in {"no_detected_candidates", "accounted", "partial"}
                 or type(check["candidate_count"]) is not int
                 or check["candidate_count"] < 0
+                or "attempts" in check and (
+                    type(check["attempts"]) is not int or check["attempts"] < 0
+                )
                 or not isinstance(check["receipt_hash"], str)
                 or len(check["receipt_hash"]) != 64
             ):

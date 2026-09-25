@@ -202,4 +202,11 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
     assert len(published("activation")) == (remote_state == "retained")
-    assert len(model_service) == before
+    retry_calls = [
+        json.loads(call["messages"][-1]["content"]) for call in model_service[before:]
+    ]
+    if remote_state == "retained":
+        assert not retry_calls
+    else:
+        assert 1 <= len(retry_calls) <= 2
+        assert all(call["stage"] == "planning" for call in retry_calls)

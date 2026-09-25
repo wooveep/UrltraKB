@@ -100,6 +100,9 @@ Rules:
    if that page cannot specify details without the external source.
    A mandatory approval or action in an external source remains mandatory in
    the page wording. Its unread details are not a missing internal prerequisite.
+   Example: "publish only after following 《External Ethics Review》" belongs in
+   the page subject, external_references and a page limitation. Do not put that
+   title in unresolved solely because the review document was not supplied.
 10. problem_type is one of missing_prerequisite, unresolved_cross_reference,
     or parsing_limitation. Do not use missing_external_material in a new plan.
 11. Organize complete knowledge tasks, including prerequisites, branches, exceptions,

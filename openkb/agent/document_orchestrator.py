@@ -26,8 +26,10 @@ from openkb.agent.document_planning_events import (
     planning_observation,
 )
 from openkb.agent.document_planning_ledger import DocumentPlanningLedger
+from openkb.agent.document_planning_ledger_retry import skip_resolved_retry
 from openkb.agent.document_planning_lifecycle import PlanningLifecycle
 from openkb.agent.document_planning_partial import (
+    combine_salvage,
     prepare_partial_acceptance,
     report_partial_acceptance,
 )
@@ -37,7 +39,10 @@ from openkb.agent.document_protocol import (
     decode_plan_response,
     plan_messages,
 )
-from openkb.agent.document_reference_review import review_candidate_references
+from openkb.agent.document_reference_review import (
+    LOCAL_REFERENCE_FAILURES,
+    review_candidate_references,
+)
 from openkb.agent.document_window_receipts import accepted_window_receipt, window_receipt_id
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.evidence_wire import WireMessages
@@ -104,7 +109,6 @@ def plan_document(
         windowing=windowing_rev,
         implementation=planning_revisions,
     )
-
     # Empty parser output is a source-only result; never construct [0, 0) W/T.
     parser_conditions = document_planning_support.source_conditions(parsed)
     windows, planning_limits = admit_planning_windows(
@@ -118,7 +122,6 @@ def plan_document(
         parser_conditions=parser_conditions,
     )
     record_document_totals(evidence_groups=len(windows))
-
     with closing(DocumentPlanningLedger(checkpoints, retained_key)) as ledger:
         lifecycle = PlanningLifecycle(
             ledger=ledger, checkpoints=checkpoints, retained_key=retained_key,
@@ -127,10 +130,10 @@ def plan_document(
             windowing_rev=windowing_rev, planning_revisions=planning_revisions,
             recovery_contract=recovery_contract, entity_types=entity_types,
             planning_limits=planning_limits, plan_only=plan_only,
-            return_result=return_result,
+            return_result=return_result, started_at=planning_started,
+            request_start=request_marker(),
         )
         public_result = lifecycle.public_result
-
         try:
             # A caller that did not ask to Continue must never append a second
             # sequence of receipt rows to a retained plan of the same identity.
@@ -165,6 +168,7 @@ def plan_document(
                     # Rebase even an interrupted pre-W ledger on the current catalogue.
                     cumulative_overview = lifecycle.reset()
                 else:
+                    lifecycle.remember_publication_state()
                     status, recovered_windows, recovered_completed = recovered_progress
                     if ledger.recovery_valid(
                         recovered_windows,
@@ -222,7 +226,6 @@ def plan_document(
         promoted_page_keys: set[str] = set()
         promoted_catalog_targets: set[str] = set()
         promoted_unresolved_keys: set[str] = set()
-
         def settle_content_failure(
             window: dict[str, Any], *, reason: str, attempts: int, predecessor: str
         ) -> None:
@@ -231,14 +234,16 @@ def plan_document(
                 reason=reason, attempts=attempts, predecessor=predecessor,
                 on_event=on_event,
             )
+
         w_idx = start_window
         while w_idx < len(windows):
+            if skip_resolved_retry(ledger, windows, w_idx, checkpoints, retained_key, on_event):
+                continue
             window = windows[w_idx]
             window_started = time.monotonic()
             processing_checkpoint("planning")
             t_start = window["target_start"]
             t_end = window["target_end"]
-
             # Read frozen evidence
             frozen_descriptor = window.get("evidence")
             desc = frozen_descriptor
@@ -276,7 +281,6 @@ def plan_document(
                         source, parsed, desc.get("start", t_start), desc.get("end", t_end)
                     )
             prefix = frozen_prefix(evidence)
-
             relevant = ledger.relevant_keys(
                 evidence,
                 t_start,
@@ -285,7 +289,6 @@ def plan_document(
                 catalog_targets=promoted_catalog_targets,
                 unresolved_keys=promoted_unresolved_keys,
             )
-
             original_target_ranges = target_ranges or [[t_start, t_end]]
             planning_target_ranges, target_was_projected = (
                 document_planning_support.exclude_attachment_ranges(parsed, original_target_ranges)
@@ -692,7 +695,7 @@ def plan_document(
                     )
                     w_idx += 1
                     continue
-
+            original_candidate = repair.candidate if salvaged and not mock_caller else raw_response
             try:
                 reviewed = review_candidate_references(
                     raw_response,
@@ -717,10 +720,7 @@ def plan_document(
                     ),
                 )
             except ProcessingIncomplete as exc:
-                if exc.reason not in {
-                    "reference_check_invalid", "reference_check_empty_response",
-                    "document_reference_check_invalid",
-                }:
+                if exc.reason not in LOCAL_REFERENCE_FAILURES:
                     raise
                 settle_content_failure(
                     window, reason=exc.reason, attempts=attempts_used,
@@ -729,9 +729,10 @@ def plan_document(
                 w_idx += 1
                 continue
             raw_response, decoded = reviewed.candidate, reviewed.delta
+            salvaged = combine_salvage(salvaged, reviewed.partial, raw_response, decoded)
             partial = prepare_partial_acceptance(
                 ledger, checkpoints, window,
-                original=repair.candidate if salvaged is not None else None,
+                original=original_candidate if salvaged is not None else None,
                 candidate=raw_response, delta=decoded, salvaged=salvaged,
                 attempts=attempts_used,
                 normalizations=repair.normalization if mock_caller is None else None,
@@ -757,9 +758,9 @@ def plan_document(
                 final_window=w_idx == len(windows) - 1,
                 windows=windows,
                 completed=w_idx + 1,
-                partial_omission=partial.omission,
+                partial_omissions=partial.omissions,
             )
-            report_partial_acceptance(partial.omission, on_event, w_idx)
+            report_partial_acceptance(partial.omissions, on_event, w_idx)
 
             emit_accepted_window(
                 on_event,
@@ -781,7 +782,6 @@ def plan_document(
             promoted_catalog_targets.clear()
             promoted_unresolved_keys.clear()
             w_idx += 1
-
         final_plan = lifecycle.finalize(windows)
         with progress_scope("planning", len(windows)) as progress:
             progress.advance(len(windows))

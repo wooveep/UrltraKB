@@ -8,6 +8,23 @@ from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.sources import content_id
 
 
+def skip_resolved_retry(
+    ledger: Any, windows: list[dict[str, Any]], index: int,
+    checkpoints: Any, retained_key: str, on_event: Any,
+) -> bool:
+    """Remove a queued retry when earlier accepted work already closed its omission."""
+    key = windows[index].get("retry_omission_key")
+    if key is None or ledger.db.execute(
+        "SELECT 1 FROM retry_resolutions WHERE omission_key = ?", (key,)
+    ).fetchone() is None:
+        return False
+    windows.pop(index)
+    ledger.replace_schedule(windows, index)
+    checkpoints.save_recovery(retained_key, "plan", ledger.progress_preview())
+    on_event({"stage": "planning", "operation": "skip_resolved_retry", "omission": key})
+    return True
+
+
 def resolve_retry_omission(ledger: Any, key: str, sequence: int) -> None:
     if ledger.db.execute(
         "SELECT 1 FROM planning_omissions WHERE key = ?", (key,)
@@ -51,7 +68,7 @@ def begin_retry(
                 default=0,
             )
             retry = {**window}
-            if receipt["status"] == "accepted":
+            if receipt["status"] == "partial":
                 import json
 
                 from openkb.agent.document_plan import range_dicts

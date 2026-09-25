@@ -202,7 +202,7 @@ def test_unknown_references_and_shared_conditions_remain_in_review(options):
     )
 
 
-def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
+def test_unresolved_prerequisite_retries_only_blocked_chain(
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.source_actions import continue_source
@@ -320,8 +320,12 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
     )
     previous = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
-    assert continued.knowledge_compilation == "completed", continued
-    assert len(model_service) == previous
+    assert continued.knowledge_compilation == "completed", (continued.reason, continued.stage)
+    retry_calls = [
+        json.loads(call["messages"][-1]["content"]) for call in model_service[previous:]
+    ]
+    assert 1 <= len(retry_calls) <= 2
+    assert all(call["stage"] == "planning" for call in retry_calls)
     assert not list((kb_dir / "wiki/concepts").glob("alpha-*.md"))
     assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
 

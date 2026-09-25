@@ -10,6 +10,7 @@ from typing import Any, Callable
 from openkb.agent.document_json_prompts import REFERENCE_EXAMPLE, example_rules
 from openkb.agent.document_json_response import classify_json_response
 from openkb.agent.document_plan_compiler import PlanningContext, compile_plan_candidate
+from openkb.agent.document_plan_salvage import SalvagedPlan
 from openkb.agent.document_plan_selections import SelectionResolver
 from openkb.agent.document_range_validation import interval_is_covered, range_intervals
 from openkb.agent.document_reference_check import (
@@ -18,6 +19,7 @@ from openkb.agent.document_reference_check import (
     apply_reference_decisions,
     detect_references,
     target_pairs,
+    valid_saved_decisions,
     validate_reference_decisions,
 )
 from openkb.agent.document_reference_evidence import (
@@ -25,6 +27,7 @@ from openkb.agent.document_reference_evidence import (
     ReferenceEvidenceError,
     read_reference_evidence,
 )
+from openkb.agent.document_reference_partial import retain_valid_reference_pages
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.source_protocol import source_messages
 from openkb.config import compilation_model_options
@@ -59,6 +62,12 @@ if scope or necessity remains unclear, use uncertain rather than required_unavai
 """
 CHECK_RULES += example_rules(REFERENCE_EXAMPLE)
 
+LOCAL_REFERENCE_FAILURES = frozenset({
+    "reference_check_invalid", "reference_check_empty_response",
+    "reference_check_response_invalid", "reference_check_budget_exceeded",
+    "document_reference_check_invalid", "output_budget_exhausted",
+})
+
 
 @dataclass(frozen=True)
 class ReferenceReviewResult:
@@ -66,6 +75,7 @@ class ReferenceReviewResult:
     candidate: dict[str, Any]
     delta: dict[str, Any]
     receipt: dict[str, Any]
+    partial: SalvagedPlan | None = None
 
     @property
     def summary(self) -> dict[str, Any]:
@@ -74,6 +84,7 @@ class ReferenceReviewResult:
             "status": self.status,
             "candidate_count": self.receipt["candidate_count"],
             "receipt_hash": content_id(self.receipt),
+            "attempts": self.receipt.get("attempts", 0),
         }
         if "receipt_key" in self.receipt:
             result["receipt_key"] = self.receipt["receipt_key"]
@@ -176,6 +187,43 @@ def _fits(limits: Any, model: str, messages: Any) -> bool:
     except InputTooLarge:
         return False
     return True
+
+
+def _partial_review(
+    candidate: dict[str, Any], context: PlanningContext, window: dict[str, Any],
+    *, valid: dict[tuple[str, str], dict[str, Any]],
+    pairs: list[tuple[str, str]], references: list[ReferenceCandidate],
+    allow_empty_overview: bool, base_receipt: dict[str, Any],
+    attempts: int, predecessor: str, checkpoints: Any, on_event: Any,
+) -> ReferenceReviewResult:
+    partial = retain_valid_reference_pages(
+        candidate, context, window, valid=valid, pairs=pairs,
+        references=references, allow_empty_overview=allow_empty_overview,
+    )
+    if partial is None:
+        raise ProcessingIncomplete("reference_check_invalid", "planning")
+    failed = [pair for pair in pairs if pair not in valid]
+    receipt = {
+        **base_receipt, "status": "partial", "decisions": list(valid.values()),
+        "failed_pairs": failed, "attempts": attempts,
+    }
+    key = content_id([
+        "document-reference-check-partial-v1", content_id(candidate),
+        pairs, receipt["decisions"], failed, predecessor,
+    ])
+    receipt["receipt_key"] = key
+    checkpoints.save_recovery(
+        key, "reference_check",
+        {"status": "validated_partial", "receipt": receipt, "candidate": partial.candidate},
+    )
+    on_event({
+        "stage": "planning", "operation": "reference_check_status",
+        "status": "partial", "candidate_count": base_receipt["candidate_count"],
+        "failed_pairs": len(failed),
+    })
+    return ReferenceReviewResult(
+        "partial", partial.candidate, partial.delta, receipt, partial
+    )
 
 
 def review_candidate_references(
@@ -330,22 +378,33 @@ def review_candidate_references(
             allow_empty_overview=allow_empty_overview,
             _prepared_extra=extra,
         )
-        children = [
-            review_candidate_references(candidate, delta, context, _pairs=part, **kwargs)
-            for part in (pairs[:middle], pairs[middle:])
-        ]
+        children = []
+        for part in (pairs[:middle], pairs[middle:]):
+            try:
+                children.append(
+                    review_candidate_references(candidate, delta, context, _pairs=part, **kwargs)
+                )
+            except ProcessingIncomplete as exc:
+                if exc.reason not in LOCAL_REFERENCE_FAILURES:
+                    raise
         decisions = {
             (item["reference_key"], item["page_ref"]): item
             for child in children
             for item in child.receipt["decisions"]
         }
-        if set(decisions) != set(pairs):
-            raise ProcessingIncomplete("reference_check_invalid", "planning")
         compile_context = replace(
             context,
             evidence={**window, "blocks": [*window["blocks"], *supplemental]},
             evidence_ranges=[*(context.evidence_ranges or []), *_range_rows(supplemental)],
         )
+        if set(decisions) != set(pairs):
+            return _partial_review(
+                candidate, compile_context, window, valid=decisions, pairs=pairs,
+                references=requested, allow_empty_overview=allow_empty_overview,
+                base_receipt=base_receipt,
+                attempts=sum(child.receipt["attempts"] for child in children),
+                predecessor=predecessor, checkpoints=checkpoints, on_event=on_event,
+            )
         merged = apply_reference_decisions(
             candidate,
             decisions,
@@ -478,15 +537,31 @@ def review_candidate_references(
     saved = checkpoints.load_recovery(recovery_key, "reference_check")
     if not isinstance(saved, dict) or saved.get("check_input_hash") != check_input_hash:
         saved = {"check_input_hash": check_input_hash, "attempt": 0, "valid": []}
+    try:
+        valid = valid_saved_decisions(
+            saved, pairs=pairs, resolver=decision_resolver, candidates=candidates,
+            candidate_hash=candidate_hash, check_input_hash=check_input_hash,
+            recovery_key=recovery_key, max_attempts=limits.max_attempts,
+        )
+    except ValueError as exc:
+        raise ProcessingIncomplete("reference_check_incompatible_recovery", "planning") from exc
+    def finish_partial(reason: str, attempts: int) -> ReferenceReviewResult:
+        try:
+            return _partial_review(
+                candidate, compile_context, window, valid=valid, pairs=pairs,
+                references=requested, allow_empty_overview=allow_empty_overview,
+                base_receipt=base_receipt, attempts=attempts,
+                predecessor=predecessor, checkpoints=checkpoints, on_event=on_event,
+            )
+        except ProcessingIncomplete as exc:
+            raise ProcessingIncomplete(reason, "planning") from exc
+
     if saved.get("status") == "execution_unknown":
         raise ProcessingIncomplete("reference_check_execution_unknown", "planning")
     if saved.get("status") == "truncated":
-        raise ProcessingIncomplete("reference_check_invalid", "planning")
+        return finish_partial("output_budget_exhausted", saved.get("attempt", 0))
     if saved.get("status") == "response_empty" and saved.get("attempt", 0) >= limits.max_attempts:
-        raise ProcessingIncomplete("reference_check_empty_response", "planning")
-    valid: dict[tuple[str, str], dict[str, Any]] = {
-        (row["reference_key"], row["page_ref"]): row for row in saved.get("valid", [])
-    }
+        return finish_partial("reference_check_empty_response", saved["attempt"])
     if saved.get("status") == "validated" and isinstance(saved.get("candidate"), dict):
         compiled_saved = compile_plan_candidate(
             saved["candidate"], compile_context,
@@ -559,14 +634,21 @@ def review_candidate_references(
                             **compilation_model_options(settings, stage="planning"),
                         )
                     )
-                except TruncatedResponseError as exc:
+                except TruncatedResponseError:
                     checkpoints.save_recovery(
                         recovery_key,
                         "reference_check",
                         {**saved, "status": "truncated", "attempt": attempt + 1},
                     )
-                    raise ProcessingIncomplete("reference_check_invalid", "planning") from exc
+                    return finish_partial("output_budget_exhausted", attempt + 1)
                 except ProcessingIncomplete as exc:
+                    if exc.reason == "output_budget_exhausted":
+                        checkpoints.save_recovery(
+                            recovery_key,
+                            "reference_check",
+                            {**saved, "status": "truncated", "attempt": attempt + 1},
+                        )
+                        return finish_partial(exc.reason, attempt + 1)
                     if exc.reason == "request_execution_unknown":
                         checkpoints.save_recovery(
                             recovery_key,
@@ -594,12 +676,12 @@ def review_candidate_references(
                 )
                 checkpoints.save_recovery(recovery_key, "reference_check", saved)
                 if attempt + 1 >= limits.max_attempts:
-                    raise ProcessingIncomplete("reference_check_empty_response", "planning")
+                    return finish_partial("reference_check_empty_response", attempt + 1)
                 continue
             if kind == "length":
-                raise ProcessingIncomplete("output_budget_exhausted", "planning")
+                return finish_partial("output_budget_exhausted", attempt + 1)
             if kind != "content":
-                raise ProcessingIncomplete("reference_check_response_invalid", "planning")
+                return finish_partial("reference_check_response_invalid", attempt + 1)
             try:
                 mapped = messages.decode_response(raw)
             except (TypeError, ValueError):
@@ -648,10 +730,10 @@ def review_candidate_references(
             if current_issues and (
                 fingerprint == new_fingerprint or attempt + 1 == limits.max_attempts
             ):
-                raise ProcessingIncomplete("reference_check_invalid", "planning")
+                break
             fingerprint = new_fingerprint
     if set(valid) != set(pairs):
-        raise ProcessingIncomplete("reference_check_invalid", "planning")
+        return finish_partial("reference_check_invalid", saved["attempt"])
     updated = apply_reference_decisions(
         candidate, valid, requested, resolver=SelectionResolver.from_context(compile_context)
     )

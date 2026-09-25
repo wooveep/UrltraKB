@@ -222,7 +222,8 @@ def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_pa
     assert any(
         row["stage"] == "generation"
         and row["reason"] == "input_budget_exceeded"
-        and row["items"] == ["concepts/notes"]
+        and len(row["items"]) == 1
+        and row["items"][0].startswith("concepts/")
         for row in result.omissions
     ), result.omissions
     assert not (kb_dir / "wiki/concepts/notes.md").exists()

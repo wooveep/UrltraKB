@@ -39,6 +39,8 @@ def salvage_candidate(
     affected_pages: set[str] = set()
     normalizations: list[dict[str, Any]] = []
     overview_missing = False
+    annotation_failed = False
+    content_failed = False
     fallback = target_ranges(window)
 
     def omitted_ranges(row: Any, field: str) -> None:
@@ -66,7 +68,11 @@ def salvage_candidate(
             return SalvagedPlan(
                 candidate, result.delta, unique, sorted(affected_pages),
                 [*normalizations, *result.normalizations],
-                "overview" if overview_missing else "document_plan",
+                (
+                    "overview" if overview_missing else
+                    "reference_annotation" if annotation_failed and not content_failed else
+                    "document_plan"
+                ),
             )
         to_drop: dict[str, set[int]] = {}
         cleared_overview = False
@@ -115,12 +121,19 @@ def salvage_candidate(
                 if section == "page_changes":
                     affected_pages.add(row.get("local_key", ""))
                     omitted_ranges(row, "subject_ranges")
+                    content_failed = True
                 elif section == "source_only":
                     omitted_ranges(row, "ranges")
+                    content_failed = True
                 elif section == "unresolved":
                     omitted_ranges(row, "location")
+                    content_failed = True
                 elif section == "resolutions":
                     omissions.extend(fallback)
+                    content_failed = True
+                elif section == "external_references":
+                    omitted_ranges(row, "location")
+                    annotation_failed = True
                 normalizations.append({
                     "code": "failed_item_excluded", "path": f"{section}[{index}]"
                 })

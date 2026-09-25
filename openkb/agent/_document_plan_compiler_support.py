@@ -98,6 +98,7 @@ class PlanningContext:
     known_open_unresolved_keys: Collection[str] = frozenset()
     selection_protocol: str = "numeric-v3"
     navigation_hints: Sequence[Mapping[str, Any]] = ()
+    retry_page_keys: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)

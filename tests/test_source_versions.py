@@ -104,7 +104,7 @@ def test_shared_import_registers_original_when_all_knowledge_is_omitted(
     documents = get_kb_list(kb_dir)["documents"]
     assert len(documents) == 1
     assert documents[0]["source_id"] == result.source_id
-    assert documents[0]["knowledge_compilation"] == "completed"
+    assert documents[0]["knowledge_compilation"] == "not_started"
 
 
 def test_shared_import_compiles_independent_sources_and_skips_only_completed_version(
@@ -203,7 +203,7 @@ def test_recompilation_preserves_manual_metadata_and_uses_saved_source(
     summary.write_text("---\ntitle: Human annotation\n---\nHuman content")
     source.unlink()
     result = asyncio.run(recompile_document(kb_dir, first.source_id))
-    assert result.status == "compiled"
+    assert result.status == "unfinished" and result.message == "needs_acceptance", result
     assert summary.read_text().endswith("Human content")
     assert result.document.source_intake == "saved"
 

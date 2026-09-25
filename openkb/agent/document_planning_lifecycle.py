@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from openkb.agent import document_planning_support
 from openkb.agent.document_plan import DocumentPlan
-from openkb.agent.document_plan_preview import save_empty_planning_report, save_final_plan
+from openkb.agent.document_plan_preview import (
+    planning_execution_metrics,
+    save_empty_planning_report,
+    save_final_plan,
+)
 from openkb.agent.document_planning_result import PlanningResult
+from openkb.execution_measurement import request_marker
 
 
 @dataclass
@@ -31,6 +37,8 @@ class PlanningLifecycle:
     planning_limits: Any
     plan_only: bool
     return_result: bool = False
+    started_at: float = 0.0
+    request_start: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
     report_ref: str | None = None
 
@@ -134,6 +142,21 @@ class PlanningLifecycle:
         self.ledger.bind_metadata(self.metadata)
         return self.ledger.overview()
 
+    def remember_publication_state(self) -> None:
+        """Keep the last formal plan while an explicit omission retry is pending."""
+        from openkb.agent.document_plan import from_dict
+
+        saved = self.checkpoints.load_recovery(self.retained_key, "plan")
+        try:
+            prior = from_dict(saved)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return
+        if (
+            prior.metadata.get("recovery_key") == self.retained_key
+            and isinstance(prior.metadata.get("publication_receipt"), dict)
+        ):
+            self.checkpoints.save_recovery(self.retained_key, "plan_baseline", saved)
+
     def terminal_recovery_valid(self) -> bool:
         saved = self.checkpoints.load_recovery(self.retained_key, "plan")
         if saved is None or not isinstance(saved, dict) or "metadata" not in saved:
@@ -158,17 +181,41 @@ class PlanningLifecycle:
 
         self.ledger.mark_accepted(windows)
         materialized = self.ledger.materialize()
+        previous = self.checkpoints.load_recovery(self.retained_key, "plan")
+        if not isinstance(previous, dict) or "metadata" not in previous:
+            previous = self.checkpoints.load_recovery(self.retained_key, "plan_baseline")
+        prior_execution = (
+            previous.get("metadata", {}).get("planning_execution")
+            if isinstance(previous, dict) else None
+        )
+        if not isinstance(prior_execution, dict):
+            prior_report = self.checkpoints.load_recovery(self.retained_key, "plan_report")
+            prior_execution = (
+                prior_report.get("planning_execution")
+                if isinstance(prior_report, dict) else None
+            )
+        prior_execution = planning_execution_metrics(prior_execution)
+        new_requests = max(0, request_marker() - self.request_start)
+        execution = {
+            "planning_requests": prior_execution.get("planning_requests", 0) + new_requests,
+            "elapsed_seconds": prior_execution.get("elapsed_seconds", 0.0) + (
+                max(0.0, time.monotonic() - self.started_at)
+                if new_requests or not prior_execution else 0.0
+            ),
+        }
         if windows and all(
             receipt["status"] == "skipped" for receipt in self.ledger.receipts()
         ):
             self.report_ref = save_empty_planning_report(
                 self.checkpoints, self.retained_key, self.metadata,
                 materialized.planning_omissions, parsed=self.parsed,
+                execution=execution,
             )
             return None
         final = document_planning_support.final_document_plan(
             metadata={
                 **self.metadata,
+                "planning_execution": execution,
                 **self.ledger.final_catalog_metadata(),
                 "accepted_window_receipts": self.ledger.receipts(),
             },
@@ -185,9 +232,7 @@ class PlanningLifecycle:
             entity_types=self.entity_types,
             existing_targets=self.ledger.final_catalog_targets(),
         )
-        inherit_publication_state(
-            final, self.checkpoints.load_recovery(self.retained_key, "plan")
-        )
+        inherit_publication_state(final, previous)
         final.metadata["planning_coverage"] = planning_coverage(final, self.parsed)
         save_final_plan(self.checkpoints, self.retained_key, final)
         return final

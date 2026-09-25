@@ -17,12 +17,12 @@ from openkb.agent.document_plan import (
 )
 from openkb.agent.document_plan_annotations import PageLimitation, PlanningOmission
 from openkb.agent.document_planning_ledger_annotations import (
+    resolve_ready_blocked_omissions,
+    resolve_retry_if_ready,
     save_external_references,
     save_partial_omission,
 )
-from openkb.agent.document_planning_ledger_annotations import (
-    settle_skipped as _settle_skipped,
-)
+from openkb.agent.document_planning_ledger_annotations import settle_skipped as _settle_skipped
 from openkb.agent.document_planning_ledger_integrity import canonical_json as _json
 from openkb.agent.document_planning_ledger_integrity import (
     catalog_baseline_proof_valid as _catalog_baseline_proof_valid,
@@ -575,6 +575,8 @@ class DocumentPlanningLedger:
                 break
         page.state = "blocked" if blocked else "ready"
         self._store_page(page)
+        if not blocked:
+            resolve_ready_blocked_omissions(self, key, self._meta(self._progress_key(), 0) + 1)
 
     def apply_accepted(
         self,
@@ -584,26 +586,23 @@ class DocumentPlanningLedger:
         final_window: bool,
         windows: list[dict[str, Any]],
         completed: int,
-        partial_omission: PlanningOmission | None = None,
+        partial_omissions: list[PlanningOmission] | None = None,
     ) -> OverviewPlan:
         """Atomically apply one validated delta, receipt, and resumable prefix."""
-
         if self._v2():
             receipt = {
                 **receipt,
                 "protocol": "document-plan-window-settlement-v2",
-                "status": "accepted",
-                "omission_keys": [partial_omission.key] if partial_omission else [],
+                "status": "partial" if partial_omissions else "accepted",
+                "omission_keys": [item.key for item in partial_omissions or []],
             }
 
         with self._transaction():
             overview = self.overview()
             window = windows[completed - 1]
             retry_omission = window.get("retry_omission_key")
-            if retry_omission is not None:
-                self._resolve_retry_omission(retry_omission, completed)
-            if partial_omission is not None:
-                save_partial_omission(self, partial_omission)
+            for omission in partial_omissions or []:
+                save_partial_omission(self, omission)
             if window.get("retry_of"):
                 addition = decoded["overview"]["text"]
                 if addition and addition not in overview.text:
@@ -616,13 +615,6 @@ class DocumentPlanningLedger:
             for limitation in decoded["overview"]["limitations"]:
                 if limitation not in overview.limitations:
                     overview.limitations.append(limitation)
-            has_omissions = self.db.execute(
-                "SELECT 1 FROM planning_omissions o LEFT JOIN retry_resolutions r "
-                "ON r.omission_key = o.key WHERE r.omission_key IS NULL LIMIT 1"
-            ).fetchone() is not None
-            overview.status = "complete" if final_window and not has_omissions else "partial"
-            self._set_meta("overview", overview.to_dict())
-
             affected: set[str] = set()
             for change in decoded["page_changes"]:
                 existing = self._page(change["target_key"])
@@ -695,6 +687,14 @@ class DocumentPlanningLedger:
             save_external_references(self, decoded.get("external_references", []))
             for key in affected:
                 self._set_page_state(key)
+            if retry_omission is not None:
+                resolve_retry_if_ready(self, retry_omission, completed)
+            has_omissions = self.db.execute(
+                "SELECT 1 FROM planning_omissions o LEFT JOIN retry_resolutions r "
+                "ON r.omission_key = o.key WHERE r.omission_key IS NULL LIMIT 1"
+            ).fetchone() is not None
+            overview.status = "complete" if final_window and not has_omissions else "partial"
+            self._set_meta("overview", overview.to_dict())
             self.db.execute(
                 "INSERT INTO receipts(sequence, payload) VALUES (?, ?)",
                 (completed, _json(receipt)),

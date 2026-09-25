@@ -19,6 +19,7 @@ class PlanningResult:
             return cls(None, "empty", report_ref)
         return cls(
             plan,
-            "partial" if plan.planning_omissions else "complete",
+            "partial" if plan.metadata.get("planning_coverage", {}).get("status") == "partial"
+            or plan.planning_omissions else "complete",
             plan.metadata.get("plan_preview"),
         )

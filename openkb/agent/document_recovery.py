@@ -36,6 +36,12 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
         return
     published_paths = set(paths)
     previous_pages = {page.key: page for page in previous.pages}
+    def references(plan: DocumentPlan, key: str) -> list[dict[str, Any]]:
+        return [
+            row.to_dict() for row in plan.external_references
+            if key in row.affected_pages
+        ]
+
     for page in final.pages:
         old = previous_pages.get(page.key)
         path = page.target or page.name
@@ -50,9 +56,13 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 old.kind,
                 old.type,
                 old.name,
+                old.title,
+                old.purpose,
                 old.target,
                 old.subject_ranges,
                 old.necessary_context,
+                old.limitations,
+                references(previous, old.key),
                 old.state,
             )
             == (
@@ -60,9 +70,13 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 page.kind,
                 page.type,
                 page.name,
+                page.title,
+                page.purpose,
                 page.target,
                 page.subject_ranges,
                 page.necessary_context,
+                page.limitations,
+                references(final, page.key),
                 page.state,
             )
         ):

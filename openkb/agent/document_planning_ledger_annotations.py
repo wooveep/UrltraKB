@@ -48,24 +48,26 @@ def save_external_references(ledger: Any, values: list[dict[str, Any]]) -> None:
 def partial_omission(
     ledger: Any, window: dict[str, Any], *, ranges: list[Any],
     affected_pages: list[str], attempts: int, diagnostic_ref: str | None,
-    component: str = "document_plan",
+    component: str = "document_plan", reason: str = "document_plan_partial_invalid",
+    durable_pages: bool = False,
 ) -> PlanningOmission:
     """Bind independently retained content to one visible failed subset."""
     if not ranges:
         raise ValueError("A partial omission needs exact ranges")
     target_id = window_receipt_id(window)
     omitted_pages = sorted({
+        page if durable_pages else
         "omitted-page:" + content_id([ledger.recovery_key, target_id, page])
         for page in affected_pages if page
     })
     key = "omission:" + content_id({
         "identity": ledger._meta("identity"), "target": target_id,
-        "stage": "planning", "ranges": ranges,
+        "stage": "planning", "reason": reason, "ranges": ranges,
         "affected_pages": omitted_pages,
         **({"retry_attempt": window["retry_attempt"]} if "retry_attempt" in window else {}),
     })
     return PlanningOmission(
-        key=key, stage="planning", reason="document_plan_partial_invalid",
+        key=key, stage="planning", reason=reason,
         target_id=target_id, ranges=ranges,
         affected_pages=omitted_pages, component=component,
         attempts=attempts, diagnostic_ref=diagnostic_ref,
@@ -76,6 +78,62 @@ def save_partial_omission(ledger: Any, omission: PlanningOmission) -> None:
     ledger.db.execute(
         "INSERT INTO planning_omissions(key, payload) VALUES (?, ?)",
         (omission.key, canonical_json(omission.to_dict())),
+    )
+
+
+def resolve_ready_blocked_omissions(ledger: Any, page_key: str, sequence: int) -> None:
+    """Close a prior blocked-page omission after later evidence unblocks every page."""
+    for key, payload in ledger.db.execute(
+        "SELECT o.key, o.payload FROM planning_omissions o LEFT JOIN retry_resolutions r "
+        "ON r.omission_key = o.key WHERE r.omission_key IS NULL"
+    ):
+        omission = PlanningOmission.from_dict(json.loads(payload))
+        if (
+            omission.reason != "document_plan_blocked_page"
+            or page_key not in omission.affected_pages
+        ):
+            continue
+        if all(
+            (page := ledger._page(affected)) is not None and page.state == "ready"
+            for affected in omission.affected_pages
+        ):
+            ledger._resolve_retry_omission(key, sequence)
+
+
+def resolve_retry_if_ready(ledger: Any, key: str, sequence: int) -> None:
+    """A retry cannot close a blocker while any affected page remains blocked."""
+    if ledger.db.execute(
+        "SELECT 1 FROM retry_resolutions WHERE omission_key = ?", (key,)
+    ).fetchone() is not None:
+        return
+    row = ledger.db.execute(
+        "SELECT payload FROM planning_omissions WHERE key = ?", (key,)
+    ).fetchone()
+    if row is None:
+        raise ValueError("Retry omission is missing")
+    omission = PlanningOmission.from_dict(json.loads(row[0]))
+    if omission.reason == "document_plan_blocked_page" and not all(
+        (page := ledger._page(affected)) is not None and page.state == "ready"
+        for affected in omission.affected_pages
+    ):
+        return
+    ledger._resolve_retry_omission(key, sequence)
+
+
+def blocked_retry_page_keys(ledger: Any, window: dict[str, Any]) -> frozenset[str] | None:
+    """Return durable pages a blocked-page retry may update, if applicable."""
+    key = window.get("retry_omission_key")
+    if key is None:
+        return None
+    row = ledger.db.execute(
+        "SELECT payload FROM planning_omissions WHERE key = ?", (key,)
+    ).fetchone()
+    if row is None:
+        raise ValueError("Retry omission is missing")
+    omission = PlanningOmission.from_dict(json.loads(row[0]))
+    return (
+        frozenset(omission.affected_pages)
+        if omission.reason == "document_plan_blocked_page" else None
     )
 
 

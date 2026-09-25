@@ -7,6 +7,28 @@ import pytest
 from openkb.agent.document_page_evidence import page_occurrence_descriptors
 from openkb.agent.document_plan import PagePlan
 from openkb.agent.document_plan_compiler import PlanningContext, compile_plan_candidate
+from openkb.agent.document_plan_finalize import finalize_candidate
+
+
+@pytest.mark.parametrize("section", ["unresolved", "resolutions", "external_references"])
+def test_blocked_retry_cannot_change_unrelated_page_relationship(section):
+    context = SimpleNamespace(
+        retry_page_keys=frozenset({"p1"}),
+        open_unresolved=[{"key": "u2", "affected_pages": ["p2"]}],
+    )
+    delta = {"page_changes": [], "unresolved": [], "resolutions": [],
+             "external_references": []}
+    delta[section] = [
+        {"unresolved_key": "u2"} if section == "resolutions" else
+        {"affected_pages": ["p2"]}
+    ]
+
+    result = finalize_candidate(
+        {}, delta, [], (), "checked", context, [],
+    )
+
+    assert result.delta is None
+    assert any(issue.code == "retry_page_scope" for issue in result.issues)
 
 
 def _context(texts, *, target_ranges=None):
@@ -582,6 +604,33 @@ def test_v5_rejects_external_quote_outside_affected_page_evidence():
 
     assert any(issue.code == "reference_outside_page_evidence" for issue in result.issues)
     assert result.delta is None
+
+
+def test_invalid_context_ranges_with_external_reference_is_reported_not_crashed():
+    context = replace(_context(["Follow Guide A."]), selection_protocol="document-plan-v5")
+    identity = context.parsed.blocks[0].id
+    selected = {"from_block": identity, "through_block": identity}
+    candidate = {
+        "overview": {"text": "Guide requirement.", "ranges": [selected], "limitations": []},
+        "page_changes": [{
+            "local_key": "guide", "kind": "concept", "title": "Guide",
+            "purpose": "Record the requirement", "subject_ranges": [selected],
+            "necessary_context": [{
+                "relation": "explicit_reference", "ranges": None,
+                "basis_ranges": [selected], "rationale": "The guide is cited.",
+            }],
+        }],
+        "source_only": [], "unresolved": [], "resolutions": [],
+        "external_references": [{
+            "location": [selected], "target_document": "Guide A",
+            "target_section": None, "affected_pages": ["guide"],
+        }],
+    }
+
+    result = compile_plan_candidate(candidate, context)
+
+    assert not result.accepted
+    assert any("necessary_context[0].ranges" in issue.path for issue in result.issues)
 
 
 def test_compiled_page_evidence_keeps_only_body_and_shared_prerequisite():

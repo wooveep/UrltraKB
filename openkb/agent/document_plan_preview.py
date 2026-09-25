@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from openkb.agent.document_plan import DocumentPlan, to_dict
@@ -11,8 +12,25 @@ from openkb.locks import atomic_write_text
 from openkb.sources import valid_id
 
 
+def planning_execution_metrics(value: Any) -> dict[str, int | float]:
+    """Normalize optional persisted counters before arithmetic or rendering."""
+    row = value if isinstance(value, dict) else {}
+    requests = row.get("planning_requests")
+    elapsed = row.get("elapsed_seconds")
+    return {
+        "planning_requests": requests if type(requests) is int and requests >= 0 else 0,
+        "elapsed_seconds": (
+            float(elapsed)
+            if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+            and math.isfinite(elapsed) and elapsed >= 0
+            else 0.0
+        ),
+    }
+
+
 def render_plan_preview(plan: DocumentPlan) -> str:
     """Render the accepted overview and page routes without publishing wiki content."""
+    execution = planning_execution_metrics(plan.metadata.get("planning_execution"))
     lines = [
         "# 文档规划预览",
         "",
@@ -20,9 +38,14 @@ def render_plan_preview(plan: DocumentPlan) -> str:
         f"解析：`{plan.metadata.get('parse_id', '')}`",
         f"规划状态：{plan.overview.status}",
         "",
+        "## 本轮处理",
+        "",
+        f"规划请求：{execution.get('planning_requests', 0)} 次；"
+        f"累计耗时：{execution.get('elapsed_seconds', 0.0):.1f} 秒",
+        "",
         "## 概要",
         "",
-        plan.overview.text or "（无可读原文）",
+        plan.overview.text or "（未形成概览）",
         "",
     ]
     if plan.overview.limitations:
@@ -102,8 +125,26 @@ def render_plan_preview(plan: DocumentPlan) -> str:
         lines.append("")
     if plan.planning_omissions:
         lines.extend(["## 本轮处理遗漏", ""])
+        receipts = plan.metadata.get("accepted_window_receipts", [])
+        receipts = receipts if isinstance(receipts, list) else []
+        reference_attempts = {
+            receipt["window"]: receipt["reference_check"].get("attempts", 0)
+            for receipt in receipts
+            if isinstance(receipt, dict) and isinstance(receipt.get("window"), str)
+            and isinstance(receipt.get("reference_check"), dict)
+        }
         for omission in plan.planning_omissions:
-            lines.append(f"- {omission.key}：{omission.reason}；尝试 {omission.attempts} 次")
+            reference_text = (
+                f"；参考核对尝试 {reference_attempts[omission.target_id]} 次"
+                if reference_attempts.get(omission.target_id) else ""
+            )
+            lines.append(
+                f"- {omission.key}：{omission.reason}；部件 {omission.component}；"
+                f"规划尝试 {omission.attempts} 次{reference_text}；受影响页面 "
+                f"{', '.join(omission.affected_pages) or '无已知页面'}；"
+                f"原文范围 `{json.dumps(omission.ranges, ensure_ascii=False)}`"
+            )
+        lines.extend(["", "补处理：对该来源执行“继续”，只重试仍开放的遗漏。"])
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -127,6 +168,7 @@ def save_empty_planning_report(
     omissions: list[Any],
     *,
     parsed: Any,
+    execution: dict[str, Any],
 ) -> str:
     """Persist an inspectable zero-result outcome without inventing a formal plan."""
     name = f"{valid_id(recovery_key)}.json"
@@ -142,6 +184,8 @@ def save_empty_planning_report(
         "overview": None,
         "planning_omissions": [item.to_dict() for item in omissions],
         "planning_coverage": None,
+        "planning_execution": planning_execution_metrics(execution),
+        "retry_entry": "continue_source (only active omissions)",
     }
     from openkb.planning_coverage import planning_coverage
 

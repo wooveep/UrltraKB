@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import asdict
 from typing import Any
 
+from openkb.agent.document_plan import range_intervals
 from openkb.agent.document_plan_issues import reject
 from openkb.agent.document_window_schedule import no_readable_body, valid_window_schedule
 from openkb.config import compilation_model_options
@@ -187,7 +188,7 @@ def read_target_evidence(
     source: Any,
     parsed: Any,
     descriptor: dict[str, Any],
-    target_ranges: list[dict[str, int]] | None,
+    target_ranges: list[Any] | None,
 ) -> dict[str, Any]:
     """Read one frozen planning target, including exact sub-block targets."""
 
@@ -200,8 +201,10 @@ def read_target_evidence(
 
     reader = ParseStore(kb_dir).reader(source, parsed)
     blocks = []
-    for item in target_ranges:
-        index, start, end = item["block_index"], item["start_char"], item["end_char"]
+    for index, start, end in (
+        span for item in target_ranges
+        for span in range_intervals(item, parsed, "planning target evidence")
+    ):
         block = parsed.blocks[index]
         if "attachment" in getattr(block, "location", {}):
             continue
@@ -243,16 +246,19 @@ def read_target_evidence(
 
 
 def fallback_target_evidence(
-    source: Any, parsed: Any, target_ranges: list[dict[str, int]]
+    source: Any, parsed: Any, target_ranges: list[Any]
 ) -> dict[str, Any]:
     """Fixture counterpart to exact target reads for mocked planner tests."""
 
     blocks = []
-    for item in target_ranges:
-        block = parsed.blocks[item["block_index"]]
+    for index, start, end in (
+        span for item in target_ranges
+        for span in range_intervals(item, parsed, "mock planning target evidence")
+    ):
+        block = parsed.blocks[index]
         if "attachment" in getattr(block, "location", {}):
             continue
-        text = getattr(block, "text", "")[item["start_char"] : item["end_char"]]
+        text = getattr(block, "text", "")[start:end]
         blocks.append(
             {
                 "id": block.id,
@@ -261,7 +267,7 @@ def fallback_target_evidence(
                 "text": text,
                 "location": getattr(block, "location", {}),
                 "assets": list(getattr(block, "assets", [])),
-                "reference": {"start": item["start_char"], "end": item["end_char"]},
+                "reference": {"start": start, "end": end},
             }
         )
     return {

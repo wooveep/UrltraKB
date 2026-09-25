@@ -240,11 +240,18 @@ def compile_external_references(
             if page is None:
                 continue
             visible: dict[int, list[tuple[int, int]]] = {}
-            for value in [
-                *page["subject_ranges"],
-                *(r for row in page["necessary_context"] for r in row["ranges"]),
-            ]:
-                for block, start, end in range_intervals(value, block_chars=chars):
+            ranges = page.get("subject_ranges")
+            selected = list(ranges) if isinstance(ranges, list) else []
+            for row in page.get("necessary_context") or []:
+                values = row.get("ranges") if isinstance(row, dict) else None
+                if isinstance(values, list):
+                    selected.extend(values)
+            for value in selected:
+                try:
+                    intervals = range_intervals(value, block_chars=chars)
+                except (KeyError, TypeError, ValueError, IndexError):
+                    continue  # The page validator already records malformed ranges.
+                for block, start, end in intervals:
                     visible.setdefault(block, []).append((start, end))
             visible = {block: merged_intervals(rows) for block, rows in visible.items()}
             if any(

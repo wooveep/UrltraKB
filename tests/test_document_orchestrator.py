@@ -1469,6 +1469,229 @@ def test_invalid_window_settles_and_a_later_valid_window_survives_resume(tmp_pat
     assert seen == [0, 3, 0, 0]
 
 
+def test_blocked_page_has_durable_partial_omission_and_resumes(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(1)
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    events = []
+
+    def blocked(_messages, **_kwargs):
+        return {
+            "overview": {"text": "One step has an unknown parameter.",
+                         "ranges": [[0, 1]], "limitations": []},
+            "page_changes": [{
+                "local_key": "step", "kind": "concept", "name": "concepts/step",
+                "title": "Step",
+                "purpose": "Describe the step", "subject_ranges": [[0, 1]],
+                "necessary_context": [],
+            }],
+            "source_only": [],
+            "unresolved": [{
+                "location": [[0, 1]], "problem_type": "missing_prerequisite",
+                "missing_target": "Unknown parameter", "affected_pages": ["step"],
+                "reason": "The required value is absent from the source.",
+                "blocking": True,
+            }],
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        result = plan_document(
+            tmp_path, workspace, source, parsed, None, settings, checkpoints,
+            plan_only=True, return_result=True, mock_caller=blocked, on_event=events.append,
+        )
+        assert result.outcome == "partial", events
+        plan = result.plan
+        assert plan is not None
+        assert plan.pages[0].state == "blocked"
+        assert plan.metadata["planning_coverage"]["blocked_pages"] == 1
+        assert plan.planning_omissions[0].reason == "document_plan_blocked_page"
+        assert plan.planning_omissions[0].ranges == [[0, 1]]
+        assert plan.metadata["accepted_window_receipts"][0]["omission_keys"] == [
+            plan.planning_omissions[0].key
+        ]
+        assert plan.metadata["accepted_window_receipts"][0]["status"] == "partial"
+        resumed = plan_document(
+            tmp_path, workspace, source, parsed, None, settings, checkpoints,
+            plan_only=True, return_result=True, resume=True,
+            mock_caller=lambda *_args, **_kwargs: pytest.fail("must use accepted ledger"),
+        )
+        assert resumed.outcome == "partial"
+        assert resumed.plan.planning_omissions == plan.planning_omissions
+
+
+def test_later_window_blocker_omits_only_current_target_and_resumes(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(6)
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    navigation = {
+        "id": "nav_block_later", "source_id": source.source_id,
+        "version_id": source.id, "parse_id": parsed.id,
+        "windows": _make_mock_windows(parsed), "nodes": [],
+    }
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+
+    def respond(messages, **_kwargs):
+        start = json.loads(messages[-1]["content"])["target"]["target_start"]
+        if start == 0:
+            return {
+                "overview": {"text": "First half.", "ranges": [[0, 3]], "limitations": []},
+                "page_changes": [{
+                    "local_key": "first", "kind": "concept", "name": "concepts/first",
+                    "title": "First", "purpose": "First half", "subject_ranges": [[0, 3]],
+                    "necessary_context": [],
+                }],
+                "source_only": [], "unresolved": [], "resolutions": [],
+            }
+        return {
+            "overview": {"text": "Both halves.", "ranges": [[0, 6]], "limitations": []},
+            "page_changes": [],
+            "source_only": [{"ranges": [[4, 6]], "reason": "Additional notes."}],
+            "unresolved": [{
+                "location": [[3, 4]], "problem_type": "missing_prerequisite",
+                "missing_target": "Unavailable value", "affected_pages": ["p1"],
+                "reason": "The required value is absent.", "blocking": True,
+            }],
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        result = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            plan_only=True, return_result=True, mock_caller=respond,
+        )
+        assert result.outcome == "partial"
+        assert result.plan.pages[0].state == "blocked"
+        assert result.plan.planning_omissions[0].ranges == [[3, 4]]
+        resumed = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            plan_only=True, return_result=True, resume=True,
+            mock_caller=lambda *_args, **_kwargs: pytest.fail("must use accepted ledger"),
+        )
+        assert resumed.outcome == "partial"
+        assert resumed.plan.planning_omissions == result.plan.planning_omissions
+
+
+@pytest.mark.parametrize("new_blocker", [False, True])
+def test_blocked_retry_keeps_omission_until_page_is_ready(tmp_path, new_blocker):
+    source, parsed = _DummySource(), _DummyParsed(1)
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+
+    def blocked(_messages, **_kwargs):
+        return {
+            "overview": {"text": "A prerequisite is missing.",
+                         "ranges": [[0, 1]], "limitations": []},
+            "page_changes": [{
+                "local_key": "step", "kind": "concept", "name": "concepts/step",
+                "title": "Step", "purpose": "Explain step", "subject_ranges": [[0, 1]],
+                "necessary_context": [],
+            }],
+            "source_only": [],
+            "unresolved": [{
+                "location": [[0, 1]], "problem_type": "missing_prerequisite",
+                "missing_target": "Absent input", "affected_pages": ["step"],
+                "reason": "The input is missing.", "blocking": True,
+            }],
+            "resolutions": [],
+        }
+
+    def still_blocked(_messages, **_kwargs):
+        return {
+            "overview": {"text": "No new evidence.",
+                         "ranges": [[0, 1]], "limitations": []},
+            "page_changes": [],
+            "source_only": [{"ranges": [[0, 1]], "reason": "Retain source."}],
+            "unresolved": ([{
+                "location": [[0, 1]], "problem_type": "missing_prerequisite",
+                "missing_target": "Still absent", "affected_pages": ["p1"],
+                "reason": "Another required input is missing.", "blocking": True,
+            }] if new_blocker else []),
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        first = plan_document(
+            tmp_path, workspace, source, parsed, None, settings, checkpoints,
+            plan_only=True, return_result=True, mock_caller=blocked,
+        )
+        assert first.outcome == "partial"
+        assert first.plan.pages[0].state == "blocked"
+        assert first.plan.planning_omissions[0].reason == "document_plan_blocked_page"
+        retried = plan_document(
+            tmp_path, workspace, source, parsed, None, settings, checkpoints,
+            plan_only=True, return_result=True, resume=True, retry_skipped=True,
+            mock_caller=still_blocked,
+        )
+        assert retried.outcome == "partial", (
+            retried.plan.overview.status if retried.plan else None,
+            [page.state for page in retried.plan.pages] if retried.plan else None,
+            [item.reason for item in retried.plan.planning_omissions] if retried.plan else None,
+        )
+        assert retried.plan.pages[0].state == "blocked"
+        assert retried.plan.planning_omissions == first.plan.planning_omissions
+
+
+def test_prior_blocker_omits_new_ranges_on_carried_page(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(6)
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    navigation = {
+        "id": "nav_prior_block", "source_id": source.source_id,
+        "version_id": source.id, "parse_id": parsed.id,
+        "windows": _make_mock_windows(parsed), "nodes": [],
+    }
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+
+    def respond(messages, **_kwargs):
+        start = json.loads(messages[-1]["content"])["target"]["target_start"]
+        if start == 0:
+            return {
+                "overview": {"text": "First half.", "ranges": [[0, 3]], "limitations": []},
+                "page_changes": [{
+                    "local_key": "first", "kind": "concept", "name": "concepts/first",
+                    "title": "First", "purpose": "First half", "subject_ranges": [[0, 1]],
+                    "necessary_context": [],
+                }],
+                "source_only": [{"ranges": [[1, 3]], "reason": "Notes."}],
+                "unresolved": [{
+                    "location": [[0, 1]], "problem_type": "missing_prerequisite",
+                    "missing_target": "Absent input", "affected_pages": ["first"],
+                    "reason": "Input missing.", "blocking": True,
+                }],
+                "resolutions": [],
+            }
+        return {
+            "overview": {"text": "Both halves.", "ranges": [[0, 6]], "limitations": []},
+            "page_changes": [{
+                "local_key": "extension", "target_key": "p1", "kind": "concept",
+                "name": "concepts/first", "title": "First", "purpose": "First half",
+                "subject_ranges": [[3, 4]], "necessary_context": [],
+            }],
+            "source_only": [{"ranges": [[4, 6]], "reason": "More notes."}],
+            "unresolved": [], "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        result = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            plan_only=True, return_result=True, mock_caller=respond,
+        )
+        assert result.outcome == "partial"
+        assert result.plan.pages[0].state == "blocked"
+        assert {str(item.ranges) for item in result.plan.planning_omissions} == {
+            str([[0, 1]]), str([[3, 4]]),
+        }
+        resumed = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            plan_only=True, return_result=True, resume=True,
+            mock_caller=lambda *_args, **_kwargs: pytest.fail("must use accepted ledger"),
+        )
+        assert resumed.outcome == "partial"
+
+
 def test_navigation_capacity_failure_settles_only_its_target(tmp_path, monkeypatch):
     from openkb.agent import document_planning_support, document_windowing
 
@@ -1649,6 +1872,11 @@ def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
 
         assert call_count == 2
         assert plan.overview.status == "complete"
+        assert plan.planning_omissions == []
+        assert len(plan.metadata["accepted_window_receipts"][0]["omission_keys"]) == 1
+        assert [row["status"] for row in plan.metadata["accepted_window_receipts"]] == [
+            "partial", "accepted"
+        ]
         assert "Complete overview" in plan.overview.text
         assert len(plan.pages) == 2
 
@@ -1671,6 +1899,12 @@ def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
         assert p2.necessary_context[0]["basis_quote"] == "Content of block 4. "
         assert p2.necessary_context[0]["rationale"] == "Block 4 supplies the reference."
         assert p2.state == "ready"
+        resumed = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            resume=True,
+            mock_caller=lambda *_args, **_kwargs: pytest.fail("resolved plan must be reused"),
+        )
+        assert resumed is not None and resumed.planning_omissions == []
 
         # Check resolution
         assert len(plan.resolutions) == 1

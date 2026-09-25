@@ -36,7 +36,6 @@ def planning_coverage(
             _add(pages, page.subject_ranges, parsed, "executable page subject")
             for context in page.necessary_context:
                 _add(pages, context.get("ranges", []), parsed, "executable page context")
-                _add(pages, context.get("basis_ranges", []), parsed, "page context basis")
         for item in plan.source_only:
             _add(source_only, item.ranges, parsed, "source-only plan route")
     total = page_chars = source_chars = 0

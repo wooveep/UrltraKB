@@ -2,6 +2,7 @@
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from openkb.agent.document_reference_check import (
     apply_reference_decisions,
     detect_references,
     target_pairs,
+    valid_saved_decisions,
     validate_reference_decisions,
 )
 from openkb.agent.document_reference_evidence import (
@@ -31,6 +33,7 @@ from openkb.processing import DEFAULT_PROCESSING, ProcessingIncomplete, processi
 from openkb.sources import content_id
 from tests.test_adaptive_processing import response
 from tests.test_document_orchestrator import _DummyParsed, _DummySource
+from tests.test_document_plan_compiler import _context
 
 SETTINGS = {
     "model": "mock-model",
@@ -43,6 +46,30 @@ SETTINGS = {
         "max_attempts": 2,
     },
 }
+
+
+@pytest.mark.parametrize("saved", [
+    {"attempt": "x", "valid": []},
+    {"attempt": 0, "status": [], "valid": []},
+    {"attempt": 0, "valid": None},
+    {"attempt": 0, "valid": [{"reference_key": "r"}]},
+    {"attempt": 0, "status": "validated", "valid": [], "candidate": {}},
+    {"attempt": 0, "status": "response_received", "valid": [],
+     "response_representation": "wire", "response": None},
+    {"attempt": 0, "status": "response_received", "valid": [],
+     "response_representation": "wire", "response": []},
+    {"attempt": 0, "status": "response_received", "valid": [],
+     "response_representation": "wire", "response": "{}", "response_output_tokens": "x"},
+])
+def test_recovered_reference_state_rejects_malformed_rows(saved):
+    context = _context(["See manual"])
+    resolver = SelectionResolver.from_context(context)
+    with pytest.raises(ValueError):
+        valid_saved_decisions(
+            saved, pairs=[], resolver=resolver, candidates=[],
+            candidate_hash="candidate", check_input_hash="input",
+            recovery_key="recovery", max_attempts=2,
+        )
 
 
 def _navigation(source, parsed):
@@ -88,6 +115,103 @@ def _plan(payload, *, external=False, informational=False):
         "unresolved": [],
         "resolutions": [],
     }
+
+
+def test_checked_references_clear_only_matching_cross_reference_blockers():
+    from tests.test_document_plan_compiler import _context
+
+    context = replace(
+        _context(["凭据准备", "先执行“凭据准备”。", "遵循《外部手册》。"]),
+        selection_protocol="document-plan-v5",
+    )
+    ids = [block.id for block in context.parsed.blocks]
+
+    def select(index):
+        return {"from_block": ids[index], "through_block": ids[index]}
+    candidate = {
+        "page_changes": [{"local_key": "sync", "target_key": "p:sync",
+                          "necessary_context": [], "limitations": []}],
+        "unresolved": [
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "凭据准备", "location": [
+                 {"block": ids[1], "start_char": 3, "end_char": 9}],
+             "affected_pages": ["p:sync"]},
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "《外部手册》", "location": [
+                 {"block": ids[2], "start_char": 2, "end_char": 8}],
+             "affected_pages": ["sync"]},
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "另一项缺失条件", "location": [select(1)],
+             "affected_pages": ["sync"]},
+        ],
+        "external_references": [],
+    }
+    internal = ReferenceCandidate(
+        "internal", ({"block_index": 1, "start_char": 3, "end_char": 9},),
+        "凭据准备", (), "supplied", ("sync",),
+    )
+    external = ReferenceCandidate(
+        "external", ({"block_index": 2, "start_char": 2, "end_char": 8},),
+        "《外部手册》", (), "external_not_supplied", ("sync",),
+    )
+    decisions = {
+        ("internal", "sync"): {
+            "decision": "required_internal", "reason": "先准备",
+            "target_ranges": [select(0)],
+        },
+        ("external", "sync"): {
+            "decision": "required_unavailable", "reason": "仍须遵循",
+        },
+    }
+
+    updated = apply_reference_decisions(
+        candidate, decisions, [internal, external], resolver=SelectionResolver.from_context(context)
+    )
+
+    assert [row["missing_target"] for row in updated["unresolved"]] == [
+        "《外部手册》", "另一项缺失条件"
+    ]
+    assert len(updated["page_changes"][0]["necessary_context"]) == 1
+    assert len(updated["external_references"]) == 1
+
+
+def test_reference_decision_keeps_broader_or_distinct_blockers():
+    from tests.test_document_plan_compiler import _context
+
+    context = replace(
+        _context(["遵循《外部操作手册》中的关键参数。"]),
+        selection_protocol="document-plan-v5",
+    )
+    identity = context.parsed.blocks[0].id
+    candidate = {
+        "page_changes": [{"local_key": "page", "target_key": "p:page",
+                          "necessary_context": [], "limitations": []}],
+        "unresolved": [
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "外部操作手册中的关键参数",
+             "location": [{"from_block": identity, "through_block": identity}],
+             "affected_pages": ["page"]},
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "外部操作手册",
+             "location": [{"from_block": identity, "through_block": identity}],
+             "affected_pages": ["page"]},
+            {"problem_type": "unresolved_cross_reference",
+             "missing_target": "外部操作手册中的关键参数",
+             "location": [{"block": identity, "start_char": 2, "end_char": 10}],
+             "affected_pages": ["page"]},
+        ],
+        "external_references": [],
+    }
+    reference = ReferenceCandidate(
+        "manual", ({"block_index": 0, "start_char": 2, "end_char": 10},),
+        "外部操作手册", (), "external_not_supplied", ("page",),
+    )
+    updated = apply_reference_decisions(
+        candidate,
+        {("manual", "page"): {"decision": "informational", "reason": "仅引用"}},
+        [reference], resolver=SelectionResolver.from_context(context),
+    )
+    assert updated["unresolved"] == candidate["unresolved"]
 
 
 @pytest.mark.parametrize(
@@ -306,7 +430,7 @@ def test_reference_gate_decisions_through_real_dispatch(tmp_path, monkeypatch, d
         assert resumed.pages[0].name == plan.pages[0].name
 
 
-def test_two_empty_reference_answers_stop_without_accepting_window(tmp_path, monkeypatch):
+def test_two_empty_reference_answers_retain_independent_page(tmp_path, monkeypatch):
     source, parsed = _DummySource(), _DummyParsed(4)
     texts = ["同步前准备", "核对源端校验码。", "批量同步", "先执行“同步前准备”，再同步。"]
     for block, body in zip(parsed.blocks, texts, strict=True):
@@ -334,37 +458,73 @@ def test_two_empty_reference_answers_stop_without_accepting_window(tmp_path, mon
     monkeypatch.setattr(litellm, "completion", completion)
     with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
         with processing_scope(SETTINGS):
-            assert (
-                plan_document(
-                    tmp_path,
-                    workspace,
-                    source,
-                    parsed,
-                    _navigation(source, parsed),
-                    SETTINGS,
-                    checkpoints,
-                    plan_only=True,
-                )
-                is None
+            plan = plan_document(
+                tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                SETTINGS, checkpoints, plan_only=True,
             )
         with processing_scope(SETTINGS):
-            assert (
-                plan_document(
-                    tmp_path,
-                    workspace,
-                    source,
-                    parsed,
-                    _navigation(source, parsed),
-                    SETTINGS,
-                    checkpoints,
-                    resume=True,
-                    plan_only=True,
-                )
-                is None
+            resumed = plan_document(
+                tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                SETTINGS, checkpoints, resume=True, plan_only=True,
             )
     assert len(calls) == 3
     assert calls[1] == calls[2]
-    assert not list(workspace.glob("**/*plan-preview*"))
+    assert [page.title for page in plan.pages] == ["准备"]
+    assert plan.planning_omissions[0].component == "page"
+    assert [page.title for page in resumed.pages] == ["准备"]
+
+
+@pytest.mark.parametrize("outcome", ["empty", "length"])
+def test_reference_failure_with_no_independent_page_settles_window(
+    tmp_path, monkeypatch, outcome
+):
+    source, parsed = _DummySource(), _DummyParsed(4)
+    texts = [
+        "同步前准备：先执行“批量同步”。",
+        "核对源端校验码。",
+        "批量同步",
+        "先执行“同步前准备”，再同步。",
+    ]
+    for block, body in zip(parsed.blocks, texts, strict=True):
+        block.text, block.chars = body, len(body)
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    monkeypatch.setattr(litellm, "token_counter", lambda **_: 100)
+    monkeypatch.setattr(
+        "openkb.agent.document_planning_support.read_target_evidence",
+        lambda _kb, _source, _parsed, descriptor, _ranges: fallback_read_evidence(
+            source, parsed, descriptor["start"], descriptor["end"]
+        ),
+    )
+    calls = []
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        calls.append(payload)
+        if payload["response_mode"] == "plan":
+            return response(_plan(payload), tokens=8)
+        assert len(payload["requested_pairs"]) == 2
+        answer = response({}, tokens=8)
+        if outcome == "empty":
+            answer.choices[0].message.content = None
+        else:
+            answer.choices[0].finish_reason = "length"
+        return answer
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
+        with processing_scope(SETTINGS):
+            assert plan_document(
+                tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                SETTINGS, checkpoints, plan_only=True,
+            ) is None
+        before = len(calls)
+        with processing_scope(SETTINGS):
+            assert plan_document(
+                tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                SETTINGS, checkpoints, resume=True, plan_only=True,
+            ) is None
+    assert len(calls) == before
 
 
 def _validator():
@@ -948,8 +1108,9 @@ def test_future_window_target_is_read_as_context_without_advancing_its_body(tmp_
 
 
 @pytest.mark.parametrize("empty_mid", [False, True])
+@pytest.mark.parametrize("outcome", ["valid", "bad", "empty", "length", "extra"])
 def test_mixed_decisions_repair_only_invalid_pair_before_atomic_commit(
-    tmp_path, monkeypatch, empty_mid
+    tmp_path, monkeypatch, empty_mid, outcome
 ):
     source, parsed = _DummySource(), _DummyParsed(4)
     texts = [
@@ -1013,7 +1174,17 @@ def test_mixed_decisions_repair_only_invalid_pair_before_atomic_commit(
         else:
             assert len(pairs) == 1
             assert len(payload["accepted_decisions"]) == 1
-            target_id = payload["evidence"]["blocks"][1]["id"]
+            if outcome in {"empty", "length"}:
+                blank = response({}, tokens=8)
+                if outcome == "empty":
+                    blank.choices[0].message.content = None
+                else:
+                    blank.choices[0].finish_reason = "length"
+                return blank
+            target_id = (
+                payload["evidence"]["blocks"][1]["id"]
+                if outcome in {"valid", "extra"} else "unknown"
+            )
             answers = [
                 {
                     **pairs[0],
@@ -1022,6 +1193,11 @@ def test_mixed_decisions_repair_only_invalid_pair_before_atomic_commit(
                     "target_ranges": [{"from_block": target_id, "through_block": target_id}],
                 }
             ]
+            if outcome == "extra":
+                answers.append({
+                    "reference_key": "unknown", "page_ref": "sync",
+                    "decision": "required_unavailable", "reason": "Not requested",
+                })
         return response(
             {
                 "check_protocol": "document-reference-check-v3",
@@ -1044,16 +1220,105 @@ def test_mixed_decisions_repair_only_invalid_pair_before_atomic_commit(
                 checkpoints,
                 plan_only=True,
             )
-    assert len(calls) == (4 if empty_mid else 3)
+    assert len(calls) == (4 if empty_mid or outcome == "empty" else 3)
     if empty_mid:
         assert calls[2] == calls[3]
-    sync = next(page for page in plan.pages if page.title == "同步")
-    assert len(sync.necessary_context) == 1
-    assert not plan.unresolved
+    if outcome in {"valid", "extra"}:
+        sync = next(page for page in plan.pages if page.title == "同步")
+        assert len(sync.necessary_context) == 1
+        assert not plan.unresolved
+    else:
+        assert [page.title for page in plan.pages] == ["准备"]
+        assert len(plan.planning_omissions) == 1
+        assert plan.planning_omissions[0].component == "page"
+        assert (
+            plan.metadata["accepted_window_receipts"][0]["reference_check"]["status"]
+            == "partial"
+        )
+        before = len(calls)
+        with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+            with processing_scope(settings):
+                resumed = plan_document(
+                    tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                    settings, checkpoints, plan_only=True, resume=True,
+                )
+        assert len(calls) == before
+        assert [page.title for page in resumed.pages] == ["准备"]
 
 
-def test_two_reference_batches_share_baseline_and_commit_once(tmp_path, monkeypatch):
+def test_mock_planning_caller_can_commit_partial_reference_result(tmp_path, monkeypatch):
+    from openkb.agent.document_plan_salvage import SalvagedPlan
+    from openkb.agent.document_reference_review import ReferenceReviewResult
+
+    source, parsed = _DummySource(), _DummyParsed(4)
+    texts = [
+        "同步前准备", "核对源端校验码。", "批量同步",
+        "先执行“同步前准备”，再参见《背景说明》了解实现原理。",
+    ]
+    for block, body in zip(parsed.blocks, texts, strict=True):
+        block.text, block.chars = body, len(body)
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    monkeypatch.setattr(litellm, "token_counter", lambda **_: 100)
+    monkeypatch.setattr(
+        "openkb.agent.document_planning_support.read_target_evidence",
+        lambda _kb, _source, _parsed, descriptor, _ranges: fallback_read_evidence(
+            source, parsed, descriptor["start"], descriptor["end"]
+        ),
+    )
+
+    def caller(messages, *, settings):
+        payload = json.loads(messages[-1]["content"])
+        assert payload["response_mode"] == "plan"
+        return {
+            "overview": {"text": "同步准备与执行。", "ranges": [[0, 4]], "limitations": []},
+            "page_changes": [
+                {"local_key": "prep", "target_key": "", "kind": "concept",
+                 "name": "concepts/prep", "title": "准备",
+                 "purpose": "准备同步", "subject_ranges": [[0, 2]],
+                 "necessary_context": []},
+                {"local_key": "sync", "target_key": "", "kind": "concept",
+                 "name": "concepts/sync", "title": "同步",
+                 "purpose": "批量同步", "subject_ranges": [[2, 4]],
+                 "necessary_context": []},
+            ],
+            "source_only": [], "unresolved": [], "resolutions": [],
+        }
+
+    def partial_review(candidate, delta, *_args, **_kwargs):
+        candidate, delta = deepcopy(candidate), deepcopy(delta)
+        candidate["page_changes"] = candidate["page_changes"][:1]
+        delta["page_changes"] = delta["page_changes"][:1]
+        partial = SalvagedPlan(candidate, delta, [[2, 4]], ["sync"], [], "page")
+        return ReferenceReviewResult(
+            "partial", candidate, delta,
+            {"protocol": PROTOCOL, "candidate_count": 2, "status": "partial"}, partial,
+        )
+
+    monkeypatch.setattr(
+        "openkb.agent.document_orchestrator.review_candidate_references", partial_review
+    )
+
+    settings = {**SETTINGS, "processing": {**SETTINGS["processing"], "max_attempts": 2}}
+    events = []
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        with processing_scope(settings):
+            plan = plan_document(
+                tmp_path, workspace, source, parsed, _navigation(source, parsed),
+                settings, checkpoints, plan_only=True, mock_caller=caller,
+                on_event=events.append,
+            )
+    assert plan is not None, events
+    assert [page.title for page in plan.pages] == ["准备"]
+    assert plan.planning_omissions[0].component == "page"
+
+
+@pytest.mark.parametrize("first_fails", [False, True])
+def test_two_reference_batches_share_baseline_and_commit_once(
+    tmp_path, monkeypatch, first_fails
+):
     from openkb.agent.document_planning_ledger import DocumentPlanningLedger
+    from openkb.agent.document_reference_partial import retain_valid_reference_pages
 
     source, parsed = _DummySource(), _DummyParsed(4)
     texts = ["同步前准备", "核对校验码。", "批量同步", "先执行“同步前准备”，参见《背景说明》。"]
@@ -1080,6 +1345,16 @@ def test_two_reference_batches_share_baseline_and_commit_once(tmp_path, monkeypa
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(DocumentPlanningLedger, "apply_accepted", apply_once)
+    if first_fails:
+        def reject_unusable_child(*args, pairs, **kwargs):
+            if len(pairs) == 1:
+                return None
+            return retain_valid_reference_pages(*args, pairs=pairs, **kwargs)
+
+        monkeypatch.setattr(
+            "openkb.agent.document_reference_review.retain_valid_reference_pages",
+            reject_unusable_child,
+        )
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
@@ -1087,6 +1362,10 @@ def test_two_reference_batches_share_baseline_and_commit_once(tmp_path, monkeypa
             return response(_plan(payload), tokens=10)
         batches.append(payload)
         assert len(payload["requested_pairs"]) == 1
+        if first_fails and len(batches) <= 2:
+            blank = response({}, tokens=8)
+            blank.choices[0].message.content = None
+            return blank
         pair = payload["requested_pairs"][0]
         row = next(
             row for row in payload["references"] if row["reference_key"] == pair["reference_key"]
@@ -1127,13 +1406,17 @@ def test_two_reference_batches_share_baseline_and_commit_once(tmp_path, monkeypa
                 checkpoints,
                 plan_only=True,
             )
-    assert len(batches) == 2
-    assert batches[0]["requested_pairs"] != batches[1]["requested_pairs"]
+    assert len(batches) == (3 if first_fails else 2)
+    assert batches[0]["requested_pairs"] != batches[-1]["requested_pairs"]
     assert all("candidate_hash" not in batch for batch in batches)
     assert all("check_input_hash" not in batch for batch in batches)
     assert len(accepted) == 1
-    assert accepted[0]["status"] == "accounted"
-    assert len(next(page for page in plan.pages if page.title == "同步").necessary_context) == 1
+    assert accepted[0]["status"] == ("partial" if first_fails else "accounted")
+    if first_fails:
+        assert [page.title for page in plan.pages] == ["准备"]
+        assert len(plan.planning_omissions) == 1
+    else:
+        assert len(next(page for page in plan.pages if page.title == "同步").necessary_context) == 1
 
 
 def test_execution_unknown_does_not_resend_reference_check(tmp_path, monkeypatch):

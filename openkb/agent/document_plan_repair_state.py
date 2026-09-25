@@ -23,6 +23,7 @@ from openkb.agent.document_plan_routing import (
     routing_request,
 )
 from openkb.agent.document_plan_selections import SelectionResolver
+from openkb.agent.document_planning_ledger_annotations import blocked_retry_page_keys
 from openkb.agent.document_protocol import PlanningProjectionRequired
 from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.agent.evidence_units import JSON_FORMAT
@@ -794,4 +795,5 @@ def planning_context(
         navigation_hints=json.loads(view.messages[-1]["content"])
         .get("navigation", {})
         .get("hints", []),
+        retry_page_keys=blocked_retry_page_keys(ledger, window),
     )

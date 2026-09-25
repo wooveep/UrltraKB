@@ -91,27 +91,28 @@ def recovery_valid(
             ):
                 return False
         elif receipt.get("omission_keys"):
-            if len(receipt["omission_keys"]) != 1:
+            if len(set(receipt["omission_keys"])) != len(receipt["omission_keys"]):
                 return False
-            row = ledger.db.execute(
-                "SELECT payload FROM planning_omissions WHERE key = ?",
-                (receipt["omission_keys"][0],),
-            ).fetchone()
-            if row is None:
-                return False
-            omission = PlanningOmission.from_dict(json.loads(row[0]))
             target = target_intervals(window, parsed)
-            if (
-                omission.target_id != receipt["window"]
-                or omission.attempts != receipt["attempt"] + 1
-                or not all(
-                    any(i == block and left <= start and end <= right
-                        for i, left, right in target)
-                    for value in omission.ranges
-                    for block, start, end in range_intervals(value, parsed, "partial omission")
-                )
-            ):
-                return False
+            for omission_key in receipt["omission_keys"]:
+                row = ledger.db.execute(
+                    "SELECT payload FROM planning_omissions WHERE key = ?",
+                    (omission_key,),
+                ).fetchone()
+                if row is None:
+                    return False
+                omission = PlanningOmission.from_dict(json.loads(row[0]))
+                if (
+                    omission.target_id != receipt["window"]
+                    or omission.attempts != receipt["attempt"] + 1
+                    or not all(
+                        any(i == block and left <= start and end <= right
+                            for i, left, right in target)
+                        for value in omission.ranges
+                        for block, start, end in range_intervals(value, parsed, "partial omission")
+                    )
+                ):
+                    return False
         receipts.append(receipt)
     if ledger._v2():
         omission_keys = {
@@ -131,6 +132,9 @@ def recovery_valid(
                 key not in omission_keys
                 or not 1 <= sequence <= completed
                 or windows[sequence - 1].get("retry_omission_key") != key
+                and not _automatic_blocker_resolution_valid(
+                    ledger, key, sequence, receipts
+                )
             ):
                 return False
     if not accepted_proofs_valid(ledger, receipts) or not salvage_proofs_valid(ledger, receipts):
@@ -139,3 +143,28 @@ def recovery_valid(
         if not terminal_coverage_valid(ledger, windows, parsed):
             return False
     return True
+
+
+def _automatic_blocker_resolution_valid(
+    ledger: Any, key: str, sequence: int, receipts: list[dict[str, Any]]
+) -> bool:
+    """Allow a later accepted window to resolve an earlier blocked page."""
+    origin = next(
+        (index for index, receipt in enumerate(receipts, 1)
+         if key in receipt.get("omission_keys", [])), None
+    )
+    row = ledger.db.execute(
+        "SELECT payload FROM planning_omissions WHERE key = ?", (key,)
+    ).fetchone()
+    if row is None or origin is None or sequence <= origin:
+        return False
+    omission = PlanningOmission.from_dict(json.loads(row[0]))
+    return (
+        omission.reason == "document_plan_blocked_page"
+        and receipts[sequence - 1]["status"] in {"accepted", "partial"}
+        and bool(omission.affected_pages)
+        and all(
+            (page := ledger._page(affected)) is not None and page.state == "ready"
+            for affected in omission.affected_pages
+        )
+    )

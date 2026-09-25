@@ -61,6 +61,19 @@ def test_zero_readable_denominator_has_no_percentage():
     assert coverage["effective_ratio"] is None
 
 
+def test_relationship_basis_alone_does_not_count_as_page_content():
+    page = _page("one", 0, 2)
+    page.necessary_context = [{
+        "ranges": [{"block_index": 0, "start_char": 2, "end_char": 4}],
+        "basis_ranges": [{"block_index": 0, "start_char": 4, "end_char": 8}],
+    }]
+    coverage = planning_coverage(DocumentPlan(pages=[page]), _parsed())
+    assert coverage["executable_page_chars"] == 4
+    assert coverage["missing_ranges"] == [
+        {"block_id": "d" * 64, "start": 4, "end": 10}
+    ]
+
+
 @pytest.mark.parametrize(
     "change",
     [
