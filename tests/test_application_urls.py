@@ -63,8 +63,8 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
 
     history = source_status(kb_dir, result.source_id)
     assert history["cumulative_usage"]["runs"] == 2
-    assert history["cumulative_usage"]["observable_attempts"] == 3
-    assert history["cumulative_usage"]["charged_tokens"] == 6
+    assert history["cumulative_usage"]["observable_attempts"] == 4
+    assert history["cumulative_usage"]["charged_tokens"] == 8
     assert history["result"]["usage"] == duplicate.usage
 
 

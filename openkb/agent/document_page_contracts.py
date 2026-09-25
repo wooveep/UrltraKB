@@ -47,6 +47,9 @@ def _page_input(page: PagePlan) -> dict[str, Any]:
         "purpose": page.purpose,
         "target": page.target,
         "subject_ranges": page.subject_ranges,
+        "context_ranges": getattr(page, "context_ranges", []),
+        "planning_notes": getattr(page, "planning_notes", []),
+        "scope_resolution": getattr(page, "scope_resolution", "section"),
         "necessary_context": source_bound_contexts(page.necessary_context),
         "limitations": [row.to_dict() for row in page.limitations],
     }

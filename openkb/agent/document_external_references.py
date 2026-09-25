@@ -49,7 +49,7 @@ def iter_external_references(kb_dir: Path, plan_ref: dict[str, str]) -> Iterator
     metadata = plan.metadata
     identity = record.get("input")
     if (
-        metadata.get("protocol") != "document-plan-v2"
+        metadata.get("protocol") not in {"document-plan-v2", "document-plan-v3"}
         or metadata.get("recovery_key") != key
         or not isinstance(identity, dict)
         or (identity.get("source"), identity.get("version"), identity.get("parse"))
@@ -60,9 +60,14 @@ def iter_external_references(kb_dir: Path, plan_ref: dict[str, str]) -> Iterator
         )
     ):
         raise ValueError("External reference plan identity mismatch")
-    from openkb.agent.document_plan_proof_reader import verify_accepted_plan
+    if metadata["protocol"] == "document-plan-v2":
+        from openkb.agent.document_plan_proof_reader import verify_accepted_plan
 
-    verify_accepted_plan(kb_dir, plan_ref, record)
+        verify_accepted_plan(kb_dir, plan_ref, record)
+    else:
+        from openkb.agent.document_plan_proof_reader import verify_markdown_reference_proof
+
+        verify_markdown_reference_proof(kb_dir, plan_ref, record)
     parsed = ParseStore(kb_dir).load(metadata["parse_id"])
     for reference in plan.external_references:
         pieces = []

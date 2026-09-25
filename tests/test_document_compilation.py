@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import yaml
 
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
-from openkb.application.source_artifacts import compilation_artifacts
 
 
 def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, model_service):
@@ -21,11 +21,12 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     payloads = [json.loads(request["messages"][-1]["content"]) for request in model_service]
     assert [payload["stage"] for payload in payloads] == [
         "planning",
+        "planning",
         "generation",
         "verification",
     ]
-    generation = payloads[1]
-    assert generation["page"]["name"].startswith("concepts/notes-")
+    generation = payloads[2]
+    assert generation["page"]["name"].startswith("concepts/notes")
     assert generation["occurrences"]
     assert "facts" not in generation
     plan_path = next(
@@ -35,33 +36,27 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     assert page["quality"] == "published"
     assert page["review_receipt"]["verdict"] == "supported"
     plan = json.loads(plan_path.read_text())["value"]
-    receipt = plan["metadata"]["accepted_window_receipts"][0]
-    assert receipt["checkpoint"] and len(receipt["result"]) == 64
-    assert all(len(receipt[key]) == 64 for key in ("request", "predecessor", "delta"))
+    assert plan["metadata"]["protocol"] == "document-plan-v3"
+    assert plan["metadata"]["planning_execution"]["planning_requests"] == 2
+    assert plan["metadata"]["overview_ref"]
+    assert plan["metadata"]["plan_report"]
     measurement = result.usage["measurement"]
     assert measurement["schema"] == 4
-    planning = measurement["document_planning"]
-    assert [row["event"] for row in planning] == ["accepted"]
-    observation = planning[0]
-    assert observation["target_ranges"] and observation["result"] == receipt["result"]
-    assert observation["frozen_prefix_blocks"] > 0 and len(observation["frozen_prefix_hash"]) == 64
-    assert observation["candidate_count"] == 1
-    request = next(row for row in measurement["requests"] if row["id"] == observation["request_id"])
-    assert observation["input_reservation"] == request["input_reservation"]
-    assert observation["actual_input"] == request["input_tokens"] == 100
-    assert observation["actual_output"] == request["output_tokens"] == 30
+    assert [row["stage"] for row in measurement["requests"]] == [
+        "planning", "planning", "generation", "verification"
+    ]
     summary = measurement["summary"]
     assert summary["request_p50_seconds"] is not None
     assert summary["request_p95_seconds"] is not None
-    assert summary["input_tokens_total"] == 300
-    assert summary["output_tokens_total"] == 90
+    assert summary["input_tokens_total"] == 400
+    assert summary["output_tokens_total"] == 120
     assert summary["peak_rss_bytes"] is None or summary["peak_rss_bytes"] > 0
     assert summary["peak_inflight_tokens"] > 0
     document = summary["document"]
     assert document["evidence_groups"] == 1
-    assert document["planning_calls"] == 1
+    assert document["planning_calls"] == 2
     assert document["planned_pages"] == 1
-    assert document["http_attempts"] == len(measurement["requests"]) == 3
+    assert document["http_attempts"] == len(measurement["requests"]) == 4
     assert document["first_inspectable_seconds"] is not None
     assert 0 <= document["first_inspectable_seconds"] <= document["wall_seconds"]
     assert len(document["group_usage"]) == 1
@@ -83,32 +78,14 @@ def test_import_keeps_character_range_coverage_exact(kb_dir, tmp_path, model_ser
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            return {
-                "overview": {
-                    "text": "A partial source plan.",
-                    "ranges": [[0, 1]],
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": "p",
-                        "target_key": "",
-                        "kind": "concept",
-                        "title": "First half",
-                        "purpose": "The first selected excerpt",
-                        "subject_ranges": [{"block_index": 0, "start_char": 0, "end_char": 5}],
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [
-                    {
-                        "ranges": [{"block_index": 0, "start_char": 5, "end_char": 10}],
-                        "reason": "The trailing literal remains with the source entry.",
-                    }
-                ],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            if payload["subtask"] == "overview":
+                return "A partial source plan."
+            return {"pages": [{
+                "kind": "concept",
+                "title": "First half",
+                "purpose": "The first selected excerpt",
+                "section": [{"block_index": 0, "start_char": 0, "end_char": 5}],
+            }]}
         if payload["stage"] == "generation":
             return {"content": "# First half\nabcde", "covered": ["o1"]}
         if payload["stage"] == "verification":
@@ -122,7 +99,7 @@ def test_import_keeps_character_range_coverage_exact(kb_dir, tmp_path, model_ser
     ranges = result.coverage["ranges"]
     assert [(row["start"], row["end"], row["status"]) for row in ranges] == [
         (0, 5, "verified"),
-        (5, 10, "no_facts"),
+        (5, 10, "pending"),
     ]
 
 
@@ -159,7 +136,7 @@ def test_none_review_mode_never_retracts_an_existing_source_contribution(
     source.write_text("The first version is verified and published.")
     first = import_document(kb_dir, source)
     assert first.knowledge_compilation == "completed", first
-    page = next((kb_dir / "wiki" / "concepts").glob("notes-*.md"))
+    page = next((kb_dir / "wiki" / "concepts").glob("notes*.md"))
     before = page.read_text(encoding="utf-8")
 
     config_path = kb_dir / ".openkb/config.yaml"
@@ -187,16 +164,14 @@ def test_plan_only_stops_before_generation_and_exposes_the_private_plan(
     assert result.reason == "document_plan_ready"
     assert [
         json.loads(request["messages"][-1]["content"])["stage"] for request in model_service
-    ] == ["planning"]
+    ] == ["planning", "planning"]
     assert not list((kb_dir / "wiki" / "concepts").glob("*.md"))
-    artifacts = compilation_artifacts(
-        kb_dir, result.source_id, result.input_version, result.parse_id, "planning"
-    )
-    assert artifacts["total"] >= 1
-    plan_text = next(
-        record["text"] for record in artifacts["records"] if "计划状态：accepted" in record["text"]
-    )
-    assert "notes" in plan_text
+    preview = next(Path(ref) for ref in result.resources if "/plan-preview/" in ref)
+    overview = next(Path(ref) for ref in result.resources if "/overview/" in ref)
+    report = next(Path(ref) for ref in result.resources if "/plan-report/" in ref)
+    assert "notes" in preview.read_text().lower()
+    assert overview.read_text().strip()
+    assert report.is_file()
 
 
 def test_plan_only_settles_an_exhausted_content_failure_as_empty(
@@ -210,7 +185,7 @@ def test_plan_only_settles_an_exhausted_content_failure_as_empty(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         assert payload["stage"] == "planning"
-        return {"not": "a valid document plan"}
+        return "无法判断"
 
     model_service.respond = respond
     result = import_document(kb_dir, source, plan_only=True)

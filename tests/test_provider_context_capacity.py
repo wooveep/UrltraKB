@@ -237,7 +237,7 @@ def test_unsplittable_provider_refusal_omits_only_affected_planned_page(
                         "target": "",
                         "title": title,
                         "kind": "concept",
-                        "name": f"concepts/{title.lower()}",
+                        "name": title,
                         "purpose": f"{title} operating condition.",
                         "subject_ranges": [[start, start + 1]],
                         "necessary_context": [],
@@ -272,7 +272,7 @@ def test_unsplittable_provider_refusal_omits_only_affected_planned_page(
         row["stage"] == "generation"
         and row["reason"] == "provider_context_exceeded"
         and len(row["items"]) == 1
-        and row["items"][0].startswith("concepts/alpha-")
+        and row["items"][0] == "concepts/alpha"
         for row in result.omissions
     ), result.omissions
     assert not list((kb_dir / "wiki/concepts").glob("alpha*.md"))

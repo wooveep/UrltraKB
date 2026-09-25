@@ -258,14 +258,11 @@ def compile_evidence(
             # a license to invent a page from an invalid response: retain the
             # original, record every affected source block as omitted, and let
             # a later Continue retry the planner.
-            if (
-                exc.reason
-                not in {
-                    "document_plan_invalid",
-                    "evidence_context_exceeds_request_budget",
-                    "provider_context_exceeded",
-                }
-            ):
+            if exc.reason not in {
+                "document_plan_invalid",
+                "evidence_context_exceeds_request_budget",
+                "provider_context_exceeded",
+            }:
                 raise
             report_content_omission(
                 "planning", exc.reason, [block.id for block in parsed.blocks] or [source.id]
@@ -296,11 +293,25 @@ def compile_evidence(
             # source produced a valid zero-page proposal. Continue starts
             # planning afresh from the retained source evidence.
             return None
+        if plan_only:
+            on_event(
+                {
+                    "stage": "planning",
+                    "status": planning_result.outcome,
+                    "plan_only": True,
+                    "report": planning_result.report_ref,
+                    "overview": planning_result.overview_ref,
+                }
+            )
+            return planning_result
         if plan is None:
             # The planner settled all targets without accepting content. Its
             # versioned report and omission rows are already durable.
+            for omission in planning_result.planning_omissions:
+                report_content_omission("planning", omission["reason"], [omission["target_id"]])
             _write_summary(
-                wiki, name,
+                wiki,
+                name,
                 "# " + source.name + "\n\n本次生成知识：0 条。规划未形成可用页面。\n",
             )
             return planning_result
@@ -322,13 +333,6 @@ def compile_evidence(
                     report_content_omission(
                         "planning", unresolved.reason, unresolved.affected_pages
                     )
-
-        if plan_only:
-            on_event({
-                "stage": "planning", "status": planning_result.outcome,
-                "plan_only": True, "report": planning_result.report_ref,
-            })
-            return planning_result
 
         used_assets = {asset for block in parsed.blocks for asset in block.assets}
         assets = {

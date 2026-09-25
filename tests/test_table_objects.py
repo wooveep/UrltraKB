@@ -68,7 +68,7 @@ def write_table(path, rows):
 
 
 @pytest.mark.parametrize("suffix", [".docx", ".pdf", ".pptx", ".xlsx"])
-def test_small_table_is_planned_in_one_document_request_without_fact_extraction(
+def test_small_table_is_planned_in_two_document_requests_without_fact_extraction(
     kb_dir, tmp_path, model_service, suffix
 ):
     path = tmp_path / ("limits" + suffix)
@@ -86,7 +86,7 @@ def test_small_table_is_planned_in_one_document_request_without_fact_extraction(
     assert result.knowledge_compilation == "completed", result
     assert not [request for request in requests if request["stage"] == "facts"]
     plans = [request for request in requests if request["stage"] == "planning"]
-    assert len(plans) == 1
+    assert len(plans) == 2
     assert {item["text"] for item in plans[0]["evidence"]["blocks"] if item["kind"] == "table"} == {
         value for row in rows for value in row
     }

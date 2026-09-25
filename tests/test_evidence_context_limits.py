@@ -38,70 +38,14 @@ def test_required_operation_context_reaches_generation_at_model_capacity(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            if payload["subtask"] == "overview":
+                return "Standby recovery deployment procedure and source conditions."
             target = payload["target"]
             ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-            frozen_ranges = [
-                [block["order"], block["order"] + 1] for block in payload["evidence"]["blocks"]
-            ]
-
-            def basis(selected):
-                return "\n".join(
-                    next(
-                        block["text"]
-                        for block in payload["evidence"]["blocks"]
-                        if block["order"] == index
-                    )
-                    for start, end in selected
-                    for index in range(start, end)
-                )
-
-            operation = next(
-                (
-                    block
-                    for block in payload["evidence"]["blocks"]
-                    if block["text"].startswith("Execute deploy --timeout 42.")
-                ),
-                None,
-            )
-            registered = payload["carry"]["page_register"]
-            assert operation or registered
             return {
-                "overview": {
-                    "text": "Standby recovery deployment procedure.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": "operation",
-                        "target_key": registered[0]["key"] if registered else "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/standby-recovery",
-                        "title": "Standby Recovery",
-                        "purpose": "Run the standby recovery deployment operation.",
-                        # Each serial planner increment may add only its own T
-                        # as body and its frozen W as necessary context. This
-                        # accumulates the complete operation without claiming
-                        # a later window as already-read evidence.
-                        "subject_ranges": ranges,
-                        "necessary_context": (
-                            [
-                                {
-                                    "relation": "applicable_condition",
-                                    "ranges": frozen_ranges,
-                                    "rationale": basis(frozen_ranges),
-                                    "basis_ranges": frozen_ranges,
-                                }
-                            ]
-                            if not registered
-                            else []
-                        ),
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
+                "pages": [
+                    {"title": "Standby Recovery", "kind": "concept", "subject_ranges": ranges}
+                ]
             }
         output = evidence_response(payload)
         if payload["stage"] == "generation":
@@ -151,7 +95,12 @@ def test_small_output_budget_keeps_formal_responses_within_limit(kb_dir, tmp_pat
     assert result.knowledge_compilation == "completed", result
     assert max(sizes) <= 256
     extracted = [json.loads(call["messages"][-1]["content"]) for call in model_service]
-    assert [call["stage"] for call in extracted] == ["planning", "generation", "verification"]
+    assert [call["stage"] for call in extracted] == [
+        "planning",
+        "planning",
+        "generation",
+        "verification",
+    ]
     assert len(extracted[0]["evidence"]["blocks"]) == 30
 
 
@@ -193,50 +142,20 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            if payload["subtask"] == "overview":
+                return "Linux-specific standby recovery procedure."
             blocks = payload["evidence"]["blocks"]
-            target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
             heading = next(block for block in blocks if "Linux version 7" in block["text"])
             command = next(block for block in blocks if block["text"].startswith("Execute"))
-            background = [
-                block
-                for block in blocks
-                if block["order"] not in {heading["order"], command["order"]}
-            ]
             return {
-                "overview": {
-                    "text": "Linux-specific standby recovery procedure.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
+                "pages": [
                     {
-                        "local_key": "deployment",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/standby-deployment",
                         "title": "Standby Deployment",
-                        "purpose": "Run the deployment command safely.",
+                        "kind": "concept",
                         "subject_ranges": [[command["order"], command["order"] + 1]],
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": [[heading["order"], heading["order"] + 1]],
-                                "rationale": "The heading is an applicable condition.",
-                                "basis_ranges": [[heading["order"], heading["order"] + 1]],
-                            }
-                        ],
+                        "context": [[heading["order"], heading["order"] + 1]],
                     }
-                ],
-                "source_only": [
-                    {
-                        "ranges": [[block["order"], block["order"] + 1] for block in background],
-                        "reason": "Background prose does not add an operation or condition.",
-                    }
-                ],
-                "unresolved": [],
-                "resolutions": [],
+                ]
             }
         response = evidence_response(payload)
         if payload["stage"] == "generation":
@@ -279,7 +198,7 @@ def test_invalid_figure_output_is_not_reused_after_model_correction(
     valid = True
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed
-    assert len(model_service) == 5
+    assert len(model_service) == 6
 
 
 def test_docx_table_parts_keep_headers_and_original_row_locations(kb_dir, tmp_path, model_service):

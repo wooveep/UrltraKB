@@ -30,7 +30,7 @@ def test_navigation_and_planning_share_frozen_non_numeric_ids_and_exact_extents(
     nav = json.loads(navigation[-1]["content"])
     plan = json.loads(planning[-1]["content"])
 
-    assert nav["protocol"] == plan["protocol"] == "source-prefix-v2"
+    assert nav["protocol"] == plan["protocol"] == "source-prefix-v3"
     assert (
         navigation[-1]["content"].split(',"stage":', 1)[0]
         == planning[-1]["content"].split(',"stage":', 1)[0]

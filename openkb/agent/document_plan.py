@@ -186,6 +186,9 @@ class PagePlan:
     target: str = ""  # target catalog path if reusing existing wiki page
     type: str | None = None  # entity type when kind == "entity"
     subject_ranges: list[RangeValue] = field(default_factory=list)
+    context_ranges: list[RangeValue] = field(default_factory=list)
+    planning_notes: list[str] = field(default_factory=list)
+    scope_resolution: str = "section"
     necessary_context: list[dict[str, Any]] = field(default_factory=list)
     limitations: list[PageLimitation] = field(default_factory=list)
     state: str = "ready"  # "ready" | "blocked"
@@ -203,6 +206,9 @@ class PagePlan:
             "purpose": self.purpose,
             "target": self.target,
             "subject_ranges": range_dicts(self.subject_ranges),
+            "context_ranges": range_dicts(self.context_ranges),
+            "planning_notes": list(self.planning_notes),
+            "scope_resolution": self.scope_resolution,
             "necessary_context": [
                 {
                     **context,
@@ -233,6 +239,9 @@ class PagePlan:
             "purpose",
             "target",
             "subject_ranges",
+            "context_ranges",
+            "planning_notes",
+            "scope_resolution",
             "necessary_context",
             "state",
             "quality",
@@ -255,10 +264,17 @@ class PagePlan:
         if data.get("local_key") is not None and not isinstance(data.get("local_key"), str):
             raise ValueError("Invalid page plan")
         subject_ranges = data.get("subject_ranges", [])
+        context_ranges = data.get("context_ranges", [])
+        planning_notes = data.get("planning_notes", [])
         contexts = data.get("necessary_context", [])
         limitations = data.get("limitations", [])
         if (
             not isinstance(subject_ranges, list)
+            or not isinstance(context_ranges, list)
+            or not isinstance(planning_notes, list)
+            or not all(isinstance(note, str) for note in planning_notes)
+            or data.get("scope_resolution", "section")
+            not in {"section", "explicit_range", "target_fallback"}
             or not isinstance(contexts, list)
             or not isinstance(limitations, list)
         ):
@@ -276,6 +292,9 @@ class PagePlan:
             purpose=data.get("purpose", ""),
             target=data.get("target", ""),
             subject_ranges=[range_dict(r) for r in subject_ranges],
+            context_ranges=[range_dict(r) for r in context_ranges],
+            planning_notes=list(planning_notes),
+            scope_resolution=data.get("scope_resolution", "section"),
             necessary_context=normalized_contexts,
             limitations=[PageLimitation.from_dict(row) for row in limitations],
             state=data.get("state", "ready"),
@@ -460,7 +479,7 @@ def to_dict(plan: DocumentPlan) -> dict[str, Any]:
         "unresolved": [u.to_dict() for u in plan.unresolved],
         "resolutions": [r.to_dict() for r in plan.resolutions],
     }
-    if plan.metadata.get("protocol") == "document-plan-v2":
+    if plan.metadata.get("protocol") in {"document-plan-v2", "document-plan-v3"}:
         result["external_references"] = [row.to_dict() for row in plan.external_references]
         result["planning_omissions"] = [row.to_dict() for row in plan.planning_omissions]
     return result
@@ -471,12 +490,12 @@ def from_dict(data: dict[str, Any]) -> DocumentPlan:
     if not isinstance(data, dict) or not isinstance(data.get("metadata"), dict):
         raise ValueError("Invalid DocumentPlan payload")
     protocol = data["metadata"].get("protocol")
-    if protocol == "document-plan-v2":
+    if protocol in {"document-plan-v2", "document-plan-v3"}:
         fields.update({"external_references", "planning_omissions"})
     if set(data) != fields:
         raise ValueError("Invalid DocumentPlan payload")
     containers: tuple[str, ...] = ("pages", "source_only", "unresolved", "resolutions")
-    if protocol == "document-plan-v2":
+    if protocol in {"document-plan-v2", "document-plan-v3"}:
         containers += ("external_references", "planning_omissions")
     if (
         not isinstance(data["metadata"], dict)

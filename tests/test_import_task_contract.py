@@ -216,7 +216,7 @@ def test_recovered_teardown_preserves_receipt_and_continues_batch(
         assert view.state == "completed"
         assert view.succeeded == 2 and view.processes_reaped
         assert all("worker_termination_recovered" in row.warnings for row in view.results)
-        assert len(model_service) == 6
+        assert len(model_service) == 8
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)

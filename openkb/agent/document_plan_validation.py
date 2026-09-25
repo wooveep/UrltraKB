@@ -41,7 +41,7 @@ def validate_plan(
 ) -> bool:
     """Validate all ranges, entity types, and targets against immutable parsed blocks."""
     protocol = plan.metadata.get("protocol")
-    if protocol not in {"document-plan-v1", "document-plan-v2"}:
+    if protocol not in {"document-plan-v1", "document-plan-v2", "document-plan-v3"}:
         raise ValueError("Invalid DocumentPlan protocol")
     if plan.overview.status not in {"partial", "complete"}:
         raise ValueError("Invalid overview status")
@@ -53,9 +53,19 @@ def validate_plan(
         and not plan.overview.text.strip()
         and not plan.overview.ranges
     )
-    if not zero_readable_body and not overview_omitted and not plan.overview.text.strip():
+    if (
+        protocol != "document-plan-v3"
+        and not zero_readable_body
+        and not overview_omitted
+        and not plan.overview.text.strip()
+    ):
         raise ValueError("Readable DocumentPlan needs a non-empty overview")
-    if not zero_readable_body and not overview_omitted and not plan.overview.ranges:
+    if (
+        protocol != "document-plan-v3"
+        and not zero_readable_body
+        and not overview_omitted
+        and not plan.overview.ranges
+    ):
         raise ValueError("Readable DocumentPlan overview needs exact evidence ranges")
     if zero_readable_body and plan.pages:
         raise ValueError("Zero-readable-body plan cannot contain pages")
@@ -94,7 +104,14 @@ def validate_plan(
             raise ValueError(f"Unknown existing page target: {page.target}")
         if page.target and page.target != page.name:
             raise ValueError(f"Existing target must equal page name: {page.target}")
-        if page.name in existing_targets and not page.target:
+        if (
+            page.name in existing_targets
+            and not page.target
+            and not (
+                protocol == "document-plan-v3"
+                and page.name not in plan.metadata.get("catalog_targets", [])
+            )
+        ):
             raise ValueError(f"Existing page name requires its actual target: {page.name}")
         if page.state not in {"ready", "blocked"}:
             raise ValueError(f"Invalid page state: {page.state}")
@@ -118,6 +135,13 @@ def validate_plan(
             raise ValueError(f"Page {page.name} needs exact subject_ranges")
         for r in page.subject_ranges:
             _check_range(r, parsed, f"page {page.name} subject_ranges")
+        if protocol == "document-plan-v3":
+            if page.scope_resolution not in {"section", "explicit_range", "target_fallback"}:
+                raise ValueError(f"Invalid scope resolution for {page.name}")
+            if not all(isinstance(note, str) for note in page.planning_notes):
+                raise ValueError(f"Invalid planning note for {page.name}")
+            for r in page.context_ranges:
+                _check_range(r, parsed, f"page {page.name} context_ranges")
         for ctx in page.necessary_context:
             if not isinstance(ctx, dict):
                 raise ValueError(f"Invalid necessary_context in page {page.name}")
@@ -141,7 +165,7 @@ def validate_plan(
                 _check_range(r, parsed, f"page {page.name} necessary_context")
             for r in basis_ranges:
                 _check_range(r, parsed, f"page {page.name} necessary_context basis")
-        if protocol == "document-plan-v2":
+        if protocol in {"document-plan-v2", "document-plan-v3"}:
             from openkb.agent.document_range_validation import interval_is_covered, merged_intervals
 
             visible: dict[int, list[tuple[int, int]]] = {}
@@ -241,7 +265,7 @@ def validate_plan(
         if page.state != expected_state:
             raise ValueError(f"Page {page.name} state must equal its derived state")
 
-    if protocol == "document-plan-v2":
+    if protocol in {"document-plan-v2", "document-plan-v3"}:
         reference_keys: set[str] = set()
         for reference in plan.external_references:
             if (
@@ -266,7 +290,7 @@ def validate_plan(
     elif plan.external_references:
         raise ValueError("Legacy DocumentPlan cannot contain external references")
 
-    if protocol == "document-plan-v2":
+    if protocol in {"document-plan-v2", "document-plan-v3"}:
         omission_keys: set[str] = set()
         for omission in plan.planning_omissions:
             if (

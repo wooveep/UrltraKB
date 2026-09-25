@@ -18,7 +18,7 @@ from openkb.agent.document_planning_support import fallback_read_evidence
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.evidence import ParseStore
 from openkb.processing import DEFAULT_PROCESSING
-from openkb.sources import SourceStore, content_id, read_object
+from openkb.sources import SourceStore, content_id
 from tests.test_adaptive_processing import response
 from tests.test_document_orchestrator import _DummyParsed, _DummySource
 
@@ -82,7 +82,7 @@ def test_reader_requires_explicit_plan_digest_and_original_quote(tmp_path, monke
         list(iter_external_references(tmp_path, reference))
 
 
-def test_reader_requires_immutable_accepted_ledger_proof(tmp_path, monkeypatch):
+def test_reader_requires_immutable_markdown_reference_proof(tmp_path, monkeypatch):
     source, parsed = _DummySource(), _DummyParsed(1)
     body = "See Guide A."
     block = parsed.blocks[0]
@@ -106,57 +106,76 @@ def test_reader_requires_immutable_accepted_ledger_proof(tmp_path, monkeypatch):
     settings = {
         "model": "mock-model",
         "processing": {
-            **DEFAULT_PROCESSING, "context_tokens": 128_000, "max_context_tokens": 128_000,
+            **DEFAULT_PROCESSING,
+            "context_tokens": 128_000,
+            "max_context_tokens": 128_000,
         },
     }
 
     def respond(messages, **_kwargs):
         payload = json.loads(messages[-1]["content"])
-        if payload["response_mode"] == "reference_check":
-            pair = payload["requested_pairs"][0]
-            reference = payload["references"][0]
-            return json.dumps({
-                "check_protocol": "document-reference-check-v3",
-                "decisions": [{
-                    **pair, "decision": "informational", "reason": "Optional guide mention",
-                    "decision_basis_ranges": reference["basis_ranges"],
-                }],
-            })
-        evidence_id = payload["evidence"]["blocks"][0]["id"]
-        selected = {"from_block": evidence_id, "through_block": evidence_id}
-        return json.dumps({
-            "overview": {"text": "Guide reference.", "ranges": [selected], "limitations": []},
-            "page_changes": [{
-                "local_key": "page", "kind": "concept", "title": "Guide note",
-                "purpose": "Record the guide requirement", "subject_ranges": [selected],
-                "necessary_context": [],
-            }],
-            "source_only": [], "unresolved": [], "resolutions": [],
-            "external_references": [{
-                "location": [selected], "target_document": "Guide A",
-                "target_section": None, "affected_pages": ["page"],
-            }],
-        })
+        if payload["subtask"] == "overview":
+            return "The source mentions Guide A."
+        return "- Name: Guide note\n  Kind: concept"
 
     monkeypatch.setattr(
-        litellm, "completion",
-        lambda **kwargs: response(json.loads(respond(kwargs["messages"])), tokens=10),
+        litellm,
+        "completion",
+        lambda **kwargs: response(respond(kwargs["messages"]), tokens=10),
     )
     events = []
     with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
         plan = plan_document(
-            tmp_path, workspace, source, parsed, None, settings, checkpoints,
-            plan_only=True, on_event=events.append,
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            None,
+            settings,
+            checkpoints,
+            plan_only=True,
+            on_event=events.append,
         )
     assert isinstance(plan, DocumentPlan), events
     assert plan.external_references, events
     handle = plan_reference(plan)
     assert len(list(iter_external_references(tmp_path, handle))) == 1
-    proof = next(
-        path for path in (store.root / "compilation").glob("*.json")
-        if (read_object(path).get("contract") or {}).get("system")
-        == "DocumentPlan accepted ledger state"
+    state_path = store.root / "compilation" / "recovery" / (
+        plan.metadata["recovery_key"] + "-markdown_plan.json"
     )
-    proof.unlink()
-    with pytest.raises(ValueError, match="accepted proof"):
+    state_record = json.loads(state_path.read_text())
+    state_record["value"]["external_references"][0]["target_document"] = "Guide B"
+    state_record["digest"] = content_id(state_record["value"])
+    state_path.write_text(json.dumps(state_record))
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        resumed = plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            None,
+            settings,
+            checkpoints,
+            plan_only=True,
+            resume=True,
+        )
+    assert isinstance(resumed, DocumentPlan)
+    assert [row.target_document for row in resumed.external_references] == ["Guide A"]
+    handle = plan_reference(resumed)
+    plan_path = store.root / "compilation" / "recovery" / (
+        plan.metadata["recovery_key"] + "-plan.json"
+    )
+    record = json.loads(plan_path.read_text())
+    original = json.dumps(record)
+    record["value"]["external_references"] = []
+    record["digest"] = content_id(record["value"])
+    plan_path.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="reference proof"):
+        list(iter_external_references(tmp_path, {**handle, "plan_digest": record["digest"]}))
+    plan_path.write_text(original)
+    checkpoint = store.root / "compilation" / (
+        resumed.metadata["reference_proof_key"] + ".json"
+    )
+    checkpoint.unlink()
+    with pytest.raises(ValueError, match="Markdown plan reference proof"):
         list(iter_external_references(tmp_path, handle))

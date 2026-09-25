@@ -215,7 +215,7 @@ def artifact_summary(record: dict[str, Any], *, storage: str) -> dict[str, Any] 
     metadata = value.get("metadata")
     progress = ledger_progress_preview(value)
     if isinstance(metadata, dict) and metadata.get("protocol") in {
-        "document-plan-v1", "document-plan-v2"
+        "document-plan-v1", "document-plan-v2", "document-plan-v3"
     }:
         stage = "planning"
     if progress is not None:

@@ -43,7 +43,7 @@ def test_invalid_document_plan_preserves_other_committed_knowledge(
         content = (
             json.dumps(evidence_response(payload))
             if payload["stage"] == "facts"
-            else "not a usable plan"
+            else "无法判断"
         )
         return SimpleNamespace(
             choices=[
@@ -60,12 +60,12 @@ def test_invalid_document_plan_preserves_other_committed_knowledge(
     result = import_document(kb_dir, source)
 
     assert result.status == "added"
-    assert result.knowledge_compilation == "not_started"
-    assert result.reason == "document_plan_empty"
-    assert any(row["reason"] == "document_plan_invalid" for row in result.omissions)
+    assert result.knowledge_compilation == "completed"
+    assert result.planning_coverage["status"] == "empty"
+    assert result.planning_coverage["planning_omissions"] == 2
     assert previous.read_text() == "Previously committed knowledge"
     summaries = list((kb_dir / "wiki/summaries").glob("*.md"))
-    assert not summaries
+    assert len(summaries) == 1
 
 
 def test_slow_compilation_keeps_async_recompile_callbacks_responsive(
@@ -246,5 +246,5 @@ def test_unknown_model_usage_does_not_change_committed_result(
     assert result.status == "added"
     assert result.knowledge_compilation == "completed"
     assert result.warnings == ()
-    assert result.usage["unknown_usage"] == 5
+    assert result.usage["unknown_usage"] == 6
     assert all(row["transport_attempts"] is None for row in result.usage["requests"])

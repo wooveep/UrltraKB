@@ -38,14 +38,17 @@ OPENKB_TEST_MODEL_KB=/absolute/path/to/configured-kb \
 
 普通 `pytest` 不自动收费调用模型。对可控异常、原子性、权限和恢复使用确定性测试；第三步语义验收以及提示词/协议设计比较必须显式执行在线模型，并报告真实调用数及结果。不得把在线模型答案改成固定期望值后再宣称在线通过。
 
-## 第三步 JSON 响应与关系核对验收
+## 第三步 Markdown 尽力规划验收
 
-确定性回归先运行 `tests/test_document_json_recovery.py`、`tests/test_document_json_prompts.py`、`tests/test_document_reference_check.py` 和相邻规划、修复、恢复测试。随后固定选择三份输入，各运行一次：
+先运行 `tests/test_document_markdown_planning.py`、相邻来源/恢复/应用测试和 `tests/test_file_size.py`。旧 `document-plan-v5` 六字段响应、patch 授权、强制引用关系判定和逐块覆盖闭合不再是新规划路径的通过条件。历史计划的读取仍需回归。
+
+固定在线集合为四例。O1 复用保存的真实原文与 PageIndex；O2/O3 是同步、研究两份短资料；O4 显式复用已保存的两窗口输入。活动脚本均使用 `load_online_model()`，只收紧生产预算。各例第三步调用上限依次为 6、6、6、12，包含服务层重试；达到上限即报告，不继续抽样。活动脚本和测试材料属于维护者本地资料，干净 checkout 不包含它们。
 
 ```bash
 OPENKB_TEST_MODEL_KB=/absolute/path/to/configured-kb .venv/bin/python docs/research/import-review-20260924/step03-navigation-reference-validation/short-synthetic.py --variant=sync
 OPENKB_TEST_MODEL_KB=/absolute/path/to/configured-kb .venv/bin/python docs/research/import-review-20260924/step03-navigation-reference-validation/short-synthetic.py --variant=research
 OPENKB_TEST_MODEL_KB=/absolute/path/to/configured-kb .venv/bin/python docs/research/import-review-20260924/step03-reference-recheck/recheck.py
+OPENKB_TEST_MODEL_KB=/absolute/path/to/configured-kb .venv/bin/python docs/research/import-review-20260924/step03-navigation-reference-validation/two-window-synthetic.py --source-run /absolute/path/to/saved-sync-run
 ```
 
-前两份短资料验证不同领域的计划与关系核对；最后一份复用第二步真实产物，并止于第三步。保存每次运行的目录和完整失败证据。若一次运行失败，记录失败及 reference_check 是否到达，不增加同输入采样次数来刷通过。只有计划、范围授权、必要引用和业务门禁都完成，才能报告第三步完整验收通过。
+记录实际模型、源版本、预算、请求与响应、finish_reason、usage、overview/预览/报告路径、可执行页与遗漏。抽查操作页的 `page_evidence()` 原文、跨章节前提、否定和外部要求；比较 A/B 实际 system 与冻结 W 前缀，确认最终调用参数没有强制 JSON。分别报告流程是否符合合同及内容是否可用；partial 可如实结束，empty 不算内容验收通过。止于第三步的运行要核对 wiki 未变且正文生成、审核、发布均为零。原始正文和响应只存隔离研究目录，不提交 Git。

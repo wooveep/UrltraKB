@@ -110,6 +110,7 @@ class _KbConfigWritable(BaseModel):
     # explicit null reverts to inherited. Values are cleaned/deduped and "other"
     # is always ensured at read time (config.resolve_entity_types).
     entity_types: list[str] | None = None
+    default_entity_type: str | None = None
     parsing: ParsingSettings | None = None
     image_understanding: VisionSettings | None = None
     processing: ProcessingSettings | None = None
@@ -138,6 +139,7 @@ class GlobalConfigResponse(CompilationSettings):
     pageindex_threshold: int
     # Effective global entity-type vocabulary (cleaned; always includes "other").
     entity_types: list[str]
+    default_entity_type: str | None = None
     # Effective KB root that kb_root_dir() would return (env OPENKB_KB_ROOT >
     # global.yaml kb_root > default <config>/kbs). kb_root_env_pinned is True
     # when OPENKB_KB_ROOT is set — a global.yaml kb_root is then ineffective, so
@@ -181,6 +183,7 @@ class KbConfigResponse(CompilationSettings):
     pageindex_threshold: int
     # Effective entity-type vocabulary (cleaned; always includes "other").
     entity_types: list[str]
+    default_entity_type: str | None = None
     openai_api_base: str | None
     has_api_key: bool
     has_ocr_api_key: bool = False

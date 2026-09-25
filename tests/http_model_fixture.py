@@ -77,6 +77,14 @@ def v4_plan(payload, value):
 
 
 def evidence_response(payload):
+    if (
+        isinstance(payload, dict)
+        and payload.get("plan_protocol") == "document-planning-markdown-v1"
+    ):
+        if payload.get("subtask") == "overview":
+            return "Document notes and instructions. Preserve the source conditions."
+        if payload.get("subtask") == "pages":
+            return "- 名称：Notes\n  类别：concept\n  用途：Document notes and instructions"
     if isinstance(payload, dict) and payload.get("stage") == "verification_batch":
         return {
             "reviews": [

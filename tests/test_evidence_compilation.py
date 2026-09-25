@@ -21,6 +21,15 @@ def _single_page_plan(payload, *, name, title, kind="concept", type_=None, targe
     """Return one valid DocumentPlan delta for the current target window."""
 
     ranges = _target_ranges(payload)
+    if payload.get("plan_protocol") == "document-planning-markdown-v1":
+        if payload["subtask"] == "overview":
+            return f"{title} overview from the original source."
+        page = {"title": title, "kind": kind, "subject_ranges": ranges}
+        if type_ is not None:
+            page["type"] = type_
+        if target:
+            page["target"] = target
+        return {"pages": [page]}
     registered = next(
         (
             item
@@ -196,30 +205,7 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
         if payload["stage"] == "planning":
             excerpts = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
             observed["planning"].update(fact for fact in facts if fact in excerpts)
-            ranges = _target_ranges(payload)
-            registered = payload["carry"]["page_register"]
-            return {
-                "overview": {
-                    "text": "Operation guidance.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": "operation",
-                        "target_key": registered[0]["key"] if registered else "",
-                        "name": "concepts/operation",
-                        "title": "Operation",
-                        "kind": "concept",
-                        "purpose": "Operation guidance",
-                        "subject_ranges": ranges,
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            return _single_page_plan(payload, name="concepts/operation", title="Operation")
         assert payload["stage"] == "generation"
         excerpts = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
         selected = [fact for fact in facts if fact in excerpts]
@@ -325,13 +311,12 @@ def test_continuation_keeps_document_plan_and_reads_current_wiki_before_generati
             raise OperationCancelled()
 
     first = import_document(kb_dir, original, context=ExecutionContext(on_event=stop))
-    assert first.status == "stopped" and len(planning_requests) == 1
+    assert first.status == "stopped" and len(planning_requests) == 2
     original.unlink()
     current_page.write_text("# Operation\nEmergency override requires approval.\n")
     continued = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert continued.reason == "needs_acceptance", continued
-    # The user edit changes the catalogue snapshot, so the retained plan is
-    # intentionally invalidated before proposing an update against current wiki.
+    # Planning is retained; generation reads the changed wiki before proposing an update.
     assert len(planning_requests) == 2
     from openkb.application.source_actions import review_source_proposal
 
@@ -491,7 +476,7 @@ def test_large_document_plan_covers_all_windows_then_omits_an_unreviewable_page(
     assert any(
         row["stage"] == "generation"
         and len(row["items"]) == 1
-        and row["items"][0].startswith("concepts/settings-")
+        and row["items"][0].startswith("concepts/settings")
         for row in result.omissions
     )
     assert (
@@ -537,11 +522,11 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
     source.write_text("Current feature.")
     changed = import_document(kb_dir, source)
     assert changed.knowledge_compilation == "completed", changed
-    retained = [path.read_text() for path in (kb_dir / "wiki/concepts").glob("retired-*.md")]
+    retained = [path.read_text() for path in (kb_dir / "wiki/concepts").glob("retired*.md")]
     assert any(
         first.source_id not in content and second.source_id in content for content in retained
     )
-    assert list((kb_dir / "wiki/concepts").glob("current-*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("current*.md"))
 
 
 def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, model_service):
@@ -596,33 +581,25 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
 
     def page_change(local_key, name, title, ranges):
         return {
-            "local_key": local_key,
-            "target_key": "",
-            "target": "",
             "kind": "concept",
-            "name": name,
             "title": title,
             "purpose": title + " from original source evidence",
             "subject_ranges": ranges,
-            "necessary_context": [],
         }
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
             evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
-            ranges = _target_ranges(payload)
             if "Current feature." not in evidence:
                 return _single_page_plan(payload, name="concepts/retired", title="Retired")
+            if payload["subtask"] == "overview":
+                return "Two new topics."
             return {
-                "overview": {"text": "Two new topics.", "ranges": ranges, "limitations": []},
-                "page_changes": [
+                "pages": [
                     page_change("current", "concepts/current", "Current", [[0, 1]]),
                     page_change("independent", "concepts/independent", "Independent", [[1, 2]]),
                 ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
             }
         if payload["stage"] == "generation":
             if payload["page"]["title"] == "Current":
@@ -654,13 +631,13 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
     changed = import_document(kb_dir, source)
 
     assert changed.knowledge_compilation == "completed", changed
-    assert not list((kb_dir / "wiki/concepts").glob("current-*.md"))
-    assert list((kb_dir / "wiki/concepts").glob("independent-*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("current*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("independent*.md"))
     assert any(
         row["stage"] == "generation"
         and row["reason"] == "knowledge_evidence_mismatch"
         and len(row["items"]) == 1
-        and row["items"][0].startswith("concepts/current-")
+        and row["items"][0].startswith("concepts/current")
         for row in changed.omissions
     ), changed.omissions
     current_reviews = [content for content in reviews if "# Current" in content]
@@ -753,36 +730,21 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
     reviews = []
 
     def page_change(payload, local_key, name, title, subject_range, purpose):
-        registered = next(
-            (
-                item
-                for item in payload["carry"]["page_register"]
-                if item["title"] == title and item["kind"] == "concept"
-            ),
-            None,
-        )
         return {
-            "local_key": local_key,
-            "target_key": registered["key"] if registered else "",
-            "target": registered.get("target", "") if registered else "",
             "kind": "concept",
-            "name": name,
             "title": title,
             "purpose": purpose,
             "subject_ranges": [subject_range],
-            "necessary_context": [],
+            **({"target": name} if name in payload["existing_targets"] else {}),
         }
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            if payload["subtask"] == "overview":
+                return "Three independently planned facts."
             return {
-                "overview": {
-                    "text": "Three independently planned facts.",
-                    "ranges": _target_ranges(payload),
-                    "limitations": [],
-                },
-                "page_changes": [
+                "pages": [
                     page_change(
                         payload,
                         "alpha",
@@ -808,9 +770,6 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
                         "Charlie evidence.",
                     ),
                 ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
             }
         if payload["stage"] == "generation":
             title = payload["page"]["title"]

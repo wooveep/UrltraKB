@@ -462,8 +462,8 @@ def test_plan_messages_frozen_w_prefix_stability():
     # Because encode_payload and share_contexts are called on evidence first.
     user1 = msg1[1]["content"]
     user2 = msg2[1]["content"]
-    assert user1.startswith('{"protocol":"source-prefix-v2"')
-    assert user2.startswith('{"protocol":"source-prefix-v2"')
+    assert user1.startswith('{"protocol":"source-prefix-v3"')
+    assert user2.startswith('{"protocol":"source-prefix-v3"')
     prefix_w = '"evidence":{"group_id":"grp_1"'
     assert prefix_w in user1
     assert prefix_w in user2

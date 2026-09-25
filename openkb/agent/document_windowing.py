@@ -10,7 +10,6 @@ from typing import Any
 
 from openkb.agent.document_plan import table_row_identity
 from openkb.agent.document_range_validation import validate_ranges
-from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.evidence_wire import WireMessages
 from openkb.processing import InputTooLarge, ProcessingIncomplete, RequestLimits
 from openkb.sources import content_id
@@ -151,8 +150,10 @@ def for_window_attempts(
 
 
 def limit_split_attempts(
-    children: list[dict[str, Any]], parent: dict[str, Any],
-    attempts_used: int, configured: int,
+    children: list[dict[str, Any]],
+    parent: dict[str, Any],
+    attempts_used: int,
+    configured: int,
 ) -> None:
     """Give each new target an initial call and divide remaining repairs."""
     if not children:
@@ -498,7 +499,7 @@ def project_planning_view(
         if budget["fits"](0, 0, tokens):
             return True
         try:
-            limits.request(model, messages, {"response_format": JSON_FORMAT})
+            limits.request(model, messages, {})
         except InputTooLarge:
             return False
         return True

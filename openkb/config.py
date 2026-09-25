@@ -47,6 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # global/KB list overrides it wholesale; resolve_entity_types cleans the
     # effective value on read.
     "entity_types": list(DEFAULT_ENTITY_TYPES),
+    "default_entity_type": None,
     "review_mode": "critical",
     # Bounded operating defaults for existing and new KBs. Context/output are
     # request caps, not a claim about an arbitrary provider's model capacity.
@@ -473,6 +474,9 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     review_mode = config.get("review_mode")
     if not (allow_inherited and review_mode is None) and review_mode not in {"critical", "none"}:
         raise ValueError("Configuration field 'review_mode' must be 'critical' or 'none'")
+    default_entity_type = config.get("default_entity_type")
+    if default_entity_type is not None and default_entity_type not in resolve_entity_types(config):
+        raise ValueError("Configuration field 'default_entity_type' must be an allowed entity type")
     threshold = config.get("pageindex_threshold")
     if threshold is None and allow_inherited:
         return
@@ -499,6 +503,7 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "language",
     "pageindex_threshold",
     "entity_types",
+    "default_entity_type",
     "review_mode",
     "processing",
     "parsing",

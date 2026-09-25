@@ -75,6 +75,7 @@ def _compile_version(
     parsed = None
     proposal = None
     plan = None
+    planning_result = None
     stage = "parsing"
     with collect_compile_report() as report:
         try:
@@ -257,12 +258,21 @@ def _compile_version(
                         asyncio.run(_close_async_llm_clients())
                     from openkb.agent.document_planning_result import PlanningResult
 
-                    if isinstance(plan, PlanningResult):
+                    if isinstance(plan, PlanningResult) and plan_only:
                         outcome = plan.outcome
                         return DocumentResult(
                             source.origin,
                             "added",
-                            originals + ((plan.report_ref,) if plan.report_ref else ()),
+                            originals
+                            + tuple(
+                                ref
+                                for ref in (
+                                    plan.overview_ref,
+                                    plan.plan.metadata.get("plan_preview") if plan.plan else None,
+                                    plan.report_ref,
+                                )
+                                if ref
+                            ),
                             input_version=source.id,
                             source_intake="saved",
                             knowledge_compilation="not_started",
@@ -277,14 +287,31 @@ def _compile_version(
                             usage=report.usage,
                             source_id=source.source_id,
                             parse_id=parsed.id,
-                            omissions=tuple(validate_omissions(report.omissions)),
+                            omissions=tuple(
+                                validate_omissions(
+                                    [
+                                        *report.omissions,
+                                        *[
+                                            {
+                                                "stage": "planning",
+                                                "reason": row["reason"],
+                                                "items": [row["target_id"]],
+                                            }
+                                            for row in plan.planning_omissions
+                                        ],
+                                    ]
+                                )
+                            ),
                             coverage=source_coverage(source, parsed, report),
                             planning_coverage=planning_coverage(
                                 plan.plan,
                                 parsed,
                                 omission_count=len(report.omissions) if plan.plan is None else None,
+                                outcome=plan.outcome,
                             ),
                         )
+                    if isinstance(plan, PlanningResult):
+                        planning_result, plan = plan, plan.plan
                     require_complete_compilation()
                     if (
                         replaces is not None
@@ -438,7 +465,19 @@ def _compile_version(
                 return DocumentResult(
                     source.origin,
                     "added",
-                    originals + tuple(str(kb_dir / "wiki" / name) for name in publication.pages),
+                    originals
+                    + tuple(str(kb_dir / "wiki" / name) for name in publication.pages)
+                    + tuple(
+                        ref
+                        for ref in (
+                            plan.metadata.get("plan_report")
+                            if plan is not None
+                            else planning_result.report_ref
+                            if planning_result is not None
+                            else None,
+                        )
+                        if ref
+                    ),
                     input_version=source.id,
                     source_intake="saved",
                     knowledge_compilation="completed",
@@ -450,7 +489,16 @@ def _compile_version(
                     source_id=source.source_id,
                     parse_id=parsed.id,
                     coverage=coverage,
-                    planning_coverage=planning_coverage(plan, parsed) if plan is not None else {},
+                    planning_coverage=planning_coverage(plan, parsed)
+                    if plan is not None
+                    else planning_coverage(
+                        None,
+                        parsed,
+                        omission_count=len(omissions),
+                        outcome=planning_result.outcome,
+                    )
+                    if planning_result is not None
+                    else {},
                 )
         except ProcessingIncomplete as exc:
             reason, stage, status = exc.reason, exc.stage, "unfinished"

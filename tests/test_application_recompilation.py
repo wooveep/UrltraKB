@@ -101,7 +101,7 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     )
     assert skipped.status == "skipped"
     assert context.snapshot is None
-    assert len(calls) == 3
+    assert len(calls) == 4
 
 
 def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
@@ -143,13 +143,10 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
         if payload["stage"] == "planning":
             target = payload["target"]
             start, end = target["target_start"], target["target_end"]
-            value = {
-                "overview": {
-                    "text": "Three independent notes.",
-                    "ranges": [[start, end]],
-                    "limitations": [],
-                },
-                "page_changes": [
+            value = (
+                "Three independent notes."
+                if payload.get("subtask") == "overview"
+                else {"pages": [
                     {
                         "local_key": f"page-{index}",
                         "kind": "concept",
@@ -159,11 +156,8 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
                         "necessary_context": [],
                     }
                     for index in range(start, end)
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+                ]}
+            )
         active -= 1
         return response(v4_plan(payload, value))
 
@@ -212,14 +206,14 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
 
 
 @pytest.mark.parametrize(
-    "plan, code",
+    "plan",
     [
-        ("not JSON", "document_plan_invalid"),
-        (json.dumps({"topics": "not-a-list"}), "document_plan_invalid"),
-        (json.dumps({"topics": [{"name": ["bad"]}]}), "document_plan_invalid"),
+        "待补充",
+        "",
+        "## 标题",
     ],
 )
-def test_invalid_document_plan_preserves_unowned_summary(kb_dir, monkeypatch, plan, code):
+def test_unusable_markdown_plan_preserves_unowned_summary(kb_dir, monkeypatch, plan):
     import litellm
 
     from openkb.application.recompilation import recompile_document
@@ -238,10 +232,8 @@ def test_invalid_document_plan_preserves_unowned_summary(kb_dir, monkeypatch, pl
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, "h"))
-    assert result.status == "compiled"
-    assert result.message == "document_plan_empty"
-    assert result.document.reason == "document_plan_empty"
-    assert any(row["reason"] == code for row in result.document.omissions)
-    assert result.document.planning_coverage["status"] == "partial"
+    assert result.status == "unfinished"
+    assert result.message == "needs_acceptance"
+    assert result.document.reason == "needs_acceptance"
     assert result.changes == ()
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

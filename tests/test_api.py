@@ -538,7 +538,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir, tmp_p
     assert response.json()["added_count"] == 2
     assert response.json()["skipped_count"] == 0
     assert response.json()["failed_count"] == 0
-    assert len(model_service) == 9  # Each import uses planning, generation and verification.
+    assert len(model_service) == 12  # Overview, pages, generation and verification per import.
     assert len(list((kb_dir / "wiki/summaries").glob("*.md"))) == 3
 
 
@@ -565,7 +565,7 @@ def test_add_endpoint_preserves_independent_uploads_with_equal_content(
         second = _post_document(client, kb).json()
     assert first["files"][0]["document"]["source_id"] != second["files"][0]["document"]["source_id"]
     assert first["files"][0]["saved_path"] == second["files"][0]["saved_path"]
-    assert second["added_count"] == 1 and len(model_service) == 6
+    assert second["added_count"] == 1 and len(model_service) == 8
     assert Path(second["files"][0]["saved_path"]).read_bytes() == b"# Paper"
 
 
@@ -1128,7 +1128,7 @@ def test_recompile_non_stream_short_doc(monkeypatch, kb_dir, tmp_path, model_ser
         assert body["status"] == "partial"
         assert body["recompiled"] == 0 and body["unfinished_count"] == 1
         assert body["docs"][0]["document"]["reason"] == "needs_acceptance"
-        assert len(model_service) == 3
+        assert len(model_service) == 4
 
 
 def test_recompile_non_stream_long_doc(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1249,7 +1249,7 @@ def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir, tmp_path, model
         body = response.json()
         assert body["total"] == 2
         assert body["recompiled"] == 0 and body["unfinished_count"] == 2
-        assert len(model_service) == 6  # Each source uses plan, generation and verification.
+        assert len(model_service) == 8  # Each source uses A/B, generation and verification.
 
 
 def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir, tmp_path, model_service):
@@ -1292,7 +1292,7 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir, tmp_path, model_serv
         body = response.json()
         assert body["recompiled"] == 0
         assert body["unfinished_count"] == 2
-        assert len(model_service) == 3
+        assert len(model_service) == 4
         assert {row["message"] for row in body["docs"]} == {
             "needs_acceptance",
             "saved_original_missing",
@@ -2395,6 +2395,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "pageindex_threshold": 20,
         # Default entity-type vocabulary when global.yaml sets none.
         "entity_types": ["person", "organization", "place", "product", "work", "event", "other"],
+        "default_entity_type": None,
         # kb_root reports the EFFECTIVE root; with no env/global override it is
         # the default <GLOBAL_CONFIG_DIR>/kbs, and env_pinned is False.
         "kb_root": str((tmp_path / "kbs").resolve()),

@@ -21,8 +21,10 @@ def planning_execution_metrics(value: Any) -> dict[str, int | float]:
         "planning_requests": requests if type(requests) is int and requests >= 0 else 0,
         "elapsed_seconds": (
             float(elapsed)
-            if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
-            and math.isfinite(elapsed) and elapsed >= 0
+            if isinstance(elapsed, (int, float))
+            and not isinstance(elapsed, bool)
+            and math.isfinite(elapsed)
+            and elapsed >= 0
             else 0.0
         ),
     }
@@ -52,23 +54,43 @@ def render_plan_preview(plan: DocumentPlan) -> str:
         lines.extend(["### 限制", "", *[f"- {item}" for item in plan.overview.limitations], ""])
     coverage = plan.metadata.get("planning_coverage")
     if isinstance(coverage, dict):
-        ratio = coverage.get("effective_ratio")
-        rendered = "不可计算" if ratio is None else f"{ratio:.1%}"
-        lines.extend(
-            [
-                "## 规划覆盖",
-                "",
-                f"可读文本有效规划覆盖率：{rendered}",
-                f"可执行页面：{coverage.get('executable_page_chars', 0)} 字；"
-                f"仅保留原文：{coverage.get('source_only_chars', 0)} 字；"
-                f"遗漏：{coverage.get('missing_chars', 0)} 字",
-                f"不可执行页面：{coverage.get('blocked_pages', 0)}；"
-                f"规划遗漏：{coverage.get('planning_omissions', 0)}；"
-                f"解析缺口：{coverage.get('parser_gaps', 0)}",
-                "正文生成、审核、发布：尚未执行",
-                "",
-            ]
-        )
+        if coverage.get("protocol") == "document-planning-coverage-v2":
+
+            def render_ratio(name: str) -> str:
+                value = coverage.get(name)
+                return "不可计算" if value is None else f"{value:.1%}"
+
+            lines.extend(
+                [
+                    "## 规划范围统计",
+                    "",
+                f"明确定位主体：{render_ratio('precise_ratio')}（{coverage['precise_chars']} 字）",
+                f"较宽取证范围：{render_ratio('fallback_ratio')}"
+                f"（{coverage['fallback_chars']} 字）",
+                f"未纳入主体：{render_ratio('unrouted_ratio')}（{coverage['unrouted_chars']} 字）",
+                    "这些比例仅说明已解析原文的范围，不证明语义完整。",
+                    "正文生成、审核、发布：尚未执行",
+                    "",
+                ]
+            )
+        else:
+            ratio = coverage.get("effective_ratio")
+            rendered = "不可计算" if ratio is None else f"{ratio:.1%}"
+            lines.extend(
+                [
+                    "## 规划覆盖",
+                    "",
+                    f"可读文本有效规划覆盖率：{rendered}",
+                    f"可执行页面：{coverage.get('executable_page_chars', 0)} 字；"
+                    f"仅保留原文：{coverage.get('source_only_chars', 0)} 字；"
+                    f"遗漏：{coverage.get('missing_chars', 0)} 字",
+                    f"不可执行页面：{coverage.get('blocked_pages', 0)}；"
+                    f"规划遗漏：{coverage.get('planning_omissions', 0)}；"
+                    f"解析缺口：{coverage.get('parser_gaps', 0)}",
+                    "正文生成、审核、发布：尚未执行",
+                    "",
+                ]
+            )
     checks = [
         check
         for row in plan.metadata.get("accepted_window_receipts", [])
@@ -102,6 +124,16 @@ def render_plan_preview(plan: DocumentPlan) -> str:
             )
         if page.necessary_context:
             lines.append("")
+        if page.context_ranges:
+            lines.append(f"- 必要上下文：`{json.dumps(page.context_ranges, ensure_ascii=False)}`")
+            lines.append("")
+        for note in page.planning_notes:
+            lines.append(f"- 规划提示（待原文核对）：{note}")
+        if page.planning_notes:
+            lines.append("")
+        if page.scope_resolution == "target_fallback":
+            lines.append("- 定位：使用当前目标的较宽原文范围，待进一步核对。")
+            lines.append("")
         for limitation in page.limitations:
             lines.append(f"- 适用限制：{limitation.reason}（原文：{limitation.source_quote}）")
         if page.limitations:
@@ -130,13 +162,15 @@ def render_plan_preview(plan: DocumentPlan) -> str:
         reference_attempts = {
             receipt["window"]: receipt["reference_check"].get("attempts", 0)
             for receipt in receipts
-            if isinstance(receipt, dict) and isinstance(receipt.get("window"), str)
+            if isinstance(receipt, dict)
+            and isinstance(receipt.get("window"), str)
             and isinstance(receipt.get("reference_check"), dict)
         }
         for omission in plan.planning_omissions:
             reference_text = (
                 f"；参考核对尝试 {reference_attempts[omission.target_id]} 次"
-                if reference_attempts.get(omission.target_id) else ""
+                if reference_attempts.get(omission.target_id)
+                else ""
             )
             lines.append(
                 f"- {omission.key}：{omission.reason}；部件 {omission.component}；"

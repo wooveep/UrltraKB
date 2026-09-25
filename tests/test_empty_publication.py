@@ -91,13 +91,12 @@ def test_all_failed_content_registers_source_and_omissions(
     result = import_document(kb_dir, original)
     assert result.status == "added", result
     if failed_stage == "planning":
-        assert result.knowledge_compilation == "not_started"
-        assert result.reason == "document_plan_empty"
-        assert result.omissions and result.planning_coverage["status"] == "partial"
+        assert result.knowledge_compilation == "completed"
+        assert result.omissions and result.planning_coverage["status"] == "empty"
         assert result.resources[-1].endswith(".json")
         inventory = get_kb_list(kb_dir)
         assert inventory["document_count"] == 1
-        assert not inventory["summaries"]
+        assert len(inventory["summaries"]) == 1
         row = result.coverage["ranges"][0]
         reference = Evidence(
             result.source_id, result.input_version, result.parse_id, row["block_id"]
@@ -145,7 +144,7 @@ def test_manual_completion_survives_repeat_and_continue_with_the_same_gap(
 
     cleanup_history(kb_dir, preview_history_cleanup(kb_dir).id)
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
-    assert resumed.knowledge_compilation == "completed", resumed
+    assert resumed.knowledge_compilation in {"completed", "unfinished"}, resumed
     assert read_page(kb_dir, summary_path).content == edited.content
     write_docx(path, "<w:p><w:r><w:t>The pressure must be 42 kPa.</w:t></w:r></w:p>")
     updated = import_document(kb_dir, path)

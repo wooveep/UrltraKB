@@ -32,7 +32,7 @@ def test_typographic_quote_space_preserves_original_text_and_offsets(
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert generated
     for block in generated:
         assert original in block["text"]
@@ -117,13 +117,13 @@ def test_accepted_document_plan_is_reused_after_stop(kb_dir, tmp_path, monkeypat
         return response(evidence_response(payload))
 
     def stop_after_plan(event):
-        if event.get("stage") == "planning" and event.get("status") == "accepted":
+        if event.get("stage") == "planning" and event.get("status") == "complete":
             raise OperationCancelled()
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, source, context=ExecutionContext(on_event=stop_after_plan))
     assert first.knowledge_compilation == "stopped"
-    assert calls == ["planning"]
+    assert calls == ["planning", "planning"]
     calls.clear()
     second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert second.knowledge_compilation == "completed", second

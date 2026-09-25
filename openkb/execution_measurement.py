@@ -117,11 +117,16 @@ class Measurement:
         planning = self.value.get("document_planning", []) if hasattr(self, "value") else []
         accepted = [row for row in planning if row["event"] == "accepted"]
         analyses = self.value.get("analyses", []) if hasattr(self, "value") else []
+        markdown_calls = sum(row.get("stage") == "planning" for row in rows)
         document = {
             "evidence_groups": self.evidence_groups,
-            "planning_calls": len(accepted),
-            "extra_planning_calls": max(0, len(accepted) - (self.evidence_groups or 0))
-            + sum(row["event"] in {"split", "retry"} for row in planning),
+            "planning_calls": len(accepted) or markdown_calls,
+            "extra_planning_calls": (
+                max(0, len(accepted) - (self.evidence_groups or 0))
+                + sum(row["event"] in {"split", "retry"} for row in planning)
+                if accepted
+                else max(0, markdown_calls - 2 * (self.evidence_groups or 0))
+            ),
             "range_carry_count": sum(
                 max(0, len(row["completed_ranges"]) - len(row["target_ranges"])) for row in accepted
             ),
@@ -305,6 +310,16 @@ def record_document_totals(*, evidence_groups: int | None = None, planned_pages:
             measurement.evidence_groups = evidence_groups
         if planned_pages is not None:
             measurement.planned_pages = planned_pages
+
+
+def record_first_inspectable() -> None:
+    """Mark the first durable overview or accepted page without ledger telemetry."""
+
+    measurement = _ACTIVE.get()
+    if measurement is not None:
+        with measurement.lock:
+            if measurement.first_inspectable_seconds is None:
+                measurement.first_inspectable_seconds = time.monotonic() - measurement.started
 
 
 def record_inflight_tokens(tokens: int) -> None:
@@ -511,6 +526,29 @@ def request_marker() -> int:
         return 0
     with measurement.lock:
         return len(measurement.value["requests"])
+
+
+def request_usage_since(marker: int) -> list[dict[str, Any]]:
+    """Return source-free physical request usage for a planning dispatch."""
+
+    measurement = _ACTIVE.get()
+    if measurement is None or type(marker) is not int or marker < 0:
+        return []
+    fields = (
+        "stage",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "cache_miss_tokens",
+        "request_seconds",
+        "transport_complete",
+    )
+    with measurement.lock:
+        return [
+            {field: row.get(field) for field in fields}
+            for row in measurement.value["requests"][marker:]
+        ]
 
 
 def request_after(marker: int, stage: str) -> dict[str, Any] | None:

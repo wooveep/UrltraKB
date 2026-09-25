@@ -14,6 +14,44 @@ from openkb.agent.document_planning_ledger_integrity import (
 )
 from openkb.sources import SourceStore, content_id, read_object, valid_id
 
+MARKDOWN_REFERENCE_PROOF_SYSTEM = "DocumentPlan v3 accepted references"
+
+
+def verify_markdown_reference_proof(
+    kb_dir: Path, plan_ref: dict[str, str], record: dict[str, Any]
+) -> None:
+    """Require an immutable accepted receipt instead of mutable workflow state."""
+    store = SourceStore(kb_dir)
+    value = record["value"]
+    key = value["metadata"].get("reference_proof_key")
+    if not isinstance(key, str):
+        raise ValueError("Markdown plan lacks a reference proof")
+    path = store.owned_path(store.root / "compilation" / f"{valid_id(key)}.json")
+    try:
+        proof = read_object(path)
+        contract = proof["contract"]
+        references = value.get("external_references", [])
+        expected_payload = {
+            "stage": "planning",
+            "subtask": "accepted_reference_proof",
+            "recovery_key": plan_ref["recovery_key"],
+            "reference_digest": content_id(references),
+        }
+        if (
+            proof.get("key") != key
+            or not isinstance(contract, dict)
+            or content_id(contract) != key
+            or contract.get("system") != MARKDOWN_REFERENCE_PROOF_SYSTEM
+            or contract.get("payload") != expected_payload
+            or contract.get("input") != record.get("input")
+            or proof.get("input") != record.get("input")
+            or proof.get("value") != references
+            or proof.get("value_digest") != content_id(references)
+        ):
+            raise ValueError("Markdown plan reference proof is invalid")
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Markdown plan reference proof is invalid") from exc
+
 
 class _ProofCheckpoints:
     def __init__(self, root: Path, identity: dict[str, Any]):
@@ -62,9 +100,7 @@ class _LedgerView:
         return json.loads(row[0]) if row is not None else None
 
 
-def verify_accepted_plan(
-    kb_dir: Path, plan_ref: dict[str, str], record: dict[str, Any]
-) -> None:
+def verify_accepted_plan(kb_dir: Path, plan_ref: dict[str, str], record: dict[str, Any]) -> None:
     """Reject a self-consistent but unaccepted recovery JSON record."""
     store = SourceStore(kb_dir)
     key = plan_ref["recovery_key"]

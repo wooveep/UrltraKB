@@ -56,6 +56,7 @@ def page_occurrence_descriptors(
                 by_index.setdefault(index, []).append((start, end, item))
 
     add_ranges(page.subject_ranges, "page_body")
+    add_ranges(page.context_ranges, "context_only", "planning_context")
     for context in page.necessary_context:
         if not isinstance(context, dict):
             raise ValueError(f"Invalid necessary context on planned page {page.key}")

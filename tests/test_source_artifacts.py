@@ -95,6 +95,8 @@ def test_artifact_preview_validates_digest_and_version(kb_dir, source_run):
         compilation_artifacts(kb_dir, "b" * 32, result.input_version, result.parse_id, "planning")
     record = read_stage(kb_dir, result, "planning")["records"][0]
     path = kb_dir / ".openkb/source-store/compilation" / (record["key"] + ".json")
+    if not path.exists():
+        path = path.parent / "recovery" / (record["key"] + "-plan.json")
     value = json.loads(path.read_text())
     value["value"] = "tampered"
     path.write_text(json.dumps(value))

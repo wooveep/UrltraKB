@@ -11,7 +11,6 @@ from openkb.application.documents import DocumentResult, import_document
 from openkb.application.source_actions import continue_source
 from openkb.config import DEFAULT_CONFIG
 from openkb.processing import ProcessingIncomplete
-from tests.http_model_fixture import v4_plan
 from tests.processing_fixtures import OFFLINE_PROCESSING
 from tests.test_adaptive_processing import response
 
@@ -32,41 +31,19 @@ def setup(kb_dir, tmp_path, monkeypatch):
     state = {"stage": "verification", "broken": True, "global": None}
 
     def plan(payload):
-        changes = []
-        existing = set(payload.get("existing_targets", []))
-        registered = {
-            item["title"]: item
-            for item in payload["carry"]["page_register"]
-            if isinstance(item, dict) and isinstance(item.get("title"), str)
-        }
+        if payload["subtask"] == "overview":
+            return "Requirements overview."
+        pages = []
         for block in payload["evidence"]["blocks"]:
             text = block["text"]
             title = "Alpha" if "Alpha" in text else "Beta"
-            name = f"concepts/{title.lower()}"
-            prior = registered.get(title)
-            existing_target = next((item for item in existing if item.startswith(name + "-")), None)
-            change = {
-                "local_key": title.lower(),
+            pages.append({
                 "kind": "concept",
                 "title": title,
                 "purpose": f"{title} requirement",
-                "subject_ranges": [[block["order"], block["order"] + 1]],
-                "necessary_context": [],
-            }
-            if prior:
-                change["target_key"] = prior["key"]
-            elif existing_target:
-                change["target"] = existing_target
-            changes.append(change)
-        target = payload["target"]
-        ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-        return {
-            "overview": {"text": "Requirements overview.", "ranges": ranges, "limitations": []},
-            "page_changes": changes,
-            "source_only": [],
-            "unresolved": [],
-            "resolutions": [],
-        }
+                "section": [[block["order"], block["order"] + 1]],
+            })
+        return json.dumps({"pages": pages})
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
@@ -75,7 +52,7 @@ def setup(kb_dir, tmp_path, monkeypatch):
         if state["global"] and stage == "generation":
             raise state["global"]
         if stage == "planning":
-            return response(v4_plan(payload, plan(payload)))
+            return response(plan(payload))
         if stage == "generation":
             title = payload["page"]["title"]
             if state.get("unavailable_topic") == title:
@@ -127,9 +104,9 @@ def test_local_failure_publishes_only_verified_content(kb_dir, setup, stage):
     assert result.coverage["status"] == "partial"
     assert result.coverage["ranges"]
     assert any(row["status"] == "pending" for row in result.coverage["ranges"])
-    assert list((kb_dir / "wiki/concepts").glob("alpha-*.md"))
-    assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
-    body = next((kb_dir / "wiki/concepts").glob("alpha-*.md")).read_text()
+    assert list((kb_dir / "wiki/concepts").glob("alpha*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("beta*.md"))
+    body = next((kb_dir / "wiki/concepts").glob("alpha*.md")).read_text()
     assert "See Beta." in body
     assert "`[[concepts/beta]]`" in body
     summary = next((kb_dir / "wiki/summaries").glob("*.md")).read_text()
@@ -152,7 +129,7 @@ def test_explicit_continue_can_complete_excluded_work(kb_dir, setup):
     assert second.knowledge_compilation == "completed", second
     assert not second.omissions
     assert second.coverage["status"] == "complete"
-    assert list((kb_dir / "wiki/concepts").glob("beta-*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("beta*.md"))
     assert "内容遗漏" not in next((kb_dir / "wiki/summaries").glob("*.md")).read_text()
 
 
@@ -162,8 +139,8 @@ def test_exhausted_temporary_failure_skips_only_affected_topic(kb_dir, setup):
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert result.coverage["status"] == "partial"
-    assert list((kb_dir / "wiki/concepts").glob("alpha-*.md"))
-    assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("alpha*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("beta*.md"))
     assert any(row["reason"] == "provider_temporarily_unavailable" for row in result.omissions)
 
 
@@ -192,8 +169,8 @@ def test_new_version_withdraws_old_contribution_for_excluded_topic(kb_dir, setup
     second = import_document(kb_dir, source)
     assert second.knowledge_compilation == "completed", second
     assert second.omissions
-    assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
-    assert "See Beta." in next((kb_dir / "wiki/concepts").glob("alpha-*.md")).read_text()
+    assert not list((kb_dir / "wiki/concepts").glob("beta*.md"))
+    assert "See Beta." in next((kb_dir / "wiki/concepts").glob("alpha*.md")).read_text()
 
 
 @pytest.mark.parametrize("position", ["outside", "inside"])
@@ -216,7 +193,7 @@ def test_accepted_cross_source_link_cleanup_keeps_manual_summary(
     summary = next(
         p for p in (kb_dir / "wiki/summaries").glob("*.md") if first.source_id in p.read_text()
     )
-    beta = next((kb_dir / "wiki/concepts").glob("beta-*.md")).stem
+    beta = next((kb_dir / "wiki/concepts").glob("beta*.md")).stem
     note = f"\nHuman note: retain this interpretation of [[concepts/{beta}|Beta]].\n"
     text = summary.read_text()
     closing = f"<!-- /openkb-source:{first.source_id} -->"

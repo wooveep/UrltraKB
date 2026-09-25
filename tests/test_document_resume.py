@@ -135,8 +135,6 @@ def test_completed_document_recompiles_when_the_effective_output_cap_is_tightene
 @pytest.mark.parametrize(
     "stage,defect",
     [
-        ("planning", "json"),
-        ("planning", "coverage"),
         ("generation", "json"),
         ("generation", "coverage"),
         ("verification", "json"),
@@ -153,19 +151,12 @@ def test_one_bad_completed_response_can_recover(kb_dir, tmp_path, monkeypatch, s
         value = evidence_response(payload)
         bad = current == stage and calls[current] == 1
         if bad and defect == "coverage":
-            if stage == "planning":
-                value["page_changes"][0]["subject_ranges"] = []
-            else:
-                value["covered"] = []
+            value["covered"] = []
         if bad and defect == "uncertain":
             value = {"verdict": "uncertain", "reason": "Temporary ambiguity in this review."}
         output = response(value)
         if bad and defect == "json":
-            output.choices[0].message.content = (
-                output.choices[0].message.content[:-1] + ",}"
-                if stage == "planning"
-                else "{invalid"
-            )
+            output.choices[0].message.content = "{invalid"
         return output
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -238,41 +229,6 @@ def test_markdown_usable_body_can_compile_with_omission_notice(
     assert result.knowledge_compilation == "completed"
 
 
-def test_explicit_source_only_range_publishes_verified_available_content(
-    kb_dir, tmp_path, monkeypatch
-):
-    def completion(**kwargs):
-        payload = json.loads(kwargs["messages"][-1]["content"])
-        value = evidence_response(payload)
-        if payload["stage"] == "planning":
-            value = {
-                "overview": {"text": "Alpha guidance.", "ranges": [[0, 2]], "limitations": []},
-                "page_changes": [
-                    {
-                        "local_key": "alpha",
-                        "target_key": "",
-                        "kind": "concept",
-                        "title": "Alpha",
-                        "purpose": "Alpha requirement",
-                        "subject_ranges": [[0, 1]],
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [
-                    {"ranges": [[1, 2]], "reason": "The beta note remains source-only."}
-                ],
-                "unresolved": [],
-                "resolutions": [],
-            }
-        return response(v4_plan(payload, value))
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    result = import_document(kb_dir, document(tmp_path))
-    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert result.knowledge_compilation == "completed"
-    assert not result.omissions
-    assert [row["status"] for row in result.coverage["ranges"]] == ["verified", "no_facts"]
-    assert pages
 
 
 def test_explicit_request_count_stops_even_with_unlimited_tokens():
@@ -310,48 +266,6 @@ def test_semantic_unsupported_omits_knowledge_and_finishes_publication(
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 
 
-def test_source_only_document_is_recorded_without_creating_a_page(kb_dir, tmp_path, monkeypatch):
-    calls = Counter()
-
-    def completion(**kwargs):
-        payload = json.loads(kwargs["messages"][-1]["content"])
-        calls[payload["stage"]] += 1
-        if payload["stage"] == "planning":
-            ranges = payload["target"].get(
-                "ranges",
-                [[payload["target"]["target_start"], payload["target"]["target_end"]]],
-            )
-            return response(
-                v4_plan(
-                    payload,
-                    {
-                        "overview": {
-                            "text": "The source is retained as source-only guidance.",
-                            "ranges": ranges,
-                            "limitations": [],
-                        },
-                        "page_changes": [],
-                        "source_only": [
-                            {"ranges": ranges, "reason": "The note is not reusable knowledge."}
-                        ],
-                        "unresolved": [],
-                        "resolutions": [],
-                    },
-                )
-            )
-        pytest.fail(f"Unexpected model stage: {payload['stage']}")
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    result = import_document(
-        kb_dir,
-        document(tmp_path, "The required pressure is 37 kPa. Never retry authentication failure."),
-    )
-    pages = list((kb_dir / "wiki/concepts").glob("*.md"))
-    assert result.knowledge_compilation == "completed", result
-    assert not result.omissions
-    assert calls == {"planning": 1}
-    assert [row["status"] for row in result.coverage["ranges"]] == ["no_facts"]
-    assert not pages
 
 
 def test_known_text_encoding_is_detected(kb_dir, tmp_path, monkeypatch):
@@ -529,30 +443,14 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "planning":
-            target = payload["target"]
-            start, end = target["target_start"], target["target_end"]
-            value = {
-                "overview": {
-                    "text": "Independent document requirements.",
-                    "ranges": [[start, end]],
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": f"topic-{index}",
-                        "target_key": "",
-                        "kind": "concept",
-                        "title": f"topic-{index}",
-                        "purpose": f"Requirement {index}",
-                        "subject_ranges": [[index, index + 1]],
-                        "necessary_context": [],
-                    }
-                    for index in range(start, end)
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            if payload["subtask"] == "overview":
+                value = "Independent document requirements."
+            else:
+                target = payload["target"]
+                value = "\n".join(
+                    f"- Name: topic-{index}\n  Kind: concept"
+                    for index in range(target["target_start"], target["target_end"])
+                )
         elif payload["stage"] == "generation":
             with lock:
                 title = payload["page"]["title"]
@@ -633,30 +531,13 @@ def test_failed_page_does_not_discard_or_prevent_later_valid_pages(kb_dir, tmp_p
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "planning":
-            target = payload["target"]
-            start, end = target["target_start"], target["target_end"]
-            value = {
-                "overview": {
-                    "text": "Three independent requirements.",
-                    "ranges": [[start, end]],
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": name.lower(),
-                        "target_key": "",
-                        "kind": "concept",
-                        "title": name,
-                        "purpose": f"{name} requirement",
-                        "subject_ranges": [[index, index + 1]],
-                        "necessary_context": [],
-                    }
-                    for index, name in enumerate(("Alpha", "Beta", "Gamma"), start=start)
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            value = (
+                "Three independent requirements."
+                if payload["subtask"] == "overview"
+                else "- Name: Alpha\n  Kind: concept\n"
+                "- Name: Beta\n  Kind: concept\n"
+                "- Name: Gamma\n  Kind: concept"
+            )
         elif payload["stage"] == "generation":
             title = payload["page"]["title"]
             if first and title == "Alpha":
@@ -712,8 +593,8 @@ def test_document_page_correction_rechecks_original_evidence(kb_dir, tmp_path, m
     source = document(tmp_path, "One required fact.")
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert calls == {"planning": 1, "generation": 2, "verification": 2}
-    page = next((kb_dir / "wiki/concepts").glob("notes-*.md")).read_text(encoding="utf-8")
+    assert calls == {"planning": 2, "generation": 2, "verification": 2}
+    page = next((kb_dir / "wiki/concepts").glob("notes*.md")).read_text(encoding="utf-8")
     assert "The original requirement is preserved." in page
     assert "Wrong claim" not in page
 

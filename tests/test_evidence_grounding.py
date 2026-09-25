@@ -79,49 +79,24 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            if payload["subtask"] == "overview":
+                return "Controller shutdown scope and version conditions."
             blocks = payload["evidence"]["blocks"]
-            target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
             heading_block = next(block for block in blocks if block["text"] == heading)
             wait_block = next(block for block in blocks if block["text"] == "Wait 15 seconds.")
             quote_block = next(block for block in blocks if block["text"] == quote)
             return {
-                "overview": {
-                    "text": "Controller shutdown scope.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
+                "pages": [
                     {
-                        "local_key": "support",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/controller-support",
                         "title": "Controller Support",
-                        "purpose": "Describe version-specific controller support.",
+                        "kind": "concept",
                         "subject_ranges": [[quote_block["order"], quote_block["order"] + 1]],
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": [[heading_block["order"], heading_block["order"] + 1]],
-                                "rationale": "The heading limits this operation.",
-                                "basis_ranges": [
-                                    [heading_block["order"], heading_block["order"] + 1]
-                                ],
-                            },
-                            {
-                                "relation": "explicit_reference",
-                                "ranges": [[wait_block["order"], wait_block["order"] + 1]],
-                                "rationale": "The wait instruction applies here.",
-                                "basis_ranges": [[wait_block["order"], wait_block["order"] + 1]],
-                            },
+                        "context": [
+                            [heading_block["order"], heading_block["order"] + 1],
+                            [wait_block["order"], wait_block["order"] + 1],
                         ],
                     }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
+                ]
             }
         response = evidence_response(payload)
         if payload["stage"] in ("generation", "verification"):
@@ -144,13 +119,11 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
         assert any(
             item["text"] == heading
             and {route["route"] for route in item["routes"]} == {"context_only"}
-            and item["routes"][0]["relation"] == "applicable_condition"
             for item in evidence
         )
         assert any(
             item["text"] == "Wait 15 seconds."
             and {route["route"] for route in item["routes"]} == {"context_only"}
-            and item["routes"][0]["relation"] == "explicit_reference"
             for item in evidence
         )
 
@@ -290,9 +263,9 @@ def test_review_uses_existing_request_budget_and_verified_work_is_reusable(
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
-    assert len(model_service) == 3  # The completed draft only needs verification.
+    assert len(model_service) == 4  # Two planning tasks, then generation and verification.
     again = import_document(kb_dir, original)
-    assert again.status == "skipped" and len(model_service) == 3
+    assert again.status == "skipped" and len(model_service) == 4
 
 
 @pytest.mark.parametrize("damage", ["missing", "verdict", "reason", "content"])
@@ -358,7 +331,8 @@ def test_public_topic_title_is_verified_with_its_body(kb_dir, tmp_path, model_se
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
-            response["page_changes"][0]["title"] = bad_title
+            if payload["subtask"] == "pages":
+                return {"pages": [{"title": bad_title, "kind": "concept"}]}
         elif payload["stage"] == "generation":
             response["content"] = original.read_text()
         elif payload["stage"] == "verification":
@@ -387,7 +361,8 @@ def test_corrected_title_is_verified_published_and_restored(kb_dir, tmp_path, mo
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
-            response["page_changes"][0]["title"] = good_title
+            if payload["subtask"] == "pages":
+                return {"pages": [{"title": good_title, "kind": "concept"}]}
         elif payload["stage"] == "generation":
             response["content"] = "# " + bad_title + "\n\n" + original.read_text()
             if payload.get("revision"):
@@ -463,9 +438,10 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
     )
     for call in model_service:
         tokens = litellm.token_counter(model="gpt-4o-mini", messages=call["messages"])
-        tokens += litellm.token_counter(
-            model="gpt-4o-mini", text=json.dumps(call["response_format"])
-        )
+        if "response_format" in call:
+            tokens += litellm.token_counter(
+                model="gpt-4o-mini", text=json.dumps(call["response_format"])
+            )
         assert tokens + call["max_tokens"] <= 6144
     content = _published_concept(kb_dir, "notes").read_text()
     assert all(f"Valve {i}." in content for i in range(4))
@@ -495,31 +471,14 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
         if payload["stage"] == "planning":
+            if payload["subtask"] == "overview":
+                return "Version 6 startup and shutdown operations."
             target = payload["target"]
             ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-            registered = payload["carry"]["page_register"]
             return {
-                "overview": {
-                    "text": "Version 6 startup and shutdown operations.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": "version-6",
-                        "target_key": registered[0]["key"] if registered else "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/version-6-operations",
-                        "title": "Version 6 operations",
-                        "purpose": "Describe supported version 6 operations.",
-                        "subject_ranges": ranges,
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
+                "pages": [
+                    {"title": "Version 6 operations", "kind": "concept", "subject_ranges": ranges}
+                ]
             }
         if payload["stage"] == "generation":
             generated.append(payload)
@@ -612,7 +571,7 @@ def test_generation_thinking_change_replans_and_reverifies_page(kb_dir, tmp_path
     stages = [
         json.loads(call["messages"][-1]["content"])["stage"] for call in model_service[before:]
     ]
-    assert stages == ["planning", "generation", "verification"]
+    assert stages == ["planning", "planning", "generation", "verification"]
 
 
 @pytest.mark.parametrize(

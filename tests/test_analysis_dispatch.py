@@ -42,7 +42,7 @@ def test_larger_actual_plan_response_is_not_shared_with_a_smaller_fresh_request(
         result = import_document(kb_dir, source)
         assert result.knowledge_compilation == "completed", result
         first_run = False
-    assert plan_caps == [1024, 2048, 1024]
+    assert plan_caps == [1024, 2048, 2048, 1024, 1024]
 
 
 def test_concurrent_expansion_does_not_relabel_an_already_dispatched_response(monkeypatch):

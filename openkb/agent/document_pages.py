@@ -47,7 +47,9 @@ original evidence. Keep actors, operations, numbers, commands, negations, prereq
 exceptions attached to the operation they qualify. Do not turn a neighboring heading, condition,
 or unrelated section into a universal requirement. Do not invent facts, source locations, links,
 or missing material.
-External reference records and page limitations preserve original instructions;
+Planning notes are unverified hints; use them only to locate relevant supplied
+original evidence, never as facts by themselves. External reference records and
+page limitations preserve original instructions;
 they do not provide the unread external document's facts. State that required
 details remain unavailable instead of inventing steps or treating the mention
 as an imported source.
@@ -87,6 +89,9 @@ def _page_fields(page: PagePlan) -> dict[str, Any]:
         "purpose": page.purpose,
         "target": page.target,
         "subject_ranges": page.subject_ranges,
+        "context_ranges": getattr(page, "context_ranges", []),
+        "planning_notes": getattr(page, "planning_notes", []),
+        "scope_resolution": getattr(page, "scope_resolution", "section"),
         "necessary_context": source_bound_contexts(page.necessary_context),
         "limitations": [row.to_dict() for row in page.limitations],
     }

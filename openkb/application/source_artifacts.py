@@ -274,7 +274,7 @@ def load_compilation_artifact(store, summary, source_id, version_id, parse_id):
             or not (
                 isinstance(value.get("metadata"), dict)
                 and value["metadata"].get("protocol") in {
-                    "document-plan-v1", "document-plan-v2"
+                    "document-plan-v1", "document-plan-v2", "document-plan-v3"
                 }
                 or ledger_progress_preview(value) is not None
             )
@@ -573,7 +573,7 @@ def saved_document_plans(store, source_id, version_id, parse_id):
             or not isinstance(value, dict)
             or not isinstance(value.get("metadata"), dict)
             or value["metadata"].get("protocol") not in {
-                "document-plan-v1", "document-plan-v2"
+                "document-plan-v1", "document-plan-v2", "document-plan-v3"
             }
         ):
             raise ValueError("Invalid document plan artifact")
@@ -587,7 +587,7 @@ def artifact_stage(record):
     if ledger_progress_preview(value) is not None:
         return "planning"
     if isinstance(metadata, dict) and metadata.get("protocol") in {
-        "document-plan-v1", "document-plan-v2"
+        "document-plan-v1", "document-plan-v2", "document-plan-v3"
     }:
         return "planning"
     if stage is not None and stage not in {"facts", "planning", "generation", "verification"}:

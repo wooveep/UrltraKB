@@ -586,6 +586,7 @@ class CompilationCheckpoints:
             "topic",
             "plan_repair",
             "reference_check",
+            "markdown_plan",
         }:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
@@ -634,6 +635,7 @@ class CompilationCheckpoints:
             "topic",
             "plan_repair",
             "reference_check",
+            "markdown_plan",
         }:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")

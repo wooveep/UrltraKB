@@ -4,6 +4,16 @@ import pytest
 
 from openkb.application.documents import import_document
 from openkb.application.removal import preview_removal, remove_document
+from tests.http_model_fixture import evidence_response
+
+
+def _plan_existing_notes(body):
+    import json
+
+    payload = json.loads(body["messages"][-1]["content"])
+    if payload.get("stage") == "planning" and payload.get("subtask") == "pages":
+        return "- 名称：Notes\n  类别：concept\n  目标页面：concepts/notes\n  用途：Document notes"
+    return evidence_response(payload)
 
 
 @pytest.mark.parametrize(
@@ -21,6 +31,8 @@ def test_last_source_removal_obeys_known_generated_ownership(kb_dir, tmp_path, m
         (kb_dir / "wiki/concepts/notes.md").write_text(
             '---\nhuman_instruction: "Retain independent metadata"\n---\n'
         )
+    if edit in {"accepted_outside", "accepted_metadata"}:
+        model_service.respond = _plan_existing_notes
     imported = import_document(kb_dir, source)
     if edit in {"accepted_outside", "accepted_metadata"}:
         from openkb.application.source_actions import continue_source, review_source_proposal
@@ -105,12 +117,11 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
     import json
 
     from openkb.application.source_actions import continue_source, review_source_proposal
-    from tests.http_model_fixture import evidence_response
-
     page = kb_dir / "wiki/concepts/notes.md"
     page.write_text('---\nhuman_instruction: "Retain independent metadata"\n---\n')
     source = tmp_path / "procedure.md"
     source.write_text("The timeout is 42 seconds.")
+    model_service.respond = _plan_existing_notes
     first = import_document(kb_dir, source)
     assert first.reason == "needs_acceptance", first
     review = review_source_proposal(kb_dir, first.resume)
@@ -126,32 +137,10 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         response = evidence_response(payload)
-        if payload["stage"] == "planning":
-            target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-            response = {
-                "overview": {
-                    "text": "The current policy.",
-                    "ranges": ranges,
-                    "limitations": [],
-                },
-                "page_changes": [
-                    {
-                        "local_key": "new-topic",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/new-topic",
-                        "title": "New topic",
-                        "purpose": "The current policy.",
-                        "subject_ranges": ranges,
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+        if payload["stage"] == "planning" and payload.get("subtask") == "overview":
+            response = "The current policy."
+        elif payload["stage"] == "planning":
+            response = "- 名称：New topic\n  类别：concept\n  用途：The current policy."
         return response
 
     model_service.respond = respond

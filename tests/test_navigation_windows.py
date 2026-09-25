@@ -390,6 +390,6 @@ def test_compile_and_verify_reuse_the_final_evidence_prefix(kb_dir, tmp_path, mo
     generation = json.loads(messages["generation"][-1]["content"])
     verification = json.loads(messages["verification"][-1]["content"])
     assert generation["evidence"] == verification["evidence"]
-    prefix = '{"protocol":"source-prefix-v2","evidence":'
+    prefix = '{"protocol":"source-prefix-v3","evidence":'
     assert messages["generation"][-1]["content"].startswith(prefix)
     assert messages["verification"][-1]["content"].startswith(prefix)

@@ -24,9 +24,19 @@ def _length(rows: list[tuple[int, int]]) -> int:
 
 
 def planning_coverage(
-    plan: DocumentPlan | None, parsed: Any, *, omission_count: int | None = None
+    plan: DocumentPlan | None,
+    parsed: Any,
+    *,
+    omission_count: int | None = None,
+    outcome: str | None = None,
 ) -> dict[str, Any]:
     """Count P, S, and M as interval unions; blocked pages contribute no P."""
+    if (
+        plan is not None
+        and plan.metadata.get("protocol") == "document-plan-v3"
+        or (plan is None and outcome in {"complete", "partial", "empty"})
+    ):
+        return _planning_coverage_v3(plan, parsed, outcome=outcome, omission_count=omission_count)
     pages: dict[int, list[tuple[int, int]]] = {}
     source_only: dict[int, list[tuple[int, int]]] = {}
     if plan is not None:
@@ -93,17 +103,86 @@ def planning_coverage(
     }
 
 
+def _planning_coverage_v3(
+    plan: DocumentPlan | None,
+    parsed: Any,
+    *,
+    outcome: str | None = None,
+    omission_count: int | None = None,
+) -> dict[str, Any]:
+    """Report precise page ranges, conservative fallbacks, and unrouted text."""
+    precise: dict[int, list[tuple[int, int]]] = {}
+    fallback: dict[int, list[tuple[int, int]]] = {}
+    for page in plan.pages if plan is not None else []:
+        if page.state != "ready":
+            continue
+        destination = fallback if page.scope_resolution == "target_fallback" else precise
+        _add(destination, page.subject_ranges, parsed, "page subject")
+    total = precise_chars = fallback_chars = 0
+    missing_ranges = []
+    for index, block in enumerate(parsed.blocks):
+        if "attachment" in block.location or block.kind in {"image", "figure", "attachment"}:
+            continue
+        chars = block.chars
+        if type(chars) is not int or chars < 0:
+            raise ValueError("Invalid readable text denominator")
+        total += chars
+        p = merged_intervals(precise.get(index, []))
+        f = merged_intervals(fallback.get(index, []))
+        precise_chars += _length(p)
+        fallback_chars += _length([*p, *f]) - _length(p)
+        cursor = 0
+        for start, end in merged_intervals([*p, *f]):
+            if start > cursor:
+                missing_ranges.append({"block_id": block.id, "start": cursor, "end": start})
+            cursor = max(cursor, end)
+        if cursor < chars:
+            missing_ranges.append({"block_id": block.id, "start": cursor, "end": chars})
+    unrouted = total - precise_chars - fallback_chars
+    return {
+        "protocol": "document-planning-coverage-v2",
+        "status": outcome or (plan.metadata.get("outcome", "complete") if plan else "empty"),
+        "readable_chars": total,
+        "precise_chars": precise_chars,
+        "fallback_chars": fallback_chars,
+        "unrouted_chars": unrouted,
+        "precise_ratio": precise_chars / total if total else None,
+        "fallback_ratio": fallback_chars / total if total else None,
+        "unrouted_ratio": unrouted / total if total else None,
+        "missing_ranges": missing_ranges,
+        "planning_omissions": omission_count
+        if omission_count is not None
+        else len(plan.planning_omissions)
+        if plan
+        else 0,
+        "parser_gaps": len(parsing_gaps(parsed)),
+    }
+
+
 def validate_planning_coverage(value: dict[str, Any]) -> None:
     """Keep the planning projection separate from publication coverage."""
     if value == {}:
         return
+    if isinstance(value, dict) and value.get("protocol") == "document-planning-coverage-v2":
+        _validate_planning_coverage_v3(value)
+        return
     if not isinstance(value, dict) or value.get("protocol") != "document-planning-coverage-v1":
         raise ValueError("Invalid planning coverage protocol")
     expected = {
-        "protocol", "status", "readable_chars", "executable_page_chars",
-        "source_only_chars", "missing_chars", "effective_ratio", "page_ratio",
-        "source_only_ratio", "missing_ratio", "missing_ranges", "blocked_pages",
-        "planning_omissions", "parser_gaps",
+        "protocol",
+        "status",
+        "readable_chars",
+        "executable_page_chars",
+        "source_only_chars",
+        "missing_chars",
+        "effective_ratio",
+        "page_ratio",
+        "source_only_ratio",
+        "missing_ratio",
+        "missing_ranges",
+        "blocked_pages",
+        "planning_omissions",
+        "parser_gaps",
     }
     if set(value) != expected:
         raise ValueError("Invalid planning coverage fields")
@@ -146,10 +225,8 @@ def validate_planning_coverage(value: dict[str, Any]) -> None:
         if type(start) is not int or type(end) is not int or not 0 <= start < end:
             raise ValueError("Invalid planning missing range bounds")
         by_block.setdefault(row["block_id"], []).append((start, end))
-    if (
-        sum(end - start for spans in by_block.values() for start, end in spans)
-        != counted[2]
-        or any(len(merged_intervals(spans)) != len(spans) for spans in by_block.values())
+    if sum(end - start for spans in by_block.values() for start, end in spans) != counted[2] or any(
+        len(merged_intervals(spans)) != len(spans) for spans in by_block.values()
     ):
         raise ValueError("Inconsistent planning missing ranges")
     for key in ("blocked_pages", "planning_omissions", "parser_gaps"):
@@ -161,3 +238,59 @@ def validate_planning_coverage(value: dict[str, Any]) -> None:
     )
     if value["status"] != ("partial" if partial else "complete"):
         raise ValueError("Inconsistent planning coverage status")
+
+
+def _validate_planning_coverage_v3(value: dict[str, Any]) -> None:
+    expected = {
+        "protocol",
+        "status",
+        "readable_chars",
+        "precise_chars",
+        "fallback_chars",
+        "unrouted_chars",
+        "precise_ratio",
+        "fallback_ratio",
+        "unrouted_ratio",
+        "missing_ranges",
+        "planning_omissions",
+        "parser_gaps",
+    }
+    if set(value) != expected or value["status"] not in {"complete", "partial", "empty"}:
+        raise ValueError("Invalid v3 planning coverage")
+    counts = [value[key] for key in ("precise_chars", "fallback_chars", "unrouted_chars")]
+    total = value["readable_chars"]
+    if any(type(count) is not int or count < 0 for count in [total, *counts]):
+        raise ValueError("Invalid v3 planning coverage counts")
+    if sum(counts) != total:
+        raise ValueError("Inconsistent v3 planning coverage counts")
+    for key, count in zip(("precise_ratio", "fallback_ratio", "unrouted_ratio"), counts):
+        expected_ratio = count / total if total else None
+        actual = value[key]
+        if (
+            expected_ratio is None
+            and actual is not None
+            or expected_ratio is not None
+            and (
+                type(actual) not in {int, float}
+                or not isclose(actual, expected_ratio, rel_tol=0, abs_tol=1e-12)
+            )
+        ):
+            raise ValueError("Invalid v3 planning coverage ratio")
+    if not isinstance(value["missing_ranges"], list):
+        raise ValueError("Invalid v3 planning missing ranges")
+    by_block: dict[str, list[tuple[int, int]]] = {}
+    for row in value["missing_ranges"]:
+        if not isinstance(row, dict) or set(row) != {"block_id", "start", "end"}:
+            raise ValueError("Invalid v3 planning missing range")
+        valid_id(row["block_id"])
+        start, end = row["start"], row["end"]
+        if type(start) is not int or type(end) is not int or not 0 <= start < end:
+            raise ValueError("Invalid v3 planning missing range bounds")
+        by_block.setdefault(row["block_id"], []).append((start, end))
+    if sum(end - start for spans in by_block.values() for start, end in spans) != counts[2] or any(
+        len(merged_intervals(spans)) != len(spans) for spans in by_block.values()
+    ):
+        raise ValueError("Inconsistent v3 planning missing ranges")
+    for key in ("planning_omissions", "parser_gaps"):
+        if type(value[key]) is not int or value[key] < 0:
+            raise ValueError("Invalid v3 planning diagnostics")
