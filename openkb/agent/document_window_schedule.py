@@ -106,7 +106,12 @@ def valid_window_schedule(
                 )
 
         covered: dict[int, list[tuple[int, int]]] = {}
+        prior_windows: list[tuple[str, list[tuple[int, int, int]]]] = []
         for window in schedule:
+            if isinstance(window, dict) and "attempt_limit" in window and (
+                type(window["attempt_limit"]) is not int or window["attempt_limit"] < 1
+            ):
+                return False
             if (
                 not isinstance(window, dict)
                 or type(window.get("target_start")) is not int
@@ -250,8 +255,22 @@ def valid_window_schedule(
                 normalized(w_spans) == normalized(base["spans"]) for base in base_w
             ):
                 return False
-            for index, start, end in target_spans:
-                covered.setdefault(index, []).append((start, end))
+            retry_of = window.get("retry_of")
+            if retry_of is not None:
+                if (
+                    not isinstance(retry_of, str)
+                    or type(window.get("retry_attempt")) is not int
+                    or window["retry_attempt"] < 1
+                    or not any(
+                        identity == retry_of and covers(prior, target_spans)
+                        for identity, prior in prior_windows
+                    )
+                ):
+                    return False
+            else:
+                for index, start, end in target_spans:
+                    covered.setdefault(index, []).append((start, end))
+            prior_windows.append((window_receipt_id(window), target_spans))
         for index, block in enumerate(parsed.blocks):
             chars = getattr(block, "chars", None)
             if type(chars) is not int or chars < 0:

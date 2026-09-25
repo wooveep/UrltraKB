@@ -1,10 +1,4 @@
-"""Deterministically compile one untrusted document-plan-v3 candidate.
-
-The public seam deliberately accepts all trusted planning state in one context
-and returns data instead of mutating a ledger.  Repair and orchestration can
-therefore submit every fresh, cached, mocked, or patched candidate through the
-same compiler before any durable state changes.
-"""
+"""Compile one untrusted planning candidate against trusted source evidence."""
 
 from __future__ import annotations
 
@@ -14,14 +8,12 @@ from openkb.agent._document_plan_compiler_support import (
     CONTEXT_FIELDS as _CONTEXT_FIELDS,
 )
 from openkb.agent._document_plan_compiler_support import (
-    PROBLEM_TYPES as _PROBLEM_TYPES,
-)
-from openkb.agent._document_plan_compiler_support import (
     RELATIONS as _RELATIONS,
 )
 from openkb.agent._document_plan_compiler_support import (
     PlanCompileResult,
     PlanningContext,
+    allowed_problem_types,
 )
 from openkb.agent._document_plan_compiler_support import (
     allocate_name as _allocate_name,
@@ -44,10 +36,18 @@ from openkb.agent._document_plan_compiler_support import (
 from openkb.agent._document_plan_compiler_support import (
     shape_issues as _shape_issues,
 )
+from openkb.agent.document_plan_annotation_compiler import (
+    attach_annotations,
+)
+from openkb.agent.document_plan_diagnostics import prepare_candidate
+from openkb.agent.document_plan_finalize import finalize_candidate
 from openkb.agent.document_plan_issues import (
     PlanValidationError,
 )
-from openkb.agent.document_planning_support import canonicalize_context_bases
+from openkb.agent.document_plan_normalization import (
+    overview_limitation_reasons,
+    reclassify_literal_external_material,
+)
 from openkb.agent.document_range_validation import (
     frozen_evidence_intervals,
     require_nonempty_ranges,
@@ -55,24 +55,27 @@ from openkb.agent.document_range_validation import (
     validate_evidence_ranges,
     validate_overview_ranges,
     validate_ranges,
-    validate_target_coverage,
     validate_target_ranges,
 )
 
 __all__ = ("PlanningContext", "PlanCompileResult", "compile_plan_candidate")
 
 
-def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileResult:
-    """Compile an untrusted v3 response into one fully derived durable delta."""
+def compile_plan_candidate(
+    raw: Any, context: PlanningContext, *, allow_coverage_gaps: bool = False,
+    allow_empty_overview: bool = False,
+) -> PlanCompileResult:
+    """Compile one untrusted versioned plan into a derived durable delta."""
 
     candidate, issues = _parse_candidate(raw)
     if issues:
         return PlanCompileResult(candidate, tuple(issues), (), None)
+    candidate, normalizations = overview_limitation_reasons(
+        candidate, context.selection_protocol
+    )
+    candidate, reclassified = reclassify_literal_external_material(candidate, context)
+    normalizations.extend(reclassified)
     issues = _shape_issues(candidate)
-    if issues:
-        return PlanCompileResult(candidate, tuple(issues), (), None)
-
-    assert isinstance(candidate, dict)
     chars = _block_chars(context)
     if len(chars) != context.total_blocks or any(
         type(value) is not int or value < 0 for value in chars
@@ -142,8 +145,35 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
         )
         return PlanCompileResult(candidate, tuple(caught), (), None)
 
+    raw_candidate = candidate
+    prepared = prepare_candidate(candidate, context, target, evidence, chars, ignored)
+    normalizations.extend(prepared.normalizations)
+    candidate, coverage_issues, coverage_status = (
+        prepared.canonical,
+        prepared.issues,
+        prepared.coverage_status,
+    )
+    if issues or any(
+        issue.code
+        in {"invalid_selection_shape", "unknown_block_reference", "selection_outside_evidence"}
+        for issue in coverage_issues
+    ):
+        return PlanCompileResult(
+            raw_candidate,
+            tuple([*issues, *coverage_issues]),
+            (),
+            None,
+            coverage_status,
+        )
+    assert isinstance(candidate, dict)
+
     overview = candidate["overview"]
-    if not isinstance(overview.get("text"), str) or not overview["text"].strip():
+    empty_overview = allow_empty_overview and overview == {
+        "text": "", "ranges": [], "limitations": []
+    }
+    if not empty_overview and (
+        not isinstance(overview.get("text"), str) or not overview["text"].strip()
+    ):
         issues.append(
             _issue(
                 "invalid_text",
@@ -165,7 +195,7 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
             )
         )
     overview_ranges = overview.get("ranges")
-    if _run(
+    if not empty_overview and _run(
         issues,
         "overview",
         lambda: validate_ranges(
@@ -202,14 +232,10 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
         for row in context.carry_pages
         if isinstance(row, Mapping) and isinstance(row.get("key"), str)
     }
-    occupied_page_keys = set(context.known_page_keys) | set(carry)
-    used_names = {
-        row.get("name")
-        for row in carry.values()
-        if isinstance(row.get("name"), str) and row.get("name")
+    occupied_page_keys: set[str] = {key for key in carry if isinstance(key, str)}
+    used_names: set[str] = {
+        name for row in carry.values() if isinstance(name := row.get("name"), str) and name
     }
-    used_names.update(context.known_page_name_keys)
-    used_names.update(context.reserved_targets)
     used_names.update(context.existing_targets)
     allocated_local: dict[str, str] = {}
     pages: list[dict[str, Any]] = []
@@ -287,24 +313,28 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                     )
                 )
 
-        target_key = change.get("target_key") or ""
-        requested_target = change.get("target") or ""
+        target_key = "" if change.get("target_key") is None else change["target_key"]
+        requested_target = "" if change.get("target") is None else change["target"]
         if not isinstance(target_key, str) or not isinstance(requested_target, str):
-            issues.append(
-                _issue(
-                    "invalid_page_identity",
-                    path,
-                    "nullable string target_key/target",
-                    {"target_key": change.get("target_key"), "target": change.get("target")},
-                    item_ref=item_ref,
-                )
-            )
+            for field_name in ("target_key", "target"):
+                if change.get(field_name) is not None and not isinstance(change[field_name], str):
+                    issues.append(
+                        _issue(
+                            "invalid_page_identity",
+                            f"{path}.{field_name}",
+                            "string or null",
+                            change[field_name],
+                            item_ref=item_ref,
+                        )
+                    )
             continue
         previous = carry.get(target_key) if target_key else None
         if target_key and previous is None:
             issues.append(
                 _issue(
-                    "unknown_page_reference",
+                    "projection_required"
+                    if target_key in context.known_page_keys
+                    else "unknown_page_reference",
                     f"{path}.target_key",
                     "visible registered page key",
                     target_key,
@@ -327,17 +357,18 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                     )
                 )
                 continue
-            if kind != previous.get("kind") or type_ != previous.get("type"):
-                issues.append(
-                    _issue(
-                        "page_identity_change",
-                        path,
-                        {"kind": previous.get("kind"), "type": previous.get("type")},
-                        {"kind": kind, "type": type_},
-                        item_ref=item_ref,
-                        category="identity",
+            for field_name, supplied in (("kind", kind), ("type", type_)):
+                if supplied != previous.get(field_name):
+                    issues.append(
+                        _issue(
+                            "page_identity_change",
+                            f"{path}.{field_name}",
+                            previous.get(field_name),
+                            supplied,
+                            item_ref=item_ref,
+                            category="identity",
+                        )
                     )
-                )
             if requested_target and requested_target != inherited_target:
                 issues.append(
                     _issue(
@@ -351,10 +382,10 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                 )
             assigned_key, durable_target = target_key, inherited_target
         elif requested_target:
-            if requested_target not in set(context.existing_targets):
+            if requested_target not in context.existing_targets:
                 code = (
                     "projection_required"
-                    if requested_target in set(context.reserved_targets)
+                    if requested_target in context.reserved_targets
                     else "unknown_page_target"
                 )
                 issues.append(
@@ -369,7 +400,7 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                 )
                 continue
             name, durable_target = requested_target, requested_target
-            assigned_key = _next_key("p", occupied_page_keys)
+            assigned_key = _next_key("p", occupied_page_keys, context.known_page_keys)
         else:
             if not isinstance(title, str) or not title.strip():
                 continue
@@ -388,7 +419,7 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                 )
                 continue
             durable_target = ""
-            assigned_key = _next_key("p", occupied_page_keys)
+            assigned_key = _next_key("p", occupied_page_keys, context.known_page_keys)
         if name in used_names and previous is None and not requested_target:
             issues.append(
                 _issue(
@@ -566,8 +597,10 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
         )
 
     unresolved: list[dict[str, Any]] = []
-    occupied_unresolved = set(context.known_unresolved_keys) | {
-        row.get("key") for row in context.open_unresolved if isinstance(row, Mapping)
+    occupied_unresolved: set[str] = {
+        row["key"]
+        for row in context.open_unresolved
+        if isinstance(row, Mapping) and isinstance(row.get("key"), str)
     }
     for index, item in enumerate(candidate["unresolved"]):
         path, item_ref = f"unresolved[{index}]", f"unresolved:{index}"
@@ -602,12 +635,13 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                 ),
             )
         problem_type = item.get("problem_type")
-        if problem_type not in _PROBLEM_TYPES:
+        allowed_types = allowed_problem_types(context.selection_protocol)
+        if problem_type not in allowed_types:
             issues.append(
                 _issue(
                     "invalid_problem_type",
                     f"{path}.problem_type",
-                    sorted(_PROBLEM_TYPES),
+                    sorted(allowed_types),
                     problem_type,
                     item_ref=item_ref,
                     source_ranges=location if isinstance(location, list) else (),
@@ -649,7 +683,9 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                 if key not in occupied_page_keys:
                     issues.append(
                         _issue(
-                            "unknown_page_reference",
+                            "projection_required"
+                            if key in context.known_page_keys
+                            else "unknown_page_reference",
                             f"{path}.affected_pages[{affected_index}]",
                             "local_key or supplied durable page key",
                             value,
@@ -662,7 +698,7 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
                     affected.append(key)
         unresolved.append(
             {
-                "key": _next_key("u", occupied_unresolved),
+                "key": _next_key("u", occupied_unresolved, context.known_unresolved_keys),
                 "location": location,
                 "problem_type": problem_type,
                 "missing_target": item.get("missing_target"),
@@ -686,7 +722,7 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
         if not isinstance(key, str) or key in resolved_keys or key not in open_by_key:
             code = (
                 "projection_required"
-                if key in set(context.known_open_unresolved_keys)
+                if key in context.known_open_unresolved_keys
                 else "unknown_unresolved_reference"
             )
             issues.append(
@@ -739,6 +775,11 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
     for page in pages:
         page["state"] = "blocked" if page["target_key"] in blocked else "ready"
 
+    external_references, external_issues = attach_annotations(
+        candidate, pages, context, allocated_local, occupied_page_keys, chars, ignored, evidence
+    )
+    issues.extend(external_issues)
+
     delta = {
         "overview": {
             "text": overview.get("text"),
@@ -749,32 +790,9 @@ def compile_plan_candidate(raw: Any, context: PlanningContext) -> PlanCompileRes
         "source_only": source_only,
         "unresolved": unresolved,
         "resolutions": resolutions,
+        "external_references": external_references,
     }
-    if not issues:
-        _run(
-            issues,
-            "$",
-            lambda: validate_target_coverage(
-                target,
-                pages,
-                source_only,
-                unresolved,
-                block_chars=chars,
-                ignored_blocks=ignored,
-            ),
-        )
-    if not issues:
-        _run(
-            issues,
-            "$",
-            lambda: canonicalize_context_bases(delta, dict(context.evidence), context.parsed),
-        )
-    unassigned = tuple(
-        source_range
-        for issue in issues
-        if issue.code == "coverage_gap"
-        for source_range in issue.source_ranges
+    return finalize_candidate(
+        raw_candidate, delta, issues, coverage_issues, coverage_status,
+        context, normalizations, allow_coverage_gaps=allow_coverage_gaps,
     )
-    if any(issue.blocking for issue in issues):
-        return PlanCompileResult(candidate, tuple(issues), unassigned, None)
-    return PlanCompileResult(candidate, tuple(issues), unassigned, delta)

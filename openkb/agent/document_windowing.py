@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from openkb.agent.document_plan import table_row_identity
@@ -135,7 +135,33 @@ def split_planning_target(window: dict[str, Any], parsed: Any) -> list[dict[str,
                 "window_id": content_id({"frozen_evidence": frozen, "target_ranges": ranges}),
             }
         )
+    for child in children[1:]:
+        child.pop("retry_omission_key", None)
     return children
+
+
+def for_window_attempts(
+    limits: RequestLimits, window: dict[str, Any], configured: int
+) -> RequestLimits:
+    """Apply a persisted split child's share of the configured repair allowance."""
+    limit = window.get("attempt_limit", configured)
+    if type(limit) is not int or limit < 1:
+        raise ValueError("Invalid planning attempt limit")
+    return replace(limits, max_attempts=min(configured, limit))
+
+
+def limit_split_attempts(
+    children: list[dict[str, Any]], parent: dict[str, Any],
+    attempts_used: int, configured: int,
+) -> None:
+    """Give each new target an initial call and divide remaining repairs."""
+    if not children:
+        return
+    parent_limit = min(configured, parent.get("attempt_limit", configured))
+    repairs = max(0, parent_limit - max(1, attempts_used))
+    per_child, extra = divmod(repairs, len(children))
+    for index, child in enumerate(children):
+        child["attempt_limit"] = 1 + per_child + (index < extra)
 
 
 def reload_planning_target(
@@ -206,6 +232,8 @@ def reload_planning_target(
                     "reloaded_from": parent,
                 }
             )
+    for child in children[1:]:
+        child.pop("retry_omission_key", None)
     return children
 
 

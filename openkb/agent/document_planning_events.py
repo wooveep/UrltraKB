@@ -2,11 +2,47 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from openkb.agent.document_window_receipts import frozen_evidence_id, target_ranges
 from openkb.execution_measurement import record_document_planning
 from openkb.sources import content_id
+
+
+def emit_readmission(on_event: Any, window_index: int, output_tokens: int) -> None:
+    on_event({
+        "stage": "planning", "operation": "re_admit_planning_request",
+        "window": window_index + 1, "output_tokens": output_tokens,
+    })
+
+
+def emit_split_target(
+    on_event: Any, ledger: Any, children: list[dict[str, Any]],
+    windows: list[dict[str, Any]], index: int, *, prefix: Any,
+    candidate_count: int, window_started: float, planning_started: float,
+    request: Any,
+) -> None:
+    on_event({
+        "stage": "planning", "operation": "split_planning_target",
+        "window": index + 1, "parts": len(children),
+        "frozen_evidence": children[0]["frozen_evidence_id"],
+    })
+    emit_planning_observation(
+        on_event,
+        planning_observation(
+            "split", children[0], windows, completed=index,
+            carry_pages=ledger.page_count(),
+            carry_unresolved=ledger.open_unresolved_count(),
+            pages=ledger.page_count(),
+            unresolved=ledger.open_unresolved_count(),
+            reason="output_budget_exhausted", parts=len(children),
+            prefix=prefix, candidate_count=candidate_count,
+            elapsed_seconds=time.monotonic() - window_started,
+            frozen_last_use_seconds=time.monotonic() - planning_started,
+            request=request,
+        ),
+    )
 
 
 def _completed_ranges(windows: list[dict[str, Any]], completed: int) -> list[Any]:
@@ -119,3 +155,51 @@ def emit_planning_observation(
 
     record_document_planning(row)
     on_event({"stage": "planning", "event": "planning_observation", "observation": row})
+
+
+def emit_accepted_window(
+    on_event: Callable[[dict[str, Any]], None],
+    ledger: Any,
+    window: dict[str, Any],
+    windows: list[dict[str, Any]],
+    receipt: dict[str, Any],
+    prefix: dict[str, Any],
+    page_register: list[Any],
+    open_references: list[Any],
+    index: int,
+    window_started: float,
+    planning_started: float,
+    request_details: dict[str, Any] | None,
+) -> None:
+    """Report the committed increment after the ledger transaction succeeds."""
+    on_event(
+        {
+            "stage": "planning",
+            "window": index + 1,
+            "total_windows": len(windows),
+            "pages": ledger.page_count(),
+            "unresolved": ledger.open_unresolved_count(),
+        }
+    )
+    emit_planning_observation(
+        on_event,
+        planning_observation(
+            "accepted",
+            window,
+            windows,
+            completed=index + 1,
+            carry_pages=len(page_register),
+            carry_unresolved=len(open_references),
+            pages=ledger.page_count(),
+            unresolved=ledger.open_unresolved_count(),
+            checkpoint=receipt["checkpoint"],
+            result=receipt["result"],
+            attempt=receipt["attempt"],
+            cached=receipt["cached"],
+            prefix=prefix,
+            candidate_count=ledger.page_count(),
+            elapsed_seconds=time.monotonic() - window_started,
+            frozen_last_use_seconds=time.monotonic() - planning_started,
+            request=request_details,
+        ),
+    )

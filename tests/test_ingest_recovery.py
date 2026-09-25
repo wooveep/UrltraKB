@@ -144,7 +144,7 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
     source.write_text("# Previously retained source\n")
     first = import_document(kb_dir, source)
     assert first.knowledge_compilation == "completed"
-    old = kb_dir / "wiki/concepts/notes.md"
+    old = next((kb_dir / "wiki/concepts").glob("notes*.md"))
     previous = old.read_bytes()
     source.write_text("# New document\n")
     copy = mutation._copy_file_atomic

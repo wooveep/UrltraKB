@@ -93,6 +93,7 @@ class DocumentResult:
     parse_id: str | None = None
     omissions: tuple[dict[str, Any], ...] = ()
     coverage: dict[str, Any] = field(default_factory=dict)
+    planning_coverage: dict[str, Any] = field(default_factory=dict)
     attachments: tuple[DocumentAttachment, ...] = ()
 
     def __post_init__(self) -> None:
@@ -127,6 +128,9 @@ class DocumentResult:
         from openkb.source_coverage import validate_coverage
 
         validate_coverage(self.coverage, self.source_id, self.input_version, self.parse_id)
+        from openkb.planning_coverage import validate_planning_coverage
+
+        validate_planning_coverage(self.planning_coverage)
         if not isinstance(self.attachments, tuple) or not all(
             isinstance(item, DocumentAttachment) for item in self.attachments
         ):

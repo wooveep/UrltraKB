@@ -11,7 +11,7 @@ from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
 from openkb.config import DEFAULT_CONFIG
 from openkb.processing import ExecutionBudget, ProcessingIncomplete, RequestLimits
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 from tests.processing_fixtures import OFFLINE_PROCESSING
 from tests.test_adaptive_processing import response
 
@@ -161,7 +161,11 @@ def test_one_bad_completed_response_can_recover(kb_dir, tmp_path, monkeypatch, s
             value = {"verdict": "uncertain", "reason": "Temporary ambiguity in this review."}
         output = response(value)
         if bad and defect == "json":
-            output.choices[0].message.content = "{invalid"
+            output.choices[0].message.content = (
+                output.choices[0].message.content[:-1] + ",}"
+                if stage == "planning"
+                else "{invalid"
+            )
         return output
 
     monkeypatch.setattr(litellm, "completion", completion)
@@ -184,7 +188,7 @@ def test_resume_reuses_accepted_document_plan_without_replanning(kb_dir, tmp_pat
         value = evidence_response(payload)
         if phase == 1 and payload["stage"] == "generation":
             value = {"content": "Incomplete candidate", "covered": []}
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
@@ -207,7 +211,7 @@ def test_resume_verification_does_not_regenerate_received_draft(kb_dir, tmp_path
         value = evidence_response(payload)
         if phase == 1 and payload["stage"] == "verification":
             value = {}
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     first = import_document(kb_dir, document(tmp_path))
@@ -248,7 +252,6 @@ def test_explicit_source_only_range_publishes_verified_available_content(
                         "local_key": "alpha",
                         "target_key": "",
                         "kind": "concept",
-                        "name": "concepts/alpha",
                         "title": "Alpha",
                         "purpose": "Alpha requirement",
                         "subject_ranges": [[0, 1]],
@@ -261,7 +264,7 @@ def test_explicit_source_only_range_publishes_verified_available_content(
                 "unresolved": [],
                 "resolutions": [],
             }
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
@@ -294,7 +297,7 @@ def test_semantic_unsupported_omits_knowledge_and_finishes_publication(
         value = evidence_response(payload)
         if payload["stage"] == "verification":
             value = {"verdict": "unsupported", "reason": "Candidate changes a literal condition."}
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path))
@@ -319,19 +322,22 @@ def test_source_only_document_is_recorded_without_creating_a_page(kb_dir, tmp_pa
                 [[payload["target"]["target_start"], payload["target"]["target_end"]]],
             )
             return response(
-                {
-                    "overview": {
-                        "text": "The source is retained as source-only guidance.",
-                        "ranges": ranges,
-                        "limitations": [],
+                v4_plan(
+                    payload,
+                    {
+                        "overview": {
+                            "text": "The source is retained as source-only guidance.",
+                            "ranges": ranges,
+                            "limitations": [],
+                        },
+                        "page_changes": [],
+                        "source_only": [
+                            {"ranges": ranges, "reason": "The note is not reusable knowledge."}
+                        ],
+                        "unresolved": [],
+                        "resolutions": [],
                     },
-                    "page_changes": [],
-                    "source_only": [
-                        {"ranges": ranges, "reason": "The note is not reusable knowledge."}
-                    ],
-                    "unresolved": [],
-                    "resolutions": [],
-                }
+                )
             )
         pytest.fail(f"Unexpected model stage: {payload['stage']}")
 
@@ -536,7 +542,6 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
                         "local_key": f"topic-{index}",
                         "target_key": "",
                         "kind": "concept",
-                        "name": f"concepts/topic-{index}",
                         "title": f"topic-{index}",
                         "purpose": f"Requirement {index}",
                         "subject_ranges": [[index, index + 1]],
@@ -554,7 +559,7 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
                 calls.append(title)
             if first and title == "topic-0":
                 value["covered"] = []
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
@@ -641,7 +646,6 @@ def test_failed_page_does_not_discard_or_prevent_later_valid_pages(kb_dir, tmp_p
                         "local_key": name.lower(),
                         "target_key": "",
                         "kind": "concept",
-                        "name": f"concepts/{name.lower()}",
                         "title": name,
                         "purpose": f"{name} requirement",
                         "subject_ranges": [[index, index + 1]],
@@ -659,7 +663,7 @@ def test_failed_page_does_not_discard_or_prevent_later_valid_pages(kb_dir, tmp_p
                 value["covered"] = []
             elif not first:
                 resumed.append(title)
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(
@@ -667,7 +671,10 @@ def test_failed_page_does_not_discard_or_prevent_later_valid_pages(kb_dir, tmp_p
     )
     assert result.knowledge_compilation == "completed", result
     assert result.omissions[0]["reason"] == "document_generation_incomplete"
-    assert {path.stem for path in (kb_dir / "wiki/concepts").glob("*.md")} == {"beta", "gamma"}
+    assert {path.stem.split("-", 1)[0] for path in (kb_dir / "wiki/concepts").glob("*.md")} == {
+        "beta",
+        "gamma",
+    }
     first = False
     result = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert result.knowledge_compilation == "completed", result
@@ -699,14 +706,14 @@ def test_document_page_correction_rechecks_original_evidence(kb_dir, tmp_path, m
                     "reason": "Correct the unsupported claim.",
                     "issues": [{"kind": "claim", "reason": "The claim is not in the source."}],
                 }
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     source = document(tmp_path, "One required fact.")
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert calls == {"planning": 1, "generation": 2, "verification": 2}
-    page = (kb_dir / "wiki/concepts/notes.md").read_text(encoding="utf-8")
+    page = next((kb_dir / "wiki/concepts").glob("notes-*.md")).read_text(encoding="utf-8")
     assert "The original requirement is preserved." in page
     assert "Wrong claim" not in page
 
@@ -742,7 +749,7 @@ def test_only_the_existing_correction_uses_explicit_deeper_mode(kb_dir, tmp_path
                     "reason": "Claim absent from source.",
                     "issues": [{"kind": "claim", "reason": "Claim absent from source."}],
                 }
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path, "One required fact."))
@@ -783,7 +790,7 @@ def test_correction_preserves_the_previously_reviewed_body(kb_dir, tmp_path, mon
                         }
                     ],
                 }
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, document(tmp_path, "One required fact."))

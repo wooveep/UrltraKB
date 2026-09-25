@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 
 
 def test_unknown_transport_recompile_retains_previous_summary(kb_dir, monkeypatch):
@@ -152,9 +152,7 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
                 "page_changes": [
                     {
                         "local_key": f"page-{index}",
-                        "target_key": "",
                         "kind": "concept",
-                        "name": f"concepts/page-{index}",
                         "title": f"Page {index}",
                         "purpose": f"Source note {index}",
                         "subject_ranges": [[index, index + 1]],
@@ -167,7 +165,7 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
                 "resolutions": [],
             }
         active -= 1
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", complete)
     result = asyncio.run(recompile_document(kb_dir, "h", context=ExecutionContext()))
@@ -240,7 +238,10 @@ def test_invalid_document_plan_preserves_unowned_summary(kb_dir, monkeypatch, pl
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, "h"))
-    assert result.status == "unfinished"
-    assert result.message == code
-    assert result.document.reason == code
+    assert result.status == "compiled"
+    assert result.message == "document_plan_empty"
+    assert result.document.reason == "document_plan_empty"
+    assert any(row["reason"] == code for row in result.document.omissions)
+    assert result.document.planning_coverage["status"] == "partial"
+    assert result.changes == ()
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

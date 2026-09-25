@@ -214,7 +214,9 @@ def artifact_summary(record: dict[str, Any], *, storage: str) -> dict[str, Any] 
         stage = "generation"
     metadata = value.get("metadata")
     progress = ledger_progress_preview(value)
-    if isinstance(metadata, dict) and metadata.get("protocol") == "document-plan-v1":
+    if isinstance(metadata, dict) and metadata.get("protocol") in {
+        "document-plan-v1", "document-plan-v2"
+    }:
         stage = "planning"
     if progress is not None:
         stage = "planning"

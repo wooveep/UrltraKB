@@ -24,8 +24,27 @@ _SOURCE_ONLY_OBJECT = re.compile(r"source_only\[(0|[1-9][0-9]*)\]\Z")
 class RepairScopeError(ValueError):
     """The corrected candidate changed data outside the authorized repair scope."""
 
-    def __init__(self, message: str, *, path: str = "$") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str = "$",
+        code: str = "repair_scope_violation",
+        operation_index: int | None = None,
+        item_ref: str | None = None,
+        field: str | None = None,
+        grant: Any = None,
+        actual: Any = None,
+        allowed: Any = None,
+    ) -> None:
         super().__init__(message)
+        self.code = code
+        self.operation_index = operation_index
+        self.item_ref = item_ref
+        self.field = field
+        self.grant = grant
+        self.actual = actual
+        self.allowed = allowed
         self.path = (
             path
             if len(path) <= 160
@@ -309,7 +328,12 @@ def _scalar_tokens(raw: str) -> list[str]:
         match = _JSON_SCALAR.match(text, offset)
         if match is None:
             raise RepairScopeError("Syntax repair is outside repair scope")
-        tokens.append(match.group())
+        token = match.group()
+        # JSON escapes can spell the same string in several ways. Keep numbers,
+        # booleans and null lexical so a syntax repair cannot change their type.
+        tokens.append(
+            json.dumps(json.loads(token), ensure_ascii=False) if token.startswith('"') else token
+        )
         offset = match.end()
     return tokens
 

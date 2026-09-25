@@ -170,6 +170,7 @@ def test_model_rationale_remains_in_plan_but_not_generation_or_review_input():
         target="",
         subject_ranges=[[0, 1]],
         necessary_context=[context],
+        limitations=[],
     )
     assert page.necessary_context[0]["rationale"] == context["rationale"]
     for projected in (_page_input(page), _page_fields(page)):
@@ -367,6 +368,19 @@ def test_syntax_repair_preserves_all_field_values():
     authorize_repair(request, '{"overview":{},"page_changes":[]}')
     with pytest.raises(ValueError, match="outside repair scope"):
         authorize_repair(request, '{"overview":{},"page_changes":[1]}')
+
+
+def test_syntax_repair_accepts_equivalent_string_escape_but_rejects_changed_value():
+    raw = '{"overview":{"text":"A\\u0026B"}} }'
+    request = {
+        "mode": "syntax_repair",
+        "candidate_hash": content_id(raw),
+        "rejected_candidate": raw,
+        "allowed_changes": ["$"],
+    }
+    authorize_repair(request, ' \n {"overview":{"text":"A&B"}} \n ')
+    with pytest.raises(ValueError, match="outside repair scope"):
+        authorize_repair(request, '{"overview":{"text":"A and B"}}')
 
 
 def test_identical_duplicate_key_can_be_removed_without_changing_the_object():

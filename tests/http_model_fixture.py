@@ -3,10 +3,77 @@
 import json
 import threading
 import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import yaml
+
+
+@dataclass(frozen=True)
+class ModelReply:
+    """Use exact provider text (including empty content) in controlled HTTP tests."""
+
+    content: str | None
+    finish_reason: str = "stop"
+    reasoning_content: str | None = None
+
+
+def planning_ranges(payload, ranges):
+    """Express fixture coordinates using the block IDs in this frozen request."""
+    if payload.get("plan_protocol") not in {
+        "document-plan-v4", "document-plan-v5", "document-plan-repair-v2"
+    }:
+        return ranges
+    blocks = {row["order"]: row for row in payload["evidence"]["blocks"]}
+    selected = []
+    for value in ranges:
+        if isinstance(value, list):
+            first, end = value
+            selected.append(
+                {
+                    "from_block": blocks[first]["id"],
+                    "through_block": blocks[end - 1]["id"],
+                }
+            )
+        else:
+            selected.append(
+                {
+                    "block": blocks[value["block_index"]]["id"],
+                    "start_char": value["start_char"],
+                    "end_char": value["end_char"],
+                }
+            )
+    return selected
+
+
+def v4_plan(payload, value):
+    """Adapt older numeric test fixtures at the response boundary."""
+    if payload.get("stage") != "planning" or payload.get("plan_protocol") not in {
+        "document-plan-v4",
+        "document-plan-v5",
+        "document-plan-repair-v2",
+    }:
+        return value
+
+    def convert(node, field=""):
+        if isinstance(node, dict):
+            return {
+                key: convert(item, node.get("field", key) if key in {"value", "content"} else key)
+                for key, item in node.items()
+                if not (payload.get("plan_protocol") == "document-plan-v5"
+                        and field == "page_changes" and key == "name")
+            }
+        if isinstance(node, list):
+            if field in {"ranges", "subject_ranges", "basis_ranges", "location"} and any(
+                isinstance(item, list) or isinstance(item, dict) and "block_index" in item
+                for item in node
+            ):
+                return planning_ranges(payload, node)
+            return [convert(item, field) for item in node]
+        return node
+
+    return convert(value)
 
 
 def evidence_response(payload):
@@ -39,34 +106,108 @@ def evidence_response(payload):
             ]
         }
     elif isinstance(payload, dict) and payload.get("stage") == "planning":
+        if payload.get("response_mode") == "reference_check":
+            by_key = {row["reference_key"]: row for row in payload["references"]}
+            return {
+                "check_protocol": "document-reference-check-v3",
+                "decisions": [
+                    {
+                        **pair,
+                        "decision": "informational",
+                        "reason": "Controlled fixture reference classification.",
+                        "decision_basis_ranges": by_key[pair["reference_key"]]["basis_ranges"],
+                    }
+                    for pair in payload["requested_pairs"]
+                ],
+            }
         if "target" in payload:
             target = payload["target"]
             t_start = target.get("target_start", 0)
             t_end = target.get("target_end", 1)
             ranges = target.get("ranges", [[t_start, t_end]])
+            ranges = planning_ranges(payload, ranges)
+            repair = payload.get("repair_request", {})
+            if repair.get("repair_protocol") in {
+                "document-plan-repair-v1",
+                "document-plan-repair-v2",
+            }:
+                grants = repair["allowed_operations"]
+                grant = next(
+                    (
+                        row
+                        for row in grants
+                        if row["op"] == "replace_field"
+                        and row["field"]
+                        in {"subject_ranges", "local_key", "target_key", "page_changes"}
+                    ),
+                    None,
+                )
+                if grant is None:
+                    return None
+                field = grant["field"]
+                if field == "page_changes":
+                    value = [
+                        {
+                            "local_key": "c1",
+                            "kind": "concept",
+                            "title": "Notes",
+                            "purpose": "Document notes and instructions",
+                            "subject_ranges": ranges,
+                            "necessary_context": [],
+                        }
+                    ]
+                else:
+                    value = {
+                        "subject_ranges": ranges,
+                        "local_key": "c2",
+                        "target_key": "",
+                    }[field]
+                return {
+                    "repair_protocol": repair["repair_protocol"],
+                    "candidate_hash": repair["candidate_hash"],
+                    "operations": [
+                        {
+                            "issue_id": grant["issue_id"],
+                            "op": grant["op"],
+                            "item_ref": grant["item_ref"],
+                            "field": grant["field"],
+                            "value": value,
+                        }
+                    ],
+                }
             existing_target = (
                 "concepts/notes" if "concepts/notes" in payload.get("existing_targets", []) else ""
             )
             registered = payload.get("carry", {}).get("page_register", [])
+            page = {
+                "local_key": "c1",
+                "kind": "concept",
+                "title": "Notes",
+                "purpose": "Document notes and instructions",
+                "subject_ranges": ranges,
+                "necessary_context": [],
+            }
+            if registered:
+                page["target_key"] = registered[0]["key"]
+                if registered[0].get("target"):
+                    page["target"] = registered[0]["target"]
+            elif existing_target:
+                page["target"] = existing_target
+            if payload.get("plan_protocol") not in {
+                "document-plan-v3", "document-plan-v4", "document-plan-v5"
+            }:
+                page.update(
+                    target_key=page.get("target_key", ""),
+                    target=page.get("target", ""),
+                    name="concepts/notes",
+                )
             return {
                 "overview": {
                     "text": "Overview of document knowledge.",
                     "ranges": ranges,
                     "limitations": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "c1",
-                        "target_key": registered[0]["key"] if registered else "",
-                        "target": existing_target,
-                        "kind": "concept",
-                        "name": "concepts/notes",
-                        "title": "Notes",
-                        "purpose": "Document notes and instructions",
-                        "subject_ranges": ranges,
-                        "necessary_context": [],
-                    }
-                ],
+                "page_changes": [page],
                 "source_only": [],
                 "unresolved": [],
                 "resolutions": [],
@@ -223,6 +364,8 @@ def model_service(kb_dir):
             )
             if calls.respond is not None and not chat:
                 value = calls.respond(body)
+            if payload.get("stage") == "planning" and payload.get("response_mode") == "plan":
+                value = v4_plan(payload, value)
             if chat:
                 if review:
                     message = (
@@ -284,8 +427,27 @@ def model_service(kb_dir):
                             "index": 0,
                             "message": message
                             if chat
-                            else {"role": "assistant", "content": json.dumps(value)},
-                            "finish_reason": finish if chat else calls.finish_reason,
+                            else {
+                                "role": "assistant",
+                                "content": (
+                                    value.content
+                                    if isinstance(value, ModelReply)
+                                    else json.dumps(value)
+                                ),
+                                **(
+                                    {"reasoning_content": value.reasoning_content}
+                                    if isinstance(value, ModelReply)
+                                    and value.reasoning_content is not None
+                                    else {}
+                                ),
+                            },
+                            "finish_reason": (
+                                finish
+                                if chat
+                                else value.finish_reason
+                                if isinstance(value, ModelReply)
+                                else calls.finish_reason
+                            ),
                         }
                     ],
                     "usage": calls.usage,

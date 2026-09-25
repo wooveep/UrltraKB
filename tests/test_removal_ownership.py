@@ -161,4 +161,4 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
     assert page.exists()
     assert 'human_instruction: "Retain independent metadata"' in page.read_text()
     assert first.source_id not in page.read_text()
-    assert (kb_dir / "wiki/concepts/new-topic.md").exists()
+    assert list((kb_dir / "wiki/concepts").glob("new-topic*.md"))

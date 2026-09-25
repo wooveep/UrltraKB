@@ -36,10 +36,10 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     events = []
     result = import_document(kb_dir, source, on_event=events.append)
     assert result.status == "added"
-    assert (
-        "[[concepts/notes|Notes]]" in read_page(kb_dir, f"summaries/notes-{result.source_id}").body
-    )
-    assert "Confirmed knowledge." in read_page(kb_dir, "concepts/notes").body
+    page = next((kb_dir / "wiki/concepts").glob("notes-*.md"))
+    page_name = f"concepts/{page.stem}"
+    assert f"[[{page_name}|Notes]]" in read_page(kb_dir, f"summaries/notes-{result.source_id}").body
+    assert "Confirmed knowledge." in read_page(kb_dir, page_name).body
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
     assert [event["stage"] for event in events][-2:] == ["committing", "committed"]

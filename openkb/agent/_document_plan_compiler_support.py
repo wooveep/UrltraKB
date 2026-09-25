@@ -21,14 +21,13 @@ _TOP_FIELDS = {"overview", "page_changes", "source_only", "unresolved", "resolut
 _OVERVIEW_FIELDS = {"text", "ranges", "limitations"}
 _PAGE_REQUIRED = {
     "local_key",
-    "target_key",
-    "target",
     "kind",
     "title",
     "purpose",
     "subject_ranges",
+    "necessary_context",
 }
-_PAGE_FIELDS = _PAGE_REQUIRED | {"type", "necessary_context"}
+_PAGE_FIELDS = _PAGE_REQUIRED | {"type", "target_key", "target", "limitations"}
 _CONTEXT_REQUIRED = {"relation", "ranges", "basis_ranges"}
 CONTEXT_FIELDS = _CONTEXT_REQUIRED | {"rationale"}
 _SOURCE_ONLY_FIELDS = {"ranges", "reason"}
@@ -40,6 +39,8 @@ _UNRESOLVED_FIELDS = {
     "reason",
 }
 _RESOLUTION_FIELDS = {"unresolved_key", "basis_ranges"}
+_LIMITATION_FIELDS = {"ranges", "reason"}
+_EXTERNAL_REFERENCE_FIELDS = {"location", "target_document", "target_section", "affected_pages"}
 _PROGRAM_FIELDS = {
     "name",
     "key",
@@ -49,6 +50,8 @@ _PROGRAM_FIELDS = {
     "quality",
     "basis",
     "basis_quote",
+    "source_quote",
+    "raw_quote",
 }
 PROBLEM_TYPES = {
     "missing_prerequisite",
@@ -56,6 +59,13 @@ PROBLEM_TYPES = {
     "missing_external_material",
     "parsing_limitation",
 }
+
+
+def allowed_problem_types(protocol: str) -> set[str]:
+    return (
+        PROBLEM_TYPES - {"missing_external_material"}
+        if protocol == "document-plan-v5" else PROBLEM_TYPES
+    )
 RELATIONS = {"explicit_reference", "applicable_condition"}
 _ASCII_WORD = re.compile(r"[a-z0-9]+")
 
@@ -86,6 +96,8 @@ class PlanningContext:
     reserved_targets: Collection[str] = frozenset()
     known_unresolved_keys: Collection[str] = frozenset()
     known_open_unresolved_keys: Collection[str] = frozenset()
+    selection_protocol: str = "numeric-v3"
+    navigation_hints: Sequence[Mapping[str, Any]] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +108,8 @@ class PlanCompileResult:
     issues: tuple[ValidationIssue, ...]
     unassigned: tuple[Any, ...]
     delta: dict[str, Any] | None
+    coverage_status: str = "unchecked"
+    normalizations: tuple[dict[str, Any], ...] = ()
 
     @property
     def accepted(self) -> bool:
@@ -171,7 +185,7 @@ def _check_fields(
                 None,
                 item_ref=item_ref,
                 source_ranges=source_ranges,
-                allowed_operations=("add_field",),
+                allowed_operations=("replace_field",),
             )
         )
     return issues
@@ -181,7 +195,11 @@ def shape_issues(candidate: Any) -> list[ValidationIssue]:
     if not isinstance(candidate, dict):
         return [issue("invalid_candidate", "$", "JSON object", candidate, item_ref="$")]
     issues = _check_fields(
-        candidate, path="", item_ref="$", required=_TOP_FIELDS, allowed=_TOP_FIELDS
+        candidate,
+        path="",
+        item_ref="$",
+        required=_TOP_FIELDS,
+        allowed=_TOP_FIELDS | {"external_references"},
     )
     issues.extend(
         _check_fields(
@@ -246,6 +264,50 @@ def shape_issues(candidate: Any) -> list[ValidationIssue]:
                         allowed=CONTEXT_FIELDS,
                     )
                 )
+            limitations = row.get("limitations", [])
+            if not isinstance(limitations, list):
+                issues.append(
+                    issue(
+                        "invalid_field_type",
+                        f"page_changes[{index}].limitations",
+                        "list",
+                        limitations,
+                        item_ref=item_ref,
+                    )
+                )
+                continue
+            for limitation_index, limitation in enumerate(limitations):
+                issues.extend(
+                    _check_fields(
+                        limitation,
+                        path=f"page_changes[{index}].limitations[{limitation_index}]",
+                        item_ref=f"limitation:{row.get('local_key', index)}:{limitation_index}",
+                        required=_LIMITATION_FIELDS,
+                        allowed=_LIMITATION_FIELDS,
+                    )
+                )
+    references = candidate.get("external_references", [])
+    if not isinstance(references, list):
+        issues.append(
+            issue(
+                "invalid_section",
+                "external_references",
+                "list",
+                references,
+                item_ref="external_references",
+            )
+        )
+    else:
+        for index, reference in enumerate(references):
+            issues.extend(
+                _check_fields(
+                    reference,
+                    path=f"external_references[{index}]",
+                    item_ref=f"external_reference:{index}",
+                    required=_EXTERNAL_REFERENCE_FIELDS,
+                    allowed=_EXTERNAL_REFERENCE_FIELDS,
+                )
+            )
     return issues
 
 
@@ -293,14 +355,19 @@ def allocate_name(
     for length in (12, 20, len(digest)):
         short_stem = stem[: 120 - length - 1].strip("-") or "page"
         name = f"{folder}/{short_stem}-{digest[:length]}"
-        if name not in used_names:
+        if (
+            name not in used_names
+            and name not in context.known_page_name_keys
+            and name not in context.reserved_targets
+            and name not in context.existing_targets
+        ):
             return name
     return None
 
 
-def next_key(prefix: str, occupied: set[str]) -> str:
+def next_key(prefix: str, occupied: set[str], known: Collection[str] = ()) -> str:
     index = 1
-    while f"{prefix}{index}" in occupied:
+    while f"{prefix}{index}" in occupied or f"{prefix}{index}" in known:
         index += 1
     value = f"{prefix}{index}"
     occupied.add(value)

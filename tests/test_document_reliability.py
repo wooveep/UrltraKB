@@ -59,9 +59,10 @@ def test_invalid_document_plan_preserves_other_committed_knowledge(
     previous.write_text("Previously committed knowledge")
     result = import_document(kb_dir, source)
 
-    assert result.status == "unfinished"
-    assert result.knowledge_compilation == "unfinished"
-    assert result.reason == "document_plan_invalid"
+    assert result.status == "added"
+    assert result.knowledge_compilation == "not_started"
+    assert result.reason == "document_plan_empty"
+    assert any(row["reason"] == "document_plan_invalid" for row in result.omissions)
     assert previous.read_text() == "Previously committed knowledge"
     summaries = list((kb_dir / "wiki/summaries").glob("*.md"))
     assert not summaries

@@ -1,12 +1,14 @@
 """Long document compilation through the shared document operation."""
 
 import json
+import re
 
 import litellm
 import pytest
 import yaml
 
 from openkb.application.documents import import_document
+from openkb.sources import read_object
 from tests.http_model_fixture import evidence_response
 
 
@@ -23,10 +25,19 @@ def _single_page_plan(payload, *, name, title, kind="concept", type_=None, targe
         (
             item
             for item in payload["carry"]["page_register"]
-            if item["name"] == name and item["kind"] == kind
+            if item["title"] == title and item["kind"] == kind
         ),
         None,
     )
+    if not target:
+        folder = "entities" if kind == "entity" else "concepts"
+        stem = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "page"
+        matches = [
+            value for value in payload.get("existing_targets", [])
+            if value.startswith(f"{folder}/{stem}-")
+        ]
+        if len(matches) == 1:
+            target = matches[0]
     change = {
         "local_key": "page",
         "target_key": registered["key"] if registered else "",
@@ -54,6 +65,19 @@ def _page_response(payload, content):
         "content": content,
         "covered": [item["id"] for item in payload["occurrences"]],
     }
+
+
+def _planned_name(kb_dir, title, kind="concept"):
+    folder = "entities" if kind == "entity" else "concepts"
+    root = kb_dir / ".openkb/source-store/compilation/recovery"
+    for path in sorted(
+        root.glob("*-plan.json"), key=lambda item: item.stat().st_mtime_ns, reverse=True
+    ):
+        plan = read_object(path)["value"]
+        for page in plan.get("pages", []):
+            if page.get("title") == title and page.get("kind") == kind:
+                return page["name"]
+    raise AssertionError(f"No planned {folder} page titled {title}")
 
 
 def test_planned_groups_delay_dense_omission_projection_until_page_dispatch():
@@ -262,7 +286,7 @@ def test_generation_reads_conditions_omitted_from_the_fact_statement(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed"
-    assert text in (kb_dir / "wiki/concepts/pressure.md").read_text()
+    assert any(text in page.read_text() for page in (kb_dir / "wiki/concepts").glob("*.md"))
 
 
 def test_continuation_keeps_document_plan_and_reads_current_wiki_before_generation(
@@ -349,7 +373,7 @@ def test_one_large_page_is_omitted_when_its_assembled_candidate_cannot_be_review
             return _single_page_plan(payload, name="concepts/settings", title="Settings")
         assert payload["stage"] == "generation"
         parts.append(payload)
-        assert not (kb_dir / "wiki/concepts/settings.md").exists()
+        assert not list((kb_dir / "wiki/concepts").glob("*.md"))
         return _page_response(
             payload, "\n\n".join(item["text"] for item in payload["evidence"]["blocks"])
         )
@@ -361,11 +385,8 @@ def test_one_large_page_is_omitted_when_its_assembled_candidate_cannot_be_review
     # Generation may split evidence safely, but #52 requires one critical
     # review of the assembled final candidate. A capacity refusal must retain
     # this page as an omission rather than publish fragment-level proof.
-    assert not (kb_dir / "wiki/concepts/settings.md").exists()
-    assert any(
-        row["stage"] == "generation" and row["items"] == ["concepts/settings"]
-        for row in result.omissions
-    )
+    assert not list((kb_dir / "wiki/concepts").glob("*.md"))
+    assert any(row["stage"] == "generation" for row in result.omissions)
 
 
 def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabulary(
@@ -411,23 +432,27 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
                 "resolutions": [],
             }
         assert payload["stage"] == "generation"
+        entity_name = _planned_name(kb_dir, "AtlasDB", "entity")
+        concept_name = _planned_name(kb_dir, "Atomic commits")
         return _page_response(
             payload,
             "# "
             + payload["page"]["title"]
-            + "\n[[entities/atlasdb]] supports [[concepts/atomic-commits]]. [[concepts/phantom]]",
+            + f"\n[[{entity_name}]] supports [[{concept_name}]]. [[concepts/phantom]]",
         )
 
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    entity = (kb_dir / "wiki/entities/atlasdb.md").read_text()
-    concept = (kb_dir / "wiki/concepts/atomic-commits.md").read_text()
+    entity_name = _planned_name(kb_dir, "AtlasDB", "entity")
+    concept_name = _planned_name(kb_dir, "Atomic commits")
+    entity = (kb_dir / "wiki" / f"{entity_name}.md").read_text()
+    concept = (kb_dir / "wiki" / f"{concept_name}.md").read_text()
     assert yaml.safe_load(entity.split("---")[1])["type"] == "Product"
-    assert "[[concepts/atomic-commits]]" in entity and "[[entities/atlasdb]]" in concept
+    assert f"[[{concept_name}]]" in entity and f"[[{entity_name}]]" in concept
     assert "[[concepts/phantom]]" not in entity + concept
     summary = next((kb_dir / "wiki/summaries").glob("*.md")).read_text()
-    assert "entities/atlasdb" in summary
+    assert entity_name in summary
 
 
 def test_large_document_plan_covers_all_windows_then_omits_an_unreviewable_page(
@@ -464,7 +489,9 @@ def test_large_document_plan_covers_all_windows_then_omits_an_unreviewable_page(
     assert all(f"Setting {i}:" in "\n".join(planned) for i in range(120))
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert any(
-        row["stage"] == "generation" and row["items"] == ["concepts/settings"]
+        row["stage"] == "generation"
+        and len(row["items"]) == 1
+        and row["items"][0].startswith("concepts/settings-")
         for row in result.omissions
     )
     assert (
@@ -510,10 +537,11 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
     source.write_text("Current feature.")
     changed = import_document(kb_dir, source)
     assert changed.knowledge_compilation == "completed", changed
-    retained = (kb_dir / "wiki/concepts/retired.md").read_text()
-    assert first.source_id not in retained
-    assert second.source_id in retained
-    assert (kb_dir / "wiki/concepts/current.md").exists()
+    retained = [path.read_text() for path in (kb_dir / "wiki/concepts").glob("retired-*.md")]
+    assert any(
+        first.source_id not in content and second.source_id in content for content in retained
+    )
+    assert list((kb_dir / "wiki/concepts").glob("current-*.md"))
 
 
 def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, model_service):
@@ -528,10 +556,11 @@ def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, 
             name = "current" if "Current" in evidence else "retired"
             return _single_page_plan(payload, name=f"concepts/{name}", title=name.title())
         if payload["stage"] == "generation":
-            if payload["page"]["name"] == "concepts/current":
+            if payload["page"]["title"] == "Current":
+                retired_name = _planned_name(kb_dir, "Retired")
                 return _page_response(
                     payload,
-                    "# Current\nSee [[concepts/retired|Retired feature]].",
+                    f"# Current\nSee [[{retired_name}|Retired feature]].",
                 )
             return _page_response(payload, "# Retired\nRetired feature.")
         if payload["stage"] == "verification":
@@ -547,12 +576,13 @@ def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, 
 
     assert changed.knowledge_compilation == "completed", changed
     current_reviews = [content for content in reviewed if "# Current" in content]
+    retired_name = _planned_name(kb_dir, "Retired")
     assert len(current_reviews) == 2
-    assert "[[concepts/retired|Retired feature]]" in current_reviews[0]
-    assert "[[concepts/retired|Retired feature]]" not in current_reviews[1]
+    assert f"[[{retired_name}|Retired feature]]" in current_reviews[0]
+    assert f"[[{retired_name}|Retired feature]]" not in current_reviews[1]
     assert "Retired feature" in current_reviews[1]
-    current = (kb_dir / "wiki/concepts/current.md").read_text()
-    assert "[[concepts/retired|Retired feature]]" not in current
+    current = (kb_dir / "wiki" / (_planned_name(kb_dir, "Current") + ".md")).read_text()
+    assert f"[[{retired_name}|Retired feature]]" not in current
 
 
 def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
@@ -595,18 +625,19 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
                 "resolutions": [],
             }
         if payload["stage"] == "generation":
-            if payload["page"]["name"] == "concepts/current":
+            if payload["page"]["title"] == "Current":
+                retired_name = _planned_name(kb_dir, "Retired")
                 return _page_response(
                     payload,
-                    "# Current\nSee [[concepts/retired|Retired feature]].",
+                    f"# Current\nSee [[{retired_name}|Retired feature]].",
                 )
-            if payload["page"]["name"] == "concepts/independent":
+            if payload["page"]["title"] == "Independent":
                 return _page_response(payload, "# Independent\nIndependent feature.")
             return _page_response(payload, "# Retired\nRetired feature.")
         if payload["stage"] == "verification":
             content = payload["candidate"]["content"]
             reviews.append(content)
-            if "# Current" in content and "[[concepts/retired|Retired feature]]" not in content:
+            if "# Current" in content and "[[" not in content:
                 return {
                     "verdict": "unsupported",
                     "reason": "The normalized candidate needs a fresh source-faithful rewrite.",
@@ -623,18 +654,20 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
     changed = import_document(kb_dir, source)
 
     assert changed.knowledge_compilation == "completed", changed
-    assert not (kb_dir / "wiki/concepts/current.md").exists()
-    assert (kb_dir / "wiki/concepts/independent.md").exists()
+    assert not list((kb_dir / "wiki/concepts").glob("current-*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("independent-*.md"))
     assert any(
         row["stage"] == "generation"
         and row["reason"] == "knowledge_evidence_mismatch"
-        and row["items"] == ["concepts/current"]
+        and len(row["items"]) == 1
+        and row["items"][0].startswith("concepts/current-")
         for row in changed.omissions
     ), changed.omissions
     current_reviews = [content for content in reviews if "# Current" in content]
     assert len(current_reviews) == 2
-    assert "[[concepts/retired|Retired feature]]" in current_reviews[0]
-    assert "[[concepts/retired|Retired feature]]" not in current_reviews[1]
+    retired_name = _planned_name(kb_dir, "Retired")
+    assert f"[[{retired_name}|Retired feature]]" in current_reviews[0]
+    assert f"[[{retired_name}|Retired feature]]" not in current_reviews[1]
 
 
 def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
@@ -662,9 +695,9 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
                 name, title = "concepts/beta", "Beta"
             return _single_page_plan(payload, name=name, title=title)
         if payload["stage"] == "generation":
-            name = payload["page"]["name"]
-            if name == "concepts/alpha":
-                return _page_response(payload, "# Alpha\nSee [[concepts/beta|Beta]].")
+            if payload["page"]["title"] == "Alpha":
+                beta_name = _planned_name(kb_dir, "Beta")
+                return _page_response(payload, f"# Alpha\nSee [[{beta_name}|Beta]].")
             return _page_response(payload, "# " + payload["page"]["title"] + "\nFeature.")
         if payload["stage"] == "verification":
             reviewed.append(payload["candidate"]["content"])
@@ -674,9 +707,10 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
     model_service.respond = respond
     assert import_document(kb_dir, beta).knowledge_compilation == "completed"
     assert import_document(kb_dir, alpha).knowledge_compilation == "completed"
-    alpha_page = kb_dir / "wiki/concepts/alpha.md"
+    alpha_page = kb_dir / "wiki" / (_planned_name(kb_dir, "Alpha") + ".md")
+    beta_name = _planned_name(kb_dir, "Beta")
     before = alpha_page.read_text(encoding="utf-8")
-    assert "[[concepts/beta|Beta]]" in before
+    assert f"[[{beta_name}|Beta]]" in before
     review_count = len(reviewed)
 
     beta.write_text("Current beta feature.")
@@ -686,7 +720,7 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
     assert alpha_page.read_text(encoding="utf-8") == before
     assert all("# Alpha" not in content for content in reviewed[review_count:])
     review = review_source_proposal(kb_dir, changed.resume)
-    assert "concepts/alpha.md" in review["protected"]
+    assert alpha_page.relative_to(kb_dir / "wiki").as_posix() in review["protected"]
     accepted = continue_source(
         kb_dir,
         changed.source_id,
@@ -695,9 +729,9 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
         accept_pages=review["protected"],
     )
     assert accepted.knowledge_compilation == "completed", accepted
-    assert not (kb_dir / "wiki/concepts/beta.md").exists()
-    assert (kb_dir / "wiki/concepts/current-beta.md").exists()
-    assert "[[concepts/beta|Beta]]" not in alpha_page.read_text(encoding="utf-8")
+    assert not (kb_dir / "wiki" / f"{beta_name}.md").exists()
+    assert (kb_dir / "wiki" / (_planned_name(kb_dir, "Current beta") + ".md")).exists()
+    assert f"[[{beta_name}|Beta]]" not in alpha_page.read_text(encoding="utf-8")
 
 
 def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
@@ -723,7 +757,7 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
             (
                 item
                 for item in payload["carry"]["page_register"]
-                if item["name"] == name and item["kind"] == "concept"
+                if item["title"] == title and item["kind"] == "concept"
             ),
             None,
         )
@@ -779,11 +813,13 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
                 "resolutions": [],
             }
         if payload["stage"] == "generation":
-            name = payload["page"]["name"]
-            if phase["replacement"] and name == "concepts/alpha":
-                return _page_response(payload, "# Alpha\nSee [[concepts/charlie|Charlie]].")
-            if name == "concepts/beta":
-                return _page_response(payload, "# Beta\nSee [[concepts/alpha|Alpha]].")
+            title = payload["page"]["title"]
+            if phase["replacement"] and title == "Alpha":
+                charlie_name = _planned_name(kb_dir, "Charlie")
+                return _page_response(payload, f"# Alpha\nSee [[{charlie_name}|Charlie]].")
+            if title == "Beta":
+                alpha_name = _planned_name(kb_dir, "Alpha")
+                return _page_response(payload, f"# Beta\nSee [[{alpha_name}|Alpha]].")
             return _page_response(payload, "# " + payload["page"]["title"] + "\nFact.")
         if payload["stage"] == "verification":
             content = payload["candidate"]["content"]
@@ -797,7 +833,7 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
             if (
                 phase["replacement"]
                 and "# Alpha" in content
-                and "[[concepts/charlie|Charlie]]" not in content
+                and "[[" not in content
             ):
                 return {
                     "verdict": "unsupported",
@@ -810,11 +846,16 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
     model_service.respond = respond
     first = import_document(kb_dir, source)
     assert first.knowledge_compilation == "completed", first
-    assert (kb_dir / "wiki/concepts/beta.md").exists()
+    beta_name = _planned_name(kb_dir, "Beta")
+    alpha_name = _planned_name(kb_dir, "Alpha")
+    charlie_name = _planned_name(kb_dir, "Charlie")
+    assert (kb_dir / "wiki" / f"{beta_name}.md").exists()
 
     recovery_dir = kb_dir / ".openkb" / "source-store" / "compilation" / "recovery"
     saved_plan = read_object(next(recovery_dir.glob("*-plan.json")))["value"]
-    pending_keys = {"p1", "p3"}
+    pending_keys = {
+        page["key"] for page in saved_plan["pages"] if page["title"] in {"Alpha", "Charlie"}
+    }
     for draft_path in recovery_dir.glob("*-draft.json"):
         draft = read_object(draft_path)
         output = draft.get("value", {}).get("output", {})
@@ -824,7 +865,7 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
         checkpoint = read_object(checkpoint_path)
         payload = checkpoint.get("contract", {}).get("payload", {})
         page = payload.get("page", {})
-        if page.get("name") in {"concepts/alpha", "concepts/charlie"}:
+        if page.get("name") in {alpha_name, charlie_name}:
             checkpoint_path.unlink()
 
     def resume_saved_plan(*_args, **_kwargs):
@@ -833,7 +874,7 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
     original_restore = document_page_contracts.restore_published_document_page_candidate
 
     def restore_only_beta(checkpoints, page):
-        if page.name in {"concepts/alpha", "concepts/charlie"}:
+        if page.name in {alpha_name, charlie_name}:
             raise ValueError("Simulated lost candidate recovery for retry.")
         return original_restore(checkpoints, page)
 
@@ -857,10 +898,10 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
             )
 
     assert changed.knowledge_compilation == "completed", changed
-    assert not (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert not (kb_dir / "wiki/concepts/charlie.md").exists()
-    beta = (kb_dir / "wiki/concepts/beta.md").read_text(encoding="utf-8")
-    assert "[[concepts/alpha|Alpha]]" not in beta
+    assert not (kb_dir / "wiki" / f"{alpha_name}.md").exists()
+    assert not (kb_dir / "wiki" / f"{charlie_name}.md").exists()
+    beta = (kb_dir / "wiki" / f"{beta_name}.md").read_text(encoding="utf-8")
+    assert f"[[{alpha_name}|Alpha]]" not in beta
     replacement_beta_reviews = [
         content for replacement, content in reviews if replacement and "# Beta" in content
     ]
@@ -936,7 +977,7 @@ def test_generated_figure_link_points_to_the_retained_immutable_asset(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    page = kb_dir / "wiki/concepts/notes.md"
+    page = kb_dir / "wiki" / (_planned_name(kb_dir, "Notes") + ".md")
     tokens = (
         MarkdownIt("commonmark")
         .enable(["table", "strikethrough"])

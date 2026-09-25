@@ -10,19 +10,34 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from openkb.agent import document_planning_projection, document_planning_support, document_windowing
-from openkb.agent.document_plan import DocumentPlan, to_dict
-from openkb.agent.document_plan_repair_state import PlanningRepairSession
+from openkb.agent.document_json_response import classify_json_response
+from openkb.agent.document_plan import DocumentPlan
+from openkb.agent.document_plan_feedback import RepairScopeError
+from openkb.agent.document_plan_issues import PlanValidationError
+from openkb.agent.document_plan_repair_state import V3PlanningRepairSession, planning_context
+from openkb.agent.document_plan_salvage import salvage_candidate
+from openkb.agent.document_planning_admission import admit_planning_windows, validate_navigation
 from openkb.agent.document_planning_events import (
+    emit_accepted_window,
     emit_planning_observation,
+    emit_readmission,
+    emit_split_target,
     frozen_prefix,
     planning_observation,
 )
 from openkb.agent.document_planning_ledger import DocumentPlanningLedger
+from openkb.agent.document_planning_lifecycle import PlanningLifecycle
+from openkb.agent.document_planning_partial import (
+    prepare_partial_acceptance,
+    report_partial_acceptance,
+)
+from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_protocol import (
     PlanningProjectionRequired,
     decode_plan_response,
     plan_messages,
 )
+from openkb.agent.document_reference_review import review_candidate_references
 from openkb.agent.document_window_receipts import accepted_window_receipt, window_receipt_id
 from openkb.agent.evidence_units import JSON_FORMAT
 from openkb.agent.evidence_wire import WireMessages
@@ -52,32 +67,23 @@ def plan_document(
     bundle: Any = None,
     on_event: Callable[[dict[str, Any]], None] = lambda event: None,
     resume: bool = False,
+    retry_skipped: bool = False,
     plan_only: bool = False,
     mock_caller: Callable[..., Any] | None = None,
-) -> DocumentPlan:
+    return_result: bool = False,
+) -> DocumentPlan | PlanningResult | None:
     """Public entry point: compile source evidence into a coherent, durable DocumentPlan."""
     from openkb.agent.compiler import _llm_call
 
     processing_checkpoint("planning")
     on_event({"stage": "planning", "status": "started"})
     planning_started = time.monotonic()
-
     wiki = workspace.path / "wiki" if hasattr(workspace, "path") else workspace / "wiki"
     schema = get_agents_md(wiki)
     entity_types = resolve_entity_types(settings)
     total_blocks = len(parsed.blocks) if hasattr(parsed, "blocks") else 0
     limits = RequestLimits.from_config(settings)
-
-    if navigation:
-        if navigation.get("source_id") and navigation["source_id"] != source.source_id:
-            raise ValueError("Navigation source_id mismatch")
-        navigation_version = navigation.get("version_id", navigation.get("version"))
-        navigation_parse = navigation.get("parse_id", navigation.get("parse"))
-        if navigation_version and navigation_version != source.id:
-            raise ValueError("Navigation version_id mismatch")
-        if navigation_parse and navigation_parse != parsed.id:
-            raise ValueError("Navigation parse_id mismatch")
-
+    validate_navigation(navigation, source, parsed)
     rules_rev = module_revision("openkb.agent.document_protocol")
     windowing_rev = module_revision("openkb.agent.document_windowing")
     planning_revisions = document_planning_support.planning_implementation_revisions()
@@ -100,76 +106,35 @@ def plan_document(
     )
 
     # Empty parser output is a source-only result; never construct [0, 0) W/T.
-    windows: list[dict[str, Any]] = []
-    planning_limits = document_planning_support.planning_admission_limits(limits)
     parser_conditions = document_planning_support.source_conditions(parsed)
-    if total_blocks and not document_planning_support.no_readable_body(parsed):
-        windows = navigation.get("windows", []) if navigation else []
-        if navigation and "windows" in navigation:
-            from openkb.navigation_evidence import planning_windows
-
-            windows = planning_windows(source, parsed, navigation)
-        if not windows:
-            windows = [
-                {
-                    "evidence": None,
-                    "target_start": 0,
-                    "target_end": total_blocks,
-                    "status": "complete",
-                    "reason": "",
-                    "target_tokens": 200000,
-                }
-            ]
-        prompt_tokens = document_windowing.planning_prompt_tokens(
-            source,
-            parsed,
-            settings,
-            entity_types=entity_types,
-            schema=schema,
-            source_conditions=document_planning_projection.prompt_condition_template(
-                parser_conditions
-            ),
-        )
-        windows, planning_limits = document_windowing.bounded_windows(
-            source, parsed, windows, planning_limits, prompt_tokens=prompt_tokens
-        )
+    windows, planning_limits = admit_planning_windows(
+        source,
+        parsed,
+        navigation,
+        settings,
+        limits,
+        entity_types=entity_types,
+        schema=schema,
+        parser_conditions=parser_conditions,
+    )
     record_document_totals(evidence_groups=len(windows))
 
     with closing(DocumentPlanningLedger(checkpoints, retained_key)) as ledger:
-
-        def initialize_ledger(*, reset: bool = False) -> tuple[dict[str, Any], Any]:
-            """Build a baseline or treat malformed durable state as a fresh plan."""
-
-            if reset:
-                ledger.reset()
-            ledger.initialize(wiki=wiki, source=source, parsed=parsed)
-            metadata = document_planning_support.planning_metadata(
-                source=source,
-                parsed=parsed,
-                navigation=navigation,
-                catalog_window="",
-                catalog_targets=set(),
-                catalog_entries=[],
-                schema=schema,
-                language=settings.get("language"),
-                rules=rules_rev,
-                windowing=windowing_rev,
-                implementation=planning_revisions,
-                recovery_key=retained_key,
-                contract=recovery_contract,
-                entity_types=entity_types,
-                catalog_manifest=ledger.catalog_manifest(),
-            )
-            metadata["effective_planning_contract"] = document_planning_support.planning_contract(
-                settings, planning_limits
-            )
-            ledger.bind_metadata(metadata)
-            return metadata, ledger.overview()
+        lifecycle = PlanningLifecycle(
+            ledger=ledger, checkpoints=checkpoints, retained_key=retained_key,
+            wiki=wiki, source=source, parsed=parsed, navigation=navigation,
+            settings=settings, schema=schema, rules_rev=rules_rev,
+            windowing_rev=windowing_rev, planning_revisions=planning_revisions,
+            recovery_contract=recovery_contract, entity_types=entity_types,
+            planning_limits=planning_limits, plan_only=plan_only,
+            return_result=return_result,
+        )
+        public_result = lifecycle.public_result
 
         try:
             # A caller that did not ask to Continue must never append a second
             # sequence of receipt rows to a retained plan of the same identity.
-            metadata, cumulative_overview = initialize_ledger(
+            metadata, cumulative_overview = lifecycle.initialize(
                 reset=not resume and ledger.initialized
             )
         except (
@@ -183,84 +148,22 @@ def plan_document(
             # A syntactically valid SQLite file can still contain a malformed
             # durable shape.  Treat it exactly like a cache miss rather than
             # letting recovery decoding escape to the caller.
-            metadata, cumulative_overview = initialize_ledger(reset=True)
+            metadata, cumulative_overview = lifecycle.initialize(reset=True)
         if not windows:
             cumulative_overview.status = "complete"
         start_window = 0
         base_windows = deepcopy(windows)
-
-        def finalize() -> DocumentPlan:
-            from openkb.agent.document_recovery import inherit_publication_state
-
-            ledger.mark_accepted(windows)
-            overview, pages, source_only, unresolved, resolutions = ledger.materialize()
-            final = document_planning_support.final_document_plan(
-                metadata={
-                    **metadata,
-                    **ledger.final_catalog_metadata(),
-                    "accepted_window_receipts": ledger.receipts(),
-                },
-                windows=windows,
-                overview=overview,
-                pages=pages,
-                source_only=source_only,
-                unresolved=unresolved,
-                resolutions=resolutions,
-                plan_only=plan_only,
-                parsed=parsed,
-                entity_types=entity_types,
-                existing_targets=ledger.final_catalog_targets(),
-            )
-            # Terminal ledger materialization deliberately reconstructs planning
-            # rows, so retain any prior completed proposal proof before replacing
-            # this recovery record with the successor's plan state.
-            inherit_publication_state(final, checkpoints.load_recovery(retained_key, "plan"))
-            checkpoints.save_recovery(retained_key, "plan", to_dict(final))
-            record_document_totals(planned_pages=len(final.pages))
-            return final
-
-        def reset_ledger() -> Any:
-            ledger.reset()
-            ledger.initialize(wiki=wiki, source=source, parsed=parsed)
-            manifest = ledger.catalog_manifest()
-            metadata.update(
-                {
-                    "catalog_snapshot": manifest["snapshot"],
-                    "catalog_count": manifest["count"],
-                    "catalog_ledger": manifest["ledger"],
-                }
-            )
-            ledger.bind_metadata(metadata)
-            return ledger.overview()
-
-        def terminal_recovery_valid() -> bool:
-            """Validate the separately consumed terminal plan hand-off on Continue."""
-
-            saved = checkpoints.load_recovery(retained_key, "plan")
-            if saved is None or not isinstance(saved, dict) or "metadata" not in saved:
-                return True
-            try:
-                from openkb.agent.document_plan import derive_page_states, from_dict, validate_plan
-
-                restored = from_dict(saved)
-                states = {page.key: page.state for page in restored.pages}
-                validate_plan(restored, parsed, entity_types, ledger.final_catalog_targets())
-                derive_page_states(restored.pages, restored.unresolved)
-                return all(page.state == states[page.key] for page in restored.pages)
-            except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error):
-                return False
-
         if resume:
             try:
-                if not terminal_recovery_valid():
-                    cumulative_overview = reset_ledger()
+                if not lifecycle.terminal_recovery_valid():
+                    cumulative_overview = lifecycle.reset()
                 elif not ledger.baseline_valid() or not ledger.verify_catalog(
                     wiki=wiki, source=source
                 ):
-                    cumulative_overview = reset_ledger()
+                    cumulative_overview = lifecycle.reset()
                 elif (recovered_progress := ledger.progress()) is None:
                     # Rebase even an interrupted pre-W ledger on the current catalogue.
-                    cumulative_overview = reset_ledger()
+                    cumulative_overview = lifecycle.reset()
                 else:
                     status, recovered_windows, recovered_completed = recovered_progress
                     if ledger.recovery_valid(
@@ -274,37 +177,20 @@ def plan_document(
                         windows, start_window = recovered_windows, recovered_completed
                         cumulative_overview = ledger.overview()
                         if status == "accepted":
-                            restored = finalize()
-                            receipt = ledger.receipt(start_window) or {}
-                            on_event(
-                                {
-                                    "stage": "planning",
-                                    "cached": True,
-                                    "retained": True,
-                                    "pages": ledger.page_count(),
-                                }
-                            )
-                            if windows:
-                                emit_planning_observation(
-                                    on_event,
-                                    planning_observation(
-                                        "adopted",
-                                        windows[-1],
-                                        windows,
-                                        completed=len(windows),
-                                        carry_pages=ledger.page_count(),
-                                        carry_unresolved=ledger.open_unresolved_count(),
-                                        pages=ledger.page_count(),
-                                        unresolved=ledger.open_unresolved_count(),
-                                        checkpoint=receipt.get("checkpoint"),
-                                        result=receipt.get("result"),
-                                        attempt=receipt.get("attempt", 0),
-                                        cached=True,
-                                    ),
+                            retry = ledger.begin_retry(windows) if retry_skipped else None
+                            if retry is not None:
+                                windows, start_window = retry
+                                checkpoints.save_recovery(
+                                    retained_key, "plan", ledger.progress_preview()
                                 )
-                            return restored
+                                on_event({
+                                    "stage": "planning", "operation": "retry_omissions",
+                                    "targets": len(windows) - start_window,
+                                })
+                            else:
+                                return public_result(lifecycle.adopt_terminal(windows, on_event))
                         if start_window == len(windows):
-                            return finalize()
+                            return public_result(lifecycle.finalize(windows))
                         on_event(
                             {
                                 "stage": "planning",
@@ -329,14 +215,22 @@ def plan_document(
                     else:
                         # Corrupt mutable state is a cache miss.  The validated model
                         # checkpoints remain reusable when the fresh planner asks them.
-                        cumulative_overview = reset_ledger()
+                        cumulative_overview = lifecycle.reset()
             except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error):
                 windows, start_window = base_windows, 0
-                cumulative_overview = reset_ledger()
-
+                cumulative_overview = lifecycle.reset()
         promoted_page_keys: set[str] = set()
         promoted_catalog_targets: set[str] = set()
         promoted_unresolved_keys: set[str] = set()
+
+        def settle_content_failure(
+            window: dict[str, Any], *, reason: str, attempts: int, predecessor: str
+        ) -> None:
+            lifecycle.settle_content_failure(
+                window, windows=windows, window_index=w_idx,
+                reason=reason, attempts=attempts, predecessor=predecessor,
+                on_event=on_event,
+            )
         w_idx = start_window
         while w_idx < len(windows):
             window = windows[w_idx]
@@ -407,9 +301,33 @@ def plan_document(
                 ),
             }
 
-            nav_hints = document_planning_support.select_navigation_hints(
-                navigation, planning_target_ranges, planning_limits
-            )
+            try:
+                nav_hints = document_planning_support.select_navigation_hints(
+                    navigation,
+                    planning_target_ranges,
+                    planning_limits,
+                    evidence=evidence,
+                    parsed=parsed,
+                    model=settings["model"],
+                )
+            except ProcessingIncomplete as exc:
+                if exc.reason != "planning_navigation_exceeds_request_budget":
+                    raise
+                children = document_windowing.reload_planning_target(source, parsed, window)
+                if children:
+                    windows[w_idx : w_idx + 1] = children
+                    ledger.replace_schedule(windows, w_idx)
+                    on_event({
+                        "stage": "planning", "operation": "reload_planning_target",
+                        "parts": len(children), "reason": exc.reason,
+                    })
+                    continue
+                settle_content_failure(
+                    window, reason="planning_context_capacity", attempts=0,
+                    predecessor=ledger.state_digest(),
+                )
+                w_idx += 1
+                continue
             page_register, open_references = ledger.projected_carry(relevant, t_start, t_end)
             terms = {
                 word.strip(".,:;()[]{}!?'\"").lower()
@@ -487,31 +405,29 @@ def plan_document(
             evidence_ranges, _ = document_planning_support.exclude_attachment_ranges(
                 parsed, raw_evidence_ranges
             )
-            decode_kwargs = {
-                "target_start": t_start,
-                "target_end": t_end,
-                "total_blocks": total_blocks,
-                "allowed_entity_types": entity_types,
-                "existing_targets": visible_targets,
-                "reserved_targets": ledger.catalog_targets(),
-                "known_page_names": ledger.page_names(),
-                "known_page_name_keys": ledger.page_names(),
-                "known_page_keys": ledger.page_keys(),
-                "carry_pages": view.page_register,
-                "open_unresolved": view.open_references,
-                "known_unresolved_keys": ledger.unresolved_keys(),
-                "known_open_unresolved_keys": ledger.unresolved_keys(status="open"),
-                "block_chars": [block.chars for block in parsed.blocks],
-                "ignored_blocks": {
-                    index
-                    for index, block in enumerate(parsed.blocks)
-                    if "attachment" in getattr(block, "location", {})
-                },
-                "target_ranges": planning_target_ranges,
-                "evidence_ranges": evidence_ranges,
-                "prior_overview_ranges": cumulative_overview.ranges,
-                "context_contract": "document-plan-v2",
-            }
+            decode_kwargs = document_planning_support.planning_decode_context(
+                parsed,
+                ledger,
+                view,
+                target_start=t_start,
+                target_end=t_end,
+                entity_types=entity_types,
+                visible_targets=visible_targets,
+                target_ranges=planning_target_ranges,
+                evidence_ranges=evidence_ranges,
+                prior_overview_ranges=cumulative_overview.ranges,
+            )
+            compile_context = planning_context(
+                source,
+                parsed,
+                window,
+                evidence,
+                view,
+                ledger,
+                decode_kwargs,
+                visible_targets,
+                cumulative_overview.ranges,
+            )
             predecessor = ledger.state_digest()
             raw_response = None
             output_exhausted = False
@@ -522,72 +438,63 @@ def plan_document(
             request_details = None
             projection_required = False
             re_admit_after_expansion = False
-
-            def retry_invalid(key: str, attempt: int, cached: bool, error: BaseException) -> None:
-                nonlocal msgs
-                msgs, feedback = repair.invalid(
-                    raw_text if raw_text is not None else value, error, attempt
-                )
-                on_event(
-                    {
-                        "stage": "planning",
-                        "operation": "retry_invalid_response",
-                        "window": w_idx + 1,
-                        "cached": cached,
-                        "invalid_fields": [issue["field"] for issue in feedback["issues"]],
-                    }
-                )
-                emit_planning_observation(
-                    on_event,
-                    planning_observation(
-                        "retry",
-                        window,
-                        windows,
-                        completed=w_idx,
-                        carry_pages=len(page_register),
-                        carry_unresolved=len(open_references),
-                        pages=ledger.page_count(),
-                        unresolved=ledger.open_unresolved_count(),
-                        checkpoint=key,
-                        attempt=attempt,
-                        cached=cached,
-                        reason="invalid_response",
-                        prefix=prefix,
-                        candidate_count=len(view.page_register),
-                        elapsed_seconds=time.monotonic() - window_started,
-                        frozen_last_use_seconds=time.monotonic() - planning_started,
-                        request=request_details,
-                    ),
-                )
-
+            content_failure: str | None = None
+            attempts_used = 0
+            salvaged = None
             def promote_projection(required: PlanningProjectionRequired) -> None:
-                if required.page_key:
-                    promoted_page_keys.add(required.page_key)
-                if required.catalog_target:
-                    promoted_catalog_targets.add(required.catalog_target)
-                if required.unresolved_key:
-                    promoted_unresolved_keys.add(required.unresolved_key)
-                on_event(
-                    {
-                        "stage": "planning",
-                        "operation": "promote_planning_ledger",
-                        "window": w_idx + 1,
-                    }
+                document_planning_support.promote_planning_projection(
+                    required,
+                    promoted_page_keys,
+                    promoted_catalog_targets,
+                    promoted_unresolved_keys,
+                    on_event,
+                    w_idx + 1,
                 )
 
             if mock_caller is not None:
+                attempts_used = 1
                 try:
                     raw_response = mock_caller(msgs, settings=settings)
                 except ProcessingIncomplete as exc:
-                    if exc.reason != "output_budget_exhausted":
+                    if exc.reason in {
+                        "document_plan_invalid", "document_plan_response_invalid",
+                        "document_plan_empty_response", "reference_check_invalid",
+                        "reference_check_empty_response",
+                    }:
+                        content_failure = exc.reason
+                    elif exc.reason != "output_budget_exhausted":
                         raise
-                    output_exhausted = True
+                    else:
+                        output_exhausted = True
             else:
-                repair = PlanningRepairSession(
-                    msgs, decode_kwargs, checkpoints, window, predecessor, planning_limits
-                )
+                try:
+                    planning_limits = document_windowing.for_window_attempts(
+                        planning_limits, window, limits.max_attempts
+                    )
+                    repair = V3PlanningRepairSession(
+                        msgs,
+                        checkpoints,
+                        window,
+                        predecessor,
+                        planning_limits,
+                        decode_kwargs["block_chars"],
+                        settings["model"],
+                        compile_context,
+                    )
+                except ProcessingIncomplete as exc:
+                    if exc.reason not in {
+                        "document_plan_invalid", "document_plan_empty_response"
+                    }:
+                        raise
+                    settle_content_failure(
+                        window, reason=exc.reason, attempts=planning_limits.max_attempts,
+                        predecessor=predecessor,
+                    )
+                    w_idx += 1
+                    continue
                 msgs = repair.messages
-                for attempt in range(repair.next_attempt, limits.max_attempts):
+                for attempt in range(repair.next_attempt, planning_limits.max_attempts):
+                    attempts_used = attempt + 1
                     request = json.loads(msgs[-1]["content"])
                     dependencies = {
                         "catalog_view": content_id(view.catalog_entries),
@@ -598,31 +505,87 @@ def plan_document(
                     with checkpoints.request(
                         msgs[0]["content"], request, dependencies=dependencies
                     ) as key:
-                        raw_text = None
+                        raw_text: Any = None
                         value = checkpoints.load(key)
                         cached = value is not None
                         try:
                             if value is None:
-                                marker = request_marker()
-                                try:
-                                    raw_text = _llm_call(
-                                        settings["model"],
-                                        msgs,
-                                        "planning",
-                                        bundle=bundle,
-                                        response_format=JSON_FORMAT,
-                                        **compilation_model_options(settings, stage="planning"),
-                                    )
-                                finally:
-                                    request_details = request_after(marker, "planning")
-                                repair.authorize(raw_text)
-                                value = msgs.decode_response(raw_text)
-                            else:
-                                repair.authorize(value)
-                            decoded = decode_plan_response(value, **decode_kwargs)
-                            document_planning_support.canonicalize_context_bases(
-                                decoded, evidence, parsed
-                            )
+                                if repair.applied_candidate is not None:
+                                    value = repair.applied_candidate
+                                    raw_text = repair.replay_receipt()
+                                else:
+                                    if repair.pending_response is not None:
+                                        raw_text = repair.pending_response
+                                    else:
+                                        marker = request_marker()
+                                        try:
+                                            raw_text = _llm_call(
+                                                settings["model"],
+                                                msgs,
+                                                "planning",
+                                                bundle=bundle,
+                                                response_format=JSON_FORMAT,
+                                                decode_response=False,
+                                                **compilation_model_options(
+                                                    settings, stage="planning"
+                                                ),
+                                            )
+                                        finally:
+                                            request_details = request_after(marker, "planning")
+                                        repair.record_response(raw_text, key)
+                                    response_kind = classify_json_response(raw_text)
+                                    if response_kind == "empty_content":
+                                        repair.empty_response(raw_text, attempt)
+                                        msgs = repair.messages
+                                        continue
+                                    if response_kind == "length":
+                                        raise ProcessingIncomplete(
+                                            "output_budget_exhausted", "planning"
+                                        )
+                                    if response_kind != "content":
+                                        raise ProcessingIncomplete(
+                                            "document_plan_response_invalid", "planning"
+                                        )
+                                    if repair.phase:
+                                        try:
+                                            mapped = (
+                                                raw_text
+                                                if repair.phase == "syntax_repair"
+                                                else msgs.decode_response(raw_text)
+                                            )
+                                        except (PlanValidationError, ValueError) as exc:
+                                            raise RepairScopeError(
+                                                "Malformed patch response"
+                                            ) from exc
+                                        value = repair.apply_response(mapped)
+                                        if repair.phase == "syntax_repair":
+                                            value = msgs.decode_response(value)
+                                        repair.applied(value)
+                                    else:
+                                        try:
+                                            value = msgs.decode_response(raw_text)
+                                        except (PlanValidationError, ValueError):
+                                            value = raw_text
+                            result, feedback = repair.evaluate(value, compile_context, attempt)
+                            if feedback is not None:
+                                msgs = repair.messages
+                                on_event(
+                                    {
+                                        "stage": "planning",
+                                        "operation": "retry_invalid_response",
+                                        "window": w_idx + 1,
+                                        "cached": cached,
+                                        "invalid_fields": [
+                                            issue["path"] for issue in feedback["issues"]
+                                        ],
+                                    }
+                                )
+                                if attempt + 1 == planning_limits.max_attempts:
+                                    raise ProcessingIncomplete("document_plan_invalid", "planning")
+                                continue
+                            assert result.delta is not None
+                            decoded = result.delta
+                            value = result.candidate
                         except ProcessingIncomplete as exc:
                             if exc.reason == "output_budget_exhausted":
                                 output_exhausted = True
@@ -639,27 +602,30 @@ def plan_document(
                                     planning_limits = expanded
                                     re_admit_after_expansion = True
                                     break
-                            if exc.reason != "evidence_output_invalid":
-                                raise
-                            retry_invalid(key, attempt, cached, exc)
-                            if attempt + 1 == limits.max_attempts:
-                                raise ProcessingIncomplete(
-                                    "document_plan_invalid", "planning"
-                                ) from None
-                            continue
+                            if exc.reason in {
+                                "document_plan_invalid", "document_plan_response_invalid",
+                                "document_plan_empty_response",
+                            }:
+                                content_failure = exc.reason
+                                break
+                            raise
                         except PlanningProjectionRequired as exc:
                             promote_projection(exc)
                             projection_required = True
                             break
-                        except (AttributeError, TypeError, ValueError) as exc:
-                            retry_invalid(key, attempt, cached, exc)
-                            if attempt + 1 == limits.max_attempts:
-                                raise ProcessingIncomplete(
-                                    "document_plan_invalid", "planning"
-                                ) from None
+                        except RepairScopeError as exc:
+                            try:
+                                repair.rejected(exc, attempt)
+                            except ProcessingIncomplete as failure:
+                                if failure.reason != "document_plan_invalid":
+                                    raise
+                                content_failure = failure.reason
+                                break
+                            msgs = repair.messages
                             continue
                         if not cached:
                             checkpoints.save(key, value, receipt=raw_text)
+                        repair.accepted(value, decoded)
                         raw_response = value
                         accepted_checkpoint = key
                         accepted_attempt = attempt
@@ -667,61 +633,109 @@ def plan_document(
                         accepted_output_tokens = checkpoints.dispatch_output_tokens(key)
                         break
             if re_admit_after_expansion:
-                on_event(
-                    {
-                        "stage": "planning",
-                        "operation": "re_admit_planning_request",
-                        "window": w_idx + 1,
-                        "output_tokens": planning_limits.output_tokens,
-                    }
-                )
+                emit_readmission(on_event, w_idx, planning_limits.output_tokens)
                 continue
+            if content_failure is not None:
+                if mock_caller is None:
+                    salvaged = salvage_candidate(repair.candidate, compile_context, window)
+                if salvaged is None:
+                    settle_content_failure(
+                        window, reason=content_failure,
+                        attempts=attempts_used, predecessor=predecessor,
+                    )
+                    w_idx += 1
+                    continue
+                raw_response, decoded = salvaged.candidate, salvaged.delta
+                accepted_attempt = attempts_used - 1
+                content_failure = None
             if output_exhausted:
                 children = document_windowing.split_planning_target(window, parsed)
+                document_windowing.limit_split_attempts(
+                    children, window, attempts_used, limits.max_attempts
+                )
                 if not children:
-                    raise ProcessingIncomplete("planning_output_budget_exhausted", "planning")
+                    settle_content_failure(
+                        window, reason="planning_output_budget_exhausted",
+                        attempts=attempts_used, predecessor=predecessor,
+                    )
+                    w_idx += 1
+                    continue
                 windows[w_idx : w_idx + 1] = children
                 ledger.replace_schedule(windows, w_idx)
-                on_event(
-                    {
-                        "stage": "planning",
-                        "operation": "split_planning_target",
-                        "window": w_idx + 1,
-                        "parts": len(children),
-                        "frozen_evidence": children[0]["frozen_evidence_id"],
-                    }
-                )
-                emit_planning_observation(
-                    on_event,
-                    planning_observation(
-                        "split",
-                        children[0],
-                        windows,
-                        completed=w_idx,
-                        carry_pages=ledger.page_count(),
-                        carry_unresolved=ledger.open_unresolved_count(),
-                        pages=ledger.page_count(),
-                        unresolved=ledger.open_unresolved_count(),
-                        reason="output_budget_exhausted",
-                        parts=len(children),
-                        prefix=prefix,
-                        candidate_count=len(view.page_register),
-                        elapsed_seconds=time.monotonic() - window_started,
-                        frozen_last_use_seconds=time.monotonic() - planning_started,
-                        request=request_details,
-                    ),
+                emit_split_target(
+                    on_event, ledger, children, windows, w_idx, prefix=prefix,
+                    candidate_count=len(view.page_register), window_started=window_started,
+                    planning_started=planning_started, request=request_details,
                 )
                 continue
             if projection_required:
                 continue
-            assert raw_response is not None
+            if raw_response is None:
+                settle_content_failure(
+                    window, reason="response_empty", attempts=attempts_used,
+                    predecessor=predecessor,
+                )
+                w_idx += 1
+                continue
+
+            if mock_caller is not None:
+                try:
+                    decoded = decode_plan_response(raw_response, **decode_kwargs)
+                    document_planning_support.canonicalize_context_bases(decoded, evidence, parsed)
+                except PlanningProjectionRequired as exc:
+                    promote_projection(exc)
+                    continue
+                except (PlanValidationError, ValueError):
+                    settle_content_failure(
+                        window, reason="document_plan_invalid", attempts=attempts_used,
+                        predecessor=predecessor,
+                    )
+                    w_idx += 1
+                    continue
 
             try:
-                decoded = decode_plan_response(raw_response, **decode_kwargs)
-                document_planning_support.canonicalize_context_bases(decoded, evidence, parsed)
-            except PlanningProjectionRequired as exc:
-                promote_projection(exc)
+                reviewed = review_candidate_references(
+                    raw_response,
+                    decoded,
+                    compile_context,
+                    kb_dir=kb_dir,
+                    source=source,
+                    parsed=parsed,
+                    navigation=navigation,
+                    navigation_hints=nav_hints,
+                    settings=settings,
+                    limits=planning_limits,
+                    checkpoints=checkpoints,
+                    bundle=bundle,
+                    predecessor=predecessor,
+                    caller=_llm_call,
+                    mock_caller=mock_caller,
+                    on_event=on_event,
+                    allow_coverage_gaps=salvaged is not None,
+                    allow_empty_overview=(
+                        salvaged is not None and salvaged.component == "overview"
+                    ),
+                )
+            except ProcessingIncomplete as exc:
+                if exc.reason not in {
+                    "reference_check_invalid", "reference_check_empty_response",
+                    "document_reference_check_invalid",
+                }:
+                    raise
+                settle_content_failure(
+                    window, reason=exc.reason, attempts=attempts_used,
+                    predecessor=predecessor,
+                )
+                w_idx += 1
                 continue
+            raw_response, decoded = reviewed.candidate, reviewed.delta
+            partial = prepare_partial_acceptance(
+                ledger, checkpoints, window,
+                original=repair.candidate if salvaged is not None else None,
+                candidate=raw_response, delta=decoded, salvaged=salvaged,
+                attempts=attempts_used,
+                normalizations=repair.normalization if mock_caller is None else None,
+            )
 
             receipt = accepted_window_receipt(
                 window,
@@ -733,6 +747,9 @@ def plan_document(
                 predecessor=predecessor,
                 delta=content_id(decoded),
                 dispatch_output_tokens=accepted_output_tokens,
+                reference_check=reviewed.summary,
+                normalization=partial.normalizations,
+                salvage_proof=partial.proof_key,
             )
             cumulative_overview = ledger.apply_accepted(
                 decoded,
@@ -740,38 +757,23 @@ def plan_document(
                 final_window=w_idx == len(windows) - 1,
                 windows=windows,
                 completed=w_idx + 1,
+                partial_omission=partial.omission,
             )
+            report_partial_acceptance(partial.omission, on_event, w_idx)
 
-            on_event(
-                {
-                    "stage": "planning",
-                    "window": w_idx + 1,
-                    "total_windows": len(windows),
-                    "pages": ledger.page_count(),
-                    "unresolved": ledger.open_unresolved_count(),
-                }
-            )
-            emit_planning_observation(
+            emit_accepted_window(
                 on_event,
-                planning_observation(
-                    "accepted",
-                    window,
-                    windows,
-                    completed=w_idx + 1,
-                    carry_pages=len(page_register),
-                    carry_unresolved=len(open_references),
-                    pages=ledger.page_count(),
-                    unresolved=ledger.open_unresolved_count(),
-                    checkpoint=receipt["checkpoint"],
-                    result=receipt["result"],
-                    attempt=receipt["attempt"],
-                    cached=receipt["cached"],
-                    prefix=prefix,
-                    candidate_count=ledger.page_count(),
-                    elapsed_seconds=time.monotonic() - window_started,
-                    frozen_last_use_seconds=time.monotonic() - planning_started,
-                    request=request_details,
-                ),
+                ledger,
+                window,
+                windows,
+                receipt,
+                prefix,
+                page_register,
+                open_references,
+                w_idx,
+                window_started,
+                planning_started,
+                request_details,
             )
 
             checkpoints.save_recovery(retained_key, "plan", ledger.progress_preview())
@@ -780,17 +782,18 @@ def plan_document(
             promoted_unresolved_keys.clear()
             w_idx += 1
 
-        final_plan = finalize()
+        final_plan = lifecycle.finalize(windows)
         with progress_scope("planning", len(windows)) as progress:
             progress.advance(len(windows))
         on_event(
             {
                 "stage": "planning",
-                "status": "accepted",
-                "pages": len(final_plan.pages),
+                "status": "accepted" if final_plan is not None else "empty",
+                "pages": len(final_plan.pages) if final_plan is not None else 0,
                 "unresolved": len(
                     [item for item in final_plan.unresolved if item.status == "open"]
+                    if final_plan is not None else []
                 ),
             }
         )
-        return final_plan
+        return public_result(final_plan)

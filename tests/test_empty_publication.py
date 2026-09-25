@@ -90,6 +90,20 @@ def test_all_failed_content_registers_source_and_omissions(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.status == "added", result
+    if failed_stage == "planning":
+        assert result.knowledge_compilation == "not_started"
+        assert result.reason == "document_plan_empty"
+        assert result.omissions and result.planning_coverage["status"] == "partial"
+        assert result.resources[-1].endswith(".json")
+        inventory = get_kb_list(kb_dir)
+        assert inventory["document_count"] == 1
+        assert not inventory["summaries"]
+        row = result.coverage["ranges"][0]
+        reference = Evidence(
+            result.source_id, result.input_version, result.parse_id, row["block_id"]
+        )
+        assert read_source_evidence(kb_dir, reference, max_chars=1000).text == original.read_text()
+        return
     assert result.knowledge_compilation == "completed"
     assert result.omissions and result.coverage["status"] == "partial"
     inventory = get_kb_list(kb_dir)

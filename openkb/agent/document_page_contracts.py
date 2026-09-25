@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openkb.agent.document_page_receipts import valid_critical_review_receipt
+from openkb.agent.document_page_reference_projection import page_external_references
 from openkb.agent.document_plan import PagePlan, source_bound_contexts
 from openkb.agent.evidence_pages import _previous_contribution
 from openkb.implementation import module_revision
@@ -47,6 +48,7 @@ def _page_input(page: PagePlan) -> dict[str, Any]:
         "target": page.target,
         "subject_ranges": page.subject_ranges,
         "necessary_context": source_bound_contexts(page.necessary_context),
+        "limitations": [row.to_dict() for row in page.limitations],
     }
 
 
@@ -88,6 +90,7 @@ def publication_candidate_identity(
             # faithful published contribution to regenerate.
             "generation": {
                 "known_omissions": known_omissions,
+                "external_references": page_external_references(page, settings),
                 "schema": settings.get("_document_schema", ""),
                 "language": settings.get("language"),
             },

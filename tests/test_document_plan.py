@@ -130,6 +130,67 @@ def test_document_plan_dataclasses_and_serialization():
     assert restored.unresolved[0].affected_pages == ["p1"]
 
 
+def test_v2_document_plan_preserves_source_bound_limits_and_external_references():
+    from openkb.agent.document_plan_annotations import ExternalReference, PageLimitation
+
+    parsed = _make_dummy_parsed(1)
+    parsed.blocks[0].text = "Use the guide."
+    parsed.blocks[0].chars = len(parsed.blocks[0].text)
+    plan = DocumentPlan(
+        metadata={"protocol": "document-plan-v2"},
+        overview=OverviewPlan(text="A guide reference.", ranges=[[0, 1]], status="complete"),
+        pages=[
+            PagePlan(
+                key="p1",
+                kind="concept",
+                name="concepts/guide",
+                title="Guide",
+                purpose="Explain the available instruction",
+                subject_ranges=[[0, 1]],
+                limitations=[
+                    PageLimitation([[0, 1]], "Details are in the guide.", "Use the guide.")
+                ],
+            )
+        ],
+        external_references=[
+            ExternalReference(
+                "xref:1", [[0, 1]], "Use the guide.", "guide", None, ["p1"]
+            )
+        ],
+    )
+    assert validate_plan(plan, parsed, [], set())
+    saved = to_dict(plan)
+    assert saved["pages"][0]["limitations"][0]["source_quote"] == "Use the guide."
+    assert saved["external_references"][0]["raw_quote"] == "Use the guide."
+    assert to_dict(from_dict(saved)) == saved
+
+
+def test_v2_plan_preserves_program_generated_planning_omissions():
+    from openkb.agent.document_plan_annotations import PlanningOmission
+
+    parsed = _make_dummy_parsed(1)
+    plan = DocumentPlan(
+        metadata={"protocol": "document-plan-v2"},
+        overview=OverviewPlan(text="Partial overview", ranges=[[0, 1]], status="partial"),
+        planning_omissions=[
+            PlanningOmission(
+                key="omission:one",
+                stage="planning",
+                reason="response_empty",
+                target_id="window-one",
+                ranges=[[0, 1]],
+                affected_pages=[],
+                component="window",
+                attempts=3,
+                diagnostic_ref=None,
+            )
+        ],
+    )
+
+    assert validate_plan(plan, parsed, [], set())
+    assert to_dict(from_dict(to_dict(plan))) == to_dict(plan)
+
+
 def test_from_dict_rejects_invalid_durable_container_shapes():
     with pytest.raises(ValueError, match="Invalid DocumentPlan"):
         from_dict(
@@ -409,18 +470,21 @@ def test_plan_messages_frozen_w_prefix_stability():
 
 
 def test_plan_rules_disambiguate_block_order_and_output_paths():
-    assert "blocks[].order" in PLAN_RULES
-    assert "opaque source IDs" in PLAN_RULES
-    assert "[i,i+1)" in PLAN_RULES
-    assert "target.total_blocks" in PLAN_RULES
-    assert "[a-z0-9][a-z0-9-]{0,119}" in PLAN_RULES
-    assert "Every new unresolved record must set blocking=true" in PLAN_RULES
+    assert "evidence.blocks[].id" in PLAN_RULES
+    assert '"from_block"' in PLAN_RULES
+    assert '"through_block"' in PLAN_RULES
+    assert "Never output numeric block" in PLAN_RULES
+    assert "The application assigns paths" in PLAN_RULES
+    assert "makes new unresolved dependencies blocking" in PLAN_RULES
     assert "necessary_context.ranges" in PLAN_RULES
     assert "necessary_context.basis_ranges" in PLAN_RULES
     normalized = " ".join(PLAN_RULES.split())
     assert "source_only ranges must not overlap any page_changes[].subject_ranges" in normalized
     assert "Multiple pages may share subject evidence" in normalized
-    assert "overview is a derived navigation summary" in normalized
+    assert (
+        "overview.text is cumulative; overview.ranges select only current-window evidence"
+        in normalized
+    )
 
 
 def test_retry_feedback_does_not_echo_arbitrary_exception_text():

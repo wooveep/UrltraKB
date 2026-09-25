@@ -6,9 +6,12 @@ import hashlib
 import json
 from typing import Any
 
+from openkb.sources import content_id
+
 _PROOF_PROTOCOL = "document-plan-ledger-proof-v1"
 _PROOF_SYSTEM = "DocumentPlan accepted ledger state"
 _BASELINE_PROOF_SYSTEM = "DocumentPlan ledger catalog baseline"
+_SETTLEMENT_PROOF_SYSTEM = "DocumentPlan skipped window settlement"
 
 
 def canonical_json(value: Any) -> str:
@@ -70,12 +73,19 @@ def plan_state_digest(ledger: Any) -> str:
     """Hash the logical plan rows, excluding mutable W/T scheduling controls."""
 
     digest = hashlib.sha256()
-    for table, columns in (
+    tables = [
         ("pages", "key, name, target, payload"),
         ("source_only", "key, payload"),
         ("unresolved", "key, status, payload"),
         ("resolutions", "unresolved_key, payload"),
-    ):
+    ]
+    if (ledger._meta("planning_metadata") or {}).get("protocol") == "document-plan-v2":
+        tables.extend((
+            ("external_references", "key, payload"),
+            ("planning_omissions", "key, payload"),
+            ("retry_resolutions", "omission_key, sequence"),
+        ))
+    for table, columns in tables:
         digest.update(table.encode("ascii") + b"\n")
         for row in ledger.db.execute(f"SELECT {columns} FROM {table} ORDER BY 1"):
             digest.update(canonical_json(list(row)).encode("utf-8"))
@@ -107,6 +117,24 @@ def save_accepted_proof(ledger: Any, receipt: dict[str, Any], sequence: int) -> 
     )
 
 
+def _settlement_payload(ledger: Any, sequence: int, receipt: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stage": "document-plan-skipped-settlement",
+        "protocol": "document-plan-ledger-settlement-v2",
+        "ledger": ledger.recovery_key,
+        "sequence": sequence,
+        "receipt": receipt,
+        "catalog_baseline": catalog_baseline_digest(ledger),
+    }
+
+
+def save_settlement_proof(ledger: Any, receipt: dict[str, Any], sequence: int) -> None:
+    """Anchor a skipped target and its omission without claiming content acceptance."""
+    payload = _settlement_payload(ledger, sequence, receipt)
+    key = ledger.checkpoints.key(_SETTLEMENT_PROOF_SYSTEM, payload)
+    ledger.checkpoints.save(key, {**payload, "plan_digest": plan_state_digest(ledger)})
+
+
 def accepted_proofs_valid(ledger: Any, receipts: list[dict[str, Any]]) -> bool:
     """Verify every accepted receipt and the final aggregate plan state."""
 
@@ -118,7 +146,14 @@ def accepted_proofs_valid(ledger: Any, receipts: list[dict[str, Any]]) -> bool:
         # empty baseline; future W/T subdivision may vary independently.
         if any(
             ledger.db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
-            for table in ("pages", "source_only", "unresolved", "resolutions")
+            for table in (
+                "pages",
+                "source_only",
+                "unresolved",
+                "resolutions",
+                "external_references",
+                "planning_omissions",
+            )
         ):
             return False
         expected_overview = {
@@ -132,8 +167,13 @@ def accepted_proofs_valid(ledger: Any, receipts: list[dict[str, Any]]) -> bool:
     expected_digest = plan_state_digest(ledger)
     final_digest = None
     for sequence, receipt in enumerate(receipts, start=1):
-        payload = _proof_payload(ledger, sequence, receipt)
-        key = ledger.checkpoints.identity(_PROOF_SYSTEM, payload)
+        skipped = receipt.get("status") == "skipped"
+        payload = (
+            _settlement_payload(ledger, sequence, receipt)
+            if skipped else _proof_payload(ledger, sequence, receipt)
+        )
+        system = _SETTLEMENT_PROOF_SYSTEM if skipped else _PROOF_SYSTEM
+        key = ledger.checkpoints.identity(system, payload)
         proof = ledger.checkpoints.load(key)
         if (
             not isinstance(proof, dict)
@@ -145,3 +185,31 @@ def accepted_proofs_valid(ledger: Any, receipts: list[dict[str, Any]]) -> bool:
             return False
         final_digest = proof["plan_digest"]
     return final_digest is None or final_digest == expected_digest
+
+
+def salvage_proofs_valid(ledger: Any, receipts: list[dict[str, Any]]) -> bool:
+    """Bind each partial acceptance to its retained complete candidate."""
+    for receipt in receipts:
+        key = receipt.get("salvage_proof")
+        if key is None:
+            continue
+        proof = ledger.checkpoints.load(key)
+        if not isinstance(proof, dict):
+            return False
+        payload_keys = ("stage", "protocol", "window", "original", "candidate", "delta")
+        try:
+            payload = {name: proof[name] for name in payload_keys}
+        except KeyError:
+            return False
+        if (
+            payload["stage"] != "document-plan-salvage"
+            or payload["protocol"] != "document-plan-salvage-v1"
+            or payload["window"] != receipt["window"]
+            or content_id(proof.get("original_candidate")) != payload["original"]
+            or content_id(proof.get("accepted_candidate")) != receipt["result"]
+            or content_id(proof.get("accepted_candidate")) != payload["candidate"]
+            or payload["delta"] != receipt["delta"]
+            or ledger.checkpoints.identity("DocumentPlan salvaged candidate", payload) != key
+        ):
+            return False
+    return True

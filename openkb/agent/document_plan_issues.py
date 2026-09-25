@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, NoReturn
 
+from openkb.sources import content_id
+
 
 @dataclass(frozen=True)
 class ValidationIssue:
@@ -22,6 +24,10 @@ class ValidationIssue:
     blocking: bool = True
     line: int | None = None
     column: int | None = None
+
+    @property
+    def issue_id(self) -> str:
+        return content_id((self.code, self.path, self.source_ranges, self.actual))
 
 
 class PlanValidationError(ValueError):
@@ -64,7 +70,12 @@ def parse_plan_json(raw: str | bytes) -> Any:
             return [convert(item, f"{path}[{index}]") for index, item in enumerate(value)]
         return value
 
-    return convert(json.loads(raw, object_pairs_hook=ObjectPairs), "")
+    def invalid_constant(value: str) -> NoReturn:
+        raise ValueError(f"Invalid JSON constant: {value}")
+
+    return convert(
+        json.loads(raw, object_pairs_hook=ObjectPairs, parse_constant=invalid_constant), ""
+    )
 
 
 def reject(

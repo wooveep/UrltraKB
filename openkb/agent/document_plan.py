@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from typing import Any
+
+from openkb.agent.document_plan_annotations import (
+    ExternalReference,
+    PageLimitation,
+    PlanningOmission,
+)
 
 
 @dataclass(frozen=True)
@@ -38,7 +43,6 @@ class RangeRef:
 
 BlockRange = list[int]  # [start_block, end_block]
 RangeValue = BlockRange | dict[str, int] | RangeRef
-_PAGE_SEGMENT = re.compile(r"^[a-z0-9][a-z0-9-]{0,119}$")
 
 
 def table_row_identity(location: Any) -> tuple[Any, ...] | None:
@@ -183,13 +187,14 @@ class PagePlan:
     type: str | None = None  # entity type when kind == "entity"
     subject_ranges: list[RangeValue] = field(default_factory=list)
     necessary_context: list[dict[str, Any]] = field(default_factory=list)
+    limitations: list[PageLimitation] = field(default_factory=list)
     state: str = "ready"  # "ready" | "blocked"
     quality: str = "planned"  # "planned" | "generated" | "verified" | "unverified" | "published"
     local_key: str | None = None
     review_receipt: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "key": self.key,
             "kind": self.kind,
             "type": self.type,
@@ -211,6 +216,9 @@ class PagePlan:
             "local_key": self.local_key,
             "review_receipt": self.review_receipt,
         }
+        if self.limitations:
+            result["limitations"] = [item.to_dict() for item in self.limitations]
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PagePlan:
@@ -230,6 +238,7 @@ class PagePlan:
             "quality",
             "local_key",
             "review_receipt",
+            "limitations",
         }
         if not set(data) <= allowed:
             raise ValueError("Invalid page plan")
@@ -247,7 +256,12 @@ class PagePlan:
             raise ValueError("Invalid page plan")
         subject_ranges = data.get("subject_ranges", [])
         contexts = data.get("necessary_context", [])
-        if not isinstance(subject_ranges, list) or not isinstance(contexts, list):
+        limitations = data.get("limitations", [])
+        if (
+            not isinstance(subject_ranges, list)
+            or not isinstance(contexts, list)
+            or not isinstance(limitations, list)
+        ):
             raise ValueError("Invalid page plan")
         normalized_contexts = [_context_dict(context) for context in contexts]
         receipt = data.get("review_receipt")
@@ -263,6 +277,7 @@ class PagePlan:
             target=data.get("target", ""),
             subject_ranges=[range_dict(r) for r in subject_ranges],
             necessary_context=normalized_contexts,
+            limitations=[PageLimitation.from_dict(row) for row in limitations],
             state=data.get("state", "ready"),
             quality=data.get("quality", "planned"),
             local_key=data.get("local_key"),
@@ -432,10 +447,12 @@ class DocumentPlan:
     source_only: list[SourceOnlyItem] = field(default_factory=list)
     unresolved: list[UnresolvedItem] = field(default_factory=list)
     resolutions: list[ResolutionItem] = field(default_factory=list)
+    external_references: list[ExternalReference] = field(default_factory=list)
+    planning_omissions: list[PlanningOmission] = field(default_factory=list)
 
 
 def to_dict(plan: DocumentPlan) -> dict[str, Any]:
-    return {
+    result = {
         "metadata": dict(plan.metadata),
         "overview": plan.overview.to_dict(),
         "pages": [p.to_dict() for p in plan.pages],
@@ -443,13 +460,24 @@ def to_dict(plan: DocumentPlan) -> dict[str, Any]:
         "unresolved": [u.to_dict() for u in plan.unresolved],
         "resolutions": [r.to_dict() for r in plan.resolutions],
     }
+    if plan.metadata.get("protocol") == "document-plan-v2":
+        result["external_references"] = [row.to_dict() for row in plan.external_references]
+        result["planning_omissions"] = [row.to_dict() for row in plan.planning_omissions]
+    return result
 
 
 def from_dict(data: dict[str, Any]) -> DocumentPlan:
     fields = {"metadata", "overview", "pages", "source_only", "unresolved", "resolutions"}
-    if not isinstance(data, dict) or set(data) != fields:
+    if not isinstance(data, dict) or not isinstance(data.get("metadata"), dict):
         raise ValueError("Invalid DocumentPlan payload")
-    containers = ("pages", "source_only", "unresolved", "resolutions")
+    protocol = data["metadata"].get("protocol")
+    if protocol == "document-plan-v2":
+        fields.update({"external_references", "planning_omissions"})
+    if set(data) != fields:
+        raise ValueError("Invalid DocumentPlan payload")
+    containers: tuple[str, ...] = ("pages", "source_only", "unresolved", "resolutions")
+    if protocol == "document-plan-v2":
+        containers += ("external_references", "planning_omissions")
     if (
         not isinstance(data["metadata"], dict)
         or not isinstance(data["overview"], dict)
@@ -468,6 +496,12 @@ def from_dict(data: dict[str, Any]) -> DocumentPlan:
             source_only=[SourceOnlyItem.from_dict(s) for s in data["source_only"]],
             unresolved=[UnresolvedItem.from_dict(u) for u in data["unresolved"]],
             resolutions=[ResolutionItem.from_dict(r) for r in data["resolutions"]],
+            external_references=[
+                ExternalReference.from_dict(row) for row in data.get("external_references", [])
+            ],
+            planning_omissions=[
+                PlanningOmission.from_dict(row) for row in data.get("planning_omissions", [])
+            ],
         )
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid DocumentPlan payload") from exc
@@ -522,197 +556,16 @@ def _check_block_range(r: Any, max_blocks: int, context_label: str) -> None:
         )
 
 
-def _check_range(r: RangeValue, parsed: Any, context_label: str) -> None:
-    # ``range_intervals`` validates both shape and exact character bounds.  It
-    # is deliberately the one authority used by planning, generation and
-    # coverage rather than allowing each layer to reinterpret partial blocks.
-    for index, _, _ in range_intervals(r, parsed, context_label):
-        if "attachment" in getattr(parsed.blocks[index], "location", {}):
-            raise ValueError(f"Range in {context_label} references unread attachment content")
-
-
 def validate_plan(
     plan: DocumentPlan,
     parsed: Any,
     allowed_entity_types: list[str],
     existing_targets: set[str],
 ) -> bool:
-    """Validate all ranges, entity types, and targets against immutable parsed blocks."""
-    if plan.metadata.get("protocol") != "document-plan-v1":
-        raise ValueError("Invalid DocumentPlan protocol")
-    if plan.overview.status not in {"partial", "complete"}:
-        raise ValueError("Invalid overview status")
-    zero_readable_body = plan.metadata.get("zero_readable_body") is True
-    if not zero_readable_body and not plan.overview.text.strip():
-        raise ValueError("Readable DocumentPlan needs a non-empty overview")
-    if not zero_readable_body and not plan.overview.ranges:
-        raise ValueError("Readable DocumentPlan overview needs exact evidence ranges")
-    if zero_readable_body and plan.pages:
-        raise ValueError("Zero-readable-body plan cannot contain pages")
+    """Validate an accepted plan against the immutable parsed source."""
+    from openkb.agent.document_plan_validation import validate_plan as validate
 
-    # Validate overview ranges
-    for r in plan.overview.ranges:
-        _check_range(r, parsed, "overview")
-
-    # Validate pages
-    page_keys = set()
-    page_names = set()
-    for page in plan.pages:
-        if not isinstance(page.key, str) or not page.key or page.key in page_keys:
-            raise ValueError("Page keys must be unique non-empty strings")
-        page_keys.add(page.key)
-        if not isinstance(page.name, str) or not page.name or page.name in page_names:
-            raise ValueError("Page names must be unique non-empty strings")
-        page_names.add(page.name)
-        if any(
-            not isinstance(value, str)
-            for value in (page.title, page.purpose, page.target, page.state, page.quality)
-        ):
-            raise ValueError(f"Invalid page fields for {page.name}")
-        if not page.purpose.strip():
-            raise ValueError(f"Page {page.name} needs a non-empty purpose")
-        if page.type is not None and not isinstance(page.type, str):
-            raise ValueError(f"Invalid entity type for {page.name}")
-        if page.local_key is not None and not isinstance(page.local_key, str):
-            raise ValueError(f"Invalid local key for {page.name}")
-        if page.review_receipt is not None and not isinstance(page.review_receipt, dict):
-            raise ValueError(f"Invalid review receipt for {page.name}")
-        if page.kind not in {"concept", "entity"}:
-            raise ValueError(f"Invalid page kind: {page.kind}")
-        _check_page_path(page.name, page.kind)
-        if page.target and page.target not in existing_targets:
-            raise ValueError(f"Unknown existing page target: {page.target}")
-        if page.target and page.target != page.name:
-            raise ValueError(f"Existing target must equal page name: {page.target}")
-        if page.name in existing_targets and not page.target:
-            raise ValueError(f"Existing page name requires its actual target: {page.name}")
-        if page.state not in {"ready", "blocked"}:
-            raise ValueError(f"Invalid page state: {page.state}")
-        if page.quality not in {"planned", "generated", "verified", "unverified", "published"}:
-            raise ValueError(f"Invalid page quality: {page.quality}")
-        from openkb.agent.document_page_receipts import valid_critical_review_receipt
-
-        if page.quality in {"verified", "published"} and not valid_critical_review_receipt(
-            page.review_receipt
-        ):
-            raise ValueError(f"Invalid critical review receipt for {page.name}")
-        if page.quality == "unverified" and not isinstance(page.review_receipt, dict):
-            raise ValueError(f"Missing review receipt for {page.name}")
-        if page.kind == "entity":
-            if not page.type or page.type not in allowed_entity_types:
-                raise ValueError(
-                    f"Invalid entity type '{page.type}' for page '{page.name}', "
-                    f"allowed: {allowed_entity_types}"
-                )
-        if not isinstance(page.subject_ranges, list) or not page.subject_ranges:
-            raise ValueError(f"Page {page.name} needs exact subject_ranges")
-        for r in page.subject_ranges:
-            _check_range(r, parsed, f"page {page.name} subject_ranges")
-        for ctx in page.necessary_context:
-            if not isinstance(ctx, dict):
-                raise ValueError(f"Invalid necessary_context in page {page.name}")
-            required = {"relation", "basis", "ranges", "basis_ranges"}
-            if not required <= set(ctx) or not set(ctx) <= required | {"basis_quote", "rationale"}:
-                raise ValueError(f"Invalid necessary_context in page {page.name}")
-            if "basis_quote" in ctx and ctx["basis_quote"] != ctx["basis"]:
-                raise ValueError(f"Invalid necessary_context in page {page.name}")
-            rel = ctx.get("relation")
-            if rel not in {"explicit_reference", "applicable_condition"}:
-                raise ValueError(f"Invalid relation in necessary_context: {rel}")
-            if not isinstance(ctx.get("basis", ""), str) or not ctx.get("basis", "").strip():
-                raise ValueError(f"Necessary context in {page.name} needs an original-text basis")
-            ranges = ctx.get("ranges", [])
-            basis_ranges = ctx.get("basis_ranges", [])
-            if not isinstance(ranges, list) or not ranges:
-                raise ValueError(f"Necessary context in {page.name} needs exact ranges")
-            if not isinstance(basis_ranges, list) or not basis_ranges:
-                raise ValueError(f"Necessary context in {page.name} needs exact basis_ranges")
-            for r in ranges:
-                _check_range(r, parsed, f"page {page.name} necessary_context")
-            for r in basis_ranges:
-                _check_range(r, parsed, f"page {page.name} necessary_context basis")
-
-    if any(page.quality == "published" for page in plan.pages) and not isinstance(
-        plan.metadata.get("publication_receipt"), dict
-    ):
-        raise ValueError("Published pages need a completed publication receipt")
-
-    # Validate source_only
-    for item in plan.source_only:
-        if not isinstance(item.reason, str) or not item.reason.strip():
-            raise ValueError("source_only item must have a non-empty reason")
-        if not isinstance(item.ranges, list):
-            raise ValueError("source_only item ranges must be a list")
-        for r in item.ranges:
-            _check_range(r, parsed, "source_only")
-
-    # Validate unresolved
-    unresolved_keys = set()
-    for u in plan.unresolved:
-        if not isinstance(u.key, str) or not u.key or u.key in unresolved_keys:
-            raise ValueError("Unresolved keys must be unique non-empty strings")
-        unresolved_keys.add(u.key)
-        if u.status not in {"open", "resolved"} or type(u.blocking) is not bool:
-            raise ValueError(f"Invalid unresolved status for {u.key}")
-        if (
-            not all(
-                isinstance(value, str) and value.strip()
-                for value in (u.problem_type, u.missing_target, u.reason)
-            )
-            or not isinstance(u.affected_pages, list)
-            or any(not isinstance(page, str) for page in u.affected_pages)
-        ):
-            raise ValueError(f"Unresolved item {u.key} is missing required fields")
-        if u.problem_type not in {
-            "missing_prerequisite",
-            "unresolved_cross_reference",
-            "missing_external_material",
-            "parsing_limitation",
-        }:
-            raise ValueError(f"Unresolved item {u.key} has an invalid problem type")
-        if not u.affected_pages or any(page not in page_keys for page in u.affected_pages):
-            raise ValueError(f"Unresolved item {u.key} has invalid affected pages")
-        if not u.location:
-            raise ValueError(f"Unresolved item {u.key} needs an exact location")
-        for r in u.location:
-            _check_range(r, parsed, f"unresolved {u.key}")
-
-    # Validate resolutions
-    resolved = set()
-    for res in plan.resolutions:
-        if (
-            not isinstance(res.unresolved_key, str)
-            or res.unresolved_key not in unresolved_keys
-            or res.unresolved_key in resolved
-            or not isinstance(res.basis_ranges, list)
-            or not res.basis_ranges
-        ):
-            raise ValueError("Resolution must refer to one unique unresolved item")
-        resolved.add(res.unresolved_key)
-        for r in res.basis_ranges:
-            _check_range(r, parsed, f"resolution for {res.unresolved_key}")
-    if resolved != {item.key for item in plan.unresolved if item.status == "resolved"}:
-        raise ValueError("Resolved unresolved items need one exact resolution receipt")
-
-    blocked_keys = _blocking_page_keys(plan.unresolved)
-    for page in plan.pages:
-        expected_state = _derived_page_state(page, blocked_keys)
-        if page.state != expected_state:
-            raise ValueError(f"Page {page.name} state must equal its derived state")
-
-    return True
-
-
-def _check_page_path(name: str, kind: str) -> None:
-    path = PurePosixPath(name)
-    folder = "concepts" if kind == "concept" else "entities"
-    if (
-        path.is_absolute()
-        or path.parts[:1] != (folder,)
-        or len(path.parts) != 2
-        or not _PAGE_SEGMENT.fullmatch(path.name)
-    ):
-        raise ValueError(f"Invalid {kind} page path: {name}")
+    return validate(plan, parsed, allowed_entity_types, existing_targets)
 
 
 def check_coverage_gaps(
@@ -728,6 +581,7 @@ def check_coverage_gaps(
     as accounted-to-unresolved, while attachments retain their independent
     storage route.
     """
+    from openkb.agent.document_range_validation import merged_intervals
 
     intervals: dict[int, list[tuple[int, int]]] = {}
 
@@ -761,16 +615,23 @@ def check_coverage_gaps(
             continue
         if required_ranges is not None and index not in required:
             continue
-        required_intervals = required.get(index, [(0, chars)])
-        actual = sorted(intervals.get(index, []))
+        required_intervals = merged_intervals(required.get(index, [(0, chars)]))
+        actual = merged_intervals(intervals.get(index, []))
         for required_start, required_end in required_intervals:
             cursor = required_start
             for start, end in actual:
                 if end <= cursor:
                     continue
-                if start > cursor:
+                if start >= required_end:
                     break
-                cursor = max(cursor, end)
+                if start > cursor:
+                    gap_end = min(start, required_end)
+                    gaps.append(
+                        [index, index + 1]
+                        if cursor == 0 and gap_end == chars
+                        else RangeRef(index, cursor, gap_end).to_dict()
+                    )
+                cursor = max(cursor, min(end, required_end))
                 if cursor >= required_end:
                     break
             if cursor < required_end:

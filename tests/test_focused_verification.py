@@ -217,8 +217,8 @@ def test_independent_planned_pages_keep_separate_review_decisions(kb_dir, tmp_pa
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert sorted(reviewed) == ["Alpha", "Beta"]
-    assert (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert list((kb_dir / "wiki/concepts").glob("alpha*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("beta*.md"))
     assert any(row["reason"] == "knowledge_evidence_mismatch" for row in result.omissions)
     assert not any(
         json.loads(row["messages"][-1]["content"])["stage"] == "verification_batch"

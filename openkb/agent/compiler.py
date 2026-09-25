@@ -409,6 +409,7 @@ def _llm_call(
     raise_on_truncation: bool = False,
     *,
     bundle=None,
+    decode_response: bool = True,
     **kwargs,
 ) -> str:
     """Single LLM call with animated progress and debug logging."""
@@ -440,7 +441,10 @@ def _llm_call(
     except BaseException:
         spinner.stop("unfinished")
         raise
-    content = response.choices[0].message.content or ""
+    provider_content = response.choices[0].message.content
+    if provider_content is not None and not isinstance(provider_content, str):
+        raise ValueError("LLM text response content is invalid")
+    content = provider_content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
     spinner.stop(_format_usage(time.time() - t0, getattr(response, "usage", None)))
@@ -453,7 +457,12 @@ def _llm_call(
         )
     from openkb.execution_receipt import model_text
 
-    return model_text(decode(content.strip()))
+    return model_text(
+        decode(content.strip()) if decode_response else content,
+        raw_content=provider_content,
+        finish_reason=getattr(response.choices[0], "finish_reason", "stop"),
+        representation="decoded" if decode_response else "wire",
+    )
 
 
 async def _llm_call_async(
@@ -463,6 +472,7 @@ async def _llm_call_async(
     raise_on_truncation: bool = False,
     *,
     bundle=None,
+    decode_response: bool = True,
     **kwargs,
 ) -> str:
     """Async LLM call with timing output and debug logging."""
@@ -488,7 +498,10 @@ async def _llm_call_async(
 
     with request_operation(step_name):
         response = await model_acall(litellm.acompletion, model=model, messages=messages, **kwargs)
-    content = response.choices[0].message.content or ""
+    provider_content = response.choices[0].message.content
+    if provider_content is not None and not isinstance(provider_content, str):
+        raise ValueError("LLM text response content is invalid")
+    content = provider_content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
     elapsed = time.time() - t0
@@ -505,7 +518,12 @@ async def _llm_call_async(
         )
     from openkb.execution_receipt import model_text
 
-    return model_text(decode(content.strip()))
+    return model_text(
+        decode(content.strip()) if decode_response else content,
+        raw_content=provider_content,
+        finish_reason=response.choices[0].finish_reason,
+        representation="decoded" if decode_response else "wire",
+    )
 
 
 async def _llm_call_page_async(

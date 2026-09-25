@@ -13,6 +13,12 @@ from openkb.sources import SourceStore, content_id
 from tests.http_model_fixture import evidence_response
 
 
+def _published_concept(kb_dir, stem):
+    pages = list((kb_dir / "wiki/concepts").glob(f"{stem}*.md"))
+    assert len(pages) == 1, pages
+    return pages[0]
+
+
 def test_semantic_rejection_keeps_original_and_blocks_knowledge_publication(
     kb_dir, tmp_path, model_service
 ):
@@ -221,7 +227,7 @@ def test_unsupported_draft_is_corrected_from_feedback_and_verified_before_public
     assert len(checked) == 2
     assert incorrect in checked[0]
     assert quote in checked[1]
-    content = (kb_dir / "wiki/concepts/notes.md").read_text()
+    content = _published_concept(kb_dir, "notes").read_text()
     assert quote in content and incorrect not in content
 
 
@@ -339,7 +345,7 @@ def test_corrupted_cached_page_response_is_revalidated_before_publication(
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed"
     assert len(model_service) > before
-    page = (kb_dir / "wiki/concepts/notes.md").read_text()
+    page = _published_concept(kb_dir, "notes").read_text()
     assert "999 kPa" not in page
 
 
@@ -461,7 +467,7 @@ def test_batches_fit_generation_review_and_correction_in_the_same_context(
             model="gpt-4o-mini", text=json.dumps(call["response_format"])
         )
         assert tokens + call["max_tokens"] <= 6144
-    content = (kb_dir / "wiki/concepts/notes.md").read_text()
+    content = _published_concept(kb_dir, "notes").read_text()
     assert all(f"Valve {i}." in content for i in range(4))
 
 
@@ -530,7 +536,7 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
     assert result.knowledge_compilation == "completed", result
     assert generated
     assert {p["page"]["title"] for p in reviewed} == {"Version 6 operations"}
-    content = (kb_dir / "wiki/concepts/version-6-operations.md").read_text()
+    content = _published_concept(kb_dir, "version-6-operations").read_text()
     assert 'description: "Version 6 operations"' in content
     assert "Shutdown support" not in content
 
@@ -671,7 +677,7 @@ def test_link_examples_in_code_reach_review_and_publication_unchanged(
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
     assert reviewed and all(content in value for value in reviewed)
-    assert content in (kb_dir / "wiki/concepts/notes.md").read_bytes().decode()
+    assert content in _published_concept(kb_dir, "notes").read_bytes().decode()
 
 
 @pytest.mark.parametrize(

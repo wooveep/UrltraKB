@@ -208,9 +208,6 @@ def compile_evidence(
         wiki = workspace / "wiki"
         page_settings = {**settings, "_document_schema": get_agents_md(wiki)}
         previous_targets = list_existing_wiki_targets(wiki)
-        has_committed_knowledge = any(
-            target.startswith(("concepts/", "entities/")) for target in previous_targets
-        )
         source_unparsed = not parsed.blocks and any(
             isinstance(row, dict)
             and isinstance(row.get("reason"), str)
@@ -224,7 +221,7 @@ def compile_evidence(
             # original as an honest zero-page result below.
             raise ValueError("Source parse has no usable blocks")
         try:
-            plan = plan_document(
+            planning_result = plan_document(
                 kb_dir,
                 workspace,
                 source,
@@ -235,8 +232,20 @@ def compile_evidence(
                 bundle=bundle,
                 on_event=on_event,
                 resume=resume_plan,
+                retry_skipped=resume_plan,
                 plan_only=plan_only,
+                return_result=True,
             )
+            from openkb.agent.document_plan import DocumentPlan
+            from openkb.agent.document_planning_result import PlanningResult
+
+            if isinstance(planning_result, PlanningResult):
+                plan = planning_result.plan
+            elif isinstance(planning_result, DocumentPlan):
+                plan = planning_result
+                planning_result = PlanningResult.from_plan(plan)
+            else:
+                raise TypeError("Planner returned an invalid result")
         except ProcessingIncomplete as exc:
             # Plan-only is an inspection boundary, not permission to turn a
             # recoverable planner failure into a fake ready DocumentPlan.
@@ -253,14 +262,9 @@ def compile_evidence(
                 exc.reason
                 not in {
                     "document_plan_invalid",
-                    "planned_evidence_unavailable",
                     "evidence_context_exceeds_request_budget",
-                    "provider_temporarily_unavailable",
                     "provider_context_exceeded",
-                    "input_budget_exceeded",
                 }
-                or not allow_planning_omission
-                or has_committed_knowledge
             ):
                 raise
             report_content_omission(
@@ -292,6 +296,17 @@ def compile_evidence(
             # source produced a valid zero-page proposal. Continue starts
             # planning afresh from the retained source evidence.
             return None
+        if plan is None:
+            # The planner settled all targets without accepting content. Its
+            # versioned report and omission rows are already durable.
+            _write_summary(
+                wiki, name,
+                "# " + source.name + "\n\n本次生成知识：0 条。规划未形成可用页面。\n",
+            )
+            return planning_result
+        page_settings["_document_external_references"] = [
+            reference.to_dict() for reference in plan.external_references
+        ]
         all_groups = _planned_groups(plan, executable_only=False)
         ready_groups = [group for group in all_groups if group["page"].state == "ready"]
 
@@ -309,8 +324,11 @@ def compile_evidence(
                     )
 
         if plan_only:
-            on_event({"stage": "planning", "status": "ready", "plan_only": True})
-            return plan
+            on_event({
+                "stage": "planning", "status": planning_result.outcome,
+                "plan_only": True, "report": planning_result.report_ref,
+            })
+            return planning_result
 
         used_assets = {asset for block in parsed.blocks for asset in block.assets}
         assets = {

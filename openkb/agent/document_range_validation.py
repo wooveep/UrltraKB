@@ -271,6 +271,41 @@ def range_intervals(value: Any, *, block_chars: list[int] | None) -> list[tuple[
     return [(index, 0, block_chars[index]) for index in range(start, end) if block_chars[index]]
 
 
+def subtract_exact_ranges(
+    original: list[Any], removed: list[Any], block_chars: list[int]
+) -> list[Any]:
+    """Subtract validated exact intervals, preserving untouched character spans."""
+    cuts: dict[int, list[tuple[int, int]]] = {}
+    for value in removed:
+        for index, start, end in range_intervals(value, block_chars=block_chars):
+            cuts.setdefault(index, []).append((start, end))
+    cuts = {index: merged_intervals(rows) for index, rows in cuts.items()}
+    kept: list[tuple[int, int, int]] = []
+    for value in original:
+        for index, start, end in range_intervals(value, block_chars=block_chars):
+            cursor = start
+            for left, right in cuts.get(index, []):
+                if right <= cursor or left >= end:
+                    continue
+                if cursor < left:
+                    kept.append((index, cursor, min(left, end)))
+                cursor = max(cursor, right)
+                if cursor >= end:
+                    break
+            if cursor < end:
+                kept.append((index, cursor, end))
+    result: list[Any] = []
+    for index, start, end in kept:
+        if start == 0 and end == block_chars[index]:
+            if result and isinstance(result[-1], list) and result[-1][1] == index:
+                result[-1][1] = index + 1
+            else:
+                result.append([index, index + 1])
+        else:
+            result.append({"block_index": index, "start_char": start, "end_char": end})
+    return result
+
+
 def validate_target_coverage(
     target_intervals: dict[int, list[tuple[int, int]]],
     pages: list[dict[str, Any]],
@@ -281,6 +316,28 @@ def validate_target_coverage(
     ignored_blocks: set[int],
 ) -> None:
     """Reject a target response that silently leaves source responsibility behind."""
+    issues = target_coverage_issues(
+        target_intervals,
+        pages,
+        source_only,
+        unresolved,
+        block_chars=block_chars,
+        ignored_blocks=ignored_blocks,
+    )
+    if issues:
+        raise PlanValidationError("Current target has conflicting or unassigned source", issues)
+
+
+def target_coverage_issues(
+    target_intervals: dict[int, list[tuple[int, int]]],
+    pages: list[dict[str, Any]],
+    source_only: list[dict[str, Any]],
+    unresolved: list[dict[str, Any]],
+    *,
+    block_chars: list[int] | None,
+    ignored_blocks: set[int],
+) -> list[ValidationIssue]:
+    """Collect every independent conflict and exact uncovered interval."""
     subjects: dict[int, list[tuple[int, int, int]]] = {}
     for page_index, page in enumerate(pages):
         for value in page["subject_ranges"]:
@@ -289,30 +346,40 @@ def validate_target_coverage(
     conflicts: list[ValidationIssue] = []
     for source_index, item in enumerate(source_only):
         for range_index, value in enumerate(item["ranges"]):
+            overlapping: set[int] = set()
+            exact_conflict: list[Any] = []
             for index, start, end in range_intervals(value, block_chars=block_chars):
-                overlapping = {
+                overlapping_here = {
                     page_index
                     for left, right, page_index in subjects.get(index, [])
                     if start < right and left < end
                 }
-                if overlapping:
-                    conflicts.append(
-                        ValidationIssue(
-                            code="source_only_conflict",
-                            path=f"source_only[{source_index}].ranges[{range_index}]",
-                            category="semantic",
-                            expected="source-only range outside every page subject",
-                            actual=value,
-                            source_ranges=[value],
-                            related_paths=[
-                                f"page_changes[{page_index}].subject_ranges"
-                                for page_index in sorted(overlapping)
-                            ],
-                            allowed_action="reselect_evidence",
-                        )
+                overlapping.update(overlapping_here)
+                exact_conflict.extend(
+                    {
+                        "block_index": index,
+                        "start_char": max(start, left),
+                        "end_char": min(end, right),
+                    }
+                    for left, right, _ in subjects.get(index, [])
+                    if start < right and left < end
+                )
+            if overlapping:
+                conflicts.append(
+                    ValidationIssue(
+                        code="source_only_conflict",
+                        path=f"source_only[{source_index}].ranges[{range_index}]",
+                        category="semantic",
+                        expected="source-only range outside every page subject",
+                        actual=value,
+                        source_ranges=exact_conflict,
+                        related_paths=[
+                            f"page_changes[{page_index}].subject_ranges"
+                            for page_index in sorted(overlapping)
+                        ],
+                        allowed_action="reselect_evidence",
                     )
-    if conflicts:
-        raise PlanValidationError("source_only cannot also be page subject evidence", conflicts)
+                )
     covered: dict[int, list[tuple[int, int]]] = {}
 
     def add(values: list[Any]) -> None:
@@ -331,6 +398,7 @@ def validate_target_coverage(
     for item in unresolved:
         add(item["location"])
 
+    gaps: list[tuple[int, int, int]] = []
     for index, required in target_intervals.items():
         if index in ignored_blocks:
             continue
@@ -341,18 +409,35 @@ def validate_target_coverage(
                 if right <= cursor:
                     continue
                 if left > cursor:
-                    break
+                    gaps.append((index, cursor, min(left, end)))
                 cursor = max(cursor, right)
                 if cursor >= end:
                     break
             if cursor < end:
-                reject(
-                    f"Current target leaves source range {index} unaccounted",
-                    code="coverage_gap",
-                    path=f"coverage[{index}]",
-                    category="coverage",
-                    expected=[cursor, end],
-                    actual=actual,
-                    source_ranges=[{"block_index": index, "start_char": cursor, "end_char": end}],
-                    allowed_action="reselect_evidence",
-                )
+                gaps.append((index, cursor, end))
+    # Whole adjacent blocks are one diagnostic. A partial character gap remains exact.
+    grouped: list[list[Any]] = []
+    for index, start, end in gaps:
+        whole = block_chars is not None and start == 0 and end == block_chars[index]
+        if whole and grouped and grouped[-1][2] and grouped[-1][1] == index:
+            grouped[-1][1] = index + 1
+        else:
+            grouped.append([index, index + 1, whole, start, end])
+    for first, last, whole, start, end in grouped:
+        source_range: Any = (
+            [first, last] if whole else {"block_index": first, "start_char": start, "end_char": end}
+        )
+        conflicts.append(
+            ValidationIssue(
+                code="coverage_gap",
+                path=f"coverage[{first}]",
+                category="coverage",
+                expected="one authorized content route",
+                actual=None,
+                source_ranges=[source_range],
+                item_ref="plan",
+                allowed_action="reselect_evidence",
+                allowed_operations=("replace_field", "append_item"),
+            )
+        )
+    return conflicts

@@ -82,7 +82,13 @@ def compilation_profile(settings, bundle):
                     "evidence_markup",
                     "compiler",
                     "document_plan",
+                    "document_plan_annotations",
+                    "document_plan_annotation_compiler",
+                    "document_plan_validation",
+                    "document_plan_preview",
                     "document_protocol",
+                    "document_json_prompts",
+                    "document_json_response",
                     "document_range_validation",
                     "document_orchestrator",
                     "document_recovery",
@@ -91,8 +97,16 @@ def compilation_profile(settings, bundle):
                     "document_window_receipts",
                     "document_planning_events",
                     "document_planning_ledger",
+                    "document_planning_ledger_annotations",
+                    "document_planning_ledger_retry",
                     "document_planning_ledger_integrity",
+                    "document_planning_ledger_recovery",
                     "document_planning_ledger_views",
+                    "document_planning_lifecycle",
+                    "document_planning_result",
+                    "document_external_references",
+                    "document_plan_proof_reader",
+                    "document_page_reference_projection",
                     "document_planning_projection",
                     "document_planning_support",
                     "document_pages",
@@ -562,7 +576,16 @@ class CompilationCheckpoints:
     def load_recovery(self, key, kind):
         """Mutable workflow state is never treated as a verified model result."""
         processing_checkpoint()
-        if kind not in {"split", "draft", "review", "plan", "topic", "plan_repair"}:
+        if kind not in {
+            "split",
+            "draft",
+            "review",
+            "plan",
+            "plan_report",
+            "topic",
+            "plan_repair",
+            "reference_check",
+        }:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         if not path.exists():
@@ -600,7 +623,16 @@ class CompilationCheckpoints:
 
     def save_recovery(self, key, kind, value):
         processing_checkpoint()
-        if kind not in {"split", "draft", "review", "plan", "topic", "plan_repair"}:
+        if kind not in {
+            "split",
+            "draft",
+            "review",
+            "plan",
+            "plan_report",
+            "topic",
+            "plan_repair",
+            "reference_check",
+        }:
             raise ValueError("Invalid recovery checkpoint kind")
         path = self.store.owned_path(self.root / "recovery" / f"{valid_id(key)}-{kind}.json")
         check_disk(path, json_size(value), stage="checkpoint", operation="save_" + kind)

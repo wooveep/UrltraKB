@@ -15,10 +15,38 @@ from openkb.sources import content_id
 __all__ = ("no_readable_body", "valid_window_schedule")
 
 
+def promote_planning_projection(
+    required: Any,
+    page_keys: set[str],
+    catalog_targets: set[str],
+    unresolved_keys: set[str],
+    on_event: Any,
+    window: int,
+) -> None:
+    if required.page_key:
+        page_keys.add(required.page_key)
+    if required.catalog_target:
+        catalog_targets.add(required.catalog_target)
+    if required.unresolved_key:
+        unresolved_keys.add(required.unresolved_key)
+    on_event({"stage": "planning", "operation": "promote_planning_ledger", "window": window})
+
+
 def select_navigation_hints(
-    navigation: dict[str, Any] | None, target_ranges: list[Any], limits: Any
+    navigation: dict[str, Any] | None,
+    target_ranges: list[Any],
+    limits: Any,
+    *,
+    evidence: dict[str, Any] | None = None,
+    parsed: Any | None = None,
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Keep every target hint that fits; otherwise spread a bounded view across T."""
+
+    if evidence is not None:
+        from openkb.agent.document_navigation_view import navigation_view
+
+        return navigation_view(navigation, evidence, limits, parsed, model=model)
 
     def in_target(node: dict[str, Any]) -> bool:
         index = node.get("start")
@@ -72,6 +100,47 @@ def accepted_request_reference(messages: Any) -> str:
     return content_id(
         {"system": messages[0]["content"], "payload": json.loads(messages[-1]["content"])}
     )
+
+
+def planning_decode_context(
+    parsed: Any,
+    ledger: Any,
+    view: Any,
+    *,
+    target_start: int,
+    target_end: int,
+    entity_types: list[str],
+    visible_targets: set[str],
+    target_ranges: list[Any],
+    evidence_ranges: list[Any],
+    prior_overview_ranges: list[Any],
+) -> dict[str, Any]:
+    """Collect trusted window inputs once for v3 compilation and legacy mock decoding."""
+    return {
+        "target_start": target_start,
+        "target_end": target_end,
+        "total_blocks": len(parsed.blocks),
+        "allowed_entity_types": entity_types,
+        "existing_targets": visible_targets,
+        "reserved_targets": ledger.catalog_targets(),
+        "known_page_names": ledger.page_names(),
+        "known_page_name_keys": ledger.page_names(),
+        "known_page_keys": ledger.page_keys(),
+        "carry_pages": view.page_register,
+        "open_unresolved": view.open_references,
+        "known_unresolved_keys": ledger.unresolved_keys(),
+        "known_open_unresolved_keys": ledger.unresolved_keys(status="open"),
+        "block_chars": [block.chars for block in parsed.blocks],
+        "ignored_blocks": {
+            index
+            for index, block in enumerate(parsed.blocks)
+            if "attachment" in getattr(block, "location", {})
+        },
+        "target_ranges": target_ranges,
+        "evidence_ranges": evidence_ranges,
+        "prior_overview_ranges": prior_overview_ranges,
+        "context_contract": "document-plan-v2",
+    }
 
 
 def planning_admission_limits(limits: Any) -> Any:
@@ -463,10 +532,27 @@ def planning_implementation_revisions() -> dict[str, str]:
         name: module_revision("openkb.agent." + name)
         for name in (
             "document_plan",
+            "document_plan_annotations",
+            "document_plan_annotation_compiler",
+            "document_plan_validation",
+            "document_plan_preview",
+            "document_json_prompts",
+            "document_json_response",
             "document_protocol",
+            "document_plan_compiler",
+            "document_plan_diagnostics",
+            "document_plan_selections",
+            "document_plan_routes",
+            "document_plan_routing",
+            "_document_plan_compiler_support",
+            "document_plan_patches",
             "document_plan_feedback",
             "document_plan_issues",
             "document_plan_repair_state",
+            "document_navigation_view",
+            "document_reference_check",
+            "document_reference_evidence",
+            "document_reference_review",
             "document_range_validation",
             "document_orchestrator",
             "document_recovery",
@@ -475,8 +561,17 @@ def planning_implementation_revisions() -> dict[str, str]:
             "document_window_receipts",
             "document_planning_events",
             "document_planning_ledger",
+            "document_planning_ledger_annotations",
+            "document_planning_ledger_retry",
             "document_planning_ledger_integrity",
+            "document_planning_ledger_recovery",
             "document_planning_ledger_views",
+            "document_planning_lifecycle",
+            "document_planning_admission",
+            "document_planning_result",
+            "document_external_references",
+            "document_plan_proof_reader",
+            "document_page_reference_projection",
             "document_planning_projection",
             "document_planning_support",
         )
@@ -500,7 +595,7 @@ def planning_identity(
     """Build the recovery identity before mutable catalogue projection begins."""
 
     return checkpoints.identity(
-        "document-plan-v1",
+        "document-plan-v2",
         {
             "source_id": source.source_id,
             "version_id": source.id,
@@ -538,7 +633,7 @@ def planning_metadata(
     """Create replay-safe plan metadata without storing source bodies."""
 
     metadata = {
-        "protocol": "document-plan-v1",
+        "protocol": "document-plan-v2",
         "source_id": source.source_id,
         "version_id": source.id,
         "parse_id": parsed.id,
@@ -591,6 +686,8 @@ def final_document_plan(
     source_only: list[Any],
     unresolved: list[Any],
     resolutions: list[Any],
+    external_references: list[Any],
+    planning_omissions: list[Any],
     plan_only: bool,
     parsed: Any,
     entity_types: list[str],
@@ -605,14 +702,15 @@ def final_document_plan(
         range_intervals,
         validate_plan,
     )
-    from openkb.agent.document_window_receipts import window_receipt_id
-
     plan = DocumentPlan(
         metadata={
             **metadata,
-            "status": "accepted",
+            "status": "partial" if planning_omissions else "accepted",
             "completed_windows": len(windows),
-            "accepted_window_ids": [window_receipt_id(item) for item in windows],
+            "accepted_window_ids": [
+                receipt["window"] for receipt in metadata["accepted_window_receipts"]
+                if receipt.get("status") != "skipped"
+            ],
             "accepted_window_receipts": metadata["accepted_window_receipts"],
             "window_schedule": windows,
             "plan_only": plan_only,
@@ -622,6 +720,8 @@ def final_document_plan(
         source_only=source_only,
         unresolved=unresolved,
         resolutions=resolutions,
+        external_references=external_references,
+        planning_omissions=planning_omissions,
     )
     omissions = parser_omissions(parsed)
     plan.metadata["parser_omissions"] = omissions

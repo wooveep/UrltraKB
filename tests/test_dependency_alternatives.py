@@ -7,7 +7,7 @@ import yaml
 
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 
 
 @pytest.mark.parametrize("remote_state", ["initially_omitted", "withdrawn_later", "retained"])
@@ -31,7 +31,7 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         value = evidence_response(request)
-        if request["stage"] == "planning":
+        if request["stage"] == "planning" and request.get("response_mode") == "plan":
             plans.append(request)
             blocks = request["evidence"]["blocks"]
 
@@ -73,7 +73,6 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                         "target_key": "",
                         "target": "",
                         "kind": "concept",
-                        "name": "concepts/activation",
                         "title": "Activation",
                         "purpose": "Activate after a valid approval.",
                         "subject_ranges": activation,
@@ -95,7 +94,6 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                         "target_key": "",
                         "target": "",
                         "kind": "concept",
-                        "name": "concepts/metrics",
                         "title": "Metrics",
                         "purpose": "Metrics listener configuration.",
                         "subject_ranges": metrics,
@@ -119,7 +117,6 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                             "target_key": "",
                             "target": "",
                             "kind": "concept",
-                            "name": "concepts/certification",
                             "title": "Certification",
                             "purpose": "Certify the remote approver.",
                             "subject_ranges": certification,
@@ -130,7 +127,6 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                             "target_key": "",
                             "target": "",
                             "kind": "concept",
-                            "name": "concepts/remote-approval",
                             "title": "Remote approval",
                             "purpose": "Obtain a remote approval after certification.",
                             "subject_ranges": remote,
@@ -166,13 +162,12 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
                         "problem_type": "missing_prerequisite",
                         "missing_target": "a retained local or remote approval prerequisite",
                         "affected_pages": ["activation"],
-                        "blocking": True,
                         "reason": (
                             "Activation cannot be published without one retained approval path."
                         ),
                     }
                 )
-            return output
+            return v4_plan(request, output)
         elif request["stage"] == "generation":
             title = request["page"]["title"]
             content = {
@@ -190,10 +185,14 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
         return value
 
     model_service.respond = respond
+
+    def published(stem):
+        return list((kb_dir / "wiki/concepts").glob(f"{stem}-*.md"))
+
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert (kb_dir / "wiki/concepts/activation.md").exists() == (remote_state == "retained")
-    assert (kb_dir / "wiki/concepts/metrics.md").exists()
+    assert len(published("activation")) == (remote_state == "retained")
+    assert len(published("metrics")) == 1
     assert plans
     if remote_state == "retained":
         assert not result.omissions
@@ -202,5 +201,5 @@ def test_import_preserves_alternative_prerequisites_across_joint_omission_decisi
     before = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
-    assert (kb_dir / "wiki/concepts/activation.md").exists() == (remote_state == "retained")
+    assert len(published("activation")) == (remote_state == "retained")
     assert len(model_service) == before

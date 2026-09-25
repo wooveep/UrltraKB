@@ -271,11 +271,12 @@ def test_unsplittable_provider_refusal_omits_only_affected_planned_page(
     assert any(
         row["stage"] == "generation"
         and row["reason"] == "provider_context_exceeded"
-        and row["items"] == ["concepts/alpha"]
+        and len(row["items"]) == 1
+        and row["items"][0].startswith("concepts/alpha-")
         for row in result.omissions
     ), result.omissions
-    assert not (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert (kb_dir / "wiki/concepts/beta.md").exists()
-    assert (kb_dir / "wiki/concepts/gamma.md").exists()
+    assert not list((kb_dir / "wiki/concepts").glob("alpha*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("beta*.md"))
+    assert list((kb_dir / "wiki/concepts").glob("gamma*.md"))
     assert result.usage["observable_attempts"] == len(calls)
     assert result.usage["unknown_usage"] == 1

@@ -6,7 +6,7 @@ import litellm
 import pytest
 
 from openkb.application.documents import import_document
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 from tests.test_adaptive_processing import response
 
 
@@ -23,6 +23,22 @@ def test_invalid_document_plan_response_retries_the_same_target(
         value = evidence_response(payload)
         if payload["stage"] == "planning":
             calls.append([block["text"] for block in payload["evidence"]["blocks"]])
+            if payload.get("response_mode") == "routing":
+                request = payload["repair_request"]
+                return response(
+                    {
+                        "repair_protocol": "document-plan-repair-v3",
+                        "candidate_hash": request["candidate_hash"],
+                        "decisions": [
+                            {
+                                "decision_id": item["decision_id"],
+                                "decision": "attach_to_pages",
+                                "page_refs": [item["allowed_destinations"]["page_refs"][0]],
+                            }
+                            for item in request["items"]
+                        ],
+                    }
+                )
             if len(calls) == 1:
                 if defect == "missing":
                     value["page_changes"][0]["subject_ranges"] = [[0, 2]]
@@ -31,8 +47,8 @@ def test_invalid_document_plan_response_retries_the_same_target(
                 elif defect == "wrong_id":
                     value["page_changes"][0]["target_key"] = "not-an-input-id"
                 else:
-                    value = {"page_changes": {}}
-        return response(value)
+                    value["page_changes"] = {}
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
@@ -55,38 +71,53 @@ def test_invalid_plan_retry_reports_all_observed_contract_errors_without_changin
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] != "planning":
-            return response(value)
+            return response(v4_plan(payload, value))
         requests.append(kwargs["messages"][-1]["content"])
         if len(requests) == 2:
             repair = payload.get("repair_request", {})
             codes = {issue["code"] for issue in repair.get("issues", [])}
             observed_codes.append(codes)
-            if codes == {"invalid_range", "invalid_page_path", "nonblocking_unresolved"}:
-                corrected = json.loads(repair["rejected_candidate"])
-                corrected["page_changes"][0]["name"] = "concepts/recovery-steps"
-                corrected["page_changes"][0]["necessary_context"][0]["ranges"] = [[0, 1]]
-                corrected["unresolved"][0]["blocking"] = True
-                return response(corrected)
-        value["page_changes"][0]["name"] = "concepts/恢复步骤"
+            assert "range_empty" in codes, codes
+            operations = []
+            for grant in repair["allowed_operations"]:
+                if (
+                    grant["code"] == "range_empty"
+                    and grant["op"] == "replace_field"
+                    and grant["field"]
+                    in {
+                        "ranges",
+                        "subject_ranges",
+                    }
+                ):
+                    operations.append(
+                        {
+                            "issue_id": grant["issue_id"],
+                            "op": grant["op"],
+                            "item_ref": grant["item_ref"],
+                            "field": grant["field"],
+                            "value": [[0, 2]] if grant["field"] == "subject_ranges" else [[0, 1]],
+                        }
+                    )
+            return response(
+                v4_plan(
+                    payload,
+                    {
+                        "repair_protocol": "document-plan-repair-v2",
+                        "candidate_hash": repair["candidate_hash"],
+                        "operations": operations,
+                    },
+                )
+            )
+        value["page_changes"][0]["subject_ranges"] = []
         value["page_changes"][0]["necessary_context"] = [
             {
                 "relation": "explicit_reference",
-                "ranges": [[0, 0]],
+                "ranges": [],
                 "rationale": "The recovery heading supplies the reference.",
                 "basis_ranges": [[0, 1]],
             }
         ]
-        value["unresolved"] = [
-            {
-                "location": [[0, 1]],
-                "problem_type": "missing_external_material",
-                "missing_target": "External instructions",
-                "affected_pages": ["c1"],
-                "blocking": False,
-                "reason": "The referenced instructions were not supplied",
-            }
-        ]
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source, on_event=events.append)
@@ -96,13 +127,15 @@ def test_invalid_plan_retry_reports_all_observed_contract_errors_without_changin
     )
     assert len(requests) == 2
     first, second = requests
-    assert first.partition(',"target":')[0] == second.partition(',"target":')[0]
+    assert json.loads(first)["evidence"] == json.loads(second)["evidence"]
+    assert json.loads(second)["plan_protocol"] == "document-plan-repair-v2"
+    assert json.loads(second)["response_mode"] == "patch"
     assert json.loads(first)["target"]["total_blocks"] == json.loads(first)["target"]["target_end"]
     repair = json.loads(second)["repair_request"]
     assert repair["candidate_hash"]
     assert len(repair["issues"]) <= 12
     retry_event = next(row for row in events if row.get("operation") == "retry_invalid_response")
-    assert {issue["field"] for issue in repair["issues"]} == set(retry_event["invalid_fields"])
+    assert {issue["path"] for issue in repair["issues"]} == set(retry_event["invalid_fields"])
 
 
 def test_persistent_invalid_document_plan_stops_after_bounded_retry(kb_dir, tmp_path, monkeypatch):
@@ -117,7 +150,8 @@ def test_persistent_invalid_document_plan_stops_after_bounded_retry(kb_dir, tmp_
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source, on_event=events.append)
     assert result.status == "added"
-    assert result.knowledge_compilation == "completed"
+    assert result.knowledge_compilation == "not_started"
+    assert result.reason == "document_plan_empty"
     assert any(row["reason"] == "document_plan_invalid" for row in result.omissions)
     assert len(calls) == 2
     diagnostic = [event for event in events if event.get("operation") == "retry_invalid_response"]
@@ -149,7 +183,6 @@ def test_successful_planned_page_survives_later_generation_omission(kb_dir, tmp_
                         "target_key": "",
                         "target": "",
                         "kind": "concept",
-                        "name": "concepts/good",
                         "title": "Good",
                         "purpose": "Retain the available requirement.",
                         "subject_ranges": [[good["order"], good["order"] + 1]],
@@ -160,7 +193,6 @@ def test_successful_planned_page_survives_later_generation_omission(kb_dir, tmp_
                         "target_key": "",
                         "target": "",
                         "kind": "concept",
-                        "name": "concepts/unavailable",
                         "title": "Unavailable",
                         "purpose": "Retain the unavailable requirement.",
                         "subject_ranges": [[unavailable["order"], unavailable["order"] + 1]],
@@ -171,11 +203,11 @@ def test_successful_planned_page_survives_later_generation_omission(kb_dir, tmp_
                 "unresolved": [],
                 "resolutions": [],
             }
-        elif payload["stage"] == "generation" and payload["page"]["name"] == "concepts/unavailable":
+        elif payload["stage"] == "generation" and payload["page"]["title"] == "Unavailable":
             value = {"content": "", "covered": []}
         else:
             value = evidence_response(payload)
-        return response(value)
+        return response(v4_plan(payload, value))
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
@@ -184,5 +216,5 @@ def test_successful_planned_page_survives_later_generation_omission(kb_dir, tmp_
         row["stage"] == "generation" and row["reason"] == "document_generation_incomplete"
         for row in result.omissions
     )
-    assert (kb_dir / "wiki/concepts/good.md").is_file()
-    assert not (kb_dir / "wiki/concepts/unavailable.md").exists()
+    assert len(list((kb_dir / "wiki/concepts").glob("good-*.md"))) == 1
+    assert not list((kb_dir / "wiki/concepts").glob("unavailable-*.md"))

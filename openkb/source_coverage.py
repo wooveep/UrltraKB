@@ -222,13 +222,18 @@ def _document_plan_coverage(source, parsed, report, *, published):
                     if occurrence["reference"]["start"] <= start
                     and occurrence["reference"]["end"] >= end
                 ]
-                route_order = {
-                    "page_body": 0,
-                    "context_only": 1,
-                    "source_only": 2,
-                    "unresolved": 3,
-                }
-                applicable.sort(key=lambda row: route_order.get(row[1].get("route"), 3))
+                def route_priority(row):
+                    identity, occurrence = row
+                    route = occurrence.get("route")
+                    if identity in report.published_occurrences and route == "page_body":
+                        return 0
+                    if identity in report.published_occurrences and route == "context_only":
+                        return 1
+                    return {"source_only": 2, "page_body": 3, "context_only": 4}.get(
+                        route, 5
+                    )
+
+                applicable.sort(key=route_priority)
                 if not applicable:
                     status, reason = "pending", "analysis_pending"
                 else:

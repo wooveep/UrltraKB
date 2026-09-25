@@ -25,7 +25,7 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
         "verification",
     ]
     generation = payloads[1]
-    assert generation["page"]["name"] == "concepts/notes"
+    assert generation["page"]["name"].startswith("concepts/notes-")
     assert generation["occurrences"]
     assert "facts" not in generation
     plan_path = next(
@@ -94,7 +94,6 @@ def test_import_keeps_character_range_coverage_exact(kb_dir, tmp_path, model_ser
                         "local_key": "p",
                         "target_key": "",
                         "kind": "concept",
-                        "name": "concepts/first-half",
                         "title": "First half",
                         "purpose": "The first selected excerpt",
                         "subject_ranges": [{"block_index": 0, "start_char": 0, "end_char": 5}],
@@ -160,7 +159,7 @@ def test_none_review_mode_never_retracts_an_existing_source_contribution(
     source.write_text("The first version is verified and published.")
     first = import_document(kb_dir, source)
     assert first.knowledge_compilation == "completed", first
-    page = kb_dir / "wiki" / "concepts" / "notes.md"
+    page = next((kb_dir / "wiki" / "concepts").glob("notes-*.md"))
     before = page.read_text(encoding="utf-8")
 
     config_path = kb_dir / ".openkb/config.yaml"
@@ -183,7 +182,7 @@ def test_plan_only_stops_before_generation_and_exposes_the_private_plan(
 
     result = import_document(kb_dir, source, plan_only=True)
 
-    assert result.status == "unfinished"
+    assert result.status == "added"
     assert result.stage == "planned"
     assert result.reason == "document_plan_ready"
     assert [
@@ -200,7 +199,7 @@ def test_plan_only_stops_before_generation_and_exposes_the_private_plan(
     assert "notes" in plan_text
 
 
-def test_plan_only_reports_a_recoverable_planning_failure_as_pending(
+def test_plan_only_settles_an_exhausted_content_failure_as_empty(
     kb_dir, tmp_path, model_service
 ):
     """A placeholder omission must not be presented as a formal ready plan."""
@@ -216,9 +215,10 @@ def test_plan_only_reports_a_recoverable_planning_failure_as_pending(
     model_service.respond = respond
     result = import_document(kb_dir, source, plan_only=True)
 
-    assert result.status == "unfinished"
-    assert result.stage == "planning"
-    assert result.reason == "document_plan_invalid"
+    assert result.status == "added"
+    assert result.stage == "planned"
+    assert result.reason == "document_plan_empty"
+    assert result.omissions
     assert result.reason != "document_plan_ready"
     assert not list((kb_dir / "wiki" / "concepts").glob("*.md"))
 
@@ -318,7 +318,6 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
                         "local_key": "first",
                         "target_key": "",
                         "kind": "concept",
-                        "name": "concepts/first",
                         "title": "First",
                         "purpose": "The first source paragraph.",
                         "subject_ranges": [[0, 1]],
@@ -328,7 +327,6 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
                         "local_key": "second",
                         "target_key": "",
                         "kind": "concept",
-                        "name": "concepts/second",
                         "title": "Second",
                         "purpose": "The second source paragraph.",
                         "subject_ranges": [[1, 2]],
@@ -340,8 +338,8 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
                 "resolutions": [],
             }
         if payload["stage"] == "generation":
-            page = payload["page"]["name"]
-            if page == "concepts/second" and not retry_second:
+            page = payload["page"]["title"]
+            if page == "Second" and not retry_second:
                 # The response deliberately fails validation, leaving a
                 # recoverable omission while the first page is published.
                 return {"content": "# Second\nnot accepted", "covered": []}
@@ -371,9 +369,11 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
         (kb_dir / ".openkb" / "source-store" / "compilation" / "recovery").glob("*-plan.json")
     )
     paused = json.loads(plan_path.read_text(encoding="utf-8"))["value"]
+    first_name = next(page["name"] for page in paused["pages"] if page["title"] == "First")
+    second_name = next(page["name"] for page in paused["pages"] if page["title"] == "Second")
     assert paused["metadata"]["publication_receipt"]["proposal_id"]
     assert paused["pages"][0]["quality"] == "published"
-    assert "concepts/first.md" in paused["metadata"]["publication_page_receipts"]
+    assert first_name + ".md" in paused["metadata"]["publication_page_receipts"]
 
     monkeypatch.setattr(document_pages, "generate_document_page", original_generate)
     retry_second = True
@@ -404,13 +404,13 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
         for request in model_service[calls_before:]
         if json.loads(request["messages"][-1]["content"])["stage"] == "generation"
     ]
-    assert retry_generations == ["concepts/second"]
+    assert retry_generations == [second_name]
     reuse_events = [
         event for event in events if event.get("operation", "").startswith("published_page_")
     ]
     assert {
         event["page"] for event in reuse_events if event.get("operation") == "published_page_reused"
-    } == {"concepts/first"}, reuse_events
+    } == {first_name}, reuse_events
     pending = json.loads(plan_path.read_text(encoding="utf-8"))["value"]
     assert pending["metadata"]["publication_receipt"]["proposal_id"]
     assert pending["metadata"]["publication_pending"]["proposal_id"]
@@ -428,8 +428,7 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
     settled = json.loads(plan_path.read_text(encoding="utf-8"))["value"]
     assert {page["quality"] for page in settled["pages"]} == {"published"}
     assert set(settled["metadata"]["publication_page_receipts"]) == {
-        "concepts/first.md",
-        "concepts/second.md",
+        first_name + ".md", second_name + ".md",
     }
 
 

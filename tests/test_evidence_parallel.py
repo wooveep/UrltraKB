@@ -11,7 +11,7 @@ import yaml
 from openkb.agent.compilation_index import checkpoint_keys
 from openkb.application.documents import import_document
 from openkb.sources import SourceStore
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 from tests.test_adaptive_processing import response
 
 
@@ -87,7 +87,7 @@ def test_single_document_uses_bounded_parallel_batches_and_keeps_all_checkpoints
         nonlocal active, peak
         payload = json.loads(kwargs["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            return response(_parallel_page_plan(payload))
+            return response(v4_plan(payload, _parallel_page_plan(payload)))
         if payload["stage"] == "generation":
             with guard:
                 active += 1
@@ -132,7 +132,7 @@ def test_stop_cancels_all_inflight_batches_without_publishing(
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            return response(_parallel_page_plan(payload))
+            return response(v4_plan(payload, _parallel_page_plan(payload)))
         assert payload["stage"] == "generation"
         with guard:
             calls.append(kwargs)

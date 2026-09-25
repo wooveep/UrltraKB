@@ -55,10 +55,13 @@ def accepted_window_receipt(
     predecessor: str,
     delta: str,
     dispatch_output_tokens: int | None,
+    reference_check: dict[str, Any] | None = None,
+    normalization: list[dict[str, Any]] | None = None,
+    salvage_proof: str | None = None,
 ) -> dict[str, Any]:
     """Capture a durable, content-free binding to the exact accepted result."""
 
-    return {
+    receipt: dict[str, Any] = {
         "window": window_receipt_id(window),
         "frozen_evidence": frozen_evidence_id(window),
         "target_ranges": target_ranges(window),
@@ -71,6 +74,52 @@ def accepted_window_receipt(
         "delta": delta,
         "dispatch_output_tokens": dispatch_output_tokens,
     }
+    if reference_check is not None:
+        receipt["reference_check"] = reference_check
+    if normalization:
+        receipt["normalization"] = normalization
+    if salvage_proof is not None:
+        receipt["salvage_proof"] = salvage_proof
+    return receipt
+
+
+def skipped_window_receipt(
+    window: dict[str, Any], *, predecessor: str, omission_key: str, attempts: int
+) -> dict[str, Any]:
+    """Bind a settled target to its program omission without claiming model acceptance."""
+    return {
+        "protocol": "document-plan-window-settlement-v2",
+        "status": "skipped",
+        "window": window_receipt_id(window),
+        "frozen_evidence": frozen_evidence_id(window),
+        "target_ranges": target_ranges(window),
+        "predecessor": predecessor,
+        "omission_keys": [omission_key],
+        "attempts": attempts,
+    }
+
+
+def valid_skipped_receipt(receipt: Any, window: dict[str, Any]) -> bool:
+    return (
+        isinstance(receipt, dict)
+        and set(receipt) == {
+            "protocol", "status", "window", "frozen_evidence", "target_ranges",
+            "predecessor", "omission_keys", "attempts",
+        }
+        and receipt["protocol"] == "document-plan-window-settlement-v2"
+        and receipt["status"] == "skipped"
+        and receipt["window"] == window_receipt_id(window)
+        and receipt["frozen_evidence"] == frozen_evidence_id(window)
+        and receipt["target_ranges"] == target_ranges(window)
+        and isinstance(receipt["predecessor"], str)
+        and len(receipt["predecessor"]) == 64
+        and isinstance(receipt["omission_keys"], list)
+        and len(receipt["omission_keys"]) == 1
+        and isinstance(receipt["omission_keys"][0], str)
+        and receipt["omission_keys"][0].startswith("omission:")
+        and type(receipt["attempts"]) is int
+        and receipt["attempts"] >= 0
+    )
 
 
 def valid_accepted_receipts(receipts: Any, windows: list[dict[str, Any]], completed: int) -> bool:
@@ -79,20 +128,92 @@ def valid_accepted_receipts(receipts: Any, windows: list[dict[str, Any]], comple
     if not isinstance(receipts, list) or len(receipts) != completed:
         return False
     for receipt, window in zip(receipts, windows[:completed], strict=True):
-        if not isinstance(receipt, dict) or set(receipt) != {
-            "window",
-            "frozen_evidence",
-            "target_ranges",
-            "checkpoint",
-            "result",
-            "attempt",
-            "cached",
-            "request",
-            "predecessor",
-            "delta",
-            "dispatch_output_tokens",
-        }:
+        if valid_skipped_receipt(receipt, window):
+            continue
+        v2 = isinstance(receipt, dict) and receipt.get("protocol") == (
+            "document-plan-window-settlement-v2"
+        )
+        if v2 and (
+            receipt.get("status") != "accepted"
+            or not isinstance(receipt.get("omission_keys"), list)
+            or any(
+                not isinstance(key, str) or not key.startswith("omission:")
+                for key in receipt["omission_keys"]
+            )
+        ):
             return False
+        core = (
+            {key: value for key, value in receipt.items() if key not in {
+                "protocol", "status", "omission_keys"
+            }} if v2 else receipt
+        )
+        if isinstance(core, dict) and "normalization" in core:
+            normalization = core.pop("normalization")
+            if not isinstance(normalization, list) or any(
+                not isinstance(row, dict)
+                or not row
+                or any(not isinstance(key, str) for key in row)
+                for row in normalization
+            ):
+                return False
+        if isinstance(core, dict) and "salvage_proof" in core:
+            proof = core.pop("salvage_proof")
+            if not isinstance(proof, str) or len(proof) != 64:
+                return False
+        if not isinstance(core, dict) or set(core) not in (
+            {
+                "window",
+                "frozen_evidence",
+                "target_ranges",
+                "checkpoint",
+                "result",
+                "attempt",
+                "cached",
+                "request",
+                "predecessor",
+                "delta",
+                "dispatch_output_tokens",
+            },
+            {
+                "window",
+                "frozen_evidence",
+                "target_ranges",
+                "checkpoint",
+                "result",
+                "attempt",
+                "cached",
+                "request",
+                "predecessor",
+                "delta",
+                "dispatch_output_tokens",
+                "reference_check",
+            },
+        ):
+            return False
+        if "reference_check" in core:
+            check = core["reference_check"]
+            if (
+                not isinstance(check, dict)
+                or set(check)
+                not in (
+                    {"protocol", "status", "candidate_count", "receipt_hash"},
+                    {"protocol", "status", "candidate_count", "receipt_hash", "receipt_key"},
+                )
+                or "receipt_key" in check
+                and (not isinstance(check["receipt_key"], str) or len(check["receipt_key"]) != 64)
+                or check["protocol"]
+                not in {
+                    "document-reference-check-v1",
+                    "document-reference-check-v2",
+                    "document-reference-check-v3",
+                }
+                or check["status"] not in {"no_detected_candidates", "accounted"}
+                or type(check["candidate_count"]) is not int
+                or check["candidate_count"] < 0
+                or not isinstance(check["receipt_hash"], str)
+                or len(check["receipt_hash"]) != 64
+            ):
+                return False
         if (
             receipt["window"] != window_receipt_id(window)
             or receipt["frozen_evidence"] != frozen_evidence_id(window)
@@ -123,6 +244,8 @@ def accepted_receipts_match_dispatch(receipts: list[dict[str, Any]], lookup: Any
     """Revalidate saved actual dispatch caps through the live checkpoint contract."""
 
     for receipt in receipts:
+        if receipt.get("status") == "skipped":
+            continue
         checkpoint = receipt["checkpoint"]
         if checkpoint is None:
             continue  # A test-only/mock planner has no model dispatch receipt.

@@ -67,11 +67,11 @@ def test_document_protocol_upgrade_reuses_unchanged_generation_and_negative_revi
         first = import_document(kb_dir, source)
     assert queried_old and verdict in verdicts
     assert first.knowledge_compilation == "completed", first
-    assert (kb_dir / "wiki/concepts/notes.md").exists() == (verdict == "supported")
+    assert bool(list((kb_dir / "wiki/concepts").glob("notes-*.md"))) == (verdict == "supported")
     before = len(model_service)
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.status == "added" and resumed.knowledge_compilation == "completed", resumed
-    assert (kb_dir / "wiki/concepts/notes.md").exists() == (verdict == "supported")
+    assert bool(list((kb_dir / "wiki/concepts").glob("notes-*.md"))) == (verdict == "supported")
     assert not {
         json.loads(call["messages"][-1]["content"])["stage"] for call in model_service[before:]
     } & {"generation", "verification", "verification_batch"}

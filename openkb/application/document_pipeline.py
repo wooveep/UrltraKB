@@ -67,6 +67,7 @@ def _compile_version(
 ):
     from openkb.agent.evidence_checkpoints import publication_settings
     from openkb.application.documents import DocumentResult
+    from openkb.planning_coverage import planning_coverage
     from openkb.runtime.family_budget import register_source_family
 
     store = SourceStore(kb_dir)
@@ -254,24 +255,68 @@ def _compile_version(
                         )
                     finally:
                         asyncio.run(_close_async_llm_clients())
-                    if plan_only:
+                    from openkb.agent.document_planning_result import PlanningResult
+
+                    if isinstance(plan, PlanningResult):
+                        outcome = plan.outcome
                         return DocumentResult(
                             source.origin,
-                            "unfinished",
-                            originals,
+                            "added",
+                            originals + ((plan.report_ref,) if plan.report_ref else ()),
                             input_version=source.id,
                             source_intake="saved",
                             knowledge_compilation="not_started",
                             stage="planned",
-                            reason="document_plan_ready",
+                            reason={
+                                "complete": "document_plan_ready",
+                                "partial": "document_plan_partial",
+                                "empty": "document_plan_empty",
+                            }[outcome],
                             resume=source.id,
                             warnings=tuple(report.warnings),
                             usage=report.usage,
                             source_id=source.source_id,
                             parse_id=parsed.id,
+                            omissions=tuple(validate_omissions(report.omissions)),
                             coverage=source_coverage(source, parsed, report),
+                            planning_coverage=planning_coverage(
+                                plan.plan,
+                                parsed,
+                                omission_count=len(report.omissions) if plan.plan is None else None,
+                            ),
                         )
                     require_complete_compilation()
+                    if (
+                        replaces is not None
+                        and plan is not None
+                        and (
+                            report.omissions
+                            or planning_coverage(plan, parsed)["status"] == "partial"
+                        )
+                    ):
+                        return DocumentResult(
+                            source.origin,
+                            "added",
+                            originals
+                            + (
+                                (plan.metadata["plan_preview"],)
+                                if "plan_preview" in plan.metadata
+                                else ()
+                            ),
+                            input_version=source.id,
+                            source_intake="saved",
+                            knowledge_compilation="not_started",
+                            stage="planned",
+                            reason="replacement_partial_private",
+                            resume=source.id,
+                            warnings=tuple(report.warnings),
+                            omissions=tuple(validate_omissions(report.omissions)),
+                            usage=report.usage,
+                            source_id=source.source_id,
+                            parse_id=parsed.id,
+                            coverage=source_coverage(source, parsed, report),
+                            planning_coverage=planning_coverage(plan, parsed),
+                        )
                     summary = workspace.path / "wiki/summaries" / f"{name}.md"
                     # The complete byte baseline includes these generated metadata.
                     parts = frontmatter.split(summary.read_text(encoding="utf-8"))
@@ -405,6 +450,7 @@ def _compile_version(
                     source_id=source.source_id,
                     parse_id=parsed.id,
                     coverage=coverage,
+                    planning_coverage=planning_coverage(plan, parsed) if plan is not None else {},
                 )
         except ProcessingIncomplete as exc:
             reason, stage, status = exc.reason, exc.stage, "unfinished"

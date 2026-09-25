@@ -18,6 +18,8 @@ _IDENTITY_FIELDS = {
     "fact_id",
     "block",
     "start_block",
+    "from_block",
+    "through_block",
     "toc_block",
     "index",
 }
@@ -64,10 +66,25 @@ class WireMessages(list):
         self.inverse = MappingProxyType({value: key for key, value in identities.items()})
 
     def decode_response(self, raw):
-        if json.loads(self[-1]["content"]).get("stage") == "planning":
+        task = json.loads(self[-1]["content"])
+        if task.get("stage") == "planning":
             from openkb.agent.document_plan_issues import parse_plan_json
 
-            parse_plan_json(json_text(raw))
+            try:
+                parse_plan_json(json_text(raw))
+            except (TypeError, ValueError):
+                if task.get("plan_protocol") not in {
+                    "document-plan-v3",
+                    "document-plan-v4",
+                    "document-plan-repair-v2",
+                    "document-plan-repair-v3",
+                    "document-reference-check-v1",
+                    "document-reference-check-v2",
+                }:
+                    raise
+                # Planning owns bounded syntax repair; keep the actual model
+                # text and dispatch receipt for that compiler decision.
+                return raw
         try:
             raw = json_text(raw)
             value = json.loads(raw, object_pairs_hook=unique_fields)

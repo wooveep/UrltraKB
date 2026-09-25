@@ -6,7 +6,7 @@ import yaml
 
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 
 PREPARATION = "Before joining a replacement node, shut down all virtual machines."
 JOIN = "Join the replacement compute node to the existing cluster."
@@ -49,7 +49,7 @@ def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         value = evidence_response(request)
-        if stage == "planning":
+        if stage == "planning" and request.get("response_mode") == "plan":
             blocks = request["evidence"]["blocks"]
 
             def ranges(heading, body):
@@ -71,67 +71,67 @@ def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
             compute = ranges("Compute recovery", JOIN)
             metrics = ranges("Metrics", "Metrics listens on port 9342.")
             target = request["target"]
-            return {
-                "overview": {
-                    "text": "Recovery procedures and prerequisites.",
-                    "ranges": target.get(
-                        "ranges", [[target["target_start"], target["target_end"]]]
-                    ),
-                    "limitations": [],
+            return v4_plan(
+                request,
+                {
+                    "overview": {
+                        "text": "Recovery procedures and prerequisites.",
+                        "ranges": target.get(
+                            "ranges", [[target["target_start"], target["target_end"]]]
+                        ),
+                        "limitations": [],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "management",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Management recovery",
+                            "purpose": "Restore the management database safely.",
+                            "subject_ranges": management,
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": preparation,
+                                    "rationale": basis(preparation),
+                                    "basis_ranges": preparation,
+                                }
+                            ],
+                        },
+                        {
+                            "local_key": "compute",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Compute recovery",
+                            "purpose": "Join the replacement compute node safely.",
+                            "subject_ranges": compute,
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": preparation,
+                                    "rationale": basis(preparation),
+                                    "basis_ranges": preparation,
+                                }
+                            ],
+                        },
+                        {
+                            "local_key": "metrics",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Metrics",
+                            "purpose": "Metrics listener configuration.",
+                            "subject_ranges": metrics,
+                            "necessary_context": [],
+                        },
+                    ],
+                    "source_only": [],
+                    "unresolved": [],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "management",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/management-recovery",
-                        "title": "Management recovery",
-                        "purpose": "Restore the management database safely.",
-                        "subject_ranges": management,
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": preparation,
-                                "rationale": basis(preparation),
-                                "basis_ranges": preparation,
-                            }
-                        ],
-                    },
-                    {
-                        "local_key": "compute",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/compute-recovery",
-                        "title": "Compute recovery",
-                        "purpose": "Join the replacement compute node safely.",
-                        "subject_ranges": compute,
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": preparation,
-                                "rationale": basis(preparation),
-                                "basis_ranges": preparation,
-                            }
-                        ],
-                    },
-                    {
-                        "local_key": "metrics",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/metrics",
-                        "title": "Metrics",
-                        "purpose": "Metrics listener configuration.",
-                        "subject_ranges": metrics,
-                        "necessary_context": [],
-                    },
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            )
         elif stage == "generation":
             title = request["page"]["title"]
             content = {
@@ -161,14 +161,14 @@ def test_import_binds_compute_recovery_to_its_original_global_prerequisite(
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
     assert compute_evidence and all(PREPARATION in evidence for evidence in compute_evidence)
-    assert not (kb_dir / "wiki/concepts/management-recovery.md").exists()
-    assert (kb_dir / "wiki/concepts/compute-recovery.md").exists()
-    assert (kb_dir / "wiki/concepts/metrics.md").exists()
+    assert not list((kb_dir / "wiki/concepts").glob("management-recovery-*.md"))
+    assert len(list((kb_dir / "wiki/concepts").glob("compute-recovery-*.md"))) == 1
+    assert len(list((kb_dir / "wiki/concepts").glob("metrics-*.md"))) == 1
     previous = len(model_service)
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
     assert len(model_service) == previous
-    assert (kb_dir / "wiki/concepts/compute-recovery.md").exists()
+    assert len(list((kb_dir / "wiki/concepts").glob("compute-recovery-*.md"))) == 1
 
 
 def test_unresolved_prerequisites_block_only_recovery_before_generation(
@@ -199,7 +199,7 @@ def test_unresolved_prerequisites_block_only_recovery_before_generation(
         request = json.loads(body["messages"][-1]["content"])
         stages.append(request["stage"])
         value = evidence_response(request)
-        if request["stage"] == "planning":
+        if request["stage"] == "planning" and request.get("response_mode") == "plan":
             blocks = request["evidence"]["blocks"]
             recovery = [row for row in blocks if "Metrics listens" not in row["text"]]
             metrics = [row for row in blocks if "Metrics listens" in row["text"]]
@@ -217,7 +217,6 @@ def test_unresolved_prerequisites_block_only_recovery_before_generation(
                     "target_key": prior["key"] if prior else "",
                     "target": prior.get("target", "") if prior else "",
                     "kind": "concept",
-                    "name": name,
                     "title": title,
                     "purpose": purpose,
                     "subject_ranges": ranges,
@@ -253,7 +252,6 @@ def test_unresolved_prerequisites_block_only_recovery_before_generation(
                         "problem_type": "missing_prerequisite",
                         "missing_target": "complete recovery prerequisite material",
                         "affected_pages": ["recovery"],
-                        "blocking": True,
                         "reason": "Recovery prerequisites exceed the available source material.",
                     }
                 )
@@ -266,7 +264,7 @@ def test_unresolved_prerequisites_block_only_recovery_before_generation(
                         [[metrics[0]["order"], metrics[0]["order"] + 1]],
                     )
                 )
-            return output
+            return v4_plan(request, output)
         if request["stage"] == "generation":
             return {
                 "content": "Metrics listens on port 9342.",
@@ -282,5 +280,5 @@ def test_unresolved_prerequisites_block_only_recovery_before_generation(
     assert "verification" in stages
     assert "dependencies" not in stages
     assert result.coverage["status"] == "partial"
-    assert (kb_dir / "wiki/concepts/metrics.md").exists()
+    assert len(list((kb_dir / "wiki/concepts").glob("metrics-*.md"))) == 1
     assert any(row.get("reason") == "unresolved_prerequisite_blocked" for row in result.omissions)

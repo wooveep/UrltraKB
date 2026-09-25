@@ -51,6 +51,7 @@ def _review(
     # These request helpers remain in document_pages beside generation.  A
     # lazy import avoids a module-level cycle while publication reuses the
     # exact same critical-review contract.
+    from openkb.agent.document_page_reference_projection import page_external_references
     from openkb.agent.document_pages import (
         VERIFY_RULES,
         _page_fields,
@@ -68,6 +69,7 @@ def _review(
             "full_content_digest": content_id(content),
         },
         "known_omissions": known_omissions,
+        "external_references": page_external_references(page, settings),
         "review_mode": "critical",
         "preserved_contribution": {
             "identity": retained_identity,

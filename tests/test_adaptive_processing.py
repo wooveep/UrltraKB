@@ -404,9 +404,10 @@ def test_indivisible_truncation_stops_without_publishing(kb_dir, tmp_path, monke
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = import_document(kb_dir, source)
-    assert result.status == "unfinished"
-    assert result.knowledge_compilation == "unfinished"
-    assert result.reason == "planning_output_budget_exhausted"
+    assert result.status == "added"
+    assert result.knowledge_compilation == "not_started"
+    assert result.reason == "document_plan_empty"
+    assert any(row["reason"] == "planning_output_budget_exhausted" for row in result.omissions)
     assert calls
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
 

@@ -15,8 +15,13 @@ from openkb.agent.document_plan import (
     SourceOnlyItem,
     UnresolvedItem,
 )
-from openkb.agent.document_planning_ledger_integrity import (
-    accepted_proofs_valid as _accepted_proofs_valid,
+from openkb.agent.document_plan_annotations import PageLimitation, PlanningOmission
+from openkb.agent.document_planning_ledger_annotations import (
+    save_external_references,
+    save_partial_omission,
+)
+from openkb.agent.document_planning_ledger_annotations import (
+    settle_skipped as _settle_skipped,
 )
 from openkb.agent.document_planning_ledger_integrity import canonical_json as _json
 from openkb.agent.document_planning_ledger_integrity import (
@@ -27,6 +32,12 @@ from openkb.agent.document_planning_ledger_integrity import (
 )
 from openkb.agent.document_planning_ledger_integrity import (
     save_catalog_baseline_proof as _save_catalog_baseline_proof,
+)
+from openkb.agent.document_planning_ledger_recovery import recovery_valid as _recovery_valid
+from openkb.agent.document_planning_ledger_retry import begin_retry as _begin_retry
+from openkb.agent.document_planning_ledger_retry import mark_accepted as _mark_accepted
+from openkb.agent.document_planning_ledger_retry import (
+    resolve_retry_omission as _resolve_retry_omission,
 )
 from openkb.agent.document_planning_ledger_views import (
     LedgerKeys,
@@ -50,12 +61,12 @@ from openkb.agent.document_planning_ledger_views import (
 from openkb.agent.document_planning_ledger_views import (
     materialize as _materialize,
 )
+from openkb.agent.document_planning_ledger_views import progress as _progress
 from openkb.agent.document_planning_ledger_views import (
     progress_preview as _progress_preview,
 )
-from openkb.agent.document_planning_ledger_views import (
-    terminal_coverage_valid as _terminal_coverage_valid,
-)
+from openkb.agent.document_planning_ledger_views import receipt as _receipt
+from openkb.agent.document_planning_ledger_views import receipts as _receipts
 from openkb.agent.document_planning_ledger_views import (
     validate_json_rows as _validate_ledger_rows,
 )
@@ -147,6 +158,18 @@ class DocumentPlanningLedger:
                 unresolved_key TEXT PRIMARY KEY,
                 payload TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS external_references (
+                key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS planning_omissions (
+                key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS retry_resolutions (
+                omission_key TEXT PRIMARY KEY,
+                sequence INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS receipts (
                 sequence INTEGER PRIMARY KEY,
                 payload TEXT NOT NULL
@@ -178,20 +201,27 @@ class DocumentPlanningLedger:
 
     def _state_digest(self) -> str:
         digest = hashlib.sha256()
-        for table, columns in (
+        tables = [
             ("pages", "key, name, target, payload"),
             ("source_only", "key, payload"),
             ("unresolved", "key, status, payload"),
             ("resolutions", "unresolved_key, payload"),
             ("receipts", "sequence, payload"),
-        ):
+        ]
+        if self._v2():
+            tables.extend((
+                ("external_references", "key, payload"),
+                ("planning_omissions", "key, payload"),
+                ("retry_resolutions", "omission_key, sequence"),
+            ))
+        for table, columns in tables:
             digest.update(table.encode("ascii") + b"\n")
             for row in self.db.execute(f"SELECT {columns} FROM {table} ORDER BY 1"):
                 digest.update(_json(list(row)).encode("utf-8"))
                 digest.update(b"\n")
         # These fields decide which windows may be skipped on Continue.  They
         # must be covered by the same integrity receipt as their rows.
-        for name in ("overview", "status", "windows", "completed"):
+        for name in ("overview", "status", "windows", self._progress_key()):
             digest.update(name.encode("ascii") + b"\n")
             digest.update(_json(self._meta(name)).encode("utf-8"))
             digest.update(b"\n")
@@ -270,6 +300,9 @@ class DocumentPlanningLedger:
                 "source_only",
                 "unresolved",
                 "resolutions",
+                "external_references",
+                "planning_omissions",
+                "retry_resolutions",
                 "receipts",
             ):
                 self.db.execute(f"DELETE FROM {table}")
@@ -294,6 +327,12 @@ class DocumentPlanningLedger:
             return
         if stored != metadata:
             raise ValueError("Recovered DocumentPlan identity mismatch")
+
+    def _v2(self) -> bool:
+        return (self._meta("planning_metadata") or {}).get("protocol") == "document-plan-v2"
+
+    def _progress_key(self) -> str:
+        return "settled_count" if self._v2() else "completed"
 
     def verify_catalog(self, *, wiki: Path, source: Any) -> bool:
         """Reject changed baseline pages; permit only this source's published additions."""
@@ -545,19 +584,43 @@ class DocumentPlanningLedger:
         final_window: bool,
         windows: list[dict[str, Any]],
         completed: int,
+        partial_omission: PlanningOmission | None = None,
     ) -> OverviewPlan:
         """Atomically apply one validated delta, receipt, and resumable prefix."""
 
+        if self._v2():
+            receipt = {
+                **receipt,
+                "protocol": "document-plan-window-settlement-v2",
+                "status": "accepted",
+                "omission_keys": [partial_omission.key] if partial_omission else [],
+            }
+
         with self._transaction():
             overview = self.overview()
-            overview.text = decoded["overview"]["text"]
+            window = windows[completed - 1]
+            retry_omission = window.get("retry_omission_key")
+            if retry_omission is not None:
+                self._resolve_retry_omission(retry_omission, completed)
+            if partial_omission is not None:
+                save_partial_omission(self, partial_omission)
+            if window.get("retry_of"):
+                addition = decoded["overview"]["text"]
+                if addition and addition not in overview.text:
+                    overview.text = (overview.text + "\n\n" + addition).strip()
+            else:
+                overview.text = decoded["overview"]["text"]
             for value in decoded["overview"]["ranges"]:
                 if value not in overview.ranges:
                     overview.ranges.append(value)
             for limitation in decoded["overview"]["limitations"]:
                 if limitation not in overview.limitations:
                     overview.limitations.append(limitation)
-            overview.status = "complete" if final_window else "partial"
+            has_omissions = self.db.execute(
+                "SELECT 1 FROM planning_omissions o LEFT JOIN retry_resolutions r "
+                "ON r.omission_key = o.key WHERE r.omission_key IS NULL LIMIT 1"
+            ).fetchone() is not None
+            overview.status = "complete" if final_window and not has_omissions else "partial"
             self._set_meta("overview", overview.to_dict())
 
             affected: set[str] = set()
@@ -570,6 +633,10 @@ class DocumentPlanningLedger:
                     for context in change["necessary_context"]:
                         if context not in existing.necessary_context:
                             existing.necessary_context.append(context)
+                    for value in change.get("limitations", []):
+                        limitation = PageLimitation.from_dict(value)
+                        if limitation not in existing.limitations:
+                            existing.limitations.append(limitation)
                     if change.get("purpose") and not existing.purpose:
                         existing.purpose = change["purpose"]
                     self._store_page(existing)
@@ -585,6 +652,9 @@ class DocumentPlanningLedger:
                     target=change.get("target", ""),
                     subject_ranges=list(change["subject_ranges"]),
                     necessary_context=list(change["necessary_context"]),
+                    limitations=[
+                        PageLimitation.from_dict(value) for value in change.get("limitations", [])
+                    ],
                     state="ready",
                     quality="planned",
                     local_key=change.get("local_key"),
@@ -622,6 +692,7 @@ class DocumentPlanningLedger:
                     "INSERT INTO resolutions(unresolved_key, payload) VALUES (?, ?)",
                     (resolution.unresolved_key, _json(resolution.to_dict())),
                 )
+            save_external_references(self, decoded.get("external_references", []))
             for key in affected:
                 self._set_page_state(key)
             self.db.execute(
@@ -629,7 +700,7 @@ class DocumentPlanningLedger:
                 (completed, _json(receipt)),
             )
             self._set_meta("windows", windows)
-            self._set_meta("completed", completed)
+            self._set_meta(self._progress_key(), completed)
             self._set_meta("status", "pending")
             self._refresh_integrity()
             # Save this independently durable receipt while the ledger change
@@ -652,39 +723,24 @@ class DocumentPlanningLedger:
             raise ValueError("Replacement planning schedule changes accepted work")
         with self._transaction():
             self._set_meta("windows", windows)
-            self._set_meta("completed", completed)
+            self._set_meta(self._progress_key(), completed)
             self._set_meta("status", "pending")
             self._refresh_integrity()
 
+    def _resolve_retry_omission(self, key: str, sequence: int) -> None:
+        _resolve_retry_omission(self, key, sequence)
+
+    def begin_retry(self, windows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int] | None:
+        return _begin_retry(self, windows)
+
     def receipts(self) -> list[dict[str, Any]]:
-        return [
-            json.loads(payload)
-            for _, payload in self.db.execute(
-                "SELECT sequence, payload FROM receipts ORDER BY sequence"
-            )
-        ]
+        return _receipts(self)
 
     def receipt(self, sequence: int) -> dict[str, Any] | None:
-        row = self.db.execute(
-            "SELECT payload FROM receipts WHERE sequence = ?", (sequence,)
-        ).fetchone()
-        return json.loads(row[0]) if row is not None else None
+        return _receipt(self, sequence)
 
     def progress(self) -> tuple[str, list[dict[str, Any]], int] | None:
-        status, windows, completed = (
-            self._meta("status"),
-            self._meta("windows"),
-            self._meta("completed"),
-        )
-        if status is None and windows is None and completed is None:
-            return None
-        if (
-            status not in {"pending", "accepted"}
-            or not isinstance(windows, list)
-            or type(completed) is not int
-        ):
-            raise ValueError("Planning ledger progress is invalid")
-        return status, windows, completed
+        return _progress(self)
 
     def recovery_valid(
         self,
@@ -697,56 +753,13 @@ class DocumentPlanningLedger:
         base_windows: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Validate a persisted prefix without loading every ledger value at once."""
-
-        from openkb.agent.document_planning_support import valid_window_schedule
-        from openkb.agent.document_window_receipts import (
-            accepted_receipts_match_dispatch,
-            valid_accepted_receipts,
+        return _recovery_valid(
+            self, windows, completed, dispatch_lookup,
+            parsed=parsed, source=source, base_windows=base_windows,
         )
 
-        try:
-            self._validate_json_rows(parsed)
-        except sqlite3.DatabaseError:
-            return False
-        if not valid_window_schedule(windows, parsed, source=source, base_schedule=base_windows):
-            return False
-        if self._state_digest() != self._meta("state_digest"):
-            return False
-        if completed < 0 or completed > len(windows):
-            return False
-        if self._meta("status") == "accepted" and completed != len(windows):
-            return False
-        if int(self.db.execute("SELECT COUNT(*) FROM receipts").fetchone()[0]) != completed:
-            return False
-        receipts = []
-        for index, window in enumerate(windows[:completed], start=1):
-            receipt = self.receipt(index)
-            if receipt is None:
-                return False
-            if not valid_accepted_receipts([receipt], [window], 1):
-                return False
-            if not accepted_receipts_match_dispatch([receipt], dispatch_lookup):
-                return False
-            receipts.append(receipt)
-        if not _accepted_proofs_valid(self, receipts):
-            return False
-        if self._meta("status") == "accepted":
-            if not _terminal_coverage_valid(self, windows, parsed):
-                return False
-        return True
-
     def mark_accepted(self, windows: list[dict[str, Any]]) -> None:
-        with self._transaction():
-            # A terminal ledger means every target has been classified.  This
-            # also covers an empty/readability-free source, which has no
-            # window through ``apply_accepted`` to update the durable overview.
-            overview = self.overview()
-            overview.status = "complete"
-            self._set_meta("overview", overview.to_dict())
-            self._set_meta("windows", windows)
-            self._set_meta("completed", len(windows))
-            self._set_meta("status", "accepted")
-            self._refresh_integrity()
+        _mark_accepted(self, windows)
 
     def compact_recovery(self) -> dict[str, Any]:
         return _compact_recovery(self)
@@ -756,6 +769,28 @@ class DocumentPlanningLedger:
 
     def materialize(self):
         return _materialize(self)
+
+    def settle_skipped(
+        self,
+        window: dict[str, Any],
+        *,
+        windows: list[dict[str, Any]],
+        completed: int,
+        reason: str,
+        attempts: int,
+        predecessor: str,
+        diagnostic_ref: str | None,
+    ):
+        return _settle_skipped(
+            self,
+            window,
+            windows=windows,
+            completed=completed,
+            reason=reason,
+            attempts=attempts,
+            predecessor=predecessor,
+            diagnostic_ref=diagnostic_ref,
+        )
 
     def final_catalog_targets(self) -> set[str]:
         return _final_catalog_targets(self)

@@ -1,6 +1,7 @@
 """Bounded and terminal projections over the private document-planning ledger."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from openkb.agent.document_plan import (
     derive_page_states,
     range_intervals,
 )
+from openkb.agent.document_plan_annotations import ExternalReference, PlanningOmission
 from openkb.agent.document_window_receipts import target_ranges
 from openkb.sources import content_id
 
@@ -24,6 +26,37 @@ _PREVIEW_RANGES = 12
 _PREVIEW_CONTEXTS = 4
 _PREVIEW_BASIS_CHARS = 512
 _PREVIEW_OVERVIEW_CHARS = 8_000
+
+
+def receipts(ledger: Any) -> list[dict[str, Any]]:
+    return [
+        json.loads(payload)
+        for _, payload in ledger.db.execute(
+            "SELECT sequence, payload FROM receipts ORDER BY sequence"
+        )
+    ]
+
+
+def receipt(ledger: Any, sequence: int) -> dict[str, Any] | None:
+    row = ledger.db.execute(
+        "SELECT payload FROM receipts WHERE sequence = ?", (sequence,)
+    ).fetchone()
+    return json.loads(row[0]) if row is not None else None
+
+
+def progress(ledger: Any) -> tuple[str, list[dict[str, Any]], int] | None:
+    status, windows, completed = (
+        ledger._meta("status"), ledger._meta("windows"), ledger._meta(ledger._progress_key())
+    )
+    if status is None and windows is None and completed is None:
+        return None
+    if (
+        status not in {"pending", "accepted"}
+        or not isinstance(windows, list)
+        or type(completed) is not int
+    ):
+        raise ValueError("Planning ledger progress is invalid")
+    return status, windows, completed
 
 
 def catalog_brief(path: Path, folder: str) -> str:
@@ -195,6 +228,9 @@ def validate_json_rows(ledger: Any, parsed: Any | None = None) -> None:
             for context in page.necessary_context:
                 for value in [*context.get("ranges", []), *context.get("basis_ranges", [])]:
                     range_intervals(value, parsed, "recovered page context")
+            for limitation in page.limitations:
+                for value in limitation.ranges:
+                    range_intervals(value, parsed, "recovered page limitation")
 
     for (payload,) in ledger.db.execute("SELECT payload FROM source_only"):
         source_item = SourceOnlyItem.from_dict(json.loads(payload))
@@ -214,6 +250,31 @@ def validate_json_rows(ledger: Any, parsed: Any | None = None) -> None:
             raise ValueError("Planning resolution row key mismatch")
         if ledger.db.execute("SELECT 1 FROM unresolved WHERE key = ?", (key,)).fetchone() is None:
             raise ValueError("Planning resolution has no unresolved item")
+    for key, payload in ledger.db.execute("SELECT key, payload FROM external_references"):
+        reference = ExternalReference.from_dict(json.loads(payload))
+        if reference.key != key:
+            raise ValueError("Planning external reference row key mismatch")
+        if parsed is not None:
+            for value in reference.location:
+                range_intervals(value, parsed, "recovered external reference")
+    for key, payload in ledger.db.execute("SELECT key, payload FROM planning_omissions"):
+        omission = PlanningOmission.from_dict(json.loads(payload))
+        if omission.key != key:
+            raise ValueError("Planning omission row key mismatch")
+        if parsed is not None:
+            for value in omission.ranges:
+                range_intervals(value, parsed, "recovered planning omission")
+    for key, sequence in ledger.db.execute(
+        "SELECT omission_key, sequence FROM retry_resolutions"
+    ):
+        if (
+            ledger.db.execute(
+                "SELECT 1 FROM planning_omissions WHERE key = ?", (key,)
+            ).fetchone() is None
+            or type(sequence) is not int
+            or ledger.receipt(sequence) is None
+        ):
+            raise ValueError("Invalid retry resolution")
 
 
 def compact_recovery(ledger: Any) -> dict[str, Any]:
@@ -336,7 +397,18 @@ def progress_preview(ledger: Any, *, limit: int = _PREVIEW_ROWS) -> dict[str, An
     return value
 
 
-def materialize(ledger: Any):
+@dataclass(frozen=True)
+class MaterializedPlan:
+    overview: OverviewPlan
+    pages: list[PagePlan]
+    source_only: list[SourceOnlyItem]
+    unresolved: list[UnresolvedItem]
+    resolutions: list[ResolutionItem]
+    external_references: list[ExternalReference]
+    planning_omissions: list[PlanningOmission]
+
+
+def materialize(ledger: Any) -> MaterializedPlan:
     """Create the complete formal plan only at terminal hand-off."""
 
     pages = [
@@ -357,24 +429,58 @@ def materialize(ledger: Any):
             "SELECT payload FROM resolutions ORDER BY unresolved_key"
         )
     ]
+    references = [
+        ExternalReference.from_dict(json.loads(payload))
+        for (payload,) in ledger.db.execute("SELECT payload FROM external_references ORDER BY key")
+    ]
+    omissions = [
+        PlanningOmission.from_dict(json.loads(payload))
+        for (payload,) in ledger.db.execute(
+            "SELECT o.payload FROM planning_omissions o LEFT JOIN retry_resolutions r "
+            "ON r.omission_key = o.key WHERE r.omission_key IS NULL ORDER BY o.key"
+        )
+    ]
     derive_page_states(pages, unresolved)
-    return ledger.overview(), pages, source_only, unresolved, resolutions
+    return MaterializedPlan(
+        ledger.overview(), pages, source_only, unresolved, resolutions, references, omissions
+    )
 
 
 def terminal_coverage_valid(ledger: Any, windows: list[dict[str, Any]], parsed: Any) -> bool:
     """Recheck the terminal W/T schedule against its materialized routes."""
 
     try:
-        overview, pages, source_only, unresolved, resolutions = materialize(ledger)
+        materialized = materialize(ledger)
         plan = DocumentPlan(
-            overview=overview,
-            pages=pages,
-            source_only=source_only,
-            unresolved=unresolved,
-            resolutions=resolutions,
+            overview=materialized.overview,
+            pages=materialized.pages,
+            source_only=materialized.source_only,
+            unresolved=materialized.unresolved,
+            resolutions=materialized.resolutions,
+            external_references=materialized.external_references,
+            planning_omissions=materialized.planning_omissions,
         )
         required_ranges = [item for window in windows for item in target_ranges(window)]
-        return not check_coverage_gaps(parsed, plan, required_ranges=required_ranges)
+        gaps = check_coverage_gaps(parsed, plan, required_ranges=required_ranges)
+        if not gaps:
+            return True
+        if not ledger._v2() or not materialized.planning_omissions:
+            return False
+        # Omissions register gaps; they never turn into valid source-only content.
+        accounted = DocumentPlan(
+            overview=materialized.overview,
+            pages=materialized.pages,
+            source_only=[
+                *materialized.source_only,
+                *[
+                    SourceOnlyItem(reason="registered planning omission", ranges=item.ranges)
+                    for item in materialized.planning_omissions
+                ],
+            ],
+            unresolved=materialized.unresolved,
+            resolutions=materialized.resolutions,
+        )
+        return not check_coverage_gaps(parsed, accounted, required_ranges=required_ranges)
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
 

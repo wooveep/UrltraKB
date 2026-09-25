@@ -9,6 +9,7 @@ from openkb.agent.evidence_generation_protocol import normalize_output
 from openkb.agent.evidence_retry import ResponseIncomplete
 from openkb.application.documents import import_document
 from openkb.application.source_actions import continue_source
+from tests.http_model_fixture import v4_plan
 from tests.test_generation_scopes import payload, response
 
 
@@ -29,30 +30,34 @@ def test_source_only_detail_is_explicit_and_reused_without_new_model_calls(
             blocks = request["evidence"]["blocks"]
             target = request["target"]
             ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-            return {
-                "overview": {"text": "Port usage overview.", "ranges": ranges, "limitations": []},
-                "page_changes": [
-                    {
-                        "local_key": "port",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/port-usage",
-                        "title": "Port Usage",
-                        "purpose": "Port configuration requirement",
-                        "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [
-                    {
-                        "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
-                        "reason": "UI label is source-only example metadata.",
-                    }
-                ],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            return v4_plan(
+                request,
+                {
+                    "overview": {
+                        "text": "Port usage overview.",
+                        "ranges": ranges,
+                        "limitations": [],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "port",
+                            "kind": "concept",
+                            "title": "Port Usage",
+                            "purpose": "Port configuration requirement",
+                            "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
+                            "necessary_context": [],
+                        }
+                    ],
+                    "source_only": [
+                        {
+                            "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                            "reason": "UI label is source-only example metadata.",
+                        }
+                    ],
+                    "unresolved": [],
+                    "resolutions": [],
+                },
+            )
         if request["stage"] == "generation":
             assert detail not in "\n".join(row["text"] for row in request["evidence"]["blocks"])
             return {
@@ -108,36 +113,36 @@ def test_required_condition_cannot_be_waived_by_source_detail_selection(
             blocks = request["evidence"]["blocks"]
             target = request["target"]
             ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
-            return {
-                "overview": {
-                    "text": "Port requirement overview.",
-                    "ranges": ranges,
-                    "limitations": [],
+            return v4_plan(
+                request,
+                {
+                    "overview": {
+                        "text": "Port requirement overview.",
+                        "ranges": ranges,
+                        "limitations": [],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "port",
+                            "kind": "concept",
+                            "title": "Port Configuration",
+                            "purpose": "Restricted port configuration",
+                            "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                                    "rationale": blocks[1]["text"],
+                                    "basis_ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
+                                }
+                            ],
+                        }
+                    ],
+                    "source_only": [],
+                    "unresolved": [],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "port",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/port-configuration",
-                        "title": "Port Configuration",
-                        "purpose": "Restricted port configuration",
-                        "subject_ranges": [[blocks[0]["order"], blocks[0]["order"] + 1]],
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
-                                "rationale": blocks[1]["text"],
-                                "basis_ranges": [[blocks[1]["order"], blocks[1]["order"] + 1]],
-                            }
-                        ],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            )
         if stage == "generation":
             if "revision" not in request:
                 content = "Use port 9342."

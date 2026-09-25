@@ -651,9 +651,10 @@ class TaskManager:
         elif len(results) == task.view.total:
             failed = any(row.status == "failed" for row in results)
             unfinished = any(row.status == "unfinished" for row in results)
+            omitted = any(row.document is not None and row.document.omissions for row in results)
             state = (
                 "partial"
-                if unfinished or (failed and task.view.succeeded)
+                if unfinished or omitted or (failed and task.view.succeeded)
                 else "failed"
                 if failed
                 else "completed"

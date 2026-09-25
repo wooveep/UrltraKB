@@ -1,8 +1,9 @@
 import json
 
 import pytest
-from http_model_fixture import model_service  # noqa: F401
 from processing_fixtures import configure_processing
+
+from tests.http_model_fixture import model_service  # noqa: F401
 
 
 @pytest.fixture(autouse=True)

@@ -112,4 +112,4 @@ def test_current_issue_index_does_not_hydrate_unselected_request_bodies(kb_dir, 
 
     view = inspect(kb_dir, result)
 
-    assert view["rows"][0]["item"] == "concepts/beta"
+    assert view["rows"][0]["item"].startswith("concepts/beta-")

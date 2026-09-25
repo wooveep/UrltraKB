@@ -5,7 +5,7 @@ import json
 import pytest
 
 from openkb.application.documents import import_document
-from tests.http_model_fixture import evidence_response
+from tests.http_model_fixture import evidence_response, v4_plan
 
 
 @pytest.mark.parametrize("cross_reference", [False, True])
@@ -31,7 +31,7 @@ def test_import_binds_conditions_only_to_affected_pages(
         request = json.loads(body["messages"][-1]["content"])
         stage = request["stage"]
         value = evidence_response(request)
-        if stage == "planning":
+        if stage == "planning" and request.get("response_mode") == "plan":
             blocks = request["evidence"]["blocks"]
 
             def ranges(*texts):
@@ -58,65 +58,65 @@ def test_import_binds_conditions_only_to_affected_pages(
             metrics = ranges("Metrics", "Metrics uses port 9342.")
             retention = ranges("Retention", "Audit records are kept for 30 days.")
             target = request["target"]
-            return {
-                "overview": {
-                    "text": "Migration, metrics and retention guidance.",
-                    "ranges": target.get(
-                        "ranges", [[target["target_start"], target["target_end"]]]
-                    ),
-                    "limitations": [],
+            return v4_plan(
+                request,
+                {
+                    "overview": {
+                        "text": "Migration, metrics and retention guidance.",
+                        "ranges": target.get(
+                            "ranges", [[target["target_start"], target["target_end"]]]
+                        ),
+                        "limitations": [],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "migration",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Migration",
+                            "purpose": "Run migration with its prerequisite.",
+                            "subject_ranges": migration,
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": backup,
+                                    "rationale": basis(backup),
+                                    "basis_ranges": backup,
+                                }
+                            ],
+                        },
+                        {
+                            "local_key": "metrics",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Metrics",
+                            "purpose": "Metrics listener configuration.",
+                            "subject_ranges": metrics,
+                            "necessary_context": [],
+                        },
+                        {
+                            "local_key": "retention",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Retention",
+                            "purpose": "Audit record retention period.",
+                            "subject_ranges": retention,
+                            "necessary_context": [],
+                        },
+                    ],
+                    "source_only": [
+                        {
+                            "ranges": guide,
+                            "reason": "Document title is source-only navigation metadata.",
+                        }
+                    ],
+                    "unresolved": [],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "migration",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/migration",
-                        "title": "Migration",
-                        "purpose": "Run migration with its prerequisite.",
-                        "subject_ranges": migration,
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": backup,
-                                "rationale": basis(backup),
-                                "basis_ranges": backup,
-                            }
-                        ],
-                    },
-                    {
-                        "local_key": "metrics",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/metrics",
-                        "title": "Metrics",
-                        "purpose": "Metrics listener configuration.",
-                        "subject_ranges": metrics,
-                        "necessary_context": [],
-                    },
-                    {
-                        "local_key": "retention",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/retention",
-                        "title": "Retention",
-                        "purpose": "Audit record retention period.",
-                        "subject_ranges": retention,
-                        "necessary_context": [],
-                    },
-                ],
-                "source_only": [
-                    {
-                        "ranges": guide,
-                        "reason": "Document title is source-only navigation metadata.",
-                    }
-                ],
-                "unresolved": [],
-                "resolutions": [],
-            }
+            )
         if stage in {"generation", "verification"}:
             title = request["page"]["title"]
             text = "\n".join(row["text"] for row in request["evidence"]["blocks"])
@@ -140,9 +140,9 @@ def test_import_binds_conditions_only_to_affected_pages(
     assert migration_evidence and all("verified backup" in text for text in migration_evidence)
     assert all("migrate --strict" in text for text in migration_evidence)
     assert all("9342" not in text and "30 days" not in text for text in migration_evidence)
-    assert (kb_dir / "wiki/concepts/migration.md").exists()
-    assert (kb_dir / "wiki/concepts/metrics.md").exists()
-    assert (kb_dir / "wiki/concepts/retention.md").exists()
+    assert len(list((kb_dir / "wiki/concepts").glob("migration-*.md"))) == 1
+    assert len(list((kb_dir / "wiki/concepts").glob("metrics-*.md"))) == 1
+    assert len(list((kb_dir / "wiki/concepts").glob("retention-*.md"))) == 1
 
 
 def _review_scope(*, preamble="", pointer="", gap="b", link="", omitted_text=None):
@@ -218,7 +218,7 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
     def respond(body):
         request = json.loads(body["messages"][-1]["content"])
         value = evidence_response(request)
-        if request["stage"] == "planning":
+        if request["stage"] == "planning" and request.get("response_mode") == "plan":
             plans.append(request)
             blocks = request["evidence"]["blocks"]
 
@@ -240,69 +240,68 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
             beta = ranges("Beta", "Run Beta after Alpha.")
             metrics = ranges("Metrics", "Metrics listens on port 9342.")
             target = request["target"]
-            return {
-                "overview": {
-                    "text": "Alpha, Beta and metrics procedures.",
-                    "ranges": target.get(
-                        "ranges", [[target["target_start"], target["target_end"]]]
-                    ),
-                    "limitations": ["The required verified backup is not available."],
+            return v4_plan(
+                request,
+                {
+                    "overview": {
+                        "text": "Alpha, Beta and metrics procedures.",
+                        "ranges": target.get(
+                            "ranges", [[target["target_start"], target["target_end"]]]
+                        ),
+                        "limitations": ["The required verified backup is not available."],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "alpha",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Alpha",
+                            "purpose": "Run Alpha after a verified backup.",
+                            "subject_ranges": alpha,
+                            "necessary_context": [],
+                        },
+                        {
+                            "local_key": "beta",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Beta",
+                            "purpose": "Run Beta after Alpha.",
+                            "subject_ranges": beta,
+                            "necessary_context": [
+                                {
+                                    "relation": "explicit_reference",
+                                    "ranges": alpha,
+                                    "rationale": basis(alpha),
+                                    "basis_ranges": alpha,
+                                }
+                            ],
+                        },
+                        {
+                            "local_key": "metrics",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Metrics",
+                            "purpose": "Metrics listener configuration.",
+                            "subject_ranges": metrics,
+                            "necessary_context": [],
+                        },
+                    ],
+                    "source_only": [],
+                    "unresolved": [
+                        {
+                            "location": alpha,
+                            "problem_type": "missing_prerequisite",
+                            "missing_target": "a verified backup",
+                            "affected_pages": ["alpha", "beta"],
+                            "reason": "The prerequisite backup has not been supplied.",
+                        }
+                    ],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "alpha",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/alpha",
-                        "title": "Alpha",
-                        "purpose": "Run Alpha after a verified backup.",
-                        "subject_ranges": alpha,
-                        "necessary_context": [],
-                    },
-                    {
-                        "local_key": "beta",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/beta",
-                        "title": "Beta",
-                        "purpose": "Run Beta after Alpha.",
-                        "subject_ranges": beta,
-                        "necessary_context": [
-                            {
-                                "relation": "explicit_reference",
-                                "ranges": alpha,
-                                "rationale": basis(alpha),
-                                "basis_ranges": alpha,
-                            }
-                        ],
-                    },
-                    {
-                        "local_key": "metrics",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/metrics",
-                        "title": "Metrics",
-                        "purpose": "Metrics listener configuration.",
-                        "subject_ranges": metrics,
-                        "necessary_context": [],
-                    },
-                ],
-                "source_only": [],
-                "unresolved": [
-                    {
-                        "location": alpha,
-                        "problem_type": "missing_prerequisite",
-                        "missing_target": "a verified backup",
-                        "affected_pages": ["alpha", "beta"],
-                        "blocking": True,
-                        "reason": "The prerequisite backup has not been supplied.",
-                    }
-                ],
-                "resolutions": [],
-            }
+            )
         if request["stage"] == "generation":
             return {
                 "content": "Metrics listens on port 9342.",
@@ -313,9 +312,9 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
     model_service.respond = respond
     result = import_document(kb_dir, source)
     assert result.knowledge_compilation == "completed", result
-    assert not (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert not (kb_dir / "wiki/concepts/beta.md").exists()
-    assert (kb_dir / "wiki/concepts/metrics.md").exists()
+    assert not list((kb_dir / "wiki/concepts").glob("alpha-*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
+    assert len(list((kb_dir / "wiki/concepts").glob("metrics-*.md"))) == 1
     assert plans and any(
         row["reason"] == "unresolved_prerequisite_blocked" for row in result.omissions
     )
@@ -323,8 +322,8 @@ def test_unresolved_prerequisite_blocks_chain_without_rerolling_plan(
     continued = continue_source(kb_dir, result.source_id, version_id=result.input_version)
     assert continued.knowledge_compilation == "completed", continued
     assert len(model_service) == previous
-    assert not (kb_dir / "wiki/concepts/alpha.md").exists()
-    assert not (kb_dir / "wiki/concepts/beta.md").exists()
+    assert not list((kb_dir / "wiki/concepts").glob("alpha-*.md"))
+    assert not list((kb_dir / "wiki/concepts").glob("beta-*.md"))
 
 
 def test_multiple_unresolved_conditions_keep_operation_blocked(kb_dir, tmp_path, model_service):
@@ -338,7 +337,7 @@ def test_multiple_unresolved_conditions_keep_operation_blocked(kb_dir, tmp_path,
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         value = evidence_response(payload)
-        if payload["stage"] == "planning":
+        if payload["stage"] == "planning" and payload.get("response_mode") == "plan":
             blocks = payload["evidence"]["blocks"]
 
             def ranges(*texts):
@@ -359,61 +358,61 @@ def test_multiple_unresolved_conditions_keep_operation_blocked(kb_dir, tmp_path,
             second = ranges("Second condition", "Missing condition two.")
             operation = ranges("Operation", "Restart requires the applicable conditions.")
             target = payload["target"]
-            return {
-                "overview": {
-                    "text": "Restart conditions remain unresolved.",
-                    "ranges": target.get(
-                        "ranges", [[target["target_start"], target["target_end"]]]
-                    ),
-                    "limitations": ["Both applicable conditions are missing."],
+            return v4_plan(
+                payload,
+                {
+                    "overview": {
+                        "text": "Restart conditions remain unresolved.",
+                        "ranges": target.get(
+                            "ranges", [[target["target_start"], target["target_end"]]]
+                        ),
+                        "limitations": ["Both applicable conditions are missing."],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": "operation",
+                            "target_key": "",
+                            "target": "",
+                            "kind": "concept",
+                            "title": "Operation",
+                            "purpose": "Restart only after the applicable conditions are known.",
+                            "subject_ranges": operation,
+                            "necessary_context": [
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": first,
+                                    "rationale": basis(first),
+                                    "basis_ranges": first,
+                                },
+                                {
+                                    "relation": "applicable_condition",
+                                    "ranges": second,
+                                    "rationale": basis(second),
+                                    "basis_ranges": second,
+                                },
+                            ],
+                        }
+                    ],
+                    "source_only": [],
+                    "unresolved": [
+                        {
+                            "location": first,
+                            "problem_type": "missing_prerequisite",
+                            "missing_target": "condition one",
+                            "affected_pages": ["operation"],
+                            "reason": "The first applicable condition is missing.",
+                        },
+                        {
+                            "location": second,
+                            "problem_type": "missing_prerequisite",
+                            "missing_target": "condition two",
+                            "affected_pages": ["operation"],
+                            "reason": "The second applicable condition is missing.",
+                        },
+                    ],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": "operation",
-                        "target_key": "",
-                        "target": "",
-                        "kind": "concept",
-                        "name": "concepts/operation",
-                        "title": "Operation",
-                        "purpose": "Restart only after the applicable conditions are known.",
-                        "subject_ranges": operation,
-                        "necessary_context": [
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": first,
-                                "rationale": basis(first),
-                                "basis_ranges": first,
-                            },
-                            {
-                                "relation": "applicable_condition",
-                                "ranges": second,
-                                "rationale": basis(second),
-                                "basis_ranges": second,
-                            },
-                        ],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [
-                    {
-                        "location": first,
-                        "problem_type": "missing_prerequisite",
-                        "missing_target": "condition one",
-                        "affected_pages": ["operation"],
-                        "blocking": True,
-                        "reason": "The first applicable condition is missing.",
-                    },
-                    {
-                        "location": second,
-                        "problem_type": "missing_prerequisite",
-                        "missing_target": "condition two",
-                        "affected_pages": ["operation"],
-                        "blocking": True,
-                        "reason": "The second applicable condition is missing.",
-                    },
-                ],
-                "resolutions": [],
-            }
+            )
         return value
 
     model_service.respond = respond

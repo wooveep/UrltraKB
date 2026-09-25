@@ -199,11 +199,13 @@ def test_planning_admission_uses_the_initial_shared_completion_reservation(monke
 def test_length_expansion_readmits_and_resizes_planning_window(tmp_path, monkeypatch):
     import litellm
 
+    from tests.http_model_fixture import v4_plan
     from tests.test_adaptive_processing import response
 
     source, parsed = _DummySource(), _DummyParsed(2)
     for index, block in enumerate(parsed.blocks):
         block.text = f"Readable source block {index}."
+        block.chars = len(block.text)
     settings = {
         "model": "mock-model",
         "processing": {
@@ -245,28 +247,30 @@ def test_length_expansion_readmits_and_resizes_planning_window(tmp_path, monkeyp
         target = payload["target"]
         start, end = target["target_start"], target["target_end"]
         return response(
-            {
-                "overview": {
-                    "text": "Complete" if end == len(parsed.blocks) else "Partial",
-                    "ranges": [[start, end]],
-                    "limitations": [],
+            v4_plan(
+                payload,
+                {
+                    "overview": {
+                        "text": "Complete" if end == len(parsed.blocks) else "Partial",
+                        "ranges": [[start, end]],
+                        "limitations": [],
+                    },
+                    "page_changes": [
+                        {
+                            "local_key": f"page-{start}",
+                            "target_key": "",
+                            "kind": "concept",
+                            "title": f"Block {start}",
+                            "purpose": "Retained after capacity readmission.",
+                            "subject_ranges": [[start, end]],
+                            "necessary_context": [],
+                        }
+                    ],
+                    "source_only": [],
+                    "unresolved": [],
+                    "resolutions": [],
                 },
-                "page_changes": [
-                    {
-                        "local_key": f"page-{start}",
-                        "target_key": "",
-                        "kind": "concept",
-                        "name": f"concepts/block-{start}",
-                        "title": f"Block {start}",
-                        "purpose": "Retained after capacity readmission.",
-                        "subject_ranges": [[start, end]],
-                        "necessary_context": [],
-                    }
-                ],
-                "source_only": [],
-                "unresolved": [],
-                "resolutions": [],
-            },
+            ),
             tokens=kwargs["max_tokens"],
         )
 
@@ -550,6 +554,63 @@ def test_accepted_ledger_cannot_skip_unfinished_windows(tmp_path):
 
             assert not ledger.recovery_valid(
                 windows, 1, checkpoints.dispatch_output_tokens, parsed=parsed, source=source
+            )
+        finally:
+            ledger.close()
+
+
+def test_skipped_window_is_durably_settled_without_an_accepted_content_proof(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(6)
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    windows = _make_mock_windows(parsed)
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        ledger = DocumentPlanningLedger(checkpoints, "e" * 64)
+        try:
+            ledger.initialize(wiki=workspace / "wiki", source=source, parsed=parsed)
+            ledger.bind_metadata({"protocol": "document-plan-v2"})
+            omission = ledger.settle_skipped(
+                windows[0],
+                windows=windows,
+                completed=1,
+                reason="response_empty",
+                attempts=3,
+                predecessor="c" * 64,
+                diagnostic_ref=None,
+            )
+            assert omission.reason == "response_empty"
+            assert ledger.progress() == ("pending", windows, 1)
+            assert ledger.receipt(1)["status"] == "skipped"
+            assert ledger.receipt(1).get("result") is None
+            assert ledger.recovery_valid(
+                windows, 1, checkpoints.dispatch_output_tokens, parsed=parsed, source=source
+            )
+            assert ledger.materialize().planning_omissions == [omission]
+            for index, window in enumerate(windows[1:], start=2):
+                ledger.settle_skipped(
+                    window,
+                    windows=windows,
+                    completed=index,
+                    reason="response_empty",
+                    attempts=3,
+                    predecessor=ledger.state_digest(),
+                    diagnostic_ref=None,
+                )
+            ledger.mark_accepted(windows)
+            assert ledger.recovery_valid(
+                windows, len(windows), checkpoints.dispatch_output_tokens,
+                parsed=parsed, source=source,
+            )
+            assert ledger.overview().status == "partial"
+            ledger.db.execute("UPDATE planning_omissions SET payload = ? WHERE key = ?", (
+                json.dumps({**omission.to_dict(), "reason": "forged"}), omission.key,
+            ))
+            ledger.db.commit()
+            assert not ledger.recovery_valid(
+                windows, len(windows), checkpoints.dispatch_output_tokens,
+                parsed=parsed, source=source,
             )
         finally:
             ledger.close()
@@ -1321,6 +1382,136 @@ def test_navigation_hints_follow_sparse_target_and_budget():
     assert titles <= {"Section 0", "Section 1", "Section 24", "Section 25"}
     assert {"Section 0", "Section 25"} <= titles
     assert len(json.dumps(hints, ensure_ascii=False)) <= 800
+
+
+def test_invalid_window_settles_and_a_later_valid_window_survives_resume(tmp_path):
+    source, parsed = _DummySource(), _DummyParsed(6)
+    windows = _make_mock_windows(parsed)
+    navigation = {
+        "id": "nav_partial",
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "status": "complete",
+        "windows": windows,
+        "nodes": [],
+    }
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    seen = []
+
+    def respond(msgs, **_kwargs):
+        target = json.loads(msgs[-1]["content"])["target"]
+        seen.append(target["target_start"])
+        if target["target_start"] == 0:
+            return {"not": "a plan"}
+        return {
+            "overview": {"text": "Second half retained.", "ranges": [[3, 6]], "limitations": []},
+            "page_changes": [],
+            "source_only": [{"ranges": [[3, 6]], "reason": "Retain readable source."}],
+            "unresolved": [],
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        plan = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            mock_caller=respond,
+        )
+        assert plan is not None
+        assert plan.overview.status == "partial"
+        assert len(plan.planning_omissions) == 1
+        assert plan.planning_omissions[0].ranges == [[0, 3]]
+        assert len(plan.source_only) == 1
+        resumed = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            resume=True, mock_caller=lambda *_args, **_kwargs: pytest.fail("must not replan"),
+        )
+        assert resumed is not None
+        assert len(resumed.planning_omissions) == 1
+        def still_invalid(messages, **_kwargs):
+            seen.append(json.loads(messages[-1]["content"])["target"]["target_start"])
+            return {"not": "a plan"}
+
+        failed_retry = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            resume=True, retry_skipped=True, mock_caller=still_invalid,
+        )
+        assert failed_retry is not None
+        assert len(failed_retry.planning_omissions) == 1
+        assert failed_retry.planning_omissions[0].key != resumed.planning_omissions[0].key
+
+        def retry(messages, **_kwargs):
+            target = json.loads(messages[-1]["content"])["target"]
+            seen.append(target["target_start"])
+            assert target["target_start"] == 0
+            return {
+                "overview": {"text": "First half retained.", "ranges": [[0, 3]], "limitations": []},
+                "page_changes": [],
+                "source_only": [{"ranges": [[0, 3]], "reason": "Retain readable source."}],
+                "unresolved": [],
+                "resolutions": [],
+            }
+
+        retried = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            resume=True, retry_skipped=True, mock_caller=retry,
+        )
+        assert retried is not None
+        assert retried.planning_omissions == []
+        assert len(retried.source_only) == 2
+        again = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            resume=True, mock_caller=lambda *_args, **_kwargs: pytest.fail("must not replan"),
+        )
+        assert again is not None and again.planning_omissions == []
+    assert seen == [0, 3, 0, 0]
+
+
+def test_navigation_capacity_failure_settles_only_its_target(tmp_path, monkeypatch):
+    from openkb.agent import document_planning_support, document_windowing
+
+    source, parsed = _DummySource(), _DummyParsed(6)
+    navigation = {
+        "id": "nav_capacity",
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "windows": _make_mock_windows(parsed),
+        "nodes": [],
+    }
+    settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    original = document_planning_support.select_navigation_hints
+
+    def hints(*args, **kwargs):
+        if kwargs["evidence"]["blocks"][0]["order"] == 0:
+            raise ProcessingIncomplete("planning_navigation_exceeds_request_budget", "planning")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(document_planning_support, "select_navigation_hints", hints)
+    monkeypatch.setattr(document_windowing, "reload_planning_target", lambda *_: [])
+
+    def respond(messages, **_kwargs):
+        assert json.loads(messages[-1]["content"])["target"]["target_start"] == 3
+        return {
+            "overview": {"text": "Later target.", "ranges": [[3, 6]], "limitations": []},
+            "page_changes": [],
+            "source_only": [{"ranges": [[3, 6]], "reason": "Retain source."}],
+            "unresolved": [],
+            "resolutions": [],
+        }
+
+    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
+        plan = plan_document(
+            tmp_path, workspace, source, parsed, navigation, settings, checkpoints,
+            mock_caller=respond,
+        )
+    assert plan is not None
+    assert [row.reason for row in plan.planning_omissions] == ["planning_context_capacity"]
+    assert len(plan.source_only) == 1
 
 
 def test_multi_window_accumulation_and_resolution(tmp_path, monkeypatch):
