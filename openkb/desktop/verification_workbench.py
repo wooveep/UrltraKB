@@ -63,7 +63,12 @@ def verify_workbench(window, first, other, root, wait):
 
     # Keep a draft intact while opening secondary navigation and changing themes.
     window.open_page("concepts/原生阅读")
-    wait(lambda: window.page is not None and window.page.path == "concepts/原生阅读")
+    # The retained page can match before the asynchronous load leaves Settings.
+    wait(
+        lambda: on_page(window, "知识")
+        and window.page is not None
+        and window.page.path == "concepts/原生阅读"
+    )
     wait(lambda: "与文字保持基线" in window.reader.toPlainText())
     window.tabs.setCurrentIndex(1)
     window.editor.setPlainText(window.editor.toPlainText() + "\n尚未保存的草稿。")
