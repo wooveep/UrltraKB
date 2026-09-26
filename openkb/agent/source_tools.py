@@ -6,7 +6,7 @@ from urllib.parse import quote
 from agents import function_tool
 
 from openkb.agent.answer_references import short_citation
-from openkb.evidence import Evidence, ParseStore, complete_read_bound, source_provenance
+from openkb.evidence import ParseStore, source_provenance
 from openkb.evidence_snapshot import EvidenceSnapshot
 from openkb.image_provenance import image_origin
 from openkb.locks import kb_read_lock
@@ -262,17 +262,12 @@ def _source_tools(kb_dir):
             raise ValueError("Invalid source search window")
         if not isinstance(query, str) or not query.strip() or len(query) > 512:
             raise ValueError("Invalid source search literal")
-        from openkb.processing import processing_checkpoint
 
         source, parsed, nav = selected(source_id)
         reader = readers[source_id]
-        matching = []
-        for index, block in enumerate(parsed.blocks):
-            processing_checkpoint()
-            reference = Evidence(source.source_id, source.id, parsed.id, block.id)
-            text = reader.read(reference, max_chars=complete_read_bound(block)).text
-            if query.casefold() in text.casefold():
-                matching.append(index)
+        from openkb.evidence_search import literal_blocks
+
+        matching = literal_blocks(reader, source, parsed, query)
         rows = []
         remaining = max_chars
         for index in matching[offset : offset + limit]:

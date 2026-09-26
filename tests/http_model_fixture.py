@@ -22,7 +22,9 @@ class ModelReply:
 def planning_ranges(payload, ranges):
     """Express fixture coordinates using the block IDs in this frozen request."""
     if payload.get("plan_protocol") not in {
-        "document-plan-v4", "document-plan-v5", "document-plan-repair-v2"
+        "document-plan-v4",
+        "document-plan-v5",
+        "document-plan-repair-v2",
     }:
         return ranges
     blocks = {row["order"]: row for row in payload["evidence"]["blocks"]}
@@ -61,8 +63,11 @@ def v4_plan(payload, value):
             return {
                 key: convert(item, node.get("field", key) if key in {"value", "content"} else key)
                 for key, item in node.items()
-                if not (payload.get("plan_protocol") == "document-plan-v5"
-                        and field == "page_changes" and key == "name")
+                if not (
+                    payload.get("plan_protocol") == "document-plan-v5"
+                    and field == "page_changes"
+                    and key == "name"
+                )
             }
         if isinstance(node, list):
             if field in {"ranges", "subject_ranges", "basis_ranges", "location"} and any(
@@ -84,7 +89,16 @@ def evidence_response(payload):
         if payload.get("subtask") == "overview":
             return "Document notes and instructions. Preserve the source conditions."
         if payload.get("subtask") == "pages":
-            return "- 名称：Notes\n  类别：concept\n  用途：Document notes and instructions"
+            return {
+                "pages": [
+                    {
+                        "title": "Notes",
+                        "kind": "concept",
+                        "purpose": "Document notes and instructions",
+                        "section": payload["target"]["ranges"],
+                    }
+                ]
+            }
     if isinstance(payload, dict) and payload.get("stage") == "verification_batch":
         return {
             "reviews": [
@@ -202,7 +216,9 @@ def evidence_response(payload):
             elif existing_target:
                 page["target"] = existing_target
             if payload.get("plan_protocol") not in {
-                "document-plan-v3", "document-plan-v4", "document-plan-v5"
+                "document-plan-v3",
+                "document-plan-v4",
+                "document-plan-v5",
             }:
                 page.update(
                     target_key=page.get("target_key", ""),

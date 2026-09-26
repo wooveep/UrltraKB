@@ -110,6 +110,10 @@ def _save_plan(checkpoints: Any, plan: Any) -> None:
     key = plan.metadata.get("recovery_key")
     if not isinstance(key, str):
         raise ValueError("DocumentPlan is missing its recovery key")
+    if plan.metadata.get("protocol") == "document-plan-v4":
+        from openkb.agent.document_planning_report import refresh_execution_report
+
+        refresh_execution_report(checkpoints, plan)
     checkpoints.save_recovery(key, "plan", to_dict(plan))
 
 

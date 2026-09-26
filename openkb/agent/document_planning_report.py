@@ -10,7 +10,7 @@ from typing import Any
 from openkb.agent import document_planning_support
 from openkb.agent.document_plan import DocumentPlan, OverviewPlan, PagePlan, validate_plan
 from openkb.agent.document_plan_annotations import ExternalReference, PlanningOmission
-from openkb.agent.document_planning_candidates import pending_candidates, rejected_candidate_summary
+from openkb.agent.document_planning_candidates import rejected_candidate_summary
 from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.execution_measurement import record_document_totals
@@ -95,11 +95,6 @@ def _omissions(
         for window in windows
         for subtask in ("overview", "pages")
     ]
-    targets.extend(
-        (key, "pages", _target_ranges(task["retired_target"], parsed))
-        for key, task in state["tasks"].items()
-        if task.get("retired_target") and pending_candidates(state, key)
-    )
     for key, subtask, ranges in targets:
         task = state["tasks"].get(key, {})
         reason = task.get("reason")
@@ -156,8 +151,10 @@ def _finalize(
     )
     if pages and not overview:
         outcome = "partial"
+    if state.get("budget_limited"):
+        outcome = "budget_limited"
     metadata = {
-        "protocol": "document-plan-v3",
+        "protocol": "document-plan-v4",
         "source_id": source.source_id,
         "version_id": source.id,
         "parse_id": parsed.id,
@@ -249,6 +246,19 @@ def _finalize(
         "overview_ref": overview_ref,
         "plan_preview": plan.metadata["plan_preview"] if plan is not None else None,
         "pages": len(pages),
+        "suggestions": {
+            "accepted": len(pages),
+            "merged": sum(row.get("reason") == "merged_page" for row in state["filtered"]),
+            "dropped": sum(row.get("reason") == "dropped_item" for row in state["rejected"]),
+        },
+        "page_states": {
+            name: sum(page.state == name for page in pages)
+            for name in ("pending_evidence", "ready", "skipped")
+        },
+        "page_quality": {
+            name: sum(page.quality == name for page in pages) for name in ("generated", "published")
+        },
+        "source_queryable": False,
         "no_pages_recommended": bool(windows)
         and not pages
         and all(
@@ -306,3 +316,35 @@ def _finalize(
         overview_ref,
         tuple(item.to_dict() for item in omissions),
     )
+
+
+def refresh_execution_report(checkpoints: Any, plan: DocumentPlan) -> None:
+    """Update the planning handoff with actual preparation/generation progress."""
+    key = plan.metadata["recovery_key"]
+    report = checkpoints.load_recovery(key, "plan_report")
+    if not isinstance(report, dict):
+        return
+    report["page_states"] = {
+        state: sum(p.state == state for p in plan.pages)
+        for state in ("pending_evidence", "ready", "skipped")
+    }
+    report["page_quality"] = {
+        "generated": sum(p.quality != "planned" for p in plan.pages),
+        "published": sum(p.quality == "published" for p in plan.pages),
+    }
+    report["downstream"] = "evidence_prepared"
+    from openkb.evidence import ParseStore
+
+    parsed = ParseStore(checkpoints.store.kb_dir).load(plan.metadata["parse_id"])
+    report["page_scopes"] = planning_page_scopes(plan, parsed)
+    report["planning_coverage"] = planning_coverage(plan, parsed)
+    plan.metadata["planning_coverage"] = report["planning_coverage"]
+    plan.metadata["page_scopes"] = report["page_scopes"]
+    checkpoints.save_recovery(key, "plan_report", report)
+    atomic_write_text(
+        _path(checkpoints, "plan-report", key, ".json"),
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+    )
+    from openkb.agent.document_plan_preview import render_plan_preview
+
+    atomic_write_text(_path(checkpoints, "plan-preview", key, ".md"), render_plan_preview(plan))

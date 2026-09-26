@@ -41,6 +41,59 @@ def _make_dummy_parsed(num_blocks=10):
     return DummyParsed()
 
 
+def test_v4_pending_suggestions_roundtrip_without_inventing_ranges():
+    plan = DocumentPlan(
+        metadata={
+            "protocol": "document-plan-v4",
+            "source_id": "a" * 32,
+            "version_id": "b" * 64,
+            "parse_id": _make_dummy_parsed().id,
+        },
+        pages=[
+            PagePlan(
+                key="p1",
+                kind="concept",
+                name="concepts/setup",
+                title="Setup",
+                purpose="Organize setup",
+                state="pending_evidence",
+                scope_resolution=None,
+                location_hints=[{"role": "related", "value": "not a navigation node"}],
+            )
+        ],
+    )
+    assert validate_plan(plan, _make_dummy_parsed(), [], set())
+    assert to_dict(from_dict(to_dict(plan))) == to_dict(plan)
+    assert plan.pages[0].subject_ranges == []
+    plan.pages[0].subject_ranges = [[0, 11]]
+    with pytest.raises(ValueError, match="bounds"):
+        validate_plan(plan, _make_dummy_parsed(), [], set())
+    plan.pages[0].subject_ranges = []
+    plan.pages[0].name = "concepts/../../elsewhere"
+    with pytest.raises(ValueError, match="path"):
+        validate_plan(plan, _make_dummy_parsed(), [], set())
+
+
+def test_v3_decoding_does_not_silently_accept_v4_hints():
+    plan = DocumentPlan(
+        metadata={"protocol": "document-plan-v3"},
+        pages=[
+            PagePlan(
+                key="p",
+                kind="concept",
+                name="concepts/setup",
+                title="Setup",
+                purpose="Organize",
+                subject_ranges=[[0, 1]],
+            )
+        ],
+    )
+    data = to_dict(plan)
+    data["pages"][0]["location_hints"] = [{"role": "related", "value": "Setup"}]
+    with pytest.raises(ValueError):
+        from_dict(data)
+
+
 def test_document_plan_dataclasses_and_serialization():
     plan = DocumentPlan(
         metadata={
@@ -153,9 +206,7 @@ def test_v2_document_plan_preserves_source_bound_limits_and_external_references(
             )
         ],
         external_references=[
-            ExternalReference(
-                "xref:1", [[0, 1]], "Use the guide.", "guide", None, ["p1"]
-            )
+            ExternalReference("xref:1", [[0, 1]], "Use the guide.", "guide", None, ["p1"])
         ],
     )
     assert validate_plan(plan, parsed, [], set())

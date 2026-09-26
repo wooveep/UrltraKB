@@ -49,7 +49,7 @@ def iter_external_references(kb_dir: Path, plan_ref: dict[str, str]) -> Iterator
     metadata = plan.metadata
     identity = record.get("input")
     if (
-        metadata.get("protocol") not in {"document-plan-v2", "document-plan-v3"}
+        metadata.get("protocol") not in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}
         or metadata.get("recovery_key") != key
         or not isinstance(identity, dict)
         or (identity.get("source"), identity.get("version"), identity.get("parse"))

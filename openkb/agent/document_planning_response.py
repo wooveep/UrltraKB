@@ -12,11 +12,14 @@ from openkb.agent.document_planning_candidates import candidate_identity
 from openkb.agent.document_planning_locations import (
     context_choices,
     labelled_key_paths,
-    resolve_location,
-    section_contribution,
-    within_target,
 )
-from openkb.agent.document_planning_pages import DEFAULT_PURPOSE, merge_page, select_page_path
+from openkb.agent.document_planning_pages import (
+    DEFAULT_PURPOSE,
+    merge_page,
+    normalized_name,
+    select_page_path,
+    suggestion_key,
+)
 from openkb.agent.document_planning_pages import _slug as _slug
 
 _FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
@@ -39,6 +42,7 @@ _ALIASES = {
     "section": {
         "section",
         "sections",
+        "selection",
         "主体章节",
         "依据章节",
         "章节定位",
@@ -56,7 +60,8 @@ _ALIASES = {
         "heading_path",
         "subject_ranges",
     },
-    "context": {"context", "必要上下文", "前提章节", "相关章节", "context_sections"},
+    "context": {"context", "必要上下文", "前提章节", "context_sections"},
+    "related": {"related", "相关章节", "keywords", "关键词", "相关线索"},
     "purpose": {"purpose", "用途", "说明", "注意事项"},
     "references": {"references", "外部参考", "参考资料", "external_references"},
     "target": {"target", "target_key", "目标页面"},
@@ -299,14 +304,25 @@ def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, A
             ends[id(current)] = line_index
             continue
         match = _FIELD.match(body)
+        if item and not match and (body.endswith(("。", ".", "！", "!", "；", ";"))):
+            current = None
+            continue
         if item and (not match or _field_name(match.group(1)) in {"name", "title"}):
             if group:
-                current = {"group_kind": group}
+                current = {"group_kind": group, **({"title": body} if not match else {})}
+                if not match:
+                    rows.append(current)
+                    ends[id(current)] = line_index
             elif match:
                 current = {}
             else:
                 current = None
-        elif item and match and current is None:
+        elif (
+            item
+            and match
+            and current is None
+            and _field_name(match.group(1)) in {"kind", "type", "section"}
+        ):
             current = {}
         if match and current is not None:
             key = match.group(1).strip()
@@ -505,6 +521,48 @@ def _display_title(value: Any) -> str:
     return title
 
 
+def _first_text(value: Any) -> str:
+    values = value if isinstance(value, list) else [value]
+    return next(
+        (_display_title(item) for item in values if isinstance(item, str) and item.strip()), ""
+    )
+
+
+def _classification(
+    row: dict[str, Any], group: str | None, types: list[str], default: str | None, notes: list[str]
+) -> tuple[str, str | None]:
+    explicit = _first_text(row.get("kind"))
+    supplied = _first_text(row.get("type"))
+    subtype = _entity_type(supplied, types) or _entity_type(explicit, types)
+    kind = _kind(explicit) or group or _kind(supplied) or ("entity" if subtype else None)
+    if (_kind(explicit) or group) and (
+        _kind(supplied) not in {None, kind} or subtype and kind != "entity"
+    ):
+        notes.append("分类表达冲突，保留组织类别：" + str(kind) + "；原分类：" + supplied)
+    if kind is None:
+        kind = "concept"
+        notes.append("类别未明确，按 concept 建议保留")
+    if kind == "entity" and subtype is None:
+        subtype = default if default in types else None
+        notes.append("实体细类未明确：" + (supplied or explicit or "未提供"))
+        if subtype is None:
+            kind = "concept"
+            notes.append("无合法默认实体细类，按 concept 建议保留")
+    return kind, subtype if kind == "entity" else None
+
+
+def _hints(row: dict[str, Any]) -> list[dict[str, Any]]:
+    roles = {"section": "subject", "context": "context", "related": "related"}
+    hints = []
+    for key, value in row.items():
+        role = roles.get(_field_name(str(key)) or "")
+        if role and value not in (None, "", []):
+            hint = {"role": role, "value": value}
+            if hint not in hints:
+                hints.append(hint)
+    return hints
+
+
 def accept_pages(
     raw: Any,
     *,
@@ -518,8 +576,11 @@ def accept_pages(
     accepted: list[PagePlan] | None = None,
     default_entity_type: str | None = None,
     evidence: dict[str, Any] | None = None,
+    source_identity: str | None = None,
 ) -> PageAcceptance:
-    """Accept entries independently, resolving only proven source locations."""
+    """Retain recognizable organization suggestions; evidence is prepared before generation."""
+    from openkb.agent.document_planning_locations import resolve_hint
+
     rows, no_pages, truncated = extract_candidates(raw)
     result = PageAcceptance(no_pages=no_pages, truncated=truncated)
     known = {page.name: page for page in accepted or []}
@@ -527,171 +588,136 @@ def accept_pages(
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
     for original in rows:
         row, conflicts = _normalize(original)
-        group_kind = _kind(original.get("group_kind"))
-        title = _display_title(row.get("title") or row.get("name"))
-        name = _display_title(row.get("name") or title)
-        explicit_kind = _kind(row.get("kind"))
-        type_from_kind = _entity_type(row.get("kind"), entity_types)
-        supplied_type = _entity_type(row.get("type"), entity_types)
-        type_kind = _kind(row.get("type"))
-        kind = (
-            explicit_kind
-            or group_kind
-            or type_kind
-            or ("entity" if supplied_type or type_from_kind else None)
+        notes = ["字段存在不同表达：" + field for field in conflicts]
+        title = _first_text(row.get("title")) or _first_text(row.get("name"))
+        name = _first_text(row.get("name")) or title
+        kind, subtype = _classification(
+            row, _kind(original.get("group_kind")), entity_types, default_entity_type, notes
         )
-        category_conflict = bool({"kind", "type"} & set(conflicts))
-        if category_conflict:
-            categories = {
-                category
-                for field in ("kind", "type", "group_kind")
-                for value in (row[field] if field in conflicts else [row.get(field)])
-                if (
-                    category := _kind(value)
-                    or ("entity" if _entity_type(value, entity_types) else None)
-                )
-            }
-            kind = next(iter(categories)) if len(categories) == 1 else None
-        identity = candidate_identity(
+        identity = candidate_identity(row, kind, title, name, reliable=bool(title))
+        if _summary_category(
             row,
-            kind,
-            title,
-            name,
-            reliable=not ({"name", "title"} & set(conflicts))
-            and isinstance(row.get("name") or row.get("title"), str)
-            and isinstance(row.get("title") or row.get("name"), str),
-        )
-        candidate_key = identity["candidate_key"]
-        candidate_name_key = identity.get("candidate_name_key")
-        if not conflicts and _summary_category(row, kind):
+            _kind(row.get("kind"))
+            or _kind(original.get("group_kind"))
+            or ("entity" if subtype else None),
+        ):
             _filter_candidate(result, identity, "summary_placeholder", original)
             continue
-        try:
-            if conflicts:
-                if category_conflict and kind is None:
-                    raise ValueError("conflicting_kind")
-                raise ValueError("conflicting_field:" + ",".join(conflicts))
-            if identity["identity_kind"] == "opaque":
-                raise ValueError("missing_title")
-            if row.get("kind") and explicit_kind is None and type_from_kind is None:
-                raise ValueError("unknown_kind")
-            if group_kind and explicit_kind and group_kind != explicit_kind:
-                raise ValueError("conflicting_kind")
-            if type_kind and any(
-                prior != type_kind for prior in (group_kind, explicit_kind) if prior
-            ):
-                raise ValueError("conflicting_kind")
-            if supplied_type and "concept" in (group_kind, explicit_kind):
-                raise ValueError("conflicting_kind")
-            if kind is None:
-                raise ValueError("unknown_kind")
-            entity_type = supplied_type or type_from_kind or default_entity_type
-            if kind == "entity" and entity_type not in entity_types:
-                raise ValueError("unknown_entity_type")
-            placeholder = row.get("section")
-            if isinstance(placeholder, str) and re.fullmatch(
+        if not title:
+            result.rejected.append(
+                {
+                    **identity,
+                    "reason": "dropped_item",
+                    "candidate": json.dumps(original, ensure_ascii=False)[:300],
+                }
+            )
+            continue
+        placeholder = _first_text(row.get("section"))
+        missing_reference = bool(
+            re.fullmatch(
                 r"(?:referenced by title only|未随本文提供|未提供正文|未附正文|引用处|"
                 r".+[（(](?:引用处|未随本文提供|referenced by title only)[）)])",
-                placeholder.strip(" `"),
+                placeholder,
                 re.I,
-            ):
-                try:
-                    resolve_location(placeholder, navigation, [], parsed, evidence)
-                except ValueError:
-                    _filter_candidate(result, identity, "reference_hint", original)
-                    continue
-            cited_without_body = any(
-                re.search(
-                    rf"《{re.escape(title)}》[^。.!?]{{0,100}}"
-                    r"(?:未随本文提供|未提供正文|未附正文)",
-                    str(block.get("text", "")),
-                )
-                for block in (evidence or {}).get("blocks", [])
-                if isinstance(block, dict)
             )
-            if cited_without_body and not any(node.get("title") == title for node in navigation):
-                # An explicitly unsupplied cited document is a reference, even
-                # when the model labels it as a concept rather than a work.
-                _filter_candidate(result, identity, "unsupplied_reference", original)
-                continue
-            page_key = "page:" + candidate_key[:24]
-            previous = next((page for page in known.values() if page.key == page_key), None)
+        )
+        cited_without_body = any(
+            re.search(
+                rf"《{re.escape(title)}》[^。.!?]{{0,100}}(?:未随本文提供|未提供正文|未附正文)",
+                str(block.get("text", "")),
+            )
+            for block in (evidence or {}).get("blocks", [])
+            if isinstance(block, dict)
+        )
+        if (missing_reference or cited_without_body) and not any(
+            node.get("title") == title for node in navigation
+        ):
+            _filter_candidate(result, identity, "unsupplied_reference", original)
+            continue
+        proposed = _first_text(row.get("target"))
+        folder = "concepts/" if kind == "concept" else "entities/"
+        allowed = allowed_update_targets or set()
+        if proposed and (
+            proposed not in existing_targets
+            or proposed not in allowed
+            or not proposed.startswith(folder)
+        ):
+            notes.append("未采用无法确认的更新意向：" + proposed)
+            proposed = ""
+        if not proposed:
+            matches = [
+                path
+                for path, label in (catalog_titles or {}).items()
+                if path.startswith(folder) and normalized_name(label) == normalized_name(title)
+            ]
+            if len(matches) == 1 and matches[0] in allowed and matches[0] in existing_targets:
+                proposed = matches[0]
+        page_key = suggestion_key(
+            str(source_identity or getattr(parsed, "id", "")), kind, subtype, name, title, proposed
+        )
+        previous = next((page for page in known.values() if page.key == page_key), None)
+        try:
             path, target_name = select_page_path(
                 kind=kind,
                 title=title,
                 name=name,
-                proposed=row.get("target"),
+                proposed=proposed or None,
                 existing=existing_targets,
-                allowed=allowed_update_targets or set(),
+                allowed=allowed,
                 catalog=catalog_titles or {},
                 accepted=known,
                 previous=previous,
             )
-            notes: list[str] = []
-            try:
-                ranges, scope = resolve_location(
-                    row.get("section"), navigation, target, parsed, evidence, notes=notes
-                )
-            except ValueError as exc:
-                if str(exc) != "subject_outside_target" or previous is None:
-                    raise
-                ranges, scope = resolve_location(
-                    row.get("section"), navigation, [], parsed, evidence, mode="context"
-                )
-            supplied_target = (
-                section_contribution(target, target, parsed, evidence)
-                if evidence is not None and any("subject_ranges" in node for node in navigation)
-                else target
-            )
-            outside_echo = not within_target(ranges, supplied_target, parsed)
-            if outside_echo and not (
-                previous is not None and within_target(ranges, previous.subject_ranges, parsed)
-            ):
-                raise ValueError("subject_outside_target")
-            contexts: list[RangeValue] = []
-            if row.get("context"):
-                for clue in context_choices(row["context"], navigation):
-                    try:
-                        located, _ = resolve_location(
-                            clue, navigation, [], parsed, evidence, notes=notes, mode="context"
-                        )
-                        contexts.extend(value for value in located if value not in contexts)
-                    except ValueError:
-                        notes.append("未定位必要上下文：" + str(clue)[:120])
-            page = PagePlan(
-                key=page_key,
-                kind=kind,
-                name=path,
-                title=title,
-                purpose=str(row.get("purpose") or DEFAULT_PURPOSE),
-                target=target_name,
-                type=str(entity_type) if kind == "entity" else None,
-                subject_ranges=ranges,
-                context_ranges=contexts,
-                planning_notes=notes + ([str(row["references"])] if row.get("references") else []),
-                scope_resolution=scope,
-            )
-            if previous is not None:
-                changed = merge_page(
-                    previous, page, add_subject=not outside_echo and scope != "target_fallback"
-                )
-                _filter_candidate(
-                    result,
-                    identity,
-                    "merged_page" if changed else "accepted_echo",
-                    original,
-                    resolved=scope != "target_fallback",
-                )
-                continue
-            known[path] = page
-            result.pages.append(page)
-            result.resolved_candidates[candidate_key] = candidate_name_key
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             result.rejected.append(
                 {
+                    **identity,
                     "reason": str(exc),
                     "candidate": json.dumps(original, ensure_ascii=False)[:300],
-                    **identity,
                 }
+            )
+            continue
+        hints = _hints(original)
+        subjects: list[RangeValue] = []
+        contexts: list[RangeValue] = []
+        scope = None
+        for hint in hints:
+            if hint["role"] == "related":
+                continue
+            for clue in context_choices(hint["value"], navigation):
+                try:
+                    located, resolution = resolve_hint(clue, navigation, parsed, evidence, notes)
+                    destination = subjects if hint["role"] == "subject" else contexts
+                    destination.extend(value for value in located if value not in destination)
+                    if hint["role"] == "subject":
+                        scope = resolution
+                except ValueError:
+                    notes.append("待取证线索：" + str(clue)[:120])
+        purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
+        page = PagePlan(
+            key=page_key,
+            kind=kind,
+            type=subtype,
+            name=path,
+            title=title,
+            target=target_name,
+            purpose=purpose,
+            subject_ranges=subjects,
+            context_ranges=contexts,
+            location_hints=hints,
+            state="pending_evidence",
+            scope_resolution=scope,
+            planning_notes=notes + ([str(row["references"])] if row.get("references") else []),
+        )
+        if previous is not None:
+            changed = merge_page(previous, page, add_subject=True)
+            _filter_candidate(
+                result, identity, "merged_page" if changed else "accepted_echo", original
+            )
+        else:
+            known[path] = page
+            result.pages.append(page)
+            result.resolved_candidates[identity["candidate_key"]] = identity.get(
+                "candidate_name_key"
             )
     return result

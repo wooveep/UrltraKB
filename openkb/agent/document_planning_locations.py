@@ -318,3 +318,28 @@ def within_target(ranges: list[RangeValue], target: list[RangeValue], parsed: An
         for value in ranges
         for index, start, end in range_intervals(value, parsed, "planned page")
     )
+
+
+def resolve_hint(
+    value: Any,
+    navigation: list[dict[str, Any]],
+    parsed: Any,
+    evidence: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
+) -> tuple[list[RangeValue], str]:
+    """Map exact positions across the bound source; never invent a fallback range."""
+    try:
+        return resolve_location(
+            value, navigation, [], parsed, evidence, mode="context", notes=notes
+        )
+    except ValueError:
+        if not isinstance(value, str):
+            raise
+        keys = set(re.findall(r"(?<![\w:-])section:[A-Za-z0-9_-]+(?![\w:-])", value))
+        if len(keys) != 1:
+            raise
+        key = next(iter(keys))
+        selected, scope = resolve_location(key, navigation, [], parsed, mode="context")
+        if notes is not None:
+            notes.append("按已知章节键定位；显示文字保留为待核对线索：" + value[:120])
+        return selected, scope

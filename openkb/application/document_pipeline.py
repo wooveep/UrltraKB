@@ -281,6 +281,7 @@ def _compile_version(
                                 "complete": "document_plan_ready",
                                 "partial": "document_plan_partial",
                                 "empty": "document_plan_empty",
+                                "budget_limited": "document_plan_budget_limited",
                             }[outcome],
                             resume=source.id,
                             warnings=tuple(report.warnings),

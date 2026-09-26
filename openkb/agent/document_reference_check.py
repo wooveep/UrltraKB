@@ -17,7 +17,7 @@ from openkb.sources import content_id
 PROTOCOL = "document-reference-check-v3"
 V2_PROTOCOL = "document-reference-check-v2"
 LEGACY_PROTOCOL = "document-reference-check-v1"
-RULE_VERSION = "explicit-reference-v1"
+RULE_VERSION = "explicit-reference-v2"
 _MARKED = re.compile(
     r"(?:先|需|须|必须|应|请|可)?\s*(?:按|按照|依照|执行|参见|参考|详见|见|遵循|阅读)\s*"
     r"(?:本文档的?|本手册的?)?\s*"
@@ -107,6 +107,18 @@ def detect_references(
             key=lambda item: item.start(),
         ):
             target = match.group("target").strip("《》“”\"'「」 ")
+            expression = match.group(0)
+            following = re.split(r"[，,。；;！!?？\n]", body[match.end() : match.end() + 12])[0]
+            quoted = match.group("target").startswith(("“", '"', "'", "「"))
+            if quoted and (
+                re.match(r"\s*(?:键|按键|按钮|菜单|选项|开关|命令|快捷键)", following)
+                or not (
+                    _DOCUMENT_CUE.search(expression + following)
+                    or re.search(r"参见|参考|详见|阅读|第.+[章节]|章节", expression + following)
+                    or any(target == node["title"] for node in nodes)
+                )
+            ):
+                continue
             basis_start, basis_end = offset + match.start(), offset + match.end()
             basis = {
                 "block": identity,
@@ -224,19 +236,34 @@ class DecisionResult:
 
 
 def valid_saved_decisions(
-    saved: dict[str, Any], *, pairs: list[tuple[str, str]],
-    resolver: SelectionResolver, candidates: list[ReferenceCandidate],
-    candidate_hash: str, check_input_hash: str, recovery_key: str,
+    saved: dict[str, Any],
+    *,
+    pairs: list[tuple[str, str]],
+    resolver: SelectionResolver,
+    candidates: list[ReferenceCandidate],
+    candidate_hash: str,
+    check_input_hash: str,
+    recovery_key: str,
     max_attempts: int,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Reject malformed or out-of-scope persisted reference-check state."""
     attempt, status = saved.get("attempt"), saved.get("status")
     if (
-        type(attempt) is not int or not 0 <= attempt <= max_attempts
-        or status is not None and not isinstance(status, str)
-        or status not in {None, "response_received", "response_empty",
-                          "response_rejected", "response_validated", "validated",
-                          "truncated", "execution_unknown"}
+        type(attempt) is not int
+        or not 0 <= attempt <= max_attempts
+        or status is not None
+        and not isinstance(status, str)
+        or status
+        not in {
+            None,
+            "response_received",
+            "response_empty",
+            "response_rejected",
+            "response_validated",
+            "validated",
+            "truncated",
+            "execution_unknown",
+        }
     ):
         raise ValueError("Invalid reference-check recovery state")
     if status == "response_received" and (
@@ -247,8 +274,9 @@ def valid_saved_decisions(
         or saved.get("finish_reason") is not None
         and not isinstance(saved["finish_reason"], str)
         or saved.get("response_output_tokens") is not None
-        and (type(saved["response_output_tokens"]) is not int
-             or saved["response_output_tokens"] < 0)
+        and (
+            type(saved["response_output_tokens"]) is not int or saved["response_output_tokens"] < 0
+        )
     ):
         raise ValueError("Invalid recovered reference response")
     rows = saved.get("valid", [])
@@ -262,12 +290,18 @@ def valid_saved_decisions(
     saved_pairs = [(row["reference_key"], row["page_ref"]) for row in rows]
     if len(set(saved_pairs)) != len(saved_pairs) or not set(saved_pairs) <= set(pairs):
         raise ValueError("Recovered reference decision is outside the request")
-    if rows and validate_reference_decisions(
-        {"check_protocol": PROTOCOL, "decisions": rows},
-        candidate_hash=candidate_hash, check_input_hash=check_input_hash,
-        pairs=saved_pairs, resolver=resolver, candidates=candidates,
-        required_protocol=PROTOCOL,
-    ).issues:
+    if (
+        rows
+        and validate_reference_decisions(
+            {"check_protocol": PROTOCOL, "decisions": rows},
+            candidate_hash=candidate_hash,
+            check_input_hash=check_input_hash,
+            pairs=saved_pairs,
+            resolver=resolver,
+            candidates=candidates,
+            required_protocol=PROTOCOL,
+        ).issues
+    ):
         raise ValueError("Invalid recovered reference decision")
     if status == "validated":
         receipt = saved.get("receipt")
@@ -556,7 +590,9 @@ def apply_reference_decisions(
 
 
 def _clear_verified_cross_reference(
-    candidate: dict[str, Any], page: dict[str, Any], reference: ReferenceCandidate,
+    candidate: dict[str, Any],
+    page: dict[str, Any],
+    reference: ReferenceCandidate,
     resolver: SelectionResolver | None,
 ) -> None:
     """Clear only the exact occurrence and target checked for this page."""
@@ -565,7 +601,8 @@ def _clear_verified_cross_reference(
     for row in candidate["unresolved"]:
         same_basis = (
             _same_reference_basis(row.get("location", []), reference.basis_ranges, resolver)
-            if resolver is not None else row.get("location") == list(reference.basis_ranges)
+            if resolver is not None
+            else row.get("location") == list(reference.basis_ranges)
         )
         if (
             row.get("problem_type") != "unresolved_cross_reference"
@@ -583,7 +620,9 @@ def _clear_verified_cross_reference(
 
 
 def _same_reference_basis(
-    location: Any, basis: tuple[dict[str, Any], ...], resolver: SelectionResolver,
+    location: Any,
+    basis: tuple[dict[str, Any], ...],
+    resolver: SelectionResolver,
 ) -> bool:
     try:
         selected = _selected_intervals(
@@ -593,7 +632,8 @@ def _same_reference_basis(
         basis_rows: list[Any] = []
         for row in basis:
             basis_rows.extend(
-                [row] if "block_index" in row
+                [row]
+                if "block_index" in row
                 else resolver.decode_ranges([row], "reference.basis", target_only=False)
             )
         required = _selected_intervals(basis_rows, resolver.chars)
@@ -603,10 +643,7 @@ def _same_reference_basis(
 
 
 def _exact_missing_target(existing: Any, desired: str) -> bool:
-    return (
-        isinstance(existing, str)
-        and re.sub(r"\W+", "", existing) == re.sub(r"\W+", "", desired)
-    )
+    return isinstance(existing, str) and re.sub(r"\W+", "", existing) == re.sub(r"\W+", "", desired)
 
 
 def _selection_covers(existing: Any, desired: Any, resolver: SelectionResolver) -> bool:

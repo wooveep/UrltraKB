@@ -6,6 +6,23 @@ from copy import deepcopy
 from typing import Any
 
 from openkb.agent.document_plan import DocumentPlan, from_dict
+from openkb.sources import content_id
+
+
+def suggestion_identity(page: Any) -> str:
+    value = page.to_dict()
+    for key in ("quality", "review_receipt", "state"):
+        value.pop(key, None)
+    return content_id(value)
+
+
+def remember_preparation(plan: DocumentPlan, suggestion: Any) -> None:
+    from openkb.agent.document_page_resolution import preparation_rules
+
+    plan.metadata["preparation_rules"] = preparation_rules()
+    plan.metadata.setdefault("prepared_suggestions", {})[suggestion.key] = suggestion_identity(
+        suggestion
+    )
 
 
 def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
@@ -25,6 +42,28 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
         return
     if previous.metadata.get("recovery_key") != final.metadata.get("recovery_key"):
         return
+    if previous.metadata.get("protocol") != final.metadata.get("protocol"):
+        return
+    previous_pages = {page.key: page for page in previous.pages}
+    if final.metadata.get("protocol") == "document-plan-v4":
+        from openkb.agent.document_page_resolution import preparation_rules
+
+        if previous.metadata.get("preparation_rules") != preparation_rules():
+            return
+        final.metadata["preparation_rules"] = preparation_rules()
+        receipts = previous.metadata.get("prepared_suggestions", {})
+        for page in final.pages:
+            old = previous_pages.get(page.key)
+            if old is not None and receipts.get(page.key) == suggestion_identity(page):
+                for field in (
+                    "subject_ranges",
+                    "context_ranges",
+                    "scope_resolution",
+                    "planning_notes",
+                    "state",
+                ):
+                    setattr(page, field, deepcopy(getattr(old, field)))
+                final.metadata.setdefault("prepared_suggestions", {})[page.key] = receipts[page.key]
     for field in ("publication_receipt", "publication_pending", "publication_page_receipts"):
         value = previous.metadata.get(field)
         if isinstance(value, dict):
@@ -36,11 +75,9 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
         return
     published_paths = set(paths)
     previous_pages = {page.key: page for page in previous.pages}
+
     def references(plan: DocumentPlan, key: str) -> list[dict[str, Any]]:
-        return [
-            row.to_dict() for row in plan.external_references
-            if key in row.affected_pages
-        ]
+        return [row.to_dict() for row in plan.external_references if key in row.affected_pages]
 
     for page in final.pages:
         old = previous_pages.get(page.key)
@@ -62,6 +99,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 old.subject_ranges,
                 old.context_ranges,
                 old.planning_notes,
+                old.location_hints,
                 old.scope_resolution,
                 old.necessary_context,
                 old.limitations,
@@ -79,6 +117,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 page.subject_ranges,
                 page.context_ranges,
                 page.planning_notes,
+                page.location_hints,
                 page.scope_resolution,
                 page.necessary_context,
                 page.limitations,

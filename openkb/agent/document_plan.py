@@ -176,6 +176,24 @@ def range_intervals(
     return intervals
 
 
+def location_hints(value: Any) -> list[dict[str, Any]]:
+    """Validate inert, source-bound suggestions without interpreting their locations."""
+    import json
+
+    if not isinstance(value, list) or any(
+        not isinstance(row, dict)
+        or set(row) != {"role", "value"}
+        or not isinstance(row["role"], str)
+        or row["role"] not in {"subject", "context", "related"}
+        for row in value
+    ):
+        raise ValueError("Invalid page location hints")
+    try:
+        return json.loads(json.dumps(value, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid page location hints") from exc
+
+
 @dataclass
 class PagePlan:
     key: str
@@ -188,7 +206,8 @@ class PagePlan:
     subject_ranges: list[RangeValue] = field(default_factory=list)
     context_ranges: list[RangeValue] = field(default_factory=list)
     planning_notes: list[str] = field(default_factory=list)
-    scope_resolution: str = "section"
+    scope_resolution: str | None = "section"
+    location_hints: list[dict[str, Any]] = field(default_factory=list)
     necessary_context: list[dict[str, Any]] = field(default_factory=list)
     limitations: list[PageLimitation] = field(default_factory=list)
     state: str = "ready"  # "ready" | "blocked"
@@ -209,6 +228,7 @@ class PagePlan:
             "context_ranges": range_dicts(self.context_ranges),
             "planning_notes": list(self.planning_notes),
             "scope_resolution": self.scope_resolution,
+            "location_hints": list(self.location_hints),
             "necessary_context": [
                 {
                     **context,
@@ -227,7 +247,7 @@ class PagePlan:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PagePlan:
+    def from_dict(cls, data: dict[str, Any], *, protocol: str = "document-plan-v4") -> PagePlan:
         if not isinstance(data, dict):
             raise ValueError("Invalid page plan")
         allowed = {
@@ -249,6 +269,8 @@ class PagePlan:
             "review_receipt",
             "limitations",
         }
+        if protocol == "document-plan-v4":
+            allowed.add("location_hints")
         if not set(data) <= allowed:
             raise ValueError("Invalid page plan")
         required = {"key", "kind", "name", "title", "purpose"}
@@ -274,7 +296,11 @@ class PagePlan:
             or not isinstance(planning_notes, list)
             or not all(isinstance(note, str) for note in planning_notes)
             or data.get("scope_resolution", "section")
-            not in {"section", "explicit_range", "target_fallback"}
+            not in (
+                {None, "section", "explicit_range", "target_fallback"}
+                if protocol == "document-plan-v4"
+                else {"section", "explicit_range", "target_fallback"}
+            )
             or not isinstance(contexts, list)
             or not isinstance(limitations, list)
         ):
@@ -295,6 +321,7 @@ class PagePlan:
             context_ranges=[range_dict(r) for r in context_ranges],
             planning_notes=list(planning_notes),
             scope_resolution=data.get("scope_resolution", "section"),
+            location_hints=location_hints(data.get("location_hints", [])),
             necessary_context=normalized_contexts,
             limitations=[PageLimitation.from_dict(row) for row in limitations],
             state=data.get("state", "ready"),
@@ -471,7 +498,7 @@ class DocumentPlan:
 
 
 def to_dict(plan: DocumentPlan) -> dict[str, Any]:
-    result = {
+    result: dict[str, Any] = {
         "metadata": dict(plan.metadata),
         "overview": plan.overview.to_dict(),
         "pages": [p.to_dict() for p in plan.pages],
@@ -479,7 +506,14 @@ def to_dict(plan: DocumentPlan) -> dict[str, Any]:
         "unresolved": [u.to_dict() for u in plan.unresolved],
         "resolutions": [r.to_dict() for r in plan.resolutions],
     }
-    if plan.metadata.get("protocol") in {"document-plan-v2", "document-plan-v3"}:
+    if plan.metadata.get("protocol") != "document-plan-v4":
+        for page in result["pages"]:
+            page.pop("location_hints", None)
+    if plan.metadata.get("protocol") in {
+        "document-plan-v2",
+        "document-plan-v3",
+        "document-plan-v4",
+    }:
         result["external_references"] = [row.to_dict() for row in plan.external_references]
         result["planning_omissions"] = [row.to_dict() for row in plan.planning_omissions]
     return result
@@ -490,12 +524,12 @@ def from_dict(data: dict[str, Any]) -> DocumentPlan:
     if not isinstance(data, dict) or not isinstance(data.get("metadata"), dict):
         raise ValueError("Invalid DocumentPlan payload")
     protocol = data["metadata"].get("protocol")
-    if protocol in {"document-plan-v2", "document-plan-v3"}:
+    if protocol in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}:
         fields.update({"external_references", "planning_omissions"})
     if set(data) != fields:
         raise ValueError("Invalid DocumentPlan payload")
     containers: tuple[str, ...] = ("pages", "source_only", "unresolved", "resolutions")
-    if protocol in {"document-plan-v2", "document-plan-v3"}:
+    if protocol in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}:
         containers += ("external_references", "planning_omissions")
     if (
         not isinstance(data["metadata"], dict)
@@ -511,7 +545,7 @@ def from_dict(data: dict[str, Any]) -> DocumentPlan:
         return DocumentPlan(
             metadata=dict(data["metadata"]),
             overview=OverviewPlan.from_dict(data["overview"]),
-            pages=[PagePlan.from_dict(p) for p in data["pages"]],
+            pages=[PagePlan.from_dict(p, protocol=protocol) for p in data["pages"]],
             source_only=[SourceOnlyItem.from_dict(s) for s in data["source_only"]],
             unresolved=[UnresolvedItem.from_dict(u) for u in data["unresolved"]],
             resolutions=[ResolutionItem.from_dict(r) for r in data["resolutions"]],
@@ -555,6 +589,9 @@ def derive_page_states(pages: list[PagePlan], unresolved: list[UnresolvedItem]) 
 
     result = []
     for page in pages:
+        if page.state in {"pending_evidence", "skipped"}:
+            result.append(page)
+            continue
         page.state = _derived_page_state(page, blocked_keys)
         result.append(page)
     return result

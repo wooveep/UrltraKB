@@ -112,6 +112,7 @@ def page_evidence(
     parsed: Any,
     *,
     resolution_ranges: list[RangeValue] | None = None,
+    strict: bool = False,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Read only planned body, context, and resolved-dependency evidence."""
 
@@ -125,10 +126,18 @@ def page_evidence(
         try:
             view = reader.read(reference, max_chars=reader.complete_bound(reference))
         except (OSError, ValueError, AttributeError) as exc:
+            if strict:
+                raise
             raise ProcessingIncomplete("planned_evidence_unavailable", "generation") from exc
         text = getattr(view, "text", "")
         if not isinstance(text, str) or not text:
             raise ProcessingIncomplete("planned_evidence_unavailable", "generation")
+        if strict and (
+            reference.end is None
+            or len(text) != reference.end - reference.start
+            or view.next_start is not None
+        ):
+            raise ValueError("Prepared page original evidence is incomplete")
         occurrence = {
             "id": descriptor["id"],
             "reference": descriptor["reference"],

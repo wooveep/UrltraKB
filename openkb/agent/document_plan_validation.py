@@ -11,6 +11,7 @@ from openkb.agent.document_plan import (
     RangeValue,
     _blocking_page_keys,
     _derived_page_state,
+    location_hints,
     range_intervals,
 )
 from openkb.agent.document_plan_annotations import (
@@ -41,8 +42,20 @@ def validate_plan(
 ) -> bool:
     """Validate all ranges, entity types, and targets against immutable parsed blocks."""
     protocol = plan.metadata.get("protocol")
-    if protocol not in {"document-plan-v1", "document-plan-v2", "document-plan-v3"}:
+    if protocol not in {
+        "document-plan-v1",
+        "document-plan-v2",
+        "document-plan-v3",
+        "document-plan-v4",
+    }:
         raise ValueError("Invalid DocumentPlan protocol")
+    if protocol == "document-plan-v4":
+        from openkb.sources import valid_id
+
+        valid_id(plan.metadata.get("source_id"), source=True)
+        valid_id(plan.metadata.get("version_id"))
+        if plan.metadata.get("parse_id") != parsed.id:
+            raise ValueError("DocumentPlan parsing identity mismatch")
     if plan.overview.status not in {"partial", "complete"}:
         raise ValueError("Invalid overview status")
     zero_readable_body = plan.metadata.get("zero_readable_body") is True
@@ -54,14 +67,14 @@ def validate_plan(
         and not plan.overview.ranges
     )
     if (
-        protocol != "document-plan-v3"
+        protocol not in {"document-plan-v3", "document-plan-v4"}
         and not zero_readable_body
         and not overview_omitted
         and not plan.overview.text.strip()
     ):
         raise ValueError("Readable DocumentPlan needs a non-empty overview")
     if (
-        protocol != "document-plan-v3"
+        protocol not in {"document-plan-v3", "document-plan-v4"}
         and not zero_readable_body
         and not overview_omitted
         and not plan.overview.ranges
@@ -108,12 +121,16 @@ def validate_plan(
             page.name in existing_targets
             and not page.target
             and not (
-                protocol == "document-plan-v3"
+                protocol in {"document-plan-v3", "document-plan-v4"}
                 and page.name not in plan.metadata.get("catalog_targets", [])
             )
         ):
             raise ValueError(f"Existing page name requires its actual target: {page.name}")
-        if page.state not in {"ready", "blocked"}:
+        if page.state not in (
+            {"pending_evidence", "ready", "skipped"}
+            if protocol == "document-plan-v4"
+            else {"ready", "blocked"}
+        ):
             raise ValueError(f"Invalid page state: {page.state}")
         if page.quality not in {"planned", "generated", "verified", "unverified", "published"}:
             raise ValueError(f"Invalid page quality: {page.quality}")
@@ -131,17 +148,29 @@ def validate_plan(
                     f"Invalid entity type '{page.type}' for page '{page.name}', "
                     f"allowed: {allowed_entity_types}"
                 )
-        if not isinstance(page.subject_ranges, list) or not page.subject_ranges:
+        if not isinstance(page.subject_ranges, list) or (
+            not page.subject_ranges and (protocol != "document-plan-v4" or page.state == "ready")
+        ):
             raise ValueError(f"Page {page.name} needs exact subject_ranges")
         for r in page.subject_ranges:
             _check_range(r, parsed, f"page {page.name} subject_ranges")
-        if protocol == "document-plan-v3":
-            if page.scope_resolution not in {"section", "explicit_range", "target_fallback"}:
+        if protocol in {"document-plan-v3", "document-plan-v4"}:
+            if page.scope_resolution not in (
+                {None, "section", "explicit_range"}
+                if protocol == "document-plan-v4"
+                else {"section", "explicit_range", "target_fallback"}
+            ):
                 raise ValueError(f"Invalid scope resolution for {page.name}")
             if not all(isinstance(note, str) for note in page.planning_notes):
                 raise ValueError(f"Invalid planning note for {page.name}")
             for r in page.context_ranges:
                 _check_range(r, parsed, f"page {page.name} context_ranges")
+        if protocol == "document-plan-v4":
+            location_hints(page.location_hints)
+            if page.state == "ready" and page.scope_resolution is None:
+                raise ValueError("Prepared page needs a scope resolution")
+            if page.state != "ready" and page.quality != "planned":
+                raise ValueError("Unprepared suggestion cannot have generated quality")
         for ctx in page.necessary_context:
             if not isinstance(ctx, dict):
                 raise ValueError(f"Invalid necessary_context in page {page.name}")
@@ -165,7 +194,7 @@ def validate_plan(
                 _check_range(r, parsed, f"page {page.name} necessary_context")
             for r in basis_ranges:
                 _check_range(r, parsed, f"page {page.name} necessary_context basis")
-        if protocol in {"document-plan-v2", "document-plan-v3"}:
+        if protocol in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}:
             from openkb.agent.document_range_validation import interval_is_covered, merged_intervals
 
             visible: dict[int, list[tuple[int, int]]] = {}
@@ -262,10 +291,10 @@ def validate_plan(
     blocked_keys = _blocking_page_keys(plan.unresolved)
     for page in plan.pages:
         expected_state = _derived_page_state(page, blocked_keys)
-        if page.state != expected_state:
+        if protocol != "document-plan-v4" and page.state != expected_state:
             raise ValueError(f"Page {page.name} state must equal its derived state")
 
-    if protocol in {"document-plan-v2", "document-plan-v3"}:
+    if protocol in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}:
         reference_keys: set[str] = set()
         for reference in plan.external_references:
             if (
@@ -290,7 +319,7 @@ def validate_plan(
     elif plan.external_references:
         raise ValueError("Legacy DocumentPlan cannot contain external references")
 
-    if protocol in {"document-plan-v2", "document-plan-v3"}:
+    if protocol in {"document-plan-v2", "document-plan-v3", "document-plan-v4"}:
         omission_keys: set[str] = set()
         for omission in plan.planning_omissions:
             if (

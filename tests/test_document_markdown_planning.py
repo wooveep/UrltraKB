@@ -68,9 +68,9 @@ def test_markdown_and_json_pages_keep_good_entries_and_read_context():
         entity_types=[],
         existing_targets=set(),
     )
-    assert len(result.pages) == 1
+    assert len(result.pages) == 2
     assert result.pages[0].context_ranges == [[0, 1]]
-    assert result.rejected[0]["reason"] == "unknown_location"
+    assert not result.rejected and result.pages[1].state == "pending_evidence"
     assert result.pages[0].scope_resolution == "section"
     descriptors = page_occurrence_descriptors(result.pages[0], _DummySource(), parsed)
     assert {row["block_index"] for row in descriptors} == {0, 1}
@@ -149,8 +149,8 @@ def test_explicit_subject_cannot_claim_another_window():
         entity_types=[],
         existing_targets=set(),
     )
-    assert result.pages == []
-    assert result.rejected[0]["reason"] == "subject_outside_target"
+    assert len(result.pages) == 1 and not result.rejected
+    assert result.pages[0].state == "pending_evidence"
 
 
 def test_empty_explicit_subject_is_rejected_locally():
@@ -163,8 +163,8 @@ def test_empty_explicit_subject_is_rejected_locally():
         entity_types=[],
         existing_targets=set(),
     )
-    assert [page.title for page in result.pages] == ["有效"]
-    assert result.rejected[0]["reason"] == "subject_outside_target"
+    assert [page.title for page in result.pages] == ["无范围", "有效"]
+    assert not result.rejected and not result.pages[0].subject_ranges
 
 
 def test_existing_slug_collision_needs_explicit_supplied_target():
@@ -213,16 +213,15 @@ def test_explanatory_bullet_under_category_is_not_a_page():
 
 def test_table_type_conflicting_with_category_is_rejected():
     result = accept_pages(
-        "## 概念页\n| 名称 | 类型 | 主体章节 |\n|---|---|---|\n"
-        "| 人物页 | person | section:run |",
+        "## 概念页\n| 名称 | 类型 | 主体章节 |\n|---|---|---|\n| 人物页 | person | section:run |",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=_parsed(),
         entity_types=["person"],
         existing_targets=set(),
     )
-    assert result.pages == []
-    assert result.rejected[0]["reason"] == "conflicting_kind"
+    assert result.pages[0].kind == "concept" and not result.rejected
+    assert any("冲突" in note for note in result.pages[0].planning_notes)
 
 
 def test_ambiguous_json_is_not_an_overview():
@@ -311,17 +310,14 @@ def test_page_planning_notes_reach_generation_as_unverified_hints():
     from openkb.agent.document_pages import _page_fields
 
     result = accept_pages(
-        "- 名称：操作\n  类别：concept\n  主体章节：操作\n"
-        "  外部参考：启动前须遵循外部审批手册",
+        "- 名称：操作\n  类别：concept\n  主体章节：操作\n  外部参考：启动前须遵循外部审批手册",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=_parsed(),
         entity_types=[],
         existing_targets=set(),
     )
-    assert _page_fields(result.pages[0])["planning_notes"] == [
-        "启动前须遵循外部审批手册"
-    ]
+    assert _page_fields(result.pages[0])["planning_notes"] == ["启动前须遵循外部审批手册"]
 
 
 def test_empty_planning_coverage_rejects_malformed_persisted_ranges():
@@ -406,9 +402,7 @@ def test_table_accepts_combined_page_title_header():
         entity_types=[],
         existing_targets=set(),
     )
-    assert [(page.title, page.subject_ranges) for page in result.pages] == [
-        ("执行流程", [[1, 2]])
-    ]
+    assert [(page.title, page.subject_ranges) for page in result.pages] == [("执行流程", [[1, 2]])]
 
 
 def test_table_source_location_column_resolves_embedded_section_key():
@@ -428,8 +422,7 @@ def test_table_source_location_column_resolves_embedded_section_key():
 
 def test_table_page_and_page_type_headers_are_recognized():
     result = accept_pages(
-        "| 页面 | 页面类型 | 依据章节 |\n|---|---|---|\n"
-        "| 执行流程 | concept | section:run |",
+        "| 页面 | 页面类型 | 依据章节 |\n|---|---|---|\n| 执行流程 | concept | section:run |",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=_parsed(),
@@ -460,8 +453,7 @@ def test_compact_dash_list_accepts_kind_and_section_key():
 
 def test_quoted_title_and_plain_title_are_the_same_page():
     result = accept_pages(
-        "- 「执行流程」 — concept — section:run\n"
-        "- 执行流程 — concept — section:run",
+        "- 「执行流程」 — concept — section:run\n- 执行流程 — concept — section:run",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=_parsed(),
@@ -514,8 +506,8 @@ def test_later_window_does_not_suppress_a_conflicting_name():
         existing_targets=set(),
         accepted=earlier.pages,
     )
-    assert not later.pages
-    assert later.rejected[0]["reason"] == "subject_outside_target"
+    assert len(later.pages) == 1 and not later.rejected
+    assert later.pages[0].name != earlier.pages[0].name
 
 
 def test_later_window_ignores_a_subset_echo_of_accepted_page():
@@ -684,8 +676,7 @@ def test_cited_work_with_supplied_body_can_be_planned():
     parsed.blocks[1].text = "《示例手册》正文：工具按步骤执行。"
     parsed.blocks[1].chars = len(parsed.blocks[1].text)
     result = accept_pages(
-        "| 名称 | 类型 | 主体章节 |\n|---|---|---|\n"
-        "| 示例手册 | work | section:run |",
+        "| 名称 | 类型 | 主体章节 |\n|---|---|---|\n| 示例手册 | work | section:run |",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=parsed,
@@ -848,8 +839,9 @@ def test_overview_and_page_plan_are_independent_v3_artifacts(tmp_path, monkeypat
     assert calls == ["overview", "pages"]
     assert result.outcome == "complete"
     assert result.plan and len(result.plan.pages) == 1
-    assert result.plan.pages[0].scope_resolution == "target_fallback"
-    assert from_dict(to_dict(result.plan)).metadata["protocol"] == "document-plan-v3"
+    assert result.plan.pages[0].scope_resolution is None
+    assert result.plan.pages[0].state == "pending_evidence"
+    assert from_dict(to_dict(result.plan)).metadata["protocol"] == "document-plan-v4"
     assert result.overview_ref and Path(result.overview_ref).is_file()
     assert result.report_ref and Path(result.report_ref).is_file()
     assert not list((workspace / "wiki").rglob("*.md"))
@@ -873,6 +865,9 @@ def test_v3_coverage_separates_precise_and_fallback_ranges():
         entity_types=[],
         existing_targets=set(),
     ).pages[0]
+    exact.state = broad.state = "ready"
+    broad.subject_ranges = [[0, 2]]
+    broad.scope_resolution = "target_fallback"
     plan = DocumentPlan(
         metadata={"protocol": "document-plan-v3", "outcome": "complete"},
         overview=OverviewPlan(text="资料概览"),
@@ -890,7 +885,7 @@ def test_internal_reference_adds_cross_window_original_context():
     parsed.blocks[1].text = "先按照本文档的“前提”检查，再执行操作。"
     parsed.blocks[1].chars = len(parsed.blocks[1].text)
     page = accept_pages(
-        "- 名称：执行流程\n  类别：概念",
+        "- 名称：执行流程\n  类别：概念\n  Section: section:run",
         navigation=_navigation(),
         target=[[1, 2]],
         parsed=parsed,
@@ -1045,12 +1040,12 @@ def test_rejected_page_candidate_does_not_erase_accepted_page(tmp_path, monkeypa
             plan_only=True,
             return_result=True,
         )
-    assert pages_calls == 2
+    assert pages_calls == 1
     assert result.outcome == "complete"
     assert {page.title for page in result.plan.pages} == {"Good", "Bad"}
     report = json.loads(Path(result.report_ref).read_text())
     assert report["rejected_candidates"] == []
-    assert len(report["rejected_candidate_history"]) == 1
+    assert not report["rejected_candidate_history"]
 
 
 def test_planning_report_counts_filtered_reference_hints(tmp_path, monkeypatch):
@@ -1083,7 +1078,7 @@ def test_planning_report_counts_filtered_reference_hints(tmp_path, monkeypatch):
         )
     report = json.loads(Path(result.report_ref).read_text())
     assert [page.title for page in result.plan.pages] == ["Good"]
-    assert report["filtered_candidates"] == {"reference_hint": 1}
+    assert report["filtered_candidates"] == {"unsupplied_reference": 1}
     assert report["filtered_candidate_history"][0]["window"].endswith(":pages")
 
 

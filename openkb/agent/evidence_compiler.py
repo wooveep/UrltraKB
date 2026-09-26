@@ -27,6 +27,10 @@ def _save_plan_state(checkpoints: Any, plan: Any) -> None:
 
     key = plan.metadata.get("recovery_key")
     if isinstance(key, str):
+        if plan.metadata.get("protocol") == "document-plan-v4":
+            from openkb.agent.document_planning_report import refresh_execution_report
+
+            refresh_execution_report(checkpoints, plan)
         checkpoints.save_recovery(key, "plan", to_dict(plan))
 
 
@@ -318,11 +322,34 @@ def compile_evidence(
         page_settings["_document_external_references"] = [
             reference.to_dict() for reference in plan.external_references
         ]
+        prepared_evidence = {}
+        if plan.metadata.get("protocol") == "document-plan-v4":
+            from openkb.agent.document_page_resolution import prepare_page
+            from openkb.agent.document_recovery import remember_preparation
+
+            for index, page in enumerate(plan.pages):
+                if page.state == "pending_evidence":
+                    remember_preparation(plan, page)
+                prepared = prepare_page(
+                    page,
+                    source,
+                    parsed,
+                    navigation,
+                    reader,
+                    max_chars=max(1000, limits.input_capacity * 2),
+                    retry_skipped=resume_plan,
+                )
+                plan.pages[index] = prepared.page
+                if prepared.evidence is not None:
+                    prepared_evidence[page.key] = (prepared.evidence, list(prepared.occurrences))
+                if prepared.reason:
+                    report_content_omission("generation", prepared.reason, [page.name])
+            _save_plan_state(checkpoints, plan)
         all_groups = _planned_groups(plan, executable_only=False)
         ready_groups = [group for group in all_groups if group["page"].state == "ready"]
 
         with collect_compile_report() as report:
-            _record_plan_routes(report, all_groups, source, parsed, plan)
+            _record_plan_routes(report, ready_groups, source, parsed, plan)
             for page in plan.pages:
                 if page.state == "blocked":
                     report_content_omission(
@@ -463,6 +490,7 @@ def compile_evidence(
                     known_omissions=_group_known_omissions(group, plan),
                     resolution_ranges=page_resolution_ranges(plan, group["page"]),
                     pool=pool,
+                    prepared_evidence=prepared_evidence.get(group["key"]),
                 )
             return group, candidate
 

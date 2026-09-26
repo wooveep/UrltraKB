@@ -18,13 +18,15 @@ from openkb.agent.document_page_contracts import (
     preserved_page_contribution,
     publication_candidate_identity,
 )
+from openkb.agent.document_page_contracts import (
+    _page_input as _page_fields,
+)
 from openkb.agent.document_page_evidence import page_evidence
 from openkb.agent.document_page_reference_projection import page_external_references
 from openkb.agent.document_page_review import review_candidate
 from openkb.agent.document_plan import (
     PagePlan,
     RangeValue,
-    source_bound_contexts,
     table_row_identity,
 )
 from openkb.agent.evidence_units import JSON_FORMAT
@@ -78,23 +80,6 @@ reason","issues":[]}. ``supported`` and ``advisory`` require no blocking issues.
 must identify a concrete material discrepancy in ``issues``. ``uncertain`` is for an identified
 missing or ambiguous key condition, not a generic preference for more detail."""
 
-
-def _page_fields(page: PagePlan) -> dict[str, Any]:
-    return {
-        "key": page.key,
-        "kind": page.kind,
-        "type": page.type,
-        "name": page.name,
-        "title": page.title,
-        "purpose": page.purpose,
-        "target": page.target,
-        "subject_ranges": page.subject_ranges,
-        "context_ranges": getattr(page, "context_ranges", []),
-        "planning_notes": getattr(page, "planning_notes", []),
-        "scope_resolution": getattr(page, "scope_resolution", "section"),
-        "necessary_context": source_bound_contexts(page.necessary_context),
-        "limitations": [row.to_dict() for row in page.limitations],
-    }
 
 
 def _occurrence_fields(occurrences: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -546,11 +531,12 @@ def generate_document_page(
     assets: dict[str, str] | None = None,
     known_omissions: list[dict[str, Any]] | None = None,
     resolution_ranges: list[RangeValue] | None = None,
+    prepared_evidence: tuple[dict[str, Any], list[dict[str, Any]]] | None = None,
     pool: Any,
 ) -> DocumentPageCandidate:
     """Create one private, review-bound candidate from one planned page."""
 
-    evidence, occurrences = page_evidence(
+    evidence, occurrences = prepared_evidence or page_evidence(
         page,
         reader,
         source,

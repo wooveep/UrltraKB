@@ -38,6 +38,8 @@ class DocumentPageCandidateReference:
 def _page_input(page: PagePlan) -> dict[str, Any]:
     """Project page fields that actually enter generation and review requests."""
 
+    from openkb.agent.document_page_resolution import preparation_rules
+
     return {
         "key": page.key,
         "kind": page.kind,
@@ -49,6 +51,8 @@ def _page_input(page: PagePlan) -> dict[str, Any]:
         "subject_ranges": page.subject_ranges,
         "context_ranges": getattr(page, "context_ranges", []),
         "planning_notes": getattr(page, "planning_notes", []),
+        "location_hints": page.location_hints,
+        "preparation_rules": preparation_rules(),
         "scope_resolution": getattr(page, "scope_resolution", "section"),
         "necessary_context": source_bound_contexts(page.necessary_context),
         "limitations": [row.to_dict() for row in page.limitations],

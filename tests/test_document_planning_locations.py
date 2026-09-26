@@ -22,6 +22,52 @@ def _accept(text, navigation=None, **kwargs):
     )
 
 
+@pytest.mark.parametrize("field", ["Section", "Selection", "主体章节", "相关章节"])
+def test_v4_keeps_unlocated_suggestions_as_hints_without_window_fallback(field):
+    result = _accept(json.dumps({"Title": "Useful setup", field: "unindexed heading"}))
+    assert not result.rejected
+    page = result.pages[0]
+    assert page.kind == "concept" and page.state == "pending_evidence"
+    assert page.subject_ranges == [] and page.scope_resolution is None
+    assert page.location_hints == [
+        {
+            "role": "related" if field == "相关章节" else "subject",
+            "value": "unindexed heading",
+        }
+    ]
+
+
+def test_v4_keeps_roles_and_bad_locations_without_rejecting_the_suggestion():
+    result = _accept(
+        json.dumps(
+            {
+                "Title": "Setup",
+                "Kind": "entity",
+                "Type": "unknown",
+                "Section": "section:run display wording",
+                "必要上下文": {"block": []},
+                "相关章节": "section:elsewhere",
+            }
+        ),
+        entity_types=["product"],
+        default_entity_type="product",
+    )
+    page = result.pages[0]
+    assert not result.rejected and page.type == "product"
+    assert page.state == "pending_evidence" and page.subject_ranges == [[1, 2]]
+    assert [h["role"] for h in page.location_hints] == ["subject", "context", "related"]
+
+
+def test_v4_duplicate_name_normalization_merges_later_hints_and_edited_purpose():
+    first = _accept('{"Name":"Setup", "Section":"unknown first", "Purpose":"Prepare"}').pages
+    result = _accept(
+        '{"Name":"ＳＥＴＵＰ", "Selection":"unknown next", "Purpose":"Configure"}', accepted=first
+    )
+    assert not result.pages and not result.rejected
+    assert len(first) == 1 and len(first[0].location_hints) == 2
+    assert any("Configure" in note for note in first[0].planning_notes)
+
+
 def test_repeated_new_path_collision_never_authorizes_an_existing_update():
     row = {"name": "Operation", "kind": "concept", "section": "section:run"}
     text = json.dumps(row)
@@ -40,7 +86,12 @@ def test_repeated_new_path_collision_never_authorizes_an_existing_update():
     from openkb.agent.document_plan import DocumentPlan, OverviewPlan, validate_plan
 
     plan = DocumentPlan(
-        metadata={"protocol": "document-plan-v3"},
+        metadata={
+            "protocol": "document-plan-v4",
+            "source_id": "a" * 32,
+            "version_id": "b" * 64,
+            "parse_id": _parsed().id,
+        },
         overview=OverviewPlan(text="Overview"),
         pages=result.pages,
     )
@@ -95,7 +146,8 @@ def test_unlabelled_parenthetical_path_is_a_real_selection(path):
         navigation,
     )
     if path == "missing path":
-        assert not result.pages and result.rejected[0]["reason"] == "unknown_location"
+        assert result.pages and not result.rejected
+        assert result.pages[0].state == "pending_evidence"
     else:
         assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
 
@@ -110,8 +162,8 @@ def test_unlabelled_parenthetical_path_is_a_real_selection(path):
 )
 def test_conflicting_path_annotation_is_visible_but_does_not_override_section_key(fields):
     result = _accept(json.dumps({"name": "Operation", "kind": "concept", **fields}))
-    assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
-    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+    assert not result.rejected and [1, 2] in result.pages[0].subject_ranges
+    assert result.pages[0].location_hints
 
 
 @pytest.mark.parametrize("selection", [[{"section_key": "section:run"}], ["section:run"]])
@@ -126,8 +178,8 @@ def test_structured_selection_retains_shape_beside_labelled_path(selection):
             }
         )
     )
-    assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
-    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+    assert not result.rejected and [1, 2] in result.pages[0].subject_ranges
+    assert result.pages[0].location_hints
 
 
 @pytest.mark.parametrize("other", ["missing selection", "section:pre"])
@@ -145,7 +197,8 @@ def test_unlabelled_other_location_field_remains_a_real_selection(other):
     if other == "section:pre":
         assert not result.rejected and result.pages[0].subject_ranges == [[1, 2], [0, 1]]
     else:
-        assert not result.pages and result.rejected[0]["reason"] == "unknown_location"
+        assert result.pages and not result.rejected
+        assert result.pages[0].state == "pending_evidence"
 
 
 @pytest.mark.parametrize("label", ["Section key / heading path", "章节键 / 标题路径"])
@@ -164,7 +217,7 @@ def test_combined_field_label_identifies_display_paths_without_hiding_selections
     expected = [[1, 2], [0, 1]] if "section:pre" in clue else [[1, 2]]
     assert result.pages[0].subject_ranges == expected
     if "section:run 前提" in clue:
-        assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+        assert result.pages[0].location_hints
 
 
 @pytest.mark.parametrize(
@@ -187,8 +240,8 @@ def test_context_annotation_retains_key_and_isolates_other_bad_clues(context):
         )
     )
     assert not result.rejected and result.pages[0].context_ranges == [[1, 2]]
-    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
-    assert any("未定位必要上下文" in note for note in result.pages[0].planning_notes)
+    assert result.pages[0].location_hints
+    assert any("待取证" in note for note in result.pages[0].planning_notes)
 
 
 @pytest.mark.parametrize("title", ["输入 → 输出", "操作（标题路径：示例）", "前提；说明"])
@@ -236,7 +289,7 @@ def test_one_bad_context_clue_preserves_the_page_and_other_context(bad):
     )
     assert not result.rejected and len(result.pages) == 1
     assert result.pages[0].context_ranges == [[0, 1]]
-    assert any("未定位必要上下文" in note for note in result.pages[0].planning_notes)
+    assert any("待取证" in note for note in result.pages[0].planning_notes)
 
 
 @pytest.mark.parametrize("later_target", [[[0, 2]], [[0, 1]]])
@@ -276,7 +329,8 @@ def test_conflicting_increment_preserves_accepted_type_and_information_atomicall
         accepted=first,
         **options,
     )
-    assert rejected.rejected[0]["reason"] == "accepted_page_conflict"
+    assert not rejected.rejected and rejected.pages[0].type == "person"
+    assert rejected.pages[0].name != first[0].name
     assert first[0].to_dict() == before
 
 
@@ -347,10 +401,11 @@ def test_location_alias_keeps_good_page_and_rejects_only_unlocated_page(shape, h
         text = json.dumps(rows, ensure_ascii=False)
     result = _accept(text)
     assert [(p.title, p.scope_resolution, p.subject_ranges) for p in result.pages] == [
-        ("执行流程", "section", [[1, 2]])
+        ("执行流程", "section", [[1, 2]]),
+        ("未知流程", None, []),
     ]
-    assert [item["reason"] for item in result.rejected] == ["unknown_location"]
-    assert "未提供的章节" in result.rejected[0]["candidate"]
+    assert not result.rejected
+    assert result.pages[1].location_hints[0]["value"] == "未提供的章节"
 
 
 def test_missing_location_still_allows_fallback_and_optional_columns_are_preserved():
@@ -359,7 +414,8 @@ def test_missing_location_still_allows_fallback_and_optional_columns_are_preserv
     assert rows[0]["补充信息"] == "简短说明"
     result = _accept(text)
     assert not result.rejected
-    assert result.pages[0].scope_resolution == "target_fallback"
+    assert result.pages[0].scope_resolution is None
+    assert result.pages[0].subject_ranges == []
 
 
 @pytest.mark.parametrize("description", ["缩略说明", "缩略；说明", "缩略;说明"])
@@ -407,8 +463,9 @@ def test_unresolved_compound_path_does_not_accept_partial_or_fallback(clue, reas
         navigation[0]["heading_path"] = ["甲", "实施", "操作"]
         navigation[1]["heading_path"] = ["乙", "实施", "操作"]
     result = _accept(f"- 页面名称：执行流程\n  类型：concept\n  主体章节：{clue}", navigation)
-    assert result.pages == []
-    assert [item["reason"] for item in result.rejected] == [reason]
+    assert len(result.pages) == 1 and not result.rejected
+    assert result.pages[0].state == "pending_evidence"
+    assert result.pages[0].scope_resolution != "target_fallback"
 
 
 @pytest.mark.parametrize("shape", ["json", "list", "table"])
@@ -442,8 +499,8 @@ def test_all_multiple_selections_are_checked_in_every_shape(shape, second):
         text = f"- Operation — concept — section:run；{second}"
     result = _accept(text)
     if second == "不存在":
-        assert not result.pages
-        assert result.rejected[0]["reason"] == "unknown_location"
+        assert result.pages and not result.rejected
+        assert result.pages[0].scope_resolution != "target_fallback"
     else:
         assert not result.rejected
         assert result.pages[0].subject_ranges == [[1, 2], [0, 1]]
@@ -465,8 +522,8 @@ def test_blank_selection_in_array_cannot_expand_a_section_to_whole_source(blank)
     result = _accept(
         json.dumps({"name": "Operation", "kind": "concept", "sections": ["section:run", blank]})
     )
-    assert not result.pages
-    assert result.rejected[0]["reason"] == "unknown_location"
+    assert result.pages and not result.rejected
+    assert result.pages[0].scope_resolution != "target_fallback"
 
 
 @pytest.mark.parametrize("label", ["Page", "page", "Page Name", "页面名称", " **PAGE__NAME** "])
@@ -487,7 +544,7 @@ def test_page_name_labels_share_one_acceptance_rule(label, shape):
 def test_page_number_does_not_supply_a_page_name():
     result = _accept("| Page Number | Kind | Section |\n|---|---|---|\n| 3 | concept | 操作 |")
     assert not result.pages
-    assert result.rejected[0]["reason"] == "missing_title"
+    assert result.rejected[0]["reason"] == "dropped_item"
 
 
 @pytest.mark.parametrize("label", ["Summary", "sUMMary", "Overview", "摘要", "概览", "{{SUMMARY}}"])
@@ -523,7 +580,7 @@ def test_configured_summary_entity_type_and_valid_group_are_not_filtered():
 def test_summary_filter_does_not_guess_other_categories(label):
     result = _accept(json.dumps({"name": "Manual", "type": label}))
     assert not result.filtered
-    assert result.rejected[0]["reason"] == "unknown_kind"
+    assert result.pages[0].kind == "concept" and not result.rejected
 
 
 def test_opaque_candidates_use_full_content_and_never_an_empty_name_key():
@@ -548,13 +605,12 @@ def test_conflicting_name_aliases_are_rejected_without_column_order_identity(rev
     if reverse:
         fields.reverse()
     result = _accept(json.dumps({**dict(fields), "kind": "concept", "section": "操作"}))
-    assert not result.pages
-    assert result.rejected[0]["reason"] == "conflicting_field:name"
-    assert result.rejected[0]["identity_kind"] == "opaque"
+    assert result.pages and not result.rejected
+    assert result.pages[0].planning_notes
     alternate = _accept(
         json.dumps({**dict(reversed(fields)), "kind": "concept", "section": "操作"})
     )
-    assert result.rejected[0]["candidate_key"] == alternate.rejected[0]["candidate_key"]
+    assert result.pages[0].key == alternate.pages[0].key
 
 
 def test_equivalent_name_aliases_and_separate_title_remain_valid():

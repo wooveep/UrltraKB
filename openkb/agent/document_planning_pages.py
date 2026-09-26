@@ -11,16 +11,29 @@ from openkb.sources import content_id
 DEFAULT_PURPOSE = "根据已选原文整理本主题"
 
 
+def normalized_name(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def suggestion_key(
+    source: str, kind: str, subtype: str | None, name: str, title: str, target: str
+) -> str:
+    identity = target or (normalized_name(name), normalized_name(title))
+    return "page:" + content_id((source, kind, subtype, identity))[:24]
+
+
 def merge_page(previous: PagePlan, incoming: PagePlan, *, add_subject: bool) -> bool:
     """Validate identity before atomically retaining every supported increment."""
     if any(
         getattr(previous, field) != getattr(incoming, field)
-        for field in ("key", "kind", "name", "title", "target", "type")
+        for field in ("key", "kind", "name", "target", "type")
     ):
         raise ValueError("accepted_page_conflict")
     subjects = list(previous.subject_ranges)
     contexts = list(previous.context_ranges)
     notes = list(previous.planning_notes)
+    hints = list(previous.location_hints)
+    hints.extend(value for value in incoming.location_hints if value not in hints)
     for known, additions in (
         (subjects, incoming.subject_ranges if add_subject else []),
         (contexts, incoming.context_ranges),
@@ -33,14 +46,23 @@ def merge_page(previous: PagePlan, incoming: PagePlan, *, add_subject: bool) -> 
             purpose = incoming.purpose
         elif (note := "补充规划说明：" + incoming.purpose) not in notes:
             notes.append(note)
-    changed = (subjects, contexts, notes, purpose) != (
+    changed = (subjects, contexts, notes, purpose, hints) != (
         previous.subject_ranges,
         previous.context_ranges,
         previous.planning_notes,
         previous.purpose,
+        previous.location_hints,
     )
     previous.subject_ranges, previous.context_ranges = subjects, contexts
     previous.planning_notes, previous.purpose = notes, purpose
+    if changed:
+        previous.location_hints = hints
+        previous.state, previous.quality, previous.review_receipt = (
+            "pending_evidence",
+            "planned",
+            None,
+        )
+        previous.scope_resolution = previous.scope_resolution or incoming.scope_resolution
     return changed
 
 

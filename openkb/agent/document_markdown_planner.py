@@ -13,10 +13,6 @@ from openkb.agent import document_planning_support, document_windowing
 from openkb.agent.document_plan import PagePlan, RangeValue
 from openkb.agent.document_plan_annotations import ExternalReference
 from openkb.agent.document_planning_admission import admit_planning_windows, validate_navigation
-from openkb.agent.document_planning_candidates import (
-    retain_split_candidates,
-    valid_split_candidate_targets,
-)
 from openkb.agent.document_planning_locations import section_contribution
 from openkb.agent.document_planning_report import (
     _finalize,
@@ -139,8 +135,8 @@ def _state(
             raise ProcessingIncomplete("planning_recovery_invalid", "planning")
         previous.setdefault("filtered", [])
         return previous
-    return {
-        "protocol": "document-planning-markdown-v1",
+    state = {
+        "protocol": "document-planning-acceptance-v2",
         "windows": windows,
         "tasks": {},
         "fragments": {},
@@ -153,10 +149,21 @@ def _state(
         "request_usage": [],
         "attempts": 0,
     }
+    if resume:
+        from openkb.agent.document_planning_history import previous_responses
+
+        if historical := previous_responses(checkpoints, windows):
+            (
+                state["windows"],
+                state["tasks"],
+                state["replayed_from"],
+                state["retained_fragments"],
+            ) = historical
+    return state
 
 
 def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
-    if not isinstance(value, dict) or value.get("protocol") != "document-planning-markdown-v1":
+    if not isinstance(value, dict) or value.get("protocol") != "document-planning-acceptance-v2":
         return False
     mapping_fields = ("tasks", "fragments")
     list_fields = (
@@ -222,14 +229,19 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
         return False
     if any(not isinstance(row, dict) for name in list_fields[2:] for row in value[name]):
         return False
-    if not valid_split_candidate_targets(value, original_windows):
-        return False
     return all(
         isinstance(key, str)
         and isinstance(task, dict)
         and task.get("status") in {"pending", "accepted", "partial", "skipped"}
         and type(task.get("attempts")) is int
         and task["attempts"] >= 0
+        and isinstance(task.get("replay", []), list)
+        and all(
+            isinstance(row, dict)
+            and isinstance(row.get("content"), str)
+            and isinstance(row.get("finish_reason"), str)
+            for row in task.get("replay", [])
+        )
         and (task.get("reason") is None or isinstance(task["reason"], str))
         and (
             task.get("raw") is None
@@ -250,7 +262,7 @@ def _accepted_overview(state: dict[str, Any]) -> str:
 def _split_window(
     state: dict[str, Any], index: int, source: Any, parsed: Any, limits: RequestLimits
 ) -> bool:
-    """Divide the remaining A/B attempts without replaying accepted parent work."""
+    """Admit new child tasks without replaying accepted parent components."""
     window = state["windows"][index]
     children = document_windowing.reload_planning_target(source, parsed, window)
     if not children:
@@ -263,24 +275,15 @@ def _split_window(
         )
     for subtask in ("overview", "pages"):
         parent_task = state["tasks"].get(_task_id(window, subtask), {})
-        cap = min(
-            limits.max_attempts,
-            window.get("attempt_limits", {}).get(
-                subtask, window.get("attempt_limit", limits.max_attempts)
-            ),
-        )
-        remaining = max(0, cap - parent_task.get("attempts", 0))
-        share, extra = divmod(remaining, len(children))
-        for child_index, child in enumerate(children):
-            child.setdefault("attempt_limits", {})[subtask] = share + (child_index < extra)
-            if parent_task.get("status") in {"accepted", "skipped"}:
+        for child in children:
+            if parent_task.get("status") == "accepted":
                 state["tasks"][_task_id(child, subtask)] = {
                     "status": parent_task["status"],
                     "attempts": 0,
                     "raw": None,
                     "reason": parent_task.get("reason"),
+                    "no_pages_recommended": parent_task.get("no_pages_recommended", False),
                 }
-    retain_split_candidates(state, window, _target_ranges(window, parsed))
     state["windows"][index : index + 1] = children
     return True
 
@@ -484,297 +487,298 @@ def plan_markdown_document(
     catalog_entries = _catalog_entries(wiki, existing_targets)
     state.setdefault("catalog_targets", sorted(existing_targets))
     if retry_skipped:
+        state.pop("budget_limited", None)
         for task in state["tasks"].values():
             if task.get("status") == "skipped":
                 task.update(status="pending", attempts=0, reason=None, raw=None)
         state["rejected"] = []
         _persist(checkpoints, key, state)
     index = 0
-    while index < len(state["windows"]):
-        window = state["windows"][index]
-        processing_checkpoint("planning")
-        desc = window.get("evidence")
-        if desc is None:
-            from openkb.navigation_evidence import evidence_descriptor
+    try:
+        while index < len(state["windows"]):
+            window = state["windows"][index]
+            processing_checkpoint("planning")
+            desc = window.get("evidence")
+            if desc is None:
+                from openkb.navigation_evidence import evidence_descriptor
 
-            desc = evidence_descriptor(source, parsed, window["target_start"], window["target_end"])
-        try:
-            evidence = document_planning_support.read_target_evidence(
-                kb_dir,
-                source,
-                parsed,
-                desc,
-                None
-                if window.get("evidence") is not None
-                else window.get("frozen_ranges") or window.get("target_ranges"),
-            )
-        except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
-            if mock_caller is None:
-                raise ProcessingIncomplete("planned_evidence_unavailable", "planning") from exc
-            evidence = document_planning_support.fallback_read_evidence(
-                source, parsed, window["target_start"], window["target_end"]
-            )
-        try:
-            hints = document_planning_support.select_navigation_hints(
-                navigation,
-                _target_ranges(window, parsed),
-                planning_limits,
-                evidence=evidence,
-                parsed=parsed,
-                model=settings["model"],
-            )
-        except ProcessingIncomplete as exc:
-            if exc.reason != "planning_navigation_exceeds_request_budget":
-                raise
-            if _split_window(state, index, source, parsed, limits):
-                _persist(checkpoints, key, state)
-                continue
-            hints = []
-            for subtask in ("overview", "pages"):
-                state["tasks"][_task_id(window, subtask)] = {
-                    "status": "skipped",
-                    "attempts": 0,
-                    "raw": None,
-                    "reason": "planning_navigation_exceeds_request_budget",
-                }
-            _persist(checkpoints, key, state)
-        target = _target_ranges(window, parsed)
-        locator = _navigation_rows(hints, navigation, parsed, target=target, evidence=evidence)
-        selected_catalog = _catalog_window(catalog_entries, evidence, hints)
-        needs_split = False
-        for subtask in ("overview", "pages"):
-            task_key = _task_id(window, subtask)
-            task = state["tasks"].setdefault(
-                task_key,
-                {
-                    "status": "pending",
-                    "attempts": 0,
-                    "raw": None,
-                    "reason": None,
-                },
-            )
-            if task["status"] in {"accepted", "skipped"}:
-                continue
-            max_attempts = min(
-                limits.max_attempts,
-                window.get("attempt_limits", {}).get(
-                    subtask, window.get("attempt_limit", limits.max_attempts)
-                ),
-            )
-            while task["attempts"] < max_attempts or task.get("raw") is not None:
-                processing_checkpoint("planning")
-                recovery = task.get("reason") or ""
-                if recovery and subtask == "pages":
-                    from openkb.agent.document_planning_candidates import pending_candidates
-
-                    rejected = pending_candidates(state, task_key)[-8:]
-                    details = [f"{row['reason']}: {row['candidate'][:160]}" for row in rejected]
-                    alternatives = [
-                        f"{row['section_key']} {' > '.join(row.get('heading_path', []))}"
-                        for row in hints[:30]
-                    ]
-                    recovery = "\n".join(
-                        [
-                            recovery,
-                            "未接受候选（可重新组织，仅补未完成部分）：",
-                            *details,
-                            "可用章节路径：",
-                            *alternatives,
-                        ]
-                    )
-                overview = _accepted_overview(state)
-                displayed_targets = [row[0] for row in selected_catalog]
-                catalog_text = "\n".join(
-                    f"- {path} | {title}" + (f" — {brief}" if brief else "")
-                    for path, title, brief in selected_catalog
+                desc = evidence_descriptor(
+                    source, parsed, window["target_start"], window["target_end"]
                 )
-                messages = plan_messages(
-                    evidence,
-                    {
-                        "overview": overview[-4000:],
-                        "pages": [
-                            {"title": p["title"], "kind": p["kind"]} for p in state["pages"][-40:]
-                        ],
-                    },
-                    {
-                        "target_start": window["target_start"],
-                        "target_end": window["target_end"],
-                        "total_blocks": len(parsed.blocks),
-                        "ranges": target,
-                    },
-                    hints,
-                    catalog_text,
-                    entity_types,
-                    schema,
-                    settings.get("language", ""),
-                    displayed_targets,
-                    source_conditions=source_conditions,
-                    subtask=subtask,
-                    recovery=recovery,
+            try:
+                evidence = document_planning_support.read_target_evidence(
+                    kb_dir,
+                    source,
+                    parsed,
+                    desc,
+                    None
+                    if window.get("evidence") is not None
+                    else window.get("frozen_ranges") or window.get("target_ranges"),
                 )
-                if task.get("raw") is None:
-                    task["attempts"] += 1
-                    state["attempts"] += 1
-                    if task["attempts"] > 1:
-                        state["recovery_requests"] = state.get("recovery_requests", 0) + 1
+            except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
+                if mock_caller is None:
+                    raise ProcessingIncomplete("planned_evidence_unavailable", "planning") from exc
+                evidence = document_planning_support.fallback_read_evidence(
+                    source, parsed, window["target_start"], window["target_end"]
+                )
+            try:
+                hints = document_planning_support.select_navigation_hints(
+                    navigation,
+                    _target_ranges(window, parsed),
+                    planning_limits,
+                    evidence=evidence,
+                    parsed=parsed,
+                    model=settings["model"],
+                )
+            except ProcessingIncomplete as exc:
+                if exc.reason != "planning_navigation_exceeds_request_budget":
+                    raise
+                if _split_window(state, index, source, parsed, limits):
                     _persist(checkpoints, key, state)
-                    marker = request_marker()
-                    try:
-                        raw = _call(
-                            messages, settings, planning_limits, bundle, mock_caller, subtask
-                        )
-                    except InputTooLarge:
-                        task["attempts"] -= 1
-                        state["attempts"] -= 1
-                        if task["attempts"] > 0:
-                            state["recovery_requests"] -= 1
-                        if selected_catalog:
-                            selected_catalog = selected_catalog[: len(selected_catalog) // 2]
+                    continue
+                hints = []
+                for subtask in ("overview", "pages"):
+                    state["tasks"][_task_id(window, subtask)] = {
+                        "status": "skipped",
+                        "attempts": 0,
+                        "raw": None,
+                        "reason": "planning_navigation_exceeds_request_budget",
+                    }
+                _persist(checkpoints, key, state)
+            target = _target_ranges(window, parsed)
+            locator = _navigation_rows(hints, navigation, parsed, target=target, evidence=evidence)
+            selected_catalog = _catalog_window(catalog_entries, evidence, hints)
+            needs_split = False
+            for subtask in ("overview", "pages"):
+                task_key = _task_id(window, subtask)
+                task = state["tasks"].setdefault(
+                    task_key,
+                    {
+                        "status": "pending",
+                        "attempts": 0,
+                        "raw": None,
+                        "reason": None,
+                    },
+                )
+                if task["status"] in {"accepted", "skipped"}:
+                    continue
+                max_attempts = limits.max_attempts
+                while (
+                    task["attempts"] < max_attempts
+                    or task.get("raw") is not None
+                    or task.get("replay")
+                ):
+                    processing_checkpoint("planning")
+                    recovery = task.get("reason") or ""
+                    overview = _accepted_overview(state)
+                    displayed_targets = [row[0] for row in selected_catalog]
+                    catalog_text = "\n".join(
+                        f"- {path} | {title}" + (f" — {brief}" if brief else "")
+                        for path, title, brief in selected_catalog
+                    )
+                    messages = plan_messages(
+                        evidence,
+                        {
+                            "overview": overview[-4000:],
+                            "pages": [
+                                {"title": p["title"], "kind": p["kind"]}
+                                for p in state["pages"][-40:]
+                            ],
+                        },
+                        {
+                            "target_start": window["target_start"],
+                            "target_end": window["target_end"],
+                            "total_blocks": len(parsed.blocks),
+                            "ranges": target,
+                        },
+                        hints,
+                        catalog_text,
+                        entity_types,
+                        schema,
+                        settings.get("language", ""),
+                        displayed_targets,
+                        source_conditions=source_conditions,
+                        subtask=subtask,
+                        recovery=recovery,
+                    )
+                    if task.get("raw") is None and task.get("replay"):
+                        task["raw"] = task["replay"].pop(0)
+                        state["responses"].append({"task": task_key, "attempt": 0, **task["raw"]})
+                    if task.get("raw") is None:
+                        task["attempts"] += 1
+                        state["attempts"] += 1
+                        if task["attempts"] > 1:
+                            state["recovery_requests"] = state.get("recovery_requests", 0) + 1
+                        _persist(checkpoints, key, state)
+                        marker = request_marker()
+                        try:
+                            raw = _call(
+                                messages, settings, planning_limits, bundle, mock_caller, subtask
+                            )
+                        except InputTooLarge:
+                            task["attempts"] -= 1
+                            state["attempts"] -= 1
+                            if task["attempts"] > 0:
+                                state["recovery_requests"] -= 1
+                            if selected_catalog:
+                                selected_catalog = selected_catalog[: len(selected_catalog) // 2]
+                                _persist(checkpoints, key, state)
+                                continue
+                            task["reason"] = "planning_context_capacity"
                             _persist(checkpoints, key, state)
-                            continue
-                        task["reason"] = "planning_context_capacity"
-                        _persist(checkpoints, key, state)
-                        needs_split = True
-                        break
-                    except OutputTruncated:
-                        task["reason"] = "model_output_truncated"
-                        planning_limits = planning_limits.expanded(reason="output_budget_exhausted")
-                        _persist(checkpoints, key, state)
-                        continue
-                    finally:
-                        dispatched = max(0, request_marker() - marker)
-                        state.setdefault("request_usage", []).extend(request_usage_since(marker))
-                        if dispatched > 1:
-                            task["attempts"] += dispatched - 1
-                            state["attempts"] += dispatched - 1
-                            state["recovery_requests"] = (
-                                state.get("recovery_requests", 0) + dispatched - 1
+                            needs_split = True
+                            break
+                        except OutputTruncated:
+                            task["reason"] = "model_output_truncated"
+                            planning_limits = planning_limits.expanded(
+                                reason="output_budget_exhausted"
                             )
                             _persist(checkpoints, key, state)
-                    task["raw"] = _raw_value(raw)
-                    state.setdefault("responses", []).append(
-                        {
-                            "task": task_key,
-                            "attempt": task["attempts"],
-                            **task["raw"],
-                        }
-                    )
-                    _persist(checkpoints, key, state)
-                response = _Response(task["raw"]["content"], task["raw"]["finish_reason"])
-                if subtask == "overview":
-                    overview_result = accept_overview(response)
-                    if overview_result.text:
-                        fragment_id = window_receipt_id(window)
-                        state["fragments"][fragment_id] = _overview_text(
-                            [state["fragments"].get(fragment_id, ""), overview_result.text]
-                        ).strip()
-                        task["status"] = "partial" if overview_result.reason else "accepted"
-                        task["reason"] = overview_result.reason
+                            continue
+                        finally:
+                            dispatched = max(0, request_marker() - marker)
+                            state.setdefault("request_usage", []).extend(
+                                request_usage_since(marker)
+                            )
+                            if dispatched > 1:
+                                task["attempts"] += dispatched - 1
+                                state["attempts"] += dispatched - 1
+                                state["recovery_requests"] = (
+                                    state.get("recovery_requests", 0) + dispatched - 1
+                                )
+                                _persist(checkpoints, key, state)
+                        task["raw"] = _raw_value(raw)
+                        state.setdefault("responses", []).append(
+                            {
+                                "task": task_key,
+                                "attempt": task["attempts"],
+                                **task["raw"],
+                            }
+                        )
+                        _persist(checkpoints, key, state)
+                    response = _Response(task["raw"]["content"], task["raw"]["finish_reason"])
+                    if subtask == "overview":
+                        overview_result = accept_overview(response)
+                        if overview_result.text:
+                            fragment_id = window_receipt_id(window)
+                            state["fragments"][fragment_id] = _overview_text(
+                                [state["fragments"].get(fragment_id, ""), overview_result.text]
+                            ).strip()
+                            task["status"] = "partial" if overview_result.reason else "accepted"
+                            task["reason"] = overview_result.reason
+                            task["raw"] = None
+                            _persist(checkpoints, key, state)
+                            overview_path = _path(checkpoints, "overview", key, ".md")
+                            atomic_write_text(overview_path, _accepted_overview(state))
+                            record_first_inspectable()
+                            if not overview_result.reason and not task.get("replay"):
+                                break
+                        else:
+                            task["reason"] = overview_result.reason
+                    else:
+                        accepted_pages = [PagePlan.from_dict(item) for item in state["pages"]]
+                        pages_result = accept_pages(
+                            response,
+                            navigation=locator,
+                            target=target,
+                            parsed=parsed,
+                            entity_types=entity_types,
+                            existing_targets=existing_targets,
+                            allowed_update_targets=set(displayed_targets),
+                            catalog_titles={path: title for path, title, _ in catalog_entries},
+                            accepted=accepted_pages,
+                            default_entity_type=settings.get("default_entity_type"),
+                            evidence=json.loads(messages[-1]["content"])["evidence"],
+                            source_identity=source.source_id,
+                        )
+                        state["pages"] = [
+                            page.to_dict() for page in accepted_pages + pages_result.pages
+                        ]
+                        from openkb.agent.document_planning_candidates import (
+                            record_candidate_attempt,
+                        )
+
+                        record_candidate_attempt(state, task_key, task["attempts"], pages_result)
+                        if pages_result.usable:
+                            task["no_pages_recommended"] = pages_result.no_pages
+                            task["status"] = "accepted" if not pages_result.truncated else "partial"
+                            task["reason"] = "pages_truncated" if pages_result.truncated else None
+                        else:
+                            task["reason"] = (
+                                "pages_truncated" if pages_result.truncated else "pages_unparseable"
+                            )
                         task["raw"] = None
                         _persist(checkpoints, key, state)
-                        overview_path = _path(checkpoints, "overview", key, ".md")
-                        atomic_write_text(overview_path, _accepted_overview(state))
-                        record_first_inspectable()
-                        if not overview_result.reason:
+                        if pages_result.pages:
+                            record_first_inspectable()
+                        if task["status"] == "accepted" and not task.get("replay"):
                             break
-                    else:
-                        task["reason"] = overview_result.reason
-                else:
-                    accepted_pages = [PagePlan.from_dict(item) for item in state["pages"]]
-                    pages_result = accept_pages(
-                        response,
-                        navigation=locator,
-                        target=target,
-                        parsed=parsed,
-                        entity_types=entity_types,
-                        existing_targets=existing_targets,
-                        allowed_update_targets=set(displayed_targets),
-                        catalog_titles={path: title for path, title, _ in catalog_entries},
-                        accepted=accepted_pages,
-                        default_entity_type=settings.get("default_entity_type"),
-                        evidence=json.loads(messages[-1]["content"])["evidence"],
-                    )
-                    state["pages"] = [
-                        page.to_dict() for page in accepted_pages + pages_result.pages
-                    ]
-                    from openkb.agent.document_planning_candidates import record_candidate_attempt
-
-                    has_pending = record_candidate_attempt(
-                        state, task_key, task["attempts"], pages_result
-                    )
-                    if pages_result.usable:
-                        task["no_pages_recommended"] = pages_result.no_pages
-                        task["status"] = (
-                            "accepted"
-                            if not has_pending and not pages_result.truncated
-                            else "partial"
-                        )
-                        task["reason"] = (
-                            "pages_truncated"
-                            if pages_result.truncated
-                            else "page_candidates_rejected"
-                            if has_pending
-                            else None
-                        )
-                    else:
-                        task["reason"] = (
-                            "pages_truncated"
-                            if pages_result.truncated
-                            else "page_candidates_rejected"
-                            if has_pending
-                            else task.get("reason") or "pages_unparseable"
-                        )
                     task["raw"] = None
                     _persist(checkpoints, key, state)
-                    if pages_result.pages:
-                        record_first_inspectable()
-                    if task["status"] == "accepted":
-                        break
-                task["raw"] = None
-                _persist(checkpoints, key, state)
-            if needs_split:
-                break
-            if task["status"] != "accepted":
-                task["status"] = "skipped"
-                task["reason"] = task.get("reason") or (
-                    "planning_capacity_split_budget"
-                    if max_attempts == 0
-                    else "model_output_unusable"
-                )
-                _persist(checkpoints, key, state)
-        if needs_split and _split_window(state, index, source, parsed, limits):
-            _persist(checkpoints, key, state)
-            continue
-        if needs_split:
-            for subtask in ("overview", "pages"):
-                task = state["tasks"].get(_task_id(window, subtask))
-                if task is not None and task["status"] not in {"accepted", "skipped"}:
+                if needs_split:
+                    break
+                if task["status"] != "accepted":
                     task["status"] = "skipped"
-                    task["reason"] = task.get("reason") or "planning_context_capacity"
+                    task["reason"] = task.get("reason") or (
+                        "planning_capacity_split_budget"
+                        if max_attempts == 0
+                        else "model_output_unusable"
+                    )
+                    _persist(checkpoints, key, state)
+            if needs_split and _split_window(state, index, source, parsed, limits):
+                _persist(checkpoints, key, state)
+                continue
+            if needs_split:
+                for subtask in ("overview", "pages"):
+                    task = state["tasks"].get(_task_id(window, subtask))
+                    if task is not None and task["status"] not in {"accepted", "skipped"}:
+                        task["status"] = "skipped"
+                        task["reason"] = task.get("reason") or "planning_context_capacity"
+                _persist(checkpoints, key, state)
+            pages = [PagePlan.from_dict(row) for row in state["pages"]]
+            references = _source_references(evidence, navigation, parsed, pages)
+            state["pages"] = [page.to_dict() for page in pages]
+            known_references = {row["key"] for row in state["external_references"]}
+            for reference in references:
+                if reference.key not in known_references:
+                    state["external_references"].append(reference.to_dict())
+                    known_references.add(reference.key)
             _persist(checkpoints, key, state)
-        pages = [PagePlan.from_dict(row) for row in state["pages"]]
-        references = _source_references(evidence, navigation, parsed, pages)
-        state["pages"] = [page.to_dict() for page in pages]
-        known_references = {row["key"] for row in state["external_references"]}
-        for reference in references:
-            if reference.key not in known_references:
-                state["external_references"].append(reference.to_dict())
-                known_references.add(reference.key)
+            index += 1
+    except ProcessingIncomplete as exc:
+        if exc.reason not in {
+            "request_budget_exhausted",
+            "token_budget_exhausted",
+            "time_budget_exhausted",
+        }:
+            raise
+        state["budget_limited"] = exc.reason
+        for window in state["windows"]:
+            for part in ("overview", "pages"):
+                task = state["tasks"].setdefault(
+                    _task_id(window, part), {"attempts": 0, "raw": None}
+                )
+                if task.get("status") != "accepted":
+                    task.update(status="skipped", reason=exc.reason)
+    from contextlib import nullcontext
+
+    from openkb.processing import budget_settlement_scope
+
+    with budget_settlement_scope() if state.get("budget_limited") else nullcontext():
         _persist(checkpoints, key, state)
-        index += 1
-    result = _finalize(
-        checkpoints,
-        key,
-        state,
-        source,
-        parsed,
-        navigation,
-        settings,
-        entity_types,
-        existing_targets,
-        plan_only,
-        started,
-    )
+        result = _finalize(
+            checkpoints,
+            key,
+            state,
+            source,
+            parsed,
+            navigation,
+            settings,
+            entity_types,
+            existing_targets,
+            plan_only,
+            started,
+        )
     on_event(
         {
             "stage": "planning",

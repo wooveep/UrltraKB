@@ -62,6 +62,7 @@ def compilation_profile(settings, bundle):
             "compilation_omissions": module_revision("openkb.compilation_omissions"),
             "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
             "evidence_reader": module_revision("openkb.evidence"),
+            "evidence_search": module_revision("openkb.evidence_search"),
             "pageindex_reader": module_revision("openkb.pageindex_evidence"),
             "pageindex_store": module_revision("openkb.pageindex_store"),
             "pageindex_bindings": module_revision("openkb.pageindex_bindings"),
@@ -92,6 +93,8 @@ def compilation_profile(settings, bundle):
                     "document_range_validation",
                     "document_orchestrator",
                     "document_recovery",
+                    "document_page_resolution",
+                    "document_planning_history",
                     "document_windowing",
                     "document_window_schedule",
                     "document_window_receipts",
@@ -355,6 +358,7 @@ class CompilationCheckpoints:
                 {
                     "evidence_provenance": deepcopy(EVIDENCE_PROVENANCE),
                     "evidence_reader": module_revision("openkb.evidence"),
+            "evidence_search": module_revision("openkb.evidence_search"),
                 }
                 if payload.get("stage") == "facts"
                 else {}
@@ -374,6 +378,7 @@ class CompilationCheckpoints:
                 {
                     "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
                     "evidence_reader": module_revision("openkb.evidence"),
+            "evidence_search": module_revision("openkb.evidence_search"),
                     "evidence_context": module_revision("openkb.evidence_context"),
                     **(
                         {"correction_options": self.correction_options}

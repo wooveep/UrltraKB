@@ -36,14 +36,17 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     assert page["quality"] == "published"
     assert page["review_receipt"]["verdict"] == "supported"
     plan = json.loads(plan_path.read_text())["value"]
-    assert plan["metadata"]["protocol"] == "document-plan-v3"
+    assert plan["metadata"]["protocol"] == "document-plan-v4"
     assert plan["metadata"]["planning_execution"]["planning_requests"] == 2
     assert plan["metadata"]["overview_ref"]
     assert plan["metadata"]["plan_report"]
     measurement = result.usage["measurement"]
     assert measurement["schema"] == 4
     assert [row["stage"] for row in measurement["requests"]] == [
-        "planning", "planning", "generation", "verification"
+        "planning",
+        "planning",
+        "generation",
+        "verification",
     ]
     summary = measurement["summary"]
     assert summary["request_p50_seconds"] is not None
@@ -80,12 +83,16 @@ def test_import_keeps_character_range_coverage_exact(kb_dir, tmp_path, model_ser
         if payload["stage"] == "planning":
             if payload["subtask"] == "overview":
                 return "A partial source plan."
-            return {"pages": [{
-                "kind": "concept",
-                "title": "First half",
-                "purpose": "The first selected excerpt",
-                "section": [{"block_index": 0, "start_char": 0, "end_char": 5}],
-            }]}
+            return {
+                "pages": [
+                    {
+                        "kind": "concept",
+                        "title": "First half",
+                        "purpose": "The first selected excerpt",
+                        "section": [{"block_index": 0, "start_char": 0, "end_char": 5}],
+                    }
+                ]
+            }
         if payload["stage"] == "generation":
             return {"content": "# First half\nabcde", "covered": ["o1"]}
         if payload["stage"] == "verification":
@@ -174,9 +181,7 @@ def test_plan_only_stops_before_generation_and_exposes_the_private_plan(
     assert report.is_file()
 
 
-def test_plan_only_settles_an_exhausted_content_failure_as_empty(
-    kb_dir, tmp_path, model_service
-):
+def test_plan_only_settles_an_exhausted_content_failure_as_empty(kb_dir, tmp_path, model_service):
     """A placeholder omission must not be presented as a formal ready plan."""
 
     source = tmp_path / "plan-only-invalid.md"
@@ -403,7 +408,8 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
     settled = json.loads(plan_path.read_text(encoding="utf-8"))["value"]
     assert {page["quality"] for page in settled["pages"]} == {"published"}
     assert set(settled["metadata"]["publication_page_receipts"]) == {
-        first_name + ".md", second_name + ".md",
+        first_name + ".md",
+        second_name + ".md",
     }
 
 

@@ -134,12 +134,18 @@ def render_plan_preview(plan: DocumentPlan) -> str:
             [
                 f"### {page.title}",
                 "",
-                f"状态：{page.state} · 目标：`{page.name}`",
+                f"状态：{page.state} · 类别：{page.kind}"
+                + (f" / {page.type}" if page.type else "")
+                + f" · 目标：`{page.name}`",
                 f"用途：{page.purpose}",
                 f"主体原文范围：`{json.dumps(page.subject_ranges, ensure_ascii=False)}`",
                 "",
             ]
         )
+        for hint in page.location_hints:
+            lines.append(
+                f"- 定位线索（{hint['role']}）：`{json.dumps(hint['value'], ensure_ascii=False)}`"
+            )
         for context in page.necessary_context:
             lines.append(
                 f"- 必要上下文（{context['relation']}）："

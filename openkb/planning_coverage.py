@@ -35,7 +35,7 @@ def planning_page_scopes(plan: DocumentPlan | None, parsed: Any) -> dict[str, An
     }
     whole_source = []
     for page in plan.pages if plan else []:
-        if page.state != "ready":
+        if page.state != "ready" or page.scope_resolution is None:
             continue
         counts[page.scope_resolution] = counts.get(page.scope_resolution, 0) + 1
         ranges: dict[int, list[tuple[int, int]]] = {}
@@ -57,15 +57,15 @@ def planning_coverage(
     """Count P, S, and M as interval unions; blocked pages contribute no P."""
     if (
         plan is not None
-        and plan.metadata.get("protocol") == "document-plan-v3"
-        or (plan is None and outcome in {"complete", "partial", "empty"})
+        and plan.metadata.get("protocol") in {"document-plan-v3", "document-plan-v4"}
+        or (plan is None and outcome in {"complete", "partial", "empty", "budget_limited"})
     ):
         return _planning_coverage_v3(plan, parsed, outcome=outcome, omission_count=omission_count)
     pages: dict[int, list[tuple[int, int]]] = {}
     source_only: dict[int, list[tuple[int, int]]] = {}
     if plan is not None:
         for page in plan.pages:
-            if page.state != "ready":
+            if page.state != "ready" or page.scope_resolution is None:
                 continue
             _add(pages, page.subject_ranges, parsed, "executable page subject")
             for context in page.necessary_context:
@@ -138,7 +138,7 @@ def _planning_coverage_v3(
     precise: dict[int, list[tuple[int, int]]] = {}
     fallback: dict[int, list[tuple[int, int]]] = {}
     for page in plan.pages if plan is not None else []:
-        if page.state != "ready":
+        if page.state != "ready" or page.scope_resolution is None:
             continue
         destination = fallback if page.scope_resolution == "target_fallback" else precise
         _add(destination, page.subject_ranges, parsed, "page subject")
@@ -279,7 +279,12 @@ def _validate_planning_coverage_v3(value: dict[str, Any]) -> None:
         "planning_omissions",
         "parser_gaps",
     }
-    if set(value) != expected or value["status"] not in {"complete", "partial", "empty"}:
+    if set(value) != expected or value["status"] not in {
+        "complete",
+        "partial",
+        "empty",
+        "budget_limited",
+    }:
         raise ValueError("Invalid v3 planning coverage")
     counts = [value[key] for key in ("precise_chars", "fallback_chars", "unrouted_chars")]
     total = value["readable_chars"]

@@ -556,6 +556,21 @@ def cleanup_limit() -> float | None:
     return active.limits.cleanup_timeout if active else None
 
 
+@contextmanager
+def budget_settlement_scope() -> Iterator[None]:
+    """Permit local receipt persistence after a budget end; cancellation still applies.
+
+    This scope is only for finalizing already obtained data. It must not dispatch
+    models or start another processing stage.
+    """
+    token = _ACTIVE.set(None)
+    try:
+        check_cancelled()
+        yield
+    finally:
+        _ACTIVE.reset(token)
+
+
 def model_call(function: Any, **kwargs: Any) -> Any:
     # Compiler operations already declare their request identity. Streaming is
     # a transport detail and does not invalidate completed semantic checkpoints.
