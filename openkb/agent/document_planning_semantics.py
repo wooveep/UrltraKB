@@ -63,6 +63,7 @@ _ALIASES = {
     "notes": {"notes", "note", "备注", "补充说明", "注意事项"},
     "references": {"references", "外部参考", "参考资料", "external_references"},
     "target": {"target", "target_key", "目标页面"},
+    "extends": {"extends", "extend", "补充已有建议", "补充建议", "补充"},
 }
 
 
@@ -147,9 +148,18 @@ def _entity_type(value: Any, allowed: list[str]) -> str | None:
 
 def _display_title(value: Any) -> str:
     title = str(value or "").strip()
-    for opening, closing in (("「", "」"), ("『", "』"), ("《", "》")):
-        if title.startswith(opening) and title.endswith(closing):
-            return title[1:-1].strip()
+    wrappers = (("**", "**"), ("__", "__"), ("`", "`"), ("「", "」"), ("『", "』"), ("《", "》"))
+    while True:
+        for opening, closing in wrappers:
+            if (
+                len(title) > len(opening) + len(closing)
+                and title.startswith(opening)
+                and title.endswith(closing)
+            ):
+                title = title[len(opening) : -len(closing)].strip()
+                break
+        else:
+            break
     return title
 
 
@@ -229,6 +239,11 @@ def deferred_suggestion(row, title, purpose, hints, notes, origin, source, reaso
 
 def record_semantics(state, result):
     deferred = state.setdefault("deferred_suggestions", [])
+    promoted = state.setdefault("promoted_suggestions", [])
+    for row in result.promoted_suggestions:
+        if row not in promoted:
+            promoted.append(row)
+        deferred[:] = [item for item in deferred if item["key"] != row["deferred_key"]]
     for incoming in result.deferred_suggestions:
         previous = next((row for row in deferred if row["key"] == incoming["key"]), None)
         if previous is None:
@@ -244,6 +259,77 @@ def record_semantics(state, result):
     state.setdefault("batch_notes", []).extend(
         note for note in result.batch_notes if note not in state.get("batch_notes", [])
     )
+
+
+def add_annotation(annotations, key, incoming):
+    previous = annotations.setdefault(key, {field: [] for field in incoming})
+    for field, values in incoming.items():
+        previous[field].extend(row for row in values if row not in previous[field])
+
+
+def inherit_classification(row, decision, title, purpose, pages, annotations):
+    """Absence can inherit known meaning; supplied unknown labels cannot."""
+    from openkb.agent.document_planning_pages import DEFAULT_PURPOSE
+
+    if decision.kind or any(row.get(key) for key in ("kind", "type", "group_kind")):
+        return decision
+    label = _first_text(row.get("extends")) or title
+    matches = matching_suggestions(label, pages, annotations)
+    if len(matches) == 1 and (
+        purpose == DEFAULT_PURPOSE or purpose == matches[0].purpose or row.get("extends")
+    ):
+        return Classification(matches[0].kind, matches[0].type, "inherited")
+    return decision
+
+
+def matching_suggestions(label, pages, annotations):
+    from openkb.agent.document_planning_pages import normalized_name
+
+    return [
+        page
+        for page in pages
+        if any(
+            normalized_name(name) == normalized_name(label)
+            for name in [page.title] + annotations.get(page.key, {}).get("aliases", [])
+        )
+    ]
+
+
+def promote_deferred(result, page, candidates):
+    from openkb.agent.document_planning_pages import DEFAULT_PURPOSE, normalized_name
+
+    matches = [
+        row for row in candidates if normalized_name(row["title"]) == normalized_name(page.title)
+    ]
+    if len(matches) != 1:
+        return
+    row = matches[0]
+    if row["reason"] == "classification_conflict" or (
+        row["purpose"] != DEFAULT_PURPOSE and page.purpose not in {row["purpose"], DEFAULT_PURPOSE}
+    ):
+        return
+    if page.purpose == DEFAULT_PURPOSE:
+        page.purpose = row["purpose"]
+    for field, additions in (
+        ("location_hints", row["location_hints"]),
+        ("planning_notes", row["notes"]),
+    ):
+        existing = getattr(page, field)
+        existing.extend(item for item in additions if item not in existing)
+    add_annotation(
+        result.annotations,
+        page.key,
+        {
+            "labels": [row["labels"]],
+            "basis": ["promoted"],
+            "aliases": [row["title"]],
+            "origins": row["origins"],
+        },
+    )
+    result.promoted_suggestions.append({"deferred_key": row["key"], "page_key": page.key})
+    result.deferred_suggestions[:] = [
+        item for item in result.deferred_suggestions if item["key"] != row["key"]
+    ]
 
 
 def validate_semantics(metadata):

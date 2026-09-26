@@ -12,6 +12,9 @@ DEFAULT_PURPOSE = "拟整理该主题，具体内容待原文核对"
 
 
 def normalized_name(value: str) -> str:
+    from openkb.agent.document_planning_semantics import _display_title
+
+    value = _display_title(value)
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 

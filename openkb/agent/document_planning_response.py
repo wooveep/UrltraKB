@@ -28,8 +28,12 @@ from openkb.agent.document_planning_semantics import (
     _first_text,
     _kind,
     _label,
+    add_annotation,
     annotation,
     deferred_suggestion,
+    inherit_classification,
+    matching_suggestions,
+    promote_deferred,
 )
 from openkb.sources import content_id
 
@@ -65,6 +69,7 @@ class PageAcceptance:
     deferred_suggestions: list[dict[str, Any]] = field(default_factory=list)
     annotations: dict[str, Any] = field(default_factory=dict)
     batch_notes: list[str] = field(default_factory=list)
+    promoted_suggestions: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def usable(self) -> bool:
@@ -474,6 +479,8 @@ def accept_pages(
     evidence: dict[str, Any] | None = None,
     source_identity: str | None = None,
     request_binding: dict[str, Any] | None = None,
+    deferred: list[dict[str, Any]] | None = None,
+    annotations: dict[str, Any] | None = None,
 ) -> PageAcceptance:
     """Retain recognizable organization suggestions; evidence is prepared before generation."""
     from openkb.agent.document_planning_bindings import bind_hints, validate_binding
@@ -486,6 +493,7 @@ def accept_pages(
     rows, no_pages, truncated = extract_candidates(raw, batch_notes=batch_notes)
     result = PageAcceptance(no_pages=no_pages, truncated=truncated, batch_notes=batch_notes)
     known = {page.name: page for page in accepted or []}
+    known_annotations = dict(annotations or {})
     if not rows and not no_pages:
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
     for entry, original in enumerate(rows):
@@ -498,8 +506,12 @@ def accept_pages(
                 notes.append(f"{field_name}：{value}")
         title = _first_text(row.get("title")) or _first_text(row.get("name"))
         name = _first_text(row.get("name")) or title
+        purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
         decision = _classification(
             row, original.get("group_kind"), entity_types, default_entity_type, notes
+        )
+        decision = inherit_classification(
+            row, decision, title, purpose, known.values(), known_annotations
         )
         kind, subtype = decision.kind, decision.subtype
         identity = candidate_identity(row, kind, title, name, reliable=bool(title))
@@ -543,7 +555,6 @@ def accept_pages(
             _filter_candidate(result, identity, "unsupplied_reference", original)
             continue
         hints = bind_hints(_hints(original), request_binding, parsed, notes)
-        purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
         origin = {"response": content_id(str(raw)), "entry": entry}
         if request_binding is not None:
             origin.update({key: request_binding[key] for key in ("request", "window")})
@@ -583,6 +594,19 @@ def accept_pages(
             str(source_identity or getattr(parsed, "id", "")), kind, subtype, name, title, proposed
         )
         previous = next((page for page in known.values() if page.key == page_key), None)
+        extension = _first_text(row.get("extends"))
+        if not proposed and (extension or name == title):
+            prior_suggestions = matching_suggestions(
+                extension or title, known.values(), known_annotations
+            )
+            if len(prior_suggestions) == 1 and (
+                prior_suggestions[0].kind,
+                prior_suggestions[0].type,
+            ) == (kind, subtype):
+                previous = prior_suggestions[0]
+                page_key = previous.key
+            elif extension:
+                notes.append("未确认补充对象或类别：" + extension)
         try:
             path, target_name = select_page_path(
                 kind=kind,
@@ -645,5 +669,16 @@ def accept_pages(
             result.resolved_candidates[identity["candidate_key"]] = identity.get(
                 "candidate_name_key"
             )
-        result.annotations[page_key] = annotation(original, decision, title, origin)
+        add_annotation(result.annotations, page_key, annotation(original, decision, title, origin))
+        add_annotation(known_annotations, page_key, annotation(original, decision, title, origin))
+        already_promoted = {row["deferred_key"] for row in result.promoted_suggestions}
+        promote_deferred(
+            result,
+            previous or page,
+            [
+                row
+                for row in (deferred or []) + result.deferred_suggestions
+                if row["key"] not in already_promoted
+            ],
+        )
     return result
