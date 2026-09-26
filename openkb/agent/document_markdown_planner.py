@@ -13,6 +13,10 @@ from openkb.agent import document_planning_support, document_windowing
 from openkb.agent.document_plan import PagePlan, RangeValue
 from openkb.agent.document_plan_annotations import ExternalReference
 from openkb.agent.document_planning_admission import admit_planning_windows, validate_navigation
+from openkb.agent.document_planning_candidates import (
+    retain_split_candidates,
+    valid_split_candidate_targets,
+)
 from openkb.agent.document_planning_report import (
     _finalize,
     _overview_text,
@@ -208,6 +212,8 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
         return False
     if any(not isinstance(row, dict) for name in list_fields[2:] for row in value[name]):
         return False
+    if not valid_split_candidate_targets(value, original_windows):
+        return False
     return all(
         isinstance(key, str)
         and isinstance(task, dict)
@@ -264,6 +270,7 @@ def _split_window(
                     "raw": None,
                     "reason": parent_task.get("reason"),
                 }
+    retain_split_candidates(state, window, _target_ranges(window, parsed))
     state["windows"][index : index + 1] = children
     return True
 
@@ -544,11 +551,9 @@ def plan_markdown_document(
                 processing_checkpoint("planning")
                 recovery = task.get("reason") or ""
                 if recovery and subtask == "pages":
-                    rejected = [
-                        row
-                        for row in state["rejected"]
-                        if row.get("window") == task_key and not row.get("resolved")
-                    ][-8:]
+                    from openkb.agent.document_planning_candidates import pending_candidates
+
+                    rejected = pending_candidates(state, task_key)[-8:]
                     details = [f"{row['reason']}: {row['candidate'][:160]}" for row in rejected]
                     alternatives = [
                         f"{row['section_key']} {' > '.join(row.get('heading_path', []))}"
@@ -680,25 +685,21 @@ def plan_markdown_document(
                     ]
                     from openkb.agent.document_planning_candidates import record_candidate_attempt
 
-                    pending_candidates = record_candidate_attempt(
+                    has_pending = record_candidate_attempt(
                         state, task_key, task["attempts"], pages_result
                     )
-                    resolved_existing = any(
-                        row["reason"] in {"accepted_echo", "merged_page"}
-                        for row in pages_result.filtered
-                    ) and not (task.get("reason") == "pages_truncated" or pending_candidates)
-                    if pages_result.pages or pages_result.no_pages or resolved_existing:
+                    if pages_result.usable:
                         task["no_pages_recommended"] = pages_result.no_pages
                         task["status"] = (
                             "accepted"
-                            if not pending_candidates and not pages_result.truncated
+                            if not has_pending and not pages_result.truncated
                             else "partial"
                         )
                         task["reason"] = (
                             "pages_truncated"
                             if pages_result.truncated
                             else "page_candidates_rejected"
-                            if pending_candidates
+                            if has_pending
                             else None
                         )
                     else:
@@ -706,7 +707,7 @@ def plan_markdown_document(
                             "pages_truncated"
                             if pages_result.truncated
                             else "page_candidates_rejected"
-                            if pending_candidates
+                            if has_pending
                             else task.get("reason") or "pages_unparseable"
                         )
                     task["raw"] = None

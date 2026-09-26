@@ -159,3 +159,137 @@ def test_blank_selection_in_array_cannot_expand_a_section_to_whole_source(blank)
     )
     assert not result.pages
     assert result.rejected[0]["reason"] == "unknown_location"
+
+
+@pytest.mark.parametrize("label", ["Page", "page", "Page Name", "页面名称", " **PAGE__NAME** "])
+@pytest.mark.parametrize("shape", ["table", "list", "json"])
+def test_page_name_labels_share_one_acceptance_rule(label, shape):
+    row = {"Section": "操作", label: "Operation", "Kind": "Concept"}
+    if shape == "json":
+        raw = json.dumps(row)
+    elif shape == "list":
+        raw = "- " + f"{label}: Operation\n  Kind: Concept\n  Section: 操作"
+    else:
+        raw = "| " + " | ".join(row) + " |\n|---|---|---|\n| " + " | ".join(row.values()) + " |"
+    result = _accept(raw)
+    assert not result.rejected
+    assert [(page.title, page.subject_ranges) for page in result.pages] == [("Operation", [[1, 2]])]
+
+
+def test_page_number_does_not_supply_a_page_name():
+    result = _accept("| Page Number | Kind | Section |\n|---|---|---|\n| 3 | concept | 操作 |")
+    assert not result.pages
+    assert result.rejected[0]["reason"] == "missing_title"
+
+
+@pytest.mark.parametrize("label", ["Summary", "sUMMary", "Overview", "摘要", "概览", "{{SUMMARY}}"])
+def test_explicit_summary_category_is_filtered_beside_a_valid_page(label):
+    result = _accept(
+        json.dumps(
+            [
+                {"name": "Manual overview", "type": label},
+                {"name": "Summary algorithm", "kind": "concept", "section": "操作"},
+            ]
+        )
+    )
+    assert not result.rejected
+    assert [p.title for p in result.pages] == ["Summary algorithm"]
+    assert result.filtered[0]["reason"] == "summary_placeholder"
+    assert result.filtered[0]["candidate_key"] in result.resolved_candidates
+
+
+def test_configured_summary_entity_type_and_valid_group_are_not_filtered():
+    result = accept_pages(
+        "## 实体\n- Name: Manual\n  Type: summary\n  Section: 操作",
+        navigation=_navigation(),
+        target=[[0, 2]],
+        parsed=_parsed(),
+        entity_types=["summary"],
+        existing_targets=set(),
+    )
+    assert not result.filtered and not result.rejected
+    assert result.pages[0].type == "summary"
+
+
+@pytest.mark.parametrize("label", ["summary algorithm", "摘要方法", "unrecognized-kind"])
+def test_summary_filter_does_not_guess_other_categories(label):
+    result = _accept(json.dumps({"name": "Manual", "type": label}))
+    assert not result.filtered
+    assert result.rejected[0]["reason"] == "unknown_kind"
+
+
+def test_opaque_candidates_use_full_content_and_never_an_empty_name_key():
+    prefix = "说明" * 180
+    raw = (
+        "| 补充说明 | Kind | Section |\n|---|---|---|\n"
+        f"| {prefix}甲 | concept | 前提 |\n| {prefix}乙 | concept | 前提 |\n"
+        f"| {prefix}甲 | concept | 前提 |"
+    )
+    result = _accept(raw)
+    assert len(result.rejected) == 3
+    first, second, duplicate = result.rejected
+    assert first["candidate_key"] != second["candidate_key"]
+    assert first["candidate_key"] == duplicate["candidate_key"]
+    assert all(row["identity_kind"] == "opaque" for row in result.rejected)
+    assert all("candidate_name_key" not in row for row in result.rejected)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_name_aliases_are_rejected_without_column_order_identity(reverse):
+    fields = [("Page", "Operation"), ("名称", "Preparation")]
+    if reverse:
+        fields.reverse()
+    result = _accept(json.dumps({**dict(fields), "kind": "concept", "section": "操作"}))
+    assert not result.pages
+    assert result.rejected[0]["reason"] == "conflicting_field:name"
+    assert result.rejected[0]["identity_kind"] == "opaque"
+    alternate = _accept(
+        json.dumps({**dict(reversed(fields)), "kind": "concept", "section": "操作"})
+    )
+    assert result.rejected[0]["candidate_key"] == alternate.rejected[0]["candidate_key"]
+
+
+def test_equivalent_name_aliases_and_separate_title_remain_valid():
+    result = _accept(
+        json.dumps(
+            {
+                "Page": "Operation",
+                "名称": " Operation ",
+                "Page Title": "Operation guide",
+                "kind": "concept",
+                "section": "操作",
+            }
+        )
+    )
+    assert not result.rejected
+    assert result.pages[0].name == "concepts/operation"
+    assert result.pages[0].title == "Operation guide"
+
+
+def test_field_label_normalization_does_not_rename_configured_entity_types():
+    result = accept_pages(
+        '{"Page":"Method","Kind":"entity","Type":"research_method","Section":"操作"}',
+        navigation=_navigation(),
+        target=[[0, 2]],
+        parsed=_parsed(),
+        entity_types=["research_method", "product"],
+        default_entity_type="product",
+        existing_targets=set(),
+    )
+    assert not result.rejected
+    assert result.pages[0].type == "research_method"
+
+
+def test_json_wrapper_type_metadata_does_not_hide_its_pages():
+    result = _accept(
+        json.dumps(
+            {
+                "type": "planning",
+                "pages": [
+                    {"name": "Operation", "kind": "concept", "section": "操作"},
+                ],
+            }
+        )
+    )
+    assert not result.rejected
+    assert result.pages[0].title == "Operation"

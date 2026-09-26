@@ -42,6 +42,7 @@ or heading path when known. Prefer labelled entries (name, type, section); table
 headings need not follow a fixed template. Copy supplied section keys or complete
 heading paths instead of abbreviating chapter names; separate multiple selections
 with semicolons. Only perform page planning; do not regenerate the overview.
+Plan only concept or entity pages; the separate overview task handles Summary/Overview.
 Entity types must use supplied types. Optional context
 chapters, purpose and external reference hints may be included. No source block must
 be routed to a page. Do not write page bodies, internal paths, proofs, JSON or reasoning.

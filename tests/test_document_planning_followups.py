@@ -8,6 +8,7 @@ import pytest
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.navigation_evidence import evidence_descriptor
+from openkb.processing import InputTooLarge, ProcessingIncomplete
 from tests.test_document_markdown_planning import SETTINGS, _parsed
 from tests.test_document_orchestrator import _DummySource
 
@@ -67,7 +68,9 @@ def test_window_containing_only_an_accepted_echo_settles_without_retry(tmp_path,
     assert not report["planning_omissions"]
 
 
-def _run_single(tmp_path, monkeypatch, responses):
+def _run_single(
+    tmp_path, monkeypatch, responses, *, overview="Credentials are required before the operation."
+):
     source, parsed = _DummySource(), _parsed()
     workspace = tmp_path / "workspace"
     (workspace / "wiki").mkdir(parents=True)
@@ -76,7 +79,7 @@ def _run_single(tmp_path, monkeypatch, responses):
 
     def respond(messages, *, settings):
         if json.loads(messages[-1]["content"])["subtask"] == "overview":
-            return "Credentials are required before the operation."
+            return overview
         return next(responses)
 
     with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
@@ -156,7 +159,12 @@ def test_repeated_candidate_failures_report_actual_attempts_once(tmp_path, monke
 
 
 @pytest.mark.parametrize(
-    "bad_fields", [{"kind": "not-a-kind"}, {"kind": "entity", "type": "concept"}]
+    "bad_fields",
+    [
+        {"kind": "not-a-kind"},
+        {"kind": "entity", "type": "concept"},
+        {"kind": "concept", "类别": "entity"},
+    ],
 )
 def test_correcting_candidate_kind_resolves_its_rejection(tmp_path, monkeypatch, bad_fields):
     page = {"name": "Operation", "kind": "concept", "subject_ranges": [[0, 1]]}
@@ -167,6 +175,23 @@ def test_correcting_candidate_kind_resolves_its_rejection(tmp_path, monkeypatch,
     report = json.loads(Path(result.report_ref).read_text())
     assert not report["rejected_candidates"]
     assert report["planning_execution"]["planning_requests"] == 3
+
+
+@pytest.mark.parametrize("corrected_kind", ["concept", "entity"])
+def test_entity_subtype_conflict_cannot_be_resolved_by_a_concept(
+    tmp_path, monkeypatch, corrected_kind
+):
+    page = {"name": "Operation", "kind": "entity", "type": "product"}
+    bad = {**page, "类型": "person"}
+    corrected = {**page, "kind": corrected_kind}
+    if corrected_kind == "concept":
+        corrected.pop("type")
+    result = _run_single(
+        tmp_path, monkeypatch, [json.dumps(bad), json.dumps(corrected), json.dumps(corrected)]
+    )
+    report = json.loads(Path(result.report_ref).read_text())
+    assert result.outcome == ("complete" if corrected_kind == "entity" else "partial")
+    assert bool(report["rejected_candidates"]) == (corrected_kind == "concept")
 
 
 def test_ambiguous_kind_cannot_be_resolved_by_two_same_name_categories(tmp_path, monkeypatch):
@@ -180,3 +205,217 @@ def test_ambiguous_kind_cannot_be_resolved_by_two_same_name_categories(tmp_path,
     assert len(result.plan.pages) == 2
     report = json.loads(Path(result.report_ref).read_text())
     assert report["rejected_candidates"][0]["reason"] == "conflicting_kind"
+
+
+def test_summary_only_response_settles_without_claiming_no_pages(tmp_path, monkeypatch):
+    result = _run_single(tmp_path, monkeypatch, ["- Page: Manual overview\n  Type: Summary"])
+    assert result.outcome == "complete"
+    assert not result.plan.pages
+    report = json.loads(Path(result.report_ref).read_text())
+    assert report["planning_execution"]["planning_requests"] == 2
+    assert not report["no_pages_recommended"]
+    assert report["filtered_candidates"] == {"summary_placeholder": 1}
+    assert not report["planning_omissions"]
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "- Page: Manual overview\n  Type: Summary",
+        "- Page: Manual overview\n  Kind: concept\n  Section: section:missing",
+    ],
+)
+def test_ignore_resolves_only_the_corresponding_named_failure(tmp_path, monkeypatch, replacement):
+    bad = "- Page: Manual overview\n  Type: unrecognized-kind"
+    result = _run_single(tmp_path, monkeypatch, [bad, replacement, replacement])
+    report = json.loads(Path(result.report_ref).read_text())
+    if "Summary" in replacement:
+        assert result.outcome == "complete"
+        assert not report["planning_omissions"]
+        assert report["rejected_candidate_history"][0]["resolution_reason"] == "summary_placeholder"
+        assert report["rejected_candidate_history"][0]["resolved_attempt"] == 2
+    else:
+        assert result.outcome == "partial"
+        assert report["rejected_candidates"]
+
+
+@pytest.mark.parametrize("later", ["No new pages needed.", "- Page: Unrelated\n  Type: Summary"])
+def test_no_pages_or_unrelated_ignore_cannot_clear_specific_failure(tmp_path, monkeypatch, later):
+    bad = "- Page: Operation\n  Kind: concept\n  Section: section:missing"
+    result = _run_single(tmp_path, monkeypatch, [bad, later, later])
+    assert result.outcome == "partial"
+    report = json.loads(Path(result.report_ref).read_text())
+    assert len(report["rejected_candidates"]) == 1
+    assert report["rejected_candidates"][0]["reason"] == "unknown_location"
+
+
+def test_complete_ignored_response_resolves_only_response_level_failure(tmp_path, monkeypatch):
+    result = _run_single(tmp_path, monkeypatch, ["", "- Type: Summary"])
+    assert result.outcome == "complete"
+    report = json.loads(Path(result.report_ref).read_text())
+    assert report["planning_execution"]["planning_requests"] == 3
+    assert report["rejected_candidate_history"][0]["resolved"] is True
+    assert not report["rejected_candidates"]
+
+
+def test_ignored_summary_cannot_replace_a_failed_overview(tmp_path, monkeypatch):
+    result = _run_single(tmp_path, monkeypatch, ["- Type: Summary"], overview="")
+    assert result.outcome == "empty"
+    assert result.plan is None and result.overview_ref is None
+    report = json.loads(Path(result.report_ref).read_text())
+    assert report["planning_execution"]["planning_requests"] == 4
+    assert [row["component"] for row in report["planning_omissions"]] == ["overview"]
+    assert not report["no_pages_recommended"]
+
+
+def test_opaque_failures_remain_distinct_after_unrelated_success(tmp_path, monkeypatch):
+    bad = (
+        "| Extra | Kind | Section |\n|---|---|---|\n"
+        "| A | concept | 前提 |\n| B | concept | 操作 |\n| A | concept | 前提 |"
+    )
+    good = "- Page: Operation\n  Kind: concept"
+    result = _run_single(tmp_path, monkeypatch, [bad, bad + "\n" + good, good])
+    assert result.outcome == "partial" and len(result.plan.pages) == 1
+    report = json.loads(Path(result.report_ref).read_text())
+    assert len(report["rejected_candidate_history"]) == 6
+    assert len(report["rejected_candidates"]) == 2
+    assert all(row["attempts"] == 2 for row in report["rejected_candidates"])
+    assert all(row["identity_kind"] == "opaque" for row in report["rejected_candidates"])
+
+
+def test_saved_raw_page_response_resumes_without_new_requests(tmp_path, monkeypatch):
+    source, parsed = _DummySource(), _parsed()
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
+    calls = []
+
+    def respond(messages, *, settings):
+        subtask = json.loads(messages[-1]["content"])["subtask"]
+        calls.append(subtask)
+        return "Saved overview." if subtask == "overview" else "- Page: Operation\n  Kind: concept"
+
+    with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
+        save = checkpoints.save_recovery
+        interrupted = False
+
+        def interrupt_after_save(key, stage, value):
+            nonlocal interrupted
+            save(key, stage, value)
+            if (
+                stage == "markdown_plan"
+                and not interrupted
+                and any(
+                    task.endswith(":pages") and record.get("raw")
+                    for task, record in value["tasks"].items()
+                )
+            ):
+                interrupted = True
+                raise RuntimeError("interrupted after durable response")
+
+        monkeypatch.setattr(checkpoints, "save_recovery", interrupt_after_save)
+        with pytest.raises(RuntimeError, match="interrupted after durable response"):
+            plan_document(
+                tmp_path,
+                workspace,
+                source,
+                parsed,
+                None,
+                SETTINGS,
+                checkpoints,
+                mock_caller=respond,
+                plan_only=True,
+                return_result=True,
+            )
+        for _ in range(2):
+            result = plan_document(
+                tmp_path,
+                workspace,
+                source,
+                parsed,
+                None,
+                SETTINGS,
+                checkpoints,
+                mock_caller=respond,
+                plan_only=True,
+                return_result=True,
+                resume=True,
+            )
+            assert result.outcome == "complete" and len(result.plan.pages) == 1
+            report = json.loads(Path(result.report_ref).read_text())
+            assert report["planning_execution"]["planning_requests"] == 2
+            assert not report["planning_omissions"]
+    assert calls == ["overview", "pages"]
+
+
+@pytest.mark.parametrize("child_name", ["Operation", "Unrelated topic"])
+def test_split_parent_failure_remains_an_explicit_omission(tmp_path, monkeypatch, child_name):
+    source, parsed = _DummySource(), _parsed()
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
+    calls = []
+
+    def respond(messages, *, settings):
+        task = json.loads(messages[-1]["content"])
+        calls.append(task["subtask"])
+        if task["subtask"] == "overview":
+            return "Saved parent overview."
+        if calls.count("pages") == 1:
+            return "- Page: Operation\n  Kind: concept\n  Section: section:missing"
+        if calls.count("pages") == 2:
+            raise InputTooLarge()
+        return f"- Page: {child_name}\n  Kind: concept"
+
+    with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
+        for resume in (False, True):
+            result = plan_document(
+                tmp_path,
+                workspace,
+                source,
+                parsed,
+                None,
+                SETTINGS,
+                checkpoints,
+                mock_caller=respond,
+                plan_only=True,
+                return_result=True,
+                resume=resume,
+            )
+            report = json.loads(Path(result.report_ref).read_text())
+            assert result.outcome == "partial"
+            assert (
+                result.plan.pages and result.plan.overview.text.strip() == "Saved parent overview."
+            )
+            assert len(report["rejected_candidates"]) == 1
+            pending = report["rejected_candidates"][0]
+            assert pending["reason"] == "unknown_location" and pending["attempts"] == 1
+            assert len(report["planning_omissions"]) == 1
+            omission = report["planning_omissions"][0]
+            assert omission["target_id"] == pending["window"]
+            assert omission["ranges"] == [[0, 2]]
+            assert omission["reason"] == "page_candidates_rejected"
+            assert report["planning_execution"]["planning_requests"] == 4
+        recovery_key = result.plan.metadata["recovery_key"]
+        saved = checkpoints.load_recovery(recovery_key, "markdown_plan")
+        for invalid in ([], "invalid-range", [[0, 3]]):
+            altered = json.loads(json.dumps(saved))
+            parent = altered["tasks"][pending["window"]]
+            parent["retired_target"]["target_ranges"] = invalid
+            checkpoints.save_recovery(recovery_key, "markdown_plan", altered)
+            with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
+                plan_document(
+                    tmp_path,
+                    workspace,
+                    source,
+                    parsed,
+                    None,
+                    SETTINGS,
+                    checkpoints,
+                    mock_caller=respond,
+                    plan_only=True,
+                    return_result=True,
+                    resume=True,
+                )
+        checkpoints.save_recovery(recovery_key, "markdown_plan", saved)
+    assert calls == ["overview", "pages", "pages", "pages", "pages"]

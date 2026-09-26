@@ -10,7 +10,7 @@ from typing import Any
 from openkb.agent import document_planning_support
 from openkb.agent.document_plan import DocumentPlan, OverviewPlan, PagePlan, validate_plan
 from openkb.agent.document_plan_annotations import ExternalReference, PlanningOmission
-from openkb.agent.document_planning_candidates import rejected_candidate_summary
+from openkb.agent.document_planning_candidates import pending_candidates, rejected_candidate_summary
 from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.execution_measurement import record_document_totals
@@ -90,29 +90,34 @@ def _omissions(
     state: dict[str, Any], windows: list[dict[str, Any]], parsed: Any
 ) -> list[PlanningOmission]:
     rows: list[PlanningOmission] = []
-    for window in windows:
-        for subtask in ("overview", "pages"):
-            key = _task_id(window, subtask)
-            task = state["tasks"].get(key, {})
-            reason = task.get("reason")
-            if not reason:
-                continue
-            ranges = _target_ranges(window, parsed)
-            if not ranges:
-                continue
-            rows.append(
-                PlanningOmission(
-                    key="omission:" + content_id((key, reason))[:24],
-                    stage="planning",
-                    reason=reason,
-                    target_id=key,
-                    ranges=ranges,
-                    affected_pages=[],
-                    component=subtask,
-                    attempts=task.get("attempts", 0),
-                    diagnostic_ref=None,
-                )
+    targets = [
+        (_task_id(window, subtask), subtask, _target_ranges(window, parsed))
+        for window in windows
+        for subtask in ("overview", "pages")
+    ]
+    targets.extend(
+        (key, "pages", _target_ranges(task["retired_target"], parsed))
+        for key, task in state["tasks"].items()
+        if task.get("retired_target") and pending_candidates(state, key)
+    )
+    for key, subtask, ranges in targets:
+        task = state["tasks"].get(key, {})
+        reason = task.get("reason")
+        if not reason or not ranges:
+            continue
+        rows.append(
+            PlanningOmission(
+                key="omission:" + content_id((key, reason))[:24],
+                stage="planning",
+                reason=reason,
+                target_id=key,
+                ranges=ranges,
+                affected_pages=[],
+                component=subtask,
+                attempts=task.get("attempts", 0),
+                diagnostic_ref=None,
             )
+        )
     return rows
 
 

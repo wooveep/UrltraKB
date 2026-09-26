@@ -9,10 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openkb.agent.document_plan import PagePlan, RangeValue
+from openkb.agent.document_planning_candidates import candidate_identity
 from openkb.agent.document_planning_locations import resolve_location, within_target
 from openkb.sources import content_id
 
-_FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff /-]+?)\s*[：:]\s*(.*?)\s*$")
+_FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
 _ITEM = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.*)$")
 _HEADING = re.compile(r"^\s*(#{2,6})\s+(.+?)\s*$")
 _FENCE = re.compile(r"^```(?:markdown|md|json)?\s*\n([\s\S]*?)\n```\s*$", re.I)
@@ -25,8 +26,8 @@ _PLACEHOLDER = re.compile(
     r"^(?:待补充|无内容|暂无|n/?a|none|placeholder|todo|无法判断|没有足够信息)[。.!\s]*$", re.I
 )
 _ALIASES = {
-    "name": {"name", "名称", "页面", "页面名称", "页面名称/标题", "page name"},
-    "title": {"title", "标题", "页面标题"},
+    "name": {"name", "page", "名称", "页面", "页面名称", "页面名称/标题", "page name"},
+    "title": {"title", "page title", "标题", "页面标题"},
     "kind": {"kind", "类别", "分类", "页面类别", "category"},
     "type": {"type", "类型", "页面类型", "实体类型", "entity type"},
     "section": {
@@ -68,9 +69,13 @@ class PageAcceptance:
     pages: list[PagePlan] = field(default_factory=list)
     rejected: list[dict[str, str]] = field(default_factory=list)
     filtered: list[dict[str, str]] = field(default_factory=list)
-    resolved_candidates: dict[str, str] = field(default_factory=dict)
+    resolved_candidates: dict[str, str | None] = field(default_factory=dict)
     no_pages: bool = False
     truncated: bool = False
+
+    @property
+    def usable(self) -> bool:
+        return bool(self.pages or self.filtered or self.no_pages)
 
 
 def _unfence(text: str) -> str:
@@ -119,8 +124,12 @@ def accept_overview(raw: Any) -> OverviewAcceptance:
     return OverviewAcceptance(content, "overview_truncated" if truncated else None, truncated)
 
 
+def _label(value: str) -> str:
+    return " ".join(value.strip(" *`\t\r\n").lower().replace("_", " ").split())
+
+
 def _field_name(value: str) -> str | None:
-    key = value.strip(" *`\t").lower().replace("_", " ")
+    key = _label(value)
     exact = next(
         (
             name
@@ -171,12 +180,38 @@ def _entity_type(value: Any, allowed: list[str]) -> str | None:
     return normalized if normalized in allowed else None
 
 
+def _summary_category(row: dict[str, Any], page_kind: str | None) -> bool:
+    return page_kind is None and any(
+        isinstance(row.get(key), str)
+        and _label(row[key]) in {"summary", "overview", "摘要", "概览", "{{summary}}"}
+        for key in ("kind", "type")
+    )
+
+
+def _filter_candidate(
+    result: PageAcceptance,
+    identity: dict[str, str],
+    reason: str,
+    original: dict[str, Any],
+    *,
+    resolved: bool = True,
+) -> None:
+    result.filtered.append(
+        {**identity, "reason": reason, "candidate": json.dumps(original, ensure_ascii=False)[:300]}
+    )
+    if resolved:
+        result.resolved_candidates[identity["candidate_key"]] = identity.get("candidate_name_key")
+
+
 def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [row for item in value for row in _json_rows(item, inherited_kind)]
     if not isinstance(value, dict):
         return []
-    if any(_field_name(str(key)) in {"name", "title"} for key in value):
+    if any(_field_name(str(key)) in {"name", "title"} for key in value) or (
+        any(_field_name(str(key)) in {"kind", "type"} for key in value)
+        and not {"pages", "page_changes", "create", "update", "concepts", "entities"} & value.keys()
+    ):
         return [
             {
                 **value,
@@ -254,6 +289,8 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
                 current = {}
             else:
                 current = None
+        elif item and match and current is None:
+            current = {}
         if match and current is not None:
             key = match.group(1).strip()
             current[key] = match.group(2).strip()
@@ -274,7 +311,7 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
                 row["group_kind"] = table_group
             if row:
                 rows.append(row)
-    return [{**row, **_normalize(row)} for row in rows]
+    return rows
 
 
 def _closed_json_pages(content: str) -> list[dict[str, Any]]:
@@ -387,19 +424,33 @@ def extract_candidates(raw: Any) -> tuple[list[dict[str, Any]], bool, bool]:
     return rows, no_pages, truncated
 
 
-def _normalize(row: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
+def _normalize(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    values: dict[str, list[Any]] = {}
     for key, value in row.items():
-        name = _field_name(str(key)) or (key if key in _ALIASES else None)
-        if name and value not in (None, ""):
-            if (
-                name == "section"
-                and "section:" in str(result.get(name, ""))
-                and "section:" not in str(value)
-            ):
-                continue
-            result[name] = value
-    return result
+        name = _field_name(str(key)) or str(key).strip()
+        if isinstance(value, str):
+            value = value.strip()
+            if name in {"kind", "type"}:
+                value = value.strip(" *`\t\r\n").lower()
+                if value in {"concept", "概念", "entity", "实体"}:
+                    value = _kind(value)
+        if (name not in _ALIASES or value not in (None, "")) and value not in values.setdefault(
+            name, []
+        ):
+            values[name].append(value)
+    result: dict[str, Any] = {}
+    conflicts = []
+    for name, choices in sorted(values.items()):
+        if name == "section" and any("section:" in str(value) for value in choices):
+            choices = [value for value in choices if "section:" in str(value)]
+        if not choices:
+            continue
+        if len(choices) > 1:
+            conflicts.append(name)
+            result[name] = sorted(choices, key=lambda value: json.dumps(value, sort_keys=True))
+        else:
+            result[name] = choices[0]
+    return result, conflicts
 
 
 def _slug(title: str) -> str:
@@ -439,19 +490,7 @@ def accept_pages(
     if not rows and not no_pages:
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
     for original in rows:
-        row = _normalize(original)
-        if str(row.get("type") or "").strip().startswith(("摘要", "{{SUMMARY}}")):
-            result.filtered.append(
-                {"reason": "summary_placeholder", "candidate": str(original)[:300]}
-            )
-            continue
-        if any(
-            phrase in str(row.get(field) or "").lower()
-            for field in ("section", "purpose")
-            for phrase in ("referenced by title only", "未随本文提供", "引用处")
-        ):
-            result.filtered.append({"reason": "reference_hint", "candidate": str(original)[:300]})
-            continue
+        row, conflicts = _normalize(original)
         group_kind = _kind(original.get("group_kind"))
         title = _display_title(row.get("title") or row.get("name"))
         name = _display_title(row.get("name") or title)
@@ -465,10 +504,45 @@ def accept_pages(
             or type_kind
             or ("entity" if supplied_type or type_from_kind else None)
         )
-        candidate_key = content_id((kind, title, name))
-        candidate_name_key = content_id((title, name))
+        category_conflict = bool({"kind", "type"} & set(conflicts))
+        if category_conflict:
+            categories = {
+                category
+                for field in ("kind", "type", "group_kind")
+                for value in (row[field] if field in conflicts else [row.get(field)])
+                if (
+                    category := _kind(value)
+                    or ("entity" if _entity_type(value, entity_types) else None)
+                )
+            }
+            kind = next(iter(categories)) if len(categories) == 1 else None
+        identity = candidate_identity(
+            row,
+            kind,
+            title,
+            name,
+            reliable=not ({"name", "title"} & set(conflicts))
+            and isinstance(row.get("name") or row.get("title"), str)
+            and isinstance(row.get("title") or row.get("name"), str),
+        )
+        candidate_key = identity["candidate_key"]
+        candidate_name_key = identity.get("candidate_name_key")
+        if not conflicts and _summary_category(row, kind):
+            _filter_candidate(result, identity, "summary_placeholder", original)
+            continue
+        if not conflicts and any(
+            phrase in str(row.get(field) or "").lower()
+            for field in ("section", "purpose")
+            for phrase in ("referenced by title only", "未随本文提供", "引用处")
+        ):
+            _filter_candidate(result, identity, "reference_hint", original)
+            continue
         try:
-            if not title or not name:
+            if conflicts:
+                if category_conflict and kind is None:
+                    raise ValueError("conflicting_kind")
+                raise ValueError("conflicting_field:" + ",".join(conflicts))
+            if identity["identity_kind"] == "opaque":
                 raise ValueError("missing_title")
             if row.get("kind") and explicit_kind is None and type_from_kind is None:
                 raise ValueError("unknown_kind")
@@ -497,7 +571,7 @@ def accept_pages(
             if cited_without_body and not any(node.get("title") == title for node in navigation):
                 # An explicitly unsupplied cited document is a reference, even
                 # when the model labels it as a concept rather than a work.
-                result.filtered.append({"reason": "unsupplied_reference", "candidate": title[:300]})
+                _filter_candidate(result, identity, "unsupplied_reference", original)
                 continue
             folder = "concepts" if kind == "concept" else "entities"
             path = f"{folder}/{_slug(name)}"
@@ -539,8 +613,7 @@ def accept_pages(
                 ):
                     # Later windows may echo an already saved page by its
                     # section key; that does not create a new outside target.
-                    result.filtered.append({"reason": "accepted_echo", "candidate": title[:300]})
-                    result.resolved_candidates[candidate_key] = candidate_name_key
+                    _filter_candidate(result, identity, "accepted_echo", original)
                     continue
                 raise ValueError("subject_outside_target")
             contexts: list[RangeValue] = []
@@ -572,22 +645,18 @@ def accept_pages(
                 if scope == "target_fallback":
                     # A repeated name without a located new section is an echo,
                     # not proof that the prior page owns this whole window.
-                    result.filtered.append({"reason": "accepted_echo", "candidate": title[:300]})
+                    _filter_candidate(result, identity, "accepted_echo", original, resolved=False)
                     continue
                 result.resolved_candidates[candidate_key] = candidate_name_key
                 before = len(previous.subject_ranges)
                 for value in ranges:
                     if value not in previous.subject_ranges:
                         previous.subject_ranges.append(value)
-                result.filtered.append(
-                    {
-                        "reason": (
-                            "accepted_echo"
-                            if len(previous.subject_ranges) == before
-                            else "merged_page"
-                        ),
-                        "candidate": title[:300],
-                    }
+                _filter_candidate(
+                    result,
+                    identity,
+                    "accepted_echo" if len(previous.subject_ranges) == before else "merged_page",
+                    original,
                 )
                 if previous.scope_resolution == "target_fallback":
                     previous.scope_resolution = "target_fallback"
@@ -614,8 +683,7 @@ def accept_pages(
                 {
                     "reason": str(exc),
                     "candidate": json.dumps(original, ensure_ascii=False)[:300],
-                    "candidate_key": candidate_key,
-                    "candidate_name_key": candidate_name_key,
+                    **identity,
                 }
             )
     return result
