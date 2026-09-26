@@ -50,7 +50,12 @@ def test_recompile_legacy_source_requires_review_without_overwriting(kb_dir, mod
     assert "needs_acceptance" in result.output
     assert "Resume:" in result.output
     assert "intake=saved, compilation=unfinished" in result.output
-    assert _wiki_bytes(kb_dir) == before
+    after = _wiki_bytes(kb_dir)
+    assert all(after[path] == content for path, content in before.items())
+    additions = set(after) - set(before)
+    assert additions and all(
+        path.as_posix().startswith("wiki/sources/snapshots/") for path in additions
+    )
     assert len(model_service) == 4
 
 

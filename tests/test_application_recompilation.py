@@ -37,7 +37,8 @@ def test_unknown_transport_recompile_retains_previous_summary(kb_dir, monkeypatc
     assert result.error_type is None
     assert result.document.reason == "request_outcome_unknown"
     assert result.document.stage == "planning"
-    assert not result.changes
+    assert len(result.changes) == 1
+    assert result.changes[0].startswith("updated: wiki/sources/snapshots/")
     assert "private provider detail" not in repr(result)
     assert summary.read_text() == original
     assert not list((kb_dir / ".openkb/journal").glob("*.json"))
@@ -146,17 +147,19 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
             value = (
                 "Three independent notes."
                 if payload.get("subtask") == "overview"
-                else {"pages": [
-                    {
-                        "local_key": f"page-{index}",
-                        "kind": "concept",
-                        "title": f"Page {index}",
-                        "purpose": f"Source note {index}",
-                        "subject_ranges": [[index, index + 1]],
-                        "necessary_context": [],
-                    }
-                    for index in range(start, end)
-                ]}
+                else {
+                    "pages": [
+                        {
+                            "local_key": f"page-{index}",
+                            "kind": "concept",
+                            "title": f"Page {index}",
+                            "purpose": f"Source note {index}",
+                            "subject_ranges": [[index, index + 1]],
+                            "necessary_context": [],
+                        }
+                        for index in range(start, end)
+                    ]
+                }
             )
         active -= 1
         return response(v4_plan(payload, value))
@@ -235,5 +238,6 @@ def test_unusable_markdown_plan_preserves_unowned_summary(kb_dir, monkeypatch, p
     assert result.status == "unfinished"
     assert result.message == "needs_acceptance"
     assert result.document.reason == "needs_acceptance"
-    assert result.changes == ()
+    assert len(result.changes) == 1
+    assert result.changes[0].startswith("updated: wiki/sources/snapshots/")
     assert (kb_dir / "wiki/summaries/note.md").read_text() == "Previous summary"

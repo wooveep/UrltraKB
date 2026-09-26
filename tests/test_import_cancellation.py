@@ -139,15 +139,21 @@ def test_stop_import_during_model_wait_rolls_back_and_reaps_worker(
         from openkb.application.source_history import source_status
 
         saved = source_status(kb_dir, document.source_id)
+        assert saved["source_queryable"]
         assert saved["result"]["knowledge_compilation"] == "stopped"
         assert saved["cumulative_usage"]["observable_attempts"] == 1
         assert result.succeeded == 0 and result.failed == 0 and result.unfinished == 2
         assert calls == ["stop-test"], "Cancellation started retries or another document"
-        assert {
+        wiki_after = {
             p.relative_to(kb_dir): p.read_bytes()
             for p in (kb_dir / "wiki").rglob("*")
             if p.is_file()
-        } == wiki_before
+        }
+        assert all(wiki_after[path] == content for path, content in wiki_before.items())
+        additions = set(wiki_after) - set(wiki_before)
+        assert additions and all(
+            path.as_posix().startswith("wiki/sources/snapshots/") for path in additions
+        )
         assert not (kb_dir / "raw" / source.name).exists()
         assert not list((kb_dir / ".openkb/journal").glob("*.json"))
     finally:

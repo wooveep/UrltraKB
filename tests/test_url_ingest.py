@@ -546,13 +546,19 @@ def test_url_ingest_keeps_knowledge_private_until_complete(kb_dir, monkeypatch, 
     import json
 
     from openkb.application.urls import import_url
-    from openkb.knowledge_commit import wiki_version
     from tests.http_model_fixture import evidence_response
 
-    before = wiki_version(kb_dir)
+    def knowledge_files():
+        return {
+            p: p.read_bytes()
+            for p in (kb_dir / "wiki").rglob("*")
+            if p.is_file() and not p.is_relative_to(kb_dir / "wiki/sources/snapshots")
+        }
+
+    before = knowledge_files()
 
     def respond(body):
-        assert wiki_version(kb_dir) == before
+        assert knowledge_files() == before
         return evidence_response(json.loads(body["messages"][-1]["content"]))
 
     model_service.respond = respond
@@ -560,7 +566,7 @@ def test_url_ingest_keeps_knowledge_private_until_complete(kb_dir, monkeypatch, 
         "openkb.url_ingest.fetch_url_to_raw", _prepared_fetch("paper.md", b"# Paper")
     )
     result = import_url(kb_dir, "https://example.test/paper")
-    assert result.status == "added" and wiki_version(kb_dir) != before
+    assert result.status == "added" and knowledge_files() != before
 
 
 def test_url_ingest_keeps_original_on_model_failure_and_continues_without_download(

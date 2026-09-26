@@ -90,12 +90,13 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
 
 
 def build_navigation(kb_dir, source, parsed, settings, *, bundle=None):
-    """Rebuild a saved parse and atomically switch only a matching published view."""
+    """Rebuild a saved parse and atomically refresh matching public bindings."""
     from openkb.compilation_report import collect_compile_report
     from openkb.locks import kb_ingest_lock
     from openkb.mutation import mutation_scope
     from openkb.navigation_usage import NavigationRun
     from openkb.processing import processing_scope
+    from openkb.query_sources import bind_query_source, query_source_bindings
     from openkb.state import HashRegistry
 
     store = SourceStore(kb_dir)
@@ -103,9 +104,16 @@ def build_navigation(kb_dir, source, parsed, settings, *, bundle=None):
         registry_path = kb_dir / ".openkb/hashes.json"
         registry = HashRegistry(registry_path)
         published = registry.get(source.source_id)
-        if published and (
-            published.get("source_version") != source.id or published.get("parse_id") != parsed.id
-        ):
+        query = query_source_bindings(kb_dir).get(source.source_id)
+        refresh_query = bool(
+            query and query["source_version"] == source.id and query["parse_id"] == parsed.id
+        )
+        refresh_published = bool(
+            published
+            and published.get("source_version") == source.id
+            and published.get("parse_id") == parsed.id
+        )
+        if published and not (refresh_published or refresh_query):
             raise ValueError(
                 "Rebuild parsing differs from published knowledge; compile and publish first"
             )
@@ -116,11 +124,20 @@ def build_navigation(kb_dir, source, parsed, settings, *, bundle=None):
                 result = prepare_navigation(
                     kb_dir, source, parsed, settings, bundle=bundle, reserve_compilation=False
                 )
-                if published:
+                if refresh_published or refresh_query:
+                    from openkb.pageindex_store import database_paths
+
                     with mutation_scope(
-                        kb_dir, [registry_path], operation="publish source navigation"
+                        kb_dir,
+                        [registry_path, *database_paths(kb_dir)],
+                        operation="publish source navigation",
                     ):
-                        registry.add(source.source_id, {**published, "navigation_id": result["id"]})
+                        if refresh_published:
+                            registry.add(
+                                source.source_id, {**published, "navigation_id": result["id"]}
+                            )
+                        if refresh_query:
+                            bind_query_source(kb_dir, source, parsed, result)
             finally:
                 run.finish(budget)
         return {**result, "usage": report.usage}

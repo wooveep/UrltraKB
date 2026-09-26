@@ -132,11 +132,10 @@ def test_import_preserves_saved_original_but_rejects_source_edit_before_publicat
     kb_dir, tmp_path, model_service
 ):
     from openkb.application.documents import import_document
-    from openkb.knowledge_commit import wiki_version
 
     source = tmp_path / "manual.txt"
     source.write_text("Original version")
-    before = wiki_version(kb_dir)
+    before = {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()}
 
     def edit_on_commit(event):
         if event.get("stage") == "committing":
@@ -144,7 +143,12 @@ def test_import_preserves_saved_original_but_rejects_source_edit_before_publicat
 
     result = import_document(kb_dir, source, on_event=edit_on_commit)
     assert result.status == "unfinished" and result.reason == "input_conflict"
-    assert wiki_version(kb_dir) == before
+    after = {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()}
+    assert all(after[p] == content for p, content in before.items())
+    assert set(after) - set(before)
+    assert all(
+        p.is_relative_to(kb_dir / "wiki/sources/snapshots") for p in set(after) - set(before)
+    )
     saved = SourceStore(kb_dir).version(result.input_version)
     assert SourceStore(kb_dir).original(saved).read_text() == "Original version"
 

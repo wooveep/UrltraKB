@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+import pytest
+
 from openkb.application.conversations import ask_question, continue_conversation
 from openkb.application.documents import import_document
 from openkb.application.source_history import source_status
@@ -332,10 +334,15 @@ def test_rebuilt_index_changes_query_binding_without_recompiling_original(
     assert seen == [rebuilt["id"]]
 
 
-def test_unpublished_new_version_never_replaces_original_used_by_query(
-    kb_dir, tmp_path, model_service
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_activated_original_is_queryable_when_new_knowledge_compilation_stops(
+    kb_dir, tmp_path, model_service, rebuild
 ):
+    import yaml
+
     from openkb.application.execution import ExecutionContext
+    from openkb.application.source_actions import rebuild_source_navigation
+    from openkb.state import HashRegistry
     from tests.http_model_fixture import original_source_answer
 
     source = tmp_path / "changing.md"
@@ -355,20 +362,38 @@ def test_unpublished_new_version_never_replaces_original_used_by_query(
     )
     assert second.knowledge_compilation == "stopped", second
     assert second.parse_id != first.parse_id
+    current = source_status(kb_dir, second.source_id)["query_source"]["navigation_id"]
+    assert current != old
+    registry_path = kb_dir / ".openkb/hashes.json"
+    published = HashRegistry(registry_path).get(first.source_id)
+    assert published["source_version"] == first.input_version
+    if rebuild:
+        before = {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()}
+        config_path = kb_dir / ".openkb/config.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["navigation"] = {"enabled": True}
+        config_path.write_text(yaml.safe_dump(config))
+        rebuilt = rebuild_source_navigation(
+            kb_dir, second.source_id, version_id=second.input_version, parse_id=second.parse_id
+        )
+        assert rebuilt["id"] != current
+        current = rebuilt["id"]
+        assert HashRegistry(registry_path).get(first.source_id) == published
+        assert {p: p.read_bytes() for p in (kb_dir / "wiki").rglob("*") if p.is_file()} == before
     seen = []
 
     def inspect(tree, result):
-        assert tree["id"] == old
-        assert all(row["reference"]["parse_id"] == first.parse_id for row in result["evidence"])
+        assert tree["id"] == current
+        assert all(row["reference"]["parse_id"] == second.parse_id for row in result["evidence"])
         text = " ".join(row["text"] for row in result["evidence"])
-        assert "37 kPa" in text and "99 kPa" not in text
+        assert "99 kPa" in text and "37 kPa" not in text
         seen.append(tree["id"])
-        return "Pressure is 37 kPa."
+        return "Pressure is 99 kPa."
 
     model_service.chat_response = original_source_answer(inspect)
     for operation in (ask_question, continue_conversation):
         assert asyncio.run(operation(kb_dir, "What pressure is published?")).status == "completed"
-    assert seen == [old, old]
+    assert seen == [current, current]
 
 
 def test_json_navigation_cannot_replace_the_pageindex_database(kb_dir, tmp_path, model_service):
