@@ -63,7 +63,11 @@ def validate_plan(
             from openkb.agent.document_planning_bindings import validate_bound
             from openkb.agent.document_planning_overview import validate_overview
 
-            validate_overview(plan.metadata)
+            validate_overview(
+                plan.metadata,
+                total_blocks=len(parsed.blocks),
+                block_chars=[block.chars for block in parsed.blocks],
+            )
             for suggestion in plan.metadata["deferred_suggestions"]:
                 for hint in suggestion["location_hints"]:
                     validate_bound(

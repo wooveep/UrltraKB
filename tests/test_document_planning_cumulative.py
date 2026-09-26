@@ -187,3 +187,98 @@ def test_legacy_window_overviews_require_new_cumulative_tasks_but_reuse_pages(tm
     assert seen == ["overview", "pages", "overview", "pages", "overview", "overview"]
     assert "Legacy" not in resumed.plan.overview.text
     assert len(resumed.plan.metadata["overview_snapshot"]["processed"]) == 2
+
+
+def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path):
+    from openkb.processing import ProcessingIncomplete
+
+    def respond(messages, *, settings):
+        return (
+            "A readable overview."
+            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            else "无需新增页面。"
+        )
+
+    settings = {**SETTINGS, "model": "gpt-4o"}
+    result = run_windows(tmp_path, respond, settings=settings)
+    with CompilationCheckpoints(tmp_path, _DummySource(), _parsed(), settings, None) as cp:
+        key = result.plan.metadata["recovery_key"]
+        state = cp.load_recovery(key, "markdown_plan")
+        state["overview_history"] = [None]
+        cp.save_recovery(key, "markdown_plan", state)
+    with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
+        run_windows(tmp_path, respond, settings=settings, resume=True)
+
+
+def test_large_processed_history_is_projected_before_source_is_split(tmp_path):
+    import litellm
+
+    settings = {
+        **SETTINGS,
+        "model": "gpt-4o",
+        "processing": {
+            **SETTINGS["processing"],
+            "context_tokens": 8192,
+            "max_context_tokens": 8192,
+            "output_tokens": 1024,
+            "max_output_tokens": 1024,
+        },
+    }
+    seen = []
+
+    def respond(messages, *, settings):
+        assert litellm.token_counter(model=settings["model"], messages=messages) <= 7168
+        body = json.loads(messages[-1]["content"])
+        seen.append(body)
+        return (
+            "A readable complete overview." if body["subtask"] == "overview" else "无需新增页面。"
+        )
+
+    result = run_windows(tmp_path, respond, settings=settings)
+    with CompilationCheckpoints(tmp_path, _DummySource(), _parsed(), settings, None) as cp:
+        key = result.plan.metadata["recovery_key"]
+        state = cp.load_recovery(key, "markdown_plan")
+        state["overview_snapshot"]["processed"] = [
+            {"window": str(i).zfill(64), "ranges": [[0, 1]]} for i in range(2000)
+        ]
+        for task in state["tasks"].values():
+            task.update(status="pending", attempts=0)
+        cp.save_recovery(key, "markdown_plan", state)
+    run_windows(tmp_path, respond, settings=settings, resume=True)
+    assert len(seen) == 8
+    assert seen[4]["carry"]["processed_overview"]["omitted"]
+
+
+def test_nested_capacity_splits_inherit_the_original_overview_input(tmp_path, monkeypatch):
+    from openkb.processing import InputTooLarge
+    from tests.test_document_orchestrator import _DummyParsed
+
+    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
+    source, parsed = _DummySource(), _DummyParsed(4)
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    calls = []
+
+    def respond(messages, *, settings):
+        body = json.loads(messages[-1]["content"])
+        calls.append(body["subtask"])
+        if body["subtask"] == "overview":
+            return "The entire source describes a procedure."
+        if body["target"]["target_end"] - body["target"]["target_start"] > 1:
+            raise InputTooLarge()
+        return "无需新增页面。"
+
+    with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as cp:
+        result = plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            None,
+            SETTINGS,
+            cp,
+            mock_caller=respond,
+            plan_only=True,
+            return_result=True,
+        )
+    assert result.outcome == "complete" and calls.count("overview") == 1

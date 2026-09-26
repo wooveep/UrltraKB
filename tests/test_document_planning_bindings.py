@@ -197,3 +197,49 @@ def test_replayed_parent_alias_uses_its_saved_mapping_in_a_different_child_reque
     assert [row["text"] for row in prepared.evidence["blocks"]] == [
         "Obtain the access token first."
     ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "{alias}; section:missing",
+        ["{alias}", "Unknown chapter"],
+        {"from_block": "{alias}", "through_block": "missing"},
+    ],
+)
+def test_alias_cannot_hide_an_unresolved_required_selection(kb_dir, tmp_path, value):
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    messages, aliases = request(source, parsed, reader, [(1, 0, parsed.blocks[1].chars)])
+    value = json.loads(json.dumps(value).replace("{alias}", aliases[0]))
+    page = accept_bound(
+        json.dumps({"title": "Procedure", "kind": "concept", "section": value}),
+        source,
+        parsed,
+        reader,
+        messages,
+    ).pages[0]
+    assert prepare_page(page, source, parsed, None, reader).page.state == "skipped"
+
+
+@pytest.mark.parametrize("bound", [True, False])
+def test_mixed_optional_hint_keeps_the_stable_heading_with_or_without_alias_map(
+    kb_dir, tmp_path, bound
+):
+    from openkb.agent.document_planning_bindings import capture_request
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    messages, aliases = request(source, parsed, reader, [(1, 0, parsed.blocks[1].chars)])
+    binding = capture_request(messages, source, parsed, {}, reader.sources) if bound else None
+    page = accept_pages(
+        json.dumps({"title": "Procedure", "kind": "concept", "related": f"{aliases[0]}; Install"}),
+        navigation=[],
+        target=[[0, 6]],
+        parsed=parsed,
+        entity_types=[],
+        existing_targets=set(),
+        source_identity=source.source_id,
+        request_binding=binding,
+    ).pages[0]
+    prepared = prepare_page(page, source, parsed, None, reader)
+    assert prepared.page.state == "ready"
+    assert any("Run setup" in row["text"] for row in prepared.evidence["blocks"])

@@ -15,6 +15,7 @@ from openkb.agent.document_planning_locations import (
 )
 from openkb.agent.document_planning_pages import (
     DEFAULT_PURPOSE,
+    distinct_scope,
     merge_page,
     normalized_name,
     select_page_path,
@@ -594,11 +595,17 @@ def accept_pages(
             str(source_identity or getattr(parsed, "id", "")), kind, subtype, name, title, proposed
         )
         previous = next((page for page in known.values() if page.key == page_key), None)
+        if previous is not None and distinct_scope(previous, purpose, hints):
+            page_key = "page:" + content_id((page_key, purpose))[:24]
+            previous = next((page for page in known.values() if page.key == page_key), None)
         extension = _first_text(row.get("extends"))
         if not proposed and (extension or name == title):
             prior_suggestions = matching_suggestions(
                 extension or title, known.values(), known_annotations
             )
+            prior_suggestions = [
+                page for page in prior_suggestions if not distinct_scope(page, purpose, hints)
+            ]
             if len(prior_suggestions) == 1 and (
                 prior_suggestions[0].kind,
                 prior_suggestions[0].type,
@@ -671,14 +678,19 @@ def accept_pages(
             )
         add_annotation(result.annotations, page_key, annotation(original, decision, title, origin))
         add_annotation(known_annotations, page_key, annotation(original, decision, title, origin))
-        already_promoted = {row["deferred_key"] for row in result.promoted_suggestions}
-        promote_deferred(
-            result,
-            previous or page,
-            [
-                row
-                for row in (deferred or []) + result.deferred_suggestions
-                if row["key"] not in already_promoted
-            ],
-        )
+    for page in known.values():
+        if (
+            page.key in result.annotations
+            and len(matching_suggestions(page.title, known.values(), known_annotations)) == 1
+        ):
+            already_promoted = {row["deferred_key"] for row in result.promoted_suggestions}
+            promote_deferred(
+                result,
+                page,
+                [
+                    row
+                    for row in (deferred or []) + result.deferred_suggestions
+                    if row["key"] not in already_promoted
+                ],
+            )
     return result

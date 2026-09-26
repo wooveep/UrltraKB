@@ -137,3 +137,44 @@ def test_deferred_promotion_preserves_both_origins_and_does_not_double_count():
     assert len(state["promoted_suggestions"]) == 1
     assert len(state["suggestion_annotations"][result.pages[0].key]["origins"]) == 2
     assert {"先保留用途", "现在有明确类别"} <= set(result.pages[0].planning_notes)
+
+
+def test_configured_default_only_fills_an_absent_entity_subtype():
+    missing = accept('{"title":"Meter","kind":"entity"}', default_entity_type="product")
+    assert missing.pages[0].type == "product"
+    unknown = accept(
+        '{"title":"Meter","kind":"entity","type":"unrecognized"}', default_entity_type="product"
+    )
+    assert not unknown.pages and unknown.deferred_suggestions[0]["reason"] == "entity_type_unknown"
+
+
+def test_conflicting_later_labels_survive_deferred_merges_and_prevent_promotion():
+    from openkb.agent.document_planning_semantics import record_semantics
+
+    state = {}
+    record_semantics(state, accept('{"title":"Setup"}'))
+    record_semantics(state, accept('{"title":"Setup","kind":"concept","type":"product"}'))
+    result = accept('{"title":"Setup","kind":"concept"}', deferred=state["deferred_suggestions"])
+    record_semantics(state, result)
+    assert state["deferred_suggestions"][0]["reason"] == "classification_conflict"
+    assert state["deferred_suggestions"][0]["labels"]["type"] == "product"
+    assert not state["promoted_suggestions"]
+
+
+def test_deferred_promotion_waits_for_the_whole_response_to_resolve_classification():
+    prior = accept('{"title":"Mercury"}')
+    result = accept(
+        '[{"title":"Mercury","kind":"concept"},{"title":"Mercury","kind":"entity","type":"product"}]',
+        deferred=prior.deferred_suggestions,
+    )
+    assert len(result.pages) == 2 and not result.promoted_suggestions
+
+
+def test_same_title_with_explicit_different_scopes_retains_both_suggestions():
+    result = accept(
+        '[{"title":"Installation","kind":"concept","purpose":"Linux server only",'
+        '"section":"Linux"},{"title":"Installation","kind":"concept",'
+        '"purpose":"Windows client only","section":"Windows"}]'
+    )
+    assert len(result.pages) == 2
+    assert result.pages[0].key != result.pages[1].key

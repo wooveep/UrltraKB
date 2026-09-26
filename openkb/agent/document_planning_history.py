@@ -76,7 +76,7 @@ def previous_responses(checkpoints, windows):
             for window in candidate["windows"]
             if window_receipt_id(window) in candidate["fragments"]
         )
-        if tasks:
+        if tasks or retained:
             return (
                 candidate["windows"],
                 tasks,

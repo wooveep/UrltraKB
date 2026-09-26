@@ -193,7 +193,8 @@ def _classification(row, group, types, default, notes):
     subtype = next(iter(subtypes), None)
     basis = "explicit" if any(_kind(v) or _entity_type(v, types) for _, v in labels) else "group"
     if kind == "entity" and subtype is None:
-        if default not in types:
+        unknown_subtype = any(key == "type" and _kind(value) is None for key, value in labels)
+        if default not in types or unknown_subtype:
             return Classification(None, None, basis, "entity_type_unknown")
         subtype, basis = default, "configured_default"
         notes.append("实体细类采用配置默认值：" + str(default))
@@ -251,6 +252,17 @@ def record_semantics(state, result):
         if previous is None:
             deferred.append(incoming)
         else:
+            for field, value in incoming["labels"].items():
+                if field not in previous["labels"]:
+                    previous["labels"][field] = value
+                elif previous["labels"][field] != value:
+                    old = previous["labels"][field]
+                    values = (old if isinstance(old, list) else [old]) + (
+                        value if isinstance(value, list) else [value]
+                    )
+                    previous["labels"][field] = list(dict.fromkeys(values))
+            if incoming["reason"] == "classification_conflict":
+                previous["reason"] = incoming["reason"]
             for field in ("location_hints", "notes", "origins"):
                 previous[field].extend(row for row in incoming[field] if row not in previous[field])
     annotations = state.setdefault("suggestion_annotations", {})
@@ -344,6 +356,17 @@ def validate_semantics(metadata):
     annotations = metadata.get("suggestion_annotations")
     if not isinstance(deferred, list) or not isinstance(annotations, dict):
         raise ValueError("Invalid planning suggestions")
+    if not isinstance(metadata.get("batch_notes", []), list) or any(
+        not isinstance(value, str) for value in metadata.get("batch_notes", [])
+    ):
+        raise ValueError("Invalid planning explanations")
+    if not isinstance(metadata.get("promoted_suggestions", []), list) or any(
+        not isinstance(row, dict)
+        or set(row) != {"deferred_key", "page_key"}
+        or any(not isinstance(value, str) for value in row.values())
+        for row in metadata.get("promoted_suggestions", [])
+    ):
+        raise ValueError("Invalid promoted suggestions")
     for row in deferred:
         if (
             not isinstance(row, dict)

@@ -116,12 +116,26 @@ def _span(first, last, binding, parsed):
 
 
 def _resolve_aliases(raw, binding, parsed):
-    if isinstance(raw, dict) and {"from_block", "through_block"} <= raw.keys():
-        text = str(raw["from_block"]) + "–" + str(raw["through_block"])
-    else:
-        text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+    if isinstance(raw, list):
+        ranges, unresolved = [], []
+        for item in raw:
+            selected, missing = _resolve_aliases(item, binding, parsed)
+            ranges.extend(row for row in selected if row not in ranges)
+            unresolved.extend(missing)
+        return ranges, unresolved
+    text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+    if isinstance(raw, dict):
+        if set(raw) == {"from_block", "through_block"}:
+            if not all(isinstance(raw[key], str) and _ALIAS.fullmatch(raw[key]) for key in raw):
+                return [], [text]
+            text = raw["from_block"] + "–" + raw["through_block"]
+        elif "block" not in raw or set(raw) - {"block", "start_char", "end_char"}:
+            return [], [text]
     tokens = list(_ALIAS.finditer(text))
+    if not tokens:
+        return [], [text]
     ranges, unresolved = [], []
+    unresolved.extend(re.findall(r"section:[A-Za-z0-9_-]+", text))
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -138,7 +152,11 @@ def _resolve_aliases(raw, binding, parsed):
         if selected is None:
             unresolved.append(token.group())
         else:
-            if isinstance(raw, dict) and "block" in raw and "start_char" in raw:
+            if (
+                isinstance(raw, dict)
+                and "block" in raw
+                and ("start_char" in raw or "end_char" in raw)
+            ):
                 start, end = raw.get("start_char"), raw.get("end_char")
                 if (
                     type(start) is not int
@@ -156,15 +174,26 @@ def _resolve_aliases(raw, binding, parsed):
 
 
 def bind_hints(hints, binding, parsed, notes):
+    from openkb.agent.document_planning_locations import context_choices
+
     result = []
     for hint in hints:
         value = hint["value"]
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        if _ALIAS.search(text):
+            choices = context_choices(value, [])
+            if len(choices) > 1:
+                result.extend(
+                    bind_hints(
+                        [{**hint, "value": choice} for choice in choices], binding, parsed, notes
+                    )
+                )
+                continue
         if isinstance(value, dict) and value.get("format") == "bound-location-v1":
             # This representation is program-owned; model text cannot supply it.
             result.append({**hint, "value": {"untrusted_location": value}})
             notes.append("模型提供的程序定位字段未作为读取授权")
             continue
-        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
         if not _ALIAS.search(text):
             result.append(hint)
             continue

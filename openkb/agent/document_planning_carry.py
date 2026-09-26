@@ -60,12 +60,19 @@ def project_messages(
     retained = list(range(len(paragraphs)))
     nav = list(hints)
     detailed, shown = len(full), len(full)
+    processed = (state.get("overview_snapshot") or {}).get("processed", [])
+    visible_processed = len(processed)
 
     def build():
         carry = {
             "overview": "\n\n".join(paragraphs[i] for i in sorted(retained)),
             "overview_input_clipped": len(retained) != len(paragraphs),
-            "processed_overview": (state.get("overview_snapshot") or {}).get("processed", []),
+            "processed_overview": {
+                "total_windows": len(processed),
+                "shown_windows": visible_processed,
+                "ranges": [row["ranges"] for row in processed[:visible_processed]],
+                "omitted": visible_processed < len(processed),
+            },
             "pages": full[:detailed],
             "other_titles": compact[detailed:shown],
             "suggestions": {"total": len(full), "shown": shown, "omitted": shown < len(full)},
@@ -88,6 +95,7 @@ def project_messages(
             "overview_input_clipped": carry["overview_input_clipped"],
             "suggestions": carry["suggestions"],
             "navigation_omitted": len(nav) < len(hints),
+            "processed_ranges_omitted": visible_processed < len(processed),
         }
 
     def fits():
@@ -103,6 +111,10 @@ def project_messages(
     nav.sort(key=lambda row: -_relevance(row.get("title", ""), context))
     while nav:
         nav = nav[: len(nav) // 2]
+        if fits():
+            return build()
+    while visible_processed:
+        visible_processed //= 2
         if fits():
             return build()
     # Whole paragraphs only, with introduction, limits and current themes first.

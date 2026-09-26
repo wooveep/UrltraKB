@@ -25,6 +25,20 @@ def suggestion_key(
     return "page:" + content_id((source, kind, subtype, identity))[:24]
 
 
+def distinct_scope(previous: PagePlan, purpose: str, hints: list[dict]) -> bool:
+    """Keep explicitly exclusive purposes apart; do not infer general semantic aliases."""
+    if purpose in {DEFAULT_PURPOSE, previous.purpose} or previous.purpose == DEFAULT_PURPOSE:
+        return False
+    exclusive = r"\bonly\b|\bexclusively\b|\bfor\b|仅|专用|适用于|面向"
+    return bool(
+        re.search(exclusive, purpose, re.I)
+        and re.search(exclusive, previous.purpose, re.I)
+        and hints
+        and previous.location_hints
+        and not any(hint in previous.location_hints for hint in hints)
+    )
+
+
 def merge_page(previous: PagePlan, incoming: PagePlan, *, add_subject: bool) -> bool:
     """Validate identity before atomically retaining every supported increment."""
     if any(

@@ -187,6 +187,7 @@ def _split_window(
                     "reason": parent_task.get("reason"),
                     "no_pages_recommended": parent_task.get("no_pages_recommended", False),
                     "inherited_from": _task_id(window, subtask),
+                    "input_ranges": parent_task["input_ranges"],
                 }
         if parent_task:
             parent_task.update(

@@ -59,22 +59,48 @@ def overview_summary(state):
     }
 
 
-def validate_overview(state):
+def validate_overview(state, *, total_blocks=None, block_chars=None):
+    from openkb.agent.document_range_validation import validate_ranges
+    from openkb.sources import valid_id
+
+    if total_blocks is None:
+        windows = state.get("windows", [])
+        if not isinstance(windows, list) or any(
+            not isinstance(row, dict) or type(row.get("target_end")) is not int for row in windows
+        ):
+            raise ValueError("Invalid overview windows")
+        total_blocks = max((row["target_end"] for row in windows), default=0)
     snapshot = state.get("overview_snapshot")
-    if snapshot is not None:
+    history = state.get("overview_history", [])
+    if not isinstance(history, list):
+        raise ValueError("Invalid overview history")
+    for record in ([snapshot] if snapshot is not None else []) + history:
         if (
-            not isinstance(snapshot, dict)
-            or not isinstance(snapshot.get("text"), str)
-            or not isinstance(snapshot.get("response"), str)
-            or type(snapshot.get("input_clipped")) is not bool
+            not isinstance(record, dict)
+            or not isinstance(record.get("response"), str)
+            or type(record.get("input_clipped")) is not bool
+            or not isinstance(record.get("text", ""), str)
         ):
             raise ValueError("Invalid overview snapshot")
-        if not isinstance(snapshot.get("processed"), list) or any(
+        valid_id(record["response"])
+        if record.get("binding") is not None:
+            valid_id(record["binding"])
+        if not isinstance(record.get("processed"), list) or any(
             not isinstance(row, dict)
             or not isinstance(row.get("window"), str)
             or not isinstance(row.get("ranges"), list)
-            for row in snapshot["processed"]
+            for row in record["processed"]
         ):
             raise ValueError("Invalid overview processing record")
-    if not isinstance(state.get("overview_history", []), list):
-        raise ValueError("Invalid overview history")
+        for row in record["processed"]:
+            validate_ranges(
+                row["ranges"], total_blocks, "overview processed", block_chars=block_chars
+            )
+    legacy = state.get("legacy_overview_fragments", [])
+    if not isinstance(legacy, list) or any(
+        not isinstance(row, dict)
+        or type(row.get("start")) is not int
+        or not isinstance(row.get("text"), str)
+        for row in legacy
+    ):
+        raise ValueError("Invalid legacy overview fragments")
