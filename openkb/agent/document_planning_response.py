@@ -21,6 +21,17 @@ from openkb.agent.document_planning_pages import (
     suggestion_key,
 )
 from openkb.agent.document_planning_pages import _slug as _slug
+from openkb.agent.document_planning_semantics import (
+    _ALIASES,
+    _classification,
+    _field_name,
+    _first_text,
+    _kind,
+    _label,
+    annotation,
+    deferred_suggestion,
+)
+from openkb.sources import content_id
 
 _FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
 _ITEM = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.*)$")
@@ -34,61 +45,6 @@ _NO_PAGES = re.compile(
 _PLACEHOLDER = re.compile(
     r"^(?:待补充|无内容|暂无|n/?a|none|placeholder|todo|无法判断|没有足够信息)[。.!\s]*$", re.I
 )
-_ALIASES = {
-    "name": {"name", "page", "名称", "页面", "页面名称", "页面名称/标题", "page name"},
-    "title": {"title", "page title", "标题", "页面标题"},
-    "kind": {"kind", "类别", "分类", "页面类别", "category"},
-    "type": {"type", "类型", "页面类型", "实体类型", "entity type"},
-    "section": {
-        "section",
-        "sections",
-        "selection",
-        "主体章节",
-        "依据章节",
-        "章节定位",
-        "章节路径",
-        "来源章节",
-        "原文章节",
-        "定位",
-        "section location",
-        "来源位置",
-        "source location",
-        "章节",
-        "主体范围",
-        "位置",
-        "section_key",
-        "heading_path",
-        "subject_ranges",
-    },
-    "context": {"context", "必要上下文", "前提章节", "context_sections"},
-    "related": {
-        "related",
-        "相关章节",
-        "keywords",
-        "关键词",
-        "相关线索",
-        "位置线索",
-        "定位线索",
-        "定位提示",
-        "location",
-        "location clues",
-        "location hints",
-        "reference",
-        "参考",
-    },
-    "purpose": {
-        "purpose",
-        "用途",
-        "用途说明",
-        "说明",
-        "注意事项",
-        "建议依据",
-        "description",
-        "rationale",
-    },
-    "references": {"references", "外部参考", "参考资料", "external_references"},
-    "target": {"target", "target_key", "目标页面"},
-}
 
 
 @dataclass
@@ -106,10 +62,13 @@ class PageAcceptance:
     resolved_candidates: dict[str, str | None] = field(default_factory=dict)
     no_pages: bool = False
     truncated: bool = False
+    deferred_suggestions: list[dict[str, Any]] = field(default_factory=list)
+    annotations: dict[str, Any] = field(default_factory=dict)
+    batch_notes: list[str] = field(default_factory=list)
 
     @property
     def usable(self) -> bool:
-        return bool(self.pages or self.filtered or self.no_pages)
+        return bool(self.pages or self.deferred_suggestions or self.filtered or self.no_pages)
 
 
 def _unfence(text: str, *, preserve_trailing: bool = False) -> str:
@@ -160,83 +119,6 @@ def accept_overview(raw: Any) -> OverviewAcceptance:
     return OverviewAcceptance(content, "overview_truncated" if truncated else None, truncated)
 
 
-def _label(value: str) -> str:
-    return " ".join(value.strip(" *`\t\r\n").lower().replace("_", " ").split())
-
-
-def _field_name(value: str) -> str | None:
-    key = _label(value)
-    exact = next(
-        (
-            name
-            for name, aliases in _ALIASES.items()
-            if key in aliases or key.replace(" ", "_") in aliases
-        ),
-        None,
-    )
-    if exact:
-        return exact
-    plain = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", key)
-    plain = re.sub(r"^(?:建议(?:的)?|suggested\s+)", "", plain)
-    if plain != key and (field_name := _field_name(plain)):
-        return field_name
-    # Composite display labels preserve their recognizable field, without
-    # requiring one fixed heading spelling or guessing at arbitrary prose.
-    parts = re.split(r"\s*[/／]\s*", key)
-    if len(parts) > 1:
-        fields = {_field_name(part) for part in parts} - {None}
-        if fields <= {"name", "title"} and fields:
-            return "title"
-        if len(fields) == 1:
-            return next(iter(fields))
-        if fields <= {"section", "context", "related"} and fields:
-            return "related"
-    if re.fullmatch(
-        r"(?:建议(?:的)?|页面|概念|实体|suggested |concept |entity |page )+"
-        r"(?:名称|标题|name|title)",
-        key,
-    ):
-        return "title"
-    if "section key" in key or "heading path" in key or "章节位置" in key:
-        return "section"
-    if "标题路径" in key or key.startswith("章节/"):
-        return "section"
-    if key.startswith("page title"):
-        return "title"
-    if key.startswith("说明/"):
-        return "purpose"
-    return None
-
-
-def _kind(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    label = value.strip().lower()
-    if label.startswith("concept") or label.startswith("概念"):
-        return "concept"
-    if label.startswith("entit") or label.startswith("实体"):
-        return "entity"
-    return None
-
-
-def _entity_type(value: Any, allowed: list[str]) -> str | None:
-    original = str(value or "").strip().lower()
-    nested = re.fullmatch(r"(?:entity|实体)\s*[（(]([^）)]+)[）)]", original)
-    label = nested.group(1).strip() if nested else re.sub(r"\s*[（(].*$", "", original)
-    aliases = {
-        "产品": "product",
-        "作品": "work",
-        "工作": "work",
-        "人物": "person",
-        "组织": "organization",
-        "地点": "place",
-        "事件": "event",
-        "其他": "other",
-    }
-    normalized = aliases.get(label, label)
-    return normalized if normalized in allowed else None
-
-
 def _summary_category(row: dict[str, Any], page_kind: str | None) -> bool:
     return page_kind is None and any(
         isinstance(row.get(key), str)
@@ -272,7 +154,7 @@ def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, 
         return [
             {
                 **value,
-                **({"kind": inherited_kind} if inherited_kind and "kind" not in value else {}),
+                **({"group_kind": inherited_kind} if inherited_kind else {}),
             }
         ]
     rows: list[dict[str, Any]] = []
@@ -284,7 +166,9 @@ def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, 
     return rows
 
 
-def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, Any]]:
+def _markdown_rows(
+    content: str, *, truncated: bool = False, batch_notes: list[str] | None = None
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     group: str | None = None
     current: dict[str, Any] | None = None
@@ -302,7 +186,7 @@ def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, A
             label = heading.group(2).strip()
             next_group = _kind(label) or _kind(label.removesuffix("页面"))
             if next_group:
-                group = next_group
+                group = label
                 current = None
             elif len(heading.group(1)) == 2:
                 group = None
@@ -349,6 +233,8 @@ def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, A
             continue
         match = _FIELD.match(body)
         if item and not match and (body.endswith(("。", ".", "！", "!", "；", ";"))):
+            if batch_notes is not None:
+                batch_notes.append(body)
             current = None
             continue
         if item and (not match or _field_name(match.group(1)) in {"name", "title"}):
@@ -374,6 +260,8 @@ def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, A
             ends[id(current)] = line_index
             if not any(current is row for row in rows):
                 rows.append(current)
+        elif not item and current is None and batch_notes is not None:
+            batch_notes.append(line.strip())
     # Tables are independent of surrounding lists and column order.
     for index, line in enumerate(lines[:-2]):
         if not line.strip().startswith("|") or not re.fullmatch(r"[\s|:\-]+", lines[index + 1]):
@@ -497,7 +385,9 @@ def _json_structure_closed(content: str) -> bool:
     return not quoted and not stack
 
 
-def extract_candidates(raw: Any) -> tuple[list[dict[str, Any]], bool, bool]:
+def extract_candidates(
+    raw: Any, *, batch_notes: list[str] | None = None
+) -> tuple[list[dict[str, Any]], bool, bool]:
     content = _unfence(str(raw or ""), preserve_trailing=True)
     truncated = getattr(raw, "finish_reason", None) == "length"
     if content.startswith(("{", "[")):
@@ -514,7 +404,7 @@ def extract_candidates(raw: Any) -> tuple[list[dict[str, Any]], bool, bool]:
                 value = None
         rows = _json_rows(value)
         return rows, False, truncated
-    rows = _markdown_rows(content, truncated=truncated)
+    rows = _markdown_rows(content, truncated=truncated, batch_notes=batch_notes)
     no_pages = bool(_NO_PAGES.search(content)) and not rows
     return rows, no_pages, truncated
 
@@ -557,44 +447,6 @@ def _normalize(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return result, conflicts
 
 
-def _display_title(value: Any) -> str:
-    title = str(value or "").strip()
-    for opening, closing in (("「", "」"), ("『", "』"), ("《", "》")):
-        if title.startswith(opening) and title.endswith(closing):
-            return title[1:-1].strip()
-    return title
-
-
-def _first_text(value: Any) -> str:
-    values = value if isinstance(value, list) else [value]
-    return next(
-        (_display_title(item) for item in values if isinstance(item, str) and item.strip()), ""
-    )
-
-
-def _classification(
-    row: dict[str, Any], group: str | None, types: list[str], default: str | None, notes: list[str]
-) -> tuple[str, str | None]:
-    explicit = _first_text(row.get("kind"))
-    supplied = _first_text(row.get("type"))
-    subtype = _entity_type(supplied, types) or _entity_type(explicit, types)
-    kind = _kind(explicit) or group or _kind(supplied) or ("entity" if subtype else None)
-    if (_kind(explicit) or group) and (
-        _kind(supplied) not in {None, kind} or subtype and kind != "entity"
-    ):
-        notes.append("分类表达冲突，保留组织类别：" + str(kind) + "；原分类：" + supplied)
-    if kind is None:
-        kind = "concept"
-        notes.append("类别未明确，按 concept 建议保留")
-    if kind == "entity" and subtype is None:
-        subtype = default if default in types else None
-        notes.append("实体细类未明确：" + (supplied or explicit or "未提供"))
-        if subtype is None:
-            kind = "concept"
-            notes.append("无合法默认实体细类，按 concept 建议保留")
-    return kind, subtype if kind == "entity" else None
-
-
 def _hints(row: dict[str, Any]) -> list[dict[str, Any]]:
     roles = {"section": "subject", "context": "context", "related": "related"}
     hints = []
@@ -625,19 +477,26 @@ def accept_pages(
     """Retain recognizable organization suggestions; evidence is prepared before generation."""
     from openkb.agent.document_planning_locations import resolve_hint
 
-    rows, no_pages, truncated = extract_candidates(raw)
-    result = PageAcceptance(no_pages=no_pages, truncated=truncated)
+    batch_notes: list[str] = []
+    rows, no_pages, truncated = extract_candidates(raw, batch_notes=batch_notes)
+    result = PageAcceptance(no_pages=no_pages, truncated=truncated, batch_notes=batch_notes)
     known = {page.name: page for page in accepted or []}
     if not rows and not no_pages:
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
-    for original in rows:
+    for entry, original in enumerate(rows):
         row, conflicts = _normalize(original)
         notes = ["字段存在不同表达：" + field for field in conflicts]
+        for field_name, value in row.items():
+            if field_name == "notes":
+                notes.extend(str(item) for item in (value if isinstance(value, list) else [value]))
+            elif field_name not in _ALIASES and field_name != "group_kind" and value:
+                notes.append(f"{field_name}：{value}")
         title = _first_text(row.get("title")) or _first_text(row.get("name"))
         name = _first_text(row.get("name")) or title
-        kind, subtype = _classification(
-            row, _kind(original.get("group_kind")), entity_types, default_entity_type, notes
+        decision = _classification(
+            row, original.get("group_kind"), entity_types, default_entity_type, notes
         )
+        kind, subtype = decision.kind, decision.subtype
         identity = candidate_identity(row, kind, title, name, reliable=bool(title))
         if _summary_category(
             row,
@@ -677,6 +536,23 @@ def accept_pages(
             node.get("title") == title for node in navigation
         ):
             _filter_candidate(result, identity, "unsupplied_reference", original)
+            continue
+        hints = _hints(original)
+        purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
+        origin = {"response": content_id(str(raw)), "entry": entry}
+        if kind is None:
+            result.deferred_suggestions.append(
+                deferred_suggestion(
+                    original,
+                    title,
+                    purpose,
+                    hints,
+                    notes,
+                    origin,
+                    source_identity or getattr(parsed, "id", ""),
+                    decision.reason,
+                )
+            )
             continue
         proposed = _first_text(row.get("target"))
         folder = "concepts/" if kind == "concept" else "entities/"
@@ -721,7 +597,6 @@ def accept_pages(
                 }
             )
             continue
-        hints = _hints(original)
         subjects: list[RangeValue] = []
         contexts: list[RangeValue] = []
         scope = None
@@ -737,7 +612,6 @@ def accept_pages(
                         scope = resolution
                 except ValueError:
                     notes.append("待取证线索：" + str(clue)[:120])
-        purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
         page = PagePlan(
             key=page_key,
             kind=kind,
@@ -764,4 +638,5 @@ def accept_pages(
             result.resolved_candidates[identity["candidate_key"]] = identity.get(
                 "candidate_name_key"
             )
+        result.annotations[page_key] = annotation(original, decision, title, origin)
     return result

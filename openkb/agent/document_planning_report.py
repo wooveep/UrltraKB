@@ -140,21 +140,21 @@ def _finalize(
         atomic_write_text(overview_path, overview)
         overview_ref = str(overview_path)
     pages = [PagePlan.from_dict(item) for item in state["pages"]]
+    deferred = state.get("deferred_suggestions", [])
+    has_products = bool(overview or pages or deferred)
     omissions = _omissions(state, windows, parsed)
     failed = bool(omissions)
-    outcome = (
-        "partial"
-        if (overview or pages) and failed
-        else "complete"
-        if (overview or pages)
-        else "empty"
-    )
-    if pages and not overview:
+    outcome = "partial" if has_products and failed else "complete" if has_products else "empty"
+    if (pages or deferred) and not overview:
         outcome = "partial"
     if state.get("budget_limited"):
         outcome = "budget_limited"
     metadata = {
         "protocol": "document-plan-v4",
+        "planning_semantics": "tolerant-quality-v1",
+        "deferred_suggestions": deferred,
+        "suggestion_annotations": state.get("suggestion_annotations", {}),
+        "batch_notes": state.get("batch_notes", []),
         "source_id": source.source_id,
         "version_id": source.id,
         "parse_id": parsed.id,
@@ -174,7 +174,7 @@ def _finalize(
         },
     }
     plan = None
-    if overview or pages:
+    if has_products:
         plan = DocumentPlan(
             metadata=metadata,
             overview=OverviewPlan(
@@ -248,6 +248,7 @@ def _finalize(
         "pages": len(pages),
         "suggestions": {
             "accepted": len(pages),
+            "deferred": len(deferred),
             "merged": sum(row.get("reason") == "merged_page" for row in state["filtered"]),
             "dropped": sum(row.get("reason") == "dropped_item" for row in state["rejected"]),
         },
@@ -261,6 +262,7 @@ def _finalize(
         "source_queryable": _source_queryable(checkpoints.store.kb_dir, source, parsed),
         "no_pages_recommended": bool(windows)
         and not pages
+        and not deferred
         and all(
             state["tasks"].get(_task_id(window, "pages"), {}).get("no_pages_recommended")
             for window in windows

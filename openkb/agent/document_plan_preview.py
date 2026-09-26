@@ -184,6 +184,19 @@ def render_plan_preview(plan: DocumentPlan) -> str:
                 f"{item.reason}；受影响页面：{', '.join(item.affected_pages)}"
             )
         lines.append("")
+    if deferred := plan.metadata.get("deferred_suggestions"):
+        lines.extend(["## 待分类建议", ""])
+        for suggestion in deferred:
+            lines.extend(
+                [
+                    f"### {suggestion['title']}",
+                    "",
+                    suggestion["purpose"],
+                    f"待分类原因：{suggestion['reason']}",
+                    *[f"- {note}" for note in suggestion["notes"]],
+                    "",
+                ]
+            )
     if plan.planning_omissions:
         lines.extend(["## 本轮处理遗漏", ""])
         receipts = plan.metadata.get("accepted_window_receipts", [])

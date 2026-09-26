@@ -8,7 +8,7 @@ import unicodedata
 from openkb.agent.document_plan import PagePlan
 from openkb.sources import content_id
 
-DEFAULT_PURPOSE = "根据已选原文整理本主题"
+DEFAULT_PURPOSE = "拟整理该主题，具体内容待原文核对"
 
 
 def normalized_name(value: str) -> str:

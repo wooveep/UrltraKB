@@ -56,6 +56,10 @@ def validate_plan(
         valid_id(plan.metadata.get("version_id"))
         if plan.metadata.get("parse_id") != parsed.id:
             raise ValueError("DocumentPlan parsing identity mismatch")
+        if "planning_semantics" in plan.metadata:
+            from openkb.agent.document_planning_semantics import validate_semantics
+
+            validate_semantics(plan.metadata)
     if plan.overview.status not in {"partial", "complete"}:
         raise ValueError("Invalid overview status")
     zero_readable_body = plan.metadata.get("zero_readable_body") is True
