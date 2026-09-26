@@ -92,6 +92,58 @@ def test_unknown_hint_skips_one_page_but_io_failure_is_not_content_success(kb_di
         prepare_page(page, source, parsed, None, BrokenReader())
 
 
+@pytest.mark.parametrize("separator", ["、", ",", "，", ";", "\n"])
+@pytest.mark.parametrize("role", ["subject", "related"])
+def test_multiple_keys_remain_distinct_required_or_optional_selections(
+    kb_dir, tmp_path, separator, role
+):
+    from openkb.agent.document_page_resolution import prepare_page
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    navigation = {
+        "nodes": [
+            {"id": "credentials", "parent": None, "start": 0, "end": 2, "title": "Credentials"},
+            {"id": "install", "parent": None, "start": 2, "end": 4, "title": "Install"},
+        ]
+    }
+    value = separator.join(["section:credentials", "section:install"])
+    result = prepare_page(
+        _page([{"role": role, "value": value}]), source, parsed, navigation, reader
+    )
+    assert result.page.state == "ready"
+    assert {row["text"] for row in result.evidence["blocks"]} == {
+        "# Credentials",
+        "Obtain the access token first.",
+        "# Install",
+        "Run setup after obtaining credentials.",
+    }
+    missing = prepare_page(
+        _page([{"role": role, "value": value + separator + "section:missing"}]),
+        source,
+        parsed,
+        navigation,
+        reader,
+    )
+    assert missing.page.state == ("skipped" if role == "subject" else "ready")
+    assert any("missing" in note or "unresolved" in note for note in missing.page.planning_notes)
+
+
+@pytest.mark.parametrize("separator", [" > ", " → ", " › ", " / "])
+def test_heading_paths_remove_display_wrappers_per_segment(kb_dir, tmp_path, separator):
+    from openkb.agent.document_page_resolution import prepare_page
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    navigation = {
+        "nodes": [
+            {"id": "manual", "parent": None, "start": 0, "end": 6, "title": "Manual"},
+            {"id": "install", "parent": "manual", "start": 2, "end": 4, "title": "Install"},
+        ]
+    }
+    page = _page([{"role": "subject", "value": separator.join(["`Manual`", "「Install」"])}])
+    result = prepare_page(page, source, parsed, navigation, reader)
+    assert result.page.state == "ready" and result.page.subject_ranges == [[2, 4]]
+
+
 def test_related_clues_are_alternatives_and_known_keys_survive_display_prose(kb_dir, tmp_path):
     from openkb.agent.document_page_resolution import prepare_page
 

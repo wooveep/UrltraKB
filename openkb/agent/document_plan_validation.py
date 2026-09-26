@@ -171,6 +171,12 @@ def validate_plan(
                 _check_range(r, parsed, f"page {page.name} context_ranges")
         if protocol == "document-plan-v4":
             location_hints(page.location_hints)
+            from openkb.agent.document_planning_bindings import validate_bound
+
+            for hint in page.location_hints:
+                validate_bound(
+                    hint["value"], plan.metadata["source_id"], plan.metadata["version_id"], parsed
+                )
             if page.state == "ready" and page.scope_resolution is None:
                 raise ValueError("Prepared page needs a scope resolution")
             if page.state != "ready" and page.quality != "planned":

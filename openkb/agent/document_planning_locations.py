@@ -9,6 +9,35 @@ from openkb.agent.document_plan import RangeValue, range_intervals
 from openkb.agent.document_planning_projection import _compact_intervals
 
 _PATH_LABEL = r"(?:heading[ _]path|章节路径|标题路径)\s*[：:]\s*"
+_SECTION_KEY = re.compile(r"(?<![\w:-])section:[A-Za-z0-9_-]+(?![\w:-])")
+
+
+def heading_path(value: str | list[str]) -> list[str]:
+    """Remove only display wrappers, independently for every path segment."""
+    if isinstance(value, str):
+        value = value.strip()
+        if value.startswith("`") and value.endswith("`") and value.count("`") == 2:
+            value = value[1:-1]
+    parts = re.split(r"\s*[>→›]\s*|\s+/\s+", value) if isinstance(value, str) else value
+    result = []
+    for part in parts:
+        part = part.strip()
+        for left, right in (("**", "**"), ("`", "`"), ("「", "」"), ("『", "』"), ('"', '"')):
+            if part.startswith(left) and part.endswith(right) and len(part) > len(left + right):
+                part = part[len(left) : -len(right)].strip()
+        result.append(part)
+    return result
+
+
+def _key_choices(value: str) -> list[str]:
+    keys = list(_SECTION_KEY.finditer(value))
+    if len(keys) < 2 or any(
+        not re.fullmatch(r"[\s`、,，;；]+", value[a.end() : b.start()])
+        for a, b in zip(keys, keys[1:])
+    ):
+        return [value]
+    cuts = [0, *(key.start() for key in keys[1:]), len(value)]
+    return [value[a:b].strip(" `、,，;；\n") for a, b in zip(cuts, cuts[1:])]
 
 
 def _literal_nodes(clue: str, navigation: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -19,7 +48,11 @@ def _literal_nodes(clue: str, navigation: list[dict[str, Any]]) -> list[dict[str
         labels.update(separator.join(path) for separator in (" / ", " > ", " → ") if path)
         if path:
             labels.add(path[-1])
-        if clue in labels:
+        if (
+            clue in labels
+            or heading_path(clue) == path
+            or (len(heading_path(clue)) == 1 and heading_path(clue)[0] in labels)
+        ):
             matches.append(node)
     return matches
 
@@ -220,7 +253,7 @@ def resolve_location(
         ) else "explicit_range"
     if not isinstance(value, str):
         raise ValueError("unknown_location")
-    clue = value.strip(" `")
+    clue = value.strip()
     if clue.isdigit():
         raise ValueError("ambiguous_numeric_location")
     exact = _literal_nodes(clue, navigation)
@@ -267,7 +300,7 @@ def resolve_location(
             candidates.append(node)
     if not candidates:
         # An exact suffix can omit ancestor headings, but must identify one node.
-        path_parts = re.split(r"\s*[>→]\s*|\s+/\s+", clue)
+        path_parts = heading_path(clue)
         if len(path_parts) > 1:
             candidates = [
                 node
@@ -293,7 +326,7 @@ def context_choices(value: Any, navigation: list[dict[str, Any]]) -> list[Any]:
     """Isolate optional clues before resolving, without stringifying containers."""
     choices = value if isinstance(value, list) else [value]
     if isinstance(value, str) and not _literal_nodes(value.strip(" `"), navigation):
-        choices = _location_choices(value)
+        choices = [part for choice in _location_choices(value) for part in _key_choices(choice)]
     primary = next((item for item in choices if _has_section_key(item)), None)
     comments = [item for item in choices if _is_path_annotation(item)]
     if primary is not None and comments:
@@ -328,6 +361,23 @@ def resolve_hint(
     notes: list[str] | None = None,
 ) -> tuple[list[RangeValue], str]:
     """Map exact positions across the bound source; never invent a fallback range."""
+    if isinstance(value, dict) and value.get("format") == "bound-location-v1":
+        if value.get("unresolved"):
+            raise ValueError("unresolved_bound_location")
+        for selected in value["ranges"]:
+            range_intervals(selected, parsed, "bound planning hint")
+        return value["ranges"], "explicit_range"
+    choices = context_choices(value, navigation)
+    if isinstance(value, str) and len(choices) > 1:
+        ranges: list[RangeValue] = []
+        scopes = []
+        for choice in choices:
+            selected, scope = resolve_hint(choice, navigation, parsed, evidence, notes)
+            ranges.extend(item for item in selected if item not in ranges)
+            scopes.append(scope)
+        return ranges, "section" if all(
+            scope == "section" for scope in scopes
+        ) else "explicit_range"
     try:
         return resolve_location(
             value, navigation, [], parsed, evidence, mode="context", notes=notes

@@ -473,9 +473,14 @@ def accept_pages(
     default_entity_type: str | None = None,
     evidence: dict[str, Any] | None = None,
     source_identity: str | None = None,
+    request_binding: dict[str, Any] | None = None,
 ) -> PageAcceptance:
     """Retain recognizable organization suggestions; evidence is prepared before generation."""
+    from openkb.agent.document_planning_bindings import bind_hints, validate_binding
     from openkb.agent.document_planning_locations import resolve_hint
+
+    if request_binding is not None:
+        validate_binding(request_binding, source_identity, request_binding["version_id"], parsed)
 
     batch_notes: list[str] = []
     rows, no_pages, truncated = extract_candidates(raw, batch_notes=batch_notes)
@@ -537,9 +542,11 @@ def accept_pages(
         ):
             _filter_candidate(result, identity, "unsupplied_reference", original)
             continue
-        hints = _hints(original)
+        hints = bind_hints(_hints(original), request_binding, parsed, notes)
         purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
         origin = {"response": content_id(str(raw)), "entry": entry}
+        if request_binding is not None:
+            origin.update({key: request_binding[key] for key in ("request", "window")})
         if kind is None:
             result.deferred_suggestions.append(
                 deferred_suggestion(

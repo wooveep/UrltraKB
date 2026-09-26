@@ -24,7 +24,9 @@ def _accept(text, navigation=None, **kwargs):
 
 @pytest.mark.parametrize("field", ["Section", "Selection", "主体章节", "相关章节"])
 def test_v4_keeps_unlocated_suggestions_as_hints_without_window_fallback(field):
-    result = _accept(json.dumps({"Title": "Useful setup", field: "unindexed heading"}))
+    result = _accept(
+        json.dumps({"Title": "Useful setup", "Kind": "concept", field: "unindexed heading"})
+    )
     assert not result.rejected
     page = result.pages[0]
     assert page.kind == "concept" and page.state == "pending_evidence"
@@ -59,9 +61,13 @@ def test_v4_keeps_roles_and_bad_locations_without_rejecting_the_suggestion():
 
 
 def test_v4_duplicate_name_normalization_merges_later_hints_and_edited_purpose():
-    first = _accept('{"Name":"Setup", "Section":"unknown first", "Purpose":"Prepare"}').pages
+    first = _accept(
+        '{"Name":"Setup", "Kind":"concept", "Section":"unknown first", "Purpose":"Prepare"}'
+    ).pages
     result = _accept(
-        '{"Name":"ＳＥＴＵＰ", "Selection":"unknown next", "Purpose":"Configure"}', accepted=first
+        '{"Name":"ＳＥＴＵＰ", "Kind":"concept", '
+        '"Selection":"unknown next", "Purpose":"Configure"}',
+        accepted=first,
     )
     assert not result.pages and not result.rejected
     assert len(first) == 1 and len(first[0].location_hints) == 2
@@ -580,7 +586,8 @@ def test_configured_summary_entity_type_and_valid_group_are_not_filtered():
 def test_summary_filter_does_not_guess_other_categories(label):
     result = _accept(json.dumps({"name": "Manual", "type": label}))
     assert not result.filtered
-    assert result.pages[0].kind == "concept" and not result.rejected
+    assert not result.pages and not result.rejected
+    assert result.deferred_suggestions[0]["reason"] == "classification_unknown"
 
 
 def test_opaque_candidates_use_full_content_and_never_an_empty_name_key():

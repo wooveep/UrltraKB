@@ -20,7 +20,10 @@ def previous_responses(checkpoints, windows):
         if not isinstance(previous, dict):
             continue
         candidate = deepcopy(previous)
-        candidate["protocol"] = "document-planning-acceptance-v2"
+        if candidate.get("protocol") == "document-planning-markdown-v1":
+            # The original fragment-era shape is checked as such; it never
+            # becomes a current cumulative-overview state.
+            candidate = {**candidate, "protocol": "document-planning-acceptance-v2"}
         if not _valid_state(candidate, windows) or not candidate["responses"]:
             continue
         tasks = {}
@@ -48,6 +51,7 @@ def previous_responses(checkpoints, windows):
                 {
                     "content": response["content"],
                     "finish_reason": response.get("finish_reason", "stop"),
+                    **({"binding": response["binding"]} if response.get("binding") else {}),
                 }
             )
         from openkb.agent.document_planning_response import accept_overview

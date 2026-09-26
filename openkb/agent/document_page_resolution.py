@@ -26,6 +26,7 @@ def preparation_rules() -> str:
                 "openkb.evidence_search",
                 "openkb.agent.document_planning_locations",
                 "openkb.agent.document_page_evidence",
+                "openkb.agent.document_planning_bindings",
             )
         }
     )
@@ -88,7 +89,18 @@ def _resolve(
     max_chars: int,
     notes: list[str],
     description: str,
+    *,
+    optional: bool = False,
 ) -> tuple[list[RangeValue], str]:
+    if isinstance(value, dict) and value.get("format") == "bound-location-v1":
+        from openkb.agent.document_planning_bindings import read_bound
+
+        ranges, unresolved = read_bound(value, source, parsed, reader.sources)
+        if unresolved:
+            notes.append("未解释的请求定位：" + "；".join(unresolved))
+            if not optional:
+                return [], "unresolved_bound_location"
+        return ranges, "explicit_range"
     try:
         return resolve_hint(
             value,
@@ -109,7 +121,9 @@ def _resolve(
             value = " > ".join(value)
         if not isinstance(value, str) or "section:" in value:
             return [], "unresolved_location"
-    clue = value.strip(" `#")
+    from openkb.agent.document_planning_locations import heading_path
+
+    clue = " > ".join(heading_path(value.strip("# ")))
     if not clue or len(clue) > 512:
         return [], "unresolved_location"
     matches = [
@@ -118,7 +132,7 @@ def _resolve(
         if _headings(block) and normalized_name(_headings(block)[-1]) == normalized_name(clue)
     ]
     if not matches:
-        path = [normalized_name(part) for part in re.split(r"\s*(?:>|→| / )\s*", clue)]
+        path = [normalized_name(part) for part in heading_path(clue)]
         matches = [
             index
             for index, block in enumerate(parsed.blocks)
@@ -206,6 +220,7 @@ def prepare_page(
                     max_chars,
                     result.planning_notes,
                     result.title + " " + result.purpose,
+                    optional=related,
                 )
                 if not ranges:
                     if related:

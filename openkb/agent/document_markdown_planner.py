@@ -312,6 +312,7 @@ def plan_markdown_document(
             "projection": module_revision("openkb.agent.document_planning_projection"),
             "semantics": module_revision("openkb.agent.document_planning_semantics"),
             "state": module_revision("openkb.agent.document_planning_state"),
+            "bindings": module_revision("openkb.agent.document_planning_bindings"),
         },
     )
     state = _state(checkpoints, key, windows, resume)
@@ -446,6 +447,11 @@ def plan_markdown_document(
                             state["recovery_requests"] = state.get("recovery_requests", 0) + 1
                         _persist(checkpoints, key, state)
                         marker = request_marker()
+                        from openkb.agent.document_planning_bindings import capture_request
+
+                        request_binding = capture_request(
+                            messages, source, parsed, window, checkpoints.store
+                        )
                         try:
                             raw = _call(
                                 messages, settings, planning_limits, bundle, mock_caller, subtask
@@ -482,7 +488,7 @@ def plan_markdown_document(
                                     state.get("recovery_requests", 0) + dispatched - 1
                                 )
                                 _persist(checkpoints, key, state)
-                        task["raw"] = _raw_value(raw)
+                        task["raw"] = {**_raw_value(raw), "binding": request_binding["id"]}
                         state.setdefault("responses", []).append(
                             {
                                 "task": task_key,
@@ -512,6 +518,13 @@ def plan_markdown_document(
                             task["reason"] = overview_result.reason
                     else:
                         accepted_pages = [PagePlan.from_dict(item) for item in state["pages"]]
+                        from openkb.agent.document_planning_bindings import load_binding
+
+                        bound_request = (
+                            load_binding(checkpoints.store, task["raw"]["binding"], source, parsed)
+                            if task["raw"].get("binding")
+                            else None
+                        )
                         pages_result = accept_pages(
                             response,
                             navigation=locator,
@@ -525,6 +538,7 @@ def plan_markdown_document(
                             default_entity_type=settings.get("default_entity_type"),
                             evidence=json.loads(messages[-1]["content"])["evidence"],
                             source_identity=source.source_id,
+                            request_binding=bound_request,
                         )
                         state["pages"] = [
                             page.to_dict() for page in accepted_pages + pages_result.pages
