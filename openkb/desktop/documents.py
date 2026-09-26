@@ -22,7 +22,7 @@ from openkb.application.removal import preview_removal
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.panels import ManagementPanel
 from openkb.desktop.source_flow import SourceFlow
-from openkb.desktop.source_flow_state import source_snapshot
+from openkb.desktop.source_flow_state import source_query_label, source_snapshot
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import ContinueSource, RecompileDocument, RemoveDocument
 
@@ -249,7 +249,9 @@ class DocumentsDialog(ManagementPanel):
                     row,
                     2,
                     QTableWidgetItem(
-                        "已保存" if doc.get("source_intake") == "saved" else "旧版资料"
+                        source_query_label(doc)
+                        if doc.get("source_intake") == "saved"
+                        else "旧版资料"
                     ),
                 )
                 labels = {

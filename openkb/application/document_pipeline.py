@@ -155,10 +155,15 @@ def _compile_version(
                     else {}
                 )
                 from openkb.agent.document_publication import repair_document_publication
+                from openkb.application.source_query_publication import activate_query_source
 
-                if repair_document_publication(
+                if not plan_only and repair_document_publication(
                     kb_dir, source, parsed, document_settings, bundle=bundle
                 ):
+                    repaired = HashRegistry(kb_dir / ".openkb/hashes.json").get(source.source_id)
+                    if repaired is None:
+                        raise ValueError("Recovered publication has no source binding")
+                    activate_query_source(kb_dir, source, parsed, repaired["navigation_id"])
                     on_event({"stage": "committing", "operation": "publication_receipt_recovered"})
                     return DocumentResult(
                         source.origin,
@@ -182,7 +187,8 @@ def _compile_version(
                     "partial",
                 }
                 if (
-                    not force
+                    not plan_only
+                    and not force
                     and not (retry_omissions and has_gaps)
                     and previous
                     and previous.get("source_version") == source.id
@@ -192,6 +198,7 @@ def _compile_version(
                 ):
                     from openkb.agent.evidence_review import stored_review_warnings
 
+                    activate_query_source(kb_dir, source, parsed, previous["navigation_id"])
                     return DocumentResult(
                         source.origin,
                         "skipped",
@@ -221,6 +228,8 @@ def _compile_version(
                 )
                 if navigation["status"] == "degraded":
                     report_auxiliary_warning("navigation_degraded")
+                if not plan_only:
+                    activate_query_source(kb_dir, source, parsed, navigation["id"])
                 stage = "compiling"
                 on_event({"stage": stage})
                 processing_checkpoint(stage)

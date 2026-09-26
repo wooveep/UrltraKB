@@ -258,7 +258,7 @@ def _finalize(
         "page_quality": {
             name: sum(page.quality == name for page in pages) for name in ("generated", "published")
         },
-        "source_queryable": False,
+        "source_queryable": _source_queryable(checkpoints.store.kb_dir, source, parsed),
         "no_pages_recommended": bool(windows)
         and not pages
         and all(
@@ -315,6 +315,21 @@ def _finalize(
         str(report_path),
         overview_ref,
         tuple(item.to_dict() for item in omissions),
+    )
+
+
+def _source_queryable(kb_dir: Path, source: Any, parsed: Any) -> bool:
+    from openkb.query_sources import query_source_bindings
+    from openkb.state import HashRegistry
+
+    binding = query_source_bindings(kb_dir).get(source.source_id) or HashRegistry(
+        kb_dir / ".openkb/hashes.json"
+    ).get(source.source_id)
+    return bool(
+        binding
+        and binding.get("navigation_id")
+        and binding.get("source_version") == source.id
+        and binding.get("parse_id") == parsed.id
     )
 
 

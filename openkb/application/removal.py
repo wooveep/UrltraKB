@@ -43,7 +43,9 @@ def _cleanup_pageindex(
     return remove_index_document(kb_dir, doc_name, doc_id)
 
 
-def _resolve_doc_identifier(registry, identifier: str) -> list[tuple[str, dict]]:
+def _resolve_doc_identifier(
+    registry, identifier: str, *, query_entries=None
+) -> list[tuple[str, dict]]:
     """Find registry entries matching ``identifier``.
 
     Match precedence (returns immediately on the first non-empty bucket):
@@ -54,7 +56,7 @@ def _resolve_doc_identifier(registry, identifier: str) -> list[tuple[str, dict]]
     Returns ``[(file_hash, metadata), ...]``. Callers handle the empty,
     single, and multi-match cases.
     """
-    entries = registry.all_entries()
+    entries = {**(query_entries or {}), **registry.all_entries()}
     if identifier in entries:
         return [(identifier, entries[identifier])]
 
@@ -73,6 +75,27 @@ def _resolve_doc_identifier(registry, identifier: str) -> list[tuple[str, dict]]
         if needle in (m.get("name") or "").lower() or needle in (m.get("doc_name") or "").lower()
     ]
     return fuzzy
+
+
+def resolve_removal_identifier(kb_dir, registry, identifier):
+    """Resolve both compiled documents and independently activated originals."""
+    from openkb.converter import _sanitize_stem
+    from openkb.query_sources import query_source_bindings
+    from openkb.sources import SourceStore
+
+    store = SourceStore(kb_dir)
+    query_entries = {}
+    for source_id, binding in query_source_bindings(kb_dir).items():
+        source = store.version(binding["source_version"])
+        if source.source_id != source_id:
+            raise ValueError("Query source identity mismatch")
+        query_entries[source_id] = {
+            **binding,
+            "name": source.name,
+            "type": source.suffix.lstrip("."),
+            "doc_name": f"{_sanitize_stem(Path(source.name).stem)[:100]}-{source_id}",
+        }
+    return _resolve_doc_identifier(registry, identifier, query_entries=query_entries)
 
 
 @dataclass
@@ -107,6 +130,7 @@ class RemovePlan:
     images_dir: Path
     kept_raw: Path | None = None
     kept_summary: bool = False
+    source_id: str | None = None
 
 
 @dataclass
@@ -296,6 +320,7 @@ def _build_remove_plan(
         images_dir=images_dir,
         kept_raw=kept_raw,
         kept_summary=kept_summary,
+        source_id=meta.get("source_id"),
     )
 
 
@@ -332,7 +357,7 @@ def _execute_remove_plan(
         raise RuntimeError("Document removal requires the KB write lease")
     tracked = _wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan)
     before = _file_versions(kb_dir, tracked)
-    source_id = (registry.get(plan.file_hash) or {}).get("source_id")
+    source_id = plan.source_id or (registry.get(plan.file_hash) or {}).get("source_id")
     ownership = SourceOwnership(kb_dir, source_id)
     with mutation_scope(kb_dir, _wiki_paths(kb_dir, plan), operation="remove-wiki"):
         if not plan.kept_summary:
@@ -382,7 +407,12 @@ def _execute_remove_plan(
                 _, pageindex_message = _cleanup_pageindex(
                     openkb_dir, kb_dir, doc_name, plan.pageindex_doc_id
                 )
-            registry.remove_by_hash(plan.file_hash)
+            if source_id:
+                from openkb.query_sources import unbind_query_source
+
+                unbind_query_source(kb_dir, source_id)
+            if registry.get(plan.file_hash) is not None:
+                registry.remove_by_hash(plan.file_hash)
             if plan.raw_path is not None:
                 plan.raw_path.unlink(missing_ok=True)
             append_log(wiki_dir, "remove", name)
@@ -447,7 +477,7 @@ def run_remove_for_api(
     openkb_dir = kb_dir / ".openkb"
     with kb_ingest_lock(openkb_dir):
         registry = HashRegistry(openkb_dir / "hashes.json")
-        matches = _resolve_doc_identifier(registry, identifier)
+        matches = resolve_removal_identifier(kb_dir, registry, identifier)
         if not matches:
             return {"status": "not_found", "identifier": identifier}
         if len(matches) > 1:
@@ -512,6 +542,10 @@ def _wiki_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
 def _commit_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
     root = kb_dir / ".openkb"
     paths = [root / "hashes.json", kb_dir / "wiki/log.md"]
+    if plan.source_id:
+        from openkb.pageindex_store import database_paths
+
+        paths.extend(database_paths(kb_dir))
     if plan.raw_path is not None:
         paths.append(plan.raw_path)
     if plan.cleanup_pageindex:
@@ -578,7 +612,7 @@ def preview_removal(
         raise FileNotFoundError("Knowledge base not found")
     with kb_read_lock(kb_dir / ".openkb"):
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
-        matches = _resolve_doc_identifier(registry, identifier)
+        matches = resolve_removal_identifier(kb_dir, registry, identifier)
         if not matches:
             return RemovalPreview("not_found")
         if len(matches) > 1:

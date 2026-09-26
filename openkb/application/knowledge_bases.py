@@ -296,6 +296,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
             )
 
         from openkb.application.source_history import source_status
+        from openkb.query_sources import source_withdrawn
         from openkb.sources import SourceStore
 
         by_identity = {row["hash"]: row for row in documents}
@@ -304,9 +305,15 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
             result = details["result"]
             row: dict[str, Any]
             if source.source_id not in by_identity:
+                if source_withdrawn(kb_dir, source):
+                    continue
                 # Removing knowledge does not erase its historical evidence.
                 # Completed sources without a live registration stay in history.
-                if result and result["knowledge_compilation"] == "completed":
+                if (
+                    result
+                    and result["knowledge_compilation"] == "completed"
+                    and not details["source_queryable"]
+                ):
                     continue
                 row = {
                     "hash": source.source_id,
@@ -332,6 +339,9 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 coverage=result.get("coverage", {}) if result else {},
                 original=details["original"],
                 cumulative_usage=details["cumulative_usage"],
+                source_queryable=details["source_queryable"],
+                queryable_current_version=details["queryable_current_version"],
+                query_source=details["query_source"],
             )
 
         summaries_dir = kb_dir / "wiki" / "summaries"

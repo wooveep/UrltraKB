@@ -71,11 +71,16 @@ def _capture(kb_dir):
     # Caller holds the KB read/execution lock. Freeze all source identities once;
     # a new selected parse or an unpublished index cannot change this conversation.
     entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
+    from openkb.query_sources import query_source_bindings
+
+    bindings = query_source_bindings(kb_dir)
     snapshots = {}
     readers = {}
     coverages = {}
-    for entry in entries.values():
+    for entry in [*bindings.values(), *entries.values()]:
         if not all(entry.get(key) for key in ("source_id", "source_version", "parse_id")):
+            continue
+        if entry["source_id"] in snapshots:
             continue
         source = store.version(entry["source_version"])
         if source.source_id != entry["source_id"]:
@@ -90,7 +95,14 @@ def _capture(kb_dir):
         readers[source.source_id] = EvidenceSnapshot(indexed_reader(kb_dir, source, parsed, nav))
         from openkb.source_coverage import stored_coverage
 
-        coverages[source.source_id] = stored_coverage(entry, source, parsed)
+        published = entries.get(source.source_id, {})
+        if published.get("source_version") == source.id and published.get("parse_id") == parsed.id:
+            coverages[source.source_id] = stored_coverage(published, source, parsed)
+        else:
+            from openkb.compilation_report import CompileReport
+            from openkb.source_coverage import source_coverage
+
+            coverages[source.source_id] = source_coverage(source, parsed, CompileReport())
     return snapshots, readers, coverages
 
 
@@ -148,6 +160,7 @@ def _source_tools(kb_dir):
                 "parse": parsed.id,
                 "index": nav["id"],
                 "analysis_coverage": coverages[source.source_id].get("status", "unknown"),
+                "source_queryable": True,
             }
             for source, parsed, nav in snapshots.values()
         ]

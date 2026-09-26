@@ -176,6 +176,25 @@ def source_status(kb_dir: Path, source_id: str, *, include_details: bool = True)
             "unconfirmed_requests": pending_requests,
             "navigation_usage": indexed_usage,
         }
+        from openkb.query_sources import query_source_bindings
+        from openkb.state import HashRegistry
+
+        query = query_source_bindings(kb_dir).get(source_id)
+        if query is None:
+            published = HashRegistry(kb_dir / ".openkb/hashes.json").get(source_id) or {}
+            if all(
+                published.get(field)
+                for field in ("source_id", "source_version", "parse_id", "navigation_id")
+            ):
+                query = {
+                    field: published[field]
+                    for field in ("source_id", "source_version", "parse_id", "navigation_id")
+                }
+        status.update(
+            source_queryable=query is not None,
+            query_source=query,
+            queryable_current_version=bool(query and query["source_version"] == version.id),
+        )
         if include_details:
             from openkb.navigation import read_navigation
 

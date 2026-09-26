@@ -229,6 +229,7 @@ class SourceReview(SourceStages, QDialog):
         def loaded(value):
             self._saved = value
             result = value["result"] or {}
+            from openkb.desktop.source_flow_state import source_query_label
             from openkb.source_coverage import coverage_text
 
             labels = {
@@ -239,7 +240,9 @@ class SourceReview(SourceStages, QDialog):
             }
             self.status.setText(
                 value["source"]["name"]
-                + " · 原文已保存 · "
+                + " · 原文"
+                + source_query_label(value)
+                + " · "
                 + labels.get(result.get("knowledge_compilation"), "等待知识编译")
                 + " · "
                 + coverage_text(result.get("coverage"))

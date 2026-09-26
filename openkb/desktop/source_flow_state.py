@@ -76,7 +76,16 @@ def source_snapshot(document):
             )
         },
         "cumulative_usage": document.get("cumulative_usage", {}),
+        "source_queryable": document.get("source_queryable", False),
+        "queryable_current_version": document.get("queryable_current_version", False),
+        "query_source": document.get("query_source"),
     }
+
+
+def source_query_label(document):
+    if not document.get("source_queryable"):
+        return "已保存"
+    return "可查询" if document.get("queryable_current_version") else "旧版本可查询"
 
 
 def flow_steps(saved, activity=None):

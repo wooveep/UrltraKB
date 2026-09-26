@@ -609,7 +609,8 @@ def query(ctx, question, save, raw):
 from openkb.application.removal import (  # noqa: E402
     _build_remove_plan,
     _execute_remove_plan,
-    _resolve_doc_identifier,
+    _resolve_doc_identifier as _resolve_doc_identifier,
+    resolve_removal_identifier,
     run_remove_for_api as run_remove_for_api,
 )
 
@@ -663,7 +664,7 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
     openkb_dir = kb_dir / ".openkb"
     registry = HashRegistry(openkb_dir / "hashes.json")
 
-    matches = _resolve_doc_identifier(registry, identifier)
+    matches = resolve_removal_identifier(kb_dir, registry, identifier)
     if not matches:
         click.echo(f"No document matching '{identifier}' found in the KB.")
         click.echo("Try `openkb list` to see indexed documents.")

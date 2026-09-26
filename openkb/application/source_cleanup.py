@@ -132,7 +132,11 @@ def _preview(kb_dir: Path) -> HistoryCleanup:
 
     index_records = inventory_bindings(kb_dir)
     groups["navigation"] = set(index_records)
-    roots = set()
+    roots: set[str] = set()
+    from openkb.query_sources import query_source_bindings
+
+    for binding in query_source_bindings(kb_dir).values():
+        roots.update(binding[field] for field in ("source_version", "parse_id", "navigation_id"))
     bindings: dict[str, set[str]] = {}
     for identity in groups["navigation"]:
         record = index_records[identity]

@@ -12,7 +12,17 @@ def _plan_existing_notes(body):
 
     payload = json.loads(body["messages"][-1]["content"])
     if payload.get("stage") == "planning" and payload.get("subtask") == "pages":
-        return "- 名称：Notes\n  类别：concept\n  目标页面：concepts/notes\n  用途：Document notes"
+        return json.dumps(
+            [
+                {
+                    "title": "Notes",
+                    "kind": "concept",
+                    "target": "concepts/notes",
+                    "purpose": "Document notes",
+                    "subject_ranges": payload["target"]["ranges"],
+                }
+            ]
+        )
     return evidence_response(payload)
 
 
@@ -117,6 +127,7 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
     import json
 
     from openkb.application.source_actions import continue_source, review_source_proposal
+
     page = kb_dir / "wiki/concepts/notes.md"
     page.write_text('---\nhuman_instruction: "Retain independent metadata"\n---\n')
     source = tmp_path / "procedure.md"
@@ -140,7 +151,10 @@ def test_new_version_preserves_accepted_metadata_on_retired_topic(kb_dir, tmp_pa
         if payload["stage"] == "planning" and payload.get("subtask") == "overview":
             response = "The current policy."
         elif payload["stage"] == "planning":
-            response = "- 名称：New topic\n  类别：concept\n  用途：The current policy."
+            response = (
+                "- 名称：New topic\n  类别：concept\n  用途：The current policy."
+                "\n  Selection：The current policy"
+            )
         return response
 
     model_service.respond = respond
