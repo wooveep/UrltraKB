@@ -1,5 +1,6 @@
 """Nonblocking plan quality observations, distinct from execution outcomes."""
 
+import re
 from collections import Counter
 from difflib import SequenceMatcher
 
@@ -14,6 +15,12 @@ def quality_summary(state, overview):
     for index, page in enumerate(pages):
         if page["purpose"] == DEFAULT_PURPOSE:
             warnings.append({"kind": "independent_purpose_missing", "pages": [page["key"]]})
+        planning_text = page["purpose"] + " " + " ".join(page.get("planning_notes", []))
+        if re.search(
+            r"仅(?:见于|出现在|署名|签名)|暂不(?:建议)?(?:独立)?建|不建议.{0,4}(?:建页|单建)",
+            planning_text,
+        ):
+            warnings.append({"kind": "limited_independent_value", "pages": [page["key"]]})
         label = normalized_name(page["title"])
         for prior in pages[:index]:
             other = normalized_name(prior["title"])
@@ -62,5 +69,15 @@ def quality_summary(state, overview):
                 for hint in hints
             ),
             "actual_evidence_ready": sum(row["state"] == "ready" for row in pages),
+            "unknown_aliases": sum(
+                note.startswith("请求短 ID 不明：")
+                for row in pages
+                for note in row.get("planning_notes", [])
+            ),
+            "ambiguous_aliases": sum(
+                note.startswith("请求短 ID 歧义：")
+                for row in pages
+                for note in row.get("planning_notes", [])
+            ),
         },
     }

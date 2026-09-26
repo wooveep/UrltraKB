@@ -108,7 +108,7 @@ def _node_ranges(
     return ranges
 
 
-def _location_choices(clue: str) -> list[str]:
+def _location_choices(clue: str, *, separators: str = ";；\n") -> list[str]:
     """Split selections without interpreting punctuation inside path annotations."""
     parts = []
     start = depth = 0
@@ -117,7 +117,7 @@ def _location_choices(clue: str) -> list[str]:
             depth += 1
         elif char in ")）":
             depth = max(0, depth - 1)
-        elif char in ";；\n" and depth == 0:
+        elif char in separators and depth == 0:
             parts.append(clue[start:index].strip())
             start = index + 1
     parts.append(clue[start:].strip())

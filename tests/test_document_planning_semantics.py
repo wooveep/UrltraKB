@@ -63,9 +63,10 @@ def test_deferred_suggestion_is_persisted_and_does_not_retry_pages(tmp_path, mon
     assert "待分类建议" in Path(result.plan.metadata["plan_preview"]).read_text()
 
 
-def test_notes_mixed_purpose_and_batch_explanation_are_retained_without_extra_pages():
+@pytest.mark.parametrize("label", ["用途或参考", "用途与说明", "用途及说明"])
+def test_notes_mixed_purpose_and_batch_explanation_are_retained_without_extra_pages(label):
     result = accept(
-        "| 标题 | 类别 | 用途或参考 | 备注 | 阅读条件 |\n|---|---|---|---|---|\n"
+        f"| 标题 | 类别 | {label} | 备注 | 阅读条件 |\n|---|---|---|---|---|\n"
         "| Calibration | 概念 | 描述校准；外部规范未核对 | 暂不建议独立建页 | 窗口外资料未读 |\n\n"
         "以下组织建议仍需要原文核对。"
     )
@@ -173,8 +174,28 @@ def test_deferred_promotion_waits_for_the_whole_response_to_resolve_classificati
 def test_same_title_with_explicit_different_scopes_retains_both_suggestions():
     result = accept(
         '[{"title":"Installation","kind":"concept","purpose":"Linux server only",'
-        '"section":"Linux"},{"title":"Installation","kind":"concept",'
-        '"purpose":"Windows client only","section":"Windows"}]'
+        '"section":"Linux","context":"Credentials"},{"title":"Installation","kind":"concept",'
+        '"purpose":"Windows client only","section":"Windows","context":"Credentials"}]'
     )
     assert len(result.pages) == 2
     assert result.pages[0].key != result.pages[1].key
+
+
+def test_explicit_extension_accepts_complementary_purposes_with_ordinary_for_wording():
+    result = accept(
+        '[{"title":"Calibration","kind":"concept",'
+        '"purpose":"Procedure for calibrating a meter","section":"Steps"},'
+        '{"title":"Calibration prerequisites","kind":"concept","extends":"Calibration",'
+        '"purpose":"Prerequisites for calibrating a meter","section":"Preparation"}]'
+    )
+    assert len(result.pages) == 1 and len(result.pages[0].location_hints) == 2
+
+
+def test_clear_inline_existing_suggestion_label_extends_without_a_required_field():
+    result = accept(
+        '[{"title":"Meter (v2)","kind":"entity","type":"product"},'
+        '{"title":"Meter (v2)（既有条目，本窗口补充）","kind":"entity","type":"product",'
+        '"notes":"补充安装选择"},{"title":"Meter (v3)","kind":"entity","type":"product"}]'
+    )
+    assert [page.title for page in result.pages] == ["Meter (v2)", "Meter (v3)"]
+    assert "补充安装选择" in result.pages[0].planning_notes

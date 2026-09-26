@@ -32,6 +32,7 @@ from openkb.agent.document_planning_semantics import (
     add_annotation,
     annotation,
     deferred_suggestion,
+    explicit_extension,
     inherit_classification,
     matching_suggestions,
     promote_deferred,
@@ -507,6 +508,8 @@ def accept_pages(
                 notes.append(f"{field_name}：{value}")
         title = _first_text(row.get("title")) or _first_text(row.get("name"))
         name = _first_text(row.get("name")) or title
+        if extension := explicit_extension(row, title):
+            row["extends"] = extension
         purpose = _first_text(row.get("purpose")) or DEFAULT_PURPOSE
         decision = _classification(
             row, original.get("group_kind"), entity_types, default_entity_type, notes

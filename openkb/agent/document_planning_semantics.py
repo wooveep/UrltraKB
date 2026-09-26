@@ -56,6 +56,8 @@ _ALIASES = {
         "purpose",
         "用途",
         "用途说明",
+        "用途与说明",
+        "用途及说明",
         "说明",
         "建议依据",
         "description",
@@ -170,6 +172,18 @@ def _first_text(value: Any) -> str:
     return next(
         (_display_title(item) for item in values if isinstance(item, str) and item.strip()), ""
     )
+
+
+def explicit_extension(row, title):
+    """Accept a clearly labelled existing suggestion without guessing title similarity."""
+    if row.get("extends"):
+        return _first_text(row["extends"])
+    match = re.fullmatch(
+        r"(.+?)[（(](?:既有|已有|existing\s+)(?:条目|建议|页面|suggestion|page)[^）)]*(?:补充|扩展|extend)[^）)]*[）)]",
+        title,
+        re.I,
+    )
+    return match.group(1).strip() if match else ""
 
 
 def _classification(row, group, types, default, notes):

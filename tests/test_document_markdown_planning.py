@@ -973,9 +973,7 @@ def test_truncated_overview_keeps_complete_first_fragment(tmp_path, monkeypatch)
         )
     assert calls == ["overview", "overview", "pages"]
     assert result.outcome == "complete"
-    assert Path(result.overview_ref).read_text() == (
-        "The operation follows that prerequisite.\n"
-    )
+    assert Path(result.overview_ref).read_text() == ("The operation follows that prerequisite.\n")
     assert result.plan and not result.plan.pages
 
 

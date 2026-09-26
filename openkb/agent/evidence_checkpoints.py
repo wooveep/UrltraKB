@@ -381,7 +381,7 @@ class CompilationCheckpoints:
                 {
                     "evidence_provenance": deepcopy(EVIDENCE_PROVENANCE),
                     "evidence_reader": module_revision("openkb.evidence"),
-            "evidence_search": module_revision("openkb.evidence_search"),
+                    "evidence_search": module_revision("openkb.evidence_search"),
                 }
                 if payload.get("stage") == "facts"
                 else {}
@@ -401,7 +401,7 @@ class CompilationCheckpoints:
                 {
                     "evidence_snapshot": module_revision("openkb.evidence_snapshot"),
                     "evidence_reader": module_revision("openkb.evidence"),
-            "evidence_search": module_revision("openkb.evidence_search"),
+                    "evidence_search": module_revision("openkb.evidence_search"),
                     "evidence_context": module_revision("openkb.evidence_context"),
                     **(
                         {"correction_options": self.correction_options}

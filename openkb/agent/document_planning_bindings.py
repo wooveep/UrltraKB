@@ -174,14 +174,18 @@ def _resolve_aliases(raw, binding, parsed):
 
 
 def bind_hints(hints, binding, parsed, notes):
-    from openkb.agent.document_planning_locations import context_choices
+    from openkb.agent.document_planning_locations import _location_choices, context_choices
 
     result = []
     for hint in hints:
         value = hint["value"]
         text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
         if _ALIAS.search(text):
-            choices = context_choices(value, [])
+            choices = (
+                _location_choices(value, separators=";；\n,，、")
+                if isinstance(value, str)
+                else context_choices(value, [])
+            )
             if len(choices) > 1:
                 result.extend(
                     bind_hints(
@@ -202,6 +206,12 @@ def bind_hints(hints, binding, parsed, notes):
             result.append({**hint, "value": {"unbound_request_location": value}})
             continue
         ranges, unresolved = _resolve_aliases(value, binding, parsed)
+        for alias in dict.fromkeys(_ALIAS.findall(text)):
+            mappings = [row["range"] for row in binding["aliases"] if row["alias"] == alias]
+            if not mappings:
+                notes.append("请求短 ID 不明：" + alias)
+            elif any(row != mappings[0] for row in mappings):
+                notes.append("请求短 ID 歧义：" + alias)
         origin = {key: binding[key] for key in (*_IDENTITY, "request", "window")}
         origin["binding"] = binding["id"]
         result.append(

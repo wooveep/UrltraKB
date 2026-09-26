@@ -189,7 +189,8 @@ def test_legacy_window_overviews_require_new_cumulative_tasks_but_reuse_pages(tm
     assert len(resumed.plan.metadata["overview_snapshot"]["processed"]) == 2
 
 
-def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path):
+@pytest.mark.parametrize("broken", ["history", "snapshot"])
+def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path, broken):
     from openkb.processing import ProcessingIncomplete
 
     def respond(messages, *, settings):
@@ -204,7 +205,10 @@ def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path):
     with CompilationCheckpoints(tmp_path, _DummySource(), _parsed(), settings, None) as cp:
         key = result.plan.metadata["recovery_key"]
         state = cp.load_recovery(key, "markdown_plan")
-        state["overview_history"] = [None]
+        if broken == "history":
+            state["overview_history"] = [None]
+        else:
+            state["overview_snapshot"].pop("text")
         cp.save_recovery(key, "markdown_plan", state)
     with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
         run_windows(tmp_path, respond, settings=settings, resume=True)

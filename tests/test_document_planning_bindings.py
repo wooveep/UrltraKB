@@ -203,6 +203,8 @@ def test_replayed_parent_alias_uses_its_saved_mapping_in_a_different_child_reque
     "value",
     [
         "{alias}; section:missing",
+        "{alias}, Unknown heading",
+        "{alias}、Unknown heading",
         ["{alias}", "Unknown chapter"],
         {"from_block": "{alias}", "through_block": "missing"},
     ],
@@ -222,8 +224,9 @@ def test_alias_cannot_hide_an_unresolved_required_selection(kb_dir, tmp_path, va
 
 
 @pytest.mark.parametrize("bound", [True, False])
+@pytest.mark.parametrize("separator", ["; ", ", ", "、"])
 def test_mixed_optional_hint_keeps_the_stable_heading_with_or_without_alias_map(
-    kb_dir, tmp_path, bound
+    kb_dir, tmp_path, bound, separator
 ):
     from openkb.agent.document_planning_bindings import capture_request
 
@@ -231,7 +234,9 @@ def test_mixed_optional_hint_keeps_the_stable_heading_with_or_without_alias_map(
     messages, aliases = request(source, parsed, reader, [(1, 0, parsed.blocks[1].chars)])
     binding = capture_request(messages, source, parsed, {}, reader.sources) if bound else None
     page = accept_pages(
-        json.dumps({"title": "Procedure", "kind": "concept", "related": f"{aliases[0]}; Install"}),
+        json.dumps(
+            {"title": "Procedure", "kind": "concept", "related": f"{aliases[0]}{separator}Install"}
+        ),
         navigation=[],
         target=[[0, 6]],
         parsed=parsed,

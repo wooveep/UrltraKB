@@ -158,6 +158,14 @@ def run(args):
     profile = load_online_model(config_kb=args.config_kb)
     settings = publication_settings(profile.settings, profile.bundle)
     protected = manifest(profile.config_kb)
+    repo = Path(__file__).resolve().parents[1]
+    tracked = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-z"], text=True).split(
+        "\0"
+    )
+    project_before = {
+        name: digest(repo / name) for name in tracked if name and (repo / name).is_file()
+    }
+    git_status = subprocess.check_output(["git", "-C", str(repo), "status", "--short"], text=True)
     previous = args.previous_run.resolve() if args.previous_run else None
     prior = manifest(previous) if previous else None
     kb = output / "kb"
@@ -240,8 +248,10 @@ def run(args):
                     "online_model": profile.description(),
                     "processing": settings["processing"],
                     "git_head": subprocess.check_output(
-                        ["git", "rev-parse", "HEAD"], text=True
+                        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
                     ).strip(),
+                    "git_status": git_status,
+                    "project_files_before": project_before,
                     "source_sha256": digest(SourceStore(kb).original(source)),
                     "source_id": source.source_id,
                     "version_id": source.id,
@@ -308,6 +318,10 @@ def run(args):
             "config_kb_unchanged": protected == manifest(profile.config_kb),
             "previous_run_unchanged": prior == manifest(previous) if previous else True,
             "wiki_unchanged": wiki_before == manifest(kb / "wiki"),
+            "project_files_unchanged": all(
+                (repo / name).is_file() and digest(repo / name) == checksum
+                for name, checksum in project_before.items()
+            ),
             "no_step3_upstream_rebuild": not any(
                 audit.calls["step3:" + name] for name in ("parse_document", "prepare_navigation")
             ),

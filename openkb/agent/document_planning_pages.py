@@ -29,13 +29,13 @@ def distinct_scope(previous: PagePlan, purpose: str, hints: list[dict]) -> bool:
     """Keep explicitly exclusive purposes apart; do not infer general semantic aliases."""
     if purpose in {DEFAULT_PURPOSE, previous.purpose} or previous.purpose == DEFAULT_PURPOSE:
         return False
-    exclusive = r"\bonly\b|\bexclusively\b|\bfor\b|仅|专用|适用于|面向"
+    exclusive = r"\bonly\b|\bexclusively\b|仅|专用"
+    subjects = [hint for hint in hints if hint["role"] != "context"]
+    prior_subjects = [hint for hint in previous.location_hints if hint["role"] != "context"]
     return bool(
         re.search(exclusive, purpose, re.I)
         and re.search(exclusive, previous.purpose, re.I)
-        and hints
-        and previous.location_hints
-        and not any(hint in previous.location_hints for hint in hints)
+        and not any(hint in prior_subjects for hint in subjects)
     )
 
 

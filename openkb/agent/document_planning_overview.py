@@ -72,6 +72,10 @@ def validate_overview(state, *, total_blocks=None, block_chars=None):
         total_blocks = max((row["target_end"] for row in windows), default=0)
     snapshot = state.get("overview_snapshot")
     history = state.get("overview_history", [])
+    if snapshot is not None and (
+        not isinstance(snapshot, dict) or not isinstance(snapshot.get("text"), str)
+    ):
+        raise ValueError("Invalid overview snapshot text")
     if not isinstance(history, list):
         raise ValueError("Invalid overview history")
     for record in ([snapshot] if snapshot is not None else []) + history:
