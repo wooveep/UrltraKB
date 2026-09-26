@@ -8,15 +8,323 @@ from openkb.agent.document_planning_response import accept_pages, extract_candid
 from tests.test_document_markdown_planning import _navigation, _parsed
 
 
-def _accept(text, navigation=None):
+def _accept(text, navigation=None, **kwargs):
     return accept_pages(
         text,
         navigation=_navigation() if navigation is None else navigation,
-        target=[[0, 2]],
-        parsed=_parsed(),
-        entity_types=[],
-        existing_targets=set(),
+        **{
+            "target": [[0, 2]],
+            "parsed": _parsed(),
+            "entity_types": [],
+            "existing_targets": set(),
+            **kwargs,
+        },
     )
+
+
+def test_repeated_new_path_collision_never_authorizes_an_existing_update():
+    row = {"name": "Operation", "kind": "concept", "section": "section:run"}
+    text = json.dumps(row)
+    occupied = {"concepts/operation"}
+    first = _accept(text, existing_targets=occupied).pages[0]
+    occupied.add(first.name)
+    result = _accept(
+        text,
+        existing_targets=occupied,
+        catalog_titles={path: "Unrelated" for path in occupied},
+        allowed_update_targets=set(),
+    )
+    assert not result.rejected and len(result.pages) == 1
+    page = result.pages[0]
+    assert page.target == "" and page.name not in occupied
+    from openkb.agent.document_plan import DocumentPlan, OverviewPlan, validate_plan
+
+    plan = DocumentPlan(
+        metadata={"protocol": "document-plan-v3"},
+        overview=OverviewPlan(text="Overview"),
+        pages=result.pages,
+    )
+    assert validate_plan(plan, _parsed(), [], occupied)
+
+
+def test_different_names_with_the_same_slug_get_distinct_paths_and_reuse_own_identity():
+    rows = [
+        {"name": name, "title": "Shared title", "kind": "concept", "section": "section:run"}
+        for name in ("Operation A", "Operation-A")
+    ]
+    first = _accept(json.dumps(rows))
+    assert not first.rejected and len(first.pages) == 2
+    assert len({p.name for p in first.pages}) == 2
+    again = _accept(json.dumps(rows), accepted=first.pages)
+    assert not again.pages and not again.rejected
+
+
+@pytest.mark.parametrize(
+    "clue",
+    [
+        "标题路径：手册 → 操作",
+        "章节路径：手册 > 操作",
+        "`手册 / 操作`",
+        "section:run；标题路径：简短说明",
+        "section:run（标题路径：简短说明）",
+        "`section:run`；标题路径：简短说明",
+        "`section:run`（标题路径：简短说明）",
+    ],
+)
+def test_location_expressions_share_exact_selection_rules(clue):
+    navigation = _navigation()
+    navigation[1]["heading_path"] = ["手册", "操作"]
+    result = _accept(
+        json.dumps({"name": "Operation", "kind": "concept", "section": clue}), navigation
+    )
+    assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
+
+
+@pytest.mark.parametrize("path", ["手册 > 操作", "missing path"])
+def test_unlabelled_parenthetical_path_is_a_real_selection(path):
+    navigation = _navigation()
+    navigation[1]["heading_path"] = ["手册", "操作"]
+    result = _accept(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "section": f"section:run ({path})",
+            }
+        ),
+        navigation,
+    )
+    if path == "missing path":
+        assert not result.pages and result.rejected[0]["reason"] == "unknown_location"
+    else:
+        assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"section_key": "section:run", "heading_path": "前提"},
+        {"section": "section:run；标题路径：前提"},
+        {"section": "section:run（标题路径：前提）"},
+    ],
+)
+def test_conflicting_path_annotation_is_visible_but_does_not_override_section_key(fields):
+    result = _accept(json.dumps({"name": "Operation", "kind": "concept", **fields}))
+    assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
+    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+
+
+@pytest.mark.parametrize("selection", [[{"section_key": "section:run"}], ["section:run"]])
+def test_structured_selection_retains_shape_beside_labelled_path(selection):
+    result = _accept(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "subject_ranges": selection,
+                "heading_path": "前提",
+            }
+        )
+    )
+    assert not result.rejected and result.pages[0].subject_ranges == [[1, 2]]
+    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+
+
+@pytest.mark.parametrize("other", ["missing selection", "section:pre"])
+def test_unlabelled_other_location_field_remains_a_real_selection(other):
+    result = _accept(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "section_key": "section:run",
+                "sections": other,
+            }
+        )
+    )
+    if other == "section:pre":
+        assert not result.rejected and result.pages[0].subject_ranges == [[1, 2], [0, 1]]
+    else:
+        assert not result.pages and result.rejected[0]["reason"] == "unknown_location"
+
+
+@pytest.mark.parametrize("label", ["Section key / heading path", "章节键 / 标题路径"])
+@pytest.mark.parametrize(
+    "clue",
+    [
+        "section:run; 手册 → 操作说明",
+        "section:run 手册 > 操作说明",
+        "section:run 前提；section:pre 操作",
+        "section:run；section:pre（heading path: 前提）",
+    ],
+)
+def test_combined_field_label_identifies_display_paths_without_hiding_selections(label, clue):
+    result = _accept(json.dumps({"name": "Operation", "kind": "concept", label: clue}))
+    assert not result.rejected
+    expected = [[1, 2], [0, 1]] if "section:pre" in clue else [[1, 2]]
+    assert result.pages[0].subject_ranges == expected
+    if "section:run 前提" in clue:
+        assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "section:run；标题路径：前提；unknown clue",
+        ["section:run", "标题路径：前提", "unknown clue"],
+        [{"section_key": "section:run"}, {"heading_path": "前提"}, "unknown clue"],
+    ],
+)
+def test_context_annotation_retains_key_and_isolates_other_bad_clues(context):
+    result = _accept(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "section": "section:pre",
+                "context": context,
+            }
+        )
+    )
+    assert not result.rejected and result.pages[0].context_ranges == [[1, 2]]
+    assert any("说明不一致" in note for note in result.pages[0].planning_notes)
+    assert any("未定位必要上下文" in note for note in result.pages[0].planning_notes)
+
+
+@pytest.mark.parametrize("title", ["输入 → 输出", "操作（标题路径：示例）", "前提；说明"])
+def test_literal_title_matching_precedes_location_punctuation(title):
+    navigation = _navigation()
+    navigation[1]["heading_path"] = [title]
+    result = _accept(
+        json.dumps({"name": "Operation", "kind": "concept", "section": title}), navigation
+    )
+    assert result.pages[0].subject_ranges == [[1, 2]] and not result.rejected
+
+
+@pytest.mark.parametrize(
+    "context", ["前提", ["前提"], {"section_key": "section:pre"}, [{"section_key": "section:pre"}]]
+)
+def test_context_shapes_preserve_equivalent_readable_evidence(context):
+    result = _accept(
+        json.dumps(
+            {"name": "Operation", "kind": "concept", "section": "section:run", "context": context}
+        )
+    )
+    assert not result.rejected and result.pages[0].context_ranges == [[0, 1]]
+    from openkb.agent.document_page_evidence import page_occurrence_descriptors
+    from tests.test_document_orchestrator import _DummySource
+
+    descriptors = page_occurrence_descriptors(result.pages[0], _DummySource(), _parsed())
+    assert {item["block_index"] for item in descriptors} == {0, 1}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"block": []}, {"section_key": None}, 17, {"block_index": 99, "start_char": 0, "end_char": 1}],
+)
+def test_one_bad_context_clue_preserves_the_page_and_other_context(bad):
+    result = _accept(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "section": "section:run",
+                "context": [bad, "前提"],
+            }
+        ),
+        evidence={"blocks": [{"id": "b0", "order": 0}]},
+    )
+    assert not result.rejected and len(result.pages) == 1
+    assert result.pages[0].context_ranges == [[0, 1]]
+    assert any("未定位必要上下文" in note for note in result.pages[0].planning_notes)
+
+
+@pytest.mark.parametrize("later_target", [[[0, 2]], [[0, 1]]])
+def test_same_page_merges_context_reference_and_purpose_even_when_body_is_unchanged(later_target):
+    row = {"name": "Operation", "kind": "concept", "section": "section:run"}
+    first = _accept(json.dumps(row)).pages
+    increment = {
+        **row,
+        "context": "section:pre",
+        "references": "《补充手册》尚未导入",
+        "purpose": "整理操作前提",
+    }
+    second = _accept(json.dumps(increment), accepted=first, target=later_target)
+    assert not second.rejected and not second.pages
+    assert first[0].context_ranges == [[0, 1]]
+    assert first[0].purpose == "整理操作前提"
+    assert first[0].planning_notes == ["《补充手册》尚未导入"]
+    assert second.filtered[0]["reason"] == "merged_page"
+    again = _accept(json.dumps(increment), accepted=first, target=later_target)
+    assert again.filtered[0]["reason"] == "accepted_echo"
+    assert first[0].subject_ranges == [[1, 2]] and first[0].context_ranges == [[0, 1]]
+    from openkb.agent.document_page_evidence import page_occurrence_descriptors
+    from tests.test_document_orchestrator import _DummySource
+
+    assert {
+        r["block_index"] for r in page_occurrence_descriptors(first[0], _DummySource(), _parsed())
+    } == {0, 1}
+
+
+def test_conflicting_increment_preserves_accepted_type_and_information_atomically():
+    row = {"name": "Device", "kind": "entity", "type": "product", "section": "section:run"}
+    options = {"entity_types": ["product", "person"]}
+    first = _accept(json.dumps(row), **options).pages
+    before = first[0].to_dict()
+    rejected = _accept(
+        json.dumps({**row, "type": "person", "context": "section:pre", "references": "changed"}),
+        accepted=first,
+        **options,
+    )
+    assert rejected.rejected[0]["reason"] == "accepted_page_conflict"
+    assert first[0].to_dict() == before
+
+
+@pytest.mark.parametrize(
+    "purpose", ["整理操作及引用处的注意事项", "外部手册未随本文提供，保留必须参考的要求"]
+)
+def test_reference_words_in_purpose_do_not_delete_a_supported_page(purpose):
+    result = _accept(
+        json.dumps(
+            {"name": "Operation", "kind": "concept", "section": "section:run", "purpose": purpose}
+        )
+    )
+    assert len(result.pages) == 1 and not result.filtered and not result.rejected
+    assert result.pages[0].purpose == purpose
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "| Name | Kind | Section |\n|---|---|---|\n| Operation | concept | section:run |",
+        "- Name: Operation\n  Kind: concept\n  Section: section:run",
+    ],
+)
+@pytest.mark.parametrize(
+    "ending", ["\n\nUnfinished note", "\n\nNote: unfinished", "\n\n", "\n## Notes\nUnfinished note"]
+)
+def test_truncation_preserves_candidates_closed_before_the_tail(body, ending):
+    from openkb.agent.document_markdown_planner import _Response
+
+    result = _accept(_Response(body + ending, "length"))
+    assert result.truncated and not result.rejected
+    assert [page.title for page in result.pages] == ["Operation"]
+
+
+def test_truncation_keeps_closed_table_row_but_not_partial_last_row():
+    from openkb.agent.document_markdown_planner import _Response
+
+    text = (
+        "| Name | Kind | Section |\n|---|---|---|\n"
+        "| Operation | concept | section:run |\n| Incomplete | concept | sect"
+    )
+    result = _accept(_Response(text, "length"))
+    assert result.truncated and [page.title for page in result.pages] == ["Operation"]
+
+
+def test_blank_line_after_subsection_heading_preserves_the_candidate():
+    result = _accept("### Operation\n\nKind: concept\nSection: section:run")
+    assert not result.rejected and result.pages[0].title == "Operation"
 
 
 @pytest.mark.parametrize("shape", ["table", "list", "json"])

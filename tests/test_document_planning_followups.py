@@ -68,6 +68,70 @@ def test_window_containing_only_an_accepted_echo_settles_without_retry(tmp_path,
     assert not report["planning_omissions"]
 
 
+def test_one_chapter_contributes_only_each_window_then_merges_without_retries(
+    tmp_path, monkeypatch
+):
+    source, parsed = _DummySource(), _parsed()
+    workspace = tmp_path / "workspace"
+    (workspace / "wiki").mkdir(parents=True)
+    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
+    navigation = {
+        "source_id": source.source_id,
+        "version_id": source.id,
+        "parse_id": parsed.id,
+        "nodes": [{"id": "chapter", "title": "操作章", "parent": None, "start": 0, "end": 2}],
+        "windows": [
+            {
+                "evidence": evidence_descriptor(source, parsed, start, start + 1),
+                "target_start": start,
+                "target_end": start + 1,
+                "status": "complete",
+                "reason": "",
+                "target_tokens": 1000,
+            }
+            for start in (0, 1)
+        ],
+    }
+    calls = []
+
+    def respond(messages, *, settings):
+        task = json.loads(messages[-1]["content"])
+        calls.append((task["target"]["target_start"], task["subtask"], messages))
+        if task["subtask"] == "overview":
+            return "This window describes part of the chapter."
+        return "- Name: Operation\n  Kind: concept\n  Section: section:chapter"
+
+    with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
+        result = plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            navigation,
+            SETTINGS,
+            checkpoints,
+            mock_caller=respond,
+            plan_only=True,
+            return_result=True,
+        )
+    assert result.outcome == "complete" and len(result.plan.pages) == 1
+    assert result.plan.pages[0].subject_ranges == [[0, 1], [1, 2]]
+    assert any("章节在本窗的片段" in note for note in result.plan.pages[0].planning_notes)
+    assert [(start, subtask) for start, subtask, _ in calls] == [
+        (0, "overview"),
+        (0, "pages"),
+        (1, "overview"),
+        (1, "pages"),
+    ]
+    for index in (0, 2):
+        first, second = calls[index][2], calls[index + 1][2]
+        assert first[0] == second[0]
+        assert (
+            first[-1]["content"].split('"plan_protocol":', 1)[0]
+            == second[-1]["content"].split('"plan_protocol":', 1)[0]
+        )
+
+
 def _run_single(
     tmp_path, monkeypatch, responses, *, overview="Credentials are required before the operation."
 ):
@@ -102,11 +166,25 @@ def test_accepted_echo_does_not_erase_unresolved_rejected_candidate(tmp_path, mo
     bad = "- Name: Missing step\n  Kind: concept\n  Section: section:missing"
     result = _run_single(tmp_path, monkeypatch, [good + "\n" + bad, good, good])
     assert result.outcome == "partial"
+    assert result.plan.overview.status == "complete"
     assert len(result.plan.pages) == 1
     report = json.loads(Path(result.report_ref).read_text())
     assert report["planning_execution"]["planning_requests"] == 4
     assert report["rejected_candidates"][0]["reason"] == "unknown_location"
     assert report["planning_omissions"][0]["reason"] == "page_candidates_rejected"
+
+
+def test_partial_overview_is_not_completed_by_successful_page_planning(tmp_path, monkeypatch):
+    from openkb.agent.document_markdown_planner import _Response
+
+    result = _run_single(
+        tmp_path,
+        monkeypatch,
+        ["- Name: Operation\n  Kind: concept"],
+        overview=_Response("Saved paragraph.\n\nUnfinished", "length"),
+    )
+    assert result.outcome == "partial" and result.plan.overview.status == "partial"
+    assert result.plan.pages and result.plan.overview.text.strip() == "Saved paragraph."
 
 
 def test_whole_source_page_does_not_hide_fallback_page_counts(tmp_path, monkeypatch):

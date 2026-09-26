@@ -42,7 +42,12 @@ or heading path when known. Prefer labelled entries (name, type, section); table
 headings need not follow a fixed template. Copy supplied section keys or complete
 heading paths instead of abbreviating chapter names; separate multiple selections
 with semicolons. Only perform page planning; do not regenerate the overview.
+Selecting a section key or path contributes only its supplied part inside this target;
+partial sections accumulate across windows. Outside sections may be context clues,
+not new page subjects. Context can locate other chapters in this same saved source.
 Plan only concept or entity pages; the separate overview task handles Summary/Overview.
+Do not create pages for external document names whose bodies were not supplied;
+retain the source's requirements to consult them as reference hints.
 Entity types must use supplied types. Optional context
 chapters, purpose and external reference hints may be included. No source block must
 be routed to a page. Do not write page bodies, internal paths, proofs, JSON or reasoning.
@@ -187,7 +192,10 @@ def plan_messages(
         "subtask": subtask,
         "target": target_t,
         "carry": carry_s,
-        "navigation": {"hints": navigation_hints},
+        "navigation": {
+            "hints": navigation_hints,
+            "subject_selection": "section ∩ target ∩ supplied original",
+        },
         "existing_pages": catalog_window,
         "existing_targets": catalog_targets or [],
         "entity_types": entity_types,

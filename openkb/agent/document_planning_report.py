@@ -181,7 +181,14 @@ def _finalize(
         plan = DocumentPlan(
             metadata=metadata,
             overview=OverviewPlan(
-                text=overview, status="complete" if overview and not failed else "partial"
+                text=overview,
+                status="complete"
+                if overview
+                and all(
+                    state["tasks"].get(_task_id(window, "overview"), {}).get("status") == "accepted"
+                    for window in windows
+                )
+                else "partial",
             ),
             pages=pages,
             planning_omissions=omissions,

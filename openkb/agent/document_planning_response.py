@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import json
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
 from openkb.agent.document_plan import PagePlan, RangeValue
 from openkb.agent.document_planning_candidates import candidate_identity
-from openkb.agent.document_planning_locations import resolve_location, within_target
-from openkb.sources import content_id
+from openkb.agent.document_planning_locations import (
+    context_choices,
+    labelled_key_paths,
+    resolve_location,
+    section_contribution,
+    within_target,
+)
+from openkb.agent.document_planning_pages import DEFAULT_PURPOSE, merge_page, select_page_path
+from openkb.agent.document_planning_pages import _slug as _slug
 
 _FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
 _ITEM = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.*)$")
@@ -78,17 +84,19 @@ class PageAcceptance:
         return bool(self.pages or self.filtered or self.no_pages)
 
 
-def _unfence(text: str) -> str:
-    content = text.strip()
+def _unfence(text: str, *, preserve_trailing: bool = False) -> str:
+    content = text.lstrip() if preserve_trailing else text.strip()
     if content.startswith('"'):
         try:
             decoded = json.loads(content)
             if isinstance(decoded, str):
-                content = decoded.strip()
+                content = decoded.lstrip() if preserve_trailing else decoded.strip()
         except ValueError:
             pass
-    match = _FENCE.fullmatch(content)
-    return match.group(1).strip() if match else content
+    match = _FENCE.fullmatch(content.strip())
+    if match:
+        return match.group(1) + "\n\n" if preserve_trailing else match.group(1).strip()
+    return content
 
 
 def accept_overview(raw: Any) -> OverviewAcceptance:
@@ -227,13 +235,19 @@ def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, 
     return rows
 
 
-def _markdown_rows(content: str) -> list[dict[str, Any]]:
+def _markdown_rows(content: str, *, truncated: bool = False) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     group: str | None = None
     current: dict[str, Any] | None = None
     lines = content.splitlines()
     table_groups: dict[int, str | None] = {}
+    ends: dict[int, int] = {}
+    table_closed: dict[int, bool] = {}
     for line_index, line in enumerate(lines):
+        if not line.strip():
+            if current is not None and id(current) in ends:
+                current = None
+            continue
         heading = _HEADING.match(line)
         if heading:
             label = heading.group(2).strip()
@@ -257,15 +271,17 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
             parts = [part.strip() for part in body.split(" — ", 2)]
             if len(parts) >= 2 and parts[0] and parts[1]:
                 type_label = re.split(r"[,，;；]", parts[1], maxsplit=1)[0].strip()
-                section = " — ".join(
-                    [parts[1][len(type_label) :].lstrip(" ,，;；"), *parts[2:]]
-                ).strip(" —")
+                inline_section = parts[1][len(type_label) :].lstrip(" ,，;；")
+                section = inline_section or (parts[2] if len(parts) > 2 else "")
                 current = {"name": parts[0], "type": type_label}
+                if inline_section and len(parts) > 2:
+                    current["purpose"] = parts[2]
                 if section:
                     current["section"] = section
                 if group:
                     current["group_kind"] = group
                 rows.append(current)
+                ends[id(current)] = line_index
                 continue
         if item and body.count("|") >= 2:
             cells = [cell.strip(" `") for cell in body.split("|")]
@@ -280,6 +296,7 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
             if group:
                 current["group_kind"] = group
             rows.append(current)
+            ends[id(current)] = line_index
             continue
         match = _FIELD.match(body)
         if item and (not match or _field_name(match.group(1)) in {"name", "title"}):
@@ -294,14 +311,15 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
         if match and current is not None:
             key = match.group(1).strip()
             current[key] = match.group(2).strip()
-            if current not in rows:
+            ends[id(current)] = line_index
+            if not any(current is row for row in rows):
                 rows.append(current)
     # Tables are independent of surrounding lists and column order.
     for index, line in enumerate(lines[:-2]):
         if not line.strip().startswith("|") or not re.fullmatch(r"[\s|:\-]+", lines[index + 1]):
             continue
         columns = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        for row_line in lines[index + 2 :]:
+        for row_index, row_line in enumerate(lines[index + 2 :], start=index + 2):
             if not row_line.strip().startswith("|"):
                 break
             cells = [cell.strip() for cell in row_line.strip().strip("|").split("|")]
@@ -311,7 +329,28 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
                 row["group_kind"] = table_group
             if row:
                 rows.append(row)
-    return rows
+                ends[id(row)] = row_index
+                table_closed[id(row)] = row_line.rstrip().endswith("|") and len(cells) == len(
+                    columns
+                )
+    if not truncated:
+        return rows
+    return [
+        row
+        for row in rows
+        if table_closed.get(id(row), False)
+        or (
+            id(row) not in table_closed
+            and any(
+                not line.strip()
+                or _HEADING.match(line)
+                or _ITEM.match(line)
+                or line.strip().startswith("|")
+                or line.strip() == "```"
+                for line in lines[ends[id(row)] + 1 :]
+            )
+        )
+    ]
 
 
 def _closed_json_pages(content: str) -> list[dict[str, Any]]:
@@ -399,7 +438,7 @@ def _json_structure_closed(content: str) -> bool:
 
 
 def extract_candidates(raw: Any) -> tuple[list[dict[str, Any]], bool, bool]:
-    content = _unfence(str(raw or ""))
+    content = _unfence(str(raw or ""), preserve_trailing=True)
     truncated = getattr(raw, "finish_reason", None) == "length"
     if content.startswith(("{", "[")):
         if truncated or not _json_structure_closed(content):
@@ -415,11 +454,7 @@ def extract_candidates(raw: Any) -> tuple[list[dict[str, Any]], bool, bool]:
                 value = None
         rows = _json_rows(value)
         return rows, False, truncated
-    rows = _markdown_rows(content)
-    if truncated and rows:
-        # An incomplete final list item can only affect that item.
-        if not content.endswith("\n\n"):
-            rows = rows[:-1]
+    rows = _markdown_rows(content, truncated=truncated)
     no_pages = bool(_NO_PAGES.search(content)) and not rows
     return rows, no_pages, truncated
 
@@ -434,6 +469,14 @@ def _normalize(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                 value = value.strip(" *`\t\r\n").lower()
                 if value in {"concept", "概念", "entity", "实体"}:
                     value = _kind(value)
+        if name == "section":
+            label = _label(str(key))
+            if any(part in label for part in ("heading path", "标题路径", "章节路径")) and any(
+                part in label for part in ("section key", "章节键")
+            ):
+                value = labelled_key_paths(value)
+            elif label in {"heading path", "标题路径", "章节路径"} and value not in (None, ""):
+                value = {"heading_path": value}
         if (name not in _ALIASES or value not in (None, "")) and value not in values.setdefault(
             name, []
         ):
@@ -441,24 +484,17 @@ def _normalize(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     result: dict[str, Any] = {}
     conflicts = []
     for name, choices in sorted(values.items()):
-        if name == "section" and any("section:" in str(value) for value in choices):
-            choices = [value for value in choices if "section:" in str(value)]
         if not choices:
             continue
         if len(choices) > 1:
-            conflicts.append(name)
-            result[name] = sorted(choices, key=lambda value: json.dumps(value, sort_keys=True))
+            if name == "section":
+                result[name] = choices
+            else:
+                conflicts.append(name)
+                result[name] = sorted(choices, key=lambda value: json.dumps(value, sort_keys=True))
         else:
             result[name] = choices[0]
     return result, conflicts
-
-
-def _slug(title: str) -> str:
-    normalized = unicodedata.normalize("NFKC", title).lower()
-    ascii_slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")[:90]
-    if not ascii_slug:
-        return "topic-" + content_id(title)[:12]
-    return ascii_slug + ("-" + content_id(title)[:12] if not normalized.isascii() else "")
 
 
 def _display_title(value: Any) -> str:
@@ -530,13 +566,6 @@ def accept_pages(
         if not conflicts and _summary_category(row, kind):
             _filter_candidate(result, identity, "summary_placeholder", original)
             continue
-        if not conflicts and any(
-            phrase in str(row.get(field) or "").lower()
-            for field in ("section", "purpose")
-            for phrase in ("referenced by title only", "未随本文提供", "引用处")
-        ):
-            _filter_candidate(result, identity, "reference_hint", original)
-            continue
         try:
             if conflicts:
                 if category_conflict and kind is None:
@@ -559,6 +588,18 @@ def accept_pages(
             entity_type = supplied_type or type_from_kind or default_entity_type
             if kind == "entity" and entity_type not in entity_types:
                 raise ValueError("unknown_entity_type")
+            placeholder = row.get("section")
+            if isinstance(placeholder, str) and re.fullmatch(
+                r"(?:referenced by title only|未随本文提供|未提供正文|未附正文|引用处|"
+                r".+[（(](?:引用处|未随本文提供|referenced by title only)[）)])",
+                placeholder.strip(" `"),
+                re.I,
+            ):
+                try:
+                    resolve_location(placeholder, navigation, [], parsed, evidence)
+                except ValueError:
+                    _filter_candidate(result, identity, "reference_hint", original)
+                    continue
             cited_without_body = any(
                 re.search(
                     rf"《{re.escape(title)}》[^。.!?]{{0,100}}"
@@ -573,101 +614,56 @@ def accept_pages(
                 # when the model labels it as a concept rather than a work.
                 _filter_candidate(result, identity, "unsupplied_reference", original)
                 continue
-            folder = "concepts" if kind == "concept" else "entities"
-            path = f"{folder}/{_slug(name)}"
-            if row.get("target"):
-                proposed = str(row["target"])
-                if (
-                    proposed not in existing_targets
-                    or proposed not in (allowed_update_targets or set())
-                    or not proposed.startswith(folder + "/")
-                ):
-                    raise ValueError("unknown_target")
-                path = proposed
-            elif catalog_titles:
-                label = unicodedata.normalize("NFKC", title).casefold().strip()
-                matches = [
-                    target_path
-                    for target_path, catalog_title in catalog_titles.items()
-                    if target_path.startswith(folder + "/")
-                    and unicodedata.normalize("NFKC", catalog_title).casefold().strip() == label
-                ]
-                if len(matches) == 1 and matches[0] in (allowed_update_targets or set()):
-                    path = matches[0]
-                elif path in existing_targets:
-                    path += "-new-" + content_id((kind, name))[:10]
-            elif path in existing_targets:
-                path += "-new-" + content_id((kind, name))[:10]
-                if path in existing_targets:
-                    raise ValueError("new_target_conflict")
-            ranges, scope = resolve_location(
-                row.get("section"), navigation, target, parsed, evidence
+            page_key = "page:" + candidate_key[:24]
+            previous = next((page for page in known.values() if page.key == page_key), None)
+            path, target_name = select_page_path(
+                kind=kind,
+                title=title,
+                name=name,
+                proposed=row.get("target"),
+                existing=existing_targets,
+                allowed=allowed_update_targets or set(),
+                catalog=catalog_titles or {},
+                accepted=known,
+                previous=previous,
             )
-            if not within_target(ranges, target, parsed):
-                if any(
-                    page.kind == kind
-                    and _display_title(page.title) == title
-                    and page.name == path
-                    and within_target(ranges, page.subject_ranges, parsed)
-                    for page in known.values()
-                ):
-                    # Later windows may echo an already saved page by its
-                    # section key; that does not create a new outside target.
-                    _filter_candidate(result, identity, "accepted_echo", original)
-                    continue
+            notes: list[str] = []
+            try:
+                ranges, scope = resolve_location(
+                    row.get("section"), navigation, target, parsed, evidence, notes=notes
+                )
+            except ValueError as exc:
+                if str(exc) != "subject_outside_target" or previous is None:
+                    raise
+                ranges, scope = resolve_location(
+                    row.get("section"), navigation, [], parsed, evidence, mode="context"
+                )
+            supplied_target = (
+                section_contribution(target, target, parsed, evidence)
+                if evidence is not None and any("subject_ranges" in node for node in navigation)
+                else target
+            )
+            outside_echo = not within_target(ranges, supplied_target, parsed)
+            if outside_echo and not (
+                previous is not None and within_target(ranges, previous.subject_ranges, parsed)
+            ):
                 raise ValueError("subject_outside_target")
             contexts: list[RangeValue] = []
-            notes: list[str] = []
             if row.get("context"):
-                context_clues = (
-                    [row["context"]]
-                    if isinstance(row["context"], list)
-                    and all(isinstance(item, (list, dict)) for item in row["context"])
-                    else re.split(r"[;；\n]", str(row["context"]))
-                )
-                for clue in context_clues:
-                    if isinstance(clue, list) or isinstance(clue, str) and clue.strip():
-                        try:
-                            located, _ = resolve_location(
-                                clue.strip() if isinstance(clue, str) else clue,
-                                navigation,
-                                target,
-                                parsed,
-                                evidence,
-                            )
-                            contexts.extend(located)
-                        except ValueError:
-                            notes.append("未定位必要上下文：" + str(clue)[:120])
-            previous = known.get(path)
-            if previous:
-                if previous.kind != kind or previous.title != title:
-                    raise ValueError("accepted_page_conflict")
-                if scope == "target_fallback":
-                    # A repeated name without a located new section is an echo,
-                    # not proof that the prior page owns this whole window.
-                    _filter_candidate(result, identity, "accepted_echo", original, resolved=False)
-                    continue
-                result.resolved_candidates[candidate_key] = candidate_name_key
-                before = len(previous.subject_ranges)
-                for value in ranges:
-                    if value not in previous.subject_ranges:
-                        previous.subject_ranges.append(value)
-                _filter_candidate(
-                    result,
-                    identity,
-                    "accepted_echo" if len(previous.subject_ranges) == before else "merged_page",
-                    original,
-                )
-                if previous.scope_resolution == "target_fallback":
-                    previous.scope_resolution = "target_fallback"
-                continue
-            target_name = path if path in existing_targets else ""
+                for clue in context_choices(row["context"], navigation):
+                    try:
+                        located, _ = resolve_location(
+                            clue, navigation, [], parsed, evidence, notes=notes, mode="context"
+                        )
+                        contexts.extend(value for value in located if value not in contexts)
+                    except ValueError:
+                        notes.append("未定位必要上下文：" + str(clue)[:120])
             page = PagePlan(
-                key="page:" + content_id((kind, name, ranges))[:24],
+                key=page_key,
                 kind=kind,
                 name=path,
                 title=title,
-                purpose=str(row.get("purpose") or "根据已选原文整理本主题"),
+                purpose=str(row.get("purpose") or DEFAULT_PURPOSE),
                 target=target_name,
                 type=str(entity_type) if kind == "entity" else None,
                 subject_ranges=ranges,
@@ -675,6 +671,18 @@ def accept_pages(
                 planning_notes=notes + ([str(row["references"])] if row.get("references") else []),
                 scope_resolution=scope,
             )
+            if previous is not None:
+                changed = merge_page(
+                    previous, page, add_subject=not outside_echo and scope != "target_fallback"
+                )
+                _filter_candidate(
+                    result,
+                    identity,
+                    "merged_page" if changed else "accepted_echo",
+                    original,
+                    resolved=scope != "target_fallback",
+                )
+                continue
             known[path] = page
             result.pages.append(page)
             result.resolved_candidates[candidate_key] = candidate_name_key

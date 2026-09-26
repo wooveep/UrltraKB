@@ -17,6 +17,7 @@ from openkb.agent.document_planning_candidates import (
     retain_split_candidates,
     valid_split_candidate_targets,
 )
+from openkb.agent.document_planning_locations import section_contribution
 from openkb.agent.document_planning_report import (
     _finalize,
     _overview_text,
@@ -51,7 +52,12 @@ from openkb.sources import content_id
 
 
 def _navigation_rows(
-    hints: list[dict[str, Any]], navigation: Any, parsed: Any
+    hints: list[dict[str, Any]],
+    navigation: Any,
+    parsed: Any,
+    *,
+    target: list[RangeValue] | None = None,
+    evidence: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     nodes = navigation.get("nodes", []) if isinstance(navigation, dict) else []
     by_key = {f"section:{node.get('id', index)}": node for index, node in enumerate(nodes)}
@@ -65,6 +71,10 @@ def _navigation_rows(
         row["original_ranges"], _ = document_planning_support.exclude_attachment_ranges(
             parsed, [[node["start"], node.get("end", node["start"] + 1)]]
         )
+        if target is not None and evidence is not None:
+            row["subject_ranges"] = section_contribution(
+                row["original_ranges"], target, parsed, evidence
+            )
         rows.append(row)
     return rows
 
@@ -460,6 +470,10 @@ def plan_markdown_document(
             "response": module_revision("openkb.agent.document_planning_response"),
             "locations": module_revision("openkb.agent.document_planning_locations"),
             "candidates": module_revision("openkb.agent.document_planning_candidates"),
+            "pages": module_revision("openkb.agent.document_planning_pages"),
+            "planner": module_revision(__name__),
+            "report": module_revision("openkb.agent.document_planning_report"),
+            "projection": module_revision("openkb.agent.document_planning_projection"),
         },
     )
     state = _state(checkpoints, key, windows, resume)
@@ -524,8 +538,8 @@ def plan_markdown_document(
                     "reason": "planning_navigation_exceeds_request_budget",
                 }
             _persist(checkpoints, key, state)
-        locator = _navigation_rows(hints, navigation, parsed)
         target = _target_ranges(window, parsed)
+        locator = _navigation_rows(hints, navigation, parsed, target=target, evidence=evidence)
         selected_catalog = _catalog_window(catalog_entries, evidence, hints)
         needs_split = False
         for subtask in ("overview", "pages"):

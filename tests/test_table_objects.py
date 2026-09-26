@@ -207,6 +207,11 @@ def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_pa
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload.get("subtask") == "pages":
+            # Select this chapter in every window. A repeated name without a
+            # location only keeps the first fallback, not the complete table.
+            section = payload["navigation"]["hints"][0]["section_key"]
+            return f"- Name: Notes\n  Kind: concept\n  Section: {section}"
         if payload["stage"] == "generation":
             generated.append(payload)
         if payload["stage"] == "verification":
@@ -232,6 +237,12 @@ def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_pa
     assert any(
         item["text"] == condition for batch in generated for item in batch["evidence"]["blocks"]
     )
+    assert {
+        item["text"]
+        for batch in generated
+        for item in batch["evidence"]["blocks"]
+        if item["kind"] == "table"
+    } == {cell for row in rows for cell in row}
     for batch in generated:
         rows_in_batch = {}
         for item in batch["evidence"]["blocks"]:

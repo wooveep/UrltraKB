@@ -3,6 +3,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from openkb.agent.document_navigation_view import navigation_view
 from openkb.agent.document_plan_compiler import PlanningContext
 from openkb.agent.document_plan_selections import SelectionResolver
@@ -65,6 +67,74 @@ def test_paths_partial_and_outside_are_exact():
     assert rows[2]["visibility"] == "outside_window"
     assert rows[2]["ranges"] == []
     assert rows[1]["section_key"] != rows[2]["section_key"]
+
+
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        ([[0, 1]], [[0, 1]]),
+        (
+            [{"block_index": 1, "start_char": 2, "end_char": 8}],
+            [{"block_index": 1, "start_char": 2, "end_char": 3}],
+        ),
+    ],
+)
+def test_chapter_selection_intersects_target_and_supplied_character_slices(target, expected):
+    from openkb.agent.document_markdown_planner import _navigation_rows
+    from openkb.agent.document_planning_response import accept_pages
+
+    parsed, evidence, navigation = _data()
+    hints = navigation_view(navigation, evidence, SimpleNamespace(input_capacity=20_000), parsed)
+    locator = _navigation_rows(hints, navigation, parsed, target=target, evidence=evidence)
+    result = accept_pages(
+        json.dumps(
+            {
+                "name": "Operation",
+                "kind": "concept",
+                "section": "section:n1",
+                "context": "section:n2",
+            }
+        ),
+        navigation=locator,
+        target=target,
+        parsed=parsed,
+        evidence=evidence,
+        entity_types=[],
+        existing_targets=set(),
+    )
+    assert not result.rejected and result.pages[0].subject_ranges == expected
+    assert result.pages[0].context_ranges == [[2, 4]]
+    outside = accept_pages(
+        '{"name":"Outside","kind":"concept","section":"section:n2"}',
+        navigation=locator,
+        target=target,
+        parsed=parsed,
+        evidence=evidence,
+        entity_types=[],
+        existing_targets=set(),
+    )
+    assert not outside.pages and outside.rejected[0]["reason"] == "subject_outside_target"
+    mixed = accept_pages(
+        '{"name":"Mixed","kind":"concept","section":"section:n1；section:n2"}',
+        navigation=locator,
+        target=target,
+        parsed=parsed,
+        evidence=evidence,
+        entity_types=[],
+        existing_targets=set(),
+    )
+    assert not mixed.pages and mixed.rejected[0]["reason"] == "subject_outside_target"
+    if target != expected:
+        explicit = accept_pages(
+            json.dumps({"name": "Explicit", "kind": "concept", "subject_ranges": target}),
+            navigation=locator,
+            target=target,
+            parsed=parsed,
+            evidence=evidence,
+            entity_types=[],
+            existing_targets=set(),
+        )
+        assert not explicit.pages and explicit.rejected[0]["reason"] == "subject_outside_target"
 
 
 def test_supplemental_suffix_preserves_window_prefix_and_permissions():
