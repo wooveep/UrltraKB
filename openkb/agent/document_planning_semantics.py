@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from openkb.agent.document_plan import PagePlan
 from openkb.sources import content_id
 
 _ALIASES = {
@@ -120,9 +122,9 @@ def _kind(value: Any) -> str | None:
         return None
     label = _label(value)
     label = re.sub(r"^(?:建议(?:的)?|suggested\s+|recommended\s+)", "", label)
-    if re.fullmatch(r"(?:concepts?|概念)(?:\s*pages?|页面)?\s*(?:[（(].*[）)])?", label):
+    if re.fullmatch(r"(?:concepts?|概念)(?:\s*pages?|页(?:面)?)?\s*(?:[（(].*[）)])?", label):
         return "concept"
-    if re.fullmatch(r"(?:entit(?:y|ies)|实体)(?:\s*pages?|页面)?\s*(?:[（(].*[）)])?", label):
+    if re.fullmatch(r"(?:entit(?:y|ies)|实体)(?:\s*pages?|页(?:面)?)?\s*(?:[（(].*[）)])?", label):
         return "entity"
     return None
 
@@ -282,7 +284,9 @@ def inherit_classification(row, decision, title, purpose, pages, annotations):
     return decision
 
 
-def matching_suggestions(label, pages, annotations):
+def matching_suggestions(
+    label: str, pages: Iterable[PagePlan], annotations: dict[str, Any]
+) -> list[PagePlan]:
     from openkb.agent.document_planning_pages import normalized_name
 
     return [

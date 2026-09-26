@@ -143,8 +143,11 @@ def render_plan_preview(plan: DocumentPlan) -> str:
             ]
         )
         for hint in page.location_hints:
+            value = hint["value"]
+            if isinstance(value, dict) and value.get("format") == "bound-location-v1":
+                value = value["raw"]
             lines.append(
-                f"- 定位线索（{hint['role']}）：`{json.dumps(hint['value'], ensure_ascii=False)}`"
+                f"- 定位线索（{hint['role']}）：{json.dumps(value, ensure_ascii=False)}"
             )
         for context in page.necessary_context:
             lines.append(

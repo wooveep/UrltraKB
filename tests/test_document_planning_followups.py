@@ -170,7 +170,8 @@ def test_partial_overview_is_not_completed_by_successful_page_planning(tmp_path,
         overview=_Response("Saved paragraph.\n\nUnfinished", "length"),
     )
     assert result.outcome == "partial" and result.plan.overview.status == "partial"
-    assert result.plan.pages and result.plan.overview.text.strip() == "Saved paragraph."
+    assert result.plan.pages and result.plan.overview.text.strip().endswith("Saved paragraph.")
+    assert "局部资料" in result.plan.overview.text
 
 
 def test_summary_only_response_settles_without_claiming_no_pages(tmp_path, monkeypatch):

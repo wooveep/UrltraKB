@@ -12,9 +12,9 @@ def _state(
     checkpoints: Any, key: str, windows: list[dict[str, Any]], resume: bool
 ) -> dict[str, Any]:
     previous = checkpoints.load_recovery(key, "markdown_plan") if resume else None
-    if previous is not None:
-        if not _valid_state(previous, windows):
-            raise ProcessingIncomplete("planning_recovery_invalid", "planning")
+    if previous is not None and not _valid_state(previous, windows):
+        raise ProcessingIncomplete("planning_recovery_invalid", "planning")
+    if previous is not None and previous.get("protocol") == "document-planning-acceptance-v3":
         previous.setdefault("filtered", [])
         return previous
     state = {
@@ -23,6 +23,9 @@ def _state(
         "deferred_suggestions": [],
         "suggestion_annotations": {},
         "batch_notes": [],
+        "overview_snapshot": None,
+        "overview_history": [],
+        "legacy_overview_fragments": [],
         "windows": windows,
         "tasks": {},
         "fragments": {},
@@ -44,6 +47,9 @@ def _state(
                 state["tasks"],
                 state["replayed_from"],
                 state["retained_fragments"],
+                state["overview_snapshot"],
+                state["overview_history"],
+                state["legacy_overview_fragments"],
             ) = historical
     return state
 
@@ -59,6 +65,9 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
 
         try:
             validate_semantics(value)
+            from openkb.agent.document_planning_overview import validate_overview
+
+            validate_overview(value)
         except ValueError:
             return False
     mapping_fields = ("tasks", "fragments")
@@ -128,7 +137,7 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
     return all(
         isinstance(key, str)
         and isinstance(task, dict)
-        and task.get("status") in {"pending", "accepted", "partial", "skipped"}
+        and task.get("status") in {"pending", "accepted", "partial", "skipped", "retired"}
         and type(task.get("attempts")) is int
         and task["attempts"] >= 0
         and isinstance(task.get("replay", []), list)
@@ -168,16 +177,35 @@ def _split_window(
     for subtask in ("overview", "pages"):
         parent_task = state["tasks"].get(_task_id(window, subtask), {})
         for child in children:
-            if parent_task.get("status") == "accepted":
+            if parent_task.get("status") == "accepted" and _covers_input(
+                parent_task, child, parsed
+            ):
                 state["tasks"][_task_id(child, subtask)] = {
                     "status": parent_task["status"],
                     "attempts": 0,
                     "raw": None,
                     "reason": parent_task.get("reason"),
                     "no_pages_recommended": parent_task.get("no_pages_recommended", False),
+                    "inherited_from": _task_id(window, subtask),
                 }
+        if parent_task:
+            parent_task.update(
+                status="retired", superseded_by=[_task_id(child, subtask) for child in children]
+            )
     state["windows"][index : index + 1] = children
     return True
+
+
+def _covers_input(task, child, parsed):
+    from openkb.agent.document_planning_projection import _range_intervals
+    from openkb.agent.document_planning_report import _target_ranges
+
+    provided = _range_intervals(parsed, task.get("input_ranges", []))
+    needed = _range_intervals(parsed, _target_ranges(child, parsed))
+    return bool(needed) and all(
+        any(i == index and left <= start and end <= right for i, left, right in provided)
+        for index, start, end in needed
+    )
 
 
 def _persist(checkpoints: Any, key: str, state: dict[str, Any]) -> None:

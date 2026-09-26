@@ -16,18 +16,14 @@ from openkb.agent.document_planning_admission import admit_planning_windows, val
 from openkb.agent.document_planning_locations import section_contribution
 from openkb.agent.document_planning_report import (
     _finalize,
-    _overview_text,
     _path,
     _target_ranges,
     _task_id,
-    ordered_fragments,
 )
 from openkb.agent.document_planning_response import accept_overview, accept_pages
 from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_planning_state import _persist, _raw_value, _split_window, _state
 from openkb.agent.document_planning_state import _valid_state as _valid_state
-from openkb.agent.document_protocol import plan_messages
-from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.config import compilation_model_options, resolve_entity_types
 from openkb.execution_measurement import (
     record_document_totals,
@@ -129,7 +125,9 @@ def _catalog_window(
 
 
 def _accepted_overview(state: dict[str, Any]) -> str:
-    return _overview_text(ordered_fragments(state))
+    from openkb.agent.document_planning_overview import current_overview
+
+    return current_overview(state)
 
 
 class _Response(str):
@@ -313,6 +311,10 @@ def plan_markdown_document(
             "semantics": module_revision("openkb.agent.document_planning_semantics"),
             "state": module_revision("openkb.agent.document_planning_state"),
             "bindings": module_revision("openkb.agent.document_planning_bindings"),
+            "carry": module_revision("openkb.agent.document_planning_carry"),
+            "overview": module_revision("openkb.agent.document_planning_overview"),
+            "prompts": module_revision("openkb.agent.document_markdown_prompts"),
+            "quality": module_revision("openkb.agent.document_planning_quality"),
         },
     )
     state = _state(checkpoints, key, windows, resume)
@@ -412,15 +414,13 @@ def plan_markdown_document(
                         f"- {path} | {title}" + (f" — {brief}" if brief else "")
                         for path, title, brief in selected_catalog
                     )
-                    messages = plan_messages(
+                    from openkb.agent.document_planning_carry import project_messages
+
+                    state["displayed_targets"] = displayed_targets
+                    messages, projection = project_messages(
                         evidence,
-                        {
-                            "overview": overview[-4000:],
-                            "pages": [
-                                {"title": p["title"], "kind": p["kind"]}
-                                for p in state["pages"][-40:]
-                            ],
-                        },
+                        state,
+                        overview,
                         {
                             "target_start": window["target_start"],
                             "target_end": window["target_end"],
@@ -431,8 +431,8 @@ def plan_markdown_document(
                         catalog_text,
                         entity_types,
                         schema,
-                        settings.get("language", ""),
-                        displayed_targets,
+                        settings,
+                        planning_limits,
                         source_conditions=source_conditions,
                         subtask=subtask,
                         recovery=recovery,
@@ -452,6 +452,7 @@ def plan_markdown_document(
                         request_binding = capture_request(
                             messages, source, parsed, window, checkpoints.store
                         )
+                        task["input_ranges"] = [row["range"] for row in request_binding["aliases"]]
                         try:
                             raw = _call(
                                 messages, settings, planning_limits, bundle, mock_caller, subtask
@@ -488,7 +489,11 @@ def plan_markdown_document(
                                     state.get("recovery_requests", 0) + dispatched - 1
                                 )
                                 _persist(checkpoints, key, state)
-                        task["raw"] = {**_raw_value(raw), "binding": request_binding["id"]}
+                        task["raw"] = {
+                            **_raw_value(raw),
+                            "binding": request_binding["id"],
+                            "projection": projection,
+                        }
                         state.setdefault("responses", []).append(
                             {
                                 "task": task_key,
@@ -501,10 +506,9 @@ def plan_markdown_document(
                     if subtask == "overview":
                         overview_result = accept_overview(response)
                         if overview_result.text:
-                            fragment_id = window_receipt_id(window)
-                            state["fragments"][fragment_id] = _overview_text(
-                                [state["fragments"].get(fragment_id, ""), overview_result.text]
-                            ).strip()
+                            from openkb.agent.document_planning_overview import accept_snapshot
+
+                            accept_snapshot(state, window, target, task["raw"], overview_result)
                             task["status"] = "partial" if overview_result.reason else "accepted"
                             task["reason"] = overview_result.reason
                             task["raw"] = None
@@ -539,6 +543,8 @@ def plan_markdown_document(
                             evidence=json.loads(messages[-1]["content"])["evidence"],
                             source_identity=source.source_id,
                             request_binding=bound_request,
+                            deferred=state["deferred_suggestions"],
+                            annotations=state["suggestion_annotations"],
                         )
                         state["pages"] = [
                             page.to_dict() for page in accepted_pages + pages_result.pages

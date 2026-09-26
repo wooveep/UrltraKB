@@ -220,8 +220,8 @@ def test_table_type_conflicting_with_category_is_rejected():
         entity_types=["person"],
         existing_targets=set(),
     )
-    assert result.pages[0].kind == "concept" and not result.rejected
-    assert any("冲突" in note for note in result.pages[0].planning_notes)
+    assert not result.pages and not result.rejected
+    assert result.deferred_suggestions[0]["reason"] == "classification_conflict"
 
 
 def test_ambiguous_json_is_not_an_overview():
@@ -974,7 +974,7 @@ def test_truncated_overview_keeps_complete_first_fragment(tmp_path, monkeypatch)
     assert calls == ["overview", "overview", "pages"]
     assert result.outcome == "complete"
     assert Path(result.overview_ref).read_text() == (
-        "The source states a prerequisite.\n\nThe operation follows that prerequisite.\n"
+        "The operation follows that prerequisite.\n"
     )
     assert result.plan and not result.plan.pages
 
@@ -1042,7 +1042,8 @@ def test_rejected_page_candidate_does_not_erase_accepted_page(tmp_path, monkeypa
         )
     assert pages_calls == 1
     assert result.outcome == "complete"
-    assert {page.title for page in result.plan.pages} == {"Good", "Bad"}
+    assert {page.title for page in result.plan.pages} == {"Good"}
+    assert [row["title"] for row in result.plan.metadata["deferred_suggestions"]] == ["Bad"]
     report = json.loads(Path(result.report_ref).read_text())
     assert report["rejected_candidates"] == []
     assert not report["rejected_candidate_history"]

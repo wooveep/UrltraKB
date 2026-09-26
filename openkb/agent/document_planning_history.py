@@ -26,7 +26,15 @@ def previous_responses(checkpoints, windows):
             candidate = {**candidate, "protocol": "document-planning-acceptance-v2"}
         if not _valid_state(candidate, windows) or not candidate["responses"]:
             continue
-        tasks = {}
+        current = (
+            candidate.get("protocol") == "document-planning-acceptance-v3"
+            and "overview_snapshot" in candidate
+        )
+        tasks = {
+            key: deepcopy(task)
+            for key, task in candidate["tasks"].items()
+            if current and key.endswith(":overview")
+        }
         valid_tasks = {
             window_receipt_id(window) + ":" + part
             for window in candidate["windows"]
@@ -34,6 +42,8 @@ def previous_responses(checkpoints, windows):
         }
         for response in candidate["responses"]:
             task_key = response.get("task")
+            if isinstance(task_key, str) and task_key.endswith(":overview"):
+                continue
             if (
                 isinstance(task_key, str)
                 and task_key.endswith(":pages")
@@ -52,30 +62,28 @@ def previous_responses(checkpoints, windows):
                     "content": response["content"],
                     "finish_reason": response.get("finish_reason", "stop"),
                     **({"binding": response["binding"]} if response.get("binding") else {}),
+                    **(
+                        {"projection": response["projection"]} if response.get("projection") else {}
+                    ),
                 }
             )
-        from openkb.agent.document_planning_response import accept_overview
-
-        retained = []
-        for fragment in candidate["retained_fragments"]:
-            accepted = accept_overview(fragment["text"])
-            if accepted.text and not accepted.reason:
-                retained.append({"start": fragment["start"], "text": accepted.text})
-        if retained:
-            for task_key in valid_tasks:
-                old_task = candidate["tasks"].get(task_key, {})
-                if (
-                    task_key.endswith(":overview")
-                    and task_key not in tasks
-                    and old_task.get("status") == "accepted"
-                    and old_task.get("attempts") == 0
-                ):
-                    tasks[task_key] = {
-                        "status": "accepted",
-                        "attempts": 0,
-                        "raw": None,
-                        "reason": None,
-                    }
+        retained = list(candidate["retained_fragments"])
+        retained.extend(
+            {
+                "start": window["target_start"],
+                "text": candidate["fragments"][window_receipt_id(window)],
+            }
+            for window in candidate["windows"]
+            if window_receipt_id(window) in candidate["fragments"]
+        )
         if tasks:
-            return candidate["windows"], tasks, key, retained
+            return (
+                candidate["windows"],
+                tasks,
+                key,
+                retained if current else [],
+                candidate.get("overview_snapshot") if current else None,
+                candidate.get("overview_history", []) if current else [],
+                candidate.get("legacy_overview_fragments", []) if current else retained,
+            )
     return None

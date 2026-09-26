@@ -133,7 +133,9 @@ def _finalize(
     from openkb.agent.document_plan_preview import render_plan_preview
 
     windows = state["windows"]
-    overview = _overview_text(ordered_fragments(state))
+    from openkb.agent.document_planning_overview import current_overview, overview_summary
+
+    overview = current_overview(state)
     overview_ref = None
     if overview:
         overview_path = _path(checkpoints, "overview", key, ".md")
@@ -141,6 +143,9 @@ def _finalize(
         overview_ref = str(overview_path)
     pages = [PagePlan.from_dict(item) for item in state["pages"]]
     deferred = state.get("deferred_suggestions", [])
+    from openkb.agent.document_planning_quality import quality_summary
+
+    quality = quality_summary(state, overview)
     has_products = bool(overview or pages or deferred)
     omissions = _omissions(state, windows, parsed)
     failed = bool(omissions)
@@ -155,6 +160,10 @@ def _finalize(
         "deferred_suggestions": deferred,
         "suggestion_annotations": state.get("suggestion_annotations", {}),
         "batch_notes": state.get("batch_notes", []),
+        "promoted_suggestions": state.get("promoted_suggestions", []),
+        "overview_snapshot": state.get("overview_snapshot"),
+        "overview_history": state.get("overview_history", []),
+        **quality,
         "source_id": source.source_id,
         "version_id": source.id,
         "parse_id": parsed.id,
@@ -163,6 +172,7 @@ def _finalize(
         "plan_only": plan_only,
         "outcome": outcome,
         "overview_ref": overview_ref,
+        "overview": overview_summary(state),
         "completed_windows": len(windows),
         "entity_types": entity_types,
         "catalog_targets": state.get("catalog_targets", sorted(existing_targets)),
@@ -243,6 +253,8 @@ def _finalize(
         else None,
         "navigation_id": navigation.get("id") if navigation else None,
         "outcome": outcome,
+        "overview": overview_summary(state),
+        **quality,
         "overview_ref": overview_ref,
         "plan_preview": plan.metadata["plan_preview"] if plan is not None else None,
         "pages": len(pages),
@@ -251,6 +263,8 @@ def _finalize(
             "deferred": len(deferred),
             "merged": sum(row.get("reason") == "merged_page" for row in state["filtered"]),
             "dropped": sum(row.get("reason") == "dropped_item" for row in state["rejected"]),
+            "promoted": len(state.get("promoted_suggestions", [])),
+            "explanations": len(state.get("batch_notes", [])),
         },
         "page_states": {
             name: sum(page.state == name for page in pages)
@@ -306,6 +320,10 @@ def _finalize(
         "tasks": {
             task_id: {field: value for field, value in task.items() if field != "raw"}
             for task_id, task in state["tasks"].items()
+            if task.get("status") != "retired"
+        },
+        "retired_tasks": {
+            key: task for key, task in state["tasks"].items() if task.get("status") == "retired"
         },
     }
     atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -350,6 +368,9 @@ def refresh_execution_report(checkpoints: Any, plan: DocumentPlan) -> None:
         "published": sum(p.quality == "published" for p in plan.pages),
     }
     report["downstream"] = "evidence_prepared"
+    report.setdefault("location_bindings", {})["actual_evidence_ready"] = sum(
+        p.state == "ready" for p in plan.pages
+    )
     from openkb.evidence import ParseStore
 
     parsed = ParseStore(checkpoints.store.kb_dir).load(plan.metadata["parse_id"])

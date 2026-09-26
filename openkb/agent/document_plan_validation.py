@@ -60,6 +60,18 @@ def validate_plan(
             from openkb.agent.document_planning_semantics import validate_semantics
 
             validate_semantics(plan.metadata)
+            from openkb.agent.document_planning_bindings import validate_bound
+            from openkb.agent.document_planning_overview import validate_overview
+
+            validate_overview(plan.metadata)
+            for suggestion in plan.metadata["deferred_suggestions"]:
+                for hint in suggestion["location_hints"]:
+                    validate_bound(
+                        hint["value"],
+                        plan.metadata["source_id"],
+                        plan.metadata["version_id"],
+                        parsed,
+                    )
     if plan.overview.status not in {"partial", "complete"}:
         raise ValueError("Invalid overview status")
     zero_readable_body = plan.metadata.get("zero_readable_body") is True
