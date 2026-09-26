@@ -50,12 +50,16 @@ def test_named_suggestions_and_dropped_rows_finish_without_candidate_retry(tmp_p
     )
     assert result.outcome == "complete"
     assert result.plan.metadata["protocol"] == "document-plan-v4"
-    assert len(result.plan.pages) == 2
-    assert all(page.state == "pending_evidence" for page in result.plan.pages)
-    assert all(not page.subject_ranges for page in result.plan.pages)
+    assert not result.plan.pages
+    deferred = result.plan.metadata["deferred_suggestions"]
+    assert [row["title"] for row in deferred] == ["Preparation", "Unknown section"]
+    assert all(row["reason"] == "classification_unknown" for row in deferred)
+    assert deferred[1]["location_hints"] == [{"role": "subject", "value": "section:absent"}]
     report = json.loads(Path(result.report_ref).read_text())
     assert report["planning_execution"]["planning_requests"] == 2
     assert report["suggestions"]["dropped"] == 1
+    assert report["suggestions"]["deferred"] == 2
+    assert not report["no_pages_recommended"]
     assert not report["planning_omissions"]
 
 
@@ -134,7 +138,7 @@ def test_capacity_children_each_get_the_configured_attempts(tmp_path, monkeypatc
         report = json.loads(Path(result.report_ref).read_text())
         key = result.plan.metadata["recovery_key"]
         state = checkpoints.load_recovery(key, "markdown_plan")
-        state["protocol"] = "document-planning-markdown-v1"
+        # Rebuild the checkpoint identity while retaining current overview semantics.
         checkpoints.save_recovery("f" * 64, "markdown_plan", state)
         (checkpoints.root / "recovery" / f"{key}-markdown_plan.json").unlink()
 
@@ -177,7 +181,7 @@ def test_quote_after_operation_verb_is_not_a_document_reference():
     assert [row.target_text for row in refs] == ["设备维护指南"]
 
 
-def test_continue_reextracts_old_raw_responses_before_spending_new_calls(tmp_path, monkeypatch):
+def test_continue_reextracts_old_pages_and_refreshes_legacy_overview(tmp_path, monkeypatch):
     source, parsed = _DummySource(), _parsed()
     workspace = tmp_path / "workspace"
     (workspace / "wiki").mkdir(parents=True)
@@ -188,7 +192,7 @@ def test_continue_reextracts_old_raw_responses_before_spending_new_calls(tmp_pat
         return (
             "Overview retained."
             if task["subtask"] == "overview"
-            else ("- Name: Operation\n  Section: section:unknown")
+            else ("- Name: Operation\n  Kind: concept\n  Section: section:unknown")
         )
 
     with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
@@ -207,11 +211,21 @@ def test_continue_reextracts_old_raw_responses_before_spending_new_calls(tmp_pat
         key = first.plan.metadata["recovery_key"]
         state = checkpoints.load_recovery(key, "markdown_plan")
         state["protocol"] = "document-planning-markdown-v1"
+        state.pop("overview_snapshot")
+        state.pop("overview_history")
+        from openkb.agent.document_window_receipts import window_receipt_id
+
+        state["fragments"] = {window_receipt_id(state["windows"][0]): "Legacy window overview."}
         checkpoints.save_recovery("e" * 64, "markdown_plan", state)
         (checkpoints.root / "recovery" / f"{key}-markdown_plan.json").unlink()
 
-        def forbidden(*args, **kwargs):
-            raise AssertionError("Historical usable responses need no model request")
+        calls = []
+
+        def refresh(messages, *, settings):
+            task = json.loads(messages[-1]["content"])
+            calls.append(task["subtask"])
+            assert task["subtask"] == "overview", "Historical pages must be replayed"
+            return "New cumulative overview."
 
         restored = plan_document(
             tmp_path,
@@ -221,13 +235,15 @@ def test_continue_reextracts_old_raw_responses_before_spending_new_calls(tmp_pat
             None,
             SETTINGS,
             checkpoints,
-            mock_caller=forbidden,
+            mock_caller=refresh,
             plan_only=True,
             return_result=True,
             resume=True,
             retry_skipped=True,
         )
     assert len(restored.plan.pages) == 1 and restored.outcome == "complete"
+    assert calls == ["overview"]
+    assert restored.plan.overview.text.strip() == "New cumulative overview."
     assert restored.plan.pages[0].location_hints == [
         {"role": "subject", "value": "section:unknown"}
     ]

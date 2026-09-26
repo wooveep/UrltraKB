@@ -39,13 +39,14 @@ def test_v4_keeps_unlocated_suggestions_as_hints_without_window_fallback(field):
     ]
 
 
-def test_v4_keeps_roles_and_bad_locations_without_rejecting_the_suggestion():
+@pytest.mark.parametrize("entity_type", ["product", "unknown"])
+def test_v4_keeps_roles_and_bad_locations_without_rejecting_the_suggestion(entity_type):
     result = _accept(
         json.dumps(
             {
                 "Title": "Setup",
                 "Kind": "entity",
-                "Type": "unknown",
+                "Type": entity_type,
                 "Section": "section:run display wording",
                 "必要上下文": {"block": []},
                 "相关章节": "section:elsewhere",
@@ -54,10 +55,18 @@ def test_v4_keeps_roles_and_bad_locations_without_rejecting_the_suggestion():
         entity_types=["product"],
         default_entity_type="product",
     )
-    page = result.pages[0]
-    assert not result.rejected and page.type == "product"
-    assert page.state == "pending_evidence" and page.subject_ranges == [[1, 2]]
-    assert [h["role"] for h in page.location_hints] == ["subject", "context", "related"]
+    assert result.usable and not result.rejected
+    if entity_type == "unknown":
+        assert not result.pages
+        suggestion = result.deferred_suggestions[0]
+        assert suggestion["reason"] == "entity_type_unknown"
+        hints = suggestion["location_hints"]
+    else:
+        page = result.pages[0]
+        assert page.type == "product"
+        assert page.state == "pending_evidence" and page.subject_ranges == [[1, 2]]
+        hints = page.location_hints
+    assert [h["role"] for h in hints] == ["subject", "context", "related"]
 
 
 def test_v4_duplicate_name_normalization_merges_later_hints_and_edited_purpose():
