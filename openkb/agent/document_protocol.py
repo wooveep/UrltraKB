@@ -32,12 +32,17 @@ OVERVIEW_RULES = """Write a readable Markdown overview for the current target. U
 PageIndex structure and summaries for navigation, and the supplied original text for
 content, limits, conditions and reference requirements. Do not claim to have read
 external or attached material. Existing overview text is saved; add only the current
-target's contribution. Return Markdown prose, not JSON or reasoning."""
+target's contribution. Only perform the overview task; do not include a page plan
+or page bodies. Return Markdown prose, not JSON or reasoning."""
 
 PAGES_RULES = """Plan useful concept and entity pages for this target using PageIndex,
 the supplied original text, and the existing catalogue. Return a Markdown list or
 table with each page's name/title, concept or entity kind, and a supplied section_key
-or heading path when known. Entity types must use supplied types. Optional context
+or heading path when known. Prefer labelled entries (name, type, section); table
+headings need not follow a fixed template. Copy supplied section keys or complete
+heading paths instead of abbreviating chapter names; separate multiple selections
+with semicolons. Only perform page planning; do not regenerate the overview.
+Entity types must use supplied types. Optional context
 chapters, purpose and external reference hints may be included. No source block must
 be routed to a page. Do not write page bodies, internal paths, proofs, JSON or reasoning.
 If no new page is warranted, say so explicitly with a short reason. Do not invent

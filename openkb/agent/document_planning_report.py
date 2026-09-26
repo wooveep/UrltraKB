@@ -10,11 +10,12 @@ from typing import Any
 from openkb.agent import document_planning_support
 from openkb.agent.document_plan import DocumentPlan, OverviewPlan, PagePlan, validate_plan
 from openkb.agent.document_plan_annotations import ExternalReference, PlanningOmission
+from openkb.agent.document_planning_candidates import rejected_candidate_summary
 from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.execution_measurement import record_document_totals
 from openkb.locks import atomic_write_text
-from openkb.planning_coverage import planning_coverage
+from openkb.planning_coverage import planning_coverage, planning_page_scopes
 from openkb.sources import content_id, valid_id
 
 
@@ -201,6 +202,7 @@ def _finalize(
             checkpoints.save(proof_key, reference_rows)
         plan.metadata["reference_proof_key"] = proof_key
     coverage = planning_coverage(plan, parsed, omission_count=len(omissions), outcome=outcome)
+    page_scopes = planning_page_scopes(plan, parsed)
     retained_starts = {
         row["start"] for row in state.get("retained_fragments", []) if isinstance(row, dict)
     }
@@ -214,6 +216,7 @@ def _finalize(
     report_path = _path(checkpoints, "plan-report", key, ".json")
     if plan is not None:
         plan.metadata["planning_coverage"] = coverage
+        plan.metadata["page_scopes"] = page_scopes
         preview_path = _path(checkpoints, "plan-preview", key, ".md")
         plan.metadata["plan_preview"] = str(preview_path)
         plan.metadata["plan_report"] = str(report_path)
@@ -264,11 +267,7 @@ def _finalize(
         "downstream": "not_started_at_planning_handoff",
         "retry_skipped_available": True,
         "planning_omissions": [item.to_dict() for item in omissions],
-        "rejected_candidates": [
-            row
-            for row in state["rejected"]
-            if state["tasks"].get(row["window"], {}).get("status") == "skipped"
-        ],
+        "rejected_candidates": rejected_candidate_summary(state),
         "rejected_candidate_history": state["rejected"],
         "filtered_candidates": {
             reason: sum(row.get("reason") == reason for row in state.get("filtered", []))
@@ -278,6 +277,7 @@ def _finalize(
         },
         "filtered_candidate_history": state.get("filtered", []),
         "planning_coverage": coverage,
+        "page_scopes": page_scopes,
         "planning_execution": metadata["planning_execution"],
         "tasks": {
             task_id: {field: value for field, value in task.items() if field != "raw"}

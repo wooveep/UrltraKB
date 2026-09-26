@@ -23,6 +23,30 @@ def _length(rows: list[tuple[int, int]]) -> int:
     return sum(end - start for start, end in merged_intervals(rows))
 
 
+def planning_page_scopes(plan: DocumentPlan | None, parsed: Any) -> dict[str, Any]:
+    """Keep page-level fallback use visible even when precise ranges cover it."""
+    counts = {"section": 0, "explicit_range": 0, "target_fallback": 0}
+    readable = {
+        index: block.chars
+        for index, block in enumerate(parsed.blocks)
+        if "attachment" not in block.location
+        and block.kind not in {"image", "figure", "attachment"}
+        and block.chars
+    }
+    whole_source = []
+    for page in plan.pages if plan else []:
+        if page.state != "ready":
+            continue
+        counts[page.scope_resolution] = counts.get(page.scope_resolution, 0) + 1
+        ranges: dict[int, list[tuple[int, int]]] = {}
+        _add(ranges, page.subject_ranges, parsed, "page subject")
+        if readable and all(
+            _length(ranges.get(index, [])) == size for index, size in readable.items()
+        ):
+            whole_source.append({"name": page.name, "scope_resolution": page.scope_resolution})
+    return {"by_resolution": counts, "whole_source_pages": whole_source}
+
+
 def planning_coverage(
     plan: DocumentPlan | None,
     parsed: Any,

@@ -8,7 +8,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
-from openkb.agent.document_plan import PagePlan, RangeValue, range_intervals
+from openkb.agent.document_plan import PagePlan, RangeValue
+from openkb.agent.document_planning_locations import resolve_location, within_target
 from openkb.sources import content_id
 
 _FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff /-]+?)\s*[：:]\s*(.*?)\s*$")
@@ -33,6 +34,12 @@ _ALIASES = {
         "sections",
         "主体章节",
         "依据章节",
+        "章节定位",
+        "章节路径",
+        "来源章节",
+        "原文章节",
+        "定位",
+        "section location",
         "来源位置",
         "source location",
         "章节",
@@ -61,6 +68,7 @@ class PageAcceptance:
     pages: list[PagePlan] = field(default_factory=list)
     rejected: list[dict[str, str]] = field(default_factory=list)
     filtered: list[dict[str, str]] = field(default_factory=list)
+    resolved_candidates: dict[str, str] = field(default_factory=dict)
     no_pages: bool = False
     truncated: bool = False
 
@@ -214,21 +222,9 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
             parts = [part.strip() for part in body.split(" — ", 2)]
             if len(parts) >= 2 and parts[0] and parts[1]:
                 type_label = re.split(r"[,，;；]", parts[1], maxsplit=1)[0].strip()
-                section_match = re.search(r"section:[a-zA-Z0-9_-]+", body)
-                path = re.search(
-                    r"(?:heading path|章节路径)\s*:\s*([^,，;；（(—]+)",
-                    body,
-                    flags=re.I,
-                )
-                section = (
-                    section_match.group(0)
-                    if section_match
-                    else path.group(1).strip()
-                    if path
-                    else parts[2]
-                    if len(parts) == 3
-                    else ""
-                )
+                section = " — ".join(
+                    [parts[1][len(type_label) :].lstrip(" ,，;；"), *parts[2:]]
+                ).strip(" —")
                 current = {"name": parts[0], "type": type_label}
                 if section:
                     current["section"] = section
@@ -259,16 +255,15 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
             else:
                 current = None
         if match and current is not None:
-            key = _field_name(match.group(1))
-            if key:
-                current[key] = match.group(2).strip()
-                if current not in rows:
-                    rows.append(current)
+            key = match.group(1).strip()
+            current[key] = match.group(2).strip()
+            if current not in rows:
+                rows.append(current)
     # Tables are independent of surrounding lists and column order.
     for index, line in enumerate(lines[:-2]):
         if not line.strip().startswith("|") or not re.fullmatch(r"[\s|:\-]+", lines[index + 1]):
             continue
-        columns = [_field_name(cell) for cell in line.strip().strip("|").split("|")]
+        columns = [cell.strip() for cell in line.strip().strip("|").split("|")]
         for row_line in lines[index + 2 :]:
             if not row_line.strip().startswith("|"):
                 break
@@ -279,7 +274,7 @@ def _markdown_rows(content: str) -> list[dict[str, Any]]:
                 row["group_kind"] = table_group
             if row:
                 rows.append(row)
-    return rows
+    return [{**row, **_normalize(row)} for row in rows]
 
 
 def _closed_json_pages(content: str) -> list[dict[str, Any]]:
@@ -299,9 +294,7 @@ def _closed_json_pages(content: str) -> list[dict[str, Any]]:
                 following = content[offset + 1 :].lstrip()
                 if frames and frames[-1]["kind"] == "{" and following.startswith(":"):
                     try:
-                        frames[-1]["pending_key"] = json.loads(
-                            content[string_start : offset + 1]
-                        )
+                        frames[-1]["pending_key"] = json.loads(content[string_start : offset + 1])
                     except ValueError:
                         pass
             continue
@@ -323,9 +316,7 @@ def _closed_json_pages(content: str) -> list[dict[str, Any]]:
                     )
                 )
             )
-            frames.append(
-                {"kind": char, "start": offset, "key": key, "page_items": page_items}
-            )
+            frames.append({"kind": char, "start": offset, "key": key, "page_items": page_items})
         elif char in "}]":
             if not frames or frames[-1]["kind"] != ("{" if char == "}" else "["):
                 return []
@@ -342,11 +333,7 @@ def _closed_json_pages(content: str) -> list[dict[str, Any]]:
             if parent["kind"] == "[" and parent["page_items"]:
                 group = parent["key"]
                 inherited = (
-                    "concept"
-                    if group == "concepts"
-                    else "entity"
-                    if group == "entities"
-                    else None
+                    "concept" if group == "concepts" else "entity" if group == "entities" else None
                 )
                 rows.extend(_json_rows(value, inherited))
     return rows
@@ -405,119 +392,14 @@ def _normalize(row: dict[str, Any]) -> dict[str, Any]:
     for key, value in row.items():
         name = _field_name(str(key)) or (key if key in _ALIASES else None)
         if name and value not in (None, ""):
+            if (
+                name == "section"
+                and "section:" in str(result.get(name, ""))
+                and "section:" not in str(value)
+            ):
+                continue
             result[name] = value
     return result
-
-
-def _location(
-    value: Any,
-    navigation: list[dict[str, Any]],
-    target: list[RangeValue],
-    parsed: Any,
-    evidence: dict[str, Any] | None = None,
-) -> tuple[list[RangeValue], str]:
-    if value is None or value == "":
-        if not target:
-            raise ValueError("missing_location")
-        return target, "target_fallback"
-    if isinstance(value, list) and all(isinstance(item, (list, dict)) for item in value):
-        supplied = {
-            block["id"]: block["order"]
-            for block in (evidence or {}).get("blocks", [])
-            if isinstance(block, dict) and isinstance(block.get("id"), str)
-        }
-        resolved: list[RangeValue] = []
-        for item in value:
-            if isinstance(item, dict) and "section_key" in item:
-                selected_context, _ = _location(
-                    item["section_key"], navigation, target, parsed, evidence
-                )
-                resolved.extend(selected_context)
-                continue
-            if isinstance(item, dict) and {"from_block", "through_block"} <= set(item):
-                first = supplied.get(item["from_block"])
-                last = supplied.get(item["through_block"])
-                if first is None or last is None or first > last:
-                    raise ValueError("unknown_location")
-                item = [first, last + 1]
-            elif isinstance(item, dict) and "block" in item:
-                index = supplied.get(item["block"])
-                if index is None:
-                    raise ValueError("unknown_location")
-                item = {
-                    "block_index": index,
-                    "start_char": item.get("start_char"),
-                    "end_char": item.get("end_char"),
-                }
-            range_intervals(item, parsed, "planned page")
-            resolved.append(item)
-        return resolved, "explicit_range"
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        value = " / ".join(value)
-    clue = str(value).strip()
-    section_keys = re.findall(r"section:[A-Za-z0-9_-]+", clue)
-    if section_keys:
-        selected: list[RangeValue] = []
-        for section_key in dict.fromkeys(section_keys):
-            matches = [node for node in navigation if node.get("section_key") == section_key]
-            if len(matches) != 1:
-                raise ValueError("unknown_location")
-            ranges = matches[0].get("original_ranges")
-            if ranges is None and isinstance(matches[0].get("original_range"), list):
-                ranges = [matches[0]["original_range"]]
-            if not isinstance(ranges, list) or not ranges:
-                raise ValueError("unknown_location")
-            selected.extend(ranges)
-        for selected_range in selected:
-            range_intervals(selected_range, parsed, "planned section")
-        return selected, "section"
-    if clue.isdigit():
-        raise ValueError("ambiguous_numeric_location")
-    candidates = []
-    for node in navigation:
-        path = node.get("heading_path", [])
-        labels = {node.get("section_key"), " / ".join(path), " > ".join(path)}
-        if path:
-            labels.add(path[-1])
-        if clue in labels:
-            candidates.append(node)
-    if len(candidates) != 1:
-        if candidates:
-            raise ValueError("ambiguous_location")
-        if " / " in clue:
-            parts = [part.strip() for part in clue.split(" / ") if part.strip()]
-            combined: list[RangeValue] = []
-            if len(parts) > 1:
-                for part in parts:
-                    located, _ = _location(part, navigation, target, parsed, evidence)
-                    combined.extend(value for value in located if value not in combined)
-                return combined, "section"
-        raise ValueError("unknown_location")
-    node = candidates[0]
-    originals = node.get("original_ranges")
-    if originals is None and isinstance(node.get("original_range"), list):
-        originals = [node["original_range"]]
-    if not isinstance(originals, list) or not originals:
-        raise ValueError("unknown_location")
-    for original in originals:
-        range_intervals(original, parsed, "planned section")
-    return originals, "section"
-
-
-def _within_target(ranges: list[RangeValue], target: list[RangeValue], parsed: Any) -> bool:
-    if not ranges:
-        return False
-    allowed = [
-        interval for value in target for interval in range_intervals(value, parsed, "target")
-    ]
-    return all(
-        any(
-            index == known_index and left <= start and end <= right
-            for known_index, left, right in allowed
-        )
-        for value in ranges
-        for index, start, end in range_intervals(value, parsed, "planned page")
-    )
 
 
 def _slug(title: str) -> str:
@@ -573,13 +455,21 @@ def accept_pages(
         group_kind = _kind(original.get("group_kind"))
         title = _display_title(row.get("title") or row.get("name"))
         name = _display_title(row.get("name") or title)
+        explicit_kind = _kind(row.get("kind"))
+        type_from_kind = _entity_type(row.get("kind"), entity_types)
+        supplied_type = _entity_type(row.get("type"), entity_types)
+        type_kind = _kind(row.get("type"))
+        kind = (
+            explicit_kind
+            or group_kind
+            or type_kind
+            or ("entity" if supplied_type or type_from_kind else None)
+        )
+        candidate_key = content_id((kind, title, name))
+        candidate_name_key = content_id((title, name))
         try:
             if not title or not name:
                 raise ValueError("missing_title")
-            explicit_kind = _kind(row.get("kind"))
-            type_from_kind = _entity_type(row.get("kind"), entity_types)
-            supplied_type = _entity_type(row.get("type"), entity_types)
-            type_kind = _kind(row.get("type"))
             if row.get("kind") and explicit_kind is None and type_from_kind is None:
                 raise ValueError("unknown_kind")
             if group_kind and explicit_kind and group_kind != explicit_kind:
@@ -590,12 +480,6 @@ def accept_pages(
                 raise ValueError("conflicting_kind")
             if supplied_type and "concept" in (group_kind, explicit_kind):
                 raise ValueError("conflicting_kind")
-            kind = (
-                explicit_kind
-                or group_kind
-                or _kind(row.get("type"))
-                or ("entity" if supplied_type or type_from_kind else None)
-            )
             if kind is None:
                 raise ValueError("unknown_kind")
             entity_type = supplied_type or type_from_kind or default_entity_type
@@ -610,9 +494,7 @@ def accept_pages(
                 for block in (evidence or {}).get("blocks", [])
                 if isinstance(block, dict)
             )
-            if cited_without_body and not any(
-                node.get("title") == title for node in navigation
-            ):
+            if cited_without_body and not any(node.get("title") == title for node in navigation):
                 # An explicitly unsupplied cited document is a reference, even
                 # when the model labels it as a concept rather than a work.
                 result.filtered.append({"reason": "unsupplied_reference", "candidate": title[:300]})
@@ -634,8 +516,7 @@ def accept_pages(
                     target_path
                     for target_path, catalog_title in catalog_titles.items()
                     if target_path.startswith(folder + "/")
-                    and unicodedata.normalize("NFKC", catalog_title).casefold().strip()
-                    == label
+                    and unicodedata.normalize("NFKC", catalog_title).casefold().strip() == label
                 ]
                 if len(matches) == 1 and matches[0] in (allowed_update_targets or set()):
                     path = matches[0]
@@ -645,18 +526,21 @@ def accept_pages(
                 path += "-new-" + content_id((kind, name))[:10]
                 if path in existing_targets:
                     raise ValueError("new_target_conflict")
-            ranges, scope = _location(row.get("section"), navigation, target, parsed, evidence)
-            if not _within_target(ranges, target, parsed):
+            ranges, scope = resolve_location(
+                row.get("section"), navigation, target, parsed, evidence
+            )
+            if not within_target(ranges, target, parsed):
                 if any(
                     page.kind == kind
                     and _display_title(page.title) == title
                     and page.name == path
-                    and _within_target(ranges, page.subject_ranges, parsed)
+                    and within_target(ranges, page.subject_ranges, parsed)
                     for page in known.values()
                 ):
                     # Later windows may echo an already saved page by its
                     # section key; that does not create a new outside target.
                     result.filtered.append({"reason": "accepted_echo", "candidate": title[:300]})
+                    result.resolved_candidates[candidate_key] = candidate_name_key
                     continue
                 raise ValueError("subject_outside_target")
             contexts: list[RangeValue] = []
@@ -671,7 +555,7 @@ def accept_pages(
                 for clue in context_clues:
                     if isinstance(clue, list) or isinstance(clue, str) and clue.strip():
                         try:
-                            located, _ = _location(
+                            located, _ = resolve_location(
                                 clue.strip() if isinstance(clue, str) else clue,
                                 navigation,
                                 target,
@@ -690,6 +574,7 @@ def accept_pages(
                     # not proof that the prior page owns this whole window.
                     result.filtered.append({"reason": "accepted_echo", "candidate": title[:300]})
                     continue
+                result.resolved_candidates[candidate_key] = candidate_name_key
                 before = len(previous.subject_ranges)
                 for value in ranges:
                     if value not in previous.subject_ranges:
@@ -723,8 +608,14 @@ def accept_pages(
             )
             known[path] = page
             result.pages.append(page)
+            result.resolved_candidates[candidate_key] = candidate_name_key
         except (TypeError, ValueError) as exc:
             result.rejected.append(
-                {"reason": str(exc), "candidate": json.dumps(original, ensure_ascii=False)[:300]}
+                {
+                    "reason": str(exc),
+                    "candidate": json.dumps(original, ensure_ascii=False)[:300],
+                    "candidate_key": candidate_key,
+                    "candidate_name_key": candidate_name_key,
+                }
             )
     return result

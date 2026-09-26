@@ -182,6 +182,7 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
         )
     ):
         return False
+
     def deltas(windows: list[dict[str, Any]]) -> dict[int, int]:
         edges: dict[int, int] = {}
         for window in windows:
@@ -450,6 +451,8 @@ def plan_markdown_document(
             "schema": content_id(schema),
             "rules": module_revision("openkb.agent.document_protocol"),
             "response": module_revision("openkb.agent.document_planning_response"),
+            "locations": module_revision("openkb.agent.document_planning_locations"),
+            "candidates": module_revision("openkb.agent.document_planning_candidates"),
         },
     )
     state = _state(checkpoints, key, windows, resume)
@@ -541,9 +544,11 @@ def plan_markdown_document(
                 processing_checkpoint("planning")
                 recovery = task.get("reason") or ""
                 if recovery and subtask == "pages":
-                    rejected = [row for row in state["rejected"] if row.get("window") == task_key][
-                        -8:
-                    ]
+                    rejected = [
+                        row
+                        for row in state["rejected"]
+                        if row.get("window") == task_key and not row.get("resolved")
+                    ][-8:]
                     details = [f"{row['reason']}: {row['candidate'][:160]}" for row in rejected]
                     alternatives = [
                         f"{row['section_key']} {' > '.join(row.get('heading_path', []))}"
@@ -673,28 +678,37 @@ def plan_markdown_document(
                     state["pages"] = [
                         page.to_dict() for page in accepted_pages + pages_result.pages
                     ]
-                    state["rejected"].extend(
-                        {"window": task_key, **row} for row in pages_result.rejected
+                    from openkb.agent.document_planning_candidates import record_candidate_attempt
+
+                    pending_candidates = record_candidate_attempt(
+                        state, task_key, task["attempts"], pages_result
                     )
-                    state["filtered"].extend(
-                        {"window": task_key, **row} for row in pages_result.filtered
-                    )
-                    if pages_result.pages or pages_result.no_pages:
+                    resolved_existing = any(
+                        row["reason"] in {"accepted_echo", "merged_page"}
+                        for row in pages_result.filtered
+                    ) and not (task.get("reason") == "pages_truncated" or pending_candidates)
+                    if pages_result.pages or pages_result.no_pages or resolved_existing:
                         task["no_pages_recommended"] = pages_result.no_pages
                         task["status"] = (
                             "accepted"
-                            if not pages_result.rejected and not pages_result.truncated
+                            if not pending_candidates and not pages_result.truncated
                             else "partial"
                         )
                         task["reason"] = (
                             "pages_truncated"
                             if pages_result.truncated
                             else "page_candidates_rejected"
-                            if pages_result.rejected
+                            if pending_candidates
                             else None
                         )
                     else:
-                        task["reason"] = "pages_unparseable"
+                        task["reason"] = (
+                            "pages_truncated"
+                            if pages_result.truncated
+                            else "page_candidates_rejected"
+                            if pending_candidates
+                            else task.get("reason") or "pages_unparseable"
+                        )
                     task["raw"] = None
                     _persist(checkpoints, key, state)
                     if pages_result.pages:

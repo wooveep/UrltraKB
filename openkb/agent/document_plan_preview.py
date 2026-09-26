@@ -64,10 +64,12 @@ def render_plan_preview(plan: DocumentPlan) -> str:
                 [
                     "## 规划范围统计",
                     "",
-                f"明确定位主体：{render_ratio('precise_ratio')}（{coverage['precise_chars']} 字）",
-                f"较宽取证范围：{render_ratio('fallback_ratio')}"
-                f"（{coverage['fallback_chars']} 字）",
-                f"未纳入主体：{render_ratio('unrouted_ratio')}（{coverage['unrouted_chars']} 字）",
+                    f"明确定位主体：{render_ratio('precise_ratio')}"
+                    f"（{coverage['precise_chars']} 字）",
+                    f"较宽取证范围：{render_ratio('fallback_ratio')}"
+                    f"（{coverage['fallback_chars']} 字）",
+                    f"未纳入主体：{render_ratio('unrouted_ratio')}"
+                    f"（{coverage['unrouted_chars']} 字）",
                     "这些比例仅说明已解析原文的范围，不证明语义完整。",
                     "正文生成、审核、发布：尚未执行",
                     "",
@@ -88,6 +90,27 @@ def render_plan_preview(plan: DocumentPlan) -> str:
                     f"规划遗漏：{coverage.get('planning_omissions', 0)}；"
                     f"解析缺口：{coverage.get('parser_gaps', 0)}",
                     "正文生成、审核、发布：尚未执行",
+                    "",
+                ]
+            )
+    scopes = plan.metadata.get("page_scopes")
+    if isinstance(scopes, dict):
+        counts = scopes["by_resolution"]
+        lines.extend(
+            [
+                f"页面定位：章节 {counts.get('section', 0)}；"
+                f"显式范围 {counts.get('explicit_range', 0)}；"
+                f"较宽范围页面：{counts.get('target_fallback', 0)}。",
+                "字符比例按范围并集去重，较宽范围页面可能不增加较宽范围字符数。",
+                "",
+            ]
+        )
+        whole_source = scopes["whole_source_pages"]
+        if whole_source:
+            lines.extend(
+                [
+                    "以下页面的主体范围覆盖全部可读原文，范围占比不代表逐页精确定位：",
+                    *(f"- `{row['name']}`（{row['scope_resolution']}）" for row in whole_source),
                     "",
                 ]
             )
