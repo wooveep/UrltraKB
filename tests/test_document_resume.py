@@ -229,8 +229,6 @@ def test_markdown_usable_body_can_compile_with_omission_notice(
     assert result.knowledge_compilation == "completed"
 
 
-
-
 def test_explicit_request_count_stops_even_with_unlimited_tokens():
     limits = RequestLimits.from_config(
         {**DEFAULT_CONFIG, "processing": {**DEFAULT_CONFIG["processing"], "max_requests": 200}}
@@ -264,8 +262,6 @@ def test_semantic_unsupported_omits_knowledge_and_finishes_publication(
     # exact rejection instead of paying for another stochastic decision.
     assert calls["verification"] == 1
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
-
-
 
 
 def test_known_text_encoding_is_detected(kb_dir, tmp_path, monkeypatch):
@@ -447,10 +443,16 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
                 value = "Independent document requirements."
             else:
                 target = payload["target"]
-                value = "\n".join(
-                    f"- Name: topic-{index}\n  Kind: concept"
-                    for index in range(target["target_start"], target["target_end"])
-                )
+                value = {
+                    "pages": [
+                        {
+                            "title": f"topic-{index}",
+                            "kind": "concept",
+                            "subject_ranges": [[index, index + 1]],
+                        }
+                        for index in range(target["target_start"], target["target_end"])
+                    ]
+                }
         elif payload["stage"] == "generation":
             with lock:
                 title = payload["page"]["title"]

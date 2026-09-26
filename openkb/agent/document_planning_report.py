@@ -284,7 +284,7 @@ def _finalize(
         },
         "windows_processed": len(windows),
         "windows_total": len(windows),
-        "parser_gaps": len([row for row in parsed.quality if row.get("status") == "needs_review"]),
+        "parser_gaps": coverage["parser_gaps"],
         "external_references": len(state["external_references"]),
         "downstream": "not_started_at_planning_handoff",
         "retry_skipped_available": True,

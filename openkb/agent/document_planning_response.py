@@ -61,8 +61,31 @@ _ALIASES = {
         "subject_ranges",
     },
     "context": {"context", "必要上下文", "前提章节", "context_sections"},
-    "related": {"related", "相关章节", "keywords", "关键词", "相关线索"},
-    "purpose": {"purpose", "用途", "说明", "注意事项"},
+    "related": {
+        "related",
+        "相关章节",
+        "keywords",
+        "关键词",
+        "相关线索",
+        "位置线索",
+        "定位线索",
+        "定位提示",
+        "location",
+        "location clues",
+        "location hints",
+        "reference",
+        "参考",
+    },
+    "purpose": {
+        "purpose",
+        "用途",
+        "用途说明",
+        "说明",
+        "注意事项",
+        "建议依据",
+        "description",
+        "rationale",
+    },
     "references": {"references", "外部参考", "参考资料", "external_references"},
     "target": {"target", "target_key", "目标页面"},
 }
@@ -153,6 +176,27 @@ def _field_name(value: str) -> str | None:
     )
     if exact:
         return exact
+    plain = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", key)
+    plain = re.sub(r"^(?:建议(?:的)?|suggested\s+)", "", plain)
+    if plain != key and (field_name := _field_name(plain)):
+        return field_name
+    # Composite display labels preserve their recognizable field, without
+    # requiring one fixed heading spelling or guessing at arbitrary prose.
+    parts = re.split(r"\s*[/／]\s*", key)
+    if len(parts) > 1:
+        fields = {_field_name(part) for part in parts} - {None}
+        if fields <= {"name", "title"} and fields:
+            return "title"
+        if len(fields) == 1:
+            return next(iter(fields))
+        if fields <= {"section", "context", "related"} and fields:
+            return "related"
+    if re.fullmatch(
+        r"(?:建议(?:的)?|页面|概念|实体|suggested |concept |entity |page )+"
+        r"(?:名称|标题|name|title)",
+        key,
+    ):
+        return "title"
     if "section key" in key or "heading path" in key or "章节位置" in key:
         return "section"
     if "标题路径" in key or key.startswith("章节/"):

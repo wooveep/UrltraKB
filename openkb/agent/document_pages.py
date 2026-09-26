@@ -81,7 +81,6 @@ must identify a concrete material discrepancy in ``issues``. ``uncertain`` is fo
 missing or ambiguous key condition, not a generic preference for more detail."""
 
 
-
 def _occurrence_fields(occurrences: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {key: occurrence[key] for key in ("id", "routes", "reference")}
@@ -394,7 +393,7 @@ def _batch_evidence(evidence: dict[str, Any], occurrences: list[dict[str, Any]])
     # its source envelope byte-identical rather than manufacturing a batch
     # identity that would make generation and verification appear to use
     # different frozen evidence.
-    if occurrences is evidence.get("blocks"):
+    if occurrences == evidence.get("blocks"):
         return evidence
     return {
         **evidence,

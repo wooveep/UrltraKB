@@ -169,6 +169,7 @@ def test_model_rationale_remains_in_plan_but_not_generation_or_review_input():
         purpose="Explain the procedure",
         target="",
         subject_ranges=[[0, 1]],
+        location_hints=[],
         necessary_context=[context],
         limitations=[],
     )

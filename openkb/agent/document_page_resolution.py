@@ -190,7 +190,13 @@ def prepare_page(
         clues = subject_hints or [row for row in result.location_hints if row["role"] == "related"]
         clues = clues or [{"value": result.title}]
         for hint in clues:
-            for clue in context_choices(hint["value"], rows):
+            related = hint.get("role") == "related"
+            choices = context_choices(hint["value"], rows)
+            if related and isinstance(hint["value"], str) and "section:" in hint["value"]:
+                # A unique supplied key can occur after display prose. Keep that
+                # whole clue available before interpreting its punctuation.
+                choices = [hint["value"], *choices]
+            for clue in choices:
                 ranges, scope = _resolve(
                     clue,
                     rows,
@@ -202,9 +208,16 @@ def prepare_page(
                     result.title + " " + result.purpose,
                 )
                 if not ranges:
+                    if related:
+                        note = "相关线索未定位：" + str(clue)[:120]
+                        if note not in result.planning_notes:
+                            result.planning_notes.append(note)
+                        continue
                     return skip(scope)
                 result.subject_ranges.extend(r for r in ranges if r not in result.subject_ranges)
                 result.scope_resolution = scope
+                if clue == hint["value"] and len(choices) > 1:
+                    break
     for hint in result.location_hints:
         if hint["role"] != "context":
             continue

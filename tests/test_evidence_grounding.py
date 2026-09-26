@@ -332,7 +332,15 @@ def test_public_topic_title_is_verified_with_its_body(kb_dir, tmp_path, model_se
         response = evidence_response(payload)
         if payload["stage"] == "planning":
             if payload["subtask"] == "pages":
-                return {"pages": [{"title": bad_title, "kind": "concept"}]}
+                return {
+                    "pages": [
+                        {
+                            "title": bad_title,
+                            "kind": "concept",
+                            "subject_ranges": payload["target"]["ranges"],
+                        }
+                    ]
+                }
         elif payload["stage"] == "generation":
             response["content"] = original.read_text()
         elif payload["stage"] == "verification":
@@ -362,7 +370,15 @@ def test_corrected_title_is_verified_published_and_restored(kb_dir, tmp_path, mo
         response = evidence_response(payload)
         if payload["stage"] == "planning":
             if payload["subtask"] == "pages":
-                return {"pages": [{"title": good_title, "kind": "concept"}]}
+                return {
+                    "pages": [
+                        {
+                            "title": good_title,
+                            "kind": "concept",
+                            "subject_ranges": payload["target"]["ranges"],
+                        }
+                    ]
+                }
         elif payload["stage"] == "generation":
             response["content"] = "# " + bad_title + "\n\n" + original.read_text()
             if payload.get("revision"):

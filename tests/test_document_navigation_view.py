@@ -70,16 +70,13 @@ def test_paths_partial_and_outside_are_exact():
 
 
 @pytest.mark.parametrize(
-    "target,expected",
+    "target",
     [
-        ([[0, 1]], [[0, 1]]),
-        (
-            [{"block_index": 1, "start_char": 2, "end_char": 8}],
-            [{"block_index": 1, "start_char": 2, "end_char": 3}],
-        ),
+        [[0, 1]],
+        [{"block_index": 1, "start_char": 2, "end_char": 8}],
     ],
 )
-def test_chapter_selection_intersects_target_and_supplied_character_slices(target, expected):
+def test_suggestions_retain_full_chapters_without_claiming_window_evidence(target):
     from openkb.agent.document_markdown_planner import _navigation_rows
     from openkb.agent.document_planning_response import accept_pages
 
@@ -102,7 +99,8 @@ def test_chapter_selection_intersects_target_and_supplied_character_slices(targe
         entity_types=[],
         existing_targets=set(),
     )
-    assert not result.rejected and result.pages[0].subject_ranges == expected
+    assert not result.rejected and result.pages[0].subject_ranges == [[0, 2]]
+    assert result.pages[0].state == "pending_evidence"
     assert result.pages[0].context_ranges == [[2, 4]]
     outside = accept_pages(
         '{"name":"Outside","kind":"concept","section":"section:n2"}',
@@ -113,7 +111,8 @@ def test_chapter_selection_intersects_target_and_supplied_character_slices(targe
         entity_types=[],
         existing_targets=set(),
     )
-    assert not outside.pages and outside.rejected[0]["reason"] == "subject_outside_target"
+    assert not outside.rejected and outside.pages[0].subject_ranges == [[2, 4]]
+    assert outside.pages[0].state == "pending_evidence"
     mixed = accept_pages(
         '{"name":"Mixed","kind":"concept","section":"section:n1；section:n2"}',
         navigation=locator,
@@ -123,8 +122,9 @@ def test_chapter_selection_intersects_target_and_supplied_character_slices(targe
         entity_types=[],
         existing_targets=set(),
     )
-    assert not mixed.pages and mixed.rejected[0]["reason"] == "subject_outside_target"
-    if target != expected:
+    assert not mixed.rejected and mixed.pages[0].subject_ranges == [[0, 2], [2, 4]]
+    assert mixed.pages[0].state == "pending_evidence"
+    if isinstance(target[0], dict):
         explicit = accept_pages(
             json.dumps({"name": "Explicit", "kind": "concept", "subject_ranges": target}),
             navigation=locator,
@@ -134,7 +134,8 @@ def test_chapter_selection_intersects_target_and_supplied_character_slices(targe
             entity_types=[],
             existing_targets=set(),
         )
-        assert not explicit.pages and explicit.rejected[0]["reason"] == "subject_outside_target"
+        assert not explicit.rejected and explicit.pages[0].subject_ranges == target
+        assert explicit.pages[0].state == "pending_evidence"
 
 
 def test_supplemental_suffix_preserves_window_prefix_and_permissions():

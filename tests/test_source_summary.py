@@ -16,7 +16,8 @@ def test_summary_preserves_bracketed_title_without_breaking_navigation(kb_dir, m
         if payload["stage"] == "planning" and payload.get("subtask") == "pages":
             value = (
                 f"- 名称：Notes\n  标题：{title}\n"
-                "  类别：concept\n  用途：Service configuration"
+                "  类别：concept\n  用途：Service configuration\n"
+                "  Selection：Required service configuration."
             )
         if payload["stage"] == "generation":
             value["content"] = "# " + title + "\nConfirmed knowledge."

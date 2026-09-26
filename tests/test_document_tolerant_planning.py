@@ -3,12 +3,40 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.processing import InputTooLarge, ProcessingIncomplete
 from tests.test_document_markdown_planning import SETTINGS, _parsed
 from tests.test_document_orchestrator import _DummySource
 from tests.test_document_planning_followups import _run_single
+
+
+@pytest.mark.parametrize(
+    "header", ["建议标题", "概念名称", "实体名称", "名称/标题", "Name / Title", "Suggested title"]
+)
+@pytest.mark.parametrize("clues", ["定位线索", "位置线索", "Location clues"])
+def test_common_composite_headers_keep_named_suggestions_and_location_hints(header, clues):
+    from openkb.agent.document_planning_response import accept_pages
+
+    raw = (
+        f"| {header} | 类型 | {clues} | 用途 / 说明 |\n|---|---|---|---|\n"
+        "| Safe start | concept | Startup chapter | Describe startup |"
+    )
+    result = accept_pages(
+        raw,
+        navigation=[],
+        target=[[0, 2]],
+        parsed=_parsed(),
+        entity_types=[],
+        existing_targets=set(),
+    )
+    assert len(result.pages) == 1
+    page = result.pages[0]
+    assert page.title == "Safe start" and page.purpose == "Describe startup"
+    assert page.location_hints == [{"role": "related", "value": "Startup chapter"}]
+    assert page.state == "pending_evidence" and not page.subject_ranges
 
 
 def test_named_suggestions_and_dropped_rows_finish_without_candidate_retry(tmp_path, monkeypatch):
@@ -29,6 +57,32 @@ def test_named_suggestions_and_dropped_rows_finish_without_candidate_retry(tmp_p
     assert report["planning_execution"]["planning_requests"] == 2
     assert report["suggestions"]["dropped"] == 1
     assert not report["planning_omissions"]
+
+
+def test_report_keeps_ocr_gaps_separate_from_usable_text(tmp_path, monkeypatch):
+    parsed = _parsed()
+    parsed.quality = [
+        {"status": "verified", "reason": "docx_image_ocr_notice:page_budget_exhausted"}
+    ]
+    monkeypatch.setattr("tests.test_document_planning_followups._parsed", lambda: parsed)
+    result = _run_single(tmp_path, monkeypatch, ["- Name: Preparation\n  Kind: concept"])
+    report = json.loads(Path(result.report_ref).read_text())
+    assert report["parser_gaps"] == report["planning_coverage"]["parser_gaps"] == 1
+
+
+def test_suggestion_columns_allow_display_prefixes_and_parenthetical_labels(tmp_path, monkeypatch):
+    result = _run_single(
+        tmp_path,
+        monkeypatch,
+        [
+            "| 建议页面 | 类型 | 建议位置线索（章节 / 关键词） | 用途说明 |\n"
+            "|---|---|---|---|\n| Startup | concept | Startup chapter | Describe startup |"
+        ],
+    )
+    assert len(result.plan.pages) == 1
+    page = result.plan.pages[0]
+    assert page.title == "Startup" and page.purpose == "Describe startup"
+    assert page.location_hints == [{"role": "related", "value": "Startup chapter"}]
 
 
 def test_global_budget_retains_overview_and_reports_unfinished_page_task(tmp_path, monkeypatch):

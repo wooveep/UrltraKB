@@ -92,6 +92,49 @@ def test_unknown_hint_skips_one_page_but_io_failure_is_not_content_success(kb_di
         prepare_page(page, source, parsed, None, BrokenReader())
 
 
+def test_related_clues_are_alternatives_and_known_keys_survive_display_prose(kb_dir, tmp_path):
+    from openkb.agent.document_page_resolution import prepare_page
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    navigation = {
+        "nodes": [{"id": "install", "parent": None, "start": 2, "end": 4, "title": "Install"}]
+    }
+    page = _page(
+        [
+            {"role": "related", "value": "Unconfirmed context; section:install (display hint)"},
+            {"role": "related", "value": "Unknown optional relationship"},
+        ]
+    )
+    result = prepare_page(page, source, parsed, navigation, reader)
+    assert result.page.state == "ready"
+    assert result.page.subject_ranges == [[2, 4]]
+    assert any(
+        row["text"] == "Run setup after obtaining credentials." for row in result.evidence["blocks"]
+    )
+    assert any("Unknown optional relationship" in note for note in result.page.planning_notes)
+
+
+@pytest.mark.parametrize("other", ["Appendix", "Missing chapter"])
+def test_subject_selection_does_not_drop_a_second_unindexed_heading(kb_dir, tmp_path, other):
+    from openkb.agent.document_page_resolution import prepare_page
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    navigation = {
+        "nodes": [{"id": "install", "parent": None, "start": 2, "end": 4, "title": "Install"}]
+    }
+    result = prepare_page(
+        _page([{"role": "subject", "value": f"section:install; {other}"}]),
+        source,
+        parsed,
+        navigation,
+        reader,
+    )
+    if other == "Appendix":
+        assert result.page.state == "ready" and result.page.subject_ranges == [[2, 4], [4, 6]]
+    else:
+        assert result.page.state == "skipped" and not result.page.subject_ranges
+
+
 def test_failed_multi_hint_preparation_is_atomic_across_continue(kb_dir, tmp_path):
     from openkb.agent.document_page_resolution import prepare_page
 
