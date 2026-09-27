@@ -84,7 +84,7 @@ class Audit:
         with self.lock:
             self.requests.append(row)
             number = len(self.requests)
-            self.pending[measured["id"]] = (number, row, messages)
+            self.pending[measured["id"]] = (number, row, messages, measured)
             self.write(f"request-{number:02d}.json", row)
             self.write(
                 f"response-{number:02d}.json",
@@ -99,7 +99,7 @@ class Audit:
             saved = self.pending.pop(measured["id"], None)
             if saved is None:
                 return
-            number, request, messages = saved
+            number, request, messages, _ = saved
             choices = getattr(response, "choices", [])
             content = choices[0].message.content if choices else None
             row = {
@@ -207,13 +207,14 @@ class Audit:
             try:
                 yield self
             finally:
-                for number, request, _ in self.pending.values():
+                for number, request, _, measured in self.pending.values():
                     self.write(
                         f"response-{number:02d}.json",
                         {
                             "request": number,
                             "phase": request["phase"],
-                            "failed": True,
+                            "response_observed": False,
+                            "measurement": dict(measured),
                             "usage": None,
                         },
                     )

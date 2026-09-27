@@ -93,3 +93,25 @@ def test_online_audit_records_real_receipt_without_global_profiler(
     assert response["decoded_content"] == expected
     assert response["finish_reason"] == "stop"
     assert len(audit.requests) == 1
+
+
+def test_online_audit_retains_external_transport_without_claiming_provider_failure(
+    kb_dir, tmp_path
+):
+    from openkb.config import load_config
+    from openkb.external_request_usage import external_request_usage
+    from openkb.processing import processing_scope
+    from tests.online_step3 import Audit
+
+    audit = Audit(tmp_path, "private-test-secret")
+    settings = load_config(kb_dir / ".openkb/config.yaml")
+    with audit.capture(), processing_scope(settings):
+        with external_request_usage(0, "ocr", model_time=False) as receipt:
+            receipt["tokens"] = 0
+    response = json.loads((tmp_path / "response-01.json").read_text())
+    assert "failed" not in response
+    assert response["response_observed"] is False
+    assert response["measurement"]["transport_complete"] is True
+    assert response["measurement"]["operation"] == "ocr"
+    assert response["measurement"]["request_seconds"] >= 0
+    assert response["usage"] is None
