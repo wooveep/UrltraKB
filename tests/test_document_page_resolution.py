@@ -124,7 +124,8 @@ def test_multiple_keys_remain_distinct_required_or_optional_selections(
         navigation,
         reader,
     )
-    assert missing.page.state == ("skipped" if role == "subject" else "ready")
+    assert missing.page.state == "ready"
+    assert missing.page.evidence_scope["status"] == "partial"
     assert any("missing" in note or "unresolved" in note for note in missing.page.planning_notes)
 
 
@@ -184,18 +185,21 @@ def test_subject_selection_does_not_drop_a_second_unindexed_heading(kb_dir, tmp_
     if other == "Appendix":
         assert result.page.state == "ready" and result.page.subject_ranges == [[2, 4], [4, 6]]
     else:
-        assert result.page.state == "skipped" and not result.page.subject_ranges
+        assert result.page.state == "ready" and result.page.subject_ranges == [[2, 4]]
+        assert result.page.evidence_scope["status"] == "partial"
 
 
-def test_failed_multi_hint_preparation_is_atomic_across_continue(kb_dir, tmp_path):
+def test_partial_multi_hint_preparation_is_stable_across_continue(kb_dir, tmp_path):
     from openkb.agent.document_page_resolution import prepare_page
 
     source, parsed, reader = _source(kb_dir, tmp_path)
     page = _page([{"role": "subject", "value": ["Install", "section:absent"]}])
     first = prepare_page(page, source, parsed, None, reader)
     second = prepare_page(first.page, source, parsed, None, reader, retry_skipped=True)
-    assert first.page.state == second.page.state == "skipped"
-    assert first.page.subject_ranges == second.page.subject_ranges == []
+    assert first.page.state == second.page.state == "ready"
+    assert first.page.subject_ranges == second.page.subject_ranges == [[2, 4]]
+    assert first.page.evidence_scope == second.page.evidence_scope
+    assert first.page.evidence_scope["status"] == "partial"
 
 
 def test_saved_ranges_do_not_hide_new_unindexed_subject_hints(kb_dir, tmp_path):

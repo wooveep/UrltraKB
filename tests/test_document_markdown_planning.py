@@ -1078,7 +1078,7 @@ def test_planning_report_counts_filtered_reference_hints(tmp_path, monkeypatch):
     report = json.loads(Path(result.report_ref).read_text())
     assert [page.title for page in result.plan.pages] == ["Good"]
     assert report["filtered_candidates"] == {"unsupplied_reference": 1}
-    assert report["filtered_candidate_history"][0]["window"].endswith(":pages")
+    assert report["filtered_candidate_history"][0]["window"].startswith("global-pages:")
 
 
 def test_empty_planning_result_has_report_without_fake_overview(tmp_path, monkeypatch):
@@ -1127,7 +1127,7 @@ def test_a_and_b_share_source_prefix_and_dispatch_without_json_format(monkeypatc
     assert all("response_format" not in row for row in captured)
 
 
-def test_capacity_split_preserves_overview_and_divides_remaining_page_calls(
+def test_capacity_retry_preserves_overview_without_restoring_per_window_pages(
     tmp_path,
     monkeypatch,
 ):
@@ -1140,7 +1140,7 @@ def test_capacity_split_preserves_overview_and_divides_remaining_page_calls(
     def respond(messages, *, settings):
         task = json.loads(messages[-1]["content"])
         subtask = task["subtask"]
-        start = task["target"]["target_start"]
+        start = task["target"].get("target_start", 0)
         calls.append((subtask, start))
         if subtask == "overview":
             return "A prerequisite precedes the operation."
@@ -1163,6 +1163,6 @@ def test_capacity_split_preserves_overview_and_divides_remaining_page_calls(
         )
     assert calls[0] == ("overview", 0)
     assert [row[0] for row in calls].count("overview") == 1
-    assert result.plan and len(result.plan.pages) == 2
+    assert result.plan and len(result.plan.pages) == 1
     assert result.plan.overview.text.strip() == "A prerequisite precedes the operation."
     assert result.outcome == "complete"

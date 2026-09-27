@@ -40,7 +40,7 @@ def _coordinate_evidence(evidence):
     return {**evidence, "blocks": blocks}
 
 
-def source_messages(evidence, task, rules):
+def source_messages(evidence, task, rules, *, planning_context=None):
     # Encode and intern the frozen evidence before traversing any task field.
     # The stage belongs to the frozen envelope: generation/review use private
     # citation markers, while navigation/planning use nonnumeric opaque IDs.
@@ -50,13 +50,24 @@ def source_messages(evidence, task, rules):
         if stage == "planning" or (isinstance(stage, str) and stage.startswith("index_"))
         else evidence
     )
-    prefix, identities = encode_payload(
-        {
-            "protocol": PROTOCOL,
-            "evidence": coordinate_evidence,
-            "stage": stage,
+    envelope = {
+        "protocol": PROTOCOL,
+        "evidence": coordinate_evidence,
+        "stage": stage,
+    }
+    if planning_context is not None:
+        if stage != "planning" or task.get("subtask") != "pages":
+            raise ValueError("Planning context requires the global pages task")
+        # P is derived navigation, never original evidence. Optional excerpts
+        # follow the frozen prefix and get their own real source bindings.
+        envelope["evidence"] = {
+            **{key: coordinate_evidence[key] for key in ("source_id", "version_id", "parse_id")},
+            "blocks": [],
         }
-    )
+        envelope["planning_context"] = planning_context
+        if coordinate_evidence.get("blocks"):
+            task = {**task, "supplemental_evidence": coordinate_evidence}
+    prefix, identities = encode_payload(envelope)
     prefix = share_contexts(
         prefix, fields=("context_data", "context", "neighbors", "heading_evidence")
     )

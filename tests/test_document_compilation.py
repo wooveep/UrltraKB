@@ -286,7 +286,11 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
             target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            ranges = (
+                target["ranges"]
+                if "ranges" in target
+                else [[target["target_start"], target["target_end"]]]
+            )
             return {
                 "overview": {
                     "text": "Two independently planned facts.",
@@ -444,3 +448,26 @@ def test_lost_formal_plan_receipt_never_falls_back_to_legacy_publication(
     assert blocked.knowledge_compilation == "unfinished"
     assert blocked.reason == "document_publication_receipt_pending"
     assert len(model_service) == requests_before
+
+
+def test_actual_generation_and_review_receive_prepared_scope_and_resume_reuses_it(
+    kb_dir, tmp_path, model_service
+):
+    source = tmp_path / "scope.md"
+    source.write_text("# Install\n\nObtain credentials before setup.\n\nRun setup.")
+    result = import_document(kb_dir, source)
+    assert result.knowledge_compilation == "completed", result
+    payloads = [json.loads(request["messages"][-1]["content"]) for request in model_service]
+    downstream = [
+        payload for payload in payloads if payload["stage"] in {"generation", "verification"}
+    ]
+    assert len(downstream) == 2
+    scope = downstream[0]["page"]["evidence_scope"]
+    assert scope is not None and scope["status"] in {"located", "unassessed"}
+    assert downstream[1]["page"]["evidence_scope"] == scope
+    assert "planning intent" in downstream[0]["task_rules"]
+    assert "incomplete coverage" in downstream[1]["task_rules"]
+    total = len(model_service)
+    resumed = continue_source(kb_dir, result.source_id, version_id=result.input_version)
+    assert resumed.knowledge_compilation == "completed", resumed
+    assert len(model_service) == total

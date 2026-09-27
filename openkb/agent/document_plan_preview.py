@@ -142,6 +142,13 @@ def render_plan_preview(plan: DocumentPlan) -> str:
                 "",
             ]
         )
+        if page.evidence_scope is not None:
+            lines.append("取证范围：" + page.evidence_scope["status"])
+            for missing in page.evidence_scope["unresolved_hints"]:
+                lines.append(
+                    f"- 未定位（{missing['role']}）：{missing['value']}；{missing['reason']}"
+                )
+            lines.append("")
         for hint in page.location_hints:
             value = hint["value"]
             if isinstance(value, dict) and value.get("format") == "bound-location-v1":
@@ -186,14 +193,14 @@ def render_plan_preview(plan: DocumentPlan) -> str:
             )
         lines.append("")
     if deferred := plan.metadata.get("deferred_suggestions"):
-        lines.extend(["## 待分类建议", ""])
+        lines.extend(["## 待确认建议", ""])
         for suggestion in deferred:
             lines.extend(
                 [
                     f"### {suggestion['title']}",
                     "",
                     suggestion["purpose"],
-                    f"待分类原因：{suggestion['reason']}",
+                    f"待确认原因：{suggestion['reason']}",
                     *[f"- {note}" for note in suggestion["notes"]],
                     "",
                 ]

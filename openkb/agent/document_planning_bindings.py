@@ -31,7 +31,14 @@ def capture_request(messages, source, parsed, window, store):
         if inverse.get(evidence.get(key), evidence.get(key)) != expected:
             raise ValueError("Planning request source identity mismatch")
     aliases = []
-    for block in evidence["blocks"]:
+    supplied = [evidence]
+    if "supplemental_evidence" in payload:
+        supplemental = payload["supplemental_evidence"]
+        for key, expected in identity.items():
+            if inverse.get(supplemental.get(key), supplemental.get(key)) != expected:
+                raise ValueError("Supplemental planning source identity mismatch")
+        supplied.append(supplemental)
+    for block in (block for value in supplied for block in value["blocks"]):
         order = block["order"]
         if type(order) is not int or not 0 <= order < len(parsed.blocks):
             raise ValueError("Planning request block order mismatch")

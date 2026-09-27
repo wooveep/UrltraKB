@@ -160,6 +160,7 @@ def plan_messages(
     source_conditions: list[dict[str, str]] | None = None,
     subtask: str = "pages",
     recovery: str = "",
+    planning_context: dict[str, Any] | None = None,
 ) -> WireMessages:
     """Assemble WireMessages with frozen evidence W prefix and dynamic suffix."""
     task = {
@@ -187,7 +188,12 @@ def plan_messages(
     }
     if subtask not in {"overview", "pages"}:
         raise ValueError("Invalid Markdown planning subtask")
-    return source_messages(evidence, task, OVERVIEW_RULES if subtask == "overview" else PAGES_RULES)
+    return source_messages(
+        evidence,
+        task,
+        OVERVIEW_RULES if subtask == "overview" else PAGES_RULES,
+        planning_context=planning_context,
+    )
 
 
 def decode_plan_response(

@@ -88,10 +88,11 @@ def test_ambiguous_existing_title_is_retained_without_choosing_a_platform():
     assert all(len(page.location_hints) == 1 for page in pages)
 
 
-def test_explanation_lists_remain_notes_while_later_named_candidates_are_accepted():
+@pytest.mark.parametrize("heading", ["### Notes and qualifications", "Notes:", "**Notes:**"])
+def test_explanation_lists_remain_notes_while_later_named_candidates_are_accepted(heading):
     result = accept(
         "## Concepts\n\n| Title | Kind |\n|---|---|\n| Calibration | concept |\n\n"
-        "### Notes and qualifications\n"
+        f"{heading}\n"
         "- Scope — preserve the distinct versions\n"
         "- Source limitations: the external procedure is unread\n\n"
         "| Title | Kind |\n|---|---|\n| Maintenance | concept |\n\n"
@@ -103,3 +104,68 @@ def test_explanation_lists_remain_notes_while_later_named_candidates_are_accepte
         "Scope — preserve the distinct versions",
         "Source limitations: the external procedure is unread",
     ]
+
+
+@pytest.mark.parametrize(
+    "purpose",
+    [
+        "仅在知识库维护作者索引时建立人物页，否则不单独建页。",
+        "Create a person page only if the knowledge base tracks document authors.",
+    ],
+)
+def test_conditional_page_recommendation_is_deferred_but_operation_prerequisite_is_not(purpose):
+    result = accept(
+        json.dumps(
+            [
+                {"title": "Author", "kind": "entity", "type": "person", "purpose": purpose},
+                {
+                    "title": "Calibration",
+                    "kind": "concept",
+                    "purpose": "Before operating, calibrate the device.",
+                },
+            ]
+        )
+    )
+    assert [page.title for page in result.pages] == ["Calibration"]
+    assert result.deferred_suggestions[0]["reason"] == "conditional_recommendation"
+    assert result.deferred_suggestions[0]["purpose"] == purpose
+
+
+def test_explicit_no_page_and_runtime_condition_stay_explanations_without_topic_blacklists():
+    result = accept(
+        json.dumps(
+            [
+                {"title": "Signature", "kind": "concept", "purpose": "仅作署名，不建议独立建页。"},
+                {
+                    "title": "Extraction",
+                    "kind": "concept",
+                    "purpose": "仅说明本次解析 source_conditions 的 OCR 未运行诊断，不是原文知识。",
+                },
+                {
+                    "title": "OCR engine",
+                    "kind": "concept",
+                    "purpose": "The source explains its OCR recognition pipeline.",
+                },
+                {
+                    "title": "Budget planning",
+                    "kind": "concept",
+                    "purpose": "The source defines the annual budget method.",
+                },
+            ]
+        )
+    )
+    assert [page.title for page in result.pages] == ["OCR engine", "Budget planning"]
+    assert len(result.batch_notes) == 2
+
+
+def test_extension_does_not_promote_a_conditionally_recommended_author():
+    previous = accept(
+        '{"title":"Author","kind":"entity","type":"person",'
+        '"purpose":"Only create a page if the KB tracks authors."}'
+    )
+    result = accept(
+        '{"Existing title":"Author","kind":"entity","type":"person","related":"Revision history"}',
+        deferred=previous.deferred_suggestions,
+    )
+    assert not result.pages
+    assert result.deferred_suggestions[0]["reason"] == "conditional_recommendation"

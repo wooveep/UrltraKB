@@ -37,12 +37,18 @@ from openkb.agent.document_planning_semantics import (
     inherit_classification,
     matching_suggestions,
     promote_deferred,
+    recommendation_intent,
 )
 from openkb.sources import content_id
 
 _FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
 _ITEM = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.*)$")
 _HEADING = re.compile(r"^\s*(#{2,6})\s+(.+?)\s*$")
+_EXPLANATION_HEADING = re.compile(
+    r"^(?:notes?|qualifications?|limitations?)\b|"
+    r"^(?:说明|限制|备注|补充说明)(?:$|[：:、/与及（( ])",
+    re.I,
+)
 _FENCE = re.compile(r"^```(?:markdown|md|json)?\s*\n([\s\S]*?)\n```\s*$", re.I)
 _NO_PAGES = re.compile(
     r"(?:无需|不需要|没有必要|无须).{0,12}(?:新|创建|新增)?.{0,8}(?:页面|知识页)"
@@ -191,15 +197,16 @@ def _markdown_rows(
                 current = None
             continue
         heading = _HEADING.match(line)
+        if (
+            not heading
+            and line.strip(" *").endswith((":", "："))
+            and _EXPLANATION_HEADING.match(line.strip(" *"))
+        ):
+            explanatory, group, current = True, None, None
+            continue
         if heading:
             label = heading.group(2).strip()
-            explanatory = bool(
-                re.match(
-                    r"^(?:notes?|qualifications?|limitations?)\b|"
-                    r"^(?:说明|限制|备注|补充说明)(?:$|[：:、/与及（( ])",
-                    _label(label),
-                )
-            )
+            explanatory = bool(_EXPLANATION_HEADING.match(_label(label)))
             if explanatory:
                 group, current = None, None
                 continue
@@ -582,7 +589,18 @@ def accept_pages(
         origin = {"response": content_id(str(raw)), "entry": entry}
         if request_binding is not None:
             origin.update({key: request_binding[key] for key in ("request", "window")})
-        deferred_reason = decision.reason
+        linked_notes = [
+            note for note in batch_notes if title in note and recommendation_intent(note)
+        ]
+        intent = recommendation_intent(
+            " ".join([purpose, *notes, *linked_notes, str(row.get("related", ""))])
+        )
+        if intent == "explanation":
+            result.batch_notes.append(title + "：" + purpose + "；".join(notes))
+            _filter_candidate(result, identity, "recommendation_explanation", original)
+            continue
+        notes.extend(note for note in linked_notes if note not in notes)
+        deferred_reason = intent or decision.reason
         if extension:
             extension_matches = matching_suggestions(extension, known.values(), known_annotations)
             if (
@@ -596,7 +614,24 @@ def accept_pages(
                     and distinct_scope(extension_matches[0], purpose, hints)
                 )
             ):
-                deferred_reason = "extension_target_unresolved"
+                deferred_reason = deferred_reason or "extension_target_unresolved"
+            prior = [
+                item
+                for item in (deferred or []) + result.deferred_suggestions
+                if normalized_name(item["title"]) == normalized_name(extension)
+                and item["reason"] == "conditional_recommendation"
+            ]
+            if prior and not re.search(
+                r"条件已(?:满足|解除)|明确推荐|condition (?:met|satisfied)|explicitly recommend",
+                purpose,
+                re.I,
+            ):
+                deferred_reason = "conditional_recommendation"
+                purpose = prior[0]["purpose"] if purpose == DEFAULT_PURPOSE else purpose
+                notes.extend(
+                    note for note in [prior[0]["purpose"], *prior[0]["notes"]] if note not in notes
+                )
+
         if kind is None or deferred_reason:
             result.deferred_suggestions.append(
                 deferred_suggestion(

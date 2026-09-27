@@ -83,19 +83,20 @@ def test_catalog_keeps_early_relevant_suggestion_with_honest_budget_projection(t
         seen.append(body)
         if body["subtask"] == "overview":
             return "# Manual\n\nA cumulative description of prerequisites and calibration."
-        return json.dumps(rows) if body["target"]["target_start"] == 0 else "无需新增页面。"
+        from openkb.agent.document_markdown_planner import _Response
+
+        return (
+            _Response(json.dumps(rows), "length")
+            if not body["carry"]["pages"]
+            else "无需新增页面。"
+        )
 
     result = run_windows(tmp_path, respond, capacity=capacity)
     assert len(result.plan.pages) == 150
     carry = seen[-1]["carry"]
+    assert {row["title"] for row in carry["pages"]} == {row["title"] for row in rows}
     assert carry["suggestions"]["total"] == 150
-    assert "Preparation" in [row["title"] for row in carry["pages"]]
-    assert carry["suggestions"]["shown"] == len(carry["pages"]) + len(carry["other_titles"])
-    assert carry["suggestions"]["omitted"] == (carry["suggestions"]["shown"] < 150)
-    if capacity == 128000:
-        assert len(carry["pages"]) == 150 and not carry["other_titles"]
-    else:
-        assert carry["other_titles"]
+    assert carry["suggestions"]["details_clipped"] == (capacity == 8192)
 
 
 def test_overview_replaces_prior_snapshot_and_resume_does_not_repeat_calls(tmp_path):
@@ -117,12 +118,12 @@ def test_overview_replaces_prior_snapshot_and_resume_does_not_repeat_calls(tmp_p
         result.plan.overview.text.strip()
         == "# Manual\n\nCredentials and calibration form the complete workflow."
     )
-    assert seen[2]["carry"]["overview"] == "# Manual\n\nInitial credentials."
+    assert seen[1]["carry"]["overview"] == "# Manual\n\nInitial credentials."
     snapshot = result.plan.metadata["overview_snapshot"]
     assert len(snapshot["processed"]) == 2 and snapshot["response"]
     assert len(result.plan.metadata["overview_history"]) == 2
     resumed = run_windows(tmp_path, respond, resume=True)
-    assert len(seen) == 4
+    assert len(seen) == 3
     assert resumed.plan.overview.text == result.plan.overview.text
 
 
@@ -163,7 +164,7 @@ def test_truncated_later_overview_keeps_previous_complete_snapshot(tmp_path):
     assert len(result.plan.metadata["overview_snapshot"]["processed"]) == 1
 
 
-def test_legacy_window_overviews_require_new_cumulative_tasks_but_reuse_pages(tmp_path):
+def test_legacy_window_overviews_require_new_cumulative_and_global_tasks(tmp_path):
     seen = []
 
     def respond(messages, *, settings):
@@ -184,7 +185,7 @@ def test_legacy_window_overviews_require_new_cumulative_tasks_but_reuse_pages(tm
         old["fragments"] = {window_receipt_id(old["windows"][0]): "Legacy window fragment."}
         cp.save_recovery(key, "markdown_plan", old)
     resumed = run_windows(tmp_path, respond, settings=settings, resume=True)
-    assert seen == ["overview", "pages", "overview", "pages", "overview", "overview"]
+    assert seen == ["overview", "overview", "pages", "overview", "overview", "pages"]
     assert "Legacy" not in resumed.plan.overview.text
     assert len(resumed.plan.metadata["overview_snapshot"]["processed"]) == 2
 
@@ -249,11 +250,11 @@ def test_large_processed_history_is_projected_before_source_is_split(tmp_path):
             task.update(status="pending", attempts=0)
         cp.save_recovery(key, "markdown_plan", state)
     run_windows(tmp_path, respond, settings=settings, resume=True)
-    assert len(seen) == 8
-    assert seen[4]["carry"]["processed_overview"]["omitted"]
+    assert len(seen) == 6
+    assert seen[3]["carry"]["processed_overview"]["omitted"]
 
 
-def test_nested_capacity_splits_inherit_the_original_overview_input(tmp_path, monkeypatch):
+def test_global_capacity_retry_does_not_split_or_repeat_overview(tmp_path, monkeypatch):
     from openkb.processing import InputTooLarge
     from tests.test_document_orchestrator import _DummyParsed
 
@@ -268,7 +269,7 @@ def test_nested_capacity_splits_inherit_the_original_overview_input(tmp_path, mo
         calls.append(body["subtask"])
         if body["subtask"] == "overview":
             return "The entire source describes a procedure."
-        if body["target"]["target_end"] - body["target"]["target_start"] > 1:
+        if calls.count("pages") == 1:
             raise InputTooLarge()
         return "无需新增页面。"
 

@@ -19,7 +19,7 @@ from openkb.planning_coverage import planning_coverage, planning_page_scopes
 from openkb.sources import content_id, valid_id
 
 
-def usage_totals(state: dict[str, Any]) -> dict[str, int | None]:
+def usage_totals(state: dict[str, Any]) -> dict[str, Any]:
     rows = state.get("request_usage", [])
 
     def total(field: str) -> int | None:
@@ -32,6 +32,10 @@ def usage_totals(state: dict[str, Any]) -> dict[str, int | None]:
         "cache_read_tokens": total("cache_read_tokens"),
         "cache_write_tokens": total("cache_write_tokens"),
         "cache_miss_tokens": total("cache_miss_tokens"),
+        "requests": len(rows),
+        "request_seconds": sum(row["request_seconds"] for row in rows)
+        if rows and all(isinstance(row.get("request_seconds"), (int, float)) for row in rows)
+        else None,
     }
 
 
@@ -93,8 +97,17 @@ def _omissions(
     targets = [
         (_task_id(window, subtask), subtask, _target_ranges(window, parsed))
         for window in windows
-        for subtask in ("overview", "pages")
+        for subtask in (("overview",) if state.get("planning_strategy") else ("overview", "pages"))
     ]
+    targets.extend(
+        (
+            key,
+            "pages",
+            [value for row in state["tasks"][key]["sections"] for value in row["original_ranges"]]
+            or [[0, len(parsed.blocks)]],
+        )
+        for key in state.get("planning_tasks", [])
+    )
     for key, subtask, ranges in targets:
         task = state["tasks"].get(key, {})
         reason = task.get("reason")
@@ -156,7 +169,10 @@ def _finalize(
         outcome = "budget_limited"
     metadata = {
         "protocol": "document-plan-v4",
-        "planning_semantics": "tolerant-quality-v1",
+        "planning_semantics": "tolerant-quality-v2",
+        "planning_strategy": state.get("planning_strategy"),
+        "planning_mode": state.get("planning_mode"),
+        "planning_snapshot": state.get("planning_snapshot"),
         "deferred_suggestions": deferred,
         "suggestion_annotations": state.get("suggestion_annotations", {}),
         "batch_notes": state.get("batch_notes", []),
@@ -177,10 +193,26 @@ def _finalize(
         "entity_types": entity_types,
         "catalog_targets": state.get("catalog_targets", sorted(existing_targets)),
         "planning_execution": {
-            "planning_requests": state["attempts"],
+            "planning_requests": len(state["request_usage"])
+            if state["request_usage"]
+            else state["attempts"],
             "recovery_requests": state.get("recovery_requests", 0),
             "elapsed_seconds": max(0.0, time.monotonic() - started),
             **usage_totals(state),
+            "overview_tasks": len(windows),
+            "pages_tasks": len(state.get("planning_tasks", [])),
+            "by_component": {
+                name: usage_totals(
+                    {
+                        "request_usage": [
+                            row
+                            for row in state.get("request_usage", [])
+                            if row.get("planning_component") == name
+                        ]
+                    }
+                )
+                for name in ("overview", "pages")
+            },
         },
     }
     plan = None
@@ -253,6 +285,9 @@ def _finalize(
         else None,
         "navigation_id": navigation.get("id") if navigation else None,
         "outcome": outcome,
+        "planning_strategy": state.get("planning_strategy"),
+        "planning_mode": state.get("planning_mode"),
+        "planning_snapshot": state.get("planning_snapshot"),
         "overview": overview_summary(state),
         **quality,
         "overview_ref": overview_ref,
@@ -278,8 +313,8 @@ def _finalize(
         and not pages
         and not deferred
         and all(
-            state["tasks"].get(_task_id(window, "pages"), {}).get("no_pages_recommended")
-            for window in windows
+            state["tasks"][key].get("no_pages_recommended")
+            for key in state.get("planning_tasks", [])
         ),
         "overview_targets": {
             "complete": sum(
@@ -368,6 +403,7 @@ def refresh_execution_report(checkpoints: Any, plan: DocumentPlan) -> None:
         "published": sum(p.quality == "published" for p in plan.pages),
     }
     report["downstream"] = "evidence_prepared"
+    report["evidence_scopes"] = {page.key: page.evidence_scope for page in plan.pages}
     report.setdefault("location_bindings", {})["actual_evidence_ready"] = sum(
         p.state == "ready" for p in plan.pages
     )

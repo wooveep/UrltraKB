@@ -50,7 +50,12 @@ exceptions attached to the operation they qualify. Do not turn a neighboring hea
 or unrelated section into a universal requirement. Do not invent facts, source locations, links,
 or missing material.
 Planning notes are unverified hints; use them only to locate relevant supplied
-original evidence, never as facts by themselves. External reference records and
+original evidence, never as facts by themselves. The title and purpose express
+planning intent, not proof of complete coverage. Use page.evidence_scope to disclose
+known missing selections and read extent. For partial or unassessed scope, write the
+useful supported portion and explain its limits; never fill unread steps to satisfy
+a title promising a complete procedure. Keep page identity stable.
+External reference records and
 page limitations preserve original instructions;
 they do not provide the unread external document's facts. State that required
 details remain unavailable instead of inventing steps or treating the mention
@@ -74,6 +79,10 @@ claimed from that target without supplied original evidence. Preserve page limit
 The original source's requirement to consult that target remains in scope.
 heading or adjacent text does not establish a condition unless the supplied relation and original
 wording support it. Do not reject concise faithful paraphrase merely because it is not a transcript.
+The program's page.evidence_scope describes actual reads, not semantic approval.
+For partial or unassessed scope, check that the contribution respects its known gaps;
+do not reject a useful supported contribution solely for incomplete coverage, a
+missing preferred heading or short length. Planning titles and purposes are not facts.
 
 Return JSON {"verdict":"supported|advisory|unsupported|uncertain","reason":"brief concrete
 reason","issues":[]}. ``supported`` and ``advisory`` require no blocking issues. ``unsupported``

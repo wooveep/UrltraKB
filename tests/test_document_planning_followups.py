@@ -12,7 +12,7 @@ from tests.test_document_markdown_planning import SETTINGS, _parsed
 from tests.test_document_orchestrator import _DummySource
 
 
-def test_window_containing_only_an_accepted_echo_settles_without_retry(tmp_path, monkeypatch):
+def test_global_response_containing_an_accepted_echo_settles_without_retry(tmp_path, monkeypatch):
     source, parsed = _DummySource(), _parsed()
     workspace = tmp_path / "workspace"
     (workspace / "wiki").mkdir(parents=True)
@@ -44,7 +44,7 @@ def test_window_containing_only_an_accepted_echo_settles_without_retry(tmp_path,
         calls.append(payload["subtask"])
         if payload["subtask"] == "overview":
             return "This section preserves its original requirements."
-        return "- Name: Preparation\n  Kind: concept\n  Section: section:first"
+        return ("- Name: Preparation\n  Kind: concept\n  Section: section:first\n" * 2)
 
     with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
         result = plan_document(
@@ -60,14 +60,14 @@ def test_window_containing_only_an_accepted_echo_settles_without_retry(tmp_path,
             return_result=True,
         )
     assert result.outcome == "complete"
-    assert calls == ["overview", "pages", "overview", "pages"]
+    assert calls == ["overview", "overview", "pages"]
     assert len(result.plan.pages) == 1
     report = json.loads(Path(result.report_ref).read_text())
     assert report["filtered_candidates"] == {"accepted_echo": 1}
     assert not report["planning_omissions"]
 
 
-def test_one_chapter_contributes_only_each_window_then_merges_without_retries(
+def test_global_chapter_selection_follows_all_window_overviews(
     tmp_path, monkeypatch
 ):
     source, parsed = _DummySource(), _parsed()
@@ -95,7 +95,7 @@ def test_one_chapter_contributes_only_each_window_then_merges_without_retries(
 
     def respond(messages, *, settings):
         task = json.loads(messages[-1]["content"])
-        calls.append((task["target"]["target_start"], task["subtask"], messages))
+        calls.append((task["target"].get("target_start"), task["subtask"], messages))
         if task["subtask"] == "overview":
             return "This window describes part of the chapter."
         return "- Name: Operation\n  Kind: concept\n  Section: section:chapter"
@@ -117,18 +117,10 @@ def test_one_chapter_contributes_only_each_window_then_merges_without_retries(
     assert result.plan.pages[0].subject_ranges == [[0, 2]]
     assert result.plan.pages[0].state == "pending_evidence"
     assert [(start, subtask) for start, subtask, _ in calls] == [
-        (0, "overview"),
-        (0, "pages"),
-        (1, "overview"),
-        (1, "pages"),
+        (0, "overview"), (1, "overview"), (None, "pages"),
     ]
-    for index in (0, 2):
-        first, second = calls[index][2], calls[index + 1][2]
-        assert first[0] == second[0]
-        assert (
-            first[-1]["content"].split('"plan_protocol":', 1)[0]
-            == second[-1]["content"].split('"plan_protocol":', 1)[0]
-        )
+    assert all(json.loads(row[2][-1]["content"])["evidence"]["blocks"] for row in calls[:2])
+    assert json.loads(calls[-1][2][-1]["content"])["evidence"]["blocks"] == []
 
 
 def _run_single(
@@ -190,8 +182,8 @@ def test_ignored_summary_cannot_replace_a_failed_overview(tmp_path, monkeypatch)
     assert result.outcome == "empty"
     assert result.plan is None and result.overview_ref is None
     report = json.loads(Path(result.report_ref).read_text())
-    assert report["planning_execution"]["planning_requests"] == 4
-    assert [row["component"] for row in report["planning_omissions"]] == ["overview"]
+    assert report["planning_execution"]["planning_requests"] == 3
+    assert [row["component"] for row in report["planning_omissions"]] == ["overview", "pages"]
     assert not report["no_pages_recommended"]
 
 
@@ -218,7 +210,7 @@ def test_saved_raw_page_response_resumes_without_new_requests(tmp_path, monkeypa
                 stage == "markdown_plan"
                 and not interrupted
                 and any(
-                    task.endswith(":pages") and record.get("raw")
+                    task.startswith("global-pages:") and record.get("raw")
                     for task, record in value["tasks"].items()
                 )
             ):

@@ -214,6 +214,7 @@ class PagePlan:
     quality: str = "planned"  # "planned" | "generated" | "verified" | "unverified" | "published"
     local_key: str | None = None
     review_receipt: dict[str, Any] | None = None
+    evidence_scope: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -242,6 +243,8 @@ class PagePlan:
             "local_key": self.local_key,
             "review_receipt": self.review_receipt,
         }
+        if self.evidence_scope is not None:
+            result["evidence_scope"] = self.evidence_scope
         if self.limitations:
             result["limitations"] = [item.to_dict() for item in self.limitations]
         return result
@@ -270,7 +273,7 @@ class PagePlan:
             "limitations",
         }
         if protocol == "document-plan-v4":
-            allowed.add("location_hints")
+            allowed.update({"location_hints", "evidence_scope"})
         if not set(data) <= allowed:
             raise ValueError("Invalid page plan")
         required = {"key", "kind", "name", "title", "purpose"}
@@ -305,6 +308,9 @@ class PagePlan:
             or not isinstance(limitations, list)
         ):
             raise ValueError("Invalid page plan")
+        from openkb.agent.document_page_scope import validate_scope
+
+        scope = validate_scope(data.get("evidence_scope"))
         normalized_contexts = [_context_dict(context) for context in contexts]
         receipt = data.get("review_receipt")
         if receipt is not None and not isinstance(receipt, dict):
@@ -328,6 +334,7 @@ class PagePlan:
             quality=data.get("quality", "planned"),
             local_key=data.get("local_key"),
             review_receipt=receipt,
+            evidence_scope=scope,
         )
 
 

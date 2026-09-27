@@ -102,6 +102,9 @@ class ExecutionBudget:
                 and self.charged_tokens + reserved > self.limits.max_tokens
             ):
                 raise ProcessingIncomplete("token_budget_exhausted", self.stage)
+            from openkb.processing_reservation import check_later_work
+
+            check_later_work(self, reserved)
             if allowance := active_allowance():
                 allowance.before_reserve(options, reserved)
             from openkb.runtime.family_budget import current_family
@@ -716,6 +719,22 @@ def active_request_limits() -> RequestLimits | None:
 
     active = _ACTIVE.get()
     return active.limits if active is not None else None
+
+
+def remaining_request_budget() -> dict[str, int | None] | None:
+    """Read available document requests/tokens for a later-stage reservation."""
+    active = _ACTIVE.get()
+    if active is None:
+        return None
+    with active.lock:
+        return {
+            "requests": None
+            if active.limits.max_requests is None
+            else max(0, active.limits.max_requests - active.attempts),
+            "tokens": None
+            if active.limits.max_tokens is None
+            else max(0, active.limits.max_tokens - active.charged_tokens),
+        }
 
 
 def external_request_usage(reservation: int, stage: str = "external"):

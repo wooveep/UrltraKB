@@ -387,7 +387,7 @@ def promote_deferred(result, page, candidates):
 
 def validate_semantics(metadata):
     """Validate the one persisted representation used by state, plan and report."""
-    if metadata.get("planning_semantics") != "tolerant-quality-v1":
+    if metadata.get("planning_semantics") not in {"tolerant-quality-v1", "tolerant-quality-v2"}:
         raise ValueError("Invalid planning semantics")
     deferred = metadata.get("deferred_suggestions")
     annotations = metadata.get("suggestion_annotations")
@@ -461,3 +461,29 @@ def _validate_origins(value):
         for row in value
     ):
         raise ValueError("Invalid suggestion origin")
+
+
+def recommendation_intent(text):
+    """Recognize explicit page-making conditions, never operational prerequisites."""
+    conditional = re.search(
+        r"(?:仅在|只有|仅当|如果|若).{0,100}(?:才|时|则).{0,25}(?:建.{0,8}页|维护.{0,8}页)"
+        r"|(?:page|include|create).{0,80}(?:only if|only when|unless)"
+        r"|only (?:create|include).{0,80}\bif\b",
+        text,
+        re.I,
+    )
+    if conditional:
+        return "conditional_recommendation"
+    if re.search(
+        r"(?:不建议|无需|不需要|不要|不单独).{0,8}(?:独立|单独|创建|建)?页"
+        r"|(?:do not|don't|no need to).{0,20}(?:create|make).{0,15}page"
+        r"|not (?:recommended|warranted) as (?:an? )?(?:independent |separate )?page",
+        text,
+        re.I,
+    ):
+        return "explanation"
+    if re.search(r"source_conditions", text, re.I) and re.search(
+        r"本次|本窗口|运行|解析|diagnostic|this (?:run|parse|window)|runtime", text, re.I
+    ):
+        return "explanation"
+    return None

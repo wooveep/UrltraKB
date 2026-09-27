@@ -60,7 +60,7 @@ def test_deferred_suggestion_is_persisted_and_does_not_retry_pages(tmp_path, mon
     assert report["suggestions"]["deferred"] == 1
     assert report["planning_execution"]["planning_requests"] == 2
     assert not report["no_pages_recommended"]
-    assert "待分类建议" in Path(result.plan.metadata["plan_preview"]).read_text()
+    assert "待确认建议" in Path(result.plan.metadata["plan_preview"]).read_text()
 
 
 @pytest.mark.parametrize("label", ["用途或参考", "用途与说明", "用途及说明"])
@@ -70,12 +70,16 @@ def test_notes_mixed_purpose_and_batch_explanation_are_retained_without_extra_pa
         "| Calibration | 概念 | 描述校准；外部规范未核对 | 暂不建议独立建页 | 窗口外资料未读 |\n\n"
         "以下组织建议仍需要原文核对。"
     )
-    assert len(result.pages) == 1
-    page = result.pages[0]
-    assert page.purpose == "描述校准；外部规范未核对"
-    assert {"暂不建议独立建页", "阅读条件：窗口外资料未读"} <= set(page.planning_notes)
-    assert result.batch_notes == ["以下组织建议仍需要原文核对。"]
-    assert result.annotations[page.key]["labels"] == [{"kind": "概念"}]
+    assert not result.pages
+    assert result.batch_notes[0] == "以下组织建议仍需要原文核对。"
+    assert all(
+        text in result.batch_notes[1]
+        for text in (
+            "描述校准；外部规范未核对",
+            "暂不建议独立建页",
+            "阅读条件：窗口外资料未读",
+        )
+    )
 
 
 def test_display_wrappers_merge_but_versions_remain_distinct():

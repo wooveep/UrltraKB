@@ -27,7 +27,8 @@ def previous_responses(checkpoints, windows):
         if not _valid_state(candidate, windows) or not candidate["responses"]:
             continue
         current = (
-            candidate.get("protocol") == "document-planning-acceptance-v3"
+            candidate.get("protocol")
+            in {"document-planning-acceptance-v3", "document-planning-acceptance-v4"}
             and "overview_snapshot" in candidate
         )
         tasks = {

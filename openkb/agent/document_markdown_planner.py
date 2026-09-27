@@ -1,8 +1,7 @@
-"""Independent Markdown overview and page planning over persisted source windows."""
+"""Cumulative window overviews followed by global Markdown page selection."""
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from pathlib import Path
@@ -20,7 +19,7 @@ from openkb.agent.document_planning_report import (
     _target_ranges,
     _task_id,
 )
-from openkb.agent.document_planning_response import accept_overview, accept_pages
+from openkb.agent.document_planning_response import accept_overview
 from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_planning_state import _persist, _raw_value, _split_window, _state
 from openkb.agent.document_planning_state import _valid_state as _valid_state
@@ -260,7 +259,7 @@ def plan_markdown_document(
     plan_only: bool = False,
     mock_caller: Callable[..., Any] | None = None,
 ) -> PlanningResult:
-    """Run bounded A/B work per window and checkpoint each accepted component."""
+    """Settle all overview windows before freezing the global planning context."""
     started = time.monotonic()
     processing_checkpoint("planning")
     validate_navigation(navigation, source, parsed)
@@ -315,6 +314,9 @@ def plan_markdown_document(
             "overview": module_revision("openkb.agent.document_planning_overview"),
             "prompts": module_revision("openkb.agent.document_markdown_prompts"),
             "quality": module_revision("openkb.agent.document_planning_quality"),
+            "global_context": module_revision("openkb.agent.document_global_context"),
+            "global_planning": module_revision("openkb.agent.document_global_planning"),
+            "source_protocol": module_revision("openkb.agent.source_protocol"),
         },
     )
     state = _state(checkpoints, key, windows, resume)
@@ -325,12 +327,56 @@ def plan_markdown_document(
     catalog_entries = _catalog_entries(wiki, existing_targets)
     state.setdefault("catalog_targets", sorted(existing_targets))
     if retry_skipped:
+        if any(
+            task.get("status") == "skipped"
+            for name, task in state["tasks"].items()
+            if name.endswith(":overview")
+        ):
+            state.pop("planning_snapshot", None)
+            for task_key in state.pop("planning_tasks", []):
+                state["tasks"][task_key]["status"] = "retired"
         state.pop("budget_limited", None)
         for task in state["tasks"].values():
             if task.get("status") == "skipped":
                 task.update(status="pending", attempts=0, reason=None, raw=None)
         state["rejected"] = []
         _persist(checkpoints, key, state)
+    from openkb.agent.document_global_context import freeze_context, messages_for
+    from openkb.agent.document_planning_budget import PlanningBudget
+
+    budget = PlanningBudget(planning_limits, settings, mock=mock_caller is not None)
+
+    def pages_reservation():
+        temporary = {**state, "planning_snapshot": None}
+        snapshot = freeze_context(
+            temporary,
+            navigation,
+            source,
+            parsed,
+            catalog_entries,
+            settings,
+            planning_limits,
+            entity_types,
+            schema,
+            source_conditions,
+        )
+        messages = messages_for(
+            snapshot,
+            snapshot["nodes"][:1],
+            temporary,
+            source,
+            parsed,
+            settings,
+            planning_limits,
+            entity_types,
+            schema,
+            source_conditions,
+        )
+        try:
+            return budget.cost(messages)
+        except InputTooLarge:
+            return planning_limits.input_capacity + planning_limits.output_tokens
+
     index = 0
     try:
         while index < len(state["windows"]):
@@ -375,7 +421,7 @@ def plan_markdown_document(
                     _persist(checkpoints, key, state)
                     continue
                 hints = []
-                for subtask in ("overview", "pages"):
+                for subtask in ("overview",):
                     state["tasks"][_task_id(window, subtask)] = {
                         "status": "skipped",
                         "attempts": 0,
@@ -384,10 +430,9 @@ def plan_markdown_document(
                     }
                 _persist(checkpoints, key, state)
             target = _target_ranges(window, parsed)
-            locator = _navigation_rows(hints, navigation, parsed, target=target, evidence=evidence)
             selected_catalog = _catalog_window(catalog_entries, evidence, hints)
             needs_split = False
-            for subtask in ("overview", "pages"):
+            for subtask in ("overview",):
                 task_key = _task_id(window, subtask)
                 task = state["tasks"].setdefault(
                     task_key,
@@ -441,6 +486,8 @@ def plan_markdown_document(
                         task["raw"] = task["replay"].pop(0)
                         state["responses"].append({"task": task_key, "attempt": 0, **task["raw"]})
                     if task.get("raw") is None:
+                        reserved_tokens = pages_reservation()
+                        budget.admit(messages, reserve_pages=reserved_tokens)
                         task["attempts"] += 1
                         state["attempts"] += 1
                         if task["attempts"] > 1:
@@ -454,9 +501,21 @@ def plan_markdown_document(
                         )
                         task["input_ranges"] = [row["range"] for row in request_binding["aliases"]]
                         try:
-                            raw = _call(
-                                messages, settings, planning_limits, bundle, mock_caller, subtask
-                            )
+                            from openkb.processing_reservation import reserve_later_work
+
+                            with reserve_later_work(
+                                requests=1,
+                                tokens=reserved_tokens,
+                                attempts=max_attempts - task["attempts"] + 1,
+                            ):
+                                raw = _call(
+                                    messages,
+                                    settings,
+                                    planning_limits,
+                                    bundle,
+                                    mock_caller,
+                                    subtask,
+                                )
                         except InputTooLarge:
                             task["attempts"] -= 1
                             state["attempts"] -= 1
@@ -477,10 +536,16 @@ def plan_markdown_document(
                             )
                             _persist(checkpoints, key, state)
                             continue
+                        except ProcessingIncomplete as exc:
+                            if exc.reason != "planning_recovery_budget":
+                                raise
+                            task["reason"] = exc.reason
+                            break
                         finally:
                             dispatched = max(0, request_marker() - marker)
                             state.setdefault("request_usage", []).extend(
-                                request_usage_since(marker)
+                                {**row, "planning_component": "overview", "task": task_key}
+                                for row in request_usage_since(marker)
                             )
                             if dispatched > 1:
                                 task["attempts"] += dispatched - 1
@@ -520,57 +585,6 @@ def plan_markdown_document(
                                 break
                         else:
                             task["reason"] = overview_result.reason
-                    else:
-                        accepted_pages = [PagePlan.from_dict(item) for item in state["pages"]]
-                        from openkb.agent.document_planning_bindings import load_binding
-
-                        bound_request = (
-                            load_binding(checkpoints.store, task["raw"]["binding"], source, parsed)
-                            if task["raw"].get("binding")
-                            else None
-                        )
-                        pages_result = accept_pages(
-                            response,
-                            navigation=locator,
-                            target=target,
-                            parsed=parsed,
-                            entity_types=entity_types,
-                            existing_targets=existing_targets,
-                            allowed_update_targets=set(displayed_targets),
-                            catalog_titles={path: title for path, title, _ in catalog_entries},
-                            accepted=accepted_pages,
-                            default_entity_type=settings.get("default_entity_type"),
-                            evidence=json.loads(messages[-1]["content"])["evidence"],
-                            source_identity=source.source_id,
-                            request_binding=bound_request,
-                            deferred=state["deferred_suggestions"],
-                            annotations=state["suggestion_annotations"],
-                        )
-                        state["pages"] = [
-                            page.to_dict() for page in accepted_pages + pages_result.pages
-                        ]
-                        from openkb.agent.document_planning_candidates import (
-                            record_candidate_attempt,
-                        )
-
-                        record_candidate_attempt(state, task_key, task["attempts"], pages_result)
-                        from openkb.agent.document_planning_semantics import record_semantics
-
-                        record_semantics(state, pages_result)
-                        if pages_result.usable:
-                            task["no_pages_recommended"] = pages_result.no_pages
-                            task["status"] = "accepted" if not pages_result.truncated else "partial"
-                            task["reason"] = "pages_truncated" if pages_result.truncated else None
-                        else:
-                            task["reason"] = (
-                                "pages_truncated" if pages_result.truncated else "pages_unparseable"
-                            )
-                        task["raw"] = None
-                        _persist(checkpoints, key, state)
-                        if pages_result.pages or pages_result.deferred_suggestions:
-                            record_first_inspectable()
-                        if task["status"] == "accepted" and not task.get("replay"):
-                            break
                     task["raw"] = None
                     _persist(checkpoints, key, state)
                 if needs_split:
@@ -587,7 +601,7 @@ def plan_markdown_document(
                 _persist(checkpoints, key, state)
                 continue
             if needs_split:
-                for subtask in ("overview", "pages"):
+                for subtask in ("overview",):
                     task = state["tasks"].get(_task_id(window, subtask))
                     if task is not None and task["status"] not in {"accepted", "skipped"}:
                         task["status"] = "skipped"
@@ -608,16 +622,75 @@ def plan_markdown_document(
             "request_budget_exhausted",
             "token_budget_exhausted",
             "time_budget_exhausted",
+            "pages_request_reserved",
+            "pages_tokens_reserved",
+            "planning_recovery_budget",
         }:
             raise
         state["budget_limited"] = exc.reason
         for window in state["windows"]:
-            for part in ("overview", "pages"):
+            for part in ("overview",):
                 task = state["tasks"].setdefault(
                     _task_id(window, part), {"attempts": 0, "raw": None}
                 )
                 if task.get("status") != "accepted":
                     task.update(status="skipped", reason=exc.reason)
+    from openkb.agent.document_global_planning import plan_global_pages
+
+    try:
+        plan_global_pages(
+            state,
+            checkpoints,
+            key,
+            source,
+            parsed,
+            navigation,
+            catalog_entries,
+            settings,
+            planning_limits,
+            entity_types,
+            schema,
+            source_conditions,
+            existing_targets,
+            budget,
+            bundle=bundle,
+            mock_caller=mock_caller,
+        )
+    except ProcessingIncomplete as exc:
+        if exc.reason not in {
+            "request_budget_exhausted",
+            "token_budget_exhausted",
+            "time_budget_exhausted",
+        }:
+            raise
+        state["budget_limited"] = exc.reason
+        for task_key in state.get("planning_tasks", []):
+            task = state["tasks"][task_key]
+            if task["status"] not in {"accepted", "retired"}:
+                task.update(status="skipped", reason=exc.reason)
+    pages = [PagePlan.from_dict(row) for row in state["pages"]]
+    for window in state["windows"]:
+        try:
+            evidence = document_planning_support.read_target_evidence(
+                kb_dir, source, parsed, window.get("evidence"), _target_ranges(window, parsed)
+            )
+        except (FileNotFoundError, KeyError, OSError, ValueError, TypeError):
+            if mock_caller is None:
+                continue
+            evidence = document_planning_support.fallback_read_evidence(
+                source, parsed, window["target_start"], window["target_end"]
+            )
+        for reference in _source_references(evidence, navigation, parsed, pages):
+            existing = next(
+                (row for row in state["external_references"] if row["key"] == reference.key), None
+            )
+            if existing is None:
+                state["external_references"].append(reference.to_dict())
+            else:
+                existing["affected_pages"] = sorted(
+                    set(existing["affected_pages"] + reference.affected_pages)
+                )
+    state["pages"] = [page.to_dict() for page in pages]
     from contextlib import nullcontext
 
     from openkb.processing import budget_settlement_scope

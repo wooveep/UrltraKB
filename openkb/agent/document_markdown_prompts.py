@@ -13,8 +13,21 @@ or itemized model lists. Processed ranges record execution, not proven semantic 
 clipped or missing prior input remains a limitation. Only perform the overview task;
 do not include page plans or bodies. Return prose, not JSON or reasoning."""
 
-PAGES_RULES = """Suggest useful concept and entity pages using PageIndex, supplied
-original text and the existing catalogue. Return readable Markdown lists or tables
+PAGES_RULES = """Select useful concept and entity pages for the whole source after
+overview traversal. The frozen planning_context contains the available overview,
+global PageIndex branches and existing catalogue, all derived guidance, not evidence.
+Use the detailed navigation for the current global or topic-group target. Organize
+coherent reusable knowledge across sections: integrate related prerequisites, main
+procedure and recovery when they answer one purpose. Do not make a page for every
+step, isolated parameter, example interface name or signature. Prefer a substantive
+core product/entity and independently useful concepts; preserve distinct versions,
+platforms and scenarios when independently useful. A runtime source_conditions
+diagnostic belongs in Notes, not a knowledge page, unless the source itself teaches
+that subject. State page-creation conditions explicitly; a conditional author index
+suggestion is not an unconditional recommendation. Mark explicit extensions with
+the existing title and added purpose/location clues. Do not automatically promote a
+conditional suggestion merely by extending it. No fixed page count is required.
+Return readable Markdown lists or tables
 with names/titles, kinds and optional location clues. Headings and field labels are
 flexible. A supplied section_key, full heading path, original heading or precise
 keyword can help retrieval later. Locations are suggestions, not evidence receipts:

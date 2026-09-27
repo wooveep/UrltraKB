@@ -186,6 +186,9 @@ def validate_plan(
             for r in page.context_ranges:
                 _check_range(r, parsed, f"page {page.name} context_ranges")
         if protocol == "document-plan-v4":
+            from openkb.agent.document_page_scope import validate_scope
+
+            validate_scope(page.evidence_scope)
             location_hints(page.location_hints)
             from openkb.agent.document_planning_bindings import validate_bound
 

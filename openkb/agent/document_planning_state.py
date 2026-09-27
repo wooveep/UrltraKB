@@ -14,12 +14,13 @@ def _state(
     previous = checkpoints.load_recovery(key, "markdown_plan") if resume else None
     if previous is not None and not _valid_state(previous, windows):
         raise ProcessingIncomplete("planning_recovery_invalid", "planning")
-    if previous is not None and previous.get("protocol") == "document-planning-acceptance-v3":
+    if previous is not None and previous.get("protocol") == "document-planning-acceptance-v4":
         previous.setdefault("filtered", [])
         return previous
-    state = {
-        "protocol": "document-planning-acceptance-v3",
-        "planning_semantics": "tolerant-quality-v1",
+    state: dict[str, Any] = {
+        "protocol": "document-planning-acceptance-v4",
+        "planning_strategy": "global-after-overview-v1",
+        "planning_semantics": "tolerant-quality-v2",
         "deferred_suggestions": [],
         "suggestion_annotations": {},
         "batch_notes": [],
@@ -51,6 +52,14 @@ def _state(
                 state["overview_history"],
                 state["legacy_overview_fragments"],
             ) = historical
+            state["historical_page_responses"] = [
+                {"task": key, "responses": task.get("replay", [])}
+                for key, task in state["tasks"].items()
+                if key.endswith(":pages")
+            ]
+            state["tasks"] = {
+                key: task for key, task in state["tasks"].items() if key.endswith(":overview")
+            }
     return state
 
 
@@ -58,9 +67,10 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
     if not isinstance(value, dict) or value.get("protocol") not in {
         "document-planning-acceptance-v2",
         "document-planning-acceptance-v3",
+        "document-planning-acceptance-v4",
     }:
         return False
-    if value["protocol"] == "document-planning-acceptance-v3":
+    if value["protocol"] in {"document-planning-acceptance-v3", "document-planning-acceptance-v4"}:
         from openkb.agent.document_planning_semantics import validate_semantics
 
         try:
@@ -70,6 +80,35 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
             validate_overview(value)
         except ValueError:
             return False
+    if value["protocol"] == "document-planning-acceptance-v4":
+        from openkb.agent.document_global_context import STRATEGY, validate_snapshot
+
+        if value.get("planning_strategy") != STRATEGY:
+            return False
+        if value.get("planning_snapshot") is not None and not validate_snapshot(
+            value["planning_snapshot"]
+        ):
+            return False
+        if any(key not in value.get("tasks", {}) for key in value.get("planning_tasks", [])):
+            return False
+        if snapshot := value.get("planning_snapshot"):
+            from openkb.agent.document_global_context import task_record
+
+            nodes = {row["section_key"]: row for row in snapshot["nodes"]}
+            for key in value.get("planning_tasks", []):
+                task = value["tasks"][key]
+                if (
+                    not isinstance(task.get("sections"), list)
+                    or task.get("snapshot_id") != snapshot["id"]
+                ):
+                    return False
+                if any(
+                    not isinstance(row, dict) or nodes.get(row.get("section_key")) != row
+                    for row in task["sections"]
+                ):
+                    return False
+                if task_record(snapshot, task["sections"])[0] != key:
+                    return False
     mapping_fields = ("tasks", "fragments")
     list_fields = (
         "windows",
@@ -174,7 +213,7 @@ def _split_window(
         state.setdefault("retained_fragments", []).append(
             {"start": window["target_start"], "text": fragment}
         )
-    for subtask in ("overview", "pages"):
+    for subtask in ("overview",) if state.get("planning_strategy") else ("overview", "pages"):
         parent_task = state["tasks"].get(_task_id(window, subtask), {})
         for child in children:
             if parent_task.get("status") == "accepted" and _covers_input(

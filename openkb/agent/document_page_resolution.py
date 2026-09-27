@@ -26,6 +26,7 @@ def preparation_rules() -> str:
                 "openkb.evidence_search",
                 "openkb.agent.document_planning_locations",
                 "openkb.agent.document_page_evidence",
+                "openkb.agent.document_page_scope",
                 "openkb.agent.document_planning_bindings",
             )
         }
@@ -98,8 +99,6 @@ def _resolve(
         ranges, unresolved = read_bound(value, source, parsed, reader.sources)
         if unresolved:
             notes.append("未解释的请求定位：" + "；".join(unresolved))
-            if not optional:
-                return [], "unresolved_bound_location"
         return ranges, "explicit_range"
     try:
         return resolve_hint(
@@ -185,6 +184,10 @@ def prepare_page(
     if result.state == "skipped" and not retry_skipped:
         return PreparedPage(result, reason="previously_skipped")
     rows = _navigation(navigation)
+    from openkb.agent.document_page_scope import evidence_scope
+
+    unresolved: list[dict[str, Any]] = []
+    declared = bool(result.subject_ranges or result.location_hints)
     # Saved ranges are program data. Corruption here is not a bad model hint.
     for value in [*result.subject_ranges, *result.context_ranges]:
         range_intervals(value, parsed, "saved page evidence")
@@ -197,46 +200,28 @@ def prepare_page(
         note = "取证跳过：" + reason
         if note not in result.planning_notes:
             result.planning_notes.append(note)
+        result.evidence_scope = evidence_scope(
+            parsed, rows, [], unresolved, declared=declared, warnings=[reason]
+        )
         return PreparedPage(result, reason=reason)
 
-    subject_hints = [row for row in result.location_hints if row["role"] == "subject"]
-    if subject_hints or not result.subject_ranges:
-        clues = subject_hints or [row for row in result.location_hints if row["role"] == "related"]
-        clues = clues or [{"value": result.title}]
-        for hint in clues:
-            related = hint.get("role") == "related"
-            choices = context_choices(hint["value"], rows)
-            if related and isinstance(hint["value"], str) and "section:" in hint["value"]:
-                # A unique supplied key can occur after display prose. Keep that
-                # whole clue available before interpreting its punctuation.
-                choices = [hint["value"], *choices]
-            for clue in choices:
-                ranges, scope = _resolve(
-                    clue,
-                    rows,
-                    source,
-                    parsed,
-                    reader,
-                    max_chars,
-                    result.planning_notes,
-                    result.title + " " + result.purpose,
-                    optional=related,
+    clues = list(result.location_hints)
+    if not clues and not result.subject_ranges:
+        clues = [{"role": "subject", "value": result.title}]
+    for hint in clues:
+        role = hint["role"]
+        choices = context_choices(hint["value"], rows)
+        if role == "related" and isinstance(hint["value"], str) and "section:" in hint["value"]:
+            choices = [hint["value"], *choices]
+        for clue in choices:
+            if isinstance(clue, dict) and clue.get("format") == "bound-location-v1":
+                from openkb.agent.document_planning_bindings import read_bound
+
+                _, missing_parts = read_bound(clue, source, parsed, reader.sources)
+                unresolved.extend(
+                    {"role": role, "value": value, "reason": "unresolved_bound_location"}
+                    for value in missing_parts
                 )
-                if not ranges:
-                    if related:
-                        note = "相关线索未定位：" + str(clue)[:120]
-                        if note not in result.planning_notes:
-                            result.planning_notes.append(note)
-                        continue
-                    return skip(scope)
-                result.subject_ranges.extend(r for r in ranges if r not in result.subject_ranges)
-                result.scope_resolution = scope
-                if clue == hint["value"] and len(choices) > 1:
-                    break
-    for hint in result.location_hints:
-        if hint["role"] != "context":
-            continue
-        for clue in context_choices(hint["value"], rows):
             ranges, reason = _resolve(
                 clue,
                 rows,
@@ -246,14 +231,24 @@ def prepare_page(
                 max_chars,
                 result.planning_notes,
                 result.title + " " + result.purpose,
+                optional=role == "related",
             )
             if not ranges:
-                return skip("context_" + reason)
-            result.context_ranges.extend(
-                r
-                for r in ranges
-                if r not in result.context_ranges and r not in result.subject_ranges
-            )
+                missing = {"role": role, "value": clue, "reason": reason}
+                if missing not in unresolved:
+                    unresolved.append(missing)
+                note = ("相关线索未定位：" if role == "related" else "待取证线索：") + str(clue)[
+                    :120
+                ]
+                if note not in result.planning_notes:
+                    result.planning_notes.append(note)
+                continue
+            destination = result.context_ranges if role == "context" else result.subject_ranges
+            destination.extend(value for value in ranges if value not in destination)
+            if role != "context":
+                result.scope_resolution = reason
+            if clue == hint["value"] and len(choices) > 1:
+                break
     if not result.subject_ranges:
         return skip("no_subject_evidence")
     size = sum(
@@ -268,5 +263,6 @@ def prepare_page(
         any(route["route"] == "page_body" for route in row["routes"]) for row in occurrences
     ):
         return skip("no_readable_subject_evidence")
+    result.evidence_scope = evidence_scope(parsed, rows, occurrences, unresolved, declared=declared)
     result.state = "ready"
     return PreparedPage(result, evidence, tuple(occurrences))

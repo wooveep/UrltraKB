@@ -124,7 +124,8 @@ def test_unknown_alias_preserves_known_part_only_for_optional_clues(kb_dir, tmp_
         messages,
     ).pages[0]
     result = prepare_page(page, source, parsed, None, reader)
-    assert result.page.state == ("skipped" if role == "Section" else "ready")
+    assert result.page.state == "ready"
+    assert result.page.evidence_scope["status"] == "partial"
     assert any("@e:absent" in note for note in result.page.planning_notes)
 
 
@@ -220,7 +221,9 @@ def test_alias_cannot_hide_an_unresolved_required_selection(kb_dir, tmp_path, va
         reader,
         messages,
     ).pages[0]
-    assert prepare_page(page, source, parsed, None, reader).page.state == "skipped"
+    prepared = prepare_page(page, source, parsed, None, reader)
+    assert prepared.page.state == ("skipped" if isinstance(value, dict) else "ready")
+    assert prepared.page.evidence_scope["status"] in {"partial", "unavailable"}
 
 
 @pytest.mark.parametrize("bound", [True, False])
@@ -248,3 +251,37 @@ def test_mixed_optional_hint_keeps_the_stable_heading_with_or_without_alias_map(
     prepared = prepare_page(page, source, parsed, None, reader)
     assert prepared.page.state == "ready"
     assert any("Run setup" in row["text"] for row in prepared.evidence["blocks"])
+
+
+def test_global_prefix_is_stable_and_only_supplemental_original_text_gets_alias_bindings(
+    kb_dir, tmp_path
+):
+    from openkb.agent.document_planning_bindings import capture_request
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    context = {
+        "overview": "Install depends on credentials.",
+        "nodes": [{"id": "f" * 64, "summary": "Derived hint"}],
+    }
+    requests, bindings = [], []
+    for i in (1, 3):
+        original, _ = request(source, parsed, reader, [(i, 0, parsed.blocks[i].chars)])
+        evidence = json.loads(original[-1]["content"])["evidence"]
+        # Restore actual identities exactly as production read_target_evidence supplies them.
+        evidence = json.loads(original.decode_response(json.dumps(evidence)))
+        evidence["group_id"] = f"optional-excerpt-{i}"
+        messages = plan_messages(
+            evidence, {"retry": i}, {"group": i}, [], "", [], "", planning_context=context
+        )
+        requests.append(messages)
+        bindings.append(capture_request(messages, source, parsed, {"task": i}, reader.sources))
+        payload = json.loads(messages[-1]["content"])
+        assert payload["evidence"]["blocks"] == []
+        assert len(payload["supplemental_evidence"]["blocks"]) == 1
+        assert [row["block_id"] for row in bindings[-1]["aliases"]] == [parsed.blocks[i].id]
+    assert (
+        requests[0][-1]["content"].split(',"plan_protocol"')[0]
+        == requests[1][-1]["content"].split(',"plan_protocol"')[0]
+    )
+    assert bindings[0]["aliases"][0]["alias"] == bindings[1]["aliases"][0]["alias"]
+    assert bindings[0]["aliases"][0]["range"] != bindings[1]["aliases"][0]["range"]

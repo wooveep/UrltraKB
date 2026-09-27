@@ -7,7 +7,7 @@ import pytest
 
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
-from openkb.processing import InputTooLarge, ProcessingIncomplete
+from openkb.processing import ProcessingIncomplete
 from tests.test_document_markdown_planning import SETTINGS, _parsed
 from tests.test_document_orchestrator import _DummySource
 from tests.test_document_planning_followups import _run_single
@@ -104,66 +104,19 @@ def test_global_budget_retains_overview_and_reports_unfinished_page_task(tmp_pat
     assert report["outcome"] == "budget_limited"
 
 
-def test_capacity_children_each_get_the_configured_attempts(tmp_path, monkeypatch):
-    source, parsed = _DummySource(), _parsed()
-    workspace = tmp_path / "workspace"
-    (workspace / "wiki").mkdir(parents=True)
-    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
-    counts = {}
+def test_global_recovery_stops_at_the_shared_attempt_allowance(tmp_path, monkeypatch):
+    calls = []
 
-    def respond(messages, *, settings):
-        task = json.loads(messages[-1]["content"])
-        if task["subtask"] == "overview":
-            return "Retained overview."
-        start, end = task["target"]["target_start"], task["target"]["target_end"]
-        if end - start > 1:
-            raise InputTooLarge()
-        counts[start] = counts.get(start, 0) + 1
-        return "" if counts[start] == 1 else f"- Name: Topic {start}\n  Kind: concept"
+    def responses():
+        while True:
+            calls.append("pages")
+            yield ""
 
-    settings = {**SETTINGS, "processing": {**SETTINGS["processing"], "max_attempts": 2}}
-    with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
-        result = plan_document(
-            tmp_path,
-            workspace,
-            source,
-            parsed,
-            None,
-            settings,
-            checkpoints,
-            mock_caller=respond,
-            plan_only=True,
-            return_result=True,
-        )
-        report = json.loads(Path(result.report_ref).read_text())
-        key = result.plan.metadata["recovery_key"]
-        state = checkpoints.load_recovery(key, "markdown_plan")
-        # Rebuild the checkpoint identity while retaining current overview semantics.
-        checkpoints.save_recovery("f" * 64, "markdown_plan", state)
-        (checkpoints.root / "recovery" / f"{key}-markdown_plan.json").unlink()
-
-        def forbidden(*args, **kwargs):
-            raise AssertionError("Retired parent overview must be retained")
-
-        restored = plan_document(
-            tmp_path,
-            workspace,
-            source,
-            parsed,
-            None,
-            settings,
-            checkpoints,
-            mock_caller=forbidden,
-            plan_only=True,
-            return_result=True,
-            resume=True,
-            retry_skipped=True,
-        )
-        assert restored.plan.overview.text == result.plan.overview.text
-        assert len(restored.plan.pages) == 2
-    assert counts == {0: 2, 1: 2}
-    assert len(result.plan.pages) == 2 and result.outcome == "complete"
-    assert report["planning_execution"]["planning_requests"] == 5
+    result = _run_single(tmp_path, monkeypatch, responses())
+    assert len(calls) == SETTINGS["processing"]["max_attempts"]
+    assert result.outcome == "partial" and result.plan.overview.text
+    report = json.loads(Path(result.report_ref).read_text())
+    assert report["planning_execution"]["pages_tasks"] == 1
 
 
 def test_quote_after_operation_verb_is_not_a_document_reference():
@@ -181,7 +134,9 @@ def test_quote_after_operation_verb_is_not_a_document_reference():
     assert [row.target_text for row in refs] == ["设备维护指南"]
 
 
-def test_continue_reextracts_old_pages_and_refreshes_legacy_overview(tmp_path, monkeypatch):
+def test_continue_keeps_legacy_pages_historical_and_requests_new_global_selection(
+    tmp_path, monkeypatch
+):
     source, parsed = _DummySource(), _parsed()
     workspace = tmp_path / "workspace"
     (workspace / "wiki").mkdir(parents=True)
@@ -224,8 +179,11 @@ def test_continue_reextracts_old_pages_and_refreshes_legacy_overview(tmp_path, m
         def refresh(messages, *, settings):
             task = json.loads(messages[-1]["content"])
             calls.append(task["subtask"])
-            assert task["subtask"] == "overview", "Historical pages must be replayed"
-            return "New cumulative overview."
+            return (
+                "New cumulative overview."
+                if task["subtask"] == "overview"
+                else "- Name: Operation\n  Kind: concept\n  Section: section:unknown"
+            )
 
         restored = plan_document(
             tmp_path,
@@ -242,7 +200,7 @@ def test_continue_reextracts_old_pages_and_refreshes_legacy_overview(tmp_path, m
             retry_skipped=True,
         )
     assert len(restored.plan.pages) == 1 and restored.outcome == "complete"
-    assert calls == ["overview"]
+    assert calls == ["overview", "pages"]
     assert restored.plan.overview.text.strip() == "New cumulative overview."
     assert restored.plan.pages[0].location_hints == [
         {"role": "subject", "value": "section:unknown"}
