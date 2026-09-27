@@ -35,7 +35,7 @@ def test_common_composite_headers_keep_named_suggestions_and_location_hints(head
     assert len(result.pages) == 1
     page = result.pages[0]
     assert page.title == "Safe start" and page.purpose == "Describe startup"
-    assert page.location_hints == [{"role": "related", "value": "Startup chapter"}]
+    assert page.location_hints == [{"role": "subject", "value": "Startup chapter"}]
     assert page.state == "pending_evidence" and not page.subject_ranges
 
 
@@ -86,7 +86,7 @@ def test_suggestion_columns_allow_display_prefixes_and_parenthetical_labels(tmp_
     assert len(result.plan.pages) == 1
     page = result.plan.pages[0]
     assert page.title == "Startup" and page.purpose == "Describe startup"
-    assert page.location_hints == [{"role": "related", "value": "Startup chapter"}]
+    assert page.location_hints == [{"role": "subject", "value": "Startup chapter"}]
 
 
 def test_global_budget_retains_overview_and_reports_unfinished_page_task(tmp_path, monkeypatch):
@@ -168,9 +168,7 @@ def test_continue_keeps_legacy_pages_historical_and_requests_new_global_selectio
         state["protocol"] = "document-planning-markdown-v1"
         state.pop("overview_snapshot")
         state.pop("overview_history")
-        from openkb.agent.document_window_receipts import window_receipt_id
-
-        state["fragments"] = {window_receipt_id(state["windows"][0]): "Legacy window overview."}
+        state["fragments"] = {"a" * 64: "Legacy window overview."}
         checkpoints.save_recovery("e" * 64, "markdown_plan", state)
         (checkpoints.root / "recovery" / f"{key}-markdown_plan.json").unlink()
 

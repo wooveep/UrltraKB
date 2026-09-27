@@ -220,8 +220,6 @@ def prepare_page(
     for hint in clues:
         role = hint["role"]
         choices = context_choices(hint["value"], rows)
-        if role == "related" and isinstance(hint["value"], str) and "section:" in hint["value"]:
-            choices = [hint["value"], *choices]
         for clue in choices:
             if isinstance(clue, dict) and clue.get("format") == "bound-location-v1":
                 from openkb.agent.document_planning_bindings import read_bound
@@ -257,6 +255,24 @@ def prepare_page(
             if role != "context":
                 result.scope_resolution = reason
             if clue == hint["value"] and len(choices) > 1:
+                break
+    if not result.subject_ranges:
+        # Supplied but unresolvable clues do not disable the existing bounded
+        # title/purpose retrieval fallback. Missing declarations remain visible.
+        for fallback in dict.fromkeys([result.title, result.purpose]):
+            ranges, reason = _resolve(
+                fallback,
+                rows,
+                source,
+                parsed,
+                reader,
+                max_chars,
+                result.planning_notes,
+                result.title + " " + result.purpose,
+            )
+            if ranges:
+                result.subject_ranges.extend(ranges)
+                result.scope_resolution = reason
                 break
     if not result.subject_ranges:
         return skip("no_subject_evidence")

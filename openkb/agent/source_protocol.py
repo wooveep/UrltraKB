@@ -56,8 +56,8 @@ def source_messages(evidence, task, rules, *, planning_context=None):
         "stage": stage,
     }
     if planning_context is not None:
-        if stage != "planning" or task.get("subtask") != "pages":
-            raise ValueError("Planning context requires the global pages task")
+        if stage != "planning" or task.get("subtask") not in {"overview", "pages"}:
+            raise ValueError("Planning context requires a planning task")
         # P is derived navigation, never original evidence. Optional excerpts
         # follow the frozen prefix and get their own real source bindings.
         envelope["evidence"] = {

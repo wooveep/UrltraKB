@@ -1,4 +1,4 @@
-"""Cumulative information remains observable through the planning entry point."""
+"""Navigation overview provenance, partial artifacts and versioned recovery."""
 
 import json
 from pathlib import Path
@@ -99,95 +99,81 @@ def test_catalog_keeps_early_relevant_suggestion_with_honest_budget_projection(t
     assert carry["suggestions"]["details_clipped"] == (capacity == 8192)
 
 
-def test_overview_replaces_prior_snapshot_and_resume_does_not_repeat_calls(tmp_path):
+def test_navigation_overview_is_reused_without_raw_window_receipts(tmp_path):
     seen = []
 
     def respond(messages, *, settings):
         body = json.loads(messages[-1]["content"])
         seen.append(body)
-        if body["subtask"] == "pages":
-            return "无需新增页面。"
         return (
-            "# Manual\n\nInitial credentials."
-            if body["target"]["target_start"] == 0
-            else "# Manual\n\nCredentials and calibration form the complete workflow."
+            "无需新增页面。"
+            if body["subtask"] == "pages"
+            else "# Manual\n\nCredentials and calibration."
         )
 
     result = run_windows(tmp_path, respond)
-    assert (
-        result.plan.overview.text.strip()
-        == "# Manual\n\nCredentials and calibration form the complete workflow."
-    )
-    assert seen[1]["carry"]["overview"] == "# Manual\n\nInitial credentials."
     snapshot = result.plan.metadata["overview_snapshot"]
-    assert len(snapshot["processed"]) == 2 and snapshot["response"]
-    assert len(result.plan.metadata["overview_history"]) == 2
+    assert "processed" not in snapshot
+    assert snapshot["node_keys"] == ["section:chapter"]
+    assert snapshot["original_read_ranges"] == []
+    assert len(result.plan.metadata["overview_history"]) == 1
+    assert seen[1]["carry"]["overview"]["text"] == result.plan.overview.text
+    assert seen[0]["planning_context"] == seen[1]["planning_context"]
     resumed = run_windows(tmp_path, respond, resume=True)
-    assert len(seen) == 3
+    assert len(seen) == 2
     assert resumed.plan.overview.text == result.plan.overview.text
 
 
-def test_failed_first_window_remains_missing_after_later_overview_succeeds(tmp_path):
+def test_failed_overview_still_allows_pages_from_tree_summaries(tmp_path):
     def respond(messages, *, settings):
         body = json.loads(messages[-1]["content"])
-        if body["subtask"] == "pages":
-            return "无需新增页面。"
-        return (
-            ""
-            if body["target"]["target_start"] == 0
-            else "# Manual\n\nCalibration; the earlier source has not been summarized."
-        )
+        return "" if body["subtask"] == "overview" else "- Title: Preparation\n  Kind: concept"
 
     result = run_windows(tmp_path, respond)
     assert result.outcome == "partial" and result.plan.overview.status == "partial"
-    assert len(result.plan.metadata["overview_snapshot"]["processed"]) == 1
+    assert result.plan.metadata["overview_snapshot"] is None
     report = json.loads(Path(result.report_ref).read_text())
-    assert len(report["overview"]["missing_windows"]) == 1
+    assert len(report["overview"]["missing_tasks"]) == 1
+    assert result.plan.pages[0].title == "Preparation"
 
 
-def test_truncated_later_overview_keeps_previous_complete_snapshot(tmp_path):
+def test_truncated_overview_keeps_closed_partial_artifact_without_full_snapshot(tmp_path):
     from openkb.agent.document_markdown_planner import _Response
 
     def respond(messages, *, settings):
         body = json.loads(messages[-1]["content"])
-        if body["subtask"] == "pages":
-            return "无需新增页面。"
         return (
-            "Complete prior overview."
-            if body["target"]["target_start"] == 0
-            else _Response("Incomplete newer paragraph.\n\nUnfinished", "length")
+            "无需新增页面。"
+            if body["subtask"] == "pages"
+            else _Response("Readable paragraph.\n\nUnfinished", "length")
         )
 
     result = run_windows(tmp_path, respond)
     assert result.outcome == "partial"
-    assert result.plan.overview.text.strip() == "Complete prior overview."
-    assert len(result.plan.metadata["overview_snapshot"]["processed"]) == 1
+    assert "Readable paragraph." in result.plan.overview.text
+    assert "Unfinished" not in result.plan.overview.text
+    assert result.plan.metadata["overview_snapshot"] is None
+    assert result.plan.metadata["overview_parts"]
 
 
-def test_legacy_window_overviews_require_new_cumulative_and_global_tasks(tmp_path):
-    seen = []
-
-    def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
-        seen.append(body["subtask"])
-        return "New cumulative overview." if body["subtask"] == "overview" else "无需新增页面。"
+def test_legacy_window_state_cannot_supply_new_navigation_overview(tmp_path):
+    from openkb.agent.document_planning_state import _state
+    from openkb.sources import content_id
 
     settings = {**SETTINGS, "model": "gpt-4o"}
-    initial = run_windows(tmp_path, respond, settings=settings)
-    from openkb.agent.document_window_receipts import window_receipt_id
-
     with CompilationCheckpoints(tmp_path, _DummySource(), _parsed(), settings, None) as cp:
-        key = initial.plan.metadata["recovery_key"]
-        old = cp.load_recovery(key, "markdown_plan")
-        old["protocol"] = "document-planning-acceptance-v2"
-        old.pop("overview_snapshot")
-        old.pop("overview_history")
-        old["fragments"] = {window_receipt_id(old["windows"][0]): "Legacy window fragment."}
-        cp.save_recovery(key, "markdown_plan", old)
-    resumed = run_windows(tmp_path, respond, settings=settings, resume=True)
-    assert seen == ["overview", "overview", "pages", "overview", "overview", "pages"]
-    assert "Legacy" not in resumed.plan.overview.text
-    assert len(resumed.plan.metadata["overview_snapshot"]["processed"]) == 2
+        old_key, new_key = content_id("legacy-strategy"), content_id("navigation-strategy")
+        old = _state(cp, old_key, [], False)
+        old.update(
+            protocol="document-planning-acceptance-v4",
+            planning_strategy="global-after-overview-v1",
+            fragments={content_id("window"): "Legacy window fragment."},
+        )
+        cp.save_recovery(old_key, "markdown_plan", old)
+        new = _state(cp, new_key, [], True)
+        assert new["planning_strategy"] == "global-navigation-v2"
+        assert new["overview_snapshot"] is None and new["tasks"] == {}
+        assert cp.load_recovery(old_key, "markdown_plan") == old
 
 
 @pytest.mark.parametrize("broken", ["history", "snapshot"])
@@ -215,43 +201,26 @@ def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path, b
         run_windows(tmp_path, respond, settings=settings, resume=True)
 
 
-def test_large_processed_history_is_projected_before_source_is_split(tmp_path):
-    import litellm
+def test_navigation_overview_rejects_fabricated_original_window_receipts(tmp_path):
+    from openkb.processing import ProcessingIncomplete
 
-    settings = {
-        **SETTINGS,
-        "model": "gpt-4o",
-        "processing": {
-            **SETTINGS["processing"],
-            "context_tokens": 8192,
-            "max_context_tokens": 8192,
-            "output_tokens": 1024,
-            "max_output_tokens": 1024,
-        },
-    }
-    seen = []
+    settings = {**SETTINGS, "model": "gpt-4o"}
 
     def respond(messages, *, settings):
-        assert litellm.token_counter(model=settings["model"], messages=messages) <= 7168
-        body = json.loads(messages[-1]["content"])
-        seen.append(body)
         return (
-            "A readable complete overview." if body["subtask"] == "overview" else "无需新增页面。"
+            "A readable overview."
+            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            else "无需新增页面。"
         )
 
     result = run_windows(tmp_path, respond, settings=settings)
     with CompilationCheckpoints(tmp_path, _DummySource(), _parsed(), settings, None) as cp:
         key = result.plan.metadata["recovery_key"]
         state = cp.load_recovery(key, "markdown_plan")
-        state["overview_snapshot"]["processed"] = [
-            {"window": str(i).zfill(64), "ranges": [[0, 1]]} for i in range(2000)
-        ]
-        for task in state["tasks"].values():
-            task.update(status="pending", attempts=0)
+        state["overview_snapshot"]["processed"] = [{"window": "a" * 64, "ranges": [[0, 2]]}]
         cp.save_recovery(key, "markdown_plan", state)
-    run_windows(tmp_path, respond, settings=settings, resume=True)
-    assert len(seen) == 6
-    assert seen[3]["carry"]["processed_overview"]["omitted"]
+    with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
+        run_windows(tmp_path, respond, settings=settings, resume=True)
 
 
 def test_global_capacity_retry_does_not_split_or_repeat_overview(tmp_path, monkeypatch):

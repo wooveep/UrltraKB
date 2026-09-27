@@ -13,11 +13,11 @@ from tests.test_document_planning_semantics import accept
 @pytest.mark.parametrize(
     "label,role",
     [
-        ("Location clue", "related"),
-        ("Location clues", "related"),
-        ("Location hint", "related"),
-        ("Location hints", "related"),
-        ("Additional location clues", "related"),
+        ("Location clue", "subject"),
+        ("Location clues", "subject"),
+        ("Location hint", "subject"),
+        ("Location hints", "subject"),
+        ("Additional location clues", "subject"),
         ("Selection", "subject"),
     ],
 )
@@ -68,10 +68,10 @@ def test_composite_description_location_keeps_both_meanings(kb_dir, tmp_path, la
     )
     page = result.pages[0]
     assert page.purpose == value
-    assert len(page.location_hints) == 1 and page.location_hints[0]["role"] == "related"
+    assert not page.location_hints
+    assert value in page.planning_notes
     prepared = prepare_page(page, source, parsed, None, reader)
-    assert prepared.page.state == "ready"
-    assert [block["text"] for block in prepared.evidence["blocks"]] == ["the access token"]
+    assert prepared.page.state == "skipped"
 
 
 @pytest.mark.parametrize(
@@ -120,12 +120,11 @@ def test_explanation_lists_remain_notes_while_later_named_candidates_are_accepte
         "| Title | Kind |\n|---|---|\n| Maintenance | concept |\n\n"
         "- Title: Recovery\n  Kind: concept"
     )
-    assert {page.title for page in result.pages} == {"Calibration", "Maintenance", "Recovery"}
+    assert {page.title for page in result.pages} == {"Calibration"}
     assert not result.deferred_suggestions
-    assert result.batch_notes == [
-        "Scope — preserve the distinct versions",
-        "Source limitations: the external procedure is unread",
-    ]
+    assert any("Scope" in note for note in result.batch_notes)
+    assert any("Maintenance" in note for note in result.batch_notes)
+    assert any("Recovery" in note for note in result.batch_notes)
 
 
 @pytest.mark.parametrize(
@@ -135,7 +134,7 @@ def test_explanation_lists_remain_notes_while_later_named_candidates_are_accepte
         "Create a person page only if the knowledge base tracks document authors.",
     ],
 )
-def test_conditional_page_recommendation_is_deferred_but_operation_prerequisite_is_not(purpose):
+def test_free_conditional_purpose_does_not_override_explicit_page_structure(purpose):
     result = accept(
         json.dumps(
             [
@@ -148,18 +147,24 @@ def test_conditional_page_recommendation_is_deferred_but_operation_prerequisite_
             ]
         )
     )
-    assert [page.title for page in result.pages] == ["Calibration"]
-    assert result.deferred_suggestions[0]["reason"] == "conditional_recommendation"
-    assert result.deferred_suggestions[0]["purpose"] == purpose
+    assert [page.title for page in result.pages] == ["Author", "Calibration"]
+    assert not result.deferred_suggestions
+    assert result.pages[0].purpose == purpose
 
 
 def test_explicit_no_page_and_runtime_condition_stay_explanations_without_topic_blacklists():
     result = accept(
         json.dumps(
             [
-                {"title": "Signature", "kind": "concept", "purpose": "仅作署名，不建议独立建页。"},
+                {
+                    "title": "Signature",
+                    "kind": "concept",
+                    "action": "skip",
+                    "purpose": "仅作署名，不建议独立建页。",
+                },
                 {
                     "title": "Extraction",
+                    "action": "notes",
                     "kind": "concept",
                     "purpose": "仅说明本次解析 source_conditions 的 OCR 未运行诊断，不是原文知识。",
                 },
@@ -182,7 +187,7 @@ def test_explicit_no_page_and_runtime_condition_stay_explanations_without_topic_
 
 def test_extension_does_not_promote_a_conditionally_recommended_author():
     previous = accept(
-        '{"title":"Author","kind":"entity","type":"person",'
+        '{"title":"Author","kind":"entity","type":"person","action":"defer",'
         '"purpose":"Only create a page if the KB tracks authors."}'
     )
     result = accept(
@@ -190,16 +195,16 @@ def test_extension_does_not_promote_a_conditionally_recommended_author():
         deferred=previous.deferred_suggestions,
     )
     assert not result.pages
-    assert result.deferred_suggestions[0]["reason"] == "conditional_recommendation"
+    assert result.deferred_suggestions[0]["reason"] == "extension_target_unresolved"
 
 
-def test_explicitly_lifted_condition_promotes_extension_and_keeps_prior_origins():
+def test_explicit_create_promotes_defer_and_keeps_prior_origins():
     prior = accept(
-        '{"title":"Author","kind":"entity","type":"person",'
+        '{"title":"Author","kind":"entity","type":"person","action":"defer",'
         '"purpose":"Only create a page if the KB tracks authors."}'
     )
     result = accept(
-        '{"Existing title":"Author",'
+        '{"title":"Author","kind":"entity","type":"person","action":"create",'
         '"purpose":"Condition met. Explicitly recommend an author page.",'
         '"related":"Revision history"}',
         deferred=prior.deferred_suggestions,

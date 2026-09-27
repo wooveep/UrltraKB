@@ -13,13 +13,13 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 from collections import Counter
-from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+from tests.online_audit import Audit  # re-export for private replay tools
+from tests.online_audit import serial as serial
 from tests.online_model import load_online_model
 
 
@@ -31,117 +31,16 @@ def manifest(root: Path) -> dict[str, str]:
     return {str(path.relative_to(root)): digest(path) for path in root.rglob("*") if path.is_file()}
 
 
-def serial(value):
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, Path):
-        return str(value)
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, (set, frozenset)):
-        return sorted(value, key=str)
-    raise TypeError(type(value).__name__)
-
-
-class Audit:
-    """Observe the real compiler transport; do not replace any business function."""
-
-    def __init__(self, output, credential):
-        self.output, self.credential = output, credential
-        self.calls = Counter()
-        self.pending = {}
-        self.requests = []
-        self.responses = []
-        self.phase = "step2"
-        self.started = time.monotonic()
-
-    def write(self, name, value):
-        text = json.dumps(value, ensure_ascii=False, indent=2, default=serial) + "\n"
-        if self.credential:
-            text = text.replace(self.credential, "<REDACTED>")
-        atomic_write_text(self.output / name, text)
-
-    def observe(self, frame, event, result):
-        filename, function = frame.f_code.co_filename, frame.f_code.co_name
-        if "/openkb/" not in filename:
-            return
-        if event == "call" and function in {
-            "parse_document",
-            "prepare_navigation",
-            "generate_document_page",
-            "publish_proposal",
-        }:
-            self.calls[self.phase + ":" + function] += 1
-        if not filename.endswith("/agent/compiler.py") or function != "_llm_call":
-            return
-        local = frame.f_locals
-        if event == "call":
-            messages = local["messages"]
-            payload = json.loads(messages[-1]["content"])
-            row = {
-                "phase": self.phase,
-                "stage": local["step_name"],
-                "messages": list(messages),
-                "inverse": dict(getattr(messages, "inverse", {})),
-                "evidence_sha256": hashlib.sha256(
-                    json.dumps(payload.get("evidence"), ensure_ascii=False, sort_keys=True).encode()
-                ).hexdigest(),
-                "options": {
-                    k: v
-                    for k, v in local["kwargs"].items()
-                    if k
-                    in {
-                        "max_tokens",
-                        "temperature",
-                        "thinking",
-                        "reasoning_effort",
-                        "response_format",
-                    }
-                },
-            }
-            self.requests.append(row)
-            number = len(self.requests)
-            self.pending[id(frame)] = (number, time.monotonic(), self.phase)
-            self.write(f"request-{number:02d}.json", row)
-            print(
-                json.dumps({"request": number, "phase": self.phase, "stage": row["stage"]}),
-                flush=True,
-            )
-        elif event == "return" and id(frame) in self.pending:
-            number, started, phase = self.pending.pop(id(frame))
-            response = local.get("response")
-            if response is None:
-                self.write(
-                    f"response-{number:02d}.json",
-                    {"request": number, "phase": phase, "failed": True},
-                )
-                return
-            row = {
-                "request": number,
-                "phase": phase,
-                "elapsed_seconds": time.monotonic() - started,
-                "finish_reason": response.choices[0].finish_reason,
-                "usage": getattr(response, "usage", None),
-                "provider_content": response.choices[0].message.content,
-                "decoded_content": str(result),
-            }
-            self.responses.append(row)
-            self.write(f"response-{number:02d}.json", row)
-
-
 def run(args):
     from openkb.agent.document_page_resolution import prepare_page
     from openkb.agent.document_plan import to_dict
     from openkb.agent.evidence_checkpoints import publication_settings
-    from openkb.agent.evidence_compiler import compile_evidence
     from openkb.application.execution import ExecutionContext
     from openkb.compilation_report import collect_compile_report
     from openkb.evidence import ParseStore
     from openkb.inputs import prepared_input
     from openkb.knowledge_commit import KnowledgeWorkspace
-    from openkb.navigation import prepare_navigation
     from openkb.pageindex_store import indexed_reader
-    from openkb.parsing import parse_document
     from openkb.processing import RequestLimits, processing_scope
     from openkb.schema import AGENTS_MD, INDEX_SEED
     from openkb.sources import SourceStore
@@ -166,10 +65,26 @@ def run(args):
         name: digest(repo / name) for name in tracked if name and (repo / name).is_file()
     }
     git_status = subprocess.check_output(["git", "-C", str(repo), "status", "--short"], text=True)
-    previous = args.previous_run.resolve() if args.previous_run else None
+    parsed_run = getattr(args, "parsed_run", None)
+    previous = args.previous_run or parsed_run
+    previous = previous.resolve() if previous else None
     prior = manifest(previous) if previous else None
     kb = output / "kb"
     audit = Audit(audit_dir, profile.bundle.api_key)
+    audit.write(
+        "isolation-before.json",
+        {"config_kb": protected, "previous_run": prior, "project": project_before},
+    )
+    audit.write(
+        "setup.json",
+        {
+            "online_model": profile.description(),
+            "processing": settings["processing"],
+            "previous_run": previous,
+            "parsed_run": parsed_run,
+            "git_status": git_status,
+        },
+    )
     if not args.resume:
         if previous:
             shutil.copytree(previous / "kb", kb)
@@ -194,13 +109,18 @@ def run(args):
     result, prepared, error = None, [], None
     source = parsed = navigation = None
     setup_started = time.monotonic()
-    sys.setprofile(audit.observe)
     try:
         with (
+            audit.capture(),
             kb_ingest_lock(kb / ".openkb"),
             ExecutionContext().begin(kb),
             collect_compile_report() as report,
         ):
+            # Resolve target exports inside the bounded audit, including their aliases.
+            from openkb.agent.evidence_compiler import compile_evidence
+            from openkb.navigation import prepare_navigation
+            from openkb.parsing import parse_document
+
             if args.resume or previous:
                 artifact_root = output if args.resume else previous
                 source = SourceStore(kb).version(
@@ -209,12 +129,19 @@ def run(args):
                 parsed = ParseStore(kb).load(
                     json.loads((artifact_root / "step2-parsed.json").read_text())["id"]
                 )
-                navigation = json.loads((artifact_root / "step2-navigation.json").read_text())
+                if not parsed_run:
+                    navigation = json.loads((artifact_root / "step2-navigation.json").read_text())
             else:
                 with prepared_input(args.source.resolve()) as ready:
                     source = SourceStore(kb).intake(ready)
+                audit.write("step1-source.json", source)
                 with processing_scope(settings):
                     parsed = parse_document(kb, source, options=settings.get("parsing"))
+            if not args.resume:
+                audit.write("step1-source.json", source)
+                audit.write("step2-parsed.json", parsed)
+            if navigation is None:
+                with processing_scope(settings):
                     navigation = prepare_navigation(
                         kb,
                         source,
@@ -231,10 +158,12 @@ def run(args):
                 if not args.resume:
                     audit.write(name, value)
             setup_elapsed = time.monotonic() - setup_started
+            audit.write("step2-compile-report.json", report)
             audit.write(
                 "step2-summary.json",
                 {
-                    "reused": bool(previous or args.resume),
+                    "reused": bool(previous or args.resume) and not bool(parsed_run),
+                    "reused_parse": bool(previous or args.resume),
                     "elapsed_seconds": setup_elapsed,
                     "calls": dict(audit.calls),
                     "requests": len(audit.requests),
@@ -287,19 +216,20 @@ def run(args):
                         result.plan.metadata["plan_preview"], audit_dir / "plan-preview.md"
                     )
                     shutil.copyfile(result.report_ref, audit_dir / "program-report.json")
-                    reader = indexed_reader(kb, source, parsed, navigation)
-                    limits = RequestLimits.from_config(settings)
-                    for page in result.plan.pages:
-                        prepared.append(
-                            prepare_page(
-                                page,
-                                source,
-                                parsed,
-                                navigation,
-                                reader,
-                                max_chars=max(1000, limits.input_capacity * 2),
+                    with audit.stage("prepare_pages"):
+                        reader = indexed_reader(kb, source, parsed, navigation)
+                        limits = RequestLimits.from_config(settings)
+                        for page in result.plan.pages:
+                            prepared.append(
+                                prepare_page(
+                                    page,
+                                    source,
+                                    parsed,
+                                    navigation,
+                                    reader,
+                                    max_chars=max(1000, limits.input_capacity * 2),
+                                )
                             )
-                        )
                     audit.write("prepared-evidence.json", prepared)
                     audit.write(
                         "prepare-budget.json",
@@ -313,7 +243,16 @@ def run(args):
         error = {"type": type(exc).__name__, "message": str(exc)}
         raise
     finally:
-        sys.setprofile(None)
+        audit.write(
+            "isolation-after.json",
+            {
+                "config_kb": manifest(profile.config_kb),
+                "previous_run": manifest(previous) if previous else None,
+                "project": {
+                    name: digest(repo / name) for name in project_before if (repo / name).is_file()
+                },
+            },
+        )
         invariants = {
             "config_kb_unchanged": protected == manifest(profile.config_kb),
             "previous_run_unchanged": prior == manifest(previous) if previous else True,
@@ -354,6 +293,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--previous-run", type=Path)
+    inputs.add_argument("--parsed-run", type=Path, help="Reuse saved source/parse and run indexing")
     inputs.add_argument("--source", type=Path)
     parser.add_argument("--config-kb", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

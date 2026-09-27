@@ -70,16 +70,11 @@ def test_notes_mixed_purpose_and_batch_explanation_are_retained_without_extra_pa
         "| Calibration | 概念 | 描述校准；外部规范未核对 | 暂不建议独立建页 | 窗口外资料未读 |\n\n"
         "以下组织建议仍需要原文核对。"
     )
-    assert not result.pages
-    assert result.batch_notes[0] == "以下组织建议仍需要原文核对。"
-    assert all(
-        text in result.batch_notes[1]
-        for text in (
-            "描述校准；外部规范未核对",
-            "暂不建议独立建页",
-            "阅读条件：窗口外资料未读",
-        )
-    )
+    assert len(result.pages) == 1
+    assert result.batch_notes == ["以下组织建议仍需要原文核对。"]
+    assert result.pages[0].purpose == "描述校准；外部规范未核对"
+    assert "暂不建议独立建页" in result.pages[0].planning_notes
+    assert "阅读条件：窗口外资料未读" in result.pages[0].planning_notes
 
 
 def test_display_wrappers_merge_but_versions_remain_distinct():
@@ -203,3 +198,94 @@ def test_clear_inline_existing_suggestion_label_extends_without_a_required_field
     )
     assert [page.title for page in result.pages] == ["Meter (v2)", "Meter (v3)"]
     assert "补充安装选择" in result.pages[0].planning_notes
+
+
+def test_explicit_regions_keep_integrated_page_and_isolate_notes():
+    result = accept(
+        "## 创建页面\n| 标题 | 类型 | 目的 / 参考提示 | 备注 |\n|---|---|---|---|\n"
+        "| POSIX 接口整合 | concept | 统一接口语义；参考规范另查 | 示例接口不单独成页 |\n"
+        "| Author conflict | person | 作者背景 | 不宜单独立页 |\n"
+        "## 说明\n| 标题 | 类型 | 备注 |\n|---|---|---|\n"
+        "| Ada | person | 不宜单独立页 |\n- Title: Another author\n  Type: person\n"
+    )
+    assert [page.title for page in result.pages] == ["POSIX 接口整合", "Author conflict"]
+    assert result.pages[0].purpose == "统一接口语义；参考规范另查"
+    assert not result.pages[0].location_hints
+    assert "示例接口不单独成页" in result.pages[0].planning_notes
+    assert "不宜单独立页" in result.pages[1].planning_notes
+    assert any("Ada" in note for note in result.batch_notes)
+
+
+def test_action_override_is_explicit_and_free_notes_never_promote():
+    first = accept(
+        "## 创建页面\n| 标题 | 类型 | Action | 备注 |\n|---|---|---|---|\n"
+        "| Author | person | defer | 现在可以了 |\n"
+        "| Kept | concept | create | 满足运行条件后执行 |\n"
+        "| Background | concept | skip | 仅参考 |"
+    )
+    assert [page.title for page in first.pages] == ["Kept"]
+    assert first.deferred_suggestions[0]["reason"] == "explicit_defer"
+    later = accept(
+        "## Notes\n- Title: Author\n  Type: person\n  Notes: 现在可以了",
+        deferred=first.deferred_suggestions,
+    )
+    assert not later.pages and not later.promoted_suggestions
+    promoted = accept(
+        "## Create\n- Title: Author\n  Type: person", deferred=first.deferred_suggestions
+    )
+    assert len(promoted.pages) == 1 and len(promoted.promoted_suggestions) == 1
+
+
+def test_unknown_peer_heading_clears_action_and_entity_group():
+    result = accept(
+        "## 创建实体页面\n- Title: Device\n  Type: product\n"
+        "## Supplement\n| 名称 | 用途 |\n|---|---|\n| Ada | 署名 |"
+    )
+    assert [page.title for page in result.pages] == ["Device"]
+    assert result.deferred_suggestions[0]["reason"] == "classification_unknown"
+
+
+def test_external_reference_field_keeps_structured_hint_without_inventing_original_quote():
+    result = accept(
+        json.dumps(
+            {
+                "title": "Calibration",
+                "kind": "concept",
+                "references": {
+                    "document": "Vendor guide",
+                    "section": "Limits",
+                    "note": "Not supplied",
+                },
+            }
+        )
+    )
+    assert len(result.pages) == 1
+    hint = result.external_reference_hints[0]
+    assert hint["target_document"] == "Vendor guide" and hint["target_section"] == "Limits"
+    assert hint["origin"]["response"] and "location" not in hint
+    assert "Not supplied" in hint["raw_text"]
+    assert any("Vendor guide" in note for note in result.pages[0].planning_notes)
+
+
+def test_closed_legacy_json_sets_preserve_action_and_kind_at_a_truncated_tail():
+    from openkb.agent.document_markdown_planner import _Response
+
+    result = accept(
+        _Response('{"concepts":{"create":[{"title":"Complete"}, {"title":"Unfinished', "length")
+    )
+    assert [page.title for page in result.pages] == ["Complete"]
+    assert result.pages[0].kind == "concept" and result.truncated
+
+
+@pytest.mark.parametrize(
+    "raw,empty",
+    [
+        ("[]", True),
+        ('{"pages":[]}', True),
+        ('{"pages":"bad shape"}', False),
+        ('{"pages":[{}]}', False),
+    ],
+)
+def test_only_explicit_empty_collections_finish_as_zero_results(raw, empty):
+    result = accept(raw)
+    assert result.no_pages is empty

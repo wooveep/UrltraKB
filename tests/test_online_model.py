@@ -51,3 +51,32 @@ def test_missing_credentials_fail_before_dispatch(tmp_path, monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     with pytest.raises(ValueError, match="credentials are unavailable"):
         load_online_model(kb)
+
+
+def test_online_audit_records_real_receipt_without_global_profiler(kb_dir, tmp_path, model_service):
+    import sys
+
+    from openkb.agent import compiler
+    from openkb.config import load_config, resolve_credential_bundle
+    from openkb.processing import processing_scope
+    from tests.online_step3 import Audit
+
+    model_service.respond = lambda _: {"sections": []}
+    settings = load_config(kb_dir / ".openkb/config.yaml")
+    audit = Audit(tmp_path, "private-test-secret")
+    before = sys.getprofile()
+    messages = [{"role": "user", "content": '{"stage":"index_structure","evidence":{}}'}]
+    with audit.capture(), processing_scope(settings):
+        assert sys.getprofile() is before
+        result = compiler._llm_call(
+            settings["model"], messages, "index_structure", bundle=resolve_credential_bundle(kb_dir)
+        )
+    assert sys.getprofile() is before
+    assert json.loads(result) == {"sections": []}
+    request = json.loads((tmp_path / "request-01.json").read_text())
+    response = json.loads((tmp_path / "response-01.json").read_text())
+    assert request["messages"] == messages
+    assert response["usage"]["prompt_tokens"] > 0
+    assert json.loads(response["provider_content"]) == {"sections": []}
+    assert response["finish_reason"] == "stop"
+    assert len(audit.requests) == 1

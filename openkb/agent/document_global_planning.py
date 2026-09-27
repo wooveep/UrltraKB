@@ -1,4 +1,4 @@
-"""Sequential, bounded page selection after the cumulative overview settles."""
+"""Sequential, bounded page selection from frozen navigation and saved overview."""
 
 from __future__ import annotations
 
@@ -88,11 +88,10 @@ def plan_global_pages(
 
         while used() < limits.max_attempts or task.get("raw") is not None:
             processing_checkpoint("planning")
-            if no_readable_body(parsed) or (
-                not nodes and not json.loads(snapshot["context_json"])["overview"]["text"]
-            ):
+            if no_readable_body(parsed) or (not nodes and not state.get("overview_snapshot")):
                 task.update(status="skipped", reason="planning_context_unavailable")
                 break
+            overview_limit = None
             messages = messages_for(
                 snapshot,
                 rows,
@@ -121,6 +120,10 @@ def plan_global_pages(
                     recovery=task.get("reason") or "",
                     detail=False,
                 )
+            if not fits(messages, settings, limits) and _split(
+                state, task_key, snapshot, rows, index, after_dispatch=bool(used())
+            ):
+                break
             shown = len(state["pages"]) + len(state.get("deferred_suggestions", []))
             while not fits(messages, settings, limits) and shown:
                 shown //= 2
@@ -138,6 +141,27 @@ def plan_global_pages(
                     recovery=task.get("reason") or "",
                     detail=False,
                     shown=shown,
+                )
+            from openkb.agent.document_planning_overview import current_overview
+
+            overview_limit = len(current_overview(state))
+            while not fits(messages, settings, limits) and overview_limit > 300:
+                overview_limit //= 2
+                messages = messages_for(
+                    snapshot,
+                    rows,
+                    state,
+                    source,
+                    parsed,
+                    settings,
+                    limits,
+                    entity_types,
+                    schema,
+                    conditions,
+                    recovery=task.get("reason") or "",
+                    detail=False,
+                    shown=shown,
+                    overview_limit=overview_limit,
                 )
             if not fits(messages, settings, limits):
                 if _split(state, task_key, snapshot, rows, index, after_dispatch=bool(used())):
@@ -157,6 +181,7 @@ def plan_global_pages(
                     recovery=task.get("reason") or "",
                     detail=False,
                     shown=shown,
+                    overview_limit=overview_limit,
                 )
                 task["projection"] = {"summaries_omitted": len(rows), "suggestions_shown": shown}
                 if fits(messages, settings, limits):
@@ -164,7 +189,11 @@ def plan_global_pages(
                 else:
                     task.update(status="skipped", reason="planning_context_capacity")
                     break
-            task["input_projection"] = json.loads(messages[-1]["content"])["carry"]["suggestions"]
+            carry = json.loads(messages[-1]["content"])["carry"]
+            task["input_projection"] = {
+                **carry["suggestions"],
+                "overview_input_clipped": carry["overview"]["input_clipped"],
+            }
             if task.get("raw") is None:
                 binding = capture_request(
                     messages, source, parsed, {"task": task_key}, checkpoints.store
@@ -238,6 +267,11 @@ def plan_global_pages(
                     row["target"] for row in json.loads(snapshot["context_json"])["catalog"]
                 },
                 catalog_titles={path: title for path, title, _ in snapshot["catalog"]},
+                catalog_types={
+                    row["target"]: row["type"]
+                    for row in json.loads(snapshot["context_json"])["catalog"]
+                    if "type" in row
+                },
                 accepted=accepted,
                 default_entity_type=settings.get("default_entity_type"),
                 source_identity=source.source_id,

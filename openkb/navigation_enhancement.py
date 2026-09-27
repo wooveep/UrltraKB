@@ -32,7 +32,6 @@ def record_optional_failure(record, error):
     if (
         isinstance(error, ProcessingIncomplete)
         and not isinstance(error, (ResponseIncomplete, InputTooLarge, OutputTruncated))
-        and error.reason != "provider_temporarily_unavailable"
     ):
         raise error  # Cancellation, hard budgets and uncertain execution stop new dispatch.
     record.update(status="degraded", reason=getattr(error, "reason", str(error)))
@@ -124,7 +123,9 @@ class IndexAllowance:
         return {"max_tokens": output, "response_format": JSON_FORMAT}
 
 
-def enhance_ranges(kb_dir, source, parsed, record, settings, bundle, *, reserve_compilation=True):
+def enhance_ranges(
+    kb_dir, source, parsed, record, settings, bundle, *, reserve_compilation=True, reader=None
+):
     from openkb.agent.evidence_checkpoints import CompilationCheckpoints
     from openkb.navigation_structure import infer_missing
     from openkb.source_omissions import has_readable_content
@@ -138,4 +139,14 @@ def enhance_ranges(kb_dir, source, parsed, record, settings, bundle, *, reserve_
         with processing_scope(settings) as budget, measure_span("index_structure"):
             allowance = IndexAllowance(budget, options, reserve_compilation)
             record["status"] = "enhanced"
-            infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, checkpoints)
+            infer_missing(
+                kb_dir,
+                source,
+                parsed,
+                record,
+                settings,
+                bundle,
+                allowance,
+                checkpoints,
+                reader=reader,
+            )

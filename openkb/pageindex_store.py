@@ -157,9 +157,11 @@ def _collection(kb_dir):
         raise PageIndexUnavailable("PageIndex database cannot read the saved source index") from exc
 
 
-def save_index(kb_dir, source, parsed, record):
+def save_index(kb_dir, source, parsed, record, *, reader=None):
     """Use Collection.add and its real SQLite storage before compilation starts."""
-    reader = ParseStore(kb_dir).reader(source, parsed)
+    from openkb.navigation_evidence import verified_reader
+
+    reader = verified_reader(kb_dir, source, parsed, reader)
     pages = []
     for block in parsed.blocks:
         processing_checkpoint()

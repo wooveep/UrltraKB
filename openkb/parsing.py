@@ -50,7 +50,12 @@ def parse_document(
     if source.suffix == ".docx":
         profile["docx"] = "openkb-docx-v20-attachments-storage-only"
     if source.suffix == ".pdf":
-        profile["pdf"] = "openkb-pdf-v7-declared-toc"
+        profile["pdf"] = "openkb-pdf-v8-strict-native-tables"
+        profile["pdf_table_policy"] = {
+            "strategy": "lines_strict",
+            "unruled_structure": "unassessed; native text and original visual retained",
+            "overlapping_grids": "unassessed; not used to suppress native text",
+        }
     if source.suffix in {".md", ".markdown", ".txt", ".csv"}:
         profile["text"] = "openkb-text-v3-heading-markers"
     if source.suffix in {".md", ".markdown"}:

@@ -125,7 +125,9 @@ def test_multiple_keys_remain_distinct_required_or_optional_selections(
         reader,
     )
     assert missing.page.state == "ready"
-    assert missing.page.evidence_scope["status"] == "partial"
+    assert missing.page.evidence_scope["status"] == (
+        "partial" if role == "subject" else "unassessed"
+    )
     assert any("missing" in note or "unresolved" in note for note in missing.page.planning_notes)
 
 
@@ -234,3 +236,27 @@ def test_original_paths_and_page_description_disambiguate_leaf_titles(kb_dir, tm
     page.title, page.purpose = "Alpha Setup", "Prepare Alpha"
     result = prepare_page(page, source, parsed, None, store.reader(source, parsed))
     assert result.page.state == "ready" and result.page.subject_ranges == [[0, 1]]
+
+
+def test_failed_subject_clues_still_allow_title_fallback_and_optional_gap_is_separate(
+    kb_dir, tmp_path
+):
+    from openkb.agent.document_page_resolution import prepare_page
+
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    page = _page(
+        [
+            {"role": "subject", "value": "section:absent"},
+            {"role": "related", "value": "External appendix not supplied"},
+        ]
+    )
+    page.title = "Install"
+    prepared = prepare_page(page, source, parsed, None, reader)
+    assert prepared.page.state == "ready"
+    assert prepared.page.subject_ranges == [[2, 4]]
+    assert prepared.page.evidence_scope["status"] == "partial"
+    # An optional reference alone does not degrade the successfully located subject.
+    page.location_hints[0]["value"] = "Install"
+    prepared = prepare_page(page, source, parsed, None, reader)
+    assert prepared.page.evidence_scope["status"] == "located"
+    assert any(row["role"] == "related" for row in prepared.page.evidence_scope["unresolved_hints"])

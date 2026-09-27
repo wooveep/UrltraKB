@@ -1,50 +1,51 @@
-"""Task-only instructions for tolerant cumulative planning."""
+"""Single-task instructions for navigation overview and explicit page selection."""
 
-OVERVIEW_RULES = """Return an updated COMPLETE concise document overview in Markdown,
-incorporating the current target into the supplied cumulative overview. Use the
-PageIndex structure and summaries for navigation, and the supplied original text for
-content, limits, conditions and reference requirements. Do not claim to have read
-external or attached material. Preserve important prior themes and limits; the new text
-replaces the old snapshot. Describe topic, scenarios, knowledge organization, prerequisites
-and unread material. Prefer one main heading and a few thematic paragraphs, roughly
-800–1800 Chinese characters or equivalent information in the requested language; this is
-guidance, not a limit. Avoid reproducing revision tables, account values, long commands
-or itemized model lists. Processed ranges record execution, not proven semantic coverage;
-clipped or missing prior input remains a limitation. Only perform the overview task;
-do not include page plans or bodies. Return prose, not JSON or reasoning."""
+OVERVIEW_RULES = """Using the supplied whole-document PageIndex structure and node
+summaries, write a concise Markdown overview: the document's subject, main knowledge
+areas and their relationships, useful scenarios, prerequisites, limitations and
+external reference requirements. Prefer global organization over section-by-section
+retelling. Do not enumerate long commands, every interface or operational parameter.
+Node summaries and partial_summaries are derived navigation, not original evidence.
+Only supplied original excerpts are direct evidence. Preserve source uncertainty and
+do not expand unread attachments or external material. The application reports input
+omissions, clipping and execution progress; do not speculate about those in the text.
+For a topic_summary, summarize only the selected disjoint branch with the coarse
+whole-document directory as context. For overview_merge, synthesize and compress the
+provided partial summaries into a strictly shorter overview; do not append them.
+Prefer one main heading and a few thematic paragraphs, roughly 800–1800 Chinese
+characters or equivalent information in the requested language; this is guidance,
+not an acceptance gate. Only complete the overview task. Return readable Markdown,
+without page plans, JSON, page bodies or reasoning."""
 
-PAGES_RULES = """Select useful concept and entity pages for the whole source after
-overview traversal. The frozen planning_context contains the available overview,
-global PageIndex branches and existing catalogue, all derived guidance, not evidence.
-Use the detailed navigation for the current global or topic-group target. Organize
-coherent reusable knowledge across sections: integrate related prerequisites, main
-procedure and recovery when they answer one purpose. Do not make a page for every
-step, isolated parameter, example interface name or signature. Prefer a substantive
-core product/entity and independently useful concepts; preserve distinct versions,
-platforms and scenarios when independently useful. A runtime source_conditions
-diagnostic belongs in Notes, not a knowledge page, unless the source itself teaches
-that subject. State page-creation conditions explicitly; a conditional author index
-suggestion is not an unconditional recommendation. Mark explicit extensions with
-the existing title and added purpose/location clues. Do not automatically promote a
-conditional suggestion merely by extending it. No fixed page count is required.
-Return readable Markdown lists or tables
-with names/titles, kinds and optional location clues. Headings and field labels are
-flexible. A supplied section_key, full heading path, original heading or precise
-keyword can help retrieval later. Locations are suggestions, not evidence receipts:
-unknown locations may remain unresolved. Distinguish subject, prerequisite context,
-and related clues. Suggestions may concern another section of this saved source;
-do not claim to have read material outside the supplied original text.
-Use supplied entity types when applicable. Include purpose or reference hints if
-helpful, and preserve qualifications or uncertainty in notes. Each page should have an
-independent reusable purpose. Prefer complete procedures with prerequisites over pages
-for every step or table row. A person mentioned only in a signature or revision log,
-or an isolated parameter, rarely warrants a page without substantive information.
-Reuse confirmed existing suggestions and add location clues or purpose details to them;
-an explicit title-based extension is sufficient. The cumulative catalogue may be compact
-or incomplete: omitted does not mean nonexistent. Preserve meaningful version/platform
-differences. If classification is uncertain, say so without guessing a concept category.
-The separate overview task handles Summary/Overview; only suggest concept
-or entity pages here. External document names without supplied bodies remain
-reference hints. No source block must be routed to a page. Do not write page bodies,
-internal paths, proofs, JSON or reasoning. If no new page is warranted, state that
-explicitly. Never invent unread external or attachment details."""
+PAGES_RULES = """Use the overview, whole-document PageIndex and existing knowledge
+catalogue to choose worthwhile pages to create or update. These are derived guidance,
+not proof that the originals were read. For a topic-group target, consider its detail
+in the same global context and preserve earlier accepted suggestions in the carry.
+Concept pages answer an independent question, explain a mechanism or cover a complete
+task. Entity pages describe central or reusable objects. A chapter, signature, default
+parameter or example name does not by itself warrant a page. No fixed page count or
+one-page-per-section allocation is required. Integrate prerequisites, procedures and
+exceptions serving one purpose across sections; preserve useful platform/version
+boundaries. Prefer confirmed existing pages; use a recognizable catalogue target for
+updates and explain uncertainty instead of guessing a target to overwrite.
+
+Use explicit Markdown regions: Create pages / 创建页面, Update pages / 更新页面,
+and Notes / 说明. Put only pages you have decided to create or update in those sets.
+A create candidate needs a Title/名称 and Kind/类型 (concept or a supplied entity type).
+Purpose/用途, Selection/主体章节, Necessary context/必要上下文 and External references/
+外部参考 are optional: provide them when supported, never invent values to fill columns.
+Tables and lists are both welcome. Put non-created, deferred, conditional and background
+objects in Notes. Operational prerequisites within a chosen page remain that page's
+notes; they do not defer creation of the page. The receiver follows the explicit sets;
+it does not infer creation decisions from arbitrary negations or conditions in notes.
+
+Location clues may be a supplied stable section key, full title/path, unique heading
+number or valid same-branch heading-number range. They guide later original retrieval;
+do not claim unprovided originals have been read. Distinguish subject, necessary
+context and optional related clues. Preserve free notes and external requirements;
+unlinked external references are allowed and their unread contents must not be expanded.
+Use a confirmed existing suggestion title for an explicit extension, preserving its
+identity. Do not merge merely similar subjects or mistake omitted catalogue entries
+for nonexistent pages. Only select pages; do not write bodies, another overview, JSON,
+internal generated paths, reasoning or a per-block coverage ledger. An empty explicit
+create/update set is a valid result."""

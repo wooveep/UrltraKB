@@ -44,7 +44,7 @@ def evidence_scope(parsed, navigation, occurrences, unresolved, *, declared, war
         "status": "unavailable"
         if not body
         else "partial"
-        if unresolved
+        if any(row["role"] != "related" for row in unresolved)
         else "located"
         if declared
         else "unassessed",

@@ -1,6 +1,7 @@
 """Sequential navigation requests share execution accounting and durable recovery."""
 
 import json
+from contextlib import nullcontext
 
 from openkb.agent.evidence_wire import WireMessages
 from openkb.agent.model_json import json_text
@@ -9,6 +10,7 @@ from openkb.agent.source_protocol import SYSTEM, source_messages
 from openkb.config import compilation_model_options
 from openkb.navigation_enhancement import IndexAllowanceExceeded
 from openkb.processing import InputTooLarge, OutputTruncated
+from openkb.processing_reservation import reserve_later_work, retry_attempt_available
 
 
 class _SummaryInvalid(ValueError):
@@ -66,7 +68,17 @@ def expand_capacity(allowance, reason):
 
 
 def request_value(
-    evidence, task, rules, settings, bundle, allowance, checkpoints, profile, validate
+    evidence,
+    task,
+    rules,
+    settings,
+    bundle,
+    allowance,
+    checkpoints,
+    profile,
+    validate,
+    *,
+    attempts=None,
 ):
     from openkb.agent.compiler import _llm_call
 
@@ -79,16 +91,21 @@ def request_value(
         **compilation_model_options(settings),
     }
     payload = {"request": list(request), "stage": task["stage"]}
-    with checkpoints.request(
-        SYSTEM, payload, dependencies={"profile": profile, "options": options}
-    ) as key:
+    limit = allowance.limits.max_attempts if attempts is None else attempts
+    family = reserve_later_work(attempts=limit) if attempts is None else nullcontext()
+    with (
+        family,
+        checkpoints.request(
+            SYSTEM, payload, dependencies={"profile": profile, "options": options}
+        ) as key,
+    ):
         saved = checkpoints.load(key)
         if saved is not None:
             if "invalid" in saved:
                 raise IndexAllowanceExceeded(saved["invalid"])
             validate(saved)
             return saved
-        for attempt in range(allowance.limits.max_attempts):
+        for attempt in range(limit):
             options["max_tokens"] = min(
                 allowance.limits.output_tokens, allowance.budget.limits.output_tokens
             )
@@ -112,8 +129,10 @@ def request_value(
                 checkpoints.save(key, value)
                 return value
             except (OutputTruncated, InputTooLarge) as exc:
-                if attempt + 1 == allowance.limits.max_attempts or not expand_capacity(
-                    allowance, exc.reason
+                if (
+                    attempt + 1 == limit
+                    or not retry_attempt_available()
+                    or not expand_capacity(allowance, exc.reason)
                 ):
                     raise
             except (ValueError, TypeError, KeyError) as exc:
@@ -122,6 +141,11 @@ def request_value(
                     reason += f": {exc}"
                 elif task["stage"] == "index_summary":
                     reason += f": $: {exc}"
+                if attempt + 1 < limit and retry_attempt_available():
+                    request = source_messages(evidence, {**task, "recovery": reason}, rules)
+                    if task["stage"] == "index_summary":
+                        request = _SummaryMessages(request, request.identities)
+                    continue
                 checkpoints.save(key, {"invalid": reason})
                 raise IndexAllowanceExceeded(reason) from None
     raise AssertionError("Navigation request loop must settle or raise")
@@ -140,47 +164,77 @@ def summarize_group(evidence, nodes, settings, bundle, allowance, checkpoints, p
         }
         for number, n in by_number.items()
     ]
-    wanted = {row["id"] for row in selected}
+    pending = {row["id"] for row in selected}
+    first_problem = None
 
     def validate(value):
         _summary_fields(value, "$", ("summaries",))
         if not isinstance(value["summaries"], list):
             raise _SummaryInvalid("$.summaries", "expected an array")
-        seen = set()
-        for i, row in enumerate(value["summaries"]):
-            path = f"$.summaries[{i}]"
-            _summary_fields(row, path, ("id", "summary"))
-            if not isinstance(row["id"], str):
-                raise _SummaryInvalid(f"{path}.id", "expected a string section number")
-            if row["id"] not in wanted:
-                raise _SummaryInvalid(f"{path}.id", "unknown section number")
-            if row["id"] in seen:
-                raise _SummaryInvalid(f"{path}.id", f"duplicate section number {row['id']}")
-            if row["summary"] is not None:
-                if not isinstance(row["summary"], str):
-                    raise _SummaryInvalid(f"{path}.summary", "expected a string or null")
-                if not 0 < len(row["summary"]) <= 1600:
-                    raise _SummaryInvalid(f"{path}.summary", "expected 1 to 1600 characters")
-            seen.add(row["id"])
-        if seen != wanted:
-            missing = ", ".join(number for number in by_number if number not in seen)
-            raise _SummaryInvalid("$.summaries", f"missing section numbers: {missing}")
 
-    value = request_value(
-        evidence,
-        {"stage": "index_summary", "nodes": selected},
+    rules = (
         'Return {"summaries":[{"id":"1","summary":"brief hint"}]}.'
-        " Copy each supplied request-local section number (id) exactly as a string."
-        " Include every section once; use null if evidence is insufficient. At most "
-        "80 words per hint. Do not infer new hierarchy or treat inferred titles "
-        "as evidence. Summaries only help readers select original text.",
-        settings,
-        bundle,
-        allowance,
-        checkpoints,
-        profile,
-        validate,
+        " Copy each supplied request-local section number exactly as a string."
+        " Summarize only the supplied nodes; accepted summaries need no repetition."
+        " Use null when evidence is insufficient. At most 80 words per hint."
+        " Do not infer hierarchy or treat inferred titles as original evidence."
     )
-    for row in value["summaries"]:
-        if row["summary"] is not None:
-            by_number[row["id"]].update(summary=row["summary"], summary_origin="model")
+    with reserve_later_work(attempts=allowance.limits.max_attempts):
+        for attempt in range(allowance.limits.max_attempts):
+            task = {"stage": "index_summary", "nodes": [r for r in selected if r["id"] in pending]}
+            if attempt:
+                task["recovery"] = first_problem or "Supply only the remaining summaries."
+            problems, seen = [], set()
+            try:
+                value = request_value(
+                    evidence,
+                    task,
+                    rules,
+                    settings,
+                    bundle,
+                    allowance,
+                    checkpoints,
+                    profile,
+                    validate,
+                    attempts=1,
+                )
+                for i, row in enumerate(value["summaries"]):
+                    path = f"$.summaries[{i}]"
+                    try:
+                        _summary_fields(row, path, ("id", "summary"))
+                        if not isinstance(row["id"], str):
+                            raise _SummaryInvalid(f"{path}.id", "expected a string section number")
+                        if row["id"] not in pending:
+                            raise _SummaryInvalid(f"{path}.id", "unknown section number")
+                        if row["id"] in seen:
+                            raise _SummaryInvalid(
+                                f"{path}.id", f"duplicate section number {row['id']}"
+                            )
+                        if row["summary"] is not None:
+                            if not isinstance(row["summary"], str):
+                                raise _SummaryInvalid(
+                                    f"{path}.summary", "expected a string or null"
+                                )
+                            if not 0 < len(row["summary"]) <= 1600:
+                                raise _SummaryInvalid(
+                                    f"{path}.summary", "expected 1 to 1600 characters"
+                                )
+                            by_number[row["id"]].update(
+                                summary=row["summary"], summary_origin="model"
+                            )
+                        seen.add(row["id"])
+                    except _SummaryInvalid as exc:
+                        problems.append(str(exc))
+                pending.difference_update(seen)
+                if not pending:
+                    return
+                problems.append(
+                    "$.summaries: missing section numbers: "
+                    + ", ".join(number for number in by_number if number in pending)
+                )
+            except IndexAllowanceExceeded as exc:
+                problems.append(str(exc).removeprefix("index_summary_invalid: "))
+            first_problem = first_problem or problems[0]
+            if not retry_attempt_available():
+                break
+    raise IndexAllowanceExceeded("index_summary_invalid: " + str(first_problem))

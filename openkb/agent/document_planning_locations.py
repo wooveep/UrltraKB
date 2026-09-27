@@ -158,6 +158,95 @@ def labelled_key_paths(value: Any) -> Any:
     return choices
 
 
+_NUMBER = r"\d+(?:\.\d+)*"
+
+
+def _heading_number(title):
+    match = re.match(r"^(" + _NUMBER + r")(?:[\s、:：.)）]|$)", title)
+    return match[1] if match else None
+
+
+def _numbered_nodes(clue, navigation):
+    path = heading_path(clue)
+    number = path[-1]
+    if not re.fullmatch(_NUMBER, number):
+        return None
+    matches = [
+        row
+        for row in navigation
+        if _heading_number(row.get("title", "")) == number
+        and (len(path) == 1 or row.get("heading_path", [])[-len(path) : -1] == path[:-1])
+    ]
+    if len(matches) != 1:
+        raise ValueError("ambiguous_location" if matches else "unknown_location")
+    return matches
+
+
+def _number_selection(clue, navigation):
+    exact = _numbered_nodes(clue, navigation)
+    if exact is not None:
+        return exact
+    atom = _NUMBER + r"(?:\s*[-–—~至到]\s*" + _NUMBER + r")?"
+    if not re.fullmatch(atom + r"(?:\s*[,，、;；]\s*" + atom + ")*", clue):
+        return None
+    selected = []
+    for part in re.split(r"[,，、;；]", clue):
+        ends = re.split(r"\s*[-–—~至到]\s*", part.strip())
+        first = _numbered_nodes(ends[0], navigation)[0]
+        if len(ends) == 1:
+            selected.append(first)
+            continue
+        last = _numbered_nodes(ends[1], navigation)[0]
+        left, right = ends[0].split("."), ends[1].split(".")
+        first_path, last_path = first.get("heading_path", []), last.get("heading_path", [])
+        if (
+            left == right[: len(left)]
+            and len(left) < len(right)
+            and first_path
+            and last_path[: len(first_path)] == first_path
+        ):
+            # An ancestor endpoint explicitly selects that real section subtree.
+            selected.append(first)
+            continue
+        branch = first_path[:-1]
+        if (
+            left[:-1] != right[:-1]
+            or int(left[-1]) > int(right[-1])
+            or branch != last.get("heading_path", [])[:-1]
+            or first.get("parent") != last.get("parent")
+        ):
+            raise ValueError("invalid_heading_number_range")
+        for row in navigation:
+            number = _heading_number(row.get("title", ""))
+            parts = number.split(".") if number else []
+            if (
+                parts[:-1] == left[:-1]
+                and parts
+                and int(left[-1]) <= int(parts[-1]) <= int(right[-1])
+                and row.get("heading_path", [])[:-1] == branch
+                and row.get("parent") == first.get("parent")
+            ):
+                selected.append(row)
+    return selected
+
+
+def _subtree_ranges(nodes, navigation, parsed, mode, notes):
+    intervals = []
+    for node in nodes:
+        path = node.get("heading_path", [])
+        subtree = [node] + [
+            row
+            for row in navigation
+            if path
+            and len(row.get("heading_path", [])) > len(path)
+            and row["heading_path"][: len(path)] == path
+        ]
+        for row in subtree:
+            for value in _node_ranges(row, parsed, mode, notes):
+                intervals.extend(range_intervals(value, parsed, "planned section subtree"))
+    return _compact_intervals(parsed, intervals)
+
+
 def resolve_location(
     value: Any,
     navigation: list[dict[str, Any]],
@@ -254,13 +343,16 @@ def resolve_location(
     if not isinstance(value, str):
         raise ValueError("unknown_location")
     clue = value.strip()
-    if clue.isdigit():
-        raise ValueError("ambiguous_numeric_location")
     exact = _literal_nodes(clue, navigation)
     if exact:
         if len(exact) != 1:
             raise ValueError("ambiguous_location")
-        return _node_ranges(exact[0], parsed, mode, notes), "section"
+        return _subtree_ranges(exact, navigation, parsed, mode, notes), "section"
+    numbered = _number_selection(clue, navigation)
+    if numbered is not None:
+        return _subtree_ranges(numbered, navigation, parsed, mode, notes), "section"
+    if clue.isdigit():
+        raise ValueError("ambiguous_numeric_location")
     keyed_path = re.fullmatch(
         _PATH_LABEL
         + r"(.+?)\s*[（(]\s*section[ _]key\s*[：:]\s*`?(section:[A-Za-z0-9_-]+)`?\s*[）)]",
@@ -289,7 +381,14 @@ def resolve_location(
         return locate(labelled_path.group(1))
     keyed_selection = re.fullmatch(r"`?(section:[A-Za-z0-9_-]+)`?\s*[（(](.+)[）)]", clue)
     if keyed_selection:
-        return locate([keyed_selection.group(1), keyed_selection.group(2)])
+        selected, scope = locate(keyed_selection.group(1))
+        annotation(selected, keyed_selection.group(2), keyed_selection.group(1))
+        return selected, scope
+    key_title = re.fullmatch(r"`?(section:[A-Za-z0-9_-]+)`?\s+(.+)", clue)
+    if key_title:
+        selected, scope = locate(key_title[1])
+        annotation(selected, key_title[2], key_title[1])
+        return selected, scope
     candidates = []
     for node in navigation:
         path = node.get("heading_path", [])
@@ -378,18 +477,4 @@ def resolve_hint(
         return ranges, "section" if all(
             scope == "section" for scope in scopes
         ) else "explicit_range"
-    try:
-        return resolve_location(
-            value, navigation, [], parsed, evidence, mode="context", notes=notes
-        )
-    except ValueError:
-        if not isinstance(value, str):
-            raise
-        keys = set(re.findall(r"(?<![\w:-])section:[A-Za-z0-9_-]+(?![\w:-])", value))
-        if len(keys) != 1:
-            raise
-        key = next(iter(keys))
-        selected, scope = resolve_location(key, navigation, [], parsed, mode="context")
-        if notes is not None:
-            notes.append("按已知章节键定位；显示文字保留为待核对线索：" + value[:120])
-        return selected, scope
+    return resolve_location(value, navigation, [], parsed, evidence, mode="context", notes=notes)

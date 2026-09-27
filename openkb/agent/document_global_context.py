@@ -10,7 +10,7 @@ from openkb.agent.document_protocol import plan_messages
 from openkb.processing import InputTooLarge
 from openkb.sources import content_id
 
-STRATEGY = "global-after-overview-v1"
+STRATEGY = "global-navigation-v2"
 
 
 def navigation_rows(navigation, parsed):
@@ -42,7 +42,8 @@ def navigation_rows(navigation, parsed):
                 "title": node.get("title", ""),
                 "heading_path": list(reversed(titles)),
                 "parent": f"section:{node['parent']}" if str(node.get("parent")) in by_id else None,
-                "summary": node.get("summary", ""),
+                "summary": node.get("summary") or "",
+                "summary_origin": node.get("summary_origin", "unspecified"),
                 "original_ranges": ranges,
             }
         )
@@ -131,6 +132,7 @@ def messages_for(
     recovery="",
     detail=True,
     shown=None,
+    overview_limit=None,
 ):
     from openkb.agent.document_planning_support import exclude_attachment_ranges
 
@@ -145,11 +147,18 @@ def messages_for(
         "total_blocks": len(parsed.blocks),
     }
     task["ranges"], _ = exclude_attachment_ranges(parsed, task["ranges"])
+    carry = _carry(state, detail, shown)
+    overview = current_overview(state)
+    carry["overview"] = {
+        "text": overview if overview_limit is None else overview[:overview_limit],
+        "input_clipped": overview_limit is not None and len(overview) > overview_limit,
+        "partial": not bool(state.get("overview_snapshot")),
+    }
     return plan_messages(
         empty_evidence(source, parsed),
-        _carry(state, detail, shown),
+        carry,
         task,
-        rows,
+        rows if context["projection"]["detail_nodes_in_suffix"] else [],
         "",
         entity_types,
         schema,
@@ -199,37 +208,51 @@ def freeze_context(
     state, navigation, source, parsed, catalog, settings, limits, entity_types, schema, conditions
 ):
     if state.get("planning_snapshot"):
-        return state["planning_snapshot"]
+        saved = state["planning_snapshot"]
+        context = json.loads(saved["context_json"])
+        if (
+            context["source"]
+            != {"source_id": source.source_id, "version_id": source.id, "parse_id": parsed.id}
+            or saved["nodes"] != navigation_rows(navigation, parsed)
+            or context["navigation_id"] != content_id((navigation or {}).get("nodes", []))
+        ):
+            from openkb.processing import ProcessingIncomplete
+
+            raise ProcessingIncomplete("planning_recovery_identity_mismatch", "planning")
+        return saved
     nodes = navigation_rows(navigation, parsed)
     roots = [row for row in nodes if row["parent"] is None]
     if len(roots) == 1:
         roots += [row for row in nodes if row["parent"] == roots[0]["section_key"]]
     context = {
-        "protocol": "global-planning-context-v1",
+        "protocol": "global-planning-context-v2",
         "strategy": STRATEGY,
         "source": {"source_id": source.source_id, "version_id": source.id, "parse_id": parsed.id},
         "navigation_id": content_id((navigation or {}).get("nodes", [])),
-        "overview": {
-            "text": current_overview(state),
-            "input_clipped": False,
-            "missing_windows": sum(
-                task.get("status") != "accepted"
-                for key, task in state["tasks"].items()
-                if key.endswith(":overview") and task.get("status") != "retired"
-            ),
+        "summary_input": {
+            "nodes": len(nodes),
+            "with_summary": sum(bool(row["summary"]) for row in nodes),
+            "missing_summary": sum(not row["summary"] for row in nodes),
+            "provenance": "derived_navigation_not_original_text",
         },
-        "topics": [
-            {key: row[key] for key in ("section_key", "title", "summary", "heading_path")}
-            for row in roots
-        ],
+        "topics": [dict(row) for row in nodes],
         "catalog": [
-            {"target": path, "title": title, "brief": brief} for path, title, brief in catalog
+            {
+                "target": path,
+                "title": title,
+                "brief": brief,
+                **(
+                    {"type": state["catalog_types"][path]}
+                    if path in state.get("catalog_types", {})
+                    else {}
+                ),
+            }
+            for path, title, brief in catalog
         ],
         "projection": {
             "total_nodes": len(nodes),
-            "overview_clipped": False,
-            "detail_nodes_in_suffix": True,
-            "omitted_nodes": len(nodes) - len(roots),
+            "detail_nodes_in_suffix": False,
+            "omitted_nodes": 0,
             "shortened_summaries": 0,
             "omitted_catalog": 0,
         },
@@ -266,6 +289,15 @@ def freeze_context(
             reserve=min(800, limits.input_capacity // 8),
         )
 
+    if not minimal_fits():
+        context["topics"] = [dict(row) for row in roots]
+        context["projection"].update(
+            detail_nodes_in_suffix=True, omitted_nodes=len(nodes) - len(roots)
+        )
+    if not minimal_fits():
+        for row in context["catalog"]:
+            row.pop("brief", None)
+    context["projection"]["overview_requires_groups"] = not minimal_fits()
     for length in (240, 80, 0):
         if minimal_fits():
             break
@@ -310,16 +342,6 @@ def freeze_context(
                 if minimal_fits() or len(groups) == 1:
                     break
                 width *= 2
-    while not minimal_fits() and len(context["overview"]["text"]) > 300:
-        text = context["overview"]["text"]
-        paragraphs = text.split("\n\n")
-        context["overview"]["text"] = (
-            "\n\n".join(paragraphs[: max(1, len(paragraphs) // 2)])
-            if len(paragraphs) > 1
-            else text[: len(text) // 2]
-        )
-        context["overview"]["input_clipped"] = True
-        context["projection"]["overview_clipped"] = True
     result = snapshot()
     state["planning_snapshot"] = result
     state["planning_strategy"] = STRATEGY
@@ -362,8 +384,7 @@ def validate_snapshot(snapshot):
         ):
             return False
         return (
-            context["strategy"] == STRATEGY
-            and isinstance(context["overview"]["text"], str)
+            context["strategy"] in {STRATEGY, "global-after-overview-v1"}
             and isinstance(context["topics"], list)
             and isinstance(context["catalog"], list)
             and isinstance(context["projection"], dict)
@@ -381,7 +402,7 @@ def validate_snapshot(snapshot):
 
 def validate_global_state(state):
     """Validate the frozen task partition before a checkpoint can drive dispatch."""
-    if state.get("planning_strategy") != STRATEGY:
+    if state.get("planning_strategy") not in {STRATEGY, "global-after-overview-v1"}:
         return False
     tasks = state.get("tasks")
     if not isinstance(tasks, dict) or any(not isinstance(task, dict) for task in tasks.values()):
@@ -393,6 +414,11 @@ def validate_global_state(state):
             for task in tasks.values()
         )
     keys = state.get("planning_tasks")
+    if keys is None:
+        return validate_snapshot(snapshot) and not any(
+            task.get("component") == "pages" and task.get("status") != "retired"
+            for task in tasks.values()
+        )
     if (
         not validate_snapshot(snapshot)
         or not isinstance(keys, list)

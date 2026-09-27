@@ -2,8 +2,9 @@
 
 import re
 
-from openkb.evidence import Evidence, ParseStore, complete_read_bound
+from openkb.evidence import Evidence, complete_read_bound
 from openkb.navigation_enhancement import IndexAllowanceExceeded
+from openkb.navigation_evidence import verified_reader
 from openkb.navigation_requests import request_value
 from openkb.processing import processing_checkpoint
 from openkb.resource_budget import check_memory
@@ -147,10 +148,12 @@ def _matches(source, parsed, reader, entries, excluded):
     return matches
 
 
-def directory_sections(kb, source, parsed, settings, bundle, allowance, checkpoints, profile):
+def directory_sections(
+    kb, source, parsed, settings, bundle, allowance, checkpoints, profile, *, reader=None
+):
     from openkb.navigation_structure import _window, locate_problems, located, normalized
 
-    reader = ParseStore(kb).reader(source, parsed)
+    reader = verified_reader(kb, source, parsed, reader)
     entries, excluded, ambiguous = _scan(source, parsed, reader)
     trusted = [
         {
@@ -170,7 +173,7 @@ def directory_sections(kb, source, parsed, settings, bundle, allowance, checkpoi
     while pending:
         start = min(pending)
         _, evidence, end, _ = _window(
-            kb, source, parsed, start, [], settings, allowance, stop=max(pending) + 1
+            kb, source, parsed, start, [], settings, allowance, stop=max(pending) + 1, reader=reader
         )
         extracted = _extract(evidence, settings, bundle, allowance, checkpoints, profile)
         excluded.update(row["toc_block"] for row in extracted)
@@ -232,7 +235,9 @@ def directory_sections(kb, source, parsed, settings, bundle, allowance, checkpoi
         ranges[index] = (left, right)
         groups.setdefault((left, right), []).append(index)
     for (left, right), indices in groups.items():
-        _, evidence, end, _ = _window(kb, source, parsed, left, [], settings, allowance, stop=right)
+        _, evidence, end, _ = _window(
+            kb, source, parsed, left, [], settings, allowance, stop=right, reader=reader
+        )
         if end < right:
             # No bounded local correction can cover this ambiguity; the relevant
             # sequential body windows will supply starts instead.

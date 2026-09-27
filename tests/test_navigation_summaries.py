@@ -13,6 +13,37 @@ from tests.test_adaptive_processing import response as model_response
 from tests.test_navigation_windows import prepare
 
 
+def test_partial_summary_keeps_good_item_and_only_recovers_missing_node(
+    kb_dir, tmp_path, model_service
+):
+    path = tmp_path / "partial-summary.md"
+    path.write_text("# Install\n\nUse version 7.\n\n# Repair\n\nRestart once.")
+    requested = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        if payload["stage"] == "index_structure":
+            return {"sections": []}
+        requested.append([row["id"] for row in payload["nodes"]])
+        if len(requested) == 1:
+            return {
+                "summaries": [
+                    {"id": "1", "summary": "Required version."},
+                    {"id": "unknown", "summary": "Unbound summary."},
+                ]
+            }
+        return {"summaries": [{"id": "2", "summary": "Recovery instructions."}]}
+
+    model_service.respond = respond
+    _, _, _, saved = prepare(kb_dir, path, {"summaries": True})
+    assert requested == [["1", "2"], ["2"]]
+    assert [n["summary"] for n in saved["nodes"][1:]] == [
+        "Required version.",
+        "Recovery instructions.",
+    ]
+    assert saved["status"] == "enhanced"
+
+
 def test_summary_numbers_map_reordered_responses_to_persistent_nodes(
     kb_dir, tmp_path, model_service
 ):
@@ -118,6 +149,7 @@ def test_rejected_summary_preserves_field_reason_on_reload_without_reasking(
     assert [json.loads(body["messages"][-1]["content"])["stage"] for body in model_service] == [
         "index_structure",
         "index_summary",
+        "index_summary",
     ]
 
 
@@ -158,4 +190,4 @@ def test_summary_decode_rejection_retains_path_and_reason(
             kb_dir, source, parsed, settings, bundle=resolve_credential_bundle(kb_dir)
         )
     assert resumed["reason"] == reason
-    assert stages == ["index_structure", "index_summary"]
+    assert stages == ["index_structure", "index_summary", "index_summary"]

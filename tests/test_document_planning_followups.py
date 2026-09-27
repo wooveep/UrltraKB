@@ -44,7 +44,7 @@ def test_global_response_containing_an_accepted_echo_settles_without_retry(tmp_p
         calls.append(payload["subtask"])
         if payload["subtask"] == "overview":
             return "This section preserves its original requirements."
-        return ("- Name: Preparation\n  Kind: concept\n  Section: section:first\n" * 2)
+        return "- Name: Preparation\n  Kind: concept\n  Section: section:first\n" * 2
 
     with CompilationCheckpoints(tmp_path, source, parsed, SETTINGS, None) as checkpoints:
         result = plan_document(
@@ -60,16 +60,14 @@ def test_global_response_containing_an_accepted_echo_settles_without_retry(tmp_p
             return_result=True,
         )
     assert result.outcome == "complete"
-    assert calls == ["overview", "overview", "pages"]
+    assert calls == ["overview", "pages"]
     assert len(result.plan.pages) == 1
     report = json.loads(Path(result.report_ref).read_text())
     assert report["filtered_candidates"] == {"accepted_echo": 1}
     assert not report["planning_omissions"]
 
 
-def test_global_chapter_selection_follows_all_window_overviews(
-    tmp_path, monkeypatch
-):
+def test_global_chapter_selection_follows_navigation_overview(tmp_path, monkeypatch):
     source, parsed = _DummySource(), _parsed()
     workspace = tmp_path / "workspace"
     (workspace / "wiki").mkdir(parents=True)
@@ -117,9 +115,10 @@ def test_global_chapter_selection_follows_all_window_overviews(
     assert result.plan.pages[0].subject_ranges == [[0, 2]]
     assert result.plan.pages[0].state == "pending_evidence"
     assert [(start, subtask) for start, subtask, _ in calls] == [
-        (0, "overview"), (1, "overview"), (None, "pages"),
+        (None, "overview"),
+        (None, "pages"),
     ]
-    assert all(json.loads(row[2][-1]["content"])["evidence"]["blocks"] for row in calls[:2])
+    assert all(not json.loads(row[2][-1]["content"])["evidence"]["blocks"] for row in calls)
     assert json.loads(calls[-1][2][-1]["content"])["evidence"]["blocks"] == []
 
 
@@ -143,7 +142,18 @@ def _run_single(
             workspace,
             source,
             parsed,
-            None,
+            {
+                "nodes": [
+                    {
+                        "id": "operations",
+                        "parent": None,
+                        "title": "Operations",
+                        "start": 0,
+                        "end": len(parsed.blocks),
+                        "summary": "Credentials are required before the operation.",
+                    }
+                ]
+            },
             SETTINGS,
             checkpoints,
             mock_caller=respond,
@@ -182,8 +192,8 @@ def test_ignored_summary_cannot_replace_a_failed_overview(tmp_path, monkeypatch)
     assert result.outcome == "empty"
     assert result.plan is None and result.overview_ref is None
     report = json.loads(Path(result.report_ref).read_text())
-    assert report["planning_execution"]["planning_requests"] == 3
-    assert [row["component"] for row in report["planning_omissions"]] == ["overview", "pages"]
+    assert report["planning_execution"]["planning_requests"] == 4
+    assert [row["component"] for row in report["planning_omissions"]] == ["overview"]
     assert not report["no_pages_recommended"]
 
 

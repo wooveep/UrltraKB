@@ -45,6 +45,44 @@ class TextOcr:
         ], self.reason
 
 
+def test_shaded_code_stays_text_and_real_grid_keeps_merged_and_empty_cells(kb_dir, tmp_path):
+    path = tmp_path / "code-and-grid.pdf"
+    lines = [f"{i:02}  value = read_item({i});" for i in range(8)]
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        for i, line in enumerate(lines):
+            page.draw_rect(
+                (40, 50 + i * 18, 460, 68 + i * 18),
+                color=None,
+                fill=(0.9, 0.9, 0.9) if i % 2 else (1, 1, 1),
+            )
+            page.draw_rect((40, 50 + i * 18, 70, 68 + i * 18), color=None, fill=(0.95, 0.95, 0.95))
+            page.insert_text((48, 63 + i * 18), line, fontname="cour", fontsize=10)
+        page = pdf.new_page()
+        for y in (50, 80, 110, 140):
+            page.draw_line((40, y), (360, y))
+        for x in (40, 360):
+            page.draw_line((x, 50), (x, 140))
+        page.draw_line((200, 80), (200, 140))
+        for x, y, text in (
+            (50, 70, "Merged heading"),
+            (50, 100, "Value"),
+            (210, 100, "42"),
+            (50, 130, "Empty right cell"),
+        ):
+            page.insert_text((x, y), text)
+        pdf.save(path)
+    blocks, _ = parse_pdf(path, SourceStore(kb_dir))
+    code = [b for b in blocks if b.location["page"] == 1 and b.kind != "image"]
+    assert code and all(b.kind == "paragraph" for b in code)
+    assert "\n".join(b.text for b in code).splitlines() == lines
+    cells = [b for b in blocks if b.location["page"] == 2 and b.kind == "table"]
+    assert len(cells) == 5
+    merged = next(b for b in cells if b.text == "Merged heading")
+    assert merged.location["bbox"] == [40.0, 50.0, 360.0, 80.0]
+    assert any(b.location["row"] == 3 and b.location["cell"] == 2 and b.text == "" for b in cells)
+
+
 def test_successful_text_ocr_keeps_original_graphics_without_requesting_ocr_again(kb_dir, tmp_path):
     source = _pdf(tmp_path / "diagram.pdf")
     store = SourceStore(kb_dir)

@@ -108,6 +108,18 @@ def _omissions(
         )
         for key in state.get("planning_tasks", [])
     )
+    targets.extend(
+        (
+            key,
+            "overview",
+            [
+                value
+                for row in state.get("planning_snapshot", {}).get("nodes", [])
+                for value in row["original_ranges"]
+            ],
+        )
+        for key in state.get("overview_tasks", [])
+    )
     for key, subtask, ranges in targets:
         task = state["tasks"].get(key, {})
         reason = task.get("reason")
@@ -163,22 +175,25 @@ def _finalize(
     omissions = _omissions(state, windows, parsed)
     failed = bool(omissions)
     outcome = "partial" if has_products and failed else "complete" if has_products else "empty"
-    if (pages or deferred) and not overview:
+    if has_products and overview_summary(state)["partial"]:
         outcome = "partial"
     if state.get("budget_limited"):
         outcome = "budget_limited"
     metadata = {
         "protocol": "document-plan-v4",
-        "planning_semantics": "tolerant-quality-v2",
+        "planning_semantics": state.get("planning_semantics", "tolerant-quality-v2"),
         "planning_strategy": state.get("planning_strategy"),
         "planning_mode": state.get("planning_mode"),
         "planning_snapshot": state.get("planning_snapshot"),
         "deferred_suggestions": deferred,
+        "external_reference_hints": state.get("external_reference_hints", []),
         "suggestion_annotations": state.get("suggestion_annotations", {}),
         "batch_notes": state.get("batch_notes", []),
         "promoted_suggestions": state.get("promoted_suggestions", []),
         "overview_snapshot": state.get("overview_snapshot"),
         "overview_history": state.get("overview_history", []),
+        "overview_input": state.get("overview_input", {}),
+        "overview_parts": state.get("overview_parts", {}),
         **quality,
         "source_id": source.source_id,
         "version_id": source.id,
@@ -199,7 +214,7 @@ def _finalize(
             "recovery_requests": state.get("recovery_requests", 0),
             "elapsed_seconds": max(0.0, time.monotonic() - started),
             **usage_totals(state),
-            "overview_tasks": len(windows),
+            "overview_tasks": len(state.get("overview_tasks", windows)),
             "pages_tasks": len(state.get("planning_tasks", [])),
             "by_component": {
                 name: usage_totals(
@@ -222,11 +237,7 @@ def _finalize(
             overview=OverviewPlan(
                 text=overview,
                 status="complete"
-                if overview
-                and all(
-                    state["tasks"].get(_task_id(window, "overview"), {}).get("status") == "accepted"
-                    for window in windows
-                )
+                if overview and not overview_summary(state)["partial"]
                 else "partial",
             ),
             pages=pages,
@@ -309,7 +320,7 @@ def _finalize(
             name: sum(page.quality == name for page in pages) for name in ("generated", "published")
         },
         "source_queryable": _source_queryable(checkpoints.store.kb_dir, source, parsed),
-        "no_pages_recommended": bool(windows)
+        "no_pages_recommended": bool(state.get("planning_tasks"))
         and not pages
         and not deferred
         and all(
@@ -318,25 +329,27 @@ def _finalize(
         ),
         "overview_targets": {
             "complete": sum(
-                state["tasks"].get(_task_id(window, "overview"), {}).get("status") == "accepted"
-                for window in windows
+                state["tasks"][key]["status"] == "accepted"
+                for key in state.get("overview_tasks", [])
             ),
             "partial": sum(
-                state["tasks"].get(_task_id(window, "overview"), {}).get("status") != "accepted"
-                and has_overview_fragment(window)
-                for window in windows
+                state["tasks"][key]["status"] != "accepted"
+                and key in state.get("overview_parts", {})
+                for key in state.get("overview_tasks", [])
             ),
             "failed": sum(
-                state["tasks"].get(_task_id(window, "overview"), {}).get("status") == "skipped"
-                and not has_overview_fragment(window)
-                for window in windows
+                state["tasks"][key]["status"] == "skipped"
+                and key not in state.get("overview_parts", {})
+                for key in state.get("overview_tasks", [])
             ),
-            "total": len(windows),
+            "total": len(state.get("overview_tasks", windows)),
         },
         "windows_processed": len(windows),
         "windows_total": len(windows),
         "parser_gaps": coverage["parser_gaps"],
         "external_references": len(state["external_references"]),
+        "external_reference_hints": state.get("external_reference_hints", []),
+        "reference_hint_basis": "derived_planning_response_not_original_quote",
         "downstream": "not_started_at_planning_handoff",
         "retry_skipped_available": True,
         "planning_omissions": [item.to_dict() for item in omissions],

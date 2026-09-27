@@ -1,4 +1,4 @@
-"""Cumulative overview snapshots and explicit partial fallback history."""
+"""Overview provenance and explicit partial artifacts across planning strategies."""
 
 from copy import deepcopy
 
@@ -10,6 +10,13 @@ def current_overview(state):
     snapshot = state.get("overview_snapshot")
     if snapshot:
         return snapshot["text"].strip() + "\n"
+    if state.get("overview_parts"):
+        texts = [
+            state["overview_parts"][key]["text"]
+            for key in state.get("overview_tasks", [])
+            if key in state["overview_parts"]
+        ]
+        return "以下为尚未形成全文概览的局部资料。\n\n" + "\n\n".join(texts) + "\n"
     from openkb.agent.document_planning_report import _overview_text, ordered_fragments
 
     fragments = ordered_fragments(state)
@@ -43,6 +50,23 @@ def accept_snapshot(state, window, ranges, raw, accepted):
 
 def overview_summary(state):
     snapshot = state.get("overview_snapshot") or {}
+    if state.get("planning_strategy") == "global-navigation-v2":
+        basis = state.get("overview_input", {})
+        return {
+            **basis,
+            "basis": snapshot.get("basis", basis.get("basis", "navigation_summaries")),
+            "characters": len(current_overview(state)),
+            "partial": not snapshot or bool(snapshot.get("partial")),
+            "current_response": snapshot.get("response"),
+            "input_clipped": bool(snapshot.get("input_clipped")),
+            "original_read_ranges": snapshot.get("original_read_ranges", []),
+            "missing_tasks": [
+                key
+                for key in state.get("overview_tasks", [])
+                if state["tasks"][key]["status"] != "accepted"
+            ],
+            "partial_summaries": len(state.get("overview_parts", {})) if not snapshot else 0,
+        }
     missing = [
         window_receipt_id(window)
         for window in state["windows"]
@@ -89,6 +113,30 @@ def validate_overview(state, *, total_blocks=None, block_chars=None):
         valid_id(record["response"])
         if record.get("binding") is not None:
             valid_id(record["binding"])
+        if record.get("basis") in {"navigation_summaries", "group_summaries"}:
+            planning = state.get("planning_snapshot") or {}
+            import json
+
+            from openkb.agent.document_global_context import validate_snapshot
+
+            if (
+                not validate_snapshot(planning)
+                or record.get("snapshot_id") != planning["id"]
+                or record.get("navigation_id")
+                != json.loads(planning["context_json"])["navigation_id"]
+                or record.get("node_keys") != [row["section_key"] for row in planning["nodes"]]
+                or type(record.get("partial")) is not bool
+                or "processed" in record
+                or not isinstance(record.get("original_read_ranges"), list)
+            ):
+                raise ValueError("Invalid navigation overview provenance")
+            validate_ranges(
+                record["original_read_ranges"],
+                total_blocks,
+                "overview original reads",
+                block_chars=block_chars,
+            )
+            continue
         if not isinstance(record.get("processed"), list) or any(
             not isinstance(row, dict)
             or not isinstance(row.get("window"), str)

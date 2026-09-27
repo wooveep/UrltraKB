@@ -1,5 +1,7 @@
 """Lightweight frozen evidence descriptors, reconstructed from immutable parsing."""
 
+from pathlib import Path
+
 from openkb.agent.source_protocol import PROTOCOL
 from openkb.evidence import Evidence, ParseStore, complete_read_bound
 from openkb.processing import processing_checkpoint
@@ -77,7 +79,20 @@ def planning_windows(source, parsed, navigation):
     return upgraded
 
 
-def read_evidence_group(kb_dir, source, parsed, descriptor):
+def verified_reader(kb_dir, source, parsed, reader=None):
+    """Reuse only the caller's same immutable execution snapshot, never a global cache."""
+    if reader is None:
+        return ParseStore(kb_dir).reader(source, parsed)
+    if reader.sources.kb_dir.resolve() != Path(kb_dir).resolve() or (
+        reader.version.source_id,
+        reader.version.id,
+        reader.parsed.id,
+    ) != (source.source_id, source.id, parsed.id):
+        raise ValueError("Reader identity does not match the navigation input")
+    return reader
+
+
+def read_evidence_group(kb_dir, source, parsed, descriptor, *, reader=None):
     """The same public reader serves indexing and later task assembly; no reparsing."""
     expected = evidence_descriptor(source, parsed, descriptor["start"], descriptor["end"])
     if descriptor != expected:
@@ -90,7 +105,7 @@ def read_evidence_group(kb_dir, source, parsed, descriptor):
         if "attachment" not in block.location
     ]
     check_memory(sum(complete_read_bound(block) for block in members) * 12, stage="index_structure")
-    reader = ParseStore(kb_dir).reader(source, parsed)
+    reader = verified_reader(kb_dir, source, parsed, reader)
     blocks = []
     for block in members:
         processing_checkpoint()

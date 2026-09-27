@@ -14,13 +14,13 @@ def _state(
     previous = checkpoints.load_recovery(key, "markdown_plan") if resume else None
     if previous is not None and not _valid_state(previous, windows):
         raise ProcessingIncomplete("planning_recovery_invalid", "planning")
-    if previous is not None and previous.get("protocol") == "document-planning-acceptance-v4":
+    if previous is not None and previous.get("protocol") == "document-planning-acceptance-v5":
         previous.setdefault("filtered", [])
         return previous
     state: dict[str, Any] = {
-        "protocol": "document-planning-acceptance-v4",
-        "planning_strategy": "global-after-overview-v1",
-        "planning_semantics": "tolerant-quality-v2",
+        "protocol": "document-planning-acceptance-v5",
+        "planning_strategy": "global-navigation-v2",
+        "planning_semantics": "explicit-actions-v3",
         "deferred_suggestions": [],
         "suggestion_annotations": {},
         "batch_notes": [],
@@ -39,27 +39,6 @@ def _state(
         "request_usage": [],
         "attempts": 0,
     }
-    if resume:
-        from openkb.agent.document_planning_history import previous_responses
-
-        if historical := previous_responses(checkpoints, windows):
-            (
-                state["windows"],
-                state["tasks"],
-                state["replayed_from"],
-                state["retained_fragments"],
-                state["overview_snapshot"],
-                state["overview_history"],
-                state["legacy_overview_fragments"],
-            ) = historical
-            state["historical_page_responses"] = [
-                {"task": key, "responses": task.get("replay", [])}
-                for key, task in state["tasks"].items()
-                if key.endswith(":pages")
-            ]
-            state["tasks"] = {
-                key: task for key, task in state["tasks"].items() if key.endswith(":overview")
-            }
     return state
 
 
@@ -68,9 +47,15 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
         "document-planning-acceptance-v2",
         "document-planning-acceptance-v3",
         "document-planning-acceptance-v4",
+        "document-planning-acceptance-v5",
     }:
         return False
-    if value["protocol"] in {"document-planning-acceptance-v3", "document-planning-acceptance-v4"}:
+    if value["protocol"] == "document-planning-acceptance-v5" and (
+        value.get("planning_strategy") != "global-navigation-v2"
+        or value.get("planning_semantics") != "explicit-actions-v3"
+    ):
+        return False
+    if value["protocol"] != "document-planning-acceptance-v2":
         from openkb.agent.document_planning_semantics import validate_semantics
 
         try:
@@ -80,7 +65,7 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
             validate_overview(value)
         except ValueError:
             return False
-    if value["protocol"] == "document-planning-acceptance-v4":
+    if value["protocol"] in {"document-planning-acceptance-v4", "document-planning-acceptance-v5"}:
         from openkb.agent.document_global_context import validate_global_state
 
         if not validate_global_state(value):

@@ -196,6 +196,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 return saved
         except (FileNotFoundError, KeyError, ValueError):
             pass  # Explicit processing may replace a damaged database generation.
+        reader = ParseStore(kb_dir).reader(source, parsed)
         record = {
             "schema": 1,
             "source_id": source.source_id,
@@ -206,7 +207,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
             "reason": None,
             "positions": _location_rows(source, parsed),
             "usage": {},
-            "nodes": basic_tree(kb_dir, source, parsed),
+            "nodes": basic_tree(kb_dir, source, parsed, reader=reader),
             "windows": [],
         }
         from openkb.navigation_enhancement import enhance_ranges
@@ -236,6 +237,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                     settings,
                     bundle,
                     reserve_compilation=reserve_compilation,
+                    reader=reader,
                 )
             finally:
                 if run is not None:
@@ -243,7 +245,7 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 budget.on_observation = previous_observer
         from openkb.pageindex_store import save_index
 
-        identity = save_index(kb_dir, source, parsed, record)
+        identity = save_index(kb_dir, source, parsed, record, reader=reader)
         saved = read_navigation(kb_dir, source, identity=identity)
         saved["positions"] = record["positions"]
         return saved

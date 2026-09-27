@@ -45,8 +45,10 @@ def parse_pdf(
                 has_regular_image = False
                 skipped_small_image = False
                 try:
-                    cells, tables = table_cells(page, number)
-                except Exception:
+                    table_issues: list[str] = []
+                    cells, tables = table_cells(page, number, issues=table_issues)
+                    reason = table_issues[0] if table_issues else None
+                except (RuntimeError, ValueError, TypeError, KeyError, IndexError):
                     cells, tables = [], []
                     reason = "native_table_structure_uncertain"
                 graphics = _page_read(_uncovered_graphics, page, tables)
@@ -55,14 +57,18 @@ def parse_pdf(
                 for block in _page_read(page.get_text, "dict", sort=True)["blocks"]:
                     location = {"kind": "pdf", "page": number, "bbox": list(block["bbox"])}
                     if block["type"] == 0:
-                        if any(
-                            pymupdf.Rect(table).contains(pymupdf.Rect(block["bbox"]))
-                            for table in tables
-                        ):
+                        lines = [
+                            line
+                            for line in block["lines"]
+                            if not any(
+                                pymupdf.Rect(table).contains(pymupdf.Rect(line["bbox"]))
+                                for table in tables
+                            )
+                        ]
+                        if not lines:
                             continue
                         text = "\n".join(
-                            "".join(span["text"] for span in line["spans"])
-                            for line in block["lines"]
+                            "".join(span["text"] for span in line["spans"]) for line in lines
                         )
                         if text.strip():
                             native.append(BlockDraft(text, "paragraph", location))

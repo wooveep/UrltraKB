@@ -12,6 +12,7 @@ from openkb.agent.document_plan import PagePlan
 from openkb.sources import content_id
 
 _ALIASES = {
+    "action": {"action", "动作", "操作", "decision", "执行动作"},
     "name": {"name", "page", "名称", "页面", "页面名称", "页面名称/标题", "page name"},
     "title": {"title", "page title", "标题", "页面标题"},
     "kind": {"kind", "类别", "分类", "页面类别", "category"},
@@ -21,6 +22,13 @@ _ALIASES = {
         "sections",
         "selection",
         "主体章节",
+        "location clue",
+        "location clues",
+        "location hints",
+        "location",
+        "位置线索",
+        "定位线索",
+        "定位提示",
         "依据章节",
         "章节定位",
         "章节路径",
@@ -44,17 +52,13 @@ _ALIASES = {
         "keywords",
         "关键词",
         "相关线索",
-        "位置线索",
-        "定位线索",
-        "定位提示",
-        "location",
-        "location clues",
-        "location hints",
         "reference",
         "参考",
+        "参考提示",
     },
     "purpose": {
         "purpose",
+        "目的",
         "用途",
         "用途说明",
         "用途与说明",
@@ -67,7 +71,7 @@ _ALIASES = {
     },
     "notes": {"notes", "note", "备注", "补充说明", "注意事项"},
     "references": {"references", "外部参考", "参考资料", "external_references"},
-    "target": {"target", "target_key", "目标页面"},
+    "target": {"target", "target_key", "目标页面", "已有目标", "existing target"},
     "extends": {"extends", "extend", "补充已有建议", "补充建议", "补充"},
 }
 
@@ -95,7 +99,7 @@ def _field_name(value: str) -> str | None:
         plain,
     )
     if re.fullmatch(r"location (?:clues?|hints?)|(?:定位|位置)?线索", plain):
-        return "related"
+        return "section"
     if plain != key and (field_name := _field_name(plain)):
         return field_name
     # Composite display labels preserve their recognizable field, without
@@ -136,9 +140,9 @@ def field_semantics(value: str) -> list[str]:
     if primary == "purpose" and any(_field_name(part) == "notes" for part in parts):
         fields.append("notes")
     if primary == "purpose" and any(_field_name(part) in {"section", "related"} for part in parts):
-        # A prose explanation mixed with a locator remains a related clue;
-        # it is not an explicit declaration of the entire subject boundary.
-        fields.append("related")
+        # Mixed purpose/reference prose is preserved, never promoted to a
+        # subject range or a necessary dependency.
+        fields.append("notes")
     if primary in {"title", "name"} and re.match(
         r"^(?:既有|已有|existing\s+)", _label(unicodedata.normalize("NFKC", value))
     ):
@@ -282,6 +286,8 @@ def deferred_suggestion(row, title, purpose, hints, notes, origin, source, reaso
 
 
 def record_semantics(state, result):
+    hints = state.setdefault("external_reference_hints", [])
+    hints.extend(row for row in result.external_reference_hints if row not in hints)
     deferred = state.setdefault("deferred_suggestions", [])
     promoted = state.setdefault("promoted_suggestions", [])
     for row in result.promoted_suggestions:
@@ -362,7 +368,7 @@ def promote_deferred(result, page, candidates):
         return
     row = matches[0]
     if row["reason"] == "classification_conflict" or (
-        row["reason"] != "conditional_recommendation"
+        row["reason"] not in {"conditional_recommendation", "explicit_defer"}
         and row["purpose"] != DEFAULT_PURPOSE
         and page.purpose not in {row["purpose"], DEFAULT_PURPOSE}
     ):
@@ -370,7 +376,8 @@ def promote_deferred(result, page, candidates):
     if page.purpose == DEFAULT_PURPOSE:
         page.purpose = row["purpose"]
     elif (
-        row["reason"] == "conditional_recommendation" and row["purpose"] not in page.planning_notes
+        row["reason"] in {"conditional_recommendation", "explicit_defer"}
+        and row["purpose"] not in page.planning_notes
     ):
         page.planning_notes.append(row["purpose"])
     for field, additions in (
@@ -397,8 +404,29 @@ def promote_deferred(result, page, candidates):
 
 def validate_semantics(metadata):
     """Validate the one persisted representation used by state, plan and report."""
-    if metadata.get("planning_semantics") not in {"tolerant-quality-v1", "tolerant-quality-v2"}:
+    if metadata.get("planning_semantics") not in {
+        "tolerant-quality-v1",
+        "tolerant-quality-v2",
+        "explicit-actions-v3",
+    }:
         raise ValueError("Invalid planning semantics")
+    if not isinstance(metadata.get("external_reference_hints", []), list):
+        raise ValueError("Invalid external reference hints")
+    for row in metadata.get("external_reference_hints", []):
+        if (
+            not isinstance(row, dict)
+            or set(row)
+            != {"key", "raw_text", "target_document", "target_section", "page_key", "origin"}
+            or not all(
+                isinstance(row.get(k), str) and row[k] for k in ("key", "raw_text", "page_key")
+            )
+            or any(
+                row.get(k) is not None and not isinstance(row[k], str)
+                for k in ("target_document", "target_section")
+            )
+        ):
+            raise ValueError("Invalid external reference hint")
+        _validate_origins([row["origin"]])
     deferred = metadata.get("deferred_suggestions")
     annotations = metadata.get("suggestion_annotations")
     if not isinstance(deferred, list) or not isinstance(annotations, dict):
@@ -473,27 +501,67 @@ def _validate_origins(value):
         raise ValueError("Invalid suggestion origin")
 
 
-def recommendation_intent(text):
-    """Recognize explicit page-making conditions, never operational prerequisites."""
-    conditional = re.search(
-        r"(?:仅在|只有|仅当|如果|若).{0,100}(?:才|时|则).{0,25}(?:建.{0,8}页|维护.{0,8}页)"
-        r"|(?:page|include|create).{0,80}(?:only if|only when|unless)"
-        r"|only (?:create|include).{0,80}\bif\b",
-        text,
-        re.I,
-    )
-    if conditional:
-        return "conditional_recommendation"
-    if re.search(
-        r"(?:不建议|无需|不需要|不要|不单独).{0,8}(?:独立|单独|创建|建)?页"
-        r"|(?:do not|don't|no need to).{0,20}(?:create|make).{0,15}page"
-        r"|not (?:recommended|warranted) as (?:an? )?(?:independent |separate )?page",
-        text,
-        re.I,
-    ):
-        return "explanation"
-    if re.search(r"source_conditions", text, re.I) and re.search(
-        r"本次|本窗口|运行|解析|diagnostic|this (?:run|parse|window)|runtime", text, re.I
-    ):
-        return "explanation"
-    return None
+def explicit_action(value):
+    """Finite action vocabulary, only called on action fields or region labels."""
+    aliases = {
+        "create": {
+            "create",
+            "create pages",
+            "new",
+            "new pages",
+            "创建",
+            "创建页面",
+            "新建",
+            "新建页面",
+        },
+        "update": {"update", "update pages", "更新", "更新页面"},
+        "skip": {"skip", "跳过", "不创建"},
+        "defer": {"defer", "deferred", "deferred pages", "暂缓", "待定", "暂不创建"},
+        "notes": {
+            "notes",
+            "note",
+            "说明",
+            "备注",
+            "限制",
+            "补充说明",
+            "qualifications",
+            "limitations",
+        },
+    }
+    return next((action for action, words in aliases.items() if _label(str(value)) in words), None)
+
+
+def action_heading(value):
+    label = _label(value)
+    action = explicit_action(label)
+    if action:
+        return action, None
+    match = re.fullmatch(r"(创建|新建|更新|create|new|update)\s*(.+)", label)
+    if match and (kind := _kind(match[2])):
+        return explicit_action(match[1]), kind
+    return None, _kind(label)
+
+
+def reference_hints(value, page_key, origin):
+    """Unverified external hints retain their model-response origin, without source ranges."""
+    import json
+
+    result = []
+    for item in value if isinstance(value, list) else [value]:
+        if not item:
+            continue
+        raw = item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+        data = item if isinstance(item, dict) else {}
+        result.append(
+            {
+                "key": "reference-hint:" + content_id((page_key, raw, origin)),
+                "raw_text": raw,
+                "target_document": _first_text(data.get("document") or data.get("target_document"))
+                or None,
+                "target_section": _first_text(data.get("section") or data.get("target_section"))
+                or None,
+                "page_key": page_key,
+                "origin": dict(origin),
+            }
+        )
+    return result

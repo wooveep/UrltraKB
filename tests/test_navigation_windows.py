@@ -30,6 +30,77 @@ def prepare(kb, path, options):
     return source, parsed, settings, saved
 
 
+def test_window_reuses_verified_reader_and_rejects_another_parse(kb_dir, tmp_path, monkeypatch):
+    from openkb.evidence import ParseStore
+    from openkb.navigation_enhancement import IndexAllowance
+    from openkb.navigation_evidence import evidence_descriptor, read_evidence_group
+    from openkb.navigation_structure import _window
+    from openkb.processing import processing_scope
+
+    path = tmp_path / "window.txt"
+    path.write_text("\n\n".join(f"Paragraph {i}: " + "original " * 20 for i in range(32)))
+    source = source_version(kb_dir, path)
+    parsed = parse_document(kb_dir, source)
+    settings = load_config(kb_dir / ".openkb/config.yaml")
+    settings["navigation"] = {"window_tokens": 1500}
+    original = ParseStore.reader
+    validations = []
+
+    def counted(store, version, parse):
+        validations.append(parse.id)
+        return original(store, version, parse)
+
+    monkeypatch.setattr(ParseStore, "reader", counted)
+    with kb_ingest_lock(kb_dir / ".openkb"), processing_scope(settings) as budget:
+        allowance = IndexAllowance(budget, settings["navigation"], False)
+        descriptor, evidence, end, _ = _window(kb_dir, source, parsed, 0, [], settings, allowance)
+        assert validations == [parsed.id]
+        assert 1 < end < len(parsed.blocks)
+        assert evidence == read_evidence_group(kb_dir, source, parsed, descriptor)
+        reader = original(ParseStore(kb_dir), source, parsed)
+        path.write_text("A different immutable parse.")
+        next_source = source_version(kb_dir, path)
+        next_parse = parse_document(kb_dir, next_source)
+        with pytest.raises(ValueError, match="Reader identity"):
+            read_evidence_group(
+                kb_dir,
+                next_source,
+                next_parse,
+                evidence_descriptor(next_source, next_parse, 0, len(next_parse.blocks)),
+                reader=reader,
+            )
+        _window(kb_dir, next_source, next_parse, 0, [], settings, allowance)
+        assert validations[-1] == next_parse.id
+
+
+def test_bad_structure_item_does_not_discard_a_located_section(kb_dir, tmp_path, model_service):
+    path = tmp_path / "partial-structure.txt"
+    path.write_text("Introduction.\n\nDistinct body instructions.")
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        block = payload["evidence"]["blocks"][-1]
+        return {
+            "sections": [
+                {
+                    "title": "Body",
+                    "title_origin": "inferred",
+                    "level": 1,
+                    "start_block": block["id"],
+                    "anchor": "Distinct body instructions.",
+                },
+                {"title": "Invalid row", "start_block": "unknown"},
+            ]
+        }
+
+    model_service.respond = respond
+    source, parsed, _, saved = prepare(kb_dir, path, {})
+    assert any(node["title"] == "Body" for node in saved["nodes"])
+    assert saved["status"] == "degraded"
+    assert saved["nodes"][0]["end"] == len(parsed.blocks)
+    assert read_navigation(kb_dir, source, identity=saved["id"])["id"] == saved["id"]
+
+
 def test_verified_legacy_window_can_be_reencoded_for_planning_without_reindexing(kb_dir, tmp_path):
     from copy import deepcopy
 

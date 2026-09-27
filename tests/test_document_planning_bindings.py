@@ -125,7 +125,9 @@ def test_unknown_alias_preserves_known_part_only_for_optional_clues(kb_dir, tmp_
     ).pages[0]
     result = prepare_page(page, source, parsed, None, reader)
     assert result.page.state == "ready"
-    assert result.page.evidence_scope["status"] == "partial"
+    assert result.page.evidence_scope["status"] == (
+        "partial" if role == "Section" else "unassessed"
+    )
     assert any("@e:absent" in note for note in result.page.planning_notes)
 
 

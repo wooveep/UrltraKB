@@ -7,12 +7,14 @@ from dataclasses import asdict
 from openkb.evidence import Evidence, ParseStore, complete_read_bound
 
 
-def basic_tree(kb_dir, source, parsed):
+def basic_tree(kb_dir, source, parsed, *, reader=None):
     from pageindex import IndexConfig
     from pageindex.index.pipeline import build_index
     from pageindex.parser.protocol import ContentNode, ParsedDocument
 
-    reader = ParseStore(kb_dir).reader(source, parsed)
+    from openkb.navigation_evidence import verified_reader
+
+    reader = verified_reader(kb_dir, source, parsed, reader)
 
     def boundary(block):
         loc = block.location

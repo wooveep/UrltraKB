@@ -13,6 +13,7 @@ from openkb.agent.document_planning_locations import (
     context_choices,
     labelled_key_paths,
 )
+from openkb.agent.document_planning_markdown import _HEADING, _markdown_rows
 from openkb.agent.document_planning_pages import (
     DEFAULT_PURPOSE,
     distinct_scope,
@@ -29,26 +30,19 @@ from openkb.agent.document_planning_semantics import (
     _first_text,
     _kind,
     _label,
+    action_heading,
     add_annotation,
     annotation,
     deferred_suggestion,
+    explicit_action,
     explicit_extension,
     field_semantics,
     inherit_classification,
     matching_suggestions,
     promote_deferred,
-    recommendation_intent,
 )
 from openkb.sources import content_id
 
-_FIELD = re.compile(r"^\s*(?:[-*+]\s*)?([\w\u4e00-\u9fff `/\-]+?)\s*[：:]\s*(.*?)\s*$")
-_ITEM = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.*)$")
-_HEADING = re.compile(r"^\s*(#{2,6})\s+(.+?)\s*$")
-_EXPLANATION_HEADING = re.compile(
-    r"^(?:notes?|qualifications?|limitations?)\b|"
-    r"^(?:说明|限制|备注|补充说明)(?:$|[：:、/与及（( ])",
-    re.I,
-)
 _FENCE = re.compile(r"^```(?:markdown|md|json)?\s*\n([\s\S]*?)\n```\s*$", re.I)
 _NO_PAGES = re.compile(
     r"(?:无需|不需要|没有必要|无须).{0,12}(?:新|创建|新增)?.{0,8}(?:页面|知识页)"
@@ -79,6 +73,7 @@ class PageAcceptance:
     annotations: dict[str, Any] = field(default_factory=dict)
     batch_notes: list[str] = field(default_factory=list)
     promoted_suggestions: list[dict[str, str]] = field(default_factory=list)
+    external_reference_hints: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def usable(self) -> bool:
@@ -156,12 +151,14 @@ def _filter_candidate(
         result.resolved_candidates[identity["candidate_key"]] = identity.get("candidate_name_key")
 
 
-def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, Any]]:
+def _json_rows(
+    value: Any, inherited_kind: str | None = None, action: str | None = None
+) -> list[dict[str, Any]]:
     if isinstance(value, list):
-        return [row for item in value for row in _json_rows(item, inherited_kind)]
+        return [row for item in value for row in _json_rows(item, inherited_kind, action)]
     if not isinstance(value, dict):
         return []
-    if any(_field_name(str(key)) in {"name", "title"} for key in value) or (
+    if any(_field_name(str(key)) in {"name", "title", "target"} for key in value) or (
         any(_field_name(str(key)) in {"kind", "type"} for key in value)
         and not {"pages", "page_changes", "create", "update", "concepts", "entities"} & value.keys()
     ):
@@ -169,169 +166,18 @@ def _json_rows(value: Any, inherited_kind: str | None = None) -> list[dict[str, 
             {
                 **value,
                 **({"group_kind": inherited_kind} if inherited_kind else {}),
+                **({"group_action": action} if action else {}),
             }
         ]
     rows: list[dict[str, Any]] = []
     for key, item in value.items():
         if key in {"pages", "page_changes", "create", "update"}:
-            rows.extend(_json_rows(item, inherited_kind))
-        elif key in {"concepts", "entities"}:
-            rows.extend(_json_rows(item, "concept" if key == "concepts" else "entity"))
-    return rows
-
-
-def _markdown_rows(
-    content: str, *, truncated: bool = False, batch_notes: list[str] | None = None
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    group: str | None = None
-    explanatory = False
-    current: dict[str, Any] | None = None
-    lines = content.splitlines()
-    table_groups: dict[int, str | None] = {}
-    ends: dict[int, int] = {}
-    table_closed: dict[int, bool] = {}
-    for line_index, line in enumerate(lines):
-        if not line.strip():
-            if current is not None and id(current) in ends:
-                current = None
-            continue
-        heading = _HEADING.match(line)
-        if (
-            not heading
-            and line.strip(" *").endswith((":", "："))
-            and _EXPLANATION_HEADING.match(line.strip(" *"))
-        ):
-            explanatory, group, current = True, None, None
-            continue
-        if heading:
-            label = heading.group(2).strip()
-            explanatory = bool(_EXPLANATION_HEADING.match(_label(label)))
-            if explanatory:
-                group, current = None, None
-                continue
-            next_group = _kind(label) or _kind(label.removesuffix("页面"))
-            if next_group:
-                group = label
-                current = None
-            elif len(heading.group(1)) == 2:
-                group = None
-                current = None
-            else:
-                current = {"title": label, **({"group_kind": group} if group else {})}
-            continue
-        if line.strip().startswith("|"):
-            table_groups[line_index] = group
-            continue
-        item = _ITEM.match(line)
-        body = item.group(1) if item else line.strip()
-        body = re.sub(r"\*\*([^*]+)\*\*", r"\1", body)
-        match = _FIELD.match(body)
-        if explanatory and not (
-            match and (_field_name(match.group(1)) in {"name", "title"} or current is not None)
-        ):
-            if batch_notes is not None:
-                batch_notes.append(body)
-            current = None
-            continue
-        if item and " — " in body:
-            parts = [part.strip() for part in body.split(" — ", 2)]
-            if len(parts) >= 2 and parts[0] and parts[1]:
-                type_label = re.split(r"[,，;；]", parts[1], maxsplit=1)[0].strip()
-                inline_section = parts[1][len(type_label) :].lstrip(" ,，;；")
-                section = inline_section or (parts[2] if len(parts) > 2 else "")
-                current = {"name": parts[0], "type": type_label}
-                if inline_section and len(parts) > 2:
-                    current["purpose"] = parts[2]
-                if section:
-                    current["section"] = section
-                if group:
-                    current["group_kind"] = group
-                rows.append(current)
-                ends[id(current)] = line_index
-                continue
-        if item and body.count("|") >= 2:
-            cells = [cell.strip(" `") for cell in body.split("|")]
-            section = cells[2]
-            if section.lower().startswith(("section_key:", "section key:", "章节:")):
-                section = section.split(":", 1)[1].strip()
-            current = {
-                "name": cells[0],
-                "type": cells[1],
-                "section": section,
-            }
-            if group:
-                current["group_kind"] = group
-            rows.append(current)
-            ends[id(current)] = line_index
-            continue
-        if item and not match and (body.endswith(("。", ".", "！", "!", "；", ";"))):
-            if batch_notes is not None:
-                batch_notes.append(body)
-            current = None
-            continue
-        if item and (not match or _field_name(match.group(1)) in {"name", "title"}):
-            if group:
-                current = {"group_kind": group, **({"title": body} if not match else {})}
-                if not match:
-                    rows.append(current)
-                    ends[id(current)] = line_index
-            elif match:
-                current = {}
-            else:
-                current = None
-        elif (
-            item
-            and match
-            and current is None
-            and _field_name(match.group(1)) in {"kind", "type", "section"}
-        ):
-            current = {}
-        if match and current is not None:
-            key = match.group(1).strip()
-            current[key] = match.group(2).strip()
-            ends[id(current)] = line_index
-            if not any(current is row for row in rows):
-                rows.append(current)
-        elif current is None and batch_notes is not None:
-            batch_notes.append(body)
-    # Tables are independent of surrounding lists and column order.
-    for index, line in enumerate(lines[:-2]):
-        if not line.strip().startswith("|") or not re.fullmatch(r"[\s|:\-]+", lines[index + 1]):
-            continue
-        columns = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        for row_index, row_line in enumerate(lines[index + 2 :], start=index + 2):
-            if not row_line.strip().startswith("|"):
-                break
-            cells = [cell.strip() for cell in row_line.strip().strip("|").split("|")]
-            row = {key: value for key, value in zip(columns, cells) if key and value}
-            table_group = table_groups.get(index)
-            if table_group:
-                row["group_kind"] = table_group
-            if row:
-                rows.append(row)
-                ends[id(row)] = row_index
-                table_closed[id(row)] = row_line.rstrip().endswith("|") and len(cells) == len(
-                    columns
-                )
-    if not truncated:
-        return rows
-    return [
-        row
-        for row in rows
-        if table_closed.get(id(row), False)
-        or (
-            id(row) not in table_closed
-            and any(
-                not line.strip()
-                or _HEADING.match(line)
-                or _ITEM.match(line)
-                or line.strip().startswith("|")
-                or line.strip() == "```"
-                for line in lines[ends[id(row)] + 1 :]
+            rows.extend(
+                _json_rows(item, inherited_kind, key if key in {"create", "update"} else action)
             )
-        )
-    ]
+        elif key in {"concepts", "entities"}:
+            rows.extend(_json_rows(item, "concept" if key == "concepts" else "entity", action))
+    return rows
 
 
 def _closed_json_pages(content: str) -> list[dict[str, Any]]:
@@ -388,11 +234,26 @@ def _closed_json_pages(content: str) -> list[dict[str, Any]]:
                 return _json_rows(value)
             parent = frames[-1]
             if parent["kind"] == "[" and parent["page_items"]:
-                group = parent["key"]
+                group = next(
+                    (
+                        frame.get("key")
+                        for frame in reversed(frames)
+                        if frame.get("key") in {"concepts", "entities"}
+                    ),
+                    parent["key"],
+                )
+                action = next(
+                    (
+                        frame.get("key")
+                        for frame in reversed(frames)
+                        if frame.get("key") in {"create", "update"}
+                    ),
+                    None,
+                )
                 inherited = (
                     "concept" if group == "concepts" else "entity" if group == "entities" else None
                 )
-                rows.extend(_json_rows(value, inherited))
+                rows.extend(_json_rows(value, inherited, action))
     return rows
 
 
@@ -418,6 +279,19 @@ def _json_structure_closed(content: str) -> bool:
     return not quoted and not stack
 
 
+def _explicit_empty_sets(value):
+    if isinstance(value, list):
+        return not value
+    if not isinstance(value, dict):
+        return False
+    collections = [
+        item
+        for key, item in value.items()
+        if key in {"pages", "page_changes", "concepts", "entities", "create", "update"}
+    ]
+    return bool(collections) and all(_explicit_empty_sets(item) for item in collections)
+
+
 def extract_candidates(
     raw: Any, *, batch_notes: list[str] | None = None
 ) -> tuple[list[dict[str, Any]], bool, bool]:
@@ -436,9 +310,16 @@ def extract_candidates(
             except (ImportError, ValueError, TypeError):
                 value = None
         rows = _json_rows(value)
-        return rows, False, truncated
+        return rows, not rows and _explicit_empty_sets(value), truncated
     rows = _markdown_rows(content, truncated=truncated, batch_notes=batch_notes)
-    no_pages = bool(_NO_PAGES.search(content)) and not rows
+    no_pages = not rows and (
+        bool(_NO_PAGES.search(content))
+        or any(
+            action_heading(match[2])[0] in {"create", "update", "notes", "skip", "defer"}
+            for line in content.splitlines()
+            if (match := _HEADING.match(line))
+        )
+    )
     return rows, no_pages, truncated
 
 
@@ -485,8 +366,8 @@ def _hints(row: dict[str, Any]) -> list[dict[str, Any]]:
     roles = {"section": "subject", "context": "context", "related": "related"}
     hints = []
     for key, value in row.items():
-        for field in field_semantics(str(key)):
-            role = roles.get(field)
+        for meaning in field_semantics(str(key)):
+            role = roles.get(meaning)
             if role and value not in (None, "", []):
                 hint = {"role": role, "value": value}
                 if hint not in hints:
@@ -504,6 +385,7 @@ def accept_pages(
     existing_targets: set[str],
     allowed_update_targets: set[str] | None = None,
     catalog_titles: dict[str, str] | None = None,
+    catalog_types: dict[str, str] | None = None,
     accepted: list[PagePlan] | None = None,
     default_entity_type: str | None = None,
     evidence: dict[str, Any] | None = None,
@@ -524,6 +406,7 @@ def accept_pages(
     result = PageAcceptance(no_pages=no_pages, truncated=truncated, batch_notes=batch_notes)
     known = {page.name: page for page in accepted or []}
     known_annotations = dict(annotations or {})
+    explicit_pages = set()
     if not rows and not no_pages:
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
     for entry, original in enumerate(rows):
@@ -532,8 +415,43 @@ def accept_pages(
         for field_name, value in row.items():
             if field_name == "notes":
                 notes.extend(str(item) for item in (value if isinstance(value, list) else [value]))
-            elif field_name not in _ALIASES and field_name != "group_kind" and value:
+            elif (
+                field_name not in _ALIASES
+                and field_name not in {"group_kind", "group_action"}
+                and value
+            ):
                 notes.append(f"{field_name}：{value}")
+        action_value = row.get("action", row.get("group_action"))
+        if not action_value and row.get("target"):
+            action_value = "update"
+        action = explicit_action(action_value) if action_value else None
+        if row.get("action") and action != row.get("group_action") and row.get("group_action"):
+            notes.append(
+                "行内动作覆盖分组动作：" + str(row["group_action"]) + " → " + str(row["action"])
+            )
+        update_target = ""
+        if action == "update":
+            label = (
+                _first_text(row.get("target"))
+                or _first_text(row.get("title"))
+                or _first_text(row.get("name"))
+            )
+            matches = [
+                path
+                for path in existing_targets & (allowed_update_targets or set())
+                if path == label
+                or normalized_name((catalog_titles or {}).get(path, "")) == normalized_name(label)
+            ]
+            if len(matches) == 1:
+                update_target = matches[0]
+                row.setdefault("title", (catalog_titles or {}).get(update_target) or label)
+                row.setdefault(
+                    "kind", "concept" if update_target.startswith("concepts/") else "entity"
+                )
+                if (catalog_types or {}).get(update_target):
+                    row.setdefault("type", (catalog_types or {})[update_target])
+            else:
+                row.setdefault("title", label)
         title = _first_text(row.get("title")) or _first_text(row.get("name"))
         name = _first_text(row.get("name")) or title
         if extension := explicit_extension(row, title):
@@ -590,18 +508,19 @@ def accept_pages(
         origin = {"response": content_id(str(raw)), "entry": entry}
         if request_binding is not None:
             origin.update({key: request_binding[key] for key in ("request", "window")})
-        linked_notes = [
-            note for note in batch_notes if title in note and recommendation_intent(note)
-        ]
-        intent = recommendation_intent(
-            " ".join([purpose, *notes, *linked_notes, str(row.get("related", ""))])
-        )
-        if intent == "explanation":
+        if action in {"skip", "notes"}:
             result.batch_notes.append(title + "：" + purpose + "；".join(notes))
-            _filter_candidate(result, identity, "recommendation_explanation", original)
+            _filter_candidate(result, identity, "explicit_" + action, original)
             continue
-        notes.extend(note for note in linked_notes if note not in notes)
-        deferred_reason = intent or decision.reason
+        deferred_reason = (
+            "unknown_action"
+            if action_value and action is None
+            else "explicit_defer"
+            if action == "defer"
+            else "update_target_unresolved"
+            if action == "update" and not update_target
+            else decision.reason
+        )
         if extension:
             extension_matches = matching_suggestions(extension, known.values(), known_annotations)
             if (
@@ -616,30 +535,6 @@ def accept_pages(
                 )
             ):
                 deferred_reason = deferred_reason or "extension_target_unresolved"
-            prior = [
-                item
-                for item in (deferred or []) + result.deferred_suggestions
-                if normalized_name(item["title"]) == normalized_name(extension)
-                and item["reason"] == "conditional_recommendation"
-            ]
-            if prior and not re.search(
-                r"条件已(?:满足|解除)|明确推荐|condition (?:met|satisfied)|explicitly recommend",
-                purpose,
-                re.I,
-            ):
-                deferred_reason = "conditional_recommendation"
-                purpose = prior[0]["purpose"] if purpose == DEFAULT_PURPOSE else purpose
-                notes.extend(
-                    note for note in [prior[0]["purpose"], *prior[0]["notes"]] if note not in notes
-                )
-            elif len(prior) == 1 and not extension_matches:
-                if not any(row.get(key) for key in ("kind", "type", "group_kind")):
-                    decision = _classification(
-                        prior[0]["labels"], None, entity_types, default_entity_type, notes
-                    )
-                kind, subtype = decision.kind, decision.subtype
-                deferred_reason = decision.reason
-                row.pop("extends", None)
 
         if kind is None or deferred_reason:
             result.deferred_suggestions.append(
@@ -655,7 +550,7 @@ def accept_pages(
                 )
             )
             continue
-        proposed = _first_text(row.get("target"))
+        proposed = update_target or _first_text(row.get("target"))
         folder = "concepts/" if kind == "concept" else "entities/"
         allowed = allowed_update_targets or set()
         if proposed and (
@@ -758,6 +653,14 @@ def accept_pages(
             result.resolved_candidates[identity["candidate_key"]] = identity.get(
                 "candidate_name_key"
             )
+        if row.get("references"):
+            from openkb.agent.document_planning_semantics import reference_hints
+
+            result.external_reference_hints.extend(
+                reference_hints(row["references"], page_key, origin)
+            )
+        if action in {"create", "update"}:
+            explicit_pages.add(page_key)
         add_annotation(result.annotations, page_key, annotation(original, decision, title, origin))
         add_annotation(known_annotations, page_key, annotation(original, decision, title, origin))
     for page in known.values():
@@ -773,6 +676,10 @@ def accept_pages(
                     row
                     for row in (deferred or []) + result.deferred_suggestions
                     if row["key"] not in already_promoted
+                    and (
+                        row["reason"] not in {"explicit_defer", "conditional_recommendation"}
+                        or page.key in explicit_pages
+                    )
                 ],
             )
     return result

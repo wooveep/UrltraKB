@@ -6,7 +6,7 @@ import litellm
 
 from openkb.agent.source_protocol import source_messages
 from openkb.navigation_enhancement import IndexAllowanceExceeded, record_optional_failure
-from openkb.navigation_evidence import evidence_descriptor, read_evidence_group
+from openkb.navigation_evidence import evidence_descriptor, read_evidence_group, verified_reader
 from openkb.navigation_requests import expand_capacity, request_value, summarize_group
 from openkb.navigation_tree import validate_nodes
 from openkb.processing import ProcessingIncomplete, processing_checkpoint
@@ -39,20 +39,21 @@ def validate_sections(value):
         or not isinstance(value["sections"], list)
     ):
         raise ValueError("Invalid structure response")
-    for row in value["sections"]:
-        if (
-            not isinstance(row, dict)
-            or set(row) != {"title", "title_origin", "level", "start_block", "anchor"}
-            or not isinstance(row["title"], str)
-            or not 0 < len(row["title"]) <= 320
-            or row["title_origin"] not in {"source", "inferred"}
-            or type(row["level"]) is not int
-            or not 1 <= row["level"] <= 9
-            or not isinstance(row["start_block"], str)
-            or not isinstance(row["anchor"], str)
-            or not 0 < len(row["anchor"]) <= 320
-        ):
-            raise ValueError("Invalid structure start")
+
+
+def valid_section(row):
+    return (
+        isinstance(row, dict)
+        and set(row) == {"title", "title_origin", "level", "start_block", "anchor"}
+        and isinstance(row["title"], str)
+        and 0 < len(row["title"]) <= 320
+        and row["title_origin"] in {"source", "inferred"}
+        and type(row["level"]) is int
+        and 1 <= row["level"] <= 9
+        and isinstance(row["start_block"], str)
+        and isinstance(row["anchor"], str)
+        and 0 < len(row["anchor"]) <= 320
+    )
 
 
 def located(row, blocks):
@@ -214,13 +215,14 @@ def _task(start, end, sections):
     }
 
 
-def _window(kb, source, parsed, start, sections, settings, allowance, *, stop=None):
+def _window(kb, source, parsed, start, sections, settings, allowance, *, stop=None, reader=None):
+    reader = verified_reader(kb, source, parsed, reader)
     target = (settings.get("navigation") or {}).get("window_tokens", 200000)
     accepted = [row for row in sections if row["order"] < start]
 
     def candidate(overlap, end):
         descriptor = evidence_descriptor(source, parsed, overlap, end)
-        evidence = read_evidence_group(kb, source, parsed, descriptor)
+        evidence = read_evidence_group(kb, source, parsed, descriptor, reader=reader)
         request = source_messages(evidence, _task(start, end, accepted), SYSTEM)
         prefix = request[-1]["content"].split(',"stage":', 1)[0]
         try:
@@ -265,22 +267,32 @@ def _window(kb, source, parsed, start, sections, settings, allowance, *, stop=No
     return chosen
 
 
-def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, checkpoints):
+def infer_missing(
+    kb_dir, source, parsed, record, settings, bundle, allowance, checkpoints, *, reader=None
+):
     from openkb.navigation_toc import directory_sections
 
+    reader = verified_reader(kb_dir, source, parsed, reader)
     sections, excluded, uncovered, unresolved = [], set(), [(0, len(parsed.blocks))], []
     try:
         sections, excluded, uncovered, unresolved = directory_sections(
-            kb_dir, source, parsed, settings, bundle, allowance, checkpoints, record["profile"]
+            kb_dir,
+            source,
+            parsed,
+            settings,
+            bundle,
+            allowance,
+            checkpoints,
+            record["profile"],
+            reader=reader,
         )
     except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
         record_optional_failure(record, exc)
     if unresolved:
         record.update(status="degraded", reason="index_unlocated_contents")
     # Preserve native anchors even when a later optional model window fails.
-    from openkb.evidence import Evidence, ParseStore, complete_read_bound
+    from openkb.evidence import Evidence, complete_read_bound
 
-    reader = ParseStore(kb_dir).reader(source, parsed)
     for block in parsed.blocks:
         if block.kind != "heading" or block.id in excluded or "attachment" in block.location:
             continue
@@ -311,7 +323,7 @@ def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, c
         processing_checkpoint("index_structure")
         try:
             descriptor, evidence, end, tokens = _window(
-                kb_dir, source, parsed, start, sections, settings, allowance
+                kb_dir, source, parsed, start, sections, settings, allowance, reader=reader
             )
         except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
             record_optional_failure(record, exc)
@@ -369,15 +381,17 @@ def infer_missing(kb_dir, source, parsed, record, settings, bundle, allowance, c
                 else {"sections": []}
             )
             offsets = {b.id: b.order for b in parsed.blocks[descriptor["start"] : end]}
-            problems = [row for row in value["sections"] if not located(row, blocks)]
-            corrected = iter(
-                locate_problems(
+            rows = [row for row in value["sections"] if valid_section(row)]
+            problems = [row for row in rows if not located(row, blocks)]
+            try:
+                corrections = locate_problems(
                     problems, evidence, settings, bundle, allowance, checkpoints, record["profile"]
                 )
-            )
-            resolved = [
-                row if located(row, blocks) else next(corrected) for row in value["sections"]
-            ]
+            except (IndexAllowanceExceeded, ProcessingIncomplete) as exc:
+                record_optional_failure(record, exc)
+                corrections = [None] * len(problems)
+            corrected = iter(corrections)
+            resolved = [row if located(row, blocks) else next(corrected) for row in rows]
             valid = [row for row in resolved if row is not None and located(row, blocks)]
             if any(
                 offsets[a["start_block"]] > offsets[b["start_block"]]

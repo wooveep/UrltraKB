@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import pymupdf
+
 from openkb.evidence import BlockDraft
 from openkb.processing import processing_checkpoint
 
 
-def table_cells(page, number: int):
+def table_cells(page, number: int, *, issues=None):
     blocks, rectangles = [], []
-    tables = page.find_tables().tables
+    tables = page.find_tables(strategy="lines_strict").tables
+    rejected: set[int] = set()
+    for i, table in enumerate(tables):
+        for j in range(i):
+            intersection = pymupdf.Rect(table.bbox) & pymupdf.Rect(tables[j].bbox)
+            if not intersection.is_empty and intersection.get_area() > 0:
+                rejected.update((i, j))
+    if rejected and issues is not None:
+        issues.append("native_table_overlap_unconfirmed")
     for table_number, table in enumerate(tables, 1):
         processing_checkpoint()
+        if table_number - 1 in rejected:
+            continue  # Ambiguous overlapping grids stay native text and original visuals.
         values = table.extract()
         if not any(text for row in values for text in row):
             continue  # Empty drawn rectangles do not establish a text table.
