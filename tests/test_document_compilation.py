@@ -284,6 +284,8 @@ def test_continue_preserves_a_partial_publication_and_retries_only_its_omission(
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
+        if payload.get("subtask") == "overview":
+            return "Two independently planned facts."
         if payload["stage"] == "planning":
             target = payload["target"]
             ranges = (

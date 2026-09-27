@@ -84,6 +84,10 @@ def test_native_placeholder_role_is_preserved_without_guessing_from_names(
     assert "Slide title: Slide 1" not in block.context
     assert {p["stage"] for p in observed} == {"planning", "generation", "verification"}
     for payload in observed:
+        if payload.get("subtask") == "pages":
+            assert payload["evidence"]["blocks"] == []
+            assert payload["planning_context"]["source"]
+            continue
         rows = payload["evidence"]["blocks"]
         row = next(r for r in rows if r["text"] == heading.text)
         assert row["location"]["placeholder_type"] == role

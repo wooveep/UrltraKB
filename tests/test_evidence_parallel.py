@@ -16,8 +16,12 @@ from tests.test_adaptive_processing import response
 
 
 def _parallel_page_plan(payload):
+    if payload.get("subtask") == "overview":
+        return "Independent pressure conditions."
     target = payload["target"]
-    ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+    ranges = (
+        target["ranges"] if "ranges" in target else [[target["target_start"], target["target_end"]]]
+    )
     page_ranges = []
     for value in ranges:
         if isinstance(value, dict):

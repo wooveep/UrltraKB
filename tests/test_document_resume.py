@@ -450,7 +450,8 @@ def test_parallel_pages_finish_independent_work_and_resume_only_failed_page(
                             "kind": "concept",
                             "subject_ranges": [[index, index + 1]],
                         }
-                        for index in range(target["target_start"], target["target_end"])
+                        for start, end in target["ranges"]
+                        for index in range(start, end)
                     ]
                 }
         elif payload["stage"] == "generation":

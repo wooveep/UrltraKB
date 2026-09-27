@@ -35,6 +35,10 @@ def test_comment_role_reaches_every_compilation_stage(kb_dir, tmp_path, model_se
         stage = payload.get("stage")
         if stage not in {"planning", "generation", "verification"}:
             continue
+        if payload.get("subtask") == "pages":
+            assert payload["evidence"]["blocks"] == []
+            assert payload["planning_context"]["source"]
+            continue
         rows = payload["evidence"]["blocks"]
         row = next(row for row in rows if "File change record." in row["text"])
         context = row["context_data"]

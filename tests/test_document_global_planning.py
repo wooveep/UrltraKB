@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.navigation_evidence import evidence_descriptor
@@ -9,7 +11,16 @@ from tests.test_document_markdown_planning import SETTINGS
 from tests.test_document_orchestrator import _DummyParsed, _DummySource
 
 
-def run_global(tmp_path, respond, *, settings=None, resume=False, nodes=None):
+def run_global(
+    tmp_path,
+    respond,
+    *,
+    settings=None,
+    resume=False,
+    nodes=None,
+    retry_skipped=False,
+    production=False,
+):
     source, parsed = _DummySource(), _DummyParsed(3)
     for block, text in zip(
         parsed.blocks, ["Preparation requirements.", "Calibration steps.", "Recovery steps."]
@@ -55,10 +66,11 @@ def run_global(tmp_path, respond, *, settings=None, resume=False, nodes=None):
             navigation,
             settings,
             checkpoints,
-            mock_caller=respond,
+            mock_caller=None if production else respond,
             plan_only=True,
             return_result=True,
             resume=resume,
+            retry_skipped=retry_skipped,
         )
 
 
@@ -249,6 +261,7 @@ def test_one_failed_topic_group_does_not_discard_an_accepted_group(tmp_path):
 
 def test_physical_overview_retries_cannot_consume_the_reserved_pages_request():
     import pytest
+
     from openkb.processing import ProcessingIncomplete, processing_scope
     from openkb.processing_reservation import reserve_later_work
 
@@ -265,3 +278,82 @@ def test_physical_overview_retries_cannot_consume_the_reserved_pages_request():
                 budget.reserve(request)
         budget.reserve({**request, "messages": [{"role": "user", "content": "Pages"}]})
         assert budget.attempts == 2
+
+
+def test_retrying_overview_retires_the_old_snapshot_page_selection(tmp_path):
+    def initial(messages, *, settings):
+        payload = json.loads(messages[-1]["content"])
+        if payload["subtask"] == "overview":
+            return "Partial overview." if payload["target"]["target_start"] == 0 else ""
+        return "- Title: Old selection\n  Kind: concept\n  Section: Preparation"
+
+    first = run_global(tmp_path, initial)
+    assert len(first.plan.pages) == 1
+
+    def refreshed(messages, *, settings):
+        payload = json.loads(messages[-1]["content"])
+        if payload["subtask"] == "overview":
+            return "Refreshed complete overview."
+        assert payload["carry"]["pages"] == []
+        return "No new pages are warranted."
+
+    second = run_global(tmp_path, refreshed, resume=True, retry_skipped=True)
+    assert not second.plan.pages
+    assert (
+        first.plan.metadata["planning_snapshot"]["id"]
+        != second.plan.metadata["planning_snapshot"]["id"]
+    )
+
+
+@pytest.mark.parametrize("broken", ["empty", "duplicate", "tasks_null", "list_null", "family"])
+def test_corrupt_global_tasks_fail_at_resume_boundary(tmp_path, broken):
+    from openkb.processing import ProcessingIncomplete
+
+    def respond(messages, *, settings):
+        return (
+            "Available overview."
+            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            else "No new pages are warranted."
+        )
+
+    settings = {**SETTINGS, "model": "gpt-4o"}
+    result = run_global(tmp_path, respond, settings=settings)
+    with CompilationCheckpoints(tmp_path, _DummySource(), _DummyParsed(3), settings, None) as cp:
+        key = result.plan.metadata["recovery_key"]
+        state = cp.load_recovery(key, "markdown_plan")
+        if broken == "empty":
+            state["planning_tasks"] = []
+        elif broken == "duplicate":
+            state["planning_tasks"] *= 2
+        elif broken == "tasks_null":
+            state["tasks"] = None
+        elif broken == "list_null":
+            state["planning_tasks"] = None
+        else:
+            state["tasks"][state["planning_tasks"][0]].pop("family")
+        cp.save_recovery(key, "markdown_plan", state)
+    with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
+        run_global(tmp_path, respond, settings=settings, resume=True)
+
+
+def test_source_failure_after_global_selection_propagates(tmp_path, monkeypatch):
+    import litellm
+
+    from openkb.agent.document_planning_support import fallback_read_evidence
+    from tests.test_adaptive_processing import response
+
+    reads = []
+
+    def read(_kb, source, parsed, descriptor, ranges):
+        reads.append(descriptor)
+        if len(reads) > 3:
+            raise OSError("source asset unavailable")
+        return fallback_read_evidence(source, parsed, descriptor["start"], descriptor["end"])
+
+    monkeypatch.setattr("openkb.agent.document_planning_support.read_target_evidence", read)
+    monkeypatch.setattr(litellm, "token_counter", lambda **_: 100)
+    monkeypatch.setattr(
+        litellm, "completion", lambda **_: response("Available overview.", tokens=10)
+    )
+    with pytest.raises(OSError, match="source asset unavailable"):
+        run_global(tmp_path, None, production=True)

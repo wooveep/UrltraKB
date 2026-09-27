@@ -19,13 +19,19 @@ class StreamTimeoutRetries:
         )
 
     def retry(self, error, activity, done):
+        from openkb.processing_reservation import retry_attempt_available
+
         budget = self.budget
         if activity is None or not self.is_timeout(error):
             return False
         # A stopped stream discards subsequent fragments and closes its owning
         # iterator. Never reuse its partial text as a settled model response.
         activity.stopped.set()
-        if self.count >= budget.limits.timeout_retries or done is None:
+        if (
+            self.count >= budget.limits.timeout_retries
+            or done is None
+            or not retry_attempt_available()
+        ):
             return False
         deadline = time.monotonic() + budget.limits.cleanup_timeout
         while not done.wait(0.025):

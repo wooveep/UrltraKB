@@ -41,7 +41,11 @@ def test_required_operation_context_reaches_generation_at_model_capacity(
             if payload["subtask"] == "overview":
                 return "Standby recovery deployment procedure and source conditions."
             target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            ranges = (
+                target["ranges"]
+                if "ranges" in target
+                else [[target["target_start"], target["target_end"]]]
+            )
             return {
                 "pages": [
                     {"title": "Standby Recovery", "kind": "concept", "subject_ranges": ranges}
@@ -139,12 +143,15 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
     )
     generated = []
 
+    overview_blocks = []
+
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
             if payload["subtask"] == "overview":
+                overview_blocks.extend(payload["evidence"]["blocks"])
                 return "Linux-specific standby recovery procedure."
-            blocks = payload["evidence"]["blocks"]
+            blocks = overview_blocks
             heading = next(block for block in blocks if "Linux version 7" in block["text"])
             command = next(block for block in blocks if block["text"].startswith("Execute"))
             return {

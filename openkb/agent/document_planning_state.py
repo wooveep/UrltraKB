@@ -81,34 +81,10 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
         except ValueError:
             return False
     if value["protocol"] == "document-planning-acceptance-v4":
-        from openkb.agent.document_global_context import STRATEGY, validate_snapshot
+        from openkb.agent.document_global_context import validate_global_state
 
-        if value.get("planning_strategy") != STRATEGY:
+        if not validate_global_state(value):
             return False
-        if value.get("planning_snapshot") is not None and not validate_snapshot(
-            value["planning_snapshot"]
-        ):
-            return False
-        if any(key not in value.get("tasks", {}) for key in value.get("planning_tasks", [])):
-            return False
-        if snapshot := value.get("planning_snapshot"):
-            from openkb.agent.document_global_context import task_record
-
-            nodes = {row["section_key"]: row for row in snapshot["nodes"]}
-            for key in value.get("planning_tasks", []):
-                task = value["tasks"][key]
-                if (
-                    not isinstance(task.get("sections"), list)
-                    or task.get("snapshot_id") != snapshot["id"]
-                ):
-                    return False
-                if any(
-                    not isinstance(row, dict) or nodes.get(row.get("section_key")) != row
-                    for row in task["sections"]
-                ):
-                    return False
-                if task_record(snapshot, task["sections"])[0] != key:
-                    return False
     mapping_fields = ("tasks", "fragments")
     list_fields = (
         "windows",

@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
-from openkb.agent.document_page_evidence import page_evidence
+from openkb.agent.document_page_evidence import page_evidence, page_occurrence_descriptors
 from openkb.agent.document_plan import PagePlan, RangeValue, range_intervals
 from openkb.agent.document_planning_admission import validate_navigation
 from openkb.agent.document_planning_locations import context_choices, resolve_hint
@@ -187,7 +187,16 @@ def prepare_page(
     from openkb.agent.document_page_scope import evidence_scope
 
     unresolved: list[dict[str, Any]] = []
-    declared = bool(result.subject_ranges or result.location_hints)
+    # Prepared ranges record actual reads, not a new declaration of page scope.
+    # Preserve that distinction across save/restore and repeated preparation.
+    declared = bool(
+        any(hint["role"] in {"subject", "context"} for hint in result.location_hints)
+        or (
+            result.subject_ranges
+            and not result.location_hints
+            and (result.evidence_scope or {}).get("status") != "unassessed"
+        )
+    )
     # Saved ranges are program data. Corruption here is not a bad model hint.
     for value in [*result.subject_ranges, *result.context_ranges]:
         range_intervals(value, parsed, "saved page evidence")
@@ -252,9 +261,8 @@ def prepare_page(
     if not result.subject_ranges:
         return skip("no_subject_evidence")
     size = sum(
-        end - start
-        for value in [*result.subject_ranges, *result.context_ranges]
-        for _, start, end in range_intervals(value, parsed, "prepared page")
+        row["reference"]["end"] - row["reference"]["start"]
+        for row in page_occurrence_descriptors(result, source, parsed)
     )
     if size > max_chars:
         return skip("page_evidence_budget_limited")

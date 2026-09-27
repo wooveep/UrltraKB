@@ -631,6 +631,14 @@ def accept_pages(
                 notes.extend(
                     note for note in [prior[0]["purpose"], *prior[0]["notes"]] if note not in notes
                 )
+            elif len(prior) == 1 and not extension_matches:
+                if not any(row.get(key) for key in ("kind", "type", "group_kind")):
+                    decision = _classification(
+                        prior[0]["labels"], None, entity_types, default_entity_type, notes
+                    )
+                kind, subtype = decision.kind, decision.subtype
+                deferred_reason = decision.reason
+                row.pop("extends", None)
 
         if kind is None or deferred_reason:
             result.deferred_suggestions.append(

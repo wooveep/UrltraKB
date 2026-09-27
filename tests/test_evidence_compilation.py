@@ -14,7 +14,9 @@ from tests.http_model_fixture import evidence_response
 
 def _target_ranges(payload):
     target = payload["target"]
-    return target.get("ranges", [[target["target_start"], target["target_end"]]])
+    return (
+        target["ranges"] if "ranges" in target else [[target["target_start"], target["target_end"]]]
+    )
 
 
 def _single_page_plan(payload, *, name, title, kind="concept", type_=None, target=""):
@@ -42,7 +44,8 @@ def _single_page_plan(payload, *, name, title, kind="concept", type_=None, targe
         folder = "entities" if kind == "entity" else "concepts"
         stem = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "page"
         matches = [
-            value for value in payload.get("existing_targets", [])
+            value
+            for value in payload.get("existing_targets", [])
             if value.startswith(f"{folder}/{stem}-")
         ]
         if len(matches) == 1:
@@ -502,7 +505,9 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "planning":
-            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            evidence = "\n".join(
+                item["text"] for item in payload["evidence"]["blocks"]
+            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
             name = "current" if "Current" in evidence else "retired"
             path = "concepts/" + name
             return _single_page_plan(
@@ -537,7 +542,9 @@ def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            evidence = "\n".join(
+                item["text"] for item in payload["evidence"]["blocks"]
+            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
             name = "current" if "Current" in evidence else "retired"
             return _single_page_plan(payload, name=f"concepts/{name}", title=name.title())
         if payload["stage"] == "generation":
@@ -590,11 +597,13 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
-            if "Current feature." not in evidence:
+            evidence = "\n".join(
+                item["text"] for item in payload["evidence"]["blocks"]
+            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
+            if "Current feature" not in evidence:
                 return _single_page_plan(payload, name="concepts/retired", title="Retired")
             if payload["subtask"] == "overview":
-                return "Two new topics."
+                return "Current feature and Independent feature."
             return {
                 "pages": [
                     page_change("current", "concepts/current", "Current", [[0, 1]]),
@@ -663,7 +672,9 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(item["text"] for item in payload["evidence"]["blocks"])
+            evidence = "\n".join(
+                item["text"] for item in payload["evidence"]["blocks"]
+            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
             if "Current beta" in evidence:
                 name, title = "concepts/current-beta", "Current beta"
             elif "Alpha" in evidence:
@@ -789,11 +800,7 @@ def test_retained_page_is_rechecked_after_a_cascading_link_withdrawal(
                     "reason": "Charlie is intentionally unavailable in this replacement.",
                     "issues": ["The planned Charlie page must remain pending."],
                 }
-            if (
-                phase["replacement"]
-                and "# Alpha" in content
-                and "[[" not in content
-            ):
+            if phase["replacement"] and "# Alpha" in content and "[[" not in content:
                 return {
                     "verdict": "unsupported",
                     "reason": "The normalized Alpha candidate needs a new source-faithful rewrite.",

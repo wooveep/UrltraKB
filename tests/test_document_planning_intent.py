@@ -169,3 +169,21 @@ def test_extension_does_not_promote_a_conditionally_recommended_author():
     )
     assert not result.pages
     assert result.deferred_suggestions[0]["reason"] == "conditional_recommendation"
+
+
+def test_explicitly_lifted_condition_promotes_extension_and_keeps_prior_origins():
+    prior = accept(
+        '{"title":"Author","kind":"entity","type":"person",'
+        '"purpose":"Only create a page if the KB tracks authors."}'
+    )
+    result = accept(
+        '{"Existing title":"Author",'
+        '"purpose":"Condition met. Explicitly recommend an author page.",'
+        '"related":"Revision history"}',
+        deferred=prior.deferred_suggestions,
+    )
+    assert len(result.pages) == 1 and not result.deferred_suggestions
+    page = result.pages[0]
+    assert (page.kind, page.type) == ("entity", "person")
+    assert prior.deferred_suggestions[0]["purpose"] in page.planning_notes
+    assert result.promoted_suggestions[0]["deferred_key"] == prior.deferred_suggestions[0]["key"]

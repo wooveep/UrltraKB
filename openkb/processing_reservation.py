@@ -44,3 +44,9 @@ def check_later_work(budget, cost):
     ):
         raise ProcessingIncomplete("pages_tokens_reserved", budget.stage)
     hold.dispatched += 1
+
+
+def retry_attempt_available():
+    """Stop transport retries at the task cap while preserving their real failure."""
+    hold = _ACTIVE.get()
+    return hold is None or hold.dispatched < hold.attempts

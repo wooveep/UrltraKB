@@ -143,7 +143,7 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
         value = evidence_response(payload)
         if payload["stage"] == "planning":
             target = payload["target"]
-            start, end = target["target_start"], target["target_end"]
+            start, end = target["ranges"][0]
             value = (
                 "Three independent notes."
                 if payload.get("subtask") == "overview"

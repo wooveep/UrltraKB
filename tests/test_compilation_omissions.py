@@ -29,20 +29,27 @@ def setup(kb_dir, tmp_path, monkeypatch):
     source.write_text("Alpha requirement.\n\nBeta requirement.")
     calls = Counter()
     state = {"stage": "verification", "broken": True, "global": None}
+    overview_blocks = {}
 
     def plan(payload):
+        identity = payload["evidence"]["version_id"]
         if payload["subtask"] == "overview":
+            overview_blocks.setdefault(identity, {}).update(
+                {block["order"]: block for block in payload["evidence"]["blocks"]}
+            )
             return "Requirements overview."
         pages = []
-        for block in payload["evidence"]["blocks"]:
+        for block in overview_blocks[identity].values():
             text = block["text"]
             title = "Alpha" if "Alpha" in text else "Beta"
-            pages.append({
-                "kind": "concept",
-                "title": title,
-                "purpose": f"{title} requirement",
-                "section": [[block["order"], block["order"] + 1]],
-            })
+            pages.append(
+                {
+                    "kind": "concept",
+                    "title": title,
+                    "purpose": f"{title} requirement",
+                    "section": [[block["order"], block["order"] + 1]],
+                }
+            )
         return json.dumps({"pages": pages})
 
     def completion(**kwargs):

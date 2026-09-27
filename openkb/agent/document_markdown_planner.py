@@ -332,6 +332,24 @@ def plan_markdown_document(
             for name, task in state["tasks"].items()
             if name.endswith(":overview")
         ):
+            state.setdefault("planning_history", []).append(
+                {
+                    field: state.get(field)
+                    for field in (
+                        "planning_snapshot",
+                        "pages",
+                        "deferred_suggestions",
+                        "suggestion_annotations",
+                        "promoted_suggestions",
+                    )
+                }
+            )
+            state.update(
+                pages=[],
+                deferred_suggestions=[],
+                suggestion_annotations={},
+                promoted_suggestions=[],
+            )
             state.pop("planning_snapshot", None)
             for task_key in state.pop("planning_tasks", []):
                 state["tasks"][task_key]["status"] = "retired"
@@ -638,24 +656,25 @@ def plan_markdown_document(
     from openkb.agent.document_global_planning import plan_global_pages
 
     try:
-        plan_global_pages(
-            state,
-            checkpoints,
-            key,
-            source,
-            parsed,
-            navigation,
-            catalog_entries,
-            settings,
-            planning_limits,
-            entity_types,
-            schema,
-            source_conditions,
-            existing_targets,
-            budget,
-            bundle=bundle,
-            mock_caller=mock_caller,
-        )
+        if parsed.blocks and not document_planning_support.no_readable_body(parsed):
+            plan_global_pages(
+                state,
+                checkpoints,
+                key,
+                source,
+                parsed,
+                navigation,
+                catalog_entries,
+                settings,
+                planning_limits,
+                entity_types,
+                schema,
+                source_conditions,
+                existing_targets,
+                budget,
+                bundle=bundle,
+                mock_caller=mock_caller,
+            )
     except ProcessingIncomplete as exc:
         if exc.reason not in {
             "request_budget_exhausted",
@@ -668,34 +687,44 @@ def plan_markdown_document(
             task = state["tasks"][task_key]
             if task["status"] not in {"accepted", "retired"}:
                 task.update(status="skipped", reason=exc.reason)
-    pages = [PagePlan.from_dict(row) for row in state["pages"]]
-    for window in state["windows"]:
-        try:
-            evidence = document_planning_support.read_target_evidence(
-                kb_dir, source, parsed, window.get("evidence"), _target_ranges(window, parsed)
-            )
-        except (FileNotFoundError, KeyError, OSError, ValueError, TypeError):
-            if mock_caller is None:
-                continue
-            evidence = document_planning_support.fallback_read_evidence(
-                source, parsed, window["target_start"], window["target_end"]
-            )
-        for reference in _source_references(evidence, navigation, parsed, pages):
-            existing = next(
-                (row for row in state["external_references"] if row["key"] == reference.key), None
-            )
-            if existing is None:
-                state["external_references"].append(reference.to_dict())
-            else:
-                existing["affected_pages"] = sorted(
-                    set(existing["affected_pages"] + reference.affected_pages)
-                )
-    state["pages"] = [page.to_dict() for page in pages]
     from contextlib import nullcontext
 
     from openkb.processing import budget_settlement_scope
 
     with budget_settlement_scope() if state.get("budget_limited") else nullcontext():
+        pages = [PagePlan.from_dict(row) for row in state["pages"]]
+        for window in state["windows"]:
+            if state.get("budget_limited") and not state["tasks"].get(
+                _task_id(window, "overview"), {}
+            ).get("input_ranges"):
+                continue
+            from openkb.navigation_evidence import evidence_descriptor
+
+            descriptor = window.get("evidence") or evidence_descriptor(
+                source, parsed, window["target_start"], window["target_end"]
+            )
+            try:
+                evidence = document_planning_support.read_target_evidence(
+                    kb_dir, source, parsed, descriptor, _target_ranges(window, parsed)
+                )
+            except (FileNotFoundError, KeyError, OSError, ValueError, TypeError):
+                if mock_caller is None:
+                    raise
+                evidence = document_planning_support.fallback_read_evidence(
+                    source, parsed, window["target_start"], window["target_end"]
+                )
+            for reference in _source_references(evidence, navigation, parsed, pages):
+                existing = next(
+                    (row for row in state["external_references"] if row["key"] == reference.key),
+                    None,
+                )
+                if existing is None:
+                    state["external_references"].append(reference.to_dict())
+                else:
+                    existing["affected_pages"] = sorted(
+                        set(existing["affected_pages"] + reference.affected_pages)
+                    )
+        state["pages"] = [page.to_dict() for page in pages]
         _persist(checkpoints, key, state)
         result = _finalize(
             checkpoints,

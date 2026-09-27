@@ -15,6 +15,8 @@ STRATEGY = "global-after-overview-v1"
 
 def navigation_rows(navigation, parsed):
     """Whole-source locations; no source text or invented evidence aliases."""
+    from openkb.agent.document_planning_support import exclude_attachment_ranges
+
     nodes = (navigation or {}).get("nodes", [])
     by_id = {str(node.get("id", i)): node for i, node in enumerate(nodes)}
     rows = []
@@ -31,6 +33,9 @@ def navigation_rows(navigation, parsed):
             or not 0 <= start < end <= len(parsed.blocks)
         ):
             continue
+        ranges, _ = exclude_attachment_ranges(parsed, [[start, end]])
+        if not ranges:
+            continue
         rows.append(
             {
                 "section_key": f"section:{node.get('id', i)}",
@@ -38,9 +43,13 @@ def navigation_rows(navigation, parsed):
                 "heading_path": list(reversed(titles)),
                 "parent": f"section:{node['parent']}" if str(node.get("parent")) in by_id else None,
                 "summary": node.get("summary", ""),
-                "original_ranges": [[start, end]],
+                "original_ranges": ranges,
             }
         )
+    keys = {row["section_key"] for row in rows}
+    for row in rows:
+        if row["parent"] not in keys:
+            row["parent"] = None
     return rows
 
 
@@ -54,38 +63,55 @@ def empty_evidence(source, parsed):
 
 
 def _carry(state, detail=True, shown=None):
-    count = len(state["pages"]) if shown is None else shown
+    pages, deferred = state["pages"], state.get("deferred_suggestions", [])
+    total = len(pages) + len(deferred)
+    count = total if shown is None else min(shown, total)
     annotations = state.get("suggestion_annotations", {})
+
+    def details(row, notes):
+        purpose = row.get("purpose", "")
+        return {
+            "purpose": purpose if detail else purpose[:200],
+            "notes": notes if detail else [note[:160] for note in notes[:2]],
+        }
+
     return {
         "pages": [
             {
                 "title": row["title"],
                 "kind": row.get("kind"),
                 "type": row.get("type"),
-                "notes": row.get("planning_notes", []),
+                **(
+                    details(row, row.get("planning_notes", []))
+                    if detail
+                    else {"notes": [note[:160] for note in row.get("planning_notes", [])[:2]]}
+                ),
                 **(
                     {
-                        "purpose": row.get("purpose", ""),
-                        "notes": row.get("planning_notes", []),
                         "aliases": annotations.get(row["key"], {}).get("aliases", []),
                     }
                     if detail
                     else {}
                 ),
             }
-            for row in state["pages"][:count]
+            for row in pages[:count]
         ],
         # Deferred conditions must survive compression; their titles are not
         # confirmed pages that later groups may silently promote.
         "suggestions": {
-            "total": len(state["pages"]),
+            "total": total,
+            "accepted_total": len(pages),
+            "deferred_total": len(deferred),
             "shown": count,
-            "omitted": count < len(state["pages"]),
+            "omitted": count < total,
             "details_clipped": not detail,
         },
         "deferred_suggestions": [
-            {key: row.get(key) for key in ("title", "kind", "reason", "purpose", "notes")}
-            for row in state.get("deferred_suggestions", [])
+            {
+                **{key: row.get(key) for key in ("title", "kind", "reason")},
+                **details(row, row.get("notes", [])),
+            }
+            for row in deferred[: max(0, count - len(pages))]
         ],
     }
 
@@ -106,6 +132,8 @@ def messages_for(
     detail=True,
     shown=None,
 ):
+    from openkb.agent.document_planning_support import exclude_attachment_ranges
+
     context = json.loads(snapshot["context_json"])
     task = {
         "kind": "global_pages" if len(rows) == len(snapshot["nodes"]) else "topic_group",
@@ -116,6 +144,7 @@ def messages_for(
         else [value for row in rows for value in row["original_ranges"]],
         "total_blocks": len(parsed.blocks),
     }
+    task["ranges"], _ = exclude_attachment_ranges(parsed, task["ranges"])
     return plan_messages(
         empty_evidence(source, parsed),
         _carry(state, detail, shown),
@@ -250,6 +279,37 @@ def freeze_context(
     while not minimal_fits() and context["catalog"]:
         context["catalog"] = context["catalog"][: len(context["catalog"]) // 2]
         context["projection"]["omitted_catalog"] = len(catalog) - len(context["catalog"])
+    if not minimal_fits() and len(roots) > 1:
+        if len([row for row in nodes if row["parent"] is None]) == 1:
+            # Roll children into their real parent, preserving global structure.
+            context["topics"] = [{**context["topics"][0], "summary": ""}]
+            context["projection"]["coarsened_nodes"] = len(roots) - 1
+            context["projection"]["omitted_nodes"] = len(nodes) - 1
+        else:
+            # Flat/multiple-root directories have no shared semantic parent.
+            # Consecutive spans cover every branch without inventing one.
+            width = 2
+            while True:
+                groups = [roots[i : i + width] for i in range(0, len(roots), width)]
+                context["topics"] = [
+                    {
+                        "from_section_key": group[0]["section_key"],
+                        "through_section_key": group[-1]["section_key"],
+                        "first_title": group[0]["title"][:120],
+                        "last_title": group[-1]["title"][:120],
+                        "branch_count": len(group),
+                    }
+                    for group in groups
+                ]
+                context["projection"].update(
+                    coarsened_nodes=len(roots),
+                    directory_segments=len(groups),
+                    segment_titles_clipped=any(len(row["title"]) > 120 for row in roots),
+                    omitted_nodes=len(nodes),
+                )
+                if minimal_fits() or len(groups) == 1:
+                    break
+                width *= 2
     while not minimal_fits() and len(context["overview"]["text"]) > 300:
         text = context["overview"]["text"]
         paragraphs = text.split("\n\n")
@@ -281,9 +341,109 @@ def validate_snapshot(snapshot):
         return False
     try:
         context = json.loads(snapshot["context_json"])
-        return context["strategy"] == STRATEGY and isinstance(context["overview"]["text"], str)
+        nodes = snapshot["nodes"]
+        if any(
+            not isinstance(row, dict)
+            or not isinstance(row.get("section_key"), str)
+            or not all(isinstance(row.get(key), str) for key in ("title", "summary"))
+            or not isinstance(row.get("heading_path"), list)
+            or not all(isinstance(title, str) for title in row["heading_path"])
+            or not (row.get("parent") is None or isinstance(row["parent"], str))
+            or not isinstance(row.get("original_ranges"), list)
+            or not row["original_ranges"]
+            or any(
+                not isinstance(span, list)
+                or len(span) != 2
+                or not all(type(n) is int for n in span)
+                or not 0 <= span[0] < span[1]
+                for span in row["original_ranges"]
+            )
+            for row in nodes
+        ):
+            return False
+        return (
+            context["strategy"] == STRATEGY
+            and isinstance(context["overview"]["text"], str)
+            and isinstance(context["topics"], list)
+            and isinstance(context["catalog"], list)
+            and isinstance(context["projection"], dict)
+            and len({row["section_key"] for row in nodes}) == len(nodes)
+            and all(
+                isinstance(row, (list, tuple))
+                and len(row) == 3
+                and all(isinstance(item, str) for item in row)
+                for row in snapshot["catalog"]
+            )
+        )
     except (ValueError, KeyError, TypeError):
         return False
+
+
+def validate_global_state(state):
+    """Validate the frozen task partition before a checkpoint can drive dispatch."""
+    if state.get("planning_strategy") != STRATEGY:
+        return False
+    tasks = state.get("tasks")
+    if not isinstance(tasks, dict) or any(not isinstance(task, dict) for task in tasks.values()):
+        return False
+    snapshot = state.get("planning_snapshot")
+    if snapshot is None:
+        return "planning_tasks" not in state and not any(
+            task.get("component") == "pages" and task.get("status") != "retired"
+            for task in tasks.values()
+        )
+    keys = state.get("planning_tasks")
+    if (
+        not validate_snapshot(snapshot)
+        or not isinstance(keys, list)
+        or not keys
+        or not all(isinstance(key, str) and key in tasks for key in keys)
+        or len(set(keys)) != len(keys)
+    ):
+        return False
+    nodes = {row["section_key"]: row for row in snapshot["nodes"]}
+    covered = []
+    for key in keys:
+        task = tasks[key]
+        rows, family = task.get("sections"), task.get("family")
+        if (
+            task.get("component") != "pages"
+            or task.get("status") == "retired"
+            or task.get("snapshot_id") != snapshot["id"]
+            or not isinstance(rows, list)
+            or (nodes and not rows)
+            or any(
+                not isinstance(row, dict)
+                or not isinstance(row.get("section_key"), str)
+                or nodes.get(row["section_key"]) != row
+                for row in rows
+            )
+            or not isinstance(family, str)
+            or family not in tasks
+        ):
+            return False
+        expected_key, expected = task_record(snapshot, rows)
+        ancestor = tasks[family]
+        if (
+            expected_key != key
+            or expected["kind"] != task.get("kind")
+            or ancestor.get("family") != family
+            or ancestor.get("snapshot_id") != snapshot["id"]
+            or ancestor.get("component") != "pages"
+            or (family != key and ancestor.get("status") != "retired")
+        ):
+            return False
+        covered.extend(row["section_key"] for row in rows)
+    return (
+        len(covered) == len(nodes)
+        and set(covered) == set(nodes)
+        and set(keys)
+        == {
+            key
+            for key, task in tasks.items()
+            if task.get("component") == "pages" and task.get("status") != "retired"
+        }
+    )
 
 
 def task_record(snapshot, rows, *, family=None):

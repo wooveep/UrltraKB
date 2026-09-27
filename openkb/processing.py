@@ -355,7 +355,9 @@ class ExecutionBudget:
                     raise self.incomplete from None
                 if not _transient(exc):
                     raise
-                if attempt + 1 == self.limits.max_attempts:
+                from openkb.processing_reservation import retry_attempt_available
+
+                if attempt + 1 == self.limits.max_attempts or not retry_attempt_available():
                     raise ProcessingIncomplete(
                         "provider_temporarily_unavailable", self.stage
                     ) from None

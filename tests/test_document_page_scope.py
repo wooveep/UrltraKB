@@ -86,6 +86,9 @@ def test_title_fallback_and_old_plan_do_not_assume_complete_evidence(kb_dir, tmp
     prepared = prepare_page(page, source, parsed, None, reader)
     assert prepared.page.state == "ready"
     assert prepared.page.evidence_scope["status"] == "unassessed"
+    restored = PagePlan.from_dict(json.loads(json.dumps(prepared.page.to_dict())))
+    repeated = prepare_page(restored, source, parsed, None, reader)
+    assert repeated.page.evidence_scope["status"] == "unassessed"
 
 
 def test_model_supplied_scope_is_not_accepted_as_a_program_read_receipt():
@@ -107,3 +110,26 @@ def test_model_supplied_scope_is_not_accepted_as_a_program_read_receipt():
         )
     )
     assert result.pages[0].evidence_scope is None
+
+
+def test_related_keyword_alone_does_not_declare_the_complete_page_scope(kb_dir, tmp_path):
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    page = _page([{"role": "related", "value": "access token"}])
+    page.title = "Complete installation"
+    prepared = prepare_page(page, source, parsed, navigation(source, parsed), reader)
+    assert prepared.page.state == "ready"
+    assert prepared.page.evidence_scope["status"] == "unassessed"
+    restored = PagePlan.from_dict(json.loads(json.dumps(prepared.page.to_dict())))
+    repeated = prepare_page(restored, source, parsed, navigation(source, parsed), reader)
+    assert repeated.page.evidence_scope["status"] == "unassessed"
+
+
+def test_overlapping_subject_context_ranges_charge_each_original_character_once(kb_dir, tmp_path):
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    page = _page([{"role": "subject", "value": "Install"}, {"role": "context", "value": "Install"}])
+    size = parsed.blocks[2].chars + parsed.blocks[3].chars
+    prepared = prepare_page(
+        page, source, parsed, navigation(source, parsed), reader, max_chars=size
+    )
+    assert prepared.page.state == "ready"
+    assert sum(len(row["text"]) for row in prepared.occurrences) == size

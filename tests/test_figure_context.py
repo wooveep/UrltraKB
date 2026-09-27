@@ -72,6 +72,10 @@ def test_caption_receives_complete_ocr_and_image_link_at_each_model_stage(
         stage = payload.get("stage")
         if stage not in {"planning", "generation", "verification"}:
             continue
+        if payload.get("subtask") == "pages":
+            assert payload["evidence"]["blocks"] == []
+            assert payload["planning_context"]["source"]
+            continue
         rows = payload["evidence"]["blocks"]
         assert any(row["text"] == "如下状态为恢复完成。" for row in rows)
         figures = [row for row in rows if "asset:" in row["text"]]

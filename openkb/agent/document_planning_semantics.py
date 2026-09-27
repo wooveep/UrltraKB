@@ -358,11 +358,17 @@ def promote_deferred(result, page, candidates):
         return
     row = matches[0]
     if row["reason"] == "classification_conflict" or (
-        row["purpose"] != DEFAULT_PURPOSE and page.purpose not in {row["purpose"], DEFAULT_PURPOSE}
+        row["reason"] != "conditional_recommendation"
+        and row["purpose"] != DEFAULT_PURPOSE
+        and page.purpose not in {row["purpose"], DEFAULT_PURPOSE}
     ):
         return
     if page.purpose == DEFAULT_PURPOSE:
         page.purpose = row["purpose"]
+    elif (
+        row["reason"] == "conditional_recommendation" and row["purpose"] not in page.planning_notes
+    ):
+        page.planning_notes.append(row["purpose"])
     for field, additions in (
         ("location_hints", row["location_hints"]),
         ("planning_notes", row["notes"]),

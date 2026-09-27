@@ -76,12 +76,15 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
     original.write_text(heading + "\n\nWait 15 seconds.\n\n" + quote)
     observed = []
 
+    overview_blocks = []
+
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
             if payload["subtask"] == "overview":
+                overview_blocks.extend(payload["evidence"]["blocks"])
                 return "Controller shutdown scope and version conditions."
-            blocks = payload["evidence"]["blocks"]
+            blocks = overview_blocks
             heading_block = next(block for block in blocks if block["text"] == heading)
             wait_block = next(block for block in blocks if block["text"] == "Wait 15 seconds.")
             quote_block = next(block for block in blocks if block["text"] == quote)
@@ -490,7 +493,11 @@ def test_later_part_cannot_change_the_title_of_verified_parts(kb_dir, tmp_path, 
             if payload["subtask"] == "overview":
                 return "Version 6 startup and shutdown operations."
             target = payload["target"]
-            ranges = target.get("ranges", [[target["target_start"], target["target_end"]]])
+            ranges = (
+                target["ranges"]
+                if "ranges" in target
+                else [[target["target_start"], target["target_end"]]]
+            )
             return {
                 "pages": [
                     {"title": "Version 6 operations", "kind": "concept", "subject_ranges": ranges}

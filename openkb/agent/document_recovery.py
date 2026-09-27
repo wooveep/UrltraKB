@@ -59,6 +59,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                     "subject_ranges",
                     "context_ranges",
                     "scope_resolution",
+                    "evidence_scope",
                     "planning_notes",
                     "state",
                 ):
@@ -101,6 +102,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 old.planning_notes,
                 old.location_hints,
                 old.scope_resolution,
+                old.evidence_scope,
                 old.necessary_context,
                 old.limitations,
                 references(previous, old.key),
@@ -119,6 +121,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                 page.planning_notes,
                 page.location_hints,
                 page.scope_resolution,
+                page.evidence_scope,
                 page.necessary_context,
                 page.limitations,
                 references(final, page.key),

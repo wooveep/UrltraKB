@@ -125,7 +125,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     assert replaced
     assert all("Outside" not in text for text in compiled)
     if moment == "model":
-        assert compiled == ["# Original", "# Original"]
+        assert compiled == ["# Original"]
     entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
     assert all(item.get("path") != outside.as_posix() for item in entries.values())
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))

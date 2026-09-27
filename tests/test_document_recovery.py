@@ -9,11 +9,16 @@ from openkb.agent.document_plan_annotations import ExternalReference, PageLimita
 from openkb.agent.document_recovery import inherit_publication_state
 
 
-@pytest.mark.parametrize("change", ["none", "limitation", "reference", "title"])
+@pytest.mark.parametrize("change", ["none", "limitation", "reference", "title", "scope"])
 def test_publication_state_inheritance_checks_generation_inputs(change):
     page = PagePlan(
-        key="p1", kind="concept", name="concepts/first", title="First",
-        purpose="Explain first", subject_ranges=[[0, 1]], quality="published",
+        key="p1",
+        kind="concept",
+        name="concepts/first",
+        title="First",
+        purpose="Explain first",
+        subject_ranges=[[0, 1]],
+        quality="published",
         review_receipt={"accepted": True},
     )
     previous = DocumentPlan(
@@ -36,6 +41,14 @@ def test_publication_state_inheritance_checks_generation_inputs(change):
         )
     elif change == "title":
         final.pages[0].title = "Changed title"
+    elif change == "scope":
+        final.pages[0].evidence_scope = {
+            "protocol": "page-evidence-scope-v1",
+            "status": "unassessed",
+            "read_sections": [],
+            "unresolved_hints": [],
+            "warnings": [],
+        }
 
     inherit_publication_state(final, to_dict(previous))
 

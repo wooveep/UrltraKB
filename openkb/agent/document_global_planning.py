@@ -17,6 +17,7 @@ from openkb.agent.document_planning_candidates import record_candidate_attempt
 from openkb.agent.document_planning_response import accept_pages
 from openkb.agent.document_planning_semantics import record_semantics
 from openkb.agent.document_planning_state import _persist, _raw_value
+from openkb.agent.document_window_schedule import no_readable_body
 from openkb.execution_measurement import (
     record_first_inspectable,
     request_marker,
@@ -87,7 +88,9 @@ def plan_global_pages(
 
         while used() < limits.max_attempts or task.get("raw") is not None:
             processing_checkpoint("planning")
-            if not nodes and not json.loads(snapshot["context_json"])["overview"]["text"]:
+            if no_readable_body(parsed) or (
+                not nodes and not json.loads(snapshot["context_json"])["overview"]["text"]
+            ):
                 task.update(status="skipped", reason="planning_context_unavailable")
                 break
             messages = messages_for(
@@ -118,7 +121,7 @@ def plan_global_pages(
                     recovery=task.get("reason") or "",
                     detail=False,
                 )
-            shown = len(state["pages"])
+            shown = len(state["pages"]) + len(state.get("deferred_suggestions", []))
             while not fits(messages, settings, limits) and shown:
                 shown //= 2
                 messages = messages_for(
