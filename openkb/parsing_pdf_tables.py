@@ -10,7 +10,10 @@ from openkb.processing import processing_checkpoint
 
 def table_cells(page, number: int, *, issues=None):
     blocks, rectangles = [], []
-    tables = page.find_tables(strategy="lines_strict").tables
+    found = page.find_tables(strategy="lines_strict")
+    if found is None:
+        raise ValueError("Native table detection unavailable")
+    tables = found.tables
     rejected: set[int] = set()
     for i, table in enumerate(tables):
         for j in range(i):

@@ -95,7 +95,7 @@ def evidence_response(payload):
                         "title": "Notes",
                         "kind": "concept",
                         "purpose": "Document notes and instructions",
-                        "section": payload["target"]["ranges"],
+                        "section": payload["target"]["sections"],
                     }
                 ]
             }

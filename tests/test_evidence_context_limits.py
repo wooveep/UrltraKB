@@ -105,7 +105,9 @@ def test_small_output_budget_keeps_formal_responses_within_limit(kb_dir, tmp_pat
         "generation",
         "verification",
     ]
-    assert len(extracted[0]["evidence"]["blocks"]) == 30
+    assert extracted[0]["evidence"]["blocks"] == extracted[1]["evidence"]["blocks"] == []
+    assert extracted[0]["planning_context"] == extracted[1]["planning_context"]
+    assert len(extracted[2]["evidence"]["blocks"]) == 30
 
 
 def test_large_existing_catalog_is_projected_before_planning_request(
@@ -143,24 +145,19 @@ def test_distant_heading_conditions_are_reread_as_generation_evidence(
     )
     generated = []
 
-    overview_blocks = []
-
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
             if payload["subtask"] == "overview":
-                overview_blocks.extend(payload["evidence"]["blocks"])
+                assert payload["evidence"]["blocks"] == []
                 return "Linux-specific standby recovery procedure."
-            blocks = overview_blocks
-            heading = next(block for block in blocks if "Linux version 7" in block["text"])
-            command = next(block for block in blocks if block["text"].startswith("Execute"))
             return {
                 "pages": [
                     {
                         "title": "Standby Deployment",
                         "kind": "concept",
-                        "subject_ranges": [[command["order"], command["order"] + 1]],
-                        "context": [[heading["order"], heading["order"] + 1]],
+                        "section": "Execute deploy --timeout 42.",
+                        "context": "Applies only to Linux version 7",
                     }
                 ]
             }

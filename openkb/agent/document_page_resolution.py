@@ -41,7 +41,7 @@ class PreparedPage:
     reason: str | None = None
 
 
-def _navigation(navigation: Any) -> list[dict[str, Any]]:
+def _navigation(navigation: Any, parsed: Any = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     paths: dict[str, list[str]] = {}
     for index, node in enumerate((navigation or {}).get("nodes", [])):
@@ -57,6 +57,12 @@ def _navigation(navigation: Any) -> list[dict[str, Any]]:
                 "original_range": [node["start"], node["end"]],
             }
         )
+    if parsed is not None:
+        from openkb.agent.document_planning_support import exclude_attachment_ranges
+
+        for row in rows:
+            row["original_ranges"], _ = exclude_attachment_ranges(parsed, [row["original_range"]])
+        rows = [row for row in rows if row["original_ranges"]]
     return rows
 
 
@@ -184,7 +190,7 @@ def prepare_page(
     result = deepcopy(page)
     if result.state == "skipped" and not retry_skipped:
         return PreparedPage(result, reason="previously_skipped")
-    rows = _navigation(navigation)
+    rows = _navigation(navigation, parsed)
     from openkb.agent.document_page_scope import evidence_scope
 
     unresolved: list[dict[str, Any]] = []
@@ -275,6 +281,10 @@ def prepare_page(
                 result.subject_ranges.extend(ranges)
                 result.scope_resolution = reason
                 break
+    from openkb.agent.document_planning_support import exclude_attachment_ranges
+
+    result.subject_ranges, _ = exclude_attachment_ranges(parsed, result.subject_ranges)
+    result.context_ranges, _ = exclude_attachment_ranges(parsed, result.context_ranges)
     if not result.subject_ranges:
         return skip("no_subject_evidence")
     size = sum(

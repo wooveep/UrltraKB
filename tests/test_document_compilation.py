@@ -56,7 +56,7 @@ def test_import_generates_from_planned_occurrences_not_facts(kb_dir, tmp_path, m
     assert summary["peak_rss_bytes"] is None or summary["peak_rss_bytes"] > 0
     assert summary["peak_inflight_tokens"] > 0
     document = summary["document"]
-    assert document["evidence_groups"] == 1
+    assert document["evidence_groups"] == 0  # Planning uses derived navigation, not original W.
     assert document["planning_calls"] == 2
     assert document["planned_pages"] == 1
     assert document["http_attempts"] == len(measurement["requests"]) == 4

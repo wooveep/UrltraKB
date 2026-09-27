@@ -32,7 +32,7 @@ def test_navigation_summary_stays_a_hint_and_facts_still_read_originals(
         if payload["stage"] == "index_summary":
             for row in result["summaries"]:
                 row["summary"] = "The left field is the maximum."
-        elif payload["stage"] == "planning":
+        elif payload["stage"] == "generation":
             checked.append(payload)
         return result
 

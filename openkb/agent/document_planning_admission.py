@@ -20,6 +20,10 @@ def validate_navigation(navigation: dict[str, Any] | None, source: Any, parsed: 
         raise ValueError("Navigation version_id mismatch")
     if navigation_parse and navigation_parse != parsed.id:
         raise ValueError("Navigation parse_id mismatch")
+    if "windows" in navigation:
+        from openkb.navigation_evidence import planning_windows
+
+        planning_windows(source, parsed, navigation)
     if "nodes" in navigation:
         nodes = navigation["nodes"]
         if not isinstance(nodes, list):
@@ -27,8 +31,15 @@ def validate_navigation(navigation: dict[str, Any] | None, source: Any, parsed: 
         seen: set[str] = set()
         canonical = bool(nodes)
         fields = {
-            "id", "parent", "start", "end", "title", "title_origin",
-            "summary", "summary_origin", "structure_origin",
+            "id",
+            "parent",
+            "start",
+            "end",
+            "title",
+            "title_origin",
+            "summary",
+            "summary_origin",
+            "structure_origin",
         }
         for node in nodes:
             if not isinstance(node, dict) or set(node) - fields:
@@ -37,10 +48,12 @@ def validate_navigation(navigation: dict[str, Any] | None, source: Any, parsed: 
             if end is None and type(start) is int:
                 end = start + 1
             if (
-                type(start) is not int or type(end) is not int
+                type(start) is not int
+                or type(end) is not int
                 or not (
                     0 <= start < end <= len(parsed.blocks)
-                    or len(parsed.blocks) == 0 and start == end == 0
+                    or len(parsed.blocks) == 0
+                    and start == end == 0
                 )
                 or not isinstance(node.get("title"), str)
                 or not isinstance(node.get("summary", ""), str)

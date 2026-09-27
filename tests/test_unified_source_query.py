@@ -78,8 +78,8 @@ def test_text_compiles_with_frozen_tree_and_query_and_chat_read_its_original(
         payload = json.loads(body["messages"][-1]["content"])
         if payload.get("stage") == "planning" and payload.get("subtask") == "overview":
             blocks = payload["evidence"]["blocks"]
-            assert blocks, "Document planning must receive original source evidence"
-            planned_evidence.append(blocks)
+            assert not blocks, "Navigation planning does not imply an original source read"
+            planned_evidence.append(payload["planning_context"]["topics"])
         return evidence_response(payload)
 
     model_service.respond = respond

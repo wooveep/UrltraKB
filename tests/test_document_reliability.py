@@ -41,9 +41,7 @@ def test_invalid_document_plan_preserves_other_committed_knowledge(
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         content = (
-            json.dumps(evidence_response(payload))
-            if payload["stage"] == "facts"
-            else "无法判断"
+            json.dumps(evidence_response(payload)) if payload["stage"] == "facts" else "无法判断"
         )
         return SimpleNamespace(
             choices=[
@@ -134,10 +132,11 @@ def test_unfit_planning_capacity_stops_without_a_model_attempt(
     else:
         source.write_text("Tiny document; the schema and output reserve still count.")
     result = import_document(kb_dir, source)
-    assert result.status == "unfinished"
-    assert result.reason == "planning_context_exceeds_request_budget"
+    assert result.status == "added"
+    assert result.planning_coverage["status"] == "empty"
+    assert result.planning_coverage["planning_omissions"] > 0
     summaries = list((kb_dir / "wiki/summaries").glob("*.md"))
-    assert not summaries
+    assert summaries  # The zero-result report survives local capacity exhaustion.
 
 
 def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, processing_config):

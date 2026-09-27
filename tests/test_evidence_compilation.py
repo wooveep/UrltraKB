@@ -22,16 +22,16 @@ def _target_ranges(payload):
 def _single_page_plan(payload, *, name, title, kind="concept", type_=None, target=""):
     """Return one valid DocumentPlan delta for the current target window."""
 
-    ranges = _target_ranges(payload)
     if payload.get("plan_protocol") == "document-planning-markdown-v1":
         if payload["subtask"] == "overview":
-            return f"{title} overview from the original source."
-        page = {"title": title, "kind": kind, "subject_ranges": ranges}
+            return f"{title} overview from the navigation."
+        page = {"title": title, "kind": kind, "section": payload["target"]["sections"]}
         if type_ is not None:
             page["type"] = type_
         if target:
             page["target"] = target
         return {"pages": [page]}
+    ranges = _target_ranges(payload)
     registered = next(
         (
             item
@@ -221,7 +221,7 @@ def test_all_sections_generate_from_original_evidence_with_bounded_requests(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert observed == {"planning": set(facts), "generation": set(facts)}
+    assert observed == {"planning": set(), "generation": set(facts)}
     pages = list((kb_dir / "wiki/concepts").glob("*.md"))
     assert len(pages) == 1
     content = pages[0].read_text()
@@ -389,6 +389,8 @@ def test_named_entity_and_concept_share_valid_links_and_preserve_entity_vocabula
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "planning":
             assert "product" in payload["entity_types"]
+            if payload["subtask"] == "overview":
+                return "AtlasDB and atomic commits."
             ranges = _target_ranges(payload)
             return {
                 "overview": {"text": "AtlasDB operations.", "ranges": ranges, "limitations": []},
@@ -474,7 +476,7 @@ def test_large_document_plan_covers_all_windows_then_omits_an_unreviewable_page(
     model_service.respond = respond
     result = import_document(kb_dir, original)
     assert result.knowledge_compilation == "completed", result
-    assert all(f"Setting {i}:" in "\n".join(planned) for i in range(120))
+    assert not planned  # A large original is reread only for page generation.
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))
     assert any(
         row["stage"] == "generation"
@@ -505,9 +507,7 @@ def test_new_source_version_retracts_its_retired_topic_without_deleting_other_so
         if payload["stage"] == "verification":
             return {"verdict": "supported", "reason": "Controlled evidence is supported."}
         if payload["stage"] == "planning":
-            evidence = "\n".join(
-                item["text"] for item in payload["evidence"]["blocks"]
-            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
+            evidence = "\n".join(row["summary"] for row in payload["planning_context"]["topics"])
             name = "current" if "Current" in evidence else "retired"
             path = "concepts/" + name
             return _single_page_plan(
@@ -542,9 +542,7 @@ def test_retired_link_is_normalized_before_its_binding_review(kb_dir, tmp_path, 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(
-                item["text"] for item in payload["evidence"]["blocks"]
-            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
+            evidence = "\n".join(row["summary"] for row in payload["planning_context"]["topics"])
             name = "current" if "Current" in evidence else "retired"
             return _single_page_plan(payload, name=f"concepts/{name}", title=name.title())
         if payload["stage"] == "generation":
@@ -597,9 +595,7 @@ def test_normalized_page_rejection_keeps_other_verified_pages_publishable(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(
-                item["text"] for item in payload["evidence"]["blocks"]
-            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
+            evidence = "\n".join(row["summary"] for row in payload["planning_context"]["topics"])
             if "Current feature" not in evidence:
                 return _single_page_plan(payload, name="concepts/retired", title="Retired")
             if payload["subtask"] == "overview":
@@ -672,9 +668,7 @@ def test_retiring_a_page_does_not_rewrite_an_unrelated_verified_page(
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            evidence = "\n".join(
-                item["text"] for item in payload["evidence"]["blocks"]
-            ) + payload.get("planning_context", {}).get("overview", {}).get("text", "")
+            evidence = "\n".join(row["summary"] for row in payload["planning_context"]["topics"])
             if "Current beta" in evidence:
                 name, title = "concepts/current-beta", "Current beta"
             elif "Alpha" in evidence:

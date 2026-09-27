@@ -179,7 +179,7 @@ def test_successful_image_transcription_does_not_complete_its_neighbor(
                 payload = json.loads(request["messages"][-1]["content"])
             except ValueError:
                 continue
-            if payload.get("stage") == "planning":
+            if payload.get("stage") in {"generation", "verification"}:
                 image_blocks.extend(
                     block for block in payload["evidence"]["blocks"] if block["kind"] == "image"
                 )

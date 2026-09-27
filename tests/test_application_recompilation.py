@@ -142,8 +142,7 @@ def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
         payload = json.loads(kwargs["messages"][-1]["content"])
         value = evidence_response(payload)
         if payload["stage"] == "planning":
-            target = payload["target"]
-            start, end = target["ranges"][0]
+            start, end = 0, 3  # The controlled source has three known notes.
             value = (
                 "Three independent notes."
                 if payload.get("subtask") == "overview"

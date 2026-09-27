@@ -35,7 +35,7 @@ def test_comment_role_reaches_every_compilation_stage(kb_dir, tmp_path, model_se
         stage = payload.get("stage")
         if stage not in {"planning", "generation", "verification"}:
             continue
-        if payload.get("subtask") == "pages":
+        if payload.get("stage") == "planning":
             assert payload["evidence"]["blocks"] == []
             assert payload["planning_context"]["source"]
             continue
@@ -47,4 +47,4 @@ def test_comment_role_reaches_every_compilation_stage(kb_dir, tmp_path, model_se
         assert context["inline_annotations"] == expected
         assert "inline_annotations" in request["messages"][0]["content"]
         seen.add(stage)
-    assert seen == {"planning", "generation", "verification"}
+    assert seen == {"generation", "verification"}

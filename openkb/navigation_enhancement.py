@@ -29,9 +29,8 @@ class IndexAllowanceExceeded(Exception):
 
 
 def record_optional_failure(record, error):
-    if (
-        isinstance(error, ProcessingIncomplete)
-        and not isinstance(error, (ResponseIncomplete, InputTooLarge, OutputTruncated))
+    if isinstance(error, ProcessingIncomplete) and not isinstance(
+        error, (ResponseIncomplete, InputTooLarge, OutputTruncated)
     ):
         raise error  # Cancellation, hard budgets and uncertain execution stop new dispatch.
     record.update(status="degraded", reason=getattr(error, "reason", str(error)))

@@ -116,7 +116,7 @@ def test_reader_requires_immutable_markdown_reference_proof(tmp_path, monkeypatc
         payload = json.loads(messages[-1]["content"])
         if payload["subtask"] == "overview":
             return "The source mentions Guide A."
-        return "- Name: Guide note\n  Kind: concept"
+        return "- Name: Guide note\n  Kind: concept\n  External references: Guide A"
 
     monkeypatch.setattr(
         litellm,
@@ -137,14 +137,23 @@ def test_reader_requires_immutable_markdown_reference_proof(tmp_path, monkeypatc
             on_event=events.append,
         )
     assert isinstance(plan, DocumentPlan), events
-    assert plan.external_references, events
+    assert (
+        not plan.external_references
+    )  # Navigation-only output cannot attest to an original quote.
+    assert plan.metadata["external_reference_hints"]
     handle = plan_reference(plan)
-    assert len(list(iter_external_references(tmp_path, handle))) == 1
-    state_path = store.root / "compilation" / "recovery" / (
-        plan.metadata["recovery_key"] + "-markdown_plan.json"
+    assert list(iter_external_references(tmp_path, handle)) == []
+    state_path = (
+        store.root
+        / "compilation"
+        / "recovery"
+        / (plan.metadata["recovery_key"] + "-markdown_plan.json")
     )
     state_record = json.loads(state_path.read_text())
-    state_record["value"]["external_references"][0]["target_document"] = "Guide B"
+    forged = ExternalReference(
+        key="xref:" + "e" * 64, location=[[0, 1]], raw_quote=body, target_document="Guide B"
+    ).to_dict()
+    state_record["value"]["external_references"] = [forged]
     state_record["digest"] = content_id(state_record["value"])
     state_path.write_text(json.dumps(state_record))
     with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
@@ -160,22 +169,20 @@ def test_reader_requires_immutable_markdown_reference_proof(tmp_path, monkeypatc
             resume=True,
         )
     assert isinstance(resumed, DocumentPlan)
-    assert [row.target_document for row in resumed.external_references] == ["Guide A"]
+    assert not resumed.external_references
     handle = plan_reference(resumed)
-    plan_path = store.root / "compilation" / "recovery" / (
-        plan.metadata["recovery_key"] + "-plan.json"
+    plan_path = (
+        store.root / "compilation" / "recovery" / (plan.metadata["recovery_key"] + "-plan.json")
     )
     record = json.loads(plan_path.read_text())
     original = json.dumps(record)
-    record["value"]["external_references"] = []
+    record["value"]["external_references"] = [forged]
     record["digest"] = content_id(record["value"])
     plan_path.write_text(json.dumps(record))
     with pytest.raises(ValueError, match="reference proof"):
         list(iter_external_references(tmp_path, {**handle, "plan_digest": record["digest"]}))
     plan_path.write_text(original)
-    checkpoint = store.root / "compilation" / (
-        resumed.metadata["reference_proof_key"] + ".json"
-    )
+    checkpoint = store.root / "compilation" / (resumed.metadata["reference_proof_key"] + ".json")
     checkpoint.unlink()
     with pytest.raises(ValueError, match="Markdown plan reference proof"):
         list(iter_external_references(tmp_path, handle))

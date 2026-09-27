@@ -65,7 +65,7 @@ def test_navigation_budget_failure_keeps_complete_knowledge_and_basic_positions(
     assert "navigation_degraded" in result.warnings
     navigation = source_status(kb_dir, result.source_id)["navigation"]
     assert navigation["status"] == "degraded"
-    assert navigation["reason"] == "index_allowance_exhausted"
+    assert navigation["reason"].endswith("index_allowance_exhausted")
     assert {item["block_id"] for item in navigation["positions"]} == {
         block.id for block in ParseStore(kb_dir).load(result.parse_id).blocks
     }

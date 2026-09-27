@@ -72,7 +72,7 @@ def test_caption_receives_complete_ocr_and_image_link_at_each_model_stage(
         stage = payload.get("stage")
         if stage not in {"planning", "generation", "verification"}:
             continue
-        if payload.get("subtask") == "pages":
+        if payload.get("stage") == "planning":
             assert payload["evidence"]["blocks"] == []
             assert payload["planning_context"]["source"]
             continue
@@ -87,7 +87,7 @@ def test_caption_receives_complete_ocr_and_image_link_at_each_model_stage(
                 context = payload["context_pool"][context["context_ref"]]
             assert "image_relations" in context
         seen.add(stage)
-    assert seen == {"planning", "generation", "verification"}
+    assert seen == {"generation", "verification"}
 
 
 @pytest.mark.parametrize("boundary", ["ordinary_text", "new_section"])

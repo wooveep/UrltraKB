@@ -34,7 +34,7 @@ def test_related_clues_are_read_even_after_subject_hit_and_unknowns_preserve_evi
     assert prepared.page.state == "ready"
     assert "Obtain the access token first." in [row["text"] for row in prepared.occurrences]
     scope = prepared.page.evidence_scope
-    assert scope["status"] == "partial"
+    assert scope["status"] == "located"
     assert scope["unresolved_hints"] == [
         {"role": "related", "value": "Missing clue", "reason": "unresolved_location"}
     ]

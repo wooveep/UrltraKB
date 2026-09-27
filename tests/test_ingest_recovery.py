@@ -96,9 +96,12 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         if payload["stage"] == "planning":
-            compiled.extend(block["text"] for block in payload["evidence"]["blocks"])
+            assert payload["evidence"]["blocks"] == []
+            assert "Outside" not in json.dumps(payload["planning_context"])
             if moment == "model":
                 replace_input()
+        elif payload["stage"] in {"generation", "verification"}:
+            compiled.extend(block["text"] for block in payload["evidence"]["blocks"])
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -125,7 +128,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     assert replaced
     assert all("Outside" not in text for text in compiled)
     if moment == "model":
-        assert compiled == ["# Original"]
+        assert compiled and set(compiled) == {"# Original"}
     entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
     assert all(item.get("path") != outside.as_posix() for item in entries.values())
     assert not list((kb_dir / "wiki/concepts").glob("*.md"))

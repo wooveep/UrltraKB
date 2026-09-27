@@ -76,28 +76,19 @@ def test_generation_and_verification_keep_the_quote_and_context_roles(
     original.write_text(heading + "\n\nWait 15 seconds.\n\n" + quote)
     observed = []
 
-    overview_blocks = []
-
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            assert payload["evidence"]["blocks"] == []
             if payload["subtask"] == "overview":
-                overview_blocks.extend(payload["evidence"]["blocks"])
                 return "Controller shutdown scope and version conditions."
-            blocks = overview_blocks
-            heading_block = next(block for block in blocks if block["text"] == heading)
-            wait_block = next(block for block in blocks if block["text"] == "Wait 15 seconds.")
-            quote_block = next(block for block in blocks if block["text"] == quote)
             return {
                 "pages": [
                     {
                         "title": "Controller Support",
                         "kind": "concept",
-                        "subject_ranges": [[quote_block["order"], quote_block["order"] + 1]],
-                        "context": [
-                            [heading_block["order"], heading_block["order"] + 1],
-                            [wait_block["order"], wait_block["order"] + 1],
-                        ],
+                        "subject_ranges": [[2, 3]],
+                        "context": [[0, 1], [1, 2]],
                     }
                 ]
             }

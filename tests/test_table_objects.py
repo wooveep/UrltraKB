@@ -87,9 +87,8 @@ def test_small_table_is_planned_in_two_document_requests_without_fact_extraction
     assert not [request for request in requests if request["stage"] == "facts"]
     plans = [request for request in requests if request["stage"] == "planning"]
     assert len(plans) == 2
-    assert {item["text"] for item in plans[0]["evidence"]["blocks"] if item["kind"] == "table"} == {
-        value for row in rows for value in row
-    }
+    assert all(plan["evidence"]["blocks"] == [] for plan in plans)
+    assert plans[0]["planning_context"] == plans[1]["planning_context"]
     generated = [request for request in requests if request["stage"] == "generation"]
     assert len(generated) == 1
     assert {
@@ -210,7 +209,7 @@ def test_large_table_stays_pending_when_a_whole_review_cannot_fit(kb_dir, tmp_pa
         if payload.get("subtask") == "pages":
             # Select this chapter in every window. A repeated name without a
             # location only keeps the first fallback, not the complete table.
-            section = payload["navigation"]["hints"][0]["section_key"]
+            section = payload["target"]["sections"][0]
             return f"- Name: Notes\n  Kind: concept\n  Section: {section}"
         if payload["stage"] == "generation":
             generated.append(payload)

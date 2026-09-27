@@ -51,16 +51,24 @@ def test_continue_replans_document_after_a_parse_changes(kb_dir, tmp_path, model
     resumed = continue_source(kb_dir, first.source_id, version_id=first.input_version)
     assert resumed.knowledge_compilation == "completed", resumed
     requests = [json.loads(call["messages"][-1]["content"]) for call in model_service[before:]]
-    planned = [
+    planning = [request for request in requests if request.get("stage") == "planning"]
+    assert [request["subtask"] for request in planning] == ["overview", "pages"]
+    assert planning[0]["planning_context"] == planning[1]["planning_context"]
+    assert all(
+        request["planning_context"]["source"]["parse_id"] == request["evidence"]["parse_id"]
+        for request in planning
+    )
+    assert all(request["evidence"]["blocks"] == [] for request in planning)
+    generated = [
         block["text"]
         for request in requests
-        if request.get("stage") == "planning"
+        if request.get("stage") == "generation"
         for block in request["evidence"]["blocks"]
     ]
-    assert "Unit 0 requires version 1." in planned
-    assert "Unit 4 requires version 5." in planned
-    assert "Unit 5 requires corrected version 12." in planned
-    assert "Unit 5 requires version 6." not in planned
+    assert "Unit 0 requires version 1." in generated
+    assert "Unit 4 requires version 5." in generated
+    assert "Unit 5 requires corrected version 12." in generated
+    assert "Unit 5 requires version 6." not in generated
     assert resumed.parse_id == new.id
 
 

@@ -102,7 +102,7 @@ def test_image_origins_reach_compiler_and_bounded_query_without_guessing_from_al
         assert raw.convert("RGB").tobytes() == shown.convert("RGB").tobytes()
     assert {p["stage"] for p in observed} == {"planning", "generation", "verification"}
     for payload in observed:
-        if payload.get("subtask") == "pages":
+        if payload.get("stage") == "planning":
             assert payload["evidence"]["blocks"] == []
             assert payload["planning_context"]["source"]
             continue

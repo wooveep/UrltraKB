@@ -152,7 +152,8 @@ def messages_for(
     carry["overview"] = {
         "text": overview if overview_limit is None else overview[:overview_limit],
         "input_clipped": overview_limit is not None and len(overview) > overview_limit,
-        "partial": not bool(state.get("overview_snapshot")),
+        "partial": not state.get("overview_snapshot")
+        or bool(state["overview_snapshot"].get("partial")),
     }
     return plan_messages(
         empty_evidence(source, parsed),
@@ -349,6 +350,19 @@ def freeze_context(
 
 
 def validate_snapshot(snapshot):
+    def valid_range(value):
+        if isinstance(value, list):
+            return (
+                len(value) == 2 and all(type(n) is int for n in value) and 0 <= value[0] < value[1]
+            )
+        return (
+            isinstance(value, dict)
+            and set(value) == {"block_index", "start_char", "end_char"}
+            and all(type(n) is int for n in value.values())
+            and value["block_index"] >= 0
+            and 0 <= value["start_char"] < value["end_char"]
+        )
+
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("context_json"), str):
         return False
     if not isinstance(snapshot.get("nodes"), list) or not isinstance(snapshot.get("catalog"), list):
@@ -373,13 +387,7 @@ def validate_snapshot(snapshot):
             or not (row.get("parent") is None or isinstance(row["parent"], str))
             or not isinstance(row.get("original_ranges"), list)
             or not row["original_ranges"]
-            or any(
-                not isinstance(span, list)
-                or len(span) != 2
-                or not all(type(n) is int for n in span)
-                or not 0 <= span[0] < span[1]
-                for span in row["original_ranges"]
-            )
+            or not all(valid_range(span) for span in row["original_ranges"])
             for row in nodes
         ):
             return False

@@ -23,7 +23,9 @@ OFFLINE_PROCESSING = dict(
 )
 
 
-def test_planning_reencodes_verified_legacy_navigation_before_budgeting(tmp_path, monkeypatch):
+def test_planning_validates_legacy_navigation_without_original_window_dispatch(
+    tmp_path, monkeypatch
+):
     source, parsed = _DummySource(), _DummyParsed(1)
     settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
     workspace = tmp_path / "workspace"
@@ -59,19 +61,32 @@ def test_planning_reencodes_verified_legacy_navigation_before_budgeting(tmp_path
     }
     navigation = {**record, "id": content_id(record)}
 
-    class BudgetReached(Exception):
-        pass
+    monkeypatch.setattr("litellm.token_counter", lambda **_: 100)
+    requests = []
 
-    def inspect_budget_input(_source, _parsed, windows, _limits, *, prompt_tokens):
-        assert windows[0]["evidence"] == evidence_descriptor(source, parsed, 0, 1)
-        assert navigation["windows"][0]["evidence"]["protocol"] == "source-prefix-v1"
-        assert prompt_tokens > 0
-        raise BudgetReached
+    def respond(messages, **_):
+        payload = json.loads(messages[-1]["content"])
+        requests.append(payload)
+        assert payload["evidence"]["blocks"] == []
+        return (
+            "Available navigation overview."
+            if payload["subtask"] == "overview"
+            else "No new pages are warranted."
+        )
 
-    monkeypatch.setattr("openkb.agent.document_windowing.bounded_windows", inspect_budget_input)
     with CompilationCheckpoints(tmp_path, source, parsed, settings, None) as checkpoints:
-        with pytest.raises(BudgetReached):
-            plan_document(tmp_path, workspace, source, parsed, navigation, settings, checkpoints)
+        plan_document(
+            tmp_path,
+            workspace,
+            source,
+            parsed,
+            navigation,
+            settings,
+            checkpoints,
+            mock_caller=respond,
+        )
+    assert [r["subtask"] for r in requests] == ["overview", "pages"]
+    assert navigation["windows"][0]["evidence"]["protocol"] == "source-prefix-v1"
 
 
 def test_ledger_persistence_and_proof_share_unicode_canonical_json(tmp_path):
@@ -193,18 +208,6 @@ def test_planning_admission_uses_the_initial_shared_completion_reservation(monke
     assert admitted.input_capacity == 95_904
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def test_accepted_ledger_cannot_skip_unfinished_windows(tmp_path):
     source, parsed = _DummySource(), _DummyParsed(6)
     settings = {"model": "mock-model", "processing": OFFLINE_PROCESSING}
@@ -285,17 +288,27 @@ def test_skipped_window_is_durably_settled_without_an_accepted_content_proof(tmp
                 )
             ledger.mark_accepted(windows)
             assert ledger.recovery_valid(
-                windows, len(windows), checkpoints.dispatch_output_tokens,
-                parsed=parsed, source=source,
+                windows,
+                len(windows),
+                checkpoints.dispatch_output_tokens,
+                parsed=parsed,
+                source=source,
             )
             assert ledger.overview().status == "partial"
-            ledger.db.execute("UPDATE planning_omissions SET payload = ? WHERE key = ?", (
-                json.dumps({**omission.to_dict(), "reason": "forged"}), omission.key,
-            ))
+            ledger.db.execute(
+                "UPDATE planning_omissions SET payload = ? WHERE key = ?",
+                (
+                    json.dumps({**omission.to_dict(), "reason": "forged"}),
+                    omission.key,
+                ),
+            )
             ledger.db.commit()
             assert not ledger.recovery_valid(
-                windows, len(windows), checkpoints.dispatch_output_tokens,
-                parsed=parsed, source=source,
+                windows,
+                len(windows),
+                checkpoints.dispatch_output_tokens,
+                parsed=parsed,
+                source=source,
             )
         finally:
             ledger.close()
@@ -952,10 +965,6 @@ def test_plan_document_rejects_an_incomplete_navigation_manifest(tmp_path):
             )
 
 
-
-
-
-
 def test_navigation_hints_follow_sparse_target_and_budget():
     from types import SimpleNamespace
 
@@ -974,20 +983,6 @@ def test_navigation_hints_follow_sparse_target_and_budget():
     assert titles <= {"Section 0", "Section 1", "Section 24", "Section 25"}
     assert {"Section 0", "Section 25"} <= titles
     assert len(json.dumps(hints, ensure_ascii=False)) <= 800
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_context_basis_must_quote_frozen_source_text():
@@ -1046,20 +1041,6 @@ def test_published_resolved_dependency_evidence_is_referenced_coverage():
     assert coverage["status"] == "complete"
     assert coverage["ranges"][0]["status"] == "referenced"
     assert coverage["ranges"][0]["reason"] == "resolved_dependency_evidence"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _two_window_navigation(source, parsed, identifier):

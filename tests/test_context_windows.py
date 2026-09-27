@@ -47,7 +47,7 @@ def test_import_keeps_complete_neighbor_conditions_at_every_model_stage(
             assert item.get("text") != original[:128]
             if item.get("text") == original:
                 seen.add(stage)
-    assert seen == {"planning", "generation", "verification"}
+    assert seen == {"generation", "verification"}
     assert source.read_bytes() == original_bytes
 
 

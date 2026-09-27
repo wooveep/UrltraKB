@@ -12,30 +12,25 @@ from tests.test_adaptive_processing import response
 def test_successful_planned_page_survives_later_generation_omission(kb_dir, tmp_path, monkeypatch):
     source = tmp_path / "partial.md"
     source.write_text("Good evidence.\n\nUnavailable evidence.")
-    blocks = []
 
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         if payload["stage"] == "planning":
+            assert payload["evidence"]["blocks"] == []
             if payload["subtask"] == "overview":
-                blocks.extend(payload["evidence"]["blocks"])
                 value = "Two independent requirements."
             else:
-                good = next(block for block in blocks if block["text"].startswith("Good"))
-                unavailable = next(
-                    block for block in blocks if block["text"].startswith("Unavailable")
-                )
                 value = {
                     "pages": [
                         {
                             "kind": "concept",
                             "title": "Good",
-                            "subject_ranges": [[good["order"], good["order"] + 1]],
+                            "subject_ranges": [[0, 1]],
                         },
                         {
                             "kind": "concept",
                             "title": "Unavailable",
-                            "subject_ranges": [[unavailable["order"], unavailable["order"] + 1]],
+                            "subject_ranges": [[1, 2]],
                         },
                     ]
                 }
