@@ -485,11 +485,12 @@ def _hints(row: dict[str, Any]) -> list[dict[str, Any]]:
     roles = {"section": "subject", "context": "context", "related": "related"}
     hints = []
     for key, value in row.items():
-        role = roles.get(_field_name(str(key)) or "")
-        if role and value not in (None, "", []):
-            hint = {"role": role, "value": value}
-            if hint not in hints:
-                hints.append(hint)
+        for field in field_semantics(str(key)):
+            role = roles.get(field)
+            if role and value not in (None, "", []):
+                hint = {"role": role, "value": value}
+                if hint not in hints:
+                    hints.append(hint)
     return hints
 
 

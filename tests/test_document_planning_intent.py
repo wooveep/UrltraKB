@@ -53,6 +53,28 @@ def test_composite_purpose_keeps_its_full_limitations_in_purpose_and_notes(label
 
 
 @pytest.mark.parametrize(
+    "label", ["说明/定位", "Description / location", "Purpose / Location clue"]
+)
+def test_composite_description_location_keeps_both_meanings(kb_dir, tmp_path, label):
+    source, parsed, reader = _source(kb_dir, tmp_path)
+    messages, aliases = request(source, parsed, reader, [(1, 7, 23)])
+    value = "Explain the calibration prerequisites. " + aliases[0]
+    result = accept_bound(
+        f"| Title | Kind | {label} |\n|---|---|---|\n| Calibration | concept | {value} |",
+        source,
+        parsed,
+        reader,
+        messages,
+    )
+    page = result.pages[0]
+    assert page.purpose == value
+    assert len(page.location_hints) == 1 and page.location_hints[0]["role"] == "related"
+    prepared = prepare_page(page, source, parsed, None, reader)
+    assert prepared.page.state == "ready"
+    assert [block["text"] for block in prepared.evidence["blocks"]] == ["the access token"]
+
+
+@pytest.mark.parametrize(
     "title,clues", [("既有标题", "补充线索"), ("Existing title", "Additional location clues")]
 )
 def test_existing_title_table_adds_locations_once_without_creating_a_page(title, clues):

@@ -107,7 +107,7 @@ def _field_name(value: str) -> str | None:
             return "title"
         if len(fields) == 1:
             return next(iter(fields))
-        if "purpose" in fields and fields <= {"purpose", "notes", "related"}:
+        if "purpose" in fields and fields <= {"purpose", "notes", "related", "section"}:
             return "purpose"
         if fields <= {"section", "context", "related"} and fields:
             return "related"
@@ -135,6 +135,10 @@ def field_semantics(value: str) -> list[str]:
     parts = re.split(r"\s*/\s*", _label(unicodedata.normalize("NFKC", value)))
     if primary == "purpose" and any(_field_name(part) == "notes" for part in parts):
         fields.append("notes")
+    if primary == "purpose" and any(_field_name(part) in {"section", "related"} for part in parts):
+        # A prose explanation mixed with a locator remains a related clue;
+        # it is not an explicit declaration of the entire subject boundary.
+        fields.append("related")
     if primary in {"title", "name"} and re.match(
         r"^(?:既有|已有|existing\s+)", _label(unicodedata.normalize("NFKC", value))
     ):
