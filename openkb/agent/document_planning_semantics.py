@@ -45,7 +45,7 @@ _ALIASES = {
         "heading_path",
         "subject_ranges",
     },
-    "context": {"context", "必要上下文", "前提章节", "context_sections"},
+    "context": {"context", "necessary context", "必要上下文", "前提章节", "context_sections"},
     "related": {
         "related",
         "相关章节",
@@ -109,6 +109,8 @@ def _field_name(value: str) -> str | None:
         fields = {_field_name(part) for part in parts} - {None}
         if fields <= {"name", "title"} and fields:
             return "title"
+        if fields <= {"kind", "type"} and fields:
+            return "type"
         if len(fields) == 1:
             return next(iter(fields))
         if "purpose" in fields and fields <= {"purpose", "notes", "related", "section"}:
@@ -536,6 +538,11 @@ def action_heading(value):
     action = explicit_action(label)
     if action:
         return action, None
+    parts = re.split(r"\s*[/／]\s*", label)
+    if len(parts) > 1:
+        actions = {explicit_action(part) for part in parts}
+        if None not in actions and len(actions) == 1:
+            return next(iter(actions)), None
     match = re.fullmatch(r"(创建|新建|更新|create|new|update)\s*(.+)", label)
     if match and (kind := _kind(match[2])):
         return explicit_action(match[1]), kind

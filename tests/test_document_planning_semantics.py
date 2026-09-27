@@ -22,6 +22,24 @@ def accept(raw, **kwargs):
     )
 
 
+def test_prompt_bilingual_columns_preserve_classification_and_context():
+    result = accept(
+        "## Create\n"
+        "| Title/名称 | Kind/类型 | Purpose/用途 | Selection/主体章节 | "
+        "Necessary context/必要上下文 | External references/外部参考 |\n"
+        "|---|---|---|---|---|---|\n"
+        "| Calibration | concept | Explain calibration | Procedure | Preparation | Vendor manual |"
+    )
+    assert len(result.pages) == 1
+    page = result.pages[0]
+    assert page.kind == "concept" and page.purpose == "Explain calibration"
+    assert [(hint["role"], hint["value"]) for hint in page.location_hints] == [
+        ("subject", "Procedure"),
+        ("context", "Preparation"),
+    ]
+    assert result.external_reference_hints[0]["raw_text"] == "Vendor manual"
+
+
 @pytest.mark.parametrize("label", ["person", "人物", "人员"])
 def test_person_aliases_and_entity_groups_keep_the_model_classification(label):
     result = accept(

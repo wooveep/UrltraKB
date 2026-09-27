@@ -214,3 +214,30 @@ def test_explicit_create_promotes_defer_and_keeps_prior_origins():
     assert (page.kind, page.type) == ("entity", "person")
     assert prior.deferred_suggestions[0]["purpose"] in page.planning_notes
     assert result.promoted_suggestions[0]["deferred_key"] == prior.deferred_suggestions[0]["key"]
+
+
+def test_update_list_accepts_target_first_and_keeps_hidden_catalog_ambiguity():
+    from tests.test_document_planning_locations import _accept
+
+    kwargs = dict(
+        existing_targets={"concepts/a", "concepts/b"},
+        allowed_update_targets={"concepts/a"},
+        catalog_titles={"concepts/a": "Shared", "concepts/b": "Shared"},
+    )
+    result = _accept(
+        "## Update pages / 更新页面\n- 已有目标: concepts/a\n  用途: More detail\n\n"
+        "- 已有目标: Shared\n  用途: Ambiguous target",
+        **kwargs,
+    )
+    assert [page.target for page in result.pages] == ["concepts/a"]
+    assert [row["reason"] for row in result.deferred_suggestions] == ["update_target_unresolved"]
+    missing = _accept("# Update pages / 更新页面\n- Title: Missing\n  Kind: concept", **kwargs)
+    assert not missing.pages
+    assert missing.deferred_suggestions[0]["reason"] == "update_target_unresolved"
+    nested = _accept(
+        "## Update pages / 更新页面\n- Title: Revised calibration\n"
+        "  - Target: concepts/a\n  - Purpose: Add detail",
+        **kwargs,
+    )
+    assert not nested.deferred_suggestions
+    assert [(p.title, p.target) for p in nested.pages] == [("Revised calibration", "concepts/a")]

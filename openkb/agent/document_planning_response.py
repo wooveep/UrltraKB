@@ -436,13 +436,17 @@ def accept_pages(
                 or _first_text(row.get("title"))
                 or _first_text(row.get("name"))
             )
-            matches = [
-                path
-                for path in existing_targets & (allowed_update_targets or set())
-                if path == label
-                or normalized_name((catalog_titles or {}).get(path, "")) == normalized_name(label)
-            ]
-            if len(matches) == 1:
+            matches = (
+                [label]
+                if label in existing_targets
+                else [
+                    path
+                    for path in existing_targets
+                    if normalized_name((catalog_titles or {}).get(path, ""))
+                    == normalized_name(label)
+                ]
+            )
+            if len(matches) == 1 and matches[0] in (allowed_update_targets or set()):
                 update_target = matches[0]
                 row.setdefault("title", (catalog_titles or {}).get(update_target) or label)
                 row.setdefault(

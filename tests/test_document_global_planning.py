@@ -422,3 +422,56 @@ def test_failed_pages_leave_an_independent_overview_artifact(tmp_path):
     assert not result.plan.pages
     assert Path(result.overview_ref).read_text() == result.plan.overview.text
     assert json.loads(Path(result.report_ref).read_text())["overview_ref"] == result.overview_ref
+
+
+def test_retry_partial_group_overview_reuses_successful_parts_and_remerges(tmp_path):
+    nodes = [
+        {
+            "id": str(i),
+            "parent": None,
+            "title": f"Area {i}",
+            "start": i,
+            "end": i + 1,
+            "summary": "Navigation detail about procedures. " * 900,
+        }
+        for i in range(3)
+    ]
+    settings = {
+        **SETTINGS,
+        "model": "gpt-4o",
+        "processing": {
+            **SETTINGS["processing"],
+            "context_tokens": 4200,
+            "max_context_tokens": 4200,
+            "output_tokens": 700,
+            "max_output_tokens": 700,
+            "max_requests": 20,
+        },
+    }
+    retried = False
+    calls = []
+
+    def respond(messages, **_):
+        body = json.loads(messages[-1]["content"])
+        calls.append((body["subtask"], body["target"].get("kind"), body["target"].get("sections")))
+        if body["subtask"] == "pages":
+            return "No new pages are warranted."
+        if body["target"]["kind"] == "overview_merge":
+            return "Related operational areas."
+        if body["target"]["sections"] == ["section:0"] and not retried:
+            return ""
+        return "Mechanisms and their procedural prerequisites. " * 3
+
+    first = run_global(tmp_path, respond, nodes=nodes, settings=settings)
+    assert first.plan.metadata["overview_snapshot"]["partial"]
+    assert first.plan.metadata["overview"]["missing_tasks"]
+    calls.clear()
+    retried = True
+    second = run_global(
+        tmp_path, respond, nodes=nodes, settings=settings, resume=True, retry_skipped=True
+    )
+    assert calls == [
+        ("overview", "topic_summary", ["section:0"]),
+        ("overview", "overview_merge", []),
+    ]
+    assert not second.plan.metadata["overview"]["missing_tasks"]

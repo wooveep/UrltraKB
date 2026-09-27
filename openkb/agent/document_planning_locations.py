@@ -230,18 +230,47 @@ def _number_selection(clue, navigation):
     return selected
 
 
+def _chapter_selection(clue, navigation):
+    """Resolve a labelled chapter and explicit child numbers, retaining real identities."""
+    match = re.fullmatch(r"第\s*(\d+)\s*章\s*(.*)", clue)
+    if not match:
+        return None
+    root = _numbered_nodes(match[1], navigation)[0]
+    children = {root["section_key"]}
+    while True:
+        expanded = children | {
+            row["section_key"] for row in navigation if row.get("parent") in children
+        }
+        if expanded == children:
+            break
+        children = expanded
+    scoped = [row for row in navigation if row["section_key"] in children]
+    suffix = match[2].strip()
+    if not suffix or re.fullmatch(r"[（(].*[）)]", suffix):
+        return [root]
+    selected = []
+    atom = _NUMBER + r"(?:\s*[-–—~至到]\s*" + _NUMBER + r")?"
+    for part in _location_choices(suffix, separators=",，、;；"):
+        item = re.fullmatch(r"(" + atom + r")(?:\s+[^（）()]*)?(?:[（(].*[）)])?", part)
+        if not item:
+            raise ValueError("unknown_location")
+        selected.extend(_number_selection(item[1], scoped) or [])
+    return selected
+
+
 def _subtree_ranges(nodes, navigation, parsed, mode, notes):
     intervals = []
+    children = {}
+    for row in navigation:
+        if row.get("parent"):
+            children.setdefault(row["parent"], []).append(row)
     for node in nodes:
-        path = node.get("heading_path", [])
-        subtree = [node] + [
-            row
-            for row in navigation
-            if path
-            and len(row.get("heading_path", [])) > len(path)
-            and row["heading_path"][: len(path)] == path
-        ]
+        subtree, seen = [node], {node.get("section_key")}
         for row in subtree:
+            for child in children.get(row.get("section_key"), []):
+                if child.get("section_key") not in seen:
+                    seen.add(child.get("section_key"))
+                    subtree.append(child)
             for value in _node_ranges(row, parsed, mode, notes):
                 intervals.extend(range_intervals(value, parsed, "planned section subtree"))
     return _compact_intervals(parsed, intervals)
@@ -351,6 +380,9 @@ def resolve_location(
     numbered = _number_selection(clue, navigation)
     if numbered is not None:
         return _subtree_ranges(numbered, navigation, parsed, mode, notes), "section"
+    chapter = _chapter_selection(clue, navigation)
+    if chapter is not None:
+        return _subtree_ranges(chapter, navigation, parsed, mode, notes), "section"
     if clue.isdigit():
         raise ValueError("ambiguous_numeric_location")
     keyed_path = re.fullmatch(

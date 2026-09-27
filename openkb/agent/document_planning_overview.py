@@ -87,6 +87,9 @@ def validate_overview(state, *, total_blocks=None, block_chars=None):
     from openkb.agent.document_range_validation import validate_ranges
     from openkb.sources import valid_id
 
+    if state.get("planning_strategy") == "global-navigation-v2":
+        _validate_navigation_parts(state)
+
     if total_blocks is None:
         windows = state.get("windows", [])
         if not isinstance(windows, list) or any(
@@ -156,3 +159,76 @@ def validate_overview(state, *, total_blocks=None, block_chars=None):
         for row in legacy
     ):
         raise ValueError("Invalid legacy overview fragments")
+
+
+def _validate_navigation_parts(state):
+    import json
+
+    from openkb.agent.document_global_context import validate_snapshot
+    from openkb.sources import valid_id
+
+    if not any(name in state for name in ("overview_input", "overview_parts", "overview_tasks")):
+        return  # Fresh state before the planning context is frozen.
+    planning = state.get("planning_snapshot")
+    if not validate_snapshot(planning):
+        raise ValueError("Invalid overview planning context")
+    context = json.loads(planning["context_json"])
+    expected = {
+        "basis": "navigation_summaries",
+        "snapshot_id": planning["id"],
+        "navigation_id": context["navigation_id"],
+        **context["summary_input"],
+        "projection": context["projection"],
+        "original_read_ranges": [],
+    }
+    if state.get("overview_input") != expected:
+        raise ValueError("Invalid overview input provenance")
+    parts = state.get("overview_parts")
+    if not isinstance(parts, dict):
+        raise ValueError("Invalid overview parts")
+    node_keys = {row["section_key"] for row in planning["nodes"]}
+    for key, part in parts.items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(part, dict)
+            or part.get("task") != key
+            or not isinstance(part.get("text"), str)
+            or not part["text"].strip()
+            or type(part.get("partial")) is not bool
+            or type(part.get("input_clipped")) is not bool
+            or not isinstance(part.get("sections"), list)
+            or any(not isinstance(item, str) or item not in node_keys for item in part["sections"])
+        ):
+            raise ValueError("Invalid overview part")
+        valid_id(part.get("response"))
+        if part.get("binding") is not None:
+            valid_id(part["binding"])
+    if "tasks" not in state:
+        return  # Published plan metadata carries parts, without the execution queue.
+    tasks, keys = state["tasks"], state.get("overview_tasks")
+    if (
+        not isinstance(tasks, dict)
+        or not isinstance(keys, list)
+        or any(not isinstance(key, str) or key not in tasks for key in keys)
+        or len(keys) != len(set(keys))
+        or not set(parts) <= set(keys)
+        or any(
+            not isinstance(task, dict) or (task.get("component") == "overview" and key not in keys)
+            for key, task in tasks.items()
+        )
+    ):
+        raise ValueError("Invalid overview task references")
+    for key in keys:
+        task = tasks[key]
+        if (
+            task.get("component") != "overview"
+            or not isinstance(task.get("kind"), str)
+            or task.get("kind") not in {"navigation_overview", "topic_summary", "overview_merge"}
+            or task.get("snapshot_id") != planning["id"]
+            or type(task.get("input_clipped")) is not bool
+            or not isinstance(task.get("sections"), list)
+            or any(not isinstance(item, str) or item not in node_keys for item in task["sections"])
+            or (task.get("status") == "accepted" and key not in parts)
+            or (key in parts and parts[key]["sections"] != task["sections"])
+        ):
+            raise ValueError("Invalid overview task identity")

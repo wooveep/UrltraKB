@@ -176,7 +176,9 @@ def test_legacy_window_state_cannot_supply_new_navigation_overview(tmp_path):
         assert cp.load_recovery(old_key, "markdown_plan") == old
 
 
-@pytest.mark.parametrize("broken", ["history", "snapshot"])
+@pytest.mark.parametrize(
+    "broken", ["history", "snapshot", "input", "task", "task_kind", "part", "part_identity"]
+)
 def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path, broken):
     from openkb.processing import ProcessingIncomplete
 
@@ -194,8 +196,20 @@ def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path, b
         state = cp.load_recovery(key, "markdown_plan")
         if broken == "history":
             state["overview_history"] = [None]
-        else:
+        elif broken == "snapshot":
             state["overview_snapshot"].pop("text")
+        elif broken == "input":
+            state["overview_input"] = []
+        elif broken == "task":
+            state["overview_tasks"] = ["missing"]
+        elif broken == "task_kind":
+            state["tasks"][state["overview_tasks"][0]]["kind"] = []
+        else:
+            part = next(iter(state["overview_parts"].values()))
+            if broken == "part":
+                part["text"] = ["invalid"]
+            else:
+                part["sections"] = ["section:unrelated"]
         cp.save_recovery(key, "markdown_plan", state)
     with pytest.raises(ProcessingIncomplete, match="planning_recovery_invalid"):
         run_windows(tmp_path, respond, settings=settings, resume=True)

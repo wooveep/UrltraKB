@@ -56,8 +56,13 @@ def plan_navigation_overview(
     snapshot = state["planning_snapshot"]
     context = json.loads(snapshot["context_json"])
     nodes = snapshot["nodes"]
-    if state.get("overview_snapshot"):
-        return
+    if overview := state.get("overview_snapshot"):
+        pending = any(
+            state["tasks"][key]["status"] == "pending" for key in state.get("overview_tasks", [])
+        )
+        if not overview.get("partial") or not pending:
+            return
+        state["overview_snapshot"] = None
     state.setdefault("overview_tasks", [])
     state.setdefault("overview_parts", {})
     state["overview_input"] = {

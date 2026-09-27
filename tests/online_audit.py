@@ -79,6 +79,7 @@ class Audit:
             ).hexdigest(),
             "options": measured["effective_options"],
             "measurement_id": measured["id"],
+            "decode_response": context.get("decode_response", True) if context else True,
         }
         with self.lock:
             self.requests.append(row)
@@ -111,7 +112,11 @@ class Audit:
                 "measurement": dict(measured),
             }
             try:
-                row["decoded_content"] = getattr(messages, "decode_response", lambda v: v)(content)
+                row["decoded_content"] = (
+                    getattr(messages, "decode_response", lambda v: v)(content)
+                    if request["decode_response"]
+                    else content
+                )
             except (ValueError, TypeError, KeyError) as exc:
                 row["decode_error"] = type(exc).__name__
             self.responses.append(row)
@@ -138,7 +143,13 @@ class Audit:
 
         @wraps(original_call)
         def call(model, messages, step_name, *args, **kwargs):
-            token = self.context.set({"messages": messages, "stage": step_name})
+            token = self.context.set(
+                {
+                    "messages": messages,
+                    "stage": step_name,
+                    "decode_response": kwargs.get("decode_response", True),
+                }
+            )
             try:
                 return original_call(model, messages, step_name, *args, **kwargs)
             finally:

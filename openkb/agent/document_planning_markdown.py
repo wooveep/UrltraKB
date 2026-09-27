@@ -24,6 +24,7 @@ def _markdown_rows(
     action = None
     region_level = 2
     current: dict[str, Any] | None = None
+    current_indent = 0
     lines = content.splitlines()
     table_groups: dict[int, tuple[str | None, str | None, bool]] = {}
     ends: dict[int, int] = {}
@@ -121,7 +122,13 @@ def _markdown_rows(
                 batch_notes.append(body)
             current = None
             continue
-        if item and (not match or _field_name(match.group(1)) in {"name", "title"}):
+        indent = len(line) - len(line.lstrip())
+        if (
+            item
+            and (not match or _field_name(match.group(1)) in {"name", "title", "target"})
+            and (current is None or indent <= current_indent)
+        ):
+            current_indent = indent
             if group:
                 current = {"group_kind": group, **({"title": body} if not match else {})}
                 if not match:
@@ -138,6 +145,7 @@ def _markdown_rows(
             and _field_name(match.group(1)) in {"kind", "type", "section"}
         ):
             current = {}
+            current_indent = indent
         if match and current is not None:
             if action:
                 current["group_action"] = action

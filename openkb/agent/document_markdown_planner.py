@@ -299,6 +299,7 @@ def plan_markdown_document(
             "schema": content_id(schema),
             "rules": module_revision("openkb.agent.document_protocol"),
             "response": module_revision("openkb.agent.document_planning_response"),
+            "markdown": module_revision("openkb.agent.document_planning_markdown"),
             "locations": module_revision("openkb.agent.document_planning_locations"),
             "candidates": module_revision("openkb.agent.document_planning_candidates"),
             "pages": module_revision("openkb.agent.document_planning_pages"),

@@ -53,30 +53,43 @@ def test_missing_credentials_fail_before_dispatch(tmp_path, monkeypatch):
         load_online_model(kb)
 
 
-def test_online_audit_records_real_receipt_without_global_profiler(kb_dir, tmp_path, model_service):
+@pytest.mark.parametrize("markdown", [False, True])
+def test_online_audit_records_real_receipt_without_global_profiler(
+    kb_dir, tmp_path, model_service, markdown
+):
     import sys
 
     from openkb.agent import compiler
+    from openkb.agent.evidence_wire import WireMessages
     from openkb.config import load_config, resolve_credential_bundle
     from openkb.processing import processing_scope
+    from tests.http_model_fixture import ModelReply
     from tests.online_step3 import Audit
 
-    model_service.respond = lambda _: {"sections": []}
+    expected = "# Overview\n\nAvailable navigation." if markdown else '{"sections": []}'
+    model_service.respond = lambda _: ModelReply(expected)
     settings = load_config(kb_dir / ".openkb/config.yaml")
     audit = Audit(tmp_path, "private-test-secret")
     before = sys.getprofile()
-    messages = [{"role": "user", "content": '{"stage":"index_structure","evidence":{}}'}]
+    messages = WireMessages(
+        [{"role": "user", "content": '{"stage":"index_structure","evidence":{}}'}], {}
+    )
     with audit.capture(), processing_scope(settings):
         assert sys.getprofile() is before
         result = compiler._llm_call(
-            settings["model"], messages, "index_structure", bundle=resolve_credential_bundle(kb_dir)
+            settings["model"],
+            messages,
+            "index_structure",
+            bundle=resolve_credential_bundle(kb_dir),
+            decode_response=not markdown,
         )
     assert sys.getprofile() is before
-    assert json.loads(result) == {"sections": []}
+    assert result == expected
     request = json.loads((tmp_path / "request-01.json").read_text())
     response = json.loads((tmp_path / "response-01.json").read_text())
     assert request["messages"] == messages
     assert response["usage"]["prompt_tokens"] > 0
-    assert json.loads(response["provider_content"]) == {"sections": []}
+    assert response["provider_content"] == expected
+    assert response["decoded_content"] == expected
     assert response["finish_reason"] == "stop"
     assert len(audit.requests) == 1

@@ -51,6 +51,7 @@ def _navigation(navigation: Any) -> list[dict[str, Any]]:
         rows.append(
             {
                 "section_key": f"section:{identity}",
+                "parent": f"section:{node['parent']}" if node.get("parent") is not None else None,
                 "title": node["title"],
                 "heading_path": path,
                 "original_range": [node["start"], node["end"]],

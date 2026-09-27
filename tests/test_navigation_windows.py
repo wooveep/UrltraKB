@@ -89,7 +89,13 @@ def test_bad_structure_item_does_not_discard_a_located_section(kb_dir, tmp_path,
                     "start_block": block["id"],
                     "anchor": "Distinct body instructions.",
                 },
-                {"title": "Invalid row", "start_block": "unknown"},
+                {
+                    "title": "Invalid row",
+                    "title_origin": [],
+                    "level": 1,
+                    "start_block": block["id"],
+                    "anchor": "Distinct body instructions.",
+                },
             ]
         }
 

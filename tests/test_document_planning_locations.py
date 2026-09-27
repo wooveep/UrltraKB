@@ -704,6 +704,20 @@ def test_numbered_locations_lists_and_sibling_range_use_real_tree():
     with pytest.raises(ValueError, match="ambiguous"):
         resolve_hint("3.1.2", duplicates, parsed)
     assert resolve_hint("Manual / 3.1.2", duplicates, parsed)[0] == [[0, 1]]
+    chapter = {
+        "section_key": "section:root",
+        "title": "3. Principles",
+        "parent": None,
+        "heading_path": ["Manual"],
+        "original_ranges": [[0, 4]],
+    }
+    assert resolve_hint("第 3 章 3.1.2–3.1.4（操作步骤）", [chapter, *rows], parsed)[0] == [[0, 3]]
+    assert resolve_hint("第 3 章 3.1.2 Prepare、3.2.1 Other", [chapter, *rows], parsed)[0] == [
+        [0, 1],
+        [3, 4],
+    ]
+    with pytest.raises(ValueError):
+        resolve_hint("第 4 章 3.1.2", [chapter, *rows], parsed)
 
 
 def test_update_region_needs_unique_existing_target_and_inherits_actual_type():
@@ -727,3 +741,36 @@ def test_update_region_needs_unique_existing_target_and_inherits_actual_type():
     assert len(result.pages) == 1
     assert result.pages[0].target == "entities/device" and result.pages[0].type == "product"
     assert result.deferred_suggestions[0]["reason"] == "update_target_unresolved"
+
+
+def test_explicit_section_key_expands_only_its_identified_descendants():
+    from openkb.agent.document_planning_locations import resolve_hint
+    from tests.test_document_orchestrator import _DummyParsed
+
+    rows = [
+        {
+            "section_key": "section:a",
+            "parent": None,
+            "heading_path": ["Repeated"],
+            "original_ranges": [[0, 1]],
+        },
+        {
+            "section_key": "section:a1",
+            "parent": "section:a",
+            "heading_path": ["Repeated", "A child"],
+            "original_ranges": [[1, 2]],
+        },
+        {
+            "section_key": "section:b",
+            "parent": None,
+            "heading_path": ["Repeated"],
+            "original_ranges": [[2, 3]],
+        },
+        {
+            "section_key": "section:b1",
+            "parent": "section:b",
+            "heading_path": ["Repeated", "B child"],
+            "original_ranges": [[3, 4]],
+        },
+    ]
+    assert resolve_hint("section:a", rows, _DummyParsed(4))[0] == [[0, 2]]

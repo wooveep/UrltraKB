@@ -47,6 +47,7 @@ def valid_section(row):
         and set(row) == {"title", "title_origin", "level", "start_block", "anchor"}
         and isinstance(row["title"], str)
         and 0 < len(row["title"]) <= 320
+        and isinstance(row["title_origin"], str)
         and row["title_origin"] in {"source", "inferred"}
         and type(row["level"]) is int
         and 1 <= row["level"] <= 9

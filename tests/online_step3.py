@@ -18,6 +18,7 @@ from collections import Counter
 from pathlib import Path
 
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+from openkb.processing import ProcessingIncomplete
 from tests.online_audit import Audit  # re-export for private replay tools
 from tests.online_audit import serial as serial
 from tests.online_model import load_online_model
@@ -239,7 +240,7 @@ def run(args):
                         },
                     )
             audit.write("compile-report.json", report)
-    except Exception as exc:
+    except (Exception, ProcessingIncomplete) as exc:
         error = {"type": type(exc).__name__, "message": str(exc)}
         raise
     finally:
