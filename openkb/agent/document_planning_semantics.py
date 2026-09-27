@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -76,7 +77,7 @@ def _label(value: str) -> str:
 
 
 def _field_name(value: str) -> str | None:
-    key = _label(value)
+    key = _label(unicodedata.normalize("NFKC", value))
     exact = next(
         (
             name
@@ -88,7 +89,13 @@ def _field_name(value: str) -> str | None:
     if exact:
         return exact
     plain = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", key)
-    plain = re.sub(r"^(?:建议(?:的)?|suggested\s+)", "", plain)
+    plain = re.sub(
+        r"^(?:建议(?:的)?|suggested\s+|additional\s+|supplementary\s+|补充|既有|已有|existing\s+)",
+        "",
+        plain,
+    )
+    if re.fullmatch(r"location (?:clues?|hints?)|(?:定位|位置)?线索", plain):
+        return "related"
     if plain != key and (field_name := _field_name(plain)):
         return field_name
     # Composite display labels preserve their recognizable field, without
@@ -100,6 +107,8 @@ def _field_name(value: str) -> str | None:
             return "title"
         if len(fields) == 1:
             return next(iter(fields))
+        if "purpose" in fields and fields <= {"purpose", "notes", "related"}:
+            return "purpose"
         if fields <= {"section", "context", "related"} and fields:
             return "related"
     if re.fullmatch(
@@ -117,6 +126,20 @@ def _field_name(value: str) -> str | None:
     if key.startswith("说明/"):
         return "purpose"
     return None
+
+
+def field_semantics(value: str) -> list[str]:
+    """A compound display label may contribute more than one known meaning."""
+    primary = _field_name(value)
+    fields = [primary or value.strip()]
+    parts = re.split(r"\s*/\s*", _label(unicodedata.normalize("NFKC", value)))
+    if primary == "purpose" and any(_field_name(part) == "notes" for part in parts):
+        fields.append("notes")
+    if primary in {"title", "name"} and re.match(
+        r"^(?:既有|已有|existing\s+)", _label(unicodedata.normalize("NFKC", value))
+    ):
+        fields.append("extends")
+    return fields
 
 
 def _kind(value: Any) -> str | None:

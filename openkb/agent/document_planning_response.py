@@ -33,6 +33,7 @@ from openkb.agent.document_planning_semantics import (
     annotation,
     deferred_suggestion,
     explicit_extension,
+    field_semantics,
     inherit_classification,
     matching_suggestions,
     promote_deferred,
@@ -178,6 +179,7 @@ def _markdown_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     group: str | None = None
+    explanatory = False
     current: dict[str, Any] | None = None
     lines = content.splitlines()
     table_groups: dict[int, str | None] = {}
@@ -191,6 +193,16 @@ def _markdown_rows(
         heading = _HEADING.match(line)
         if heading:
             label = heading.group(2).strip()
+            explanatory = bool(
+                re.match(
+                    r"^(?:notes?|qualifications?|limitations?)\b|"
+                    r"^(?:说明|限制|备注|补充说明)(?:$|[：:、/与及（( ])",
+                    _label(label),
+                )
+            )
+            if explanatory:
+                group, current = None, None
+                continue
             next_group = _kind(label) or _kind(label.removesuffix("页面"))
             if next_group:
                 group = label
@@ -207,6 +219,14 @@ def _markdown_rows(
         item = _ITEM.match(line)
         body = item.group(1) if item else line.strip()
         body = re.sub(r"\*\*([^*]+)\*\*", r"\1", body)
+        match = _FIELD.match(body)
+        if explanatory and not (
+            match and (_field_name(match.group(1)) in {"name", "title"} or current is not None)
+        ):
+            if batch_notes is not None:
+                batch_notes.append(body)
+            current = None
+            continue
         if item and " — " in body:
             parts = [part.strip() for part in body.split(" — ", 2)]
             if len(parts) >= 2 and parts[0] and parts[1]:
@@ -238,7 +258,6 @@ def _markdown_rows(
             rows.append(current)
             ends[id(current)] = line_index
             continue
-        match = _FIELD.match(body)
         if item and not match and (body.endswith(("。", ".", "！", "!", "；", ";"))):
             if batch_notes is not None:
                 batch_notes.append(body)
@@ -267,8 +286,8 @@ def _markdown_rows(
             ends[id(current)] = line_index
             if not any(current is row for row in rows):
                 rows.append(current)
-        elif not item and current is None and batch_notes is not None:
-            batch_notes.append(line.strip())
+        elif current is None and batch_notes is not None:
+            batch_notes.append(body)
     # Tables are independent of surrounding lists and column order.
     for index, line in enumerate(lines[:-2]):
         if not line.strip().startswith("|") or not re.fullmatch(r"[\s|:\-]+", lines[index + 1]):
@@ -434,10 +453,11 @@ def _normalize(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                 value = labelled_key_paths(value)
             elif label in {"heading path", "标题路径", "章节路径"} and value not in (None, ""):
                 value = {"heading_path": value}
-        if (name not in _ALIASES or value not in (None, "")) and value not in values.setdefault(
-            name, []
-        ):
-            values[name].append(value)
+        for name in field_semantics(str(key)):
+            if (name not in _ALIASES or value not in (None, "")) and value not in values.setdefault(
+                name, []
+            ):
+                values[name].append(value)
     result: dict[str, Any] = {}
     conflicts = []
     for name, choices in sorted(values.items()):
@@ -562,7 +582,22 @@ def accept_pages(
         origin = {"response": content_id(str(raw)), "entry": entry}
         if request_binding is not None:
             origin.update({key: request_binding[key] for key in ("request", "window")})
-        if kind is None:
+        deferred_reason = decision.reason
+        if extension:
+            extension_matches = matching_suggestions(extension, known.values(), known_annotations)
+            if (
+                len(extension_matches) != 1
+                or (
+                    kind is not None
+                    and (extension_matches[0].kind, extension_matches[0].type) != (kind, subtype)
+                )
+                or (
+                    len(extension_matches) == 1
+                    and distinct_scope(extension_matches[0], purpose, hints)
+                )
+            ):
+                deferred_reason = "extension_target_unresolved"
+        if kind is None or deferred_reason:
             result.deferred_suggestions.append(
                 deferred_suggestion(
                     original,
@@ -572,7 +607,7 @@ def accept_pages(
                     notes,
                     origin,
                     source_identity or getattr(parsed, "id", ""),
-                    decision.reason,
+                    deferred_reason,
                 )
             )
             continue
