@@ -88,3 +88,37 @@ PageIndex 272 项通过、2 项因缺少上游 PDF fixture 跳过；桌面 22 �
 本地 PageIndex 与模型推理分开配置：推理仍通过项目选择的 LLM 提供商，
 可使用本地模型或已配置的远程模型。当前补丁清单见
 `vendor/PageIndex/UPSTREAM.json`，验证结果见记录的 `pageindex_local_only`。
+
+## 导入追踪与慢响应
+
+知识库的 `timeout`（以及优先级更高的 `litellm.timeout`）现在会传入
+PageIndex 每次索引的 `llm_params`，与编译阶段使用同一设置；它不会被
+PageIndex 自身的短超时默认值覆盖，也不会泄漏到其他知识库。
+
+使用下面的命令完成一批 DeepSeek 文档导入并保存每次 HTTP 请求及原始响应：
+
+```sh
+.venv/bin/python -m scripts.import_documents_traced \
+  --kb examples/kb/Ocloudware --model deepseek/deepseek-flash \
+  --language zh-cn --timeout 1200 --concurrency 4 \
+  /absolute/path/to/document.pdf /absolute/path/to/another.pdf
+```
+
+密钥从目标目录的 `.env` 中读取 `LLM_API_KEY`。记录器仅在本次导入期间
+监听随机本机端口，再转发到指定模型服务；不会修改 `.env` 或把本机地址
+保存进知识库配置。默认上游为 `https://api.deepseek.com`。
+
+记录保存在 `.openkb/traces/<run-id>/`，不受文档失败回滚影响：
+
+- `manifest.json`：文档、SHA256、页数、模型、超时、执行状态。
+- `requests/<request-id>/request.json`：完整提示词、请求参数、阶段和时间。
+- `requests/<request-id>/response.json`：原始响应、思考与回答正文、用量、错误和耗时。
+- `requests/summary.json`：逐次请求与用量汇总，重试也单独记录。
+- `NN-console.log`、`NN-result.json`：原导入流程日志及结构化结果。
+
+保存输入缓存命中、未命中、输出和思考 token 的原始服务端字段。
+回答 token 按服务端的输出减思考 token 计算并明确标注；没有返回的字段
+保留为 `null`，汇总同时显示已知值与缺失请求数。失败后服务端未返回用量的
+请求无法统计实际计费量。记录器不重放历史回答，所有导入请求实际执行。
+Authorization、密钥与临时代理路由均会排除或脱敏，目录权限限当前用户。
+导入记录器仅支持非流式响应；已存在的成功文档遵循原有内容哈希去重。

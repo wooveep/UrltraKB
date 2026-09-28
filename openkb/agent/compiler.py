@@ -411,6 +411,9 @@ def _llm_call(
     """Single LLM call with animated progress and debug logging."""
     messages = _prepare_messages(model, messages)
     extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
+    from openkb.llm_runtime import audit_step_headers
+
+    extra_headers = audit_step_headers(extra_headers, step_name)
     if extra_headers:
         kwargs.setdefault("extra_headers", extra_headers)
     timeout = bundle.timeout if bundle is not None else get_timeout()
@@ -421,7 +424,12 @@ def _llm_call(
         kwargs.setdefault("base_url", bundle.base_url)
     logger.debug("LLM request [%s]:\n%s", step_name, _fmt_messages(messages))
     if kwargs:
-        logger.debug("LLM kwargs [%s]: %s", step_name, kwargs)
+        logger.debug(
+            "LLM kwargs [%s]: fields=%s, timeout=%s",
+            step_name,
+            sorted(kwargs),
+            kwargs.get("timeout"),
+        )
 
     spinner = _Spinner(step_name)
     spinner.start()
@@ -454,6 +462,9 @@ async def _llm_call_async(
     """Async LLM call with timing output and debug logging."""
     messages = _prepare_messages(model, messages)
     extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
+    from openkb.llm_runtime import audit_step_headers
+
+    extra_headers = audit_step_headers(extra_headers, step_name)
     if extra_headers:
         kwargs.setdefault("extra_headers", extra_headers)
     timeout = bundle.timeout if bundle is not None else get_timeout()
@@ -464,7 +475,12 @@ async def _llm_call_async(
         kwargs.setdefault("base_url", bundle.base_url)
     logger.debug("LLM request [%s]:\n%s", step_name, _fmt_messages(messages))
     if kwargs:
-        logger.debug("LLM kwargs [%s]: %s", step_name, kwargs)
+        logger.debug(
+            "LLM kwargs [%s]: fields=%s, timeout=%s",
+            step_name,
+            sorted(kwargs),
+            kwargs.get("timeout"),
+        )
 
     t0 = time.time()
 

@@ -10,7 +10,13 @@ from typing import Any
 
 from pageindex import IndexConfig, LocalClient
 
-from openkb.config import resolve_concurrency, resolve_effective_config
+from openkb.config import (
+    LlmCredentialBundle,
+    resolve_concurrency,
+    resolve_credential_bundle,
+    resolve_effective_config,
+    resolve_per_request_overrides,
+)
 from openkb.tree_renderer import render_summary_md
 
 logger = logging.getLogger(__name__)
@@ -110,7 +116,9 @@ def _write_long_doc_artifacts(
     return summary_path
 
 
-def _build_index_config(config: dict[str, Any]) -> IndexConfig:
+def _build_index_config(
+    config: dict[str, Any], *, bundle: LlmCredentialBundle | None = None
+) -> IndexConfig:
     """Build the PageIndex ``IndexConfig`` for local indexing.
 
     Forwards the KB's ``concurrency`` setting to PageIndex, which caps how many
@@ -125,6 +133,24 @@ def _build_index_config(config: dict[str, Any]) -> IndexConfig:
         "if_add_node_summary": True,
         "if_add_doc_description": True,
     }
+    headers, timeout, _ = resolve_per_request_overrides(config)
+    from openkb.llm_runtime import audit_step_headers
+
+    headers = audit_step_headers(headers, "pageindex.index")
+    params: dict[str, Any] = {}
+    if timeout is not None:
+        params["timeout"] = timeout
+    if headers:
+        params["extra_headers"] = headers
+    if bundle is not None:
+        if bundle.api_key:
+            params["api_key"] = bundle.api_key
+        if bundle.base_url:
+            params["api_base"] = bundle.base_url
+    if params:
+        # PageIndex scopes these per index; LiteLLM globals cannot override its
+        # own timeout default. Forward the same resolved KB settings as compile.
+        kwargs["llm_params"] = params
     concurrency = resolve_concurrency(config)
     if concurrency is not None:
         if "max_concurrency" in IndexConfig.model_fields:
@@ -148,7 +174,7 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
     config = resolve_effective_config(kb_dir)[0]
 
     model: str = config.get("model", "gpt-5.4")
-    index_config = _build_index_config(config)
+    index_config = _build_index_config(config, bundle=resolve_credential_bundle(kb_dir))
 
     client = LocalClient(
         model=model,

@@ -7,6 +7,16 @@ from typing import Any
 _runtime_extra_headers: dict[str, str] = {}
 
 
+def audit_step_headers(headers: dict[str, str], step: str) -> dict[str, str]:
+    """Label calls only for the opt-in loopback import recorder."""
+    import os
+    from urllib.parse import quote
+
+    if os.environ.get("OPENKB_LLM_AUDIT") != "1":
+        return headers
+    return {**headers, "X-OpenKB-Step": quote(step, safe="")}
+
+
 def set_extra_headers(headers: dict[str, str]) -> None:
     """Set the process-wide extra headers for LLM requests."""
     global _runtime_extra_headers
