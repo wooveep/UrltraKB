@@ -40,6 +40,21 @@ def _coordinate_evidence(evidence):
     return {**evidence, "blocks": blocks}
 
 
+def request_payload(messages):
+    """Read the logical request without assuming all data is in the last turn."""
+    task = json.loads(messages[-1]["content"])
+    if task.get("planning_dialogue") != "v1":
+        return task
+    payload = {**json.loads(messages[1]["content"]), **task}
+    if messages[-2]["role"] == "assistant":
+        carry = payload.get("carry", {})
+        payload["carry"] = {
+            **carry,
+            "overview": {**carry.get("overview", {}), "text": messages[-2]["content"]},
+        }
+    return payload
+
+
 def source_messages(evidence, task, rules, *, planning_context=None):
     # Encode and intern the frozen evidence before traversing any task field.
     # The stage belongs to the frozen envelope: generation/review use private
@@ -56,7 +71,7 @@ def source_messages(evidence, task, rules, *, planning_context=None):
         "stage": stage,
     }
     if planning_context is not None:
-        if stage != "planning" or task.get("subtask") not in {"overview", "pages"}:
+        if stage != "planning" or task.get("subtask") not in {"overview", "pages", "page_sources"}:
             raise ValueError("Planning context requires a planning task")
         # P is derived navigation, never original evidence. Optional excerpts
         # follow the frozen prefix and get their own real source bindings.
@@ -65,6 +80,14 @@ def source_messages(evidence, task, rules, *, planning_context=None):
             "blocks": [],
         }
         envelope["planning_context"] = planning_context
+        if "common_inputs" in planning_context:
+            from openkb.processing import ProcessingIncomplete
+
+            task = dict(task)
+            for key, value in planning_context["common_inputs"].items():
+                if key not in task or task[key] != value:
+                    raise ProcessingIncomplete("planning_recovery_identity_mismatch", "planning")
+                del task[key]
         if coordinate_evidence.get("blocks"):
             task = {**task, "supplemental_evidence": coordinate_evidence}
     prefix, identities = encode_payload(envelope)
@@ -79,6 +102,33 @@ def source_messages(evidence, task, rules, *, planning_context=None):
         create=True,
         namespace=(prefix.get("identity_protocol") or {}).get("namespace"),
     )
+    if planning_context is not None:
+        rows = [
+            {"role": "system", "content": SYSTEM},
+            {
+                "role": "user",
+                "content": json.dumps(prefix, ensure_ascii=False, separators=(",", ":")),
+            },
+        ]
+        overview = suffix.get("carry", {}).get("overview")
+        if suffix.get("subtask") == "pages" and isinstance(overview, dict) and overview.get("text"):
+            rows.append({"role": "assistant", "content": overview["text"]})
+            suffix["carry"]["overview"] = {
+                key: value for key, value in overview.items() if key != "text"
+            }
+        rows.append(
+            {
+                "role": "user",
+                # Retain the small identity envelope for existing binding/dispatch readers.
+                # Source text and the common navigation/configuration occur only in the prefix.
+                "content": json.dumps(
+                    {"evidence": prefix["evidence"], "planning_dialogue": "v1", **suffix},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            }
+        )
+        return WireMessages(rows, identities)
     return WireMessages(
         [
             {"role": "system", "content": SYSTEM},

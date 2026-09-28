@@ -7,6 +7,7 @@ import pytest
 
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+from openkb.agent.source_protocol import request_payload
 from openkb.navigation_evidence import evidence_descriptor
 from tests.test_document_markdown_planning import SETTINGS, _parsed
 from tests.test_document_orchestrator import _DummySource
@@ -78,7 +79,7 @@ def test_catalog_keeps_early_relevant_suggestion_with_honest_budget_projection(t
     def respond(messages, *, settings):
         import litellm
 
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         assert litellm.token_counter(model=settings["model"], messages=messages) <= capacity - 1024
         seen.append(body)
         if body["subtask"] == "overview":
@@ -103,7 +104,7 @@ def test_navigation_overview_is_reused_without_raw_window_receipts(tmp_path):
     seen = []
 
     def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         seen.append(body)
         return (
             "无需新增页面。"
@@ -126,7 +127,7 @@ def test_navigation_overview_is_reused_without_raw_window_receipts(tmp_path):
 
 def test_failed_overview_still_allows_pages_from_tree_summaries(tmp_path):
     def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         return "" if body["subtask"] == "overview" else "- Title: Preparation\n  Kind: concept"
 
     result = run_windows(tmp_path, respond)
@@ -141,7 +142,7 @@ def test_truncated_overview_keeps_closed_partial_artifact_without_full_snapshot(
     from openkb.agent.document_markdown_planner import _Response
 
     def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         return (
             "无需新增页面。"
             if body["subtask"] == "pages"
@@ -171,7 +172,7 @@ def test_legacy_window_state_cannot_supply_new_navigation_overview(tmp_path):
         )
         cp.save_recovery(old_key, "markdown_plan", old)
         new = _state(cp, new_key, [], True)
-        assert new["planning_strategy"] == "global-navigation-v2"
+        assert new["planning_strategy"] == "global-navigation-v3"
         assert new["overview_snapshot"] is None and new["tasks"] == {}
         assert cp.load_recovery(old_key, "markdown_plan") == old
 
@@ -185,7 +186,7 @@ def test_invalid_overview_history_is_rejected_at_the_resume_boundary(tmp_path, b
     def respond(messages, *, settings):
         return (
             "A readable overview."
-            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            if request_payload(messages)["subtask"] == "overview"
             else "无需新增页面。"
         )
 
@@ -223,7 +224,7 @@ def test_navigation_overview_rejects_fabricated_original_window_receipts(tmp_pat
     def respond(messages, *, settings):
         return (
             "A readable overview."
-            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            if request_payload(messages)["subtask"] == "overview"
             else "无需新增页面。"
         )
 
@@ -248,7 +249,7 @@ def test_global_capacity_retry_does_not_split_or_repeat_overview(tmp_path, monke
     calls = []
 
     def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         calls.append(body["subtask"])
         if body["subtask"] == "overview":
             return "The entire source describes a procedure."

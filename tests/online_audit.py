@@ -8,12 +8,15 @@ from collections import Counter
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from functools import wraps
 from importlib import import_module
+from os.path import commonprefix
 from pathlib import Path
 from threading import RLock
 from unittest.mock import patch
 
+from openkb.agent.source_protocol import request_payload
 from openkb.locks import atomic_write_text
 
 
@@ -66,7 +69,7 @@ class Audit:
         context = self.context.get()
         messages = context["messages"] if context else options.get("messages", [])
         try:
-            payload = json.loads(messages[-1]["content"])
+            payload = request_payload(messages)
         except (IndexError, KeyError, TypeError, ValueError):
             payload = {}
         row = {
@@ -80,8 +83,43 @@ class Audit:
             "options": measured["effective_options"],
             "measurement_id": measured["id"],
             "decode_response": context.get("decode_response", True) if context else True,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "options_semantics": "safe_display_projection_not_sdk_replay_parameters",
         }
         with self.lock:
+            content = messages[-1]["content"] if messages else ""
+            prefix = content.split(
+                ',"subtask":' if payload.get("planning_context") else ',"stage":', 1
+            )[0]
+            if payload.get("planning_dialogue") == "v1":
+                # The reusable source prefix is now a complete earlier message.
+                prefix = json.dumps(list(messages[:2]), ensure_ascii=False, separators=(",", ":"))
+                content = json.dumps(list(messages), ensure_ascii=False, separators=(",", ":"))
+            previous = self.requests[-1]["messages"] if self.requests else []
+            previous_content = (
+                json.dumps(previous, ensure_ascii=False, separators=(",", ":"))
+                if payload.get("planning_dialogue") == "v1"
+                else previous[-1]["content"]
+                if previous
+                else ""
+            )
+            blocks = payload.get("evidence", {}).get("blocks", [])
+            row.update(
+                prefix_sha256=hashlib.sha256(prefix.encode()).hexdigest(),
+                prefix_chars=len(prefix),
+                previous_common_prefix_chars=len(commonprefix([previous_content, content]))
+                if self.requests and self.requests[-1]["messages"]
+                else None,
+                original_block_occurrences=len(blocks),
+                unique_original_blocks=len({b.get("id") for b in blocks}),
+                planning_context_sha256=hashlib.sha256(
+                    json.dumps(
+                        payload["planning_context"], ensure_ascii=False, sort_keys=True
+                    ).encode()
+                ).hexdigest()
+                if "planning_context" in payload
+                else None,
+            )
             self.requests.append(row)
             number = len(self.requests)
             self.pending[measured["id"]] = (number, row, messages, measured)

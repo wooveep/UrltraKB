@@ -30,7 +30,22 @@ def heading_path(value: str | list[str]) -> list[str]:
 
 
 def _key_choices(value: str) -> list[str]:
+    annotated = _location_choices(value, separators=",，、;；")
+    if len(annotated) > 1 and all(
+        _SECTION_KEY.search(part)
+        and (re.match(r"`?section:", part) or re.fullmatch(r"[^（）()]+[（(].+[）)]", part))
+        for part in annotated
+    ):
+        return annotated
     keys = list(_SECTION_KEY.finditer(value))
+    # Keys inside a displayed group belong to that one annotated selection.
+    # Splitting them here leaves a dangling '(' / ')' and can silently lose a root key.
+    if any(
+        value[: key.start()].count("(") + value[: key.start()].count("（")
+        > value[: key.start()].count(")") + value[: key.start()].count("）")
+        for key in keys
+    ):
+        return [value]
     if len(keys) < 2 or any(
         not re.fullmatch(r"[\s`、,，;；]+", value[a.end() : b.start()])
         for a, b in zip(keys, keys[1:])
@@ -377,13 +392,16 @@ def resolve_location(
         if len(exact) != 1:
             raise ValueError("ambiguous_location")
         return _subtree_ranges(exact, navigation, parsed, mode, notes), "section"
-    numbered = _number_selection(clue, navigation)
-    if numbered is not None:
-        return _subtree_ranges(numbered, navigation, parsed, mode, notes), "section"
-    chapter = _chapter_selection(clue, navigation)
-    if chapter is not None:
-        return _subtree_ranges(chapter, navigation, parsed, mode, notes), "section"
+    if clue.casefold() in {"全文", "全书", "whole document", "entire document"} and parsed.blocks:
+        return [[0, len(parsed.blocks)]], "explicit_range"
+    # A finite wiki-link wrapper still names only explicit, validated keys.
+    wiki_key = r"\[\[(section:[A-Za-z0-9_-]+)\]\]"
+    if re.fullmatch(wiki_key + r"(?:\s*[,，、;；]\s*" + wiki_key + r")*", clue):
+        return locate(re.findall(wiki_key, clue))
     if clue.isdigit():
+        numbered = _number_selection(clue, navigation)
+        if numbered is not None:
+            return _subtree_ranges(numbered, navigation, parsed, mode, notes), "section"
         raise ValueError("ambiguous_numeric_location")
     keyed_path = re.fullmatch(
         _PATH_LABEL
@@ -395,6 +413,44 @@ def resolve_location(
         selected, scope = locate(keyed_path.group(2))
         annotation(selected, keyed_path.group(1), keyed_path.group(2))
         return selected, scope
+    displayed_key = re.fullmatch(r"(.+?)\s*[（(]\s*`?(section:[A-Za-z0-9_-]+)`?\s*[）)]", clue)
+    if displayed_key and not _SECTION_KEY.search(displayed_key.group(1)):
+        selected, scope = locate(displayed_key.group(2))
+        annotation(selected, displayed_key.group(1), displayed_key.group(2))
+        return selected, scope
+    displayed_group = re.fullmatch(r"([^（）()]+?)\s*[（(]\s*(`?section:[^（）()]+)[）)]", clue)
+    if displayed_group and not _SECTION_KEY.search(displayed_group[1]):
+        inside = displayed_group[2].strip()
+        descendants = re.fullmatch(r"(section:[A-Za-z0-9_-]+)\s+及其\s+(.+)", inside)
+        if descendants:
+            root = _literal_nodes(descendants[1], navigation)
+            if len(root) != 1:
+                raise ValueError("unknown_location")
+            selected, scope = locate(descendants[1])
+            children = _number_selection(descendants[2], navigation)
+            if not children or not within_target(
+                _subtree_ranges(children, navigation, parsed, mode, notes), selected, parsed
+            ):
+                raise ValueError("invalid_heading_number_range")
+            annotation(selected, displayed_group[1], descendants[1])
+            return selected, scope
+        parts = [part.strip(" `") for part in re.split(r"[,，、]", inside)]
+        if len(parts) > 1 and all(
+            re.fullmatch(r"section:[A-Za-z0-9_-]+|n[A-Za-z0-9_-]+", part) for part in parts
+        ):
+            keys = [part if part.startswith("section:") else "section:" + part for part in parts]
+            selected, scope = locate(keys)
+            annotation(selected, displayed_group[1], keys)
+            return selected, scope
+    # Explicit keys take precedence over display-only chapter numbers.
+    # Never discard an unknown key by resolving just the number before parentheses.
+    if not _SECTION_KEY.search(clue):
+        numbered = _number_selection(clue, navigation)
+        if numbered is not None:
+            return _subtree_ranges(numbered, navigation, parsed, mode, notes), "section"
+        chapter = _chapter_selection(clue, navigation)
+        if chapter is not None:
+            return _subtree_ranges(chapter, navigation, parsed, mode, notes), "section"
     unlabelled = re.sub(
         r"^(?:heading[ _]path|section[ _]key|章节路径|标题路径)\s*[：:]\s*", "", clue, flags=re.I
     )
@@ -457,7 +513,11 @@ def context_choices(value: Any, navigation: list[dict[str, Any]]) -> list[Any]:
     """Isolate optional clues before resolving, without stringifying containers."""
     choices = value if isinstance(value, list) else [value]
     if isinstance(value, str) and not _literal_nodes(value.strip(" `"), navigation):
-        choices = [part for choice in _location_choices(value) for part in _key_choices(choice)]
+        titles = _location_choices(value, separators=",，、;；\n")
+        if len(titles) > 1 and any(_literal_nodes(part, navigation) for part in titles):
+            choices = titles
+        else:
+            choices = [part for choice in _location_choices(value) for part in _key_choices(choice)]
     primary = next((item for item in choices if _has_section_key(item)), None)
     comments = [item for item in choices if _is_path_annotation(item)]
     if primary is not None and comments:

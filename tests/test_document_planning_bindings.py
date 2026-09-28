@@ -281,9 +281,6 @@ def test_global_prefix_is_stable_and_only_supplemental_original_text_gets_alias_
         assert payload["evidence"]["blocks"] == []
         assert len(payload["supplemental_evidence"]["blocks"]) == 1
         assert [row["block_id"] for row in bindings[-1]["aliases"]] == [parsed.blocks[i].id]
-    assert (
-        requests[0][-1]["content"].split(',"plan_protocol"')[0]
-        == requests[1][-1]["content"].split(',"plan_protocol"')[0]
-    )
+    assert requests[0][:2] == requests[1][:2]
     assert bindings[0]["aliases"][0]["alias"] == bindings[1]["aliases"][0]["alias"]
     assert bindings[0]["aliases"][0]["range"] != bindings[1]["aliases"][0]["range"]

@@ -391,13 +391,14 @@ def test_real_200000_token_assembly_keeps_only_bounded_descriptors(kb_dir, tmp_p
         kb_dir,
         path,
         {
+            "window_tokens": 200000,
             "execution": {
                 "context_tokens": 260000,
                 "max_tokens": None,
                 "request_timeout": 30,
                 "stage_timeout": 120,
                 "document_timeout": 180,
-            }
+            },
         },
     )
     assert saved["status"] == "enhanced", saved

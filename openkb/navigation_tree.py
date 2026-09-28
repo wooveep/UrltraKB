@@ -137,6 +137,8 @@ def basic_tree(kb_dir, source, parsed, *, reader=None):
 
 
 def validate_nodes(nodes, count):
+    from openkb.navigation_metadata import validate_metadata
+
     if not isinstance(nodes, list) or not nodes:
         raise ValueError("Missing navigation ranges")
     seen = {}
@@ -145,7 +147,7 @@ def validate_nodes(nodes, count):
     for node in nodes:
         if (
             not isinstance(node, dict)
-            or set(node)
+            or set(node) - {"structure", "summary_details", "pdf_page_range"}
             != {
                 "id",
                 "parent",
@@ -169,6 +171,7 @@ def validate_nodes(nodes, count):
             or node["structure_origin"] not in {"native", "basic", "inferred"}
         ):
             raise ValueError("Invalid navigation node")
+        validate_metadata(node)
         parent = node["parent"]
         if parent is None:
             if seen or node["start"] != 0 or node["end"] != count:
@@ -176,12 +179,22 @@ def validate_nodes(nodes, count):
         elif (
             not isinstance(parent, str)
             or parent not in seen
-            or not seen[parent]["start"] <= node["start"] <= node["end"] <= seen[parent]["end"]
+            or not seen[parent]["start"] <= node["start"] <= node["end"]
+            or (
+                node["end"] > seen[parent]["end"]
+                and not ("pdf_page_range" in node and "pdf_page_range" in seen[parent])
+            )
             or (
                 parent in last_sibling
                 and node["start"] < last_sibling[parent]["end"]
                 and node["start"] != last_sibling[parent]["start"]
                 and node["start"] != last_sibling[parent]["end"] - 1
+                and not (
+                    "pdf_page_range" in node
+                    and "pdf_page_range" in last_sibling[parent]
+                    and node["pdf_page_range"]["start"]
+                    == last_sibling[parent]["pdf_page_range"]["end"]
+                )
             )
         ):
             raise ValueError("Invalid navigation parent or overlapping sibling")

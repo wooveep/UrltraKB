@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 
+from openkb.agent.document_range_validation import merged_intervals
+
 PROTOCOL = "page-evidence-scope-v1"
 
 
@@ -49,6 +51,11 @@ def evidence_scope(parsed, navigation, occurrences, unresolved, *, declared, war
         if declared
         else "unassessed",
         "read_sections": sections,
+        "read_ranges": [
+            {"block_index": index, "start_char": left, "end_char": right}
+            for index, spans in sorted(intervals.items())
+            for left, right in merged_intervals(spans)
+        ],
         "unresolved_hints": deepcopy(unresolved),
         "warnings": list(warnings),
     }
@@ -59,7 +66,8 @@ def validate_scope(value):
         return None
     if (
         not isinstance(value, dict)
-        or set(value) != {"protocol", "status", "read_sections", "unresolved_hints", "warnings"}
+        or set(value) - {"read_ranges"}
+        != {"protocol", "status", "read_sections", "unresolved_hints", "warnings"}
         or value["protocol"] != PROTOCOL
         or value["status"] not in {"unassessed", "located", "partial", "unavailable"}
         or any(
@@ -88,4 +96,16 @@ def validate_scope(value):
             raise ValueError("Invalid unresolved page hint")
     if any(not isinstance(note, str) for note in value["warnings"]):
         raise ValueError("Invalid page scope warnings")
+    if "read_ranges" in value:
+        if not isinstance(value["read_ranges"], list):
+            raise ValueError("Invalid page read ranges")
+        for span in value["read_ranges"]:
+            if (
+                not isinstance(span, dict)
+                or set(span) != {"block_index", "start_char", "end_char"}
+                or any(type(n) is not int for n in span.values())
+                or span["block_index"] < 0
+                or not 0 <= span["start_char"] < span["end_char"]
+            ):
+                raise ValueError("Invalid page read range")
     return deepcopy(value)

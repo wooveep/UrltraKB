@@ -52,6 +52,38 @@ _NO_PAGES = re.compile(
 _PLACEHOLDER = re.compile(
     r"^(?:待补充|无内容|暂无|n/?a|none|placeholder|todo|无法判断|没有足够信息)[。.!\s]*$", re.I
 )
+_EMPTY_SET = re.compile(r"(?:[（(]\s*)?(?:无|none|n/a|[-—–]+)(?:\s*[）)])?", re.I)
+
+
+def _empty_set_row(row, navigation, parsed, entity_types, existing_targets, catalog_titles):
+    """Only whole-cell placeholders lacking usable page identity or scope are empty."""
+    from openkb.agent.document_planning_locations import resolve_hint
+
+    title = (
+        _first_text(row.get("title"))
+        or _first_text(row.get("name"))
+        or _first_text(row.get("target"))
+    )
+    if not _EMPTY_SET.fullmatch(title.strip(" *`")):
+        return False
+    target = _first_text(row.get("target")) or title
+    if target in existing_targets or any(
+        normalized_name(target) == normalized_name(name) for name in catalog_titles.values()
+    ):
+        return False
+    if any(
+        _kind(row.get(key)) or row.get(key) in entity_types
+        for key in ("kind", "type", "group_kind")
+    ):
+        return False
+    for hint in _hints(row):
+        try:
+            ranges, _ = resolve_hint(hint["value"], navigation, parsed)
+        except ValueError:
+            continue
+        if ranges:
+            return False
+    return True
 
 
 @dataclass
@@ -411,6 +443,12 @@ def accept_pages(
         result.rejected.append({"reason": "pages_unparseable", "candidate": str(raw or "")[:300]})
     for entry, original in enumerate(rows):
         row, conflicts = _normalize(original)
+        if not conflicts and _empty_set_row(
+            row, navigation, parsed, entity_types, existing_targets, catalog_titles or {}
+        ):
+            result.no_pages = True
+            result.batch_notes.extend(str(row[key]) for key in ("purpose", "notes") if row.get(key))
+            continue
         notes = ["字段存在不同表达：" + field for field in conflicts]
         for field_name, value in row.items():
             if field_name == "notes":

@@ -6,6 +6,7 @@ import json
 import math
 from typing import Any
 
+from openkb.navigation_metadata import hint_metadata
 from openkb.processing import ProcessingIncomplete
 
 
@@ -111,6 +112,7 @@ def navigation_view(
                 "visibility": visibility,
                 "summary": node.get("summary", ""),
                 "summary_origin": node.get("summary_origin", "unavailable"),
+                **hint_metadata(node),
             }
         )
     # This is a token allowance for navigation within the full request. The

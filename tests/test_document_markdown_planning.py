@@ -7,7 +7,6 @@ import pytest
 
 from openkb.agent.document_markdown_planner import (
     _call,
-    _catalog_entries,
     _Response,
     _source_references,
     _state,
@@ -17,6 +16,7 @@ from openkb.agent.document_page_evidence import page_occurrence_descriptors
 from openkb.agent.document_plan import DocumentPlan, OverviewPlan, from_dict, to_dict
 from openkb.agent.document_planning_report import ordered_fragments
 from openkb.agent.document_planning_response import accept_overview, accept_pages
+from openkb.agent.document_planning_runtime import read_catalog
 from openkb.agent.document_protocol import plan_messages
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
 from openkb.planning_coverage import planning_coverage, validate_planning_coverage
@@ -276,7 +276,7 @@ def test_unique_exposed_catalog_title_can_update_existing_page(tmp_path):
     wiki = tmp_path / "wiki"
     (wiki / "concepts").mkdir(parents=True)
     (wiki / "concepts/notes.md").write_text("# Notes\n\nExisting note.")
-    catalog = _catalog_entries(wiki, {"concepts/notes"})
+    catalog, _ = read_catalog(wiki, {"concepts/notes"})
     assert catalog == [("concepts/notes", "Notes", "Existing note.")]
     result = accept_pages(
         "- 名称：Notes\n  类别：concept\n  主体章节：操作",
@@ -1125,6 +1125,61 @@ def test_a_and_b_share_source_prefix_and_dispatch_without_json_format(monkeypatc
     _call(pages, SETTINGS, RequestLimits.from_config(SETTINGS), None, None, "pages")
     assert all(row["decode_response"] is False for row in captured)
     assert all("response_format" not in row for row in captured)
+
+
+def test_planning_tasks_do_not_carry_other_branch_instructions():
+    def rules(subtask, kind):
+        messages = plan_messages(
+            {"source_id": "a" * 32, "version_id": "b" * 64, "parse_id": "c" * 64},
+            {},
+            {"kind": kind},
+            [],
+            "",
+            ["product"],
+            "",
+            subtask=subtask,
+            planning_context={"navigation_style": "legacy_pdf"},
+        )
+        return json.loads(messages[-1]["content"])["task_rules"]
+
+    overview = rules("overview", "navigation_overview")
+    topic = rules("overview", "topic_summary")
+    merge = rules("overview", "overview_merge")
+    pages = rules("pages", "global_pages")
+    grouped_pages = rules("pages", "topic_group")
+    assert "key themes and findings" in overview
+    assert "partial summaries" not in overview and "topic group" not in overview
+    assert "selected topic group" in topic and "coarse whole-document directory" in topic
+    assert "strictly shorter" in merge and "chapters not supplied" in merge
+    for task in (overview, topic, merge):
+        assert "Create pages" not in task
+    assert "target topic group" not in pages
+    assert grouped_pages.startswith(pages)
+    assert "earlier accepted suggestions" in grouped_pages
+    assert "empty existing-page catalogue is an initial wiki" not in pages
+    assert "readable Title" in pages and "are optional" in pages
+    with pytest.raises(ValueError, match="Invalid Markdown planning subtask"):
+        rules("unknown", "navigation_overview")
+
+
+def test_aligned_markdown_keeps_optional_locations_and_does_not_enforce_page_counts():
+    raw = (
+        "## Create pages\n| Title | Kind |\n|---|---|\n"
+        + "\n".join(f"| Mechanism {i} | concept |" for i in range(4))
+        + "\n| Named system | product |\n"
+        "## Update pages\nNone\n## Notes\nA related system only needs a cross-link."
+    )
+    result = accept_pages(
+        raw,
+        navigation=_navigation(),
+        target=[[0, 2]],
+        parsed=_parsed(),
+        entity_types=["product"],
+        existing_targets=set(),
+    )
+    assert len(result.pages) == 5 and not result.rejected
+    assert result.pages[-1].kind == "entity" and result.pages[-1].type == "product"
+    assert "A related system only needs a cross-link." in result.batch_notes
 
 
 def test_capacity_retry_preserves_overview_without_restoring_per_window_pages(

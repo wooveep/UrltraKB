@@ -61,6 +61,7 @@ def inherit_publication_state(final: DocumentPlan, saved: Any) -> None:
                     "scope_resolution",
                     "evidence_scope",
                     "planning_notes",
+                    "location_hints",
                     "state",
                 ):
                     setattr(page, field, deepcopy(getattr(old, field)))

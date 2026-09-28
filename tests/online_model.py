@@ -28,12 +28,16 @@ class OnlineModel:
     settings: dict[str, Any] = field(repr=False)
     bundle: LlmCredentialBundle = field(repr=False)
 
+    def model_options(self, *, stage=None):
+        """Build SDK options from configuration; audit projections are not replay bodies."""
+        return compilation_model_options(self.settings, stage=stage)
+
     def description(self) -> dict[str, Any]:
         """Allowlisted metadata, without credentials, headers, or endpoint URLs."""
         return {
             "config_kb": str(self.config_kb),
             "model": self.settings["model"],
-            "planning_options": compilation_model_options(self.settings, stage="planning"),
+            "planning_options": self.model_options(stage="planning"),
             "credential_present": bool(self.bundle.api_key),
             "custom_endpoint": bool(self.bundle.base_url),
         }

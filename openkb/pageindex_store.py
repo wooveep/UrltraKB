@@ -93,7 +93,15 @@ class _NativeStorage(SQLiteStorage):
                     summary=node["summary"],
                     source_range={
                         key: node[key]
-                        for key in ("title_origin", "summary_origin", "structure_origin")
+                        for key in (
+                            "title_origin",
+                            "summary_origin",
+                            "structure_origin",
+                            "structure",
+                            "summary_details",
+                            "pdf_page_range",
+                        )
+                        if key in node
                     },
                 )
                 bind(branch.get("nodes", []), node["id"])

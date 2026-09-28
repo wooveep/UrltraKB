@@ -55,7 +55,12 @@ def test_repeated_contents_entries_keep_distinct_occurrences(kb_dir, tmp_path, m
         assert payload["stage"] == "index_location"
         candidates = payload["candidates"]
         assert len(candidates) == 2 and candidates[0]["id"] != candidates[1]["id"]
-        headings = [b for b in payload["evidence"]["blocks"] if b["kind"] == "heading"]
+        # A complete preceding reading unit can also contain the Contents title.
+        headings = [
+            b
+            for b in payload["evidence"]["blocks"]
+            if b["kind"] == "heading" and b["text"].strip() == "# Overview"
+        ]
         return {
             "locations": [
                 {"id": row["id"], "location": {"start_block": block["id"], "anchor": "Overview"}}
@@ -72,20 +77,30 @@ def test_repeated_contents_entries_keep_distinct_occurrences(kb_dir, tmp_path, m
 
 
 def test_pdf_contents_stops_before_body_pages(kb_dir, tmp_path, model_service):
+    from tests.test_pdf_navigation import contents_response
+
     path = tmp_path / "contents.pdf"
     pdf = pymupdf.open()
-    for text in ("Contents", "Install .... 3", "Install\nUse version 7."):
+    for text in (
+        "Cover",
+        "Contents\nInstall .... 1\nRepair .... 2",
+        "Install\nUse version 7.",
+        "Repair\nRestart.",
+    ):
         page = pdf.new_page()
         page.insert_text((50, 50), text)
     pdf.save(path)
     pdf.close()
+    model_service.respond = contents_response
     _, parsed, _, saved = prepare(kb_dir, path, {})
     assert saved["status"] == "enhanced", saved
-    assert [n["title"] for n in saved["nodes"]][1:] == ["Install"]
-    assert saved["nodes"][1]["start"] == next(
+    assert [n["title"] for n in saved["nodes"]][1:] == ["Preface", "Install", "Repair"]
+    assert saved["nodes"][2]["start"] == next(
         b.order for b in parsed.blocks if b.location["page"] == 3
     )
-    assert not model_service
+    names = [json.loads(call["messages"][-1]["content"])["legacy_task"] for call in model_service]
+    assert names.count("toc_detector_single_page") == 3
+    assert "toc_index_extractor" in names and "generate_toc_init" not in names
 
 
 def test_image_bearing_html_retains_heading_and_table(kb_dir, tmp_path):
@@ -123,14 +138,9 @@ def test_failed_later_window_preserves_native_headings(kb_dir, tmp_path, model_s
     assert {n["title"] for n in saved["nodes"]} >= {"First", "Last"}
 
 
-def test_pdf_shared_block_headings_preserve_parent_containment(kb_dir, tmp_path, model_service):
-    path = tmp_path / "shared.pdf"
-    pdf = pymupdf.open()
-    for text in ("Alpha", "Beta\nGamma", "Delta"):
-        page = pdf.new_page()
-        page.insert_text((50, 50), text)
-    pdf.save(path)
-    pdf.close()
+def test_text_shared_block_headings_preserve_parent_containment(kb_dir, tmp_path, model_service):
+    path = tmp_path / "shared.md"
+    path.write_text("Alpha\n\nBeta\nGamma\n\nDelta")
 
     def respond(body):
         payload = json.loads(body["messages"][-1]["content"])
@@ -167,6 +177,8 @@ def test_pdf_shared_block_headings_preserve_parent_containment(kb_dir, tmp_path,
 
 
 def test_pdf_contents_and_body_can_share_one_page(kb_dir, tmp_path, model_service):
+    from tests.test_pdf_navigation import response
+
     path = tmp_path / "same-page.pdf"
     pdf = pymupdf.open()
     page = pdf.new_page()
@@ -174,30 +186,47 @@ def test_pdf_contents_and_body_can_share_one_page(kb_dir, tmp_path, model_servic
         page.insert_text((50, 50 + i * 60), text)
     pdf.save(path)
     pdf.close()
+
+    def respond(body):
+        task = json.loads(body["messages"][-1]["content"])
+        if task["legacy_task"] == "generate_toc_init":
+            return [{"structure": "1", "title": "Install", "physical_index": 1}]
+        if task["legacy_task"] == "check_title_appearance_in_start":
+            return {"start_begin": "no"}
+        return response(body)
+
+    model_service.respond = respond
     _, parsed, _, saved = prepare(kb_dir, path, {})
     assert saved["status"] == "enhanced", saved
     assert len(parsed.blocks) == 4
     assert [n["title"] for n in saved["nodes"]][1:] == ["Install"]
-    assert saved["nodes"][1]["start"] == 2
-    assert not model_service
+    assert saved["nodes"][1]["start"] == 0
+    assert saved["nodes"][1]["end"] == 4
+    assert saved["nodes"][1]["pdf_page_range"] == {"start": 1, "end": 1}
 
 
-def test_pdf_bookmarks_take_precedence_over_printed_contents(kb_dir, tmp_path, model_service):
+def test_pdf_bookmarks_do_not_bypass_legacy_reading(kb_dir, tmp_path, model_service):
+    from tests.test_pdf_navigation import contents_response
+
     path = tmp_path / "bookmarks.pdf"
     pdf = pymupdf.open()
-    for text in ("Contents\nInstall .... 2\nRepair .... 3", "Install", "Repair"):
+    for text in ("Cover", "Contents\nInstall .... 1\nRepair .... 2", "Install", "Repair"):
         page = pdf.new_page()
         page.insert_text((50, 50), text)
-    pdf.set_toc([[1, "Install", 2], [1, "Repair", 3]])
+    pdf.set_toc([[1, "Wrong bookmark", 2]])
     pdf.save(path)
     pdf.close()
+    model_service.respond = contents_response
     _, _, _, saved = prepare(kb_dir, path, {})
     assert saved["status"] == "enhanced", saved
-    assert [n["title"] for n in saved["nodes"]][1:] == ["Install", "Repair"]
-    assert not model_service
+    assert [n["title"] for n in saved["nodes"]][1:] == ["Preface", "Install", "Repair"]
+    assert any(
+        json.loads(c["messages"][-1]["content"])["legacy_task"] == "toc_transformer"
+        for c in model_service
+    )
 
 
-def test_unresolved_contents_between_shared_starts_remains_declared(
+def test_pdf_unusable_model_output_keeps_saved_source_and_declares_gap(
     kb_dir, tmp_path, model_service
 ):
     path = tmp_path / "unresolved.pdf"
@@ -218,10 +247,10 @@ def test_unresolved_contents_between_shared_starts_remains_declared(
 
     model_service.respond = respond
     source, _, _, saved = prepare(kb_dir, path, {})
-    assert stages == ["index_location", "index_structure"]
+    assert stages == ["index_pdf_toc_detector_single_page"] * 2 + ["index_pdf_generate_toc_init"]
     assert saved["status"] == "degraded", saved
     assert saved["windows"][0]["status"] == "basic"
-    assert saved["windows"][0]["unlocated"][0]["title"] == "Missing"
+    assert saved["windows"][0]["structure_issues"]["reason"] == "pdf_navigation_partial"
     from openkb.navigation import read_navigation
 
     restored = read_navigation(kb_dir, source, identity=saved["id"])

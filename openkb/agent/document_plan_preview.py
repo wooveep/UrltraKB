@@ -53,7 +53,39 @@ def render_plan_preview(plan: DocumentPlan) -> str:
     if plan.overview.limitations:
         lines.extend(["### 限制", "", *[f"- {item}" for item in plan.overview.limitations], ""])
     coverage = plan.metadata.get("planning_coverage")
-    if isinstance(coverage, dict):
+    views = plan.metadata.get("planning_ranges")
+    if isinstance(views, dict):
+        selected, reading = views["selection"], views["reading"]
+        total = selected["readable_chars"]
+        selected_chars = selected["precise_chars"] + selected["fallback_chars"]
+
+        def range_ratio(value):
+            return "不可计算" if value is None else f"{value:.1%}"
+
+        read_status = {
+            "not_started": "尚未执行",
+            "unknown": "未知／未观测",
+            "observed": "已观测",
+            "partially_observed": "部分已观测",
+        }[reading["status"]]
+        lines.extend(
+            [
+                "## 规划选择与实际读取",
+                "",
+                f"计划已选主体范围：{range_ratio(selected_chars / total if total else None)}"
+                f"（{selected_chars} 字；仅为规划选择）",
+                f"其中较宽范围：{range_ratio(selected['fallback_ratio'])}"
+                f"（{selected['fallback_chars']} 字）",
+                f"未纳入页面计划：{range_ratio(selected['unrouted_ratio'])}"
+                f"（{selected['unrouted_chars']} 字）",
+                f"实际已读取范围：{read_status}；{range_ratio(reading['read_ratio'])}",
+                f"已执行但跳过：{len(reading['skipped'])} 页；"
+                f"存在未定位线索：{len(reading['unresolved'])} 页。",
+                "未纳入计划不代表导入失败，原文仍可查询；选择和读取比例都不证明语义完整。",
+                "",
+            ]
+        )
+    elif isinstance(coverage, dict):
         if coverage.get("protocol") == "document-planning-coverage-v2":
 
             def render_ratio(name: str) -> str:
@@ -93,7 +125,11 @@ def render_plan_preview(plan: DocumentPlan) -> str:
                     "",
                 ]
             )
-    scopes = plan.metadata.get("page_scopes")
+    scopes = (
+        views["selection"]["page_scopes"]
+        if isinstance(views, dict)
+        else plan.metadata.get("page_scopes")
+    )
     if isinstance(scopes, dict):
         counts = scopes["by_resolution"]
         lines.extend(

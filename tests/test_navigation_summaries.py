@@ -191,3 +191,175 @@ def test_summary_decode_rejection_retains_path_and_reason(
         )
     assert resumed["reason"] == reason
     assert stages == ["index_structure", "index_summary", "index_summary"]
+
+
+@pytest.mark.parametrize("missing_child", [False, True])
+def test_cross_window_parent_uses_child_hints_and_direct_introduction(
+    kb_dir, tmp_path, model_service, missing_child
+):
+    path = tmp_path / "parent.md"
+    path.write_text(
+        "# Parent\n\nParent introduction and condition.\n\n## Child A\n\n"
+        + "\n\n".join("ALREADY_SUMMARIZED_A " * 30 for _ in range(4))
+        + "\n\n## Child B\n\n"
+        + "\n\n".join("CHILD_B_BODY " * 30 for _ in range(4))
+        + "\n\n# Next\n\nOther topic."
+    )
+    requests = []
+
+    def respond(body):
+        p = json.loads(body["messages"][-1]["content"])
+        requests.append(p)
+        if p["stage"] == "index_structure":
+            return {"sections": []}
+        return {
+            "summaries": [
+                {
+                    "id": n["id"],
+                    "summary": None
+                    if missing_child and n["title"] == "Child B"
+                    else n["title"] + " themes and conditions.",
+                }
+                for n in p["nodes"]
+            ]
+        }
+
+    model_service.respond = respond
+    source, parsed, settings, saved = prepare(
+        kb_dir, path, {"summaries": True, "window_tokens": 600}
+    )
+    parent = next(n for n in saved["nodes"] if n["title"] == "Parent")
+    merges = [p for p in requests if "summary_input" in p]
+    assert len(merges) == 1
+    p = merges[0]
+    original = " ".join(b["text"] for b in p["evidence"]["blocks"])
+    assert "Parent introduction and condition." in original
+    assert "ALREADY_SUMMARIZED_A" not in original and "CHILD_B_BODY" not in original
+    assert {n["title"] for n in p["summary_input"]["inputs"]} == {"Child A", "Child B"}
+    details = parent["summary_details"]
+    assert details["basis"] == "mixed"
+    assert details["status"] == ("partial" if missing_child else "complete")
+    child_b = next(n for n in saved["nodes"] if n["title"] == "Child B")
+    if missing_child:
+        assert all(right <= child_b["start"] for left, right in details["covered_ranges"])
+    before = len(model_service)
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        restored = prepare_navigation(
+            kb_dir, source, parsed, settings, bundle=resolve_credential_bundle(kb_dir)
+        )
+    assert restored["id"] == saved["id"] and len(model_service) == before
+
+
+def test_completed_summary_is_reused_when_targets_are_regrouped(kb_dir, tmp_path, model_service):
+    from copy import deepcopy
+
+    from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+    from openkb.navigation_enhancement import IndexAllowance
+    from openkb.navigation_evidence import evidence_descriptor, read_evidence_group
+    from openkb.navigation_requests import summarize_group
+    from openkb.processing import processing_scope
+
+    path = tmp_path / "regroup.md"
+    path.write_text("# First\n\nOriginal one.\n\n# Second\n\nOriginal two.")
+    source, parsed, settings, saved = prepare(kb_dir, path, {"summaries": False})
+    evidence = read_evidence_group(
+        kb_dir, source, parsed, evidence_descriptor(source, parsed, 0, len(parsed.blocks))
+    )
+    nodes = deepcopy(saved["nodes"][1:])
+    for n in nodes:
+        n.pop("summary_details", None)
+    requests = []
+
+    def respond(body):
+        payload = json.loads(body["messages"][-1]["content"])
+        requests.append([n["title"] for n in payload["nodes"]])
+        return {
+            "summaries": [
+                {"id": n["id"], "summary": n["title"] + " hint."} for n in payload["nodes"]
+            ]
+        }
+
+    model_service.respond = respond
+    with (
+        kb_ingest_lock(kb_dir / ".openkb"),
+        processing_scope(settings) as budget,
+        CompilationCheckpoints(
+            kb_dir, source, parsed, settings, resolve_credential_bundle(kb_dir)
+        ) as checkpoints,
+    ):
+        allowance = IndexAllowance(budget, {}, False)
+        summarize_group(
+            evidence,
+            deepcopy(nodes[:1]),
+            settings,
+            resolve_credential_bundle(kb_dir),
+            allowance,
+            checkpoints,
+            saved["profile"],
+        )
+        summarize_group(
+            evidence,
+            nodes,
+            settings,
+            resolve_credential_bundle(kb_dir),
+            allowance,
+            checkpoints,
+            saved["profile"],
+        )
+    assert requests == [["First"], ["Second"]]
+    assert all(n["summary_details"]["basis"] == "original" for n in nodes)
+
+
+def test_parent_summary_inheritance_checks_child_dependencies():
+    from copy import deepcopy
+
+    from openkb.navigation_anchors import inherit_summaries
+    from openkb.navigation_summary_inputs import child_signature
+
+    child = {
+        "id": "child",
+        "parent": "parent",
+        "title": "Child",
+        "title_origin": "source",
+        "start": 1,
+        "end": 4,
+        "summary": "A condition.",
+        "summary_origin": "model",
+        "summary_details": {
+            "status": "complete",
+            "reason": None,
+            "covered_ranges": [[1, 4]],
+            "basis": "original",
+        },
+    }
+    parent = {
+        "id": "parent",
+        "parent": None,
+        "title": "Parent",
+        "title_origin": "source",
+        "start": 0,
+        "end": 4,
+        "summary": "Parent hint.",
+        "summary_origin": "model",
+        "summary_details": {
+            "status": "complete",
+            "reason": None,
+            "covered_ranges": [[0, 4]],
+            "basis": "mixed",
+            "input_signature": child_signature([child]),
+        },
+    }
+    old = [parent, child]
+    fresh = deepcopy(old)
+    for n in fresh:
+        n.update(summary="", summary_origin="unavailable")
+        n.pop("summary_details")
+    inherit_summaries(fresh, old)
+    assert fresh == old
+    changed = deepcopy(fresh)
+    changed[0].update(summary="", summary_origin="unavailable")
+    changed[0].pop("summary_details")
+    changed[1]["title"] = "Corrected child title"
+    inherit_summaries(changed, old)
+    assert "summary_details" not in changed[0]
+    assert changed[0]["summary"] == ""

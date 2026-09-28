@@ -19,7 +19,7 @@ def _state(
         return previous
     state: dict[str, Any] = {
         "protocol": "document-planning-acceptance-v5",
-        "planning_strategy": "global-navigation-v2",
+        "planning_strategy": "global-navigation-v3",
         "planning_semantics": "explicit-actions-v3",
         "deferred_suggestions": [],
         "suggestion_annotations": {},
@@ -51,7 +51,7 @@ def _valid_state(value: Any, original_windows: list[dict[str, Any]]) -> bool:
     }:
         return False
     if value["protocol"] == "document-planning-acceptance-v5" and (
-        value.get("planning_strategy") != "global-navigation-v2"
+        value.get("planning_strategy") not in {"global-navigation-v2", "global-navigation-v3"}
         or value.get("planning_semantics") != "explicit-actions-v3"
     ):
         return False

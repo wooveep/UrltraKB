@@ -23,7 +23,9 @@ def _length(rows: list[tuple[int, int]]) -> int:
     return sum(end - start for start, end in merged_intervals(rows))
 
 
-def planning_page_scopes(plan: DocumentPlan | None, parsed: Any) -> dict[str, Any]:
+def planning_page_scopes(
+    plan: DocumentPlan | None, parsed: Any, *, include_pending=False
+) -> dict[str, Any]:
     """Keep page-level fallback use visible even when precise ranges cover it."""
     counts = {"section": 0, "explicit_range": 0, "target_fallback": 0}
     readable = {
@@ -35,9 +37,10 @@ def planning_page_scopes(plan: DocumentPlan | None, parsed: Any) -> dict[str, An
     }
     whole_source = []
     for page in plan.pages if plan else []:
-        if page.state != "ready" or page.scope_resolution is None:
+        if not include_pending and (page.state != "ready" or page.scope_resolution is None):
             continue
-        counts[page.scope_resolution] = counts.get(page.scope_resolution, 0) + 1
+        resolution = page.scope_resolution or "unresolved"
+        counts[resolution] = counts.get(resolution, 0) + 1
         ranges: dict[int, list[tuple[int, int]]] = {}
         _add(ranges, page.subject_ranges, parsed, "page subject")
         if readable and all(
@@ -133,12 +136,13 @@ def _planning_coverage_v3(
     *,
     outcome: str | None = None,
     omission_count: int | None = None,
+    include_pending: bool = False,
 ) -> dict[str, Any]:
     """Report precise page ranges, conservative fallbacks, and unrouted text."""
     precise: dict[int, list[tuple[int, int]]] = {}
     fallback: dict[int, list[tuple[int, int]]] = {}
     for page in plan.pages if plan is not None else []:
-        if page.state != "ready" or page.scope_resolution is None:
+        if not include_pending and (page.state != "ready" or page.scope_resolution is None):
             continue
         destination = fallback if page.scope_resolution == "target_fallback" else precise
         _add(destination, page.subject_ranges, parsed, "page subject")
@@ -180,6 +184,60 @@ def _planning_coverage_v3(
         if plan
         else 0,
         "parser_gaps": len(parsing_gaps(parsed)),
+    }
+
+
+def planning_range_views(
+    plan: DocumentPlan | None, parsed: Any, *, not_started=False
+) -> dict[str, Any]:
+    """Selection is intent; read counts come only from observed evidence receipts."""
+    selected = _planning_coverage_v3(plan, parsed, include_pending=True)
+    selected["protocol"] = "document-planning-selection-v1"
+    selected["page_scopes"] = planning_page_scopes(plan, parsed, include_pending=True)
+    reads: dict[int, list[tuple[int, int]]] = {}
+    observed, unknown, skipped, unresolved = [], [], [], []
+    for page in plan.pages if plan else []:
+        scope = page.evidence_scope
+        if not scope or "read_ranges" not in scope:
+            if scope or page.state != "pending_evidence":
+                unknown.append(page.key)
+            continue
+        _add(reads, scope["read_ranges"], parsed, "actual read receipt")
+        observed.append(page.key)
+        if scope["status"] == "unavailable":
+            skipped.append({"page": page.key, "reasons": scope["warnings"]})
+        if scope["unresolved_hints"]:
+            unresolved.append({"page": page.key, "hints": scope["unresolved_hints"]})
+    total = selected["readable_chars"]
+    count = (
+        sum(
+            _length(reads.get(index, []))
+            for index, block in enumerate(parsed.blocks)
+            if "attachment" not in block.location
+            and block.kind not in {"image", "figure", "attachment"}
+        )
+        if observed
+        else None
+    )
+    return {
+        "protocol": "document-planning-ranges-v1",
+        "selection": selected,
+        "reading": {
+            "status": "partially_observed"
+            if observed and unknown
+            else "observed"
+            if observed
+            else "unknown"
+            if unknown or not not_started
+            else "not_started",
+            "readable_chars": total,
+            "read_chars": count,
+            "read_ratio": count / total if count is not None and total else None,
+            "observed_pages": observed,
+            "unknown_pages": unknown,
+            "skipped": skipped,
+            "unresolved": unresolved,
+        },
     }
 
 

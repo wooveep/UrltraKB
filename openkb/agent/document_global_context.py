@@ -7,10 +7,11 @@ from copy import deepcopy
 
 from openkb.agent.document_planning_overview import current_overview
 from openkb.agent.document_protocol import plan_messages
+from openkb.navigation_metadata import hint_metadata, structure_diagnostics
 from openkb.processing import InputTooLarge
 from openkb.sources import content_id
 
-STRATEGY = "global-navigation-v2"
+STRATEGY = "global-navigation-v3"
 
 
 def navigation_rows(navigation, parsed):
@@ -45,6 +46,7 @@ def navigation_rows(navigation, parsed):
                 "summary": node.get("summary") or "",
                 "summary_origin": node.get("summary_origin", "unspecified"),
                 "original_ranges": ranges,
+                **hint_metadata(node),
             }
         )
     keys = {row["section_key"] for row in rows}
@@ -148,6 +150,14 @@ def messages_for(
     }
     task["ranges"], _ = exclude_attachment_ranges(parsed, task["ranges"])
     carry = _carry(state, detail, shown)
+    if state.get("runtime"):
+        from openkb.agent.document_planning_runtime import selection_counts
+
+        carry["selection_counts"] = selection_counts(state["pages"], state["catalog_targets"])
+        if state["runtime"]["kb_stage"] == "initial":
+            carry["suggested_new_concepts_remaining"] = max(
+                0, 3 - carry["selection_counts"]["concept"]["create"]
+            )
     overview = current_overview(state)
     carry["overview"] = {
         "text": overview if overview_limit is None else overview[:overview_limit],
@@ -164,7 +174,9 @@ def messages_for(
         entity_types,
         schema,
         settings.get("language", ""),
-        [row["target"] for row in context["catalog"]],
+        context.get("common_inputs", {}).get(
+            "existing_targets", [row["target"] for row in context["catalog"]]
+        ),
         source_conditions=conditions,
         subtask="pages",
         recovery=recovery,
@@ -208,6 +220,23 @@ def split_topics(rows):
 def freeze_context(
     state, navigation, source, parsed, catalog, settings, limits, entity_types, schema, conditions
 ):
+    def projected_runtime(context):
+        runtime = deepcopy(state.get("runtime", {}))
+        if runtime:
+            runtime["catalog_status"].update(
+                shown=len(context["catalog"]),
+                omitted=len(catalog) - len(context["catalog"]),
+            )
+        return runtime
+
+    common_inputs = {
+        "schema": schema,
+        "entity_types": entity_types,
+        "language": settings.get("language", ""),
+        "source_conditions": conditions or [],
+        "existing_pages": "",
+        "existing_targets": [path for path, _, _ in catalog],
+    }
     if state.get("planning_snapshot"):
         saved = state["planning_snapshot"]
         context = json.loads(saved["context_json"])
@@ -216,6 +245,13 @@ def freeze_context(
             != {"source_id": source.source_id, "version_id": source.id, "parse_id": parsed.id}
             or saved["nodes"] != navigation_rows(navigation, parsed)
             or context["navigation_id"] != content_id((navigation or {}).get("nodes", []))
+            or context.get("strategy") != STRATEGY
+            or context.get("common_inputs") != common_inputs
+            or content_id(saved["catalog"]) != content_id(catalog)
+            or context.get("catalog_types", {}) != state.get("catalog_types", {})
+            or saved.get("catalog_metadata", {}) != state.get("catalog_metadata", {})
+            or context.get("runtime", {}) != projected_runtime(context)
+            or context.get("structure_diagnostics") != structure_diagnostics(navigation or {})
         ):
             from openkb.processing import ProcessingIncomplete
 
@@ -226,10 +262,18 @@ def freeze_context(
     if len(roots) == 1:
         roots += [row for row in nodes if row["parent"] == roots[0]["section_key"]]
     context = {
-        "protocol": "global-planning-context-v2",
+        "protocol": "global-planning-context-v3",
         "strategy": STRATEGY,
         "source": {"source_id": source.source_id, "version_id": source.id, "parse_id": parsed.id},
         "navigation_id": content_id((navigation or {}).get("nodes", [])),
+        **(
+            {"navigation_style": "legacy_pdf"}
+            if any("pdf_page_range" in row for row in nodes)
+            else {}
+        ),
+        "common_inputs": deepcopy(common_inputs),
+        "catalog_types": deepcopy(state.get("catalog_types", {})),
+        "structure_diagnostics": structure_diagnostics(navigation or {}),
         "summary_input": {
             "nodes": len(nodes),
             "with_summary": sum(bool(row["summary"]) for row in nodes),
@@ -242,6 +286,7 @@ def freeze_context(
                 "target": path,
                 "title": title,
                 "brief": brief,
+                **state.get("catalog_metadata", {}).get(path, {}),
                 **(
                     {"type": state["catalog_types"][path]}
                     if path in state.get("catalog_types", {})
@@ -262,12 +307,22 @@ def freeze_context(
     # Store canonical serialization, so checkpoint JSON key sorting cannot
     # change P's bytes or its wire identity ordering on resume.
     def snapshot():
+        if state.get("runtime"):
+            context["runtime"] = projected_runtime(context)
         encoded = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return {
-            "id": content_id({"context": encoded, "nodes": nodes, "catalog": catalog}),
+            "id": content_id(
+                {
+                    "context": encoded,
+                    "nodes": nodes,
+                    "catalog": catalog,
+                    "catalog_metadata": state.get("catalog_metadata", {}),
+                }
+            ),
             "context_json": encoded,
             "nodes": nodes,
             "catalog": catalog,
+            "catalog_metadata": deepcopy(state.get("catalog_metadata", {})),
         }
 
     def minimal_fits():
@@ -372,6 +427,11 @@ def validate_snapshot(snapshot):
             "context": snapshot["context_json"],
             "nodes": snapshot["nodes"],
             "catalog": snapshot["catalog"],
+            **(
+                {"catalog_metadata": snapshot["catalog_metadata"]}
+                if "catalog_metadata" in snapshot
+                else {}
+            ),
         }
     ):
         return False
@@ -392,7 +452,7 @@ def validate_snapshot(snapshot):
         ):
             return False
         return (
-            context["strategy"] in {STRATEGY, "global-after-overview-v1"}
+            context["strategy"] in {STRATEGY, "global-navigation-v2", "global-after-overview-v1"}
             and isinstance(context["topics"], list)
             and isinstance(context["catalog"], list)
             and isinstance(context["projection"], dict)
@@ -410,7 +470,11 @@ def validate_snapshot(snapshot):
 
 def validate_global_state(state):
     """Validate the frozen task partition before a checkpoint can drive dispatch."""
-    if state.get("planning_strategy") not in {STRATEGY, "global-after-overview-v1"}:
+    if state.get("planning_strategy") not in {
+        STRATEGY,
+        "global-navigation-v2",
+        "global-after-overview-v1",
+    }:
         return False
     tasks = state.get("tasks")
     if not isinstance(tasks, dict) or any(not isinstance(task, dict) for task in tasks.values()):

@@ -22,6 +22,19 @@ def accept(raw, **kwargs):
     )
 
 
+@pytest.mark.parametrize("placeholder", ["（无）", "无", "none", "N/A", "—"])
+def test_empty_update_placeholder_does_not_become_a_deferred_page(placeholder):
+    result = accept(
+        "## Create\n| Title | Kind | Section |\n|---|---|---|\n"
+        "| 无服务器架构 | concept | [0, 1] |\n| None | concept | [0, 1] |\n"
+        "## Update\n| Title | Notes |\n|---|---|\n"
+        f"| {placeholder} | 目录为空 |\n"
+    )
+    assert {p.title for p in result.pages} == {"无服务器架构", "None"}
+    assert not result.deferred_suggestions and not result.rejected
+    assert "目录为空" in result.batch_notes
+
+
 def test_prompt_bilingual_columns_preserve_classification_and_context():
     result = accept(
         "## Create\n"

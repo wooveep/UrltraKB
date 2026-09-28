@@ -2410,7 +2410,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "navigation": {
             "enabled": False,
             "processing": None,
-            "window_tokens": 200000,
+            "window_tokens": 20000,
             "summaries": True,
         },
         "compilation_thinking": None,

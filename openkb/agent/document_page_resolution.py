@@ -28,6 +28,10 @@ def preparation_rules() -> str:
                 "openkb.agent.document_page_evidence",
                 "openkb.agent.document_page_scope",
                 "openkb.agent.document_planning_bindings",
+                "openkb.agent.document_page_preparation",
+                "openkb.agent.document_page_sources",
+                "openkb.agent.document_preparation_allowance",
+                "openkb.agent.document_planning_runtime",
             )
         }
     )

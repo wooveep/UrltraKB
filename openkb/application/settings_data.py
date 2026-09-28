@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, SecretStr
 
 from openkb.compilation_settings import CompilationSettings, Effort, ReviewMode, Thinking
+from openkb.navigation_reading import DEFAULT_WINDOW_TOKENS
 from openkb.ocr.config import ParsingSettings
 from openkb.vision.config import VisionSettings
 
@@ -77,7 +78,7 @@ ProcessingSettings = Annotated[dict[str, Any], BeforeValidator(_processing_setti
 class NavigationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = Field(default=False, strict=True)
-    window_tokens: int = Field(default=200000, strict=True, gt=0)
+    window_tokens: int = Field(default=DEFAULT_WINDOW_TOKENS, strict=True, gt=0)
     summaries: bool = Field(default=True, strict=True)
     processing: ProcessingSettings | None = None
 

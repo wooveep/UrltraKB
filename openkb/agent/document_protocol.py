@@ -10,6 +10,7 @@ from typing import Any
 from openkb.agent.document_json_prompts import PLAN_EXAMPLE, example_rules
 from openkb.agent.document_markdown_prompts import OVERVIEW_RULES as OVERVIEW_RULES
 from openkb.agent.document_markdown_prompts import PAGES_RULES as PAGES_RULES
+from openkb.agent.document_markdown_prompts import planning_rules
 from openkb.agent.document_plan_issues import parse_plan_json, reject
 from openkb.agent.document_range_validation import (
     frozen_evidence_intervals,
@@ -186,12 +187,18 @@ def plan_messages(
         "source_conditions": source_conditions or [],
         "recovery": recovery,
     }
-    if subtask not in {"overview", "pages"}:
-        raise ValueError("Invalid Markdown planning subtask")
+    if planning_context and "common_inputs" in planning_context and catalog_targets is None:
+        task["existing_targets"] = planning_context["common_inputs"]["existing_targets"]
+    rules = planning_rules(
+        subtask,
+        target_t.get("kind", ""),
+        (planning_context or {}).get("navigation_style", ""),
+        (planning_context or {}).get("runtime"),
+    )
     return source_messages(
         evidence,
         task,
-        OVERVIEW_RULES if subtask == "overview" else PAGES_RULES,
+        rules,
         planning_context=planning_context,
     )
 

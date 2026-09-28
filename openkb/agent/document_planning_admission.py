@@ -41,8 +41,9 @@ def validate_navigation(navigation: dict[str, Any] | None, source: Any, parsed: 
             "summary_origin",
             "structure_origin",
         }
+        optional = {"structure", "summary_details", "pdf_page_range"}
         for node in nodes:
-            if not isinstance(node, dict) or set(node) - fields:
+            if not isinstance(node, dict) or set(node) - fields - optional:
                 raise ValueError("Invalid navigation node")
             start, end = node.get("start"), node.get("end")
             if end is None and type(start) is int:
@@ -67,11 +68,17 @@ def validate_navigation(navigation: dict[str, Any] | None, source: Any, parsed: 
             parent = node.get("parent")
             if parent is not None and (not isinstance(parent, str) or parent not in seen):
                 raise ValueError("Invalid navigation node parent")
-            canonical &= set(node) == fields
+            from openkb.navigation_metadata import validate_metadata
+
+            validate_metadata(node)
+            canonical &= set(node) - optional == fields
         if canonical:
             from openkb.navigation_tree import validate_nodes
 
             validate_nodes(nodes, len(parsed.blocks))
+        from openkb.navigation_metadata import validate_pdf_ranges
+
+        validate_pdf_ranges(nodes, source, parsed)
 
 
 def admit_planning_windows(

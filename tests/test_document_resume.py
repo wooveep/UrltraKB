@@ -192,6 +192,37 @@ def test_resume_reuses_accepted_document_plan_without_replanning(kb_dir, tmp_pat
     assert calls[(2, "generation")] == 1
 
 
+def test_manual_catalog_edit_is_not_mistaken_for_our_published_output(
+    kb_dir, tmp_path, monkeypatch
+):
+    calls = Counter()
+    phase = 1
+
+    def completion(**kwargs):
+        payload = json.loads(kwargs["messages"][-1]["content"])
+        calls[payload["stage"]] += 1
+        value = evidence_response(payload)
+        if payload["stage"] == "planning" and payload["subtask"] == "pages":
+            value = "- Title: Alpha\n  Kind: concept\n- Title: Beta\n  Kind: concept"
+        elif (
+            payload["stage"] == "generation" and payload["page"]["title"] == "Alpha" and phase == 1
+        ):
+            value["covered"] = []
+        return response(v4_plan(payload, value))
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    first = import_document(kb_dir, document(tmp_path))
+    assert first.knowledge_compilation == "completed"
+    page = next((kb_dir / "wiki/concepts").glob("*.md"))
+    page.write_text(page.read_text().replace("# Beta", "# Manually revised title"))
+    phase = 2
+    calls.clear()
+    second = continue_source(kb_dir, first.source_id, version_id=first.input_version)
+    assert second.knowledge_compilation == "unfinished"
+    assert calls["planning"] > 0
+    assert "# Manually revised title" in page.read_text()
+
+
 def test_resume_verification_does_not_regenerate_received_draft(kb_dir, tmp_path, monkeypatch):
     phase = 1
     calls = Counter()

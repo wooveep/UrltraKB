@@ -18,6 +18,7 @@ _ALIASES = {
     "kind": {"kind", "类别", "分类", "页面类别", "category"},
     "type": {"type", "类型", "页面类型", "实体类型", "entity type"},
     "section": {
+        "subject",
         "section",
         "sections",
         "selection",
@@ -38,6 +39,11 @@ _ALIASES = {
         "section location",
         "来源位置",
         "source location",
+        "source section",
+        "source sections",
+        "relevant section",
+        "relevant sections",
+        "related sources",
         "章节",
         "主体范围",
         "位置",
@@ -197,6 +203,9 @@ def _display_title(value: Any) -> str:
                 break
         else:
             break
+    wiki = re.fullmatch(r"\[\[(?:concepts|entities)/([^\[\]|]+)(?:\|([^\[\]|]+))?\]\]", title)
+    if wiki:
+        return (wiki[2] or wiki[1]).strip()
     return title
 
 
@@ -520,6 +529,10 @@ def explicit_action(value):
         "skip": {"skip", "跳过", "不创建"},
         "defer": {"defer", "deferred", "deferred pages", "暂缓", "待定", "暂不创建"},
         "notes": {
+            "related",
+            "related pages",
+            "关联",
+            "仅关联",
             "notes",
             "note",
             "说明",
@@ -543,7 +556,7 @@ def action_heading(value):
         actions = {explicit_action(part) for part in parts}
         if None not in actions and len(actions) == 1:
             return next(iter(actions)), None
-    match = re.fullmatch(r"(创建|新建|更新|create|new|update)\s*(.+)", label)
+    match = re.fullmatch(r"(创建|新建|更新|仅关联|关联|create|new|update|related)\s*(.+)", label)
     if match and (kind := _kind(match[2])):
         return explicit_action(match[1]), kind
     return None, _kind(label)

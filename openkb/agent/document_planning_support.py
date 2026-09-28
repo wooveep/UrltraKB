@@ -98,6 +98,8 @@ def select_navigation_hints(
 def accepted_request_reference(messages: Any) -> str:
     """Bind an accepted receipt to the actual request, including any repair suffix."""
 
+    if len(messages) > 2:
+        return content_id(list(messages))
     return content_id(
         {"system": messages[0]["content"], "payload": json.loads(messages[-1]["content"])}
     )
@@ -202,7 +204,8 @@ def read_target_evidence(
     reader = ParseStore(kb_dir).reader(source, parsed)
     blocks = []
     for index, start, end in (
-        span for item in target_ranges
+        span
+        for item in target_ranges
         for span in range_intervals(item, parsed, "planning target evidence")
     ):
         block = parsed.blocks[index]
@@ -245,14 +248,13 @@ def read_target_evidence(
     }
 
 
-def fallback_target_evidence(
-    source: Any, parsed: Any, target_ranges: list[Any]
-) -> dict[str, Any]:
+def fallback_target_evidence(source: Any, parsed: Any, target_ranges: list[Any]) -> dict[str, Any]:
     """Fixture counterpart to exact target reads for mocked planner tests."""
 
     blocks = []
     for index, start, end in (
-        span for item in target_ranges
+        span
+        for item in target_ranges
         for span in range_intervals(item, parsed, "mock planning target evidence")
     ):
         block = parsed.blocks[index]
@@ -708,13 +710,15 @@ def final_document_plan(
         range_intervals,
         validate_plan,
     )
+
     plan = DocumentPlan(
         metadata={
             **metadata,
             "status": "partial" if planning_omissions else "accepted",
             "completed_windows": len(windows),
             "accepted_window_ids": [
-                receipt["window"] for receipt in metadata["accepted_window_receipts"]
+                receipt["window"]
+                for receipt in metadata["accepted_window_receipts"]
                 if receipt.get("status") != "skipped"
             ],
             "accepted_window_receipts": metadata["accepted_window_receipts"],

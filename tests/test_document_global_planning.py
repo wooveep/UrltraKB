@@ -6,6 +6,7 @@ import pytest
 
 from openkb.agent.document_orchestrator import plan_document
 from openkb.agent.evidence_checkpoints import CompilationCheckpoints
+from openkb.agent.source_protocol import request_payload
 from openkb.navigation_evidence import evidence_descriptor
 from tests.test_document_markdown_planning import SETTINGS
 from tests.test_document_orchestrator import _DummyParsed, _DummySource
@@ -78,7 +79,7 @@ def test_three_source_windows_use_one_navigation_overview_then_global_pages(tmp_
     requests = []
 
     def respond(messages, *, settings):
-        payload = json.loads(messages[-1]["content"])
+        payload = request_payload(messages)
         requests.append(payload)
         if payload["subtask"] == "overview":
             assert payload["evidence"]["blocks"] == []
@@ -97,10 +98,35 @@ def test_three_source_windows_use_one_navigation_overview_then_global_pages(tmp_
         "Recovery",
     }
     assert pages["evidence"]["blocks"] == []
-    assert result.plan.metadata["planning_strategy"] == "global-navigation-v2"
+    assert result.plan.metadata["planning_strategy"] == "global-navigation-v3"
     assert result.plan.metadata["overview"]["basis"] == "navigation_summaries"
     assert result.plan.metadata["overview"]["original_read_ranges"] == []
     assert len(result.plan.pages) == 1
+
+
+def test_changed_catalog_type_starts_new_planning_snapshot(tmp_path):
+    requests = []
+
+    def respond(messages, *, settings):
+        payload = request_payload(messages)
+        requests.append(payload)
+        if payload["subtask"] == "overview":
+            return "Instrument preparation and recovery."
+        return "- Title: Operation\n  Kind: concept\n  Section: Calibration"
+
+    page = tmp_path / "workspace/wiki/entities/instrument.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("---\ntitle: Instrument\ntype: tool\n---\n# Instrument\nAn instrument.")
+    settings = {**SETTINGS, "model": "gpt-4o", "entity_types": ["tool", "system"]}
+    original = run_global(tmp_path, respond, settings=settings)
+    run_global(tmp_path, respond, settings=settings, resume=True)
+    assert len(requests) == 2
+    page.write_text(page.read_text().replace("type: tool", "type: system"))
+    changed = run_global(tmp_path, respond, settings=settings, resume=True)
+    assert len(requests) == 4
+    assert requests[0]["planning_context"]["catalog_types"] == {"entities/instrument": "tool"}
+    assert requests[2]["planning_context"]["catalog_types"] == {"entities/instrument": "system"}
+    assert original.plan.overview == changed.plan.overview
 
 
 def test_small_real_budget_groups_branches_with_frozen_prefix_and_merges_additions(tmp_path):
@@ -141,11 +167,11 @@ def test_small_real_budget_groups_branches_with_frozen_prefix_and_merges_additio
     }
 
     def respond(messages, *, settings):
-        payload = json.loads(messages[-1]["content"])
+        payload = request_payload(messages)
         if payload["subtask"] == "overview":
             return "Instrument setup, preparation and recovery in the current overview."
         requests.append(payload)
-        prefixes.append(messages[-1]["content"].split(',"plan_protocol"')[0])
+        prefixes.append(messages[1]["content"])
         if len(requests) == 1:
             return "- Title: Instrument operation\n  Kind: concept\n  Section: Preparation"
         assert requests[-1]["carry"]["pages"][0]["title"] == "Instrument operation"
@@ -170,7 +196,7 @@ def test_resumption_does_not_repeat_settled_overviews_or_global_selection(tmp_pa
     calls = []
 
     def respond(messages, *, settings):
-        calls.append(json.loads(messages[-1]["content"])["subtask"])
+        calls.append(request_payload(messages)["subtask"])
         return "Available overview." if calls[-1] == "overview" else "No new pages are warranted."
 
     first = run_global(tmp_path, respond)
@@ -183,7 +209,7 @@ def test_two_request_budget_finishes_both_navigation_tasks(tmp_path):
     calls = []
 
     def respond(messages, *, settings):
-        calls.append(json.loads(messages[-1]["content"])["subtask"])
+        calls.append(request_payload(messages)["subtask"])
         return (
             "Available partial overview."
             if calls[-1] == "overview"
@@ -211,7 +237,7 @@ def test_truncated_global_selection_retains_pages_and_shares_child_attempt_budge
     calls = []
 
     def respond(messages, *, settings):
-        payload = json.loads(messages[-1]["content"])
+        payload = request_payload(messages)
         if payload["subtask"] == "overview":
             return "Overview of all operating stages."
         calls.append(payload)
@@ -235,7 +261,7 @@ def test_one_failed_topic_group_does_not_discard_an_accepted_group(tmp_path):
     calls = []
 
     def respond(messages, *, settings):
-        payload = json.loads(messages[-1]["content"])
+        payload = request_payload(messages)
         if payload["subtask"] == "overview":
             return "Overview of all operating stages."
         calls.append(payload)
@@ -282,7 +308,7 @@ def test_physical_overview_retries_cannot_consume_the_reserved_pages_request():
 
 def test_retrying_failed_overview_keeps_frozen_context_and_accepted_pages(tmp_path):
     def initial(messages, *, settings):
-        if json.loads(messages[-1]["content"])["subtask"] == "overview":
+        if request_payload(messages)["subtask"] == "overview":
             return ""
         return "- Title: Old selection\n  Kind: concept\n  Section: Preparation"
 
@@ -291,7 +317,7 @@ def test_retrying_failed_overview_keeps_frozen_context_and_accepted_pages(tmp_pa
     calls = []
 
     def refreshed(messages, *, settings):
-        calls.append(json.loads(messages[-1]["content"])["subtask"])
+        calls.append(request_payload(messages)["subtask"])
         return "Refreshed complete overview."
 
     second = run_global(tmp_path, refreshed, resume=True, retry_skipped=True)
@@ -307,7 +333,7 @@ def test_corrupt_global_tasks_fail_at_resume_boundary(tmp_path, broken):
     def respond(messages, *, settings):
         return (
             "Available overview."
-            if json.loads(messages[-1]["content"])["subtask"] == "overview"
+            if request_payload(messages)["subtask"] == "overview"
             else "No new pages are warranted."
         )
 
@@ -339,7 +365,7 @@ def test_navigation_planning_does_not_reread_source_windows(tmp_path, monkeypatc
     result = run_global(
         tmp_path,
         lambda messages, **_: "Available overview."
-        if json.loads(messages[-1]["content"])["subtask"] == "overview"
+        if request_payload(messages)["subtask"] == "overview"
         else "No new pages are warranted.",
     )
     assert result.outcome == "complete"
@@ -376,7 +402,7 @@ def test_oversized_coarse_navigation_keeps_disjoint_parts_and_bounded_merge(
     calls = []
 
     def respond(messages, *, settings):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         calls.append(body)
         if body["subtask"] == "pages":
             return "No new pages are warranted."
@@ -387,6 +413,8 @@ def test_oversized_coarse_navigation_keeps_disjoint_parts_and_bounded_merge(
     result = run_global(tmp_path, respond, nodes=nodes, settings=settings)
     summary_calls = [row for row in calls if row["subtask"] == "overview"]
     assert summary_calls[0]["target"]["kind"] == "topic_summary"
+    assert "selected topic group" in summary_calls[0]["task_rules"]
+    assert "partial summaries" not in summary_calls[0]["task_rules"]
     assert len(calls) <= requests_budget
     assert all(row["evidence"]["blocks"] == [] for row in calls)
     assert len({json.dumps(row["planning_context"], sort_keys=True) for row in calls}) == 1
@@ -397,6 +425,8 @@ def test_oversized_coarse_navigation_keeps_disjoint_parts_and_bounded_merge(
         assert result.outcome == "budget_limited"
     else:
         assert summary_calls[-1]["target"]["kind"] == "overview_merge"
+        assert "strictly shorter" in summary_calls[-1]["task_rules"]
+        assert "selected topic group" not in summary_calls[-1]["task_rules"]
         assert result.plan.metadata["overview_snapshot"]["basis"] == "group_summaries"
         groups = [
             row["target"]["sections"]
@@ -415,7 +445,7 @@ def test_failed_pages_leave_an_independent_overview_artifact(tmp_path):
     result = run_global(
         tmp_path,
         lambda messages, **_: "# Overview\n\nUseful global structure."
-        if json.loads(messages[-1]["content"])["subtask"] == "overview"
+        if request_payload(messages)["subtask"] == "overview"
         else "",
     )
     assert result.outcome == "partial"
@@ -452,7 +482,7 @@ def test_retry_partial_group_overview_reuses_successful_parts_and_remerges(tmp_p
     calls = []
 
     def respond(messages, **_):
-        body = json.loads(messages[-1]["content"])
+        body = request_payload(messages)
         calls.append((body["subtask"], body["target"].get("kind"), body["target"].get("sections")))
         if body["subtask"] == "pages":
             return "No new pages are warranted."

@@ -18,11 +18,11 @@ storage failures still stop the task before a new index can authorize handoff.
 ```yaml
 navigation:
   enabled: true
-  window_tokens: 200000
+  window_tokens: 20000
   summaries: true
 ```
 
-`window_tokens` is a positive integer target for the serialized original evidence
+For non-PDF inputs, `window_tokens` is a positive integer target for the serialized original evidence
 package, including positions, stable context and overlap. Short inputs are not
 padded. The complete request also includes the fixed system, task suffix and
 output reservation. Configured processing ceilings, optional navigation allowance,
@@ -30,18 +30,170 @@ compilation reserve and memory checks can reduce the adopted window; each manife
 records its target, actual range and limitations. The target is neither a model
 capacity declaration nor the batch size for all compilation tasks.
 
-Declared contents are mapped to body headings in code. Missing or unusable
+The default reading target is 20,000 tokens; larger explicit targets remain supported.
+Non-PDF windows prefer complete PPTX slides, spreadsheet rows and DOCX
+table rows. Other text keeps saved paragraph, list, code and table blocks intact,
+with a heading retained alongside the following block when capacity permits.
+DOCX/Markdown/HTML/TXT do not acquire synthetic physical page numbers: their original
+paragraph, DOM and line positions remain the citation anchors. CSV multiline records
+remain whole records, not arbitrary line slices. A previous reading unit supplies
+overlap; when it is too large, overlap reduces to one block or none. A unit larger
+than the available request capacity may span windows at complete block boundaries.
+Reading units do not determine chapter boundaries or knowledge-page titles.
+
+For non-PDF inputs, declared contents are mapped to body headings in code. Missing or unusable
 entries use body analysis, with at most one local semantic positioning attempt
 per candidate. Documents without usable contents use the same sequential body
 window executor whether or not they have native headings. Responses contain new
 section starts, levels, source/inferred title roles and short original anchors;
 code derives hierarchy and ends across windows. An empty continuation is valid.
+An empty result with short, numbered paragraph title cues gets a bounded re-read
+within the same configured request attempt count and frozen evidence prefix. Cues
+are not automatically promoted to headings. If the model still returns no starts,
+the task continues with `index_structure_unconfirmed` diagnostics available to
+summary and planning consumers. Ordinary headingless prose needs no extra review.
 Unusable enhancement leaves complete base evidence and a specific degradation
 reason. Completed requests have source-bound recovery identities; later windows
 bind their accepted predecessor state. A truncated response is never a completed
 structure, even when it contains parseable JSON.
-Unresolved contents entries remain in the affected window's `unlocated` list,
+Unresolved non-PDF contents entries remain in the affected window's `unlocated` list,
 with their source positions and reason, even when body fallback yields no new starts.
+
+PDF inputs use the original PageIndex long-document algorithm for every document
+length. The installed, exactly pinned PageIndex functions run in a per-import
+namespace; source storage, bounded model transport and checkpoints remain OpenKB's.
+There is no native-bookmark shortcut and no selective-only title verification:
+
+- Look for a printed table of contents, initially within 20 physical pages. A
+  continuing TOC may extend beyond that initial scan. Detect printed page numbers,
+  match body titles and calculate the physical-page offset. Failed location
+  verification falls back to TOC without page numbers, then body-only reading.
+- Body reading groups target 20,000 tokens of page text and physical-page tags,
+  with one page of overlap. This legacy target does not include the current block
+  metadata serialization and is not changed by `navigation.window_tokens`. Groups
+  carry the accepted preceding structure. The complete request still has to fit
+  the configured model context and output reservation; an oversized request is
+  recorded as unavailable, never sent beyond the budget.
+- Check each returned title against its proposed page, allowing fuzzy matching.
+  Full agreement accepts the structure; agreement above 60% permits up to three
+  local position-repair rounds. This percentage measures returned-title location
+  accuracy, not chapter completeness. Each title also gets its own page-start
+  decision. These are separate tasks, not a combined model response.
+- A node spanning more than 10 page intervals and at least 20,000 text tokens is
+  expanded locally. Content failure preserves the coarse node. Repeated recursive
+  ranges stop further expansion. A failed reading group or summary is recorded;
+  accepted work remains available. Provider, cancellation and hard-budget errors
+  preserve their existing task-level behavior.
+- Summarize each node from its own physical-page text and derive a document
+  description from the resulting tree. Blank native pages may reuse already saved
+  OCR text; indexing does not initiate another OCR pass.
+
+PDF nodes carry `pdf_page_range` (one-based inclusive), mapped to immutable saved
+block ranges. Adjacent sections may share a whole page. A parent's own text may
+end before its children; it is not a promise that selecting the parent reads the
+entire subtree through the raw node-range API. Page-plan section-key selection
+explicitly unions the node with its known descendants. If same-page headings produce the legacy empty interval, preserve
+that shared page as a coarse range and record the adjustment. Page/block mapping
+is checked again on read and planning admission. PDF manifests describe continuous
+reading groups; the request audit, not the manifest, records actual TOC and local
+verification calls.
+
+Step three consumes the PageIndex summaries for a Markdown overview and a separate
+Markdown page-selection task. All source formats share the original global selection goals:
+few foundational concepts (initial guidance: 2–3), central/reusable named entities,
+existing-page updates first, and link-only suggestions kept as notes. Counts are
+prompt guidance, not acceptance gates. Tolerant reception, partial completion and
+current source-backed page preparation remain in effect. Model-returned JSON is
+still used internally for the small legacy PageIndex decisions; this does not
+reintroduce a JSON requirement for the overview or page plan.
+
+Page selection now separates Concepts and Entities, each with Create, Update and
+Related lists. Combined headings and the older mixed Create/Update tables remain
+accepted. Nested groups supply the classification and action, so concept entries
+can be just names; entity entries add their configured type. Related-only entries
+remain linking notes and do not create or rewrite pages. A Notes ancestor cannot
+authorize page creation through a nested Create heading.
+Compact entries such as `Title (type: product) — Purpose: ...` and
+`Title — Type: product — Purpose: ...` preserve both the type and purpose;
+allowed entity types are still checked against configuration. Bulleted fields
+under a page heading remain one candidate. A `concepts/name` or `entities/name`
+heading supplies a suggested name while an explicit Title supplies the display
+title; it does not authorize a write destination. Parenthesized empty-group notices
+remain notes, while explicitly labelled titles are preserved.
+
+This task selects useful pages; a short purpose and source-location hints are
+optional. It does not require an exact range or dependency plan. A location-free
+selection is saved without an extra planning retry. Later original preparation
+still reads real sources, retains unresolved hints and skips unavailable or oversized
+evidence locally; it never substitutes a summary for original evidence.
+The prompt encourages carrying already-known PageIndex titles/keys in a Subject
+hint without another analysis call. Explicit whole-document hints select the bound
+source, subject to the same attachment exclusions and preparation budget; unknown
+locations never imply the whole document.
+
+Planning receives explicit runtime facts: registered other-source count, the unprojected
+concept/entity counts, catalogue completeness, and the actual original-preparation
+character allowance. An empty displayed catalogue is not treated as an empty KB.
+Unbound legacy source identities yield an unknown stage. Catalogue previews prefer
+`description`, then legacy `brief`, then body text; missing source counts stay unknown.
+The early-stage concept-count suggestion applies across the document, counts only new
+concepts, and remains advisory. Updating an existing page does not consume it.
+
+`prepare_planned_pages` is the shared production/online preparation entry point.
+Already located pages only read originals. A `no_subject_evidence` result can invoke
+one-page `page_sources` calls that select existing chapter labels; they cannot rename
+or reclassify the plan. Empty/invalid results receive bounded recovery; unresolved
+parts remain visible and do not discard the overview or other pages. The per-page
+limit is `processing.max_attempts` including the first attempt, with at most six
+additional application transport requests per document execution round. Reservations
+are checkpointed before transport, SDK retries are disabled for this operation, and
+internal application retries count. Interrupted recovery retains its allowance;
+explicit retry of a settled round starts a new round with cumulative audit history.
+Accepted location responses and prepared originals are reused.
+
+A declared scope above the preparation allowance is preserved and locally skipped.
+Generation can split evidence, but final review still uses the whole page's evidence;
+removing the preparation check alone does not provide arbitrary-size page support.
+Preparation success is distinct from semantic completeness or published page quality.
+
+Global planning places the frozen PageIndex and common configuration in a shared
+user message. Page selection follows it with the saved overview as an assistant
+message and the current task as the final user message; overview generation and
+recovery reuse the same source message. The overview is not duplicated in the
+task data, and its partial/clipped status remains visible. Request receipts cover
+every message, and request audits reconstruct the complete logical payload.
+
+Reception accepts `Subject`, `Related sources`, `Source sections`, and `Relevant sections`
+as source-location clues, and preserves parenthesized groups of explicit keys without
+dropping a root selection. Lists of keys with individual parenthetical
+descriptions retain every selection, including unresolved clues in the notes.
+Known keys must still resolve against the bound document; unknown keys remain
+unresolved, and external-reference fields do not become required dependencies.
+A `concept:`/`entity:` page-heading decoration is removed from the display title;
+explicit classification fields retain their meaning. An explicit `Title` agreeing
+with the heading is accepted; genuinely different titles retain a conflict note.
+Page-heading blocks can contain blank-separated descriptions and source fields
+whose values are bullet lists. Descriptions become purpose text, while a notes
+region remains outside the page candidates.
+Recognized field values take precedence over compact-list punctuation, so a dash
+inside a purpose does not create another page. Comma-separated navigation titles
+can be resolved individually; an exact whole title containing a comma still wins.
+Internal wiki-link titles use their display label, without authorizing that path
+as an update destination.
+These compatibility rules neither invent evidence nor bypass page-read budgets.
+
+PDF requests place frozen physical-page evidence before the variable task suffix.
+Calls reading the same page set can reuse that prefix, including retries; calls
+reading different page sets cannot be assumed to hit. Step-three overview and
+planning retain their own frozen global-navigation prefix. Page text, serialized
+block evidence and derived navigation are different prefixes, so cache reuse
+between these forms is not claimed. Cache savings must be measured from provider
+usage, independently of local checkpoint reuse.
+Identical concurrent PDF requests share one executor through the existing
+cancellable analysis-flight mechanism. In particular, two same-page nodes can ask
+the identical summary question: the accepted response is reused, avoiding duplicate
+model charges and conflicting writes to an immutable checkpoint. Requests with
+different titles or instructions still execute separately.
 
 Navigation uses the configured effective output reservation, without a special
 2,048-token ceiling. Summaries are optional selection hints with shape and source
@@ -53,7 +205,7 @@ arrive in a different order. Rejected summary fields retain their JSON path and
 reason in checkpoints and the saved navigation/window status, for example
 `index_summary_invalid: $.summaries[0].id: unknown section number`.
 
-The `source-prefix-v1` protocol fixes the public system and encodes frozen source
+The `source-prefix-v3` protocol fixes the public system and encodes frozen source
 identities and context before task data. Structure and summary requests can reuse
 the same evidence package; generation and verification can reuse their smaller
 evidence groups. Changing candidates, stage rules and continuation state affects
@@ -370,7 +522,8 @@ The release does not read, migrate or fall back to
 originals, parsing, assets and usage receipts. Index storage and retrieval use the
 database regardless of document length or the former PDF threshold.
 
-Native structure is preferred. Missing structure and long-range summaries may use
+Non-PDF native structure is preferred; PDF enhancement uses the physical-page
+algorithm described above. Missing structure and long-range summaries may use
 bounded model requests under the separately configured navigation allowance. Each
 request is measured against the selected model and endpoint's declared capacity (or an
 explicit shared/independent capacity contract); there is no fixed global navigation

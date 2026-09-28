@@ -11,6 +11,47 @@ from openkb.config import compilation_model_options
 from openkb.navigation_enhancement import IndexAllowanceExceeded
 from openkb.processing import InputTooLarge, OutputTruncated
 from openkb.processing_reservation import reserve_later_work, retry_attempt_available
+from openkb.sources import content_id
+
+SUMMARY_RULES = (
+    'Return {"summaries":[{"id":"1","summary":"brief hint"}]}.'
+    " Copy each supplied request-local section number exactly as a string."
+    " Summarize only the supplied nodes; accepted summaries need no repetition."
+    " Use null when evidence is insufficient. At most 80 words per hint."
+    " Do not infer hierarchy or treat inferred titles as original evidence."
+    " Ranges describe navigation subtrees, not exclusive ownership;"
+    " preserve supplied structure gaps."
+)
+MERGE_RULES = SUMMARY_RULES + (
+    " This is a parent navigation summary. summary_input contains explicitly derived hints,"
+    " not original quotations; evidence contains only the parent's direct original material."
+    " Synthesize only these supplied inputs, preserving main themes and conditions."
+    " Missing or null child hints are gaps; do not infer their contents or semantic completeness."
+    " Return a short navigation hint, not an overview, plan, concatenated hints or page body."
+)
+
+
+def summary_task(nodes, summary_input=None, structure_issues=()):
+    return {
+        "stage": "index_summary",
+        "nodes": [
+            {"id": str(i), **{key: n[key] for key in ("title", "title_origin", "start", "end")}}
+            for i, n in enumerate(nodes, 1)
+        ],
+        **({"summary_input": summary_input} if summary_input is not None else {}),
+        **({"structure_issues": structure_issues} if structure_issues else {}),
+    }
+
+
+def summary_fits(evidence, nodes, settings, allowance, *, summary_input=None, structure_issues=()):
+    return allowance.fits(
+        settings["model"],
+        source_messages(
+            evidence,
+            summary_task(nodes, summary_input, structure_issues),
+            MERGE_RULES if summary_input is not None else SUMMARY_RULES,
+        ),
+    )
 
 
 class _SummaryInvalid(ValueError):
@@ -79,6 +120,7 @@ def request_value(
     validate,
     *,
     attempts=None,
+    reconsider=None,
 ):
     from openkb.agent.compiler import _llm_call
 
@@ -126,6 +168,10 @@ def request_value(
             try:
                 with allowance.enforce():
                     value = analysis.run(produce, validate)
+                followup = reconsider(value) if reconsider is not None else None
+                if followup and attempt + 1 < limit and retry_attempt_available():
+                    request = source_messages(evidence, {**task, **followup}, rules)
+                    continue
                 checkpoints.save(key, value)
                 return value
             except (OutputTruncated, InputTooLarge) as exc:
@@ -151,37 +197,64 @@ def request_value(
     raise AssertionError("Navigation request loop must settle or raise")
 
 
-def summarize_group(evidence, nodes, settings, bundle, allowance, checkpoints, profile):
+def summarize_group(
+    evidence,
+    nodes,
+    settings,
+    bundle,
+    allowance,
+    checkpoints,
+    profile,
+    *,
+    summary_input=None,
+    structure_issues=(),
+):
     # Short numbers belong only to this request; persisted identities stay in code.
     by_number = {str(i): node for i, node in enumerate(nodes, 1)}
-    selected = [
-        {
-            "id": number,
-            "title": n["title"],
-            "title_origin": n["title_origin"],
-            "start": n["start"],
-            "end": n["end"],
-        }
-        for number, n in by_number.items()
-    ]
+    selected = summary_task(nodes)["nodes"]
     pending = {row["id"] for row in selected}
     first_problem = None
+    rules = MERGE_RULES if summary_input is not None else SUMMARY_RULES
+    dependencies = {
+        "profile": profile,
+        "options": compilation_model_options(settings),
+        "max_tokens": min(allowance.limits.output_tokens, allowance.budget.limits.output_tokens),
+    }
+    evidence_id = content_id(evidence)
+
+    def work_payload(node):
+        return {
+            "stage": "index_summary_item",
+            "evidence": evidence_id,
+            "node": {key: node[key] for key in ("title", "title_origin", "start", "end")},
+            "summary_input": summary_input,
+            "structure_issues": structure_issues,
+        }
+
+    for number, node in by_number.items():
+        with checkpoints.request(rules, work_payload(node), dependencies=dependencies) as key:
+            saved = checkpoints.load(key)
+        if saved is not None:
+            from openkb.navigation_metadata import validate_metadata
+
+            validate_metadata({**node, **saved})
+            node.update(saved)
+            pending.remove(number)
+    if not pending:
+        return
 
     def validate(value):
         _summary_fields(value, "$", ("summaries",))
         if not isinstance(value["summaries"], list):
             raise _SummaryInvalid("$.summaries", "expected an array")
 
-    rules = (
-        'Return {"summaries":[{"id":"1","summary":"brief hint"}]}.'
-        " Copy each supplied request-local section number exactly as a string."
-        " Summarize only the supplied nodes; accepted summaries need no repetition."
-        " Use null when evidence is insufficient. At most 80 words per hint."
-        " Do not infer hierarchy or treat inferred titles as original evidence."
-    )
     with reserve_later_work(attempts=allowance.limits.max_attempts):
         for attempt in range(allowance.limits.max_attempts):
             task = {"stage": "index_summary", "nodes": [r for r in selected if r["id"] in pending]}
+            if summary_input is not None:
+                task["summary_input"] = summary_input
+            if structure_issues:
+                task["structure_issues"] = structure_issues
             if attempt:
                 task["recovery"] = first_problem or "Supply only the remaining summaries."
             problems, seen = [], set()
@@ -215,12 +288,68 @@ def summarize_group(evidence, nodes, settings, bundle, allowance, checkpoints, p
                                 raise _SummaryInvalid(
                                     f"{path}.summary", "expected a string or null"
                                 )
-                            if not 0 < len(row["summary"]) <= 1600:
+                            if not row["summary"].strip() or len(row["summary"]) > 1600:
                                 raise _SummaryInvalid(
                                     f"{path}.summary", "expected 1 to 1600 characters"
                                 )
                             by_number[row["id"]].update(
                                 summary=row["summary"], summary_origin="model"
+                            )
+                        node = by_number[row["id"]]
+                        from openkb.agent.document_range_validation import merged_intervals
+
+                        original_ranges = [
+                            list(span)
+                            for span in merged_intervals(
+                                [
+                                    (b["order"], b["order"] + 1)
+                                    for b in evidence.get("blocks", [])
+                                    if node["start"] <= b.get("order", -1) < node["end"]
+                                ]
+                            )
+                        ]
+                        covered = (
+                            (
+                                summary_input["covered_ranges"]
+                                if summary_input is not None
+                                else original_ranges
+                            )
+                            if row["summary"] is not None
+                            else []
+                        )
+                        if row["summary"] is None:
+                            node.update(summary="", summary_origin="unavailable")
+                        complete = merged_intervals(covered) == [(node["start"], node["end"])]
+                        node["summary_details"] = {
+                            "status": "complete"
+                            if complete
+                            else "partial"
+                            if covered
+                            else "insufficient_evidence",
+                            "reason": None
+                            if complete
+                            else "index_summary_partial"
+                            if covered
+                            else "index_summary_empty",
+                            "covered_ranges": covered,
+                            "basis": summary_input["basis"]
+                            if summary_input is not None
+                            else "original",
+                            **(
+                                {"input_signature": summary_input["input_signature"]}
+                                if summary_input is not None
+                                else {}
+                            ),
+                        }
+                        with checkpoints.request(
+                            rules, work_payload(node), dependencies=dependencies
+                        ) as key:
+                            checkpoints.save(
+                                key,
+                                {
+                                    field: node[field]
+                                    for field in ("summary", "summary_origin", "summary_details")
+                                },
                             )
                         seen.add(row["id"])
                     except _SummaryInvalid as exc:

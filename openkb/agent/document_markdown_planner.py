@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import re
 import time
-from pathlib import Path
 from typing import Any, Callable
 
-from openkb import frontmatter
 from openkb.agent import document_planning_support
 from openkb.agent.document_plan import PagePlan, RangeValue
 from openkb.agent.document_plan_annotations import ExternalReference
@@ -24,7 +21,6 @@ from openkb.execution_measurement import (
     record_document_totals,
 )
 from openkb.implementation import module_revision
-from openkb.lint import list_existing_wiki_targets
 from openkb.processing import (
     ProcessingIncomplete,
     RequestLimits,
@@ -60,44 +56,6 @@ def _navigation_rows(
             )
         rows.append(row)
     return rows
-
-
-def _catalog_entries(wiki: Path, targets: set[str]) -> list[tuple[str, str, str]]:
-    """Read bounded titles and previews for safe existing-page matching."""
-    entries = []
-    for target in sorted(targets):
-        if not target.startswith(("concepts/", "entities/")):
-            continue
-        path = wiki / f"{target}.md"
-        if path.is_symlink():
-            continue
-        try:
-            content = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            continue
-        body = (frontmatter.split(content) or ("", content))[1]
-        heading = next(
-            (
-                match[1].strip()
-                for line in body.splitlines()[:20]
-                if (match := re.match(r"^#\s+(.+)$", line))
-            ),
-            "",
-        )
-        metadata_title = frontmatter.parse(content).get("title")
-        title = metadata_title if isinstance(metadata_title, str) and metadata_title else heading
-        if not title:
-            title = target.rsplit("/", 1)[-1].replace("-", " ")
-        snippet = next(
-            (
-                line.strip()
-                for line in body.splitlines()
-                if line.strip() and not line.startswith("#")
-            ),
-            "",
-        )[:120]
-        entries.append((target, title, snippet))
-    return entries
 
 
 def _catalog_window(
@@ -273,66 +231,92 @@ def plan_markdown_document(
     schema = get_agents_md(wiki)
     entity_types = resolve_entity_types(settings)
     source_conditions = document_planning_support.source_conditions(parsed)
+    from openkb.agent.document_planning_runtime import read_planning_inputs
+    from openkb.navigation_metadata import structure_diagnostics
+
     limits = RequestLimits.from_config(settings)
+    inputs = read_planning_inputs(kb_dir, wiki, source, parsed, settings, limits)
+    existing_targets = set(inputs["catalog_targets"])
+    catalog_entries, catalog_types = inputs["catalog"], inputs["catalog_types"]
+    catalog_metadata, runtime = inputs["catalog_metadata"], inputs["runtime"]
     windows: list[dict[str, Any]] = []
     planning_limits = limits
     record_document_totals(evidence_groups=0)
-    key = checkpoints.identity(
-        "document-planning-navigation-v2",
-        {
-            "source": source.source_id,
-            "version": source.id,
-            "parse": parsed.id,
-            "navigation": content_id(navigation.get("nodes", [])) if navigation else None,
-            "settings": {
-                field: settings.get(field)
-                for field in (
-                    "model",
-                    "language",
-                    "entity_types",
-                    "default_entity_type",
-                    "planning_thinking",
-                    "planning_reasoning_effort",
-                    "processing",
-                )
-            },
-            "schema": content_id(schema),
-            "rules": module_revision("openkb.agent.document_protocol"),
-            "response": module_revision("openkb.agent.document_planning_response"),
-            "markdown": module_revision("openkb.agent.document_planning_markdown"),
-            "locations": module_revision("openkb.agent.document_planning_locations"),
-            "candidates": module_revision("openkb.agent.document_planning_candidates"),
-            "pages": module_revision("openkb.agent.document_planning_pages"),
-            "planner": module_revision(__name__),
-            "report": module_revision("openkb.agent.document_planning_report"),
-            "projection": module_revision("openkb.agent.document_planning_projection"),
-            "semantics": module_revision("openkb.agent.document_planning_semantics"),
-            "state": module_revision("openkb.agent.document_planning_state"),
-            "bindings": module_revision("openkb.agent.document_planning_bindings"),
-            "carry": module_revision("openkb.agent.document_planning_carry"),
-            "overview": module_revision("openkb.agent.document_planning_overview"),
-            "prompts": module_revision("openkb.agent.document_markdown_prompts"),
-            "quality": module_revision("openkb.agent.document_planning_quality"),
-            "navigation_overview": module_revision("openkb.agent.document_navigation_overview"),
-            "global_context": module_revision("openkb.agent.document_global_context"),
-            "global_planning": module_revision("openkb.agent.document_global_planning"),
-            "source_protocol": module_revision("openkb.agent.source_protocol"),
+    identity = {
+        "source": source.source_id,
+        "version": source.id,
+        "parse": parsed.id,
+        "navigation": content_id(navigation.get("nodes", [])) if navigation else None,
+        "settings": {
+            field: settings.get(field)
+            for field in (
+                "model",
+                "language",
+                "entity_types",
+                "default_entity_type",
+                "planning_thinking",
+                "planning_reasoning_effort",
+                "processing",
+            )
         },
-    )
+        "schema": content_id(schema),
+        "catalog": catalog_entries,
+        "catalog_targets": sorted(
+            target for target in existing_targets if target.startswith(("concepts/", "entities/"))
+        ),
+        "catalog_types": catalog_types,
+        "catalog_metadata": catalog_metadata,
+        "runtime": runtime,
+        "runtime_rules": module_revision("openkb.agent.document_planning_runtime"),
+        "source_conditions": source_conditions,
+        "structure_diagnostics": structure_diagnostics(navigation or {}),
+        "rules": module_revision("openkb.agent.document_protocol"),
+        "response": module_revision("openkb.agent.document_planning_response"),
+        "markdown": module_revision("openkb.agent.document_planning_markdown"),
+        "locations": module_revision("openkb.agent.document_planning_locations"),
+        "candidates": module_revision("openkb.agent.document_planning_candidates"),
+        "pages": module_revision("openkb.agent.document_planning_pages"),
+        "planner": module_revision(__name__),
+        "catalog_rules": module_revision("openkb.agent.document_planning_catalog"),
+        "report": module_revision("openkb.agent.document_planning_report"),
+        "projection": module_revision("openkb.agent.document_planning_projection"),
+        "semantics": module_revision("openkb.agent.document_planning_semantics"),
+        "state": module_revision("openkb.agent.document_planning_state"),
+        "bindings": module_revision("openkb.agent.document_planning_bindings"),
+        "carry": module_revision("openkb.agent.document_planning_carry"),
+        "overview": module_revision("openkb.agent.document_planning_overview"),
+        "prompts": module_revision("openkb.agent.document_markdown_prompts"),
+        "quality": module_revision("openkb.agent.document_planning_quality"),
+        "navigation_overview": module_revision("openkb.agent.document_navigation_overview"),
+        "global_context": module_revision("openkb.agent.document_global_context"),
+        "global_planning": module_revision("openkb.agent.document_global_planning"),
+        "source_protocol": module_revision("openkb.agent.source_protocol"),
+    }
+    if resume:
+        from openkb.agent.document_planning_catalog import retained_catalog
+
+        retained = retained_catalog(kb_dir, wiki, source, parsed, checkpoints, identity)
+        if retained is not None:
+            previous_key, previous_catalog = retained
+            candidate = {**identity, **previous_catalog}
+            if checkpoints.identity("document-planning-navigation-v3", candidate) == previous_key:
+                identity = candidate
+                catalog_entries = [tuple(row) for row in previous_catalog["catalog"]]
+                catalog_types = previous_catalog["catalog_types"]
+                catalog_metadata = previous_catalog["catalog_metadata"]
+                runtime = previous_catalog["runtime"]
+                existing_targets = set(previous_catalog["catalog_targets"])
+    key = checkpoints.identity("document-planning-navigation-v3", identity)
     state = _state(checkpoints, key, windows, resume)
     # Accepted references are re-derived from source evidence on every run.
     # Mutable resume state must not mint a new immutable proof for altered rows.
     state["external_references"] = []
-    existing_targets = list_existing_wiki_targets(wiki)
-    catalog_entries = _catalog_entries(wiki, existing_targets)
     state.setdefault("catalog_targets", sorted(existing_targets))
-    if "catalog_types" not in state:
-        state["catalog_types"] = {}
-        for target, _, _ in catalog_entries:
-            path = wiki / f"{target}.md"
-            page_type = frontmatter.parse(path.read_text(encoding="utf-8")).get("type")
-            if isinstance(page_type, str) and page_type.lower() in entity_types:
-                state["catalog_types"][target] = page_type.lower()
+    state.setdefault("catalog_types", catalog_types)
+    for field, expected in (("catalog_metadata", catalog_metadata), ("runtime", runtime)):
+        if field in state and state[field] != expected:
+            raise ProcessingIncomplete("planning_recovery_identity_mismatch", "planning")
+        state[field] = expected
 
     if retry_skipped:
         for task in state["tasks"].values():

@@ -33,9 +33,10 @@ def manifest(root: Path) -> dict[str, str]:
 
 
 def run(args):
-    from openkb.agent.document_page_resolution import prepare_page
+    from openkb.agent.document_page_preparation import PreparationContext, prepare_planned_pages
     from openkb.agent.document_plan import to_dict
-    from openkb.agent.evidence_checkpoints import publication_settings
+    from openkb.agent.document_planning_runtime import preparation_max_chars
+    from openkb.agent.evidence_checkpoints import CompilationCheckpoints, publication_settings
     from openkb.application.execution import ExecutionContext
     from openkb.compilation_report import collect_compile_report
     from openkb.evidence import ParseStore
@@ -193,6 +194,10 @@ def run(args):
                 },
             )
             audit.phase = "step3"
+            if comparison := getattr(args, "compare_pages_from", None):
+                from tests.online_step3_comparison import compare_pages
+
+                compare_pages(comparison, audit, profile, settings, kb, source, parsed, navigation)
             with processing_scope(settings):
                 with KnowledgeWorkspace(kb, source, parsed, settings) as workspace:
                     result = compile_evidence(
@@ -220,23 +225,42 @@ def run(args):
                     with audit.stage("prepare_pages"):
                         reader = indexed_reader(kb, source, parsed, navigation)
                         limits = RequestLimits.from_config(settings)
-                        for page in result.plan.pages:
-                            prepared.append(
-                                prepare_page(
-                                    page,
+                        with CompilationCheckpoints(
+                            kb, source, parsed, settings, profile.bundle
+                        ) as checkpoints:
+                            prepared = prepare_planned_pages(
+                                result.plan,
+                                PreparationContext(
                                     source,
                                     parsed,
                                     navigation,
                                     reader,
-                                    max_chars=max(1000, limits.input_capacity * 2),
-                                )
+                                    settings,
+                                    checkpoints,
+                                    bundle=profile.bundle,
+                                    retry_skipped=args.resume,
+                                ),
                             )
+                        audit.write("step3-plan.json", to_dict(result.plan))
+                        shutil.copyfile(result.report_ref, audit_dir / "program-report.json")
+                        shutil.copyfile(
+                            result.plan.metadata["plan_preview"], audit_dir / "plan-preview.md"
+                        )
                     audit.write("prepared-evidence.json", prepared)
+                    from copy import deepcopy
+
+                    from openkb.planning_coverage import planning_range_views
+
+                    prepared_plan = deepcopy(result.plan)
+                    prepared_plan.pages = [row.page for row in prepared]
+                    ranges = planning_range_views(prepared_plan, parsed)
+                    ranges["selection"] = result.plan.metadata["planning_ranges"]["selection"]
+                    audit.write("prepared-ranges.json", ranges)
                     audit.write(
                         "prepare-budget.json",
                         {
                             "input_capacity": limits.input_capacity,
-                            "max_chars": max(1000, limits.input_capacity * 2),
+                            "max_chars": preparation_max_chars(limits),
                         },
                     )
             audit.write("compile-report.json", report)
@@ -299,7 +323,14 @@ def main():
     parser.add_argument("--config-kb", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--compare-pages-from",
+        type=Path,
+        help="Compare saved versus current pages rules with frozen request inputs before Step 3",
+    )
     args = parser.parse_args()
+    if args.compare_pages_from and (args.resume or not args.previous_run):
+        parser.error("--compare-pages-from requires --previous-run and a new output")
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
     run(args)
 

@@ -127,6 +127,7 @@ def enhance_ranges(
 ):
     from openkb.agent.evidence_checkpoints import CompilationCheckpoints
     from openkb.navigation_structure import infer_missing
+    from openkb.pdf_navigation import infer_pdf
     from openkb.source_omissions import has_readable_content
 
     options = settings.get("navigation") or {}
@@ -138,7 +139,8 @@ def enhance_ranges(
         with processing_scope(settings) as budget, measure_span("index_structure"):
             allowance = IndexAllowance(budget, options, reserve_compilation)
             record["status"] = "enhanced"
-            infer_missing(
+            infer = infer_pdf if source.name.lower().endswith(".pdf") else infer_missing
+            infer(
                 kb_dir,
                 source,
                 parsed,

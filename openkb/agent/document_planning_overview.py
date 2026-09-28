@@ -50,7 +50,7 @@ def accept_snapshot(state, window, ranges, raw, accepted):
 
 def overview_summary(state):
     snapshot = state.get("overview_snapshot") or {}
-    if state.get("planning_strategy") == "global-navigation-v2":
+    if state.get("planning_strategy") in {"global-navigation-v2", "global-navigation-v3"}:
         basis = state.get("overview_input", {})
         return {
             **basis,
@@ -87,7 +87,7 @@ def validate_overview(state, *, total_blocks=None, block_chars=None):
     from openkb.agent.document_range_validation import validate_ranges
     from openkb.sources import valid_id
 
-    if state.get("planning_strategy") == "global-navigation-v2":
+    if state.get("planning_strategy") in {"global-navigation-v2", "global-navigation-v3"}:
         _validate_navigation_parts(state)
 
     if total_blocks is None:

@@ -128,7 +128,11 @@ def _matches(source, parsed, reader, entries, excluded):
 
     matches = {normalized(entry["title"]): [] for entry in entries}
     for block in parsed.blocks:
-        if "attachment" in block.location:
+        if (
+            "attachment" in block.location
+            or block.kind in {"metadata", "image"}
+            or block.location.get("role") in {"toc", "header", "footer"}
+        ):
             continue
         if block.id in excluded or (block.kind != "heading" and block.location["kind"] != "pdf"):
             continue
@@ -268,6 +272,15 @@ def directory_sections(
                 slots[index] = {**row, "order": orders[row["start_block"]]}
         if any(slots[i] is None for i in indices):
             uncovered.append((left, right))
+    # Unlocated bookmark groups are not body ancestors. Rebase only the mapped
+    # hierarchy; explicit native depth and body numbering are reconciled later.
+    ancestors = []
+    for entry, slot in zip(entries, slots):
+        while ancestors and ancestors[-1][0] >= entry["level"]:
+            ancestors.pop()
+        if slot is not None:
+            slot["level"] = 1 + sum(mapped for _, mapped in ancestors)
+        ancestors.append((entry["level"], slot is not None))
     mapped = [row for row in slots if row is not None]
     if not mapped and not uncovered:
         uncovered = [(0, len(parsed.blocks))]

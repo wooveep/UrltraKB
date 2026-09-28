@@ -164,7 +164,7 @@ def test_attempt_budget_prevents_whole_document_retry(kb_dir, monkeypatch, proce
     assert calls[0]["max_tokens"] == 1024
 
 
-def test_small_pdf_preserves_native_ranges_through_unified_navigation(
+def test_small_pdf_uses_legacy_tasks_and_keeps_saved_physical_positions(
     kb_dir, monkeypatch, processing_config
 ):
     import fitz
@@ -197,10 +197,21 @@ def test_small_pdf_preserves_native_ranges_through_unified_navigation(
     def completion(**kwargs):
         payload = json.loads(kwargs["messages"][-1]["content"])
         stages.append(payload["stage"])
+        task = payload.get("legacy_task")
+        if task == "toc_detector_single_page":
+            return response({"toc_detected": "no"})
+        if task == "generate_toc_init":
+            return response([{"structure": "1", "title": "Chapter A", "physical_index": 2}])
+        if task == "check_title_appearance":
+            return response({"answer": "yes"})
+        if task == "check_title_appearance_in_start":
+            return response({"start_begin": "yes"})
+        if task in {"generate_node_summary", "generate_doc_description"}:
+            return response("Chapter A original knowledge.")
         return response(evidence_response(payload))
 
     async def asynchronous(**kwargs):
-        pytest.fail("Native short ranges need no asynchronous model enhancement")
+        pytest.fail("All PDF calls must use the unified bounded model transport")
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", asynchronous)
@@ -209,11 +220,10 @@ def test_small_pdf_preserves_native_ranges_through_unified_navigation(
     navigation = source_status(kb_dir, result.source_id)["navigation"]
     assert navigation["status"] == "enhanced", navigation
     assert {position["location"]["page"] for position in navigation["positions"]} == {1, 2}
-    assert navigation["usage"]["observable_attempts"] == 2
-    assert [stage for stage in stages if stage.startswith("index_")] == [
-        "index_structure",
-        "index_summary",
-    ]
+    indexing = [stage for stage in stages if stage.startswith("index_")]
+    assert navigation["usage"]["observable_attempts"] == len(indexing) == 9
+    assert indexing.count("index_pdf_check_title_appearance") == 1
+    assert indexing.count("index_pdf_check_title_appearance_in_start") == 2
 
 
 def test_unknown_model_usage_does_not_change_committed_result(

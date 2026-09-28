@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 from importlib.metadata import version as package_version
 
@@ -78,6 +79,9 @@ def read_navigation(kb_dir, source, *, offset=0, limit=100, identity=None):
     rows = _location_rows(source, parsed)
     record["nodes"] = load_nodes(kb_dir, record["pageindex"])
     validate_nodes(record["nodes"], len(rows))
+    from openkb.navigation_metadata import validate_pdf_ranges
+
+    validate_pdf_ranges(record["nodes"], source, parsed)
     validate_usage(record["usage"])
     return {
         **record,
@@ -166,6 +170,15 @@ def prepare_navigation(kb_dir, source, parsed, settings, *, bundle=None, reserve
                 "enhancement": module_revision("openkb.navigation_enhancement"),
                 "verification": module_revision("openkb.navigation_verification"),
                 "structure": module_revision("openkb.navigation_structure"),
+                "reading": module_revision("openkb.navigation_reading"),
+                "pdf": module_revision("openkb.pdf_navigation"),
+                "pdf_pages": module_revision("openkb.pdf_navigation_pages"),
+                "pdf_runtime": module_revision("openkb.pdf_navigation_runtime"),
+                "pdf_requests": module_revision("openkb.pdf_navigation_requests"),
+                "anchors": module_revision("openkb.navigation_anchors"),
+                "summaries": module_revision("openkb.navigation_summaries"),
+                "summary_inputs": module_revision("openkb.navigation_summary_inputs"),
+                "metadata": module_revision("openkb.navigation_metadata"),
                 "requests": module_revision("openkb.navigation_requests"),
                 "toc": module_revision("openkb.navigation_toc"),
                 "evidence_groups": module_revision("openkb.navigation_evidence"),
@@ -265,4 +278,7 @@ def navigation_capabilities(record):
             "preview": sum(node["summary_origin"] == "preview" for node in nodes),
             "unavailable": sum(node["summary_origin"] == "unavailable" for node in nodes),
         },
+        "summary_outcomes": dict(
+            Counter(node.get("summary_details", {}).get("status", "unspecified") for node in nodes)
+        ),
     }

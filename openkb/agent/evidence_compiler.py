@@ -324,26 +324,32 @@ def compile_evidence(
         ]
         prepared_evidence = {}
         if plan.metadata.get("protocol") == "document-plan-v4":
-            from openkb.agent.document_page_resolution import prepare_page
-            from openkb.agent.document_recovery import remember_preparation
+            from openkb.agent.document_page_preparation import (
+                PreparationContext,
+                prepare_planned_pages,
+            )
 
-            for index, page in enumerate(plan.pages):
-                if page.state == "pending_evidence":
-                    remember_preparation(plan, page)
-                prepared = prepare_page(
-                    page,
+            prepared_pages = prepare_planned_pages(
+                plan,
+                PreparationContext(
                     source,
                     parsed,
                     navigation,
                     reader,
-                    max_chars=max(1000, limits.input_capacity * 2),
+                    settings,
+                    checkpoints,
+                    bundle=bundle,
                     retry_skipped=resume_plan,
-                )
-                plan.pages[index] = prepared.page
+                ),
+            )
+            for prepared in prepared_pages:
                 if prepared.evidence is not None:
-                    prepared_evidence[page.key] = (prepared.evidence, list(prepared.occurrences))
+                    prepared_evidence[prepared.page.key] = (
+                        prepared.evidence,
+                        list(prepared.occurrences),
+                    )
                 if prepared.reason:
-                    report_content_omission("generation", prepared.reason, [page.name])
+                    report_content_omission("generation", prepared.reason, [prepared.page.name])
             _save_plan_state(checkpoints, plan)
         all_groups = _planned_groups(plan, executable_only=False)
         ready_groups = [group for group in all_groups if group["page"].state == "ready"]

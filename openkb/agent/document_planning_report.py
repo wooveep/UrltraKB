@@ -15,7 +15,7 @@ from openkb.agent.document_planning_result import PlanningResult
 from openkb.agent.document_window_receipts import window_receipt_id
 from openkb.execution_measurement import record_document_totals
 from openkb.locks import atomic_write_text
-from openkb.planning_coverage import planning_coverage, planning_page_scopes
+from openkb.planning_coverage import planning_coverage, planning_page_scopes, planning_range_views
 from openkb.sources import content_id, valid_id
 
 
@@ -185,6 +185,7 @@ def _finalize(
         "planning_strategy": state.get("planning_strategy"),
         "planning_mode": state.get("planning_mode"),
         "planning_snapshot": state.get("planning_snapshot"),
+        "planning_runtime": state.get("runtime", {}),
         "deferred_suggestions": deferred,
         "external_reference_hints": state.get("external_reference_hints", []),
         "suggestion_annotations": state.get("suggestion_annotations", {}),
@@ -265,6 +266,7 @@ def _finalize(
         plan.metadata["reference_proof_key"] = proof_key
     coverage = planning_coverage(plan, parsed, omission_count=len(omissions), outcome=outcome)
     page_scopes = planning_page_scopes(plan, parsed)
+    range_views = planning_range_views(plan, parsed, not_started=True)
     retained_starts = {
         row["start"] for row in state.get("retained_fragments", []) if isinstance(row, dict)
     }
@@ -279,6 +281,7 @@ def _finalize(
     if plan is not None:
         plan.metadata["planning_coverage"] = coverage
         plan.metadata["page_scopes"] = page_scopes
+        plan.metadata["planning_ranges"] = range_views
         preview_path = _path(checkpoints, "plan-preview", key, ".md")
         plan.metadata["plan_preview"] = str(preview_path)
         plan.metadata["plan_report"] = str(report_path)
@@ -299,6 +302,7 @@ def _finalize(
         "planning_strategy": state.get("planning_strategy"),
         "planning_mode": state.get("planning_mode"),
         "planning_snapshot": state.get("planning_snapshot"),
+        "planning_runtime": state.get("runtime", {}),
         "overview": overview_summary(state),
         **quality,
         "overview_ref": overview_ref,
@@ -363,6 +367,7 @@ def _finalize(
         },
         "filtered_candidate_history": state.get("filtered", []),
         "planning_coverage": coverage,
+        "planning_ranges": range_views,
         "page_scopes": page_scopes,
         "planning_execution": metadata["planning_execution"],
         "tasks": {
@@ -416,6 +421,10 @@ def refresh_execution_report(checkpoints: Any, plan: DocumentPlan) -> None:
         "published": sum(p.quality == "published" for p in plan.pages),
     }
     report["downstream"] = "evidence_prepared"
+    report["page_preparation"] = plan.metadata.get("page_preparation", {})
+    report["preparation_success_rate"] = (
+        sum(page.state == "ready" for page in plan.pages) / len(plan.pages) if plan.pages else None
+    )
     report["evidence_scopes"] = {page.key: page.evidence_scope for page in plan.pages}
     report.setdefault("location_bindings", {})["actual_evidence_ready"] = sum(
         p.state == "ready" for p in plan.pages
@@ -425,6 +434,10 @@ def refresh_execution_report(checkpoints: Any, plan: DocumentPlan) -> None:
     parsed = ParseStore(checkpoints.store.kb_dir).load(plan.metadata["parse_id"])
     report["page_scopes"] = planning_page_scopes(plan, parsed)
     report["planning_coverage"] = planning_coverage(plan, parsed)
+    report["planning_ranges"] = planning_range_views(plan, parsed)
+    if previous_ranges := plan.metadata.get("planning_ranges"):
+        report["planning_ranges"]["selection"] = previous_ranges["selection"]
+    plan.metadata["planning_ranges"] = report["planning_ranges"]
     plan.metadata["planning_coverage"] = report["planning_coverage"]
     plan.metadata["page_scopes"] = report["page_scopes"]
     checkpoints.save_recovery(key, "plan_report", report)
