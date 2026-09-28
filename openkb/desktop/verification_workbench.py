@@ -29,6 +29,9 @@ def verify_workbench(window, first, other, root, wait):
     for name in ("资料", "知识", "对话", "产物", "任务", "设置", "概览"):
         QTest.mouseClick(button(window, name), Qt.MouseButton.LeftButton)
         wait(lambda: on_page(window, name))
+    from openkb.desktop.verification_reading import verify_reading
+
+    verify_reading(window, root, wait)
     button(window, "资料").click()
     from openkb.desktop.documents import DocumentsDialog
 
@@ -60,7 +63,12 @@ def verify_workbench(window, first, other, root, wait):
 
     # Keep a draft intact while opening secondary navigation and changing themes.
     window.open_page("concepts/原生阅读")
-    wait(lambda: window.page is not None and window.page.path == "concepts/原生阅读")
+    # The retained page can match before the asynchronous load leaves Settings.
+    wait(
+        lambda: on_page(window, "知识")
+        and window.page is not None
+        and window.page.path == "concepts/原生阅读"
+    )
     wait(lambda: "与文字保持基线" in window.reader.toPlainText())
     window.tabs.setCurrentIndex(1)
     window.editor.setPlainText(window.editor.toPlainText() + "\n尚未保存的草稿。")
@@ -154,6 +162,9 @@ def capture_workbench(window, theme, root, wait):
                 if name == "知识":
                     window.tabs.setCurrentIndex(0)
                     wait(lambda: "与文字保持基线" in window.reader.toPlainText())
+                    wait(window.reader.rendering_stopped)
+                if name == "对话":
+                    wait(window.chat.rendering_stopped)
                 if name == "设置":
                     from openkb.desktop.settings import SettingsDialog
 
@@ -242,7 +253,9 @@ def verify_history_submission(window, kb, wait):
         QTest.keyClick(window.question, Qt.Key.Key_Return)
         task_id = window.manager.tasks()[-1].id
         try:
-            wait(lambda: "已排队" in window.chat.toPlainText())
+            wait(lambda: "排队显示验证" in window.chat.toPlainText())
+            assert "已排队" not in window.chat.toPlainText()
+            assert window.stop_answer.isVisible()
             assert on_page(window, "对话") and window.chat.isVisible()
         finally:
             window.manager.stop(task_id)

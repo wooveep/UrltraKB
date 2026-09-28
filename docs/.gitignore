@@ -7,3 +7,9 @@
 !.gitignore
 !golden-principles.md
 !desktop.md
+!dev-1.2.0.md
+!desktop-evidence/
+!desktop-evidence/dev-1.2.0/
+!desktop-evidence/dev-1.2.0/verification.json
+!desktop-evidence/dev-1.2.0/documents.png
+!desktop-evidence/dev-1.2.0/conversations.png

@@ -15,6 +15,17 @@ import time
 from pathlib import Path
 
 
+def create_application():
+    """Use Qt-owned dialogs so acceptance can drive them on every desktop host."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from openkb.desktop.fonts import application_arguments
+
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
+    return QApplication(application_arguments([]))
+
+
 def main() -> int:
     multiprocessing.freeze_support()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,6 +37,10 @@ def main() -> int:
     parser.add_argument("--one-shot-url", help="Controlled PDF URL that can be downloaded once")
     parser.add_argument("--catalog-only", action="store_true", help="Only KB management/navigation")
     parser.add_argument("--workbench", action="store_true", help="Workbench appearance/navigation")
+    parser.add_argument("--startup", choices=("system", "light", "dark"), help="First-frame fonts")
+    parser.add_argument(
+        "--baseline", action="store_true", help="Original document/chat workflow UI"
+    )
     parser.add_argument("--distribution", action="store_true", help="Installed source/license UI")
     parser.add_argument("--workbench-restart", type=Path, help="Isolated prior appearance profile")
     parser.add_argument("--lifecycle", choices=("wait", "stop", "delete", "restart"))
@@ -52,12 +67,15 @@ def main() -> int:
         str((args.workbench_restart or root) / "qt"),
     )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    from openkb.desktop.fonts import application_arguments
     from openkb.desktop.window import Workbench
 
-    app = QApplication(application_arguments([]))
+    app = create_application()
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("OpenKB Verification")
+    if args.startup:
+        from openkb.desktop.verification_startup import verify_startup
+
+        return verify_startup(app, root, args.startup)
     if args.lifecycle:
         from openkb.desktop.verification_lifecycle import verify_lifecycle
 
@@ -144,6 +162,12 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        if args.baseline:
+            from openkb.desktop.verification_baseline import verify_baseline
+
+            verify_baseline(window, first, root, wait_until)
+            checks.append("baseline Markdown/PageIndex inventory, source reading and chat stages")
+            return 0
         if args.distribution:
             from openkb.desktop.verification_distribution import verify_distribution
 

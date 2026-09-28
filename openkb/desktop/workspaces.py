@@ -1,8 +1,7 @@
 """Page composition around the existing native controls and application interfaces."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTabWidget,
+    QToolButton,
     QTreeWidget,
     QVBoxLayout,
     QWidget,
@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
 from openkb.desktop.drawer import Drawer
 from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.fonts import text_font
+from openkb.desktop.form_controls import FocusComboBox
 from openkb.desktop.location import LocationLabel
+from openkb.desktop.navigation_icons import navigation_icon
 from openkb.desktop.reader import MarkdownView
 from openkb.desktop.shell import PAGES, action
 
@@ -74,42 +76,90 @@ class Workspaces:
         outer = self.hosts["概览"]
         content, layout = page()
         content.setMaximumWidth(960)
-        row = QHBoxLayout()
+        canvas = QWidget()
+        row = QHBoxLayout(canvas)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addStretch()
         row.addWidget(content, 1)
         row.addStretch()
-        outer.addLayout(row, 1)
-        layout.setContentsMargins(20, 32, 20, 20)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        layout.setContentsMargins(12, 24, 12, 20)
+        eyebrow = QLabel("你的知识工作台")
+        eyebrow.setObjectName("eyebrow")
+        layout.addWidget(eyebrow)
         title = QLabel("知识，从这里开始")
         title.setObjectName("welcomeTitle")
         layout.addWidget(title)
-        layout.addWidget(path_label("将原始资料整理为相互关联的知识，继续阅读、提问与创作。"))
+        intro = path_label("将原始资料整理为相互关联的知识，继续阅读、提问与创作。")
+        intro.setObjectName("overviewIntro")
+        layout.addWidget(intro)
         row = FlowLayout()
         for label, callback in (
             ("新建知识库", self.window._create_kb),
             ("打开知识库", self.window._choose_kb),
         ):
-            row.addWidget(action(label, callback))
+            button = action(label, callback)
+            if label == "新建知识库":
+                button.setObjectName("primaryAction")
+            row.addWidget(button)
         layout.addLayout(row)
+        layout.addSpacing(8)
+        summary = QFrame()
+        summary.setObjectName("overviewSummary")
+        summary_body = QVBoxLayout(summary)
+        summary_body.setContentsMargins(22, 18, 22, 18)
+        summary_body.setSpacing(8)
+        summary_title = QLabel("当前知识库")
+        summary_title.setObjectName("sectionTitle")
+        summary_body.addWidget(summary_title)
         self.overview_location = LocationLabel("尚未打开知识库")
-        layout.addWidget(self.overview_location)
+        self.overview_location.setObjectName("muted")
+        summary_body.addWidget(self.overview_location)
         self.stats = QLabel("打开知识库后，在这里查看资料、知识与最近活动。")
         self.stats.setObjectName("overviewStats")
         self.stats.setWordWrap(True)
-        layout.addWidget(self.stats)
+        summary_body.addWidget(self.stats)
         self.recent = path_label("")
-        layout.addWidget(self.recent)
+        self.recent.setObjectName("muted")
+        summary_body.addWidget(self.recent)
+        layout.addWidget(summary)
+        layout.addSpacing(8)
+        next_title = QLabel("继续探索")
+        next_title.setObjectName("sectionTitle")
+        layout.addWidget(next_title)
         self.shortcuts = QWidget()
         quick = FlowLayout(self.shortcuts)
         quick.setContentsMargins(0, 0, 0, 0)
+        self.shortcut_buttons = {}
         for label, target in (("导入资料", "资料"), ("阅读知识", "知识"), ("开始对话", "对话")):
-            quick.addWidget(
-                action(label, lambda checked=False, name=target: self.window.shell.navigate(name))
+            button = QToolButton()
+            button.setObjectName("overviewShortcut")
+            button.setText(label)
+            button.setAccessibleName(label)
+            button.setToolTip(label)
+            button.setIcon(navigation_icon(target))
+            button.setIconSize(QSize(22, 22))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setMinimumWidth(136)
+            button.clicked.connect(
+                lambda checked=False, name=target: self.window.shell.navigate(name)
             )
+            quick.addWidget(button)
+            self.shortcut_buttons[target] = button
         layout.addWidget(self.shortcuts)
         layout.addStretch()
 
     def _documents(self):
+        hint = path_label(
+            "导入文件、目录或网址，生成摘要、概念与实体页面。"
+            "普通文档转换为 Markdown；达到设置页数的 PDF 使用 PageIndex 长文索引。"
+        )
+        hint.setObjectName("documentWorkflow")
+        self.hosts["资料"].addWidget(hint)
         row = FlowLayout()
         self.import_controls = QWidget()
         self.import_controls.setLayout(row)
@@ -118,7 +168,10 @@ class Workspaces:
             ("导入目录", self.window._import_directory),
             ("导入网址", self.window._import_urls),
         ):
-            row.addWidget(action(label, callback))
+            button = action(label, callback)
+            if label == "导入文件":
+                button.setObjectName("primaryAction")
+            row.addWidget(button)
         self.hosts["资料"].addWidget(self.import_controls)
 
     def _knowledge(self):
@@ -132,7 +185,7 @@ class Workspaces:
             row.addWidget(button)
         row.addWidget(action("检查与修复…", w._maintenance))
         row.addWidget(action("刷新", w._refresh_current))
-        w.zoom = QComboBox()
+        w.zoom = FocusComboBox()
         w.zoom.setAccessibleName("内容缩放")
         for scale in (0.75, 1, 1.5, 2, 4):
             w.zoom.addItem(f"{scale:.0%}", scale)
@@ -144,10 +197,27 @@ class Workspaces:
         layout.addWidget(w.location)
         self.reading = QSplitter()
         w.pages = QTreeWidget()
+        w.pages.setObjectName("knowledgeDirectory")
         w.pages.setHeaderLabel("知识目录")
         w.pages.setMinimumWidth(160)
         w.pages.setMaximumWidth(320)
-        w.pages.itemActivated.connect(w._activate_page)
+        # Selection covers one mouse click and keyboard navigation. Activation
+        # (often a double click) must not issue a second asynchronous page read.
+        w.pages.currentItemChanged.connect(
+            lambda current, previous: w._activate_page(current, 0) if current else None
+        )
+        w.pages.setExpandsOnDoubleClick(False)
+        w.pages.itemClicked.connect(
+            lambda item, column: item.setExpanded(not item.isExpanded())
+            if item.childCount()
+            else None
+        )
+        w.pages.itemClicked.connect(
+            lambda item, column: w.tabs.setCurrentIndex(0)
+            if w.page
+            and (item.data(0, Qt.ItemDataRole.UserRole) or "").removesuffix(".md") == w.page.path
+            else None
+        )
         self.reading.addWidget(w.pages)
         w.tabs = QTabWidget()
         w.reader = MarkdownView()
@@ -161,6 +231,7 @@ class Workspaces:
         editor_layout.addWidget(w.editor, 1)
         buttons = FlowLayout()
         w.save_button = action("保存正文", w._save_page)
+        w.save_button.setObjectName("primaryAction")
         for button in (
             w.save_button,
             action("查看最新版本 / 处理冲突", w._review_draft),
@@ -191,6 +262,19 @@ class Workspaces:
             self._directory_wide = self.directory_toggle.isChecked()
         self.resize_reading(self._narrow)
 
+    def select_page(self, path):
+        """Reflect link navigation without issuing another page read."""
+        tree = self.window.pages
+        matches = tree.findItems("*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive)
+        for item in matches:
+            target = item.data(0, Qt.ItemDataRole.UserRole)
+            if target and target.removesuffix(".md") == path:
+                blocked = tree.blockSignals(True)
+                tree.setCurrentItem(item)
+                tree.scrollToItem(item)
+                tree.blockSignals(blocked)
+                return
+
     def toggle_context(self):
         # On narrow windows secondary panes share the reading space, never stack up.
         visible = self.context_toggle.isChecked()
@@ -213,7 +297,8 @@ class Workspaces:
             self.context_toggle.setChecked(False)
 
     def _conversations(self):
-        from openkb.desktop.conversation_view import ConversationView, QuestionEdit
+        from openkb.desktop.conversation_cards import ConversationView
+        from openkb.desktop.conversation_view import QuestionEdit
 
         w = self.window
         layout = self.hosts["对话"]
@@ -229,7 +314,9 @@ class Workspaces:
         self.history_toggle.setCheckable(True)
         row.addWidget(self.history_toggle)
         layout.addLayout(row)
-        w.conversation_notice = path_label("")
+        from openkb.desktop.conversation_activity import ConversationActivity
+
+        w.conversation_notice = ConversationActivity()
         w.conversation_notice.setObjectName("muted")
         w.conversation_notice.hide()
         layout.addWidget(w.conversation_notice)
@@ -368,20 +455,40 @@ class Workspaces:
     def _settings(self):
         w = self.window
         layout = self.hosts["设置"]
+        content, body = page()
+        content.setMaximumWidth(1040)
+        centered = QHBoxLayout()
+        centered.setContentsMargins(0, 0, 0, 0)
+        centered.addStretch()
+        centered.addWidget(content, 1)
+        centered.addStretch()
+        layout.addLayout(centered, 1)
         row = QHBoxLayout()
+        row.addWidget(QLabel("应用到"))
+        self.settings_scope = FocusComboBox()
+        self.settings_scope.setAccessibleName("设置范围")
+        self.settings_scope.addItems(["所有知识库", "当前知识库"])
+        self.settings_scope.setMinimumWidth(150)
+        self.settings_scope.setMaximumWidth(300)
+        self.settings_scope.setSizeAdjustPolicy(
+            FocusComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        row.addWidget(self.settings_scope)
+        row.addStretch()
         row.addWidget(QLabel("外观"))
-        w.theme = QComboBox()
+        w.theme = FocusComboBox()
         w.theme.setAccessibleName("应用主题")
         for label, value in (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark")):
             w.theme.addItem(label, value)
         row.addWidget(w.theme)
-        row.addStretch()
-        row.addWidget(action("关于 UrltraKB", w._about))
-        layout.addLayout(row)
+        body.addLayout(row)
         self.settings_tabs = QTabWidget()
         self.settings_tabs.setAccessibleName("设置范围")
+        self.settings_tabs.tabBar().hide()
+        self.settings_scope.currentIndexChanged.connect(self.settings_tabs.setCurrentIndex)
+        self.settings_tabs.currentChanged.connect(self.settings_scope.setCurrentIndex)
         self.settings_tabs.currentChanged.connect(self.refresh_settings)
-        layout.addWidget(self.settings_tabs, 1)
+        body.addWidget(self.settings_tabs, 1)
 
     def refresh_settings(self):
         selected = self.settings_tabs.currentWidget()
@@ -391,17 +498,22 @@ class Workspaces:
                 if scroll is selected:
                     panel.reload()
 
-    def embed(self, key, panel, layout=None):
+    def embed(self, key, panel, layout=None, *, scrollable=True):
         panel.setWindowFlags(Qt.WindowType.Widget)
         panel.setMinimumSize(0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(panel)
+        if scrollable:
+            host = QScrollArea()
+            host.setWidgetResizable(True)
+            host.setFrameShape(QScrollArea.Shape.NoFrame)
+            host.setWidget(panel)
+        else:
+            # Panels with their own content scrolling keep actions outside it.
+            host, body = page()
+            body.addWidget(panel)
         if layout is not None:
-            layout.addWidget(scroll, 1)
-        self.panels[key] = (panel, scroll)
-        return scroll
+            layout.addWidget(host, 1)
+        self.panels[key] = (panel, host)
+        return host
 
     def reset(self):
         # Retire callbacks before changing the visible owner. Running tasks are independent.
@@ -412,6 +524,9 @@ class Workspaces:
             panel.done(QDialog.DialogCode.Rejected)
             scroll.hide()
             scroll.setParent(self.window)
+            for view in scroll.findChildren(MarkdownView):
+                view.stop_rendering()
+            scroll.deleteLater()
             del self.panels[key]
         while self.chat_stack.count() > 1:
             self.chat_stack.removeTab(1)
@@ -421,6 +536,13 @@ class Workspaces:
         self.history_drawer.set_content(None)
         self.context_drawer.set_open(False, immediate=True)
         enabled = self.window.kb is not None
+        self.settings_scope.model().item(1).setEnabled(enabled)
+        self.settings_scope.setItemText(
+            1, f"当前知识库 · {self.window.kb.name}" if enabled else "当前知识库（未打开）"
+        )
+        self.settings_scope.setItemData(
+            1, str(self.window.kb) if enabled else "请先打开知识库", Qt.ItemDataRole.ToolTipRole
+        )
         self.shortcuts.setEnabled(enabled)
         self.import_controls.setEnabled(enabled)
         self.watches.root = self.window.kb
@@ -452,7 +574,7 @@ class Workspaces:
                     continue
                 panel = SettingsDialog(w.io, kb, w)
                 panel.buttons.button(QDialogButtonBox.StandardButton.Close).hide()
-                self.settings_tabs.addTab(self.embed(key, panel), key)
+                self.settings_tabs.addTab(self.embed(key, panel, scrollable=False), key)
             self.refresh_settings()
         if w.kb is None:
             return

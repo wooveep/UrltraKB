@@ -120,6 +120,13 @@ Subscription-based providers that authenticate via OAuth device flow (e.g. `chat
 
 ### Native desktop workbench
 
+`dev-1.2.0` combines the original `0cec254` document and conversation workflows
+with the native desktop workbench. Ordinary documents compile from Markdown;
+long PDFs use PageIndex at the configured page threshold. The Documents page
+shows that distinction and opens retained source text, while Conversations keeps
+the original Wiki-based multi-turn history. See the
+[branch scope and verification notes](docs/dev-1.2.0.md).
+
 The desktop targets Windows 11 x86_64 and Debian 13.6 x86_64 with GNOME/X11. Open the `OpenKB` program from the complete portable program directory. Knowledge bases and settings remain in their user-selected locations when program files are replaced.
 
 For development in this checkout:

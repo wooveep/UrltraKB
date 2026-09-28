@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QPlainTextEdit
 from openkb.agent.answer_text import visible_answer
 from openkb.desktop.fonts import text_font
 from openkb.desktop.reader import MarkdownView
+from openkb.desktop.theme import theme_colors
 
 
 class QuestionEdit(QPlainTextEdit):
@@ -57,17 +58,21 @@ class ConversationView(MarkdownView):
     def show_turns(self, turns, base, *, pending=None):
         self._turns = tuple(turns)
         self._pending = pending
-        background = "#30312e" if self._dark else "#f0f1ed"
+        background = theme_colors(self._dark).selection
         parts = []
         for question, answer in (*self._turns, *((pending,) if pending else ())):
             question = html.escape(question).replace("\n", "<br>")
             parts.append(
                 '<table width="100%" cellspacing="0" cellpadding="14">'
                 f'<tr><td width="22%"></td><td bgcolor="{background}">{question}</td></tr>'
-                '</table>\n\n<p style="font-size: 13px; margin-top: 24px;">UrltraKB</p>\n\n'
-                + visible_answer(answer)
-                + '\n\n<p style="margin-bottom: 28px;"></p>'
+                "</table>"
             )
+            if answer:
+                parts.append(
+                    '\n\n<p style="font-size: 13px; margin-top: 24px;">UrltraKB</p>\n\n'
+                    + visible_answer(answer)
+                    + '\n\n<p style="margin-bottom: 28px;"></p>'
+                )
         if not parts:
             self.show_temporary("")
         else:
@@ -79,6 +84,7 @@ class ConversationView(MarkdownView):
         following = bar.maximum() - previous < 40
         super()._apply_rendered(generation, value)
         if generation == self._generation:
+            self._fit_source_images()
             bar.setValue(bar.maximum() if following else previous)
 
     def show_temporary(self, text):

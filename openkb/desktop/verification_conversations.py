@@ -53,10 +53,9 @@ def verify_conversations(window, kb, root, wait):
         before = len(window.manager.tasks())
         QTest.keyClick(window.question, Qt.Key.Key_Return)
         task = window.manager.tasks()[-1]
-        wait(
-            lambda: "已排队" in window.chat.toPlainText()
-            or "等待知识库" in window.chat.toPlainText()
-        )
+        wait(lambda: "第三轮：在原对话中继续" in window.chat.toPlainText())
+        assert "已排队" not in window.chat.toPlainText()
+        assert "等待知识库" not in window.chat.toPlainText()
         assert task.operation == "ContinueConversation"
         assert "第一轮的完整回答" in window.chat.toPlainText()
         assert window.stop_answer.isVisible()

@@ -4,6 +4,10 @@ The desktop opens local knowledge bases in their existing format. It uses Qt
 Widgets for its interface and local static rendering for mathematics and Mermaid.
 The CLI and independent REST API continue to work with the same data.
 
+For this branch's baseline, selected desktop changes and verification results,
+see [dev-1.2.0](dev-1.2.0.md). Historical package acceptance below belongs to its
+recorded source revisions; this branch has separate source-level validation.
+
 ## Launch and data locations
 
 On Windows 11 x86_64, unpack the complete program directory and run `UrltraKB.exe`.
@@ -83,6 +87,13 @@ Browse summaries, concepts, entities and explorations in **知识** (Knowledge).
 source material, outgoing links and backlinks. Missing or ambiguous targets are
 reported rather than linked to an arbitrary page. Code blocks, tables, images,
 Chinese text, mathematics and the supported Mermaid families display natively.
+Single-click a directory entry to read it. Images resize with the reading pane;
+switching themes preserves the reading position and unsaved drafts.
+
+In **资料**, the inventory distinguishes **Markdown 全文编译** from **PageIndex 长文索引**.
+Select one document and choose **阅读原文** to open the converted text or retained
+PDF page text. Ordinary imports and PDF imports below the configured threshold
+use Markdown. Long PDFs build a PageIndex tree before compiling knowledge.
 
 The editor saves through the shared page operations and preserves metadata.
 If another entry point or an external editor changed the page after it was
@@ -103,7 +114,9 @@ context and **对话历史** opens saved chats with one click. Reopening a KB re
 the last selected conversation. The complete transcript stays visible during a
 follow-up, and the composer offers **停止** while a reply is running.
 
-The chat displays a short progress status until the final answer is ready. Tool
+The chat displays task status and elapsed time separately from the message cards
+until the final answer is ready. It uses Wiki tools and the original long-document
+retrieval; no separate source-review stages are displayed. Tool
 narration and explicitly tagged reasoning are excluded from the answer. Quoted
 code, citations, formulas and diagrams remain available. Completed turns retain
 the established session model/language and reusable SDK history. Accepted submissions are first saved in a private desktop outbox, including
@@ -127,8 +140,9 @@ evaluation, validation, history and rollback remain available in the CLI.
 
 ## Settings and task outcomes
 
-Global and KB settings expose the existing model, language, concurrency and
-provider configuration. Secret fields distinguish keeping, replacing and
+Global and KB settings expose the model, language, long-PDF page threshold,
+entity types and API credentials. Advanced provider options remain available in
+the configuration file. Secret fields distinguish keeping, replacing and
 clearing a value. Desktop credentials prefer the KB, then the environment from
 which the application launched, then global settings. The CLI retains its
 environment-first behavior. Desktop setup uses API keys; subscription login

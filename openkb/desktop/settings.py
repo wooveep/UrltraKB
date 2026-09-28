@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -23,6 +22,7 @@ from openkb.application.settings import (
     read_settings_view,
 )
 from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+from openkb.desktop.form_controls import FocusComboBox, scroll_form
 from openkb.desktop.panels import ManagementPanel
 
 _SOURCES = {
@@ -48,7 +48,7 @@ class SettingField(QWidget):
         self.key = key
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.action = QComboBox()
+        self.action = FocusComboBox()
         self.action.addItems(["不变", "设置", "清除覆盖"])
         self.text = QLineEdit()
         if key == "api_key":
@@ -105,20 +105,26 @@ class SettingsDialog(ManagementPanel):
         self.status = QLabel("正在读取设置…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
         self.form = QWidget()
         form_layout = QFormLayout(self.form)
+        form_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.fields = {}
         for key, label in _FIELDS.items():
             field = SettingField(key)
             self.fields[key] = field
             form_layout.addRow(label, field)
-        layout.addWidget(self.form)
+        content_layout.addWidget(self.form)
         hint = QLabel(
             "清除仅移除此处覆盖，之后使用下一层设置。密钥值不会读回。\n"
             "已开始的任务保留原配置；新任务开始时读取最新设置。"
         )
         hint.setWordWrap(True)
-        layout.addWidget(hint)
+        content_layout.addWidget(hint)
+        content_layout.addStretch()
+        layout.addWidget(scroll_form(content), 1)
         self.repair_button = QPushButton("检查并恢复设置…")
         self.repair_button.clicked.connect(self.repair)
         layout.addWidget(self.repair_button)

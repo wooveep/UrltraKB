@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -52,7 +53,7 @@ class Renderer:
         environment["TZ"] = "UTC"
         environment["OPENKB_RENDER_PARENT_PID"] = str(os.getpid())
         environment["OPENKB_RENDER_TIMEOUT_MS"] = "60000"
-        if os.name != "nt":
+        if sys.platform == "linux":
             stat = Path("/proc/self/stat").read_text()
             environment["OPENKB_RENDER_PARENT_START"] = stat[stat.rfind(")") + 2 :].split()[19]
         if "LD_LIBRARY_PATH_ORIG" in environment:

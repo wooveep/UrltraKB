@@ -9,6 +9,24 @@ import pytest
 pytest.importorskip("PySide6")
 
 
+def test_native_baseline_documents_and_conversation(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "openkb.desktop.verification",
+            "--baseline",
+            "--output",
+            str(tmp_path / "baseline"),
+        ],
+        env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_native_workbench_navigation_and_appearance(tmp_path):
     result = subprocess.run(
         [

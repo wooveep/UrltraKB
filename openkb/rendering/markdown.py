@@ -106,6 +106,15 @@ def render_markdown(
         return f'<{tag}><a name="{html.escape(slug, quote=True)}"></a>'
 
     markdown.renderer.rules["heading_open"] = heading
+
+    # Scope native table styling to Markdown cells. Conversation layout tables
+    # arrive as raw HTML and should retain their own presentation.
+    def table_cell(tokens, index, options, env):
+        tokens[index].attrSet("class", "markdown-cell")
+        return markdown.renderer.renderToken(tokens, index, options, env)
+
+    markdown.renderer.rules["th_open"] = table_cell
+    markdown.renderer.rules["td_open"] = table_cell
     markdown.block.ruler.before("fence", "openkb_math", math_block)
     default_fence = markdown.renderer.rules["fence"]
     markdown.renderer.rules["fence"] = fence

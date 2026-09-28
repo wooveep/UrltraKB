@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
-    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from openkb.application.knowledge_bases import get_kb_list
 from openkb.application.recompilation import select_recompilation
 from openkb.application.removal import preview_removal
+from openkb.desktop.flow_layout import FlowLayout
 from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import RecompileDocument, RemoveDocument
@@ -37,23 +38,28 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["资料", "类型"])
+        self.table = QTableWidget(0, 3)
+        self.table.setAccessibleName("已导入资料")
+        self.table.setHorizontalHeaderLabels(["资料", "格式", "导入方式"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.invalidate)
         layout.addWidget(self.table)
-        options = QHBoxLayout()
+        options = FlowLayout()
         self.keep_raw = QCheckBox("保留原文")
         self.keep_empty = QCheckBox("保留失去全部来源的概念 / 实体页面")
         for checkbox in (self.keep_raw, self.keep_empty):
             checkbox.toggled.connect(self.invalidate)
             options.addWidget(checkbox)
         layout.addLayout(options)
-        actions = QHBoxLayout()
+        actions = FlowLayout()
         self.refresh_button = QPushButton("刷新资料")
+        self.read_button = QPushButton("阅读原文")
+        self.read_button.clicked.connect(self.read_source)
+        actions.addWidget(self.read_button)
         self.preview_button = QPushButton("查看删除计划")
         self.confirm_button = QPushButton("确认删除")
         self.confirm_button.setEnabled(False)
@@ -65,7 +71,7 @@ class DocumentsDialog(ManagementPanel):
             button.clicked.connect(callback)
             actions.addWidget(button)
         layout.addLayout(actions)
-        recompilation = QHBoxLayout()
+        recompilation = FlowLayout()
         self.recompile_selected = QPushButton("重编译所选资料")
         self.recompile_all = QPushButton("重编译全部资料")
         self.recompile_selected.clicked.connect(lambda: self.recompile(all_docs=False))
@@ -83,6 +89,34 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def read_source(self):
+        """Render the original pipeline's retained Markdown or per-page JSON text."""
+        from openkb.documents import read_document_source
+
+        selected = self.table.selectionModel().selectedRows()
+        if len(selected) != 1:
+            self.status.setText("请先选择一份资料阅读原文。")
+            return
+        identifier = self.table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        generation = self._generation
+
+        def loaded(value, error):
+            if self._closed or generation != self._generation:
+                return
+            if error or value is None:
+                self.status.setText("原文读取失败，请刷新资料列表或查看任务结果。")
+                return
+            from openkb.desktop.source_reader import show_source
+
+            show_source(self.window, self.kb, value)
+
+        self.window.io.submit(
+            lambda: read_document_source(self.kb, identifier),
+            loaded,
+            kb=self.kb,
+            obsolete=lambda: self._closed or generation != self._generation,
+        )
 
     def invalidate(self):
         self._generation += 1
@@ -109,7 +143,19 @@ class DocumentsDialog(ManagementPanel):
                 item = QTableWidgetItem(doc["name"])
                 item.setData(Qt.ItemDataRole.UserRole, doc["hash"])
                 self.table.setItem(row, 0, item)
-                self.table.setItem(row, 1, QTableWidgetItem(doc.get("display_type", doc["type"])))
+                is_long = doc.get("display_type") == "pageindex"
+                self.table.setItem(
+                    row,
+                    1,
+                    QTableWidgetItem("PDF" if doc["type"] == "long_pdf" else doc["type"].upper()),
+                )
+                self.table.setItem(
+                    row,
+                    2,
+                    QTableWidgetItem("PageIndex 长文索引" if is_long else "Markdown 全文编译"),
+                )
+            self.recompile_all.setEnabled(bool(value["documents"]))
+            self.read_button.setEnabled(bool(value["documents"]))
 
         self.window.io.submit(
             lambda: get_kb_list(self.kb), loaded, kb=self.kb, obsolete=lambda: self._closed

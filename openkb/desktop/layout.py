@@ -12,6 +12,9 @@ def build_workbench(window):
 
     register_fonts()
     QApplication.instance().setFont(text_font())
+    # The top-level window already exists. On Windows its system font can
+    # otherwise be inherited by children until the stylesheet is reapplied.
+    window.setFont(text_font())
     preferences = QSettings(
         QSettings.defaultFormat(), QSettings.Scope.UserScope, "OpenKB", "OpenKB"
     )

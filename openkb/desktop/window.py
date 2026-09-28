@@ -65,6 +65,13 @@ _OPERATIONS = {
 }
 
 _STAGES = {
+    "preparing": "准备资料",
+    "converting": "转换为 Markdown / 识别长 PDF",
+    "indexing": "建立 PageIndex 长文索引",
+    "compiling": "编译摘要、概念与实体",
+    "committed": "已保存到知识库",
+    "answering": "查阅知识库并整理回答",
+    "saving": "保存结果",
     "waiting-input": "等待文件稳定",
     "input-returned-to-watch": "输入仍在变化，已交回监听补查",
 }
@@ -337,6 +344,8 @@ class Workbench(QMainWindow):
                 item = QTreeWidgetItem(groups[group], [Path(path).stem])
                 item.setData(0, Qt.ItemDataRole.UserRole, path)
             self.pages.expandToDepth(0)
+            if self.page:
+                self.workspaces.select_page(self.page.path)
             self.conversations.catalog_loaded(sessions)
             self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
             if self.page is None and (root / "wiki/index.md").exists():
@@ -367,6 +376,7 @@ class Workbench(QMainWindow):
                 return
             page = context.page
             self.page = page
+            self.workspaces.select_page(page.path)
             self.page_context.show_context(root, context)
             editable = page.path.split("/")[0] in EDITABLE_SECTIONS
             self.save_button.setEnabled(editable)

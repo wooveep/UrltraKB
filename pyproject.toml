@@ -90,7 +90,8 @@ exclude = ["/openkb/web"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
-    "/docs/desktop.md", "/docs/golden-principles.md",
+    "/docs/desktop.md", "/docs/dev-1.2.0.md", "/docs/golden-principles.md",
+    "/docs/desktop-evidence/dev-1.2.0",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]

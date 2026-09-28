@@ -1,0 +1,68 @@
+{
+  "date": "2026-09-28",
+  "branch": "dev-1.2.0",
+  "baseline": "0cec254bb2f37adff8b1af2e1bd2802ea56910ee",
+  "desktop_source": "55479194d4829530fa054e69619f34b2c395a7a2",
+  "initial_desktop_range": "0cec254..b5cdc0d",
+  "initial_desktop_commits": 51,
+  "platform": "Linux x86_64",
+  "python": "3.12.13",
+  "dependencies": {
+    "pageindex": "0.3.0.dev3",
+    "PySide6-Essentials": "6.11.2",
+    "markitdown": "0.1.5",
+    "openai-agents": "0.17.3",
+    "litellm": "1.87.2"
+  },
+  "checks": {
+    "pytest": {
+      "passed": 1492,
+      "failed": 0,
+      "warnings": 2,
+      "seconds": 93.78
+    },
+    "ruff_check": "passed",
+    "ruff_format_check": "283 files already formatted",
+    "mypy": "Success: no issues found in 169 source files",
+    "git_diff_check": "passed",
+    "original_prompts_and_schema": "identical to 0cec254",
+    "native_workbench": "passed; light/dark, narrow/wide, history, drafts, single-click navigation, responsive images",
+    "baseline_pages": "passed; Markdown and PageIndex inventory/source reading, original chat status, original settings",
+    "model_boundary": "controlled local HTTP fixture, actual SDK and execution processes",
+    "model_acceptance": [
+      "native Chinese, formulas, flowchart, table, code; source unchanged",
+      "save during continued editing retains draft and advances confirmed version",
+      "external version conflict is visible and preserves the local draft",
+      "busy-KB read requests do not starve navigation to an independent KB",
+      "superseded rendering cannot replace new text; switching KB clears old content",
+      "native KB/global settings save, inheritance, credential rotation and clear",
+      "native removal preview, stale confirmation, spawned cleanup and kept resources",
+      "native conversation wait/stop, unique transcript copies and version-bound deletion",
+      "native structural report, link repair confirmation, restricted inspection and recovery",
+      "native selected/all recompile, skipped missing source, existing long index reused",
+      "native semantic audit with real SDK requests and saved report",
+      "real long-PDF PageIndex tree, database and all page content",
+      "real document conversion, compilation, registry and native reading",
+      "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation",
+      "one-shot HTTP PDF survives worker deferral; private input is collected",
+      "real SDK query/save and two persisted chat turns against local HTTP fixture",
+      "native artifacts: graph, SDK generation, archive consent, supporting-file exports",
+      "native watch: startup scan, recursive atomic moves, independent workers and stop",
+      "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+      "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+      "desktop environment and cwd remain unchanged",
+      "explicit quit reaps execution workers and rendering"
+    ],
+    "reproducible_command": "passed: python scripts/verify_baseline_desktop.py --output <new-directory>"
+  },
+  "notes": [
+    "Two existing test-double warnings report unawaited compile_short_doc/compile_long_doc coroutines.",
+    "Use the independent locked environment; dev-1.1.0 PageIndex 0.3.0.dev3+openkb.1 is incompatible with the original API.",
+    "Prepared local rendering assets reused at the repository pinned versions.",
+    "Linux Qt offscreen source validation only; no live-model quality claim or new installer acceptance."
+  ],
+  "screenshots": [
+    "documents.png",
+    "conversations.png"
+  ]
+}

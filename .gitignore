@@ -4,6 +4,7 @@ __pycache__/
 dist/
 build/
 .venv/
+.scratch/
 venv/
 *.db
 .DS_Store
