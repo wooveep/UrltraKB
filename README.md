@@ -277,23 +277,17 @@ The full settings reference — `entity_types`, OAuth providers (`chatgpt/*`, `g
 
 Long-document retrieval is a [known challenge](https://x.com/karpathy/status/2039823314982744522) for LLMs. [PageIndex](https://github.com/VectifyAI/PageIndex) solves this with vectorless, reasoning-based retrieval, by building a hierarchical tree index that lets LLMs reason over the index for context-aware retrieval.
 
-PageIndex runs locally by default using the [open-source version](https://github.com/VectifyAI/PageIndex), with no external dependencies required.
+PageIndex runs from the project-owned source in [`vendor/PageIndex`](vendor/PageIndex).
+PDF parsing, tree indexes, document storage and retrieval run locally. Model inference
+uses your configured LLM provider and may contact that provider.
 
-***Cloud Support*** *(Optional)*:
+The managed PageIndex service, remote document-ID import, hosted OCR and legacy
+remote SDK have been removed. Existing service keys do not enable remote indexing.
+Import files, directories or URLs with `openkb add <path-or-url>`.
 
-For large or complex PDFs, [PageIndex Cloud](https://docs.pageindex.ai/) can be used to access additional capabilities, including:
-
-- OCR support for scanned PDFs (via hosted VLM models)
-- Faster structure generation
-- Scalable indexing for large documents
-
-Set `PAGEINDEX_API_KEY` in your `.env` to enable cloud features:
-
-```
-PAGEINDEX_API_KEY=your_pageindex_api_key
-```
-
-→ **Example:** local vs. cloud indexing, and importing a cloud-indexed doc — [`examples/pageindex-cloud/`](examples/pageindex-cloud/).
+See the [local PageIndex guide](vendor/PageIndex/README.urltrakb.md) for installation
+and build details. Historical imported documents keep their local wiki artifacts;
+removing them only removes those local artifacts.
 
 ### AGENTS.md
 

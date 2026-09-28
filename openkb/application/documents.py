@@ -345,7 +345,7 @@ def _add_for_api(
     """Run the locked add pipeline and return a structured result for the API.
 
     Reuses the upstream ``add_single_file`` (which already holds the ingest
-    lock and handles cloud import / registry dedup) so the API and CLI share a
+    lock and handles conversion / registry dedup) so the API and CLI share a
     single ingest code path. Maps the ``Literal`` status to a message-bearing
     ``AddFileResult``; on ``skipped`` the caller (api._add_saved_file) deletes
     the freshly uploaded raw copy to avoid orphaning it.

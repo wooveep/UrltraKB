@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.1",
+  "local_version": "0.3.0.dev3+urltrakb.2",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -115,6 +115,42 @@
     "tests/test_types.py": "83a13eede4789b9987b6f7b89a8cd5212bc57fa1a639e3ab6cfda88c800fc5ec"
   },
   "local_changes": [
-    "pyproject.toml: apply release tag version with +urltrakb.1 suffix and pin poetry-core to 2.4.1 (the upstream release wheel build version)"
-  ]
+    "pyproject.toml: local release version +urltrakb.2; poetry-core pinned to 2.4.1; remove requests dependency used only by retired cloud transports",
+    "Remove managed-service and legacy remote SDK transports, client selection, exports, cloud-specific errors and response status field",
+    "Keep the local indexing, parsing, storage and retrieval algorithms unchanged",
+    "Remove cloud demos, notebooks and retired-API tests; retain and adapt local tests",
+    "Replace upstream hosted-service README with local-source installation and use instructions"
+  ],
+  "local_patch": {
+    "date": "2026-09-28",
+    "purpose": "local PageIndex only; user-configured LLM providers remain supported",
+    "modified": {
+      "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
+      "pageindex/__init__.py": "2f5ddea295637ea9668ab6e3c9d4a0f15d85ec8fdebc69f30b4f6be9831be034",
+      "pageindex/backend/protocol.py": "00c9ac4c43f93aa89c80e2451f7bfac2e35ec025fff1718a708582926001b96c",
+      "pageindex/client.py": "60445dfd4a57145e6a6f8525b0a7c7eede061139fd9ba6fdfe9e9050b7351f3b",
+      "pageindex/errors.py": "3cbf6fa85138b7c190b73d7b2286d1ad0dd4395c182a1f19bbb168a8cff2b30f",
+      "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
+      "pyproject.toml": "b94a3315be7a8729e3ebb8e9fab9d94f9a9fbb4d53df53f0210a5444959b1340",
+      "tests/test_architecture.py": "f9ee3a6f339fc7034c6a09f5165082c10ccae27ecb2acc3a3b110b753654df85",
+      "tests/test_client.py": "3f6529bb3a104413f3d5492feea7e36f02b4bf2dfeb62c0969cc5df779569bb4",
+      "tests/test_errors.py": "90c108ebb4f8afd430ca025bbb5ebfdc56caf86add95c18aacb9d97e9520b2e7",
+      "tests/test_review_fixes.py": "8885cbac97d50da7f24dbe7e767742e60ea681ab5ee679bd6f4403001cddaf7e",
+      "tests/test_review_fixes_2.py": "881fc1627e461126f708ced652266b03be279816f1ec1ae60b7be8790939f1e8",
+      "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8"
+    },
+    "deleted": [
+      "cookbook/README.md",
+      "cookbook/agentic_retrieval.ipynb",
+      "cookbook/pageIndex_chat_quickstart.ipynb",
+      "cookbook/pageindex_RAG_simple.ipynb",
+      "cookbook/vision_RAG_pageindex.ipynb",
+      "examples/cloud_demo.py",
+      "examples/demo_legacy_sdk.py",
+      "pageindex/backend/cloud.py",
+      "pageindex/cloud_api.py",
+      "tests/test_cloud_backend.py",
+      "tests/test_legacy_sdk_contract.py"
+    ]
+  }
 }

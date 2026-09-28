@@ -99,29 +99,6 @@ def test_agent_tools_consistently_report_missing_doc(tmp_path):
         assert "error" in parsed and "ghost" in parsed["error"], f"{name} did not report not-found consistently: {parsed}"
 
 
-# ── #6: cloud delete_collection preserves the "folders unavailable" sentinel ──
-def test_cloud_delete_collection_preserves_unavailable_sentinel(monkeypatch):
-    from pageindex.backend.cloud import CloudBackend
-
-    backend = CloudBackend(api_key="pi-test")
-    backend._folder_id_cache["papers"] = None  # folders-unavailable sentinel
-    called = []
-    monkeypatch.setattr(backend, "_request", lambda *a, **k: called.append(a) or {})
-    backend.delete_collection("papers")
-    assert not called, "no DELETE should fire when folder_id is the unavailable sentinel"
-    assert "papers" in backend._folder_id_cache and backend._folder_id_cache["papers"] is None
-
-
-def test_cloud_delete_collection_still_clears_real_folder_id(monkeypatch):
-    from pageindex.backend.cloud import CloudBackend
-
-    backend = CloudBackend(api_key="pi-test")
-    backend._folder_id_cache["papers"] = "folder-123"
-    monkeypatch.setattr(backend, "_request", lambda *a, **k: {})
-    backend.delete_collection("papers")
-    assert "papers" not in backend._folder_id_cache
-
-
 # ── #7: remove_structure_text is skipped when text was never added ───────────
 def _mock_content_based_pipeline(monkeypatch, structure):
     """content_based's real path (_content_based_pipeline) drives real LLM

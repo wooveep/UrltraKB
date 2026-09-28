@@ -2049,7 +2049,7 @@ wheels = [
 
 [[package]]
 name = "pageindex"
-version = "0.3.0.dev3+urltrakb.1"
+version = "0.3.0.dev3+urltrakb.2"
 source = { editable = "vendor/PageIndex" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
@@ -2061,7 +2061,6 @@ dependencies = [
     { name = "pypdf2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
-    { name = "requests" },
     { name = "typing-extensions" },
 ]
 
@@ -2076,7 +2075,6 @@ requires-dist = [
     { name = "pypdf2", specifier = ">=3.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "requests", specifier = ">=2.28.0" },
     { name = "typing-extensions", specifier = ">=4.9.0" },
 ]
 

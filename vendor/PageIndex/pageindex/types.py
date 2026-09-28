@@ -28,11 +28,10 @@ class _DocumentDetailRequired(DocumentInfo):
 class DocumentDetail(_DocumentDetailRequired, total=False):
     """A document with its tree, as returned by ``get_document()``.
 
-    ``structure`` is always present; ``file_path`` is local-only and
-    ``status`` is cloud-only, hence total=False for those two only.
+    ``structure`` is always present; ``file_path`` is optional for storage
+    engines that do not expose an on-disk source file.
     """
-    file_path: str  # local backend only
-    status: str     # cloud backend only
+    file_path: str
 
 
 class PageContent(TypedDict, total=False):

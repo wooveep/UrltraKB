@@ -14,7 +14,7 @@ anywhere once a KB is initialized.
 
 | Command | Purpose | Key flags |
 | --- | --- | --- |
-| `add <path\|dir\|URL>` | Ingest documents | `--from-pageindex-cloud` |
+| `add <path\|dir\|URL>` | Ingest documents | – |
 | `query <question>` | One-off question | `--save`, `--raw` |
 | `remove <id>` | Delete a document | `--keep-raw`, `--keep-empty`, `--dry-run`, `--yes` |
 | `recompile [doc]` | Re-run the compile pipeline | `--all`, `--dry-run`, `--yes`, `--refresh-schema` |
@@ -32,7 +32,6 @@ anywhere once a KB is initialized.
 openkb add ../docs/attention-is-all-you-need.pdf   # a single file
 openkb add ~/papers/                               # a directory (recursive)
 openkb add https://arxiv.org/pdf/2509.11420        # a URL
-openkb add --from-pageindex-cloud <DOC_ID>         # an already-indexed cloud doc
 ```
 
 - **Supported formats:** `.pdf .md .markdown .docx .pptx .xlsx .xls .html .htm
@@ -40,7 +39,7 @@ openkb add --from-pageindex-cloud <DOC_ID>         # an already-indexed cloud do
 - **URLs** are sniffed by content type: PDFs are downloaded and indexed; HTML is
   run through a main-content extractor (trafilatura) and ingested as Markdown.
 - **Long vs. short PDFs** are split by `pageindex_threshold` — see
-  [`pageindex-cloud/`](../pageindex-cloud/).
+  [local indexing](../../vendor/PageIndex/README.urltrakb.md).
 - **Idempotent:** a document is registered by content hash only after it compiles
   successfully, so re-adding the same file is skipped and a failed add can be
   retried.
@@ -144,8 +143,8 @@ Knowledge Base Status:
   Last compile:  2026-06-25 14:30:22
 ```
 
-`openkb list` prints the document table (name · type · pages — long PDFs and cloud
-imports both show as `pageindex`) followed by the compiled summaries, concepts,
+`openkb list` prints the document table (name · type · pages — long PDFs and historical imports
+show as `pageindex`) followed by the compiled summaries, concepts,
 entities, and reports. (The counts above match [`sample-wiki/`](sample-wiki/).)
 
 ---

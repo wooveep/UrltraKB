@@ -136,5 +136,65 @@
       "The sdist respects the existing .claude ignore rule; the full upstream snapshot is tracked in Git and included in the desktop source export.",
       "No live-model quality claim or installer build/acceptance; runtime and packaging source paths were verified."
     ]
+  },
+  "pageindex_local_only": {
+    "date": "2026-09-28",
+    "base_commit": "efd5b29c122bac7c94c815df387b348d484d8555",
+    "installed_version": "0.3.0.dev3+urltrakb.2",
+    "runtime_source": "vendor/PageIndex/pageindex",
+    "upstream_local_algorithms_unchanged": true,
+    "checks": {
+      "pytest": {
+        "passed": 1477,
+        "failed": 0,
+        "warnings": 2,
+        "seconds": 96.65
+      },
+      "vendored_pytest": {
+        "passed": 227,
+        "skipped": 2,
+        "failed": 0,
+        "warnings": 2,
+        "seconds": 14.27
+      },
+      "ruff_check": "passed",
+      "ruff_format_check": "284 files already formatted",
+      "mypy": "Success: no issues found in 168 source files",
+      "git_diff_check": "passed",
+      "retired_credentials": "PageIndexClient and LocalClient add/read/reopen/delete Markdown with socket connections blocked and a nonempty PAGEINDEX_API_KEY",
+      "retired_interfaces": "cloud modules and SDK methods absent; former key constructor and CLI cloud import rejected before ingestion",
+      "legacy_data": "existing local historical-import removal and recompilation tests passed",
+      "packaging": "PageIndex wheel, OpenKB wheel and sdist built; 28 runtime Python files match local source, cloud transports absent, local dependency version and LICENSE verified",
+      "model_acceptance": [
+        "native Chinese, formulas, flowchart, table, code; source unchanged",
+        "save during continued editing retains draft and advances confirmed version",
+        "external version conflict is visible and preserves the local draft",
+        "busy-KB read requests do not starve navigation to an independent KB",
+        "superseded rendering cannot replace new text; switching KB clears old content",
+        "native KB/global settings save, inheritance, credential rotation and clear",
+        "native removal preview, stale confirmation, spawned cleanup and kept resources",
+        "native conversation wait/stop, unique transcript copies and version-bound deletion",
+        "native structural report, link repair confirmation, restricted inspection and recovery",
+        "native selected/all recompile, skipped missing source, existing long index reused",
+        "native semantic audit with real SDK requests and saved report",
+        "real long-PDF PageIndex tree, database and all page content",
+        "real document conversion, compilation, registry and native reading",
+        "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation",
+        "one-shot HTTP PDF survives worker deferral; private input is collected",
+        "real SDK query/save and two persisted chat turns against local HTTP fixture",
+        "native artifacts: graph, SDK generation, archive consent, supporting-file exports",
+        "native watch: startup scan, recursive atomic moves, independent workers and stop",
+        "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+        "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+        "desktop environment and cwd remain unchanged",
+        "explicit quit reaps execution workers and rendering"
+      ],
+      "model_boundary": "controlled local HTTP fixture; real SDK, execution workers and Qt offscreen; PAGEINDEX_API_KEY deliberately set to retired-service-key"
+    },
+    "notes": [
+      "Counts differ from the original snapshot because tests for deleted cloud APIs were retired and local-only regression tests added.",
+      "Two upstream PDF fixture tests remain skipped; the main suite retains two existing unawaited-coroutine warnings.",
+      "LLM provider calls are unchanged. No live-model quality claim or new installer acceptance."
+    ]
   }
 }

@@ -2,10 +2,7 @@
 import ast
 from pathlib import Path
 
-import pytest
-
 from pageindex.backend.protocol import Backend, SupportsParserRegistration
-from pageindex.backend.cloud import CloudBackend
 
 
 def test_parser_layer_does_not_import_index():
@@ -33,21 +30,11 @@ def test_parser_registration_is_a_capability_protocol():
     from pageindex.backend.local import LocalBackend
     lb = LocalBackend(storage=MagicMock(), files_dir="/tmp/x", model="m")
     assert isinstance(lb, SupportsParserRegistration)
-    assert not isinstance(CloudBackend(api_key="pi-test"), SupportsParserRegistration)
 
 
-def test_register_parser_rejected_in_cloud_mode():
-    from pageindex import CloudClient
-    from pageindex.errors import PageIndexError
-    client = CloudClient(api_key="pi-test")
-    with pytest.raises(PageIndexError, match="not supported in cloud mode"):
-        client.register_parser(object())
-
-
-def test_both_backends_satisfy_backend_protocol():
+def test_local_backend_satisfies_backend_protocol():
     from unittest.mock import MagicMock
     from pageindex.backend.local import LocalBackend
-    assert isinstance(CloudBackend(api_key="pi-test"), Backend)
     assert isinstance(LocalBackend(storage=MagicMock(), files_dir="/tmp/x", model="m"), Backend)
 
 

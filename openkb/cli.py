@@ -204,7 +204,7 @@ def _setup_llm_key(kb_dir: Path | None = None) -> None:
                 os.environ[provider_env] = api_key
 
         # Fallback: also set common provider keys so multi-provider
-        # configs (e.g. PageIndex Cloud) still work
+        # LLM configurations still work
         for env_var in _KNOWN_PROVIDER_KEYS:
             if not os.environ.get(env_var):
                 os.environ[env_var] = api_key
@@ -220,7 +220,7 @@ _TYPE_DISPLAY_MAP = {
 
 # Registry types that were compiled via the long-doc pipeline (tree + per-page
 # JSON source), as opposed to short docs (markdown source). Both the local
-# long-PDF type and cloud imports belong here — they share the long-doc
+# long-PDF type and previously imported cloud records belong here — they share the long-doc
 # summary/source layout and recompile path.
 from openkb.application import recompilation as recompilation_use_cases
 
@@ -314,15 +314,6 @@ def add_single_file(file_path: Path, kb_dir: Path, *, stage: bool = True, bundle
         bundle=bundle,
         report=click.echo,
     )
-
-
-def import_from_pageindex_cloud(doc_id: str, kb_dir: Path) -> str:
-    """CLI output and credential precedence for the shared cloud import."""
-    from openkb.application.cloud import import_cloud
-
-    settings = resolve_effective_config(kb_dir)[0]
-    _setup_llm_key(kb_dir)
-    return import_cloud(kb_dir, doc_id, settings=settings, report=click.echo).status
 
 
 # ---------------------------------------------------------------------------
@@ -544,16 +535,8 @@ def init(model, language):
 
 @cli.command()
 @click.argument("path", required=False)
-@click.option(
-    "--from-pageindex-cloud",
-    "from_pageindex_cloud",
-    default=None,
-    metavar="DOC_ID",
-    help="Import an already-indexed PageIndex Cloud document by its doc-id "
-    "(no local file). Mutually exclusive with PATH.",
-)
 @click.pass_context
-def add(ctx, path, from_pageindex_cloud):
+def add(ctx, path):
     """Add a document or directory of documents at PATH to the knowledge base.
 
     PATH may be a local file, a local directory (which is walked
@@ -561,28 +544,14 @@ def add(ctx, path, from_pageindex_cloud):
     fetched into ``raw/`` first: PDF responses (by Content-Type and
     magic-byte sniff) are saved as ``.pdf``; HTML responses are run
     through trafilatura's main-content extractor and saved as ``.md``.
-
-    Alternatively, pass --from-pageindex-cloud <DOC_ID> to import a document
-    that is already indexed in PageIndex Cloud, with no local file. Requires
-    the PAGEINDEX_API_KEY environment variable.
     """
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
 
-    # Cloud import path — mutually exclusive with a local/URL PATH.
-    if from_pageindex_cloud is not None:
-        if path is not None:
-            click.echo("Provide either PATH or --from-pageindex-cloud, not both.")
-            return
-        outcome = import_from_pageindex_cloud(from_pageindex_cloud, kb_dir)
-        if outcome == "failed":
-            ctx.exit(1)
-        return
-
     if path is None:
-        click.echo("Provide a PATH or use --from-pageindex-cloud <DOC_ID>.")
+        click.echo("Provide a PATH (file, directory or URL).")
         return
 
     from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path

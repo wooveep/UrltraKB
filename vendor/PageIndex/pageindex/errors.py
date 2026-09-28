@@ -23,27 +23,6 @@ class IndexingError(PageIndexError):
     pass
 
 
-class PageIndexAPIError(PageIndexError):
-    """PageIndex cloud API returned an error.
-
-    Kept for compatibility with the pageindex 0.2.x cloud SDK.
-    """
-    pass
-
-
-class CloudAPIError(PageIndexAPIError):
-    """Cloud API returned error.
-
-    ``status_code`` carries the HTTP status when the error came from an HTTP
-    response (None for transport-level failures), so callers can branch on it
-    instead of parsing the message.
-    """
-
-    def __init__(self, message: str, status_code: int | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-
-
 class FileTypeError(PageIndexError, ValueError):
     """Unsupported file type.
 

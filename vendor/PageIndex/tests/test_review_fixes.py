@@ -109,27 +109,6 @@ def test_local_get_document_structure_missing_raises(tmp_path):
         backend.get_document_structure("c", "ghost")
 
 
-# ── #5: delete_collection drops the cached folder_id ─────────────────────────
-def test_cloud_delete_collection_clears_folder_cache(monkeypatch):
-    from pageindex.backend.cloud import CloudBackend
-
-    backend = CloudBackend(api_key="pi-test")
-    backend._folder_id_cache["papers"] = "folder-123"
-    monkeypatch.setattr(backend, "_request", lambda *a, **k: {})
-    backend.delete_collection("papers")
-    assert "papers" not in backend._folder_id_cache
-
-
-# ── #6: querying an empty collection raises instead of sending doc_id:[] ──────
-def test_cloud_query_empty_collection_raises(monkeypatch):
-    from pageindex.backend.cloud import CloudBackend
-
-    backend = CloudBackend(api_key="pi-test")
-    monkeypatch.setattr(backend, "_get_all_doc_ids", lambda col: [])
-    with pytest.raises(ValueError, match="no documents"):
-        backend.query("empty", "q")  # doc_ids=None -> resolves to []
-
-
 # ── #10: CLI bool flags still parse legacy yes/no (a bare 'no' must be False) ──
 def test_cli_bool_coerces_legacy_yes_no():
     import run_pageindex

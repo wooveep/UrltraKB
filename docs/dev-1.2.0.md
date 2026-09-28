@@ -40,8 +40,8 @@ worktree 开发；随后将 `dev-1.2.0` 切换到项目主目录，移除临时 
 必须使用本分支自己的依赖环境。`dev-1.1.0` 使用的
 `pageindex==0.3.0.dev3+openkb.1` 修改包与本分支原始接口不兼容；这里使用
 项目内 `vendor/PageIndex` 的 `v0.3.0.dev3` 源码，构建版本为
-`pageindex==0.3.0.dev3+urltrakb.1`。`uv sync` 直接以 editable 模式安装本目录，
-索引代码与原始 `0.3.0.dev3` 一致。来源和升级说明见
+`pageindex==0.3.0.dev3+urltrakb.2`。`uv sync` 直接以 editable 模式安装本目录，
+本地索引算法与原始 `0.3.0.dev3` 一致，云端后端已移除。来源和升级说明见
 [PageIndex 源码依赖](../vendor/PageIndex/README.urltrakb.md)。
 
 ```bash
@@ -77,3 +77,14 @@ PageIndex 272 项通过、2 项因缺少上游 PDF fixture 跳过；桌面 22 �
 检查通过。Ruff、格式与类型检查通过。两个 Python 轮子及主项目源码包构建
 成功，确认 PageIndex 轮子内的运行时代码与项目目录逐文件一致，桌面源码
 导出包含全部 107 个上游文件。详细结果见验证记录的 `pageindex_vendoring`。
+
+## 移除托管服务调用
+
+后续的 `+urltrakb.2` 修改移除了 PageIndex Cloud 传输代码、云端客户端、
+旧版远程 SDK、CLI 云端文档 ID 导入及配套示例、说明。长 PDF 固定调用
+本地 `LocalClient`，不再读取 `PAGEINDEX_API_KEY` 决定索引方式。
+遗留资料类型仍用于识别本地历史数据，读取和删除不请求云端。
+
+本地 PageIndex 与模型推理分开配置：推理仍通过项目选择的 LLM 提供商，
+可使用本地模型或已配置的远程模型。当前补丁清单见
+`vendor/PageIndex/UPSTREAM.json`，验证结果见记录的 `pageindex_local_only`。

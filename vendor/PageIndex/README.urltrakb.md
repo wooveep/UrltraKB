@@ -1,28 +1,46 @@
-# PageIndex 源码依赖
+# PageIndex 本地源码依赖
 
-此目录是 [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex.git) 的
-`v0.3.0.dev3` 源码快照，提交 `9ad54122bbd519cec8913198e2d63cff92781c1e`。
-上游 `.git` 已删除；这里不是子模块，所有内容由 UrltraKB 的 Git 仓库管理。
-保留上游的 [MIT 许可证](LICENSE)、文档、示例和测试。
+此目录基于 [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex.git)
+标签 `v0.3.0.dev3`，提交 `9ad54122bbd519cec8913198e2d63cff92781c1e`。
+上游 `.git` 已删除，所有文件由 UrltraKB 仓库管理；保留上游
+[MIT 许可证](LICENSE)和作者信息。
 
-选择该标签是为了保留 dev-1.2.0 的原始文档导入和对话方案。其 `pageindex/`
-内容已逐文件核对，与此前安装的 PyPI `0.3.0.dev3` 完全一致。
-上游发布流程在构建时把 Git 标签写入版本字段；源码里的 `0.3.0.dev1` 是
-占位值。因此这里将包版本固定为 `0.3.0.dev3+urltrakb.1`，同时固定原发布轮子
-使用的构建后端 `poetry-core==2.4.1`。本地版本后缀避免误装同名 PyPI 包。
+当前本地版本为 `0.3.0.dev3+urltrakb.2`，仅提供本地索引和检索。
+已删除托管服务后端、旧版远程 SDK、云端客户端和相关示例；
+`PageIndexClient` 与 `LocalClient` 都使用本地后端。
+原来的服务密钥参数不再接受，环境中残留的 `PAGEINDEX_API_KEY` 不会启用
+云端索引。PDF 解析、索引数据库和源文件存储均在本地执行。
+模型推理仍使用项目配置的 LLM 服务商；需要完全本地推理时配置本地模型。
 
-来源信息、导入前每个文件的 SHA256 以及本地改动说明见 [UPSTREAM.json](UPSTREAM.json)。
-它用于来源核对，不是自动更新配置；上游变更需要显式引入并重新验证。
+选择该上游标签是为了保留 dev-1.2.0 的原始文档导入和对话方案。
+本地索引、解析、存储和检索算法保持上游实现。来源信息、导入前文件
+SHA256、本地修改及删除清单见 [UPSTREAM.json](UPSTREAM.json)。
+上游升级需要显式引入、核对本地补丁并重新验证。
 
-在 UrltraKB 根目录执行 `uv sync --frozen --extra desktop --extra api --extra dev`，
-将以 editable 方式安装本目录。修改这里的 Python 文件后，启动的新进程直接
-使用修改后的内容；长期运行的桌面或服务应重启。
+## 安装和运行
 
-原生桌面构建会验证 PageIndex 导入路径属于同一源码树，拒绝使用其他 checkout
-或 PyPI 安装的版本。应用源码导出和 sdist 包含本目录。若使用 pip，应同时安装
-两个项目：`pip install -e ./vendor/PageIndex -e ".[desktop,api,dev]"`。
+在 UrltraKB 根目录执行：
 
-构建离线分发用的两个 Python 轮子：
+```sh
+uv sync --frozen --extra desktop --extra api --extra dev
+uv run openkb-desktop
+```
+
+`uv` 以 editable 方式安装本目录。修改 Python 文件后，新进程直接使用
+修改后的内容；长期运行的桌面或服务需重启。若使用 pip：
+
+```sh
+pip install -e ./vendor/PageIndex -e ".[desktop,api,dev]"
+```
+
+桌面和 CLI 均使用本地导入：`openkb add <文件、目录或网址>`。
+已取消按云端文档 ID 导入。历史导入资料的本地 Wiki、来源正文和删除操作
+继续受支持，不会请求远端原文。
+
+## 构建
+
+原生桌面构建验证 PageIndex 导入路径属于同一源码树，拒绝使用其他 checkout
+或 PyPI 版本。应用源码导出和 sdist 包含此目录。
 
 ```sh
 uv build vendor/PageIndex --wheel --out-dir dist
@@ -30,4 +48,5 @@ uv build --wheel --out-dir dist
 ```
 
 分发时同时提供两者，以 `pip install --find-links /path/to/dist openkb` 安装。
+构建后端固定为 `poetry-core==2.4.1`，本地版本后缀避免误装同名 PyPI 包。
 原生桌面完整构建方法见仓库的 `packaging/desktop/README.md`。

@@ -43,5 +43,5 @@ class Backend(Protocol):
 @runtime_checkable
 class SupportsParserRegistration(Protocol):
     """Capability protocol: a backend that accepts custom document parsers
-    (local mode). Cloud backends don't implement this."""
+    (local indexing)."""
     def register_parser(self, parser: Any) -> None: ...
