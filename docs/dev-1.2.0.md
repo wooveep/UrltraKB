@@ -71,3 +71,9 @@ URL 暂存、查询保存、两轮会话、产物导出、目录监听、任务�
 本次检查的结果与环境记录在
 [verification.json](desktop-evidence/dev-1.2.0/verification.json)。
 以前的 `desktop-evidence` 记录属于各自注明的历史提交。
+
+PageIndex 入库并迁回主目录后重新验证：主项目 1496 项测试通过；上游
+PageIndex 272 项通过、2 项因缺少上游 PDF fixture 跳过；桌面 22 项端到端
+检查通过。Ruff、格式与类型检查通过。两个 Python 轮子及主项目源码包构建
+成功，确认 PageIndex 轮子内的运行时代码与项目目录逐文件一致，桌面源码
+导出包含全部 107 个上游文件。详细结果见验证记录的 `pageindex_vendoring`。

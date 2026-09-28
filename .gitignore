@@ -20,12 +20,14 @@ kbs/
 # Local only
 docs/internal/
 .claude/
+.codegraph/
 
 # Heavy test-input documents for the examples (the old blanket `docs/` rule
 # used to catch this dir at any depth; the anchored `docs/internal/` above
 # does not). The PDFs already tracked on main stay tracked — this only stops
 # new drops from being swept into commits.
 examples/docs/
+examples/kb/
 
 # Locally assembled native rendering runtimes (included by desktop packaging).
 /openkb/rendering/assets/

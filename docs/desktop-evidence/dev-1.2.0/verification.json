@@ -64,5 +64,77 @@
   "screenshots": [
     "documents.png",
     "conversations.png"
-  ]
+  ],
+  "pageindex_vendoring": {
+    "date": "2026-09-28",
+    "source_commit": "3933d4af08e1725219ea1d4e9064e863f583ef21",
+    "upstream_tag": "v0.3.0.dev3",
+    "upstream_commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
+    "installed_version": "0.3.0.dev3+urltrakb.1",
+    "runtime_source": "vendor/PageIndex/pageindex",
+    "upstream_files_verified": 107,
+    "upstream_modified_files": [
+      "pyproject.toml"
+    ],
+    "runtime_source_unchanged": true,
+    "nested_git_removed": true,
+    "main_directory_branch": "dev-1.2.0",
+    "temporary_worktree_removed": true,
+    "checks": {
+      "pytest": {
+        "passed": 1496,
+        "failed": 0,
+        "warnings": 2,
+        "seconds": 105.59
+      },
+      "upstream_pytest": {
+        "passed": 272,
+        "skipped": 2,
+        "failed": 0,
+        "warnings": 25,
+        "seconds": 13.09
+      },
+      "ruff_check": "passed",
+      "ruff_format_check": "285 files already formatted",
+      "mypy": "Success: no issues found in 169 source files",
+      "git_diff_check": "passed",
+      "wheels": "PageIndex and OpenKB wheels built; exact runtime source bytes, LICENSE and local dependency verified",
+      "sdist": "OpenKB source distribution built; PageIndex source, license and provenance included; no nested .git",
+      "sdist_excluded_upstream_files": [
+        ".claude/commands/dedupe.md"
+      ],
+      "desktop_source_export": "all 107 vendored upstream files exported and source manifest verified",
+      "model_boundary": "controlled local HTTP fixture, actual SDK and execution processes; Qt offscreen",
+      "model_acceptance": [
+        "native Chinese, formulas, flowchart, table, code; source unchanged",
+        "save during continued editing retains draft and advances confirmed version",
+        "external version conflict is visible and preserves the local draft",
+        "busy-KB read requests do not starve navigation to an independent KB",
+        "superseded rendering cannot replace new text; switching KB clears old content",
+        "native KB/global settings save, inheritance, credential rotation and clear",
+        "native removal preview, stale confirmation, spawned cleanup and kept resources",
+        "native conversation wait/stop, unique transcript copies and version-bound deletion",
+        "native structural report, link repair confirmation, restricted inspection and recovery",
+        "native selected/all recompile, skipped missing source, existing long index reused",
+        "native semantic audit with real SDK requests and saved report",
+        "real long-PDF PageIndex tree, database and all page content",
+        "real document conversion, compilation, registry and native reading",
+        "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation",
+        "one-shot HTTP PDF survives worker deferral; private input is collected",
+        "real SDK query/save and two persisted chat turns against local HTTP fixture",
+        "native artifacts: graph, SDK generation, archive consent, supporting-file exports",
+        "native watch: startup scan, recursive atomic moves, independent workers and stop",
+        "native manual retry: verified failed units in a new task; cleanup retains artifacts",
+        "native page references, KB discovery/statistics, cancelled/confirmed deletion",
+        "desktop environment and cwd remain unchanged",
+        "explicit quit reaps execution workers and rendering"
+      ]
+    },
+    "notes": [
+      "Top-level checks above describe the earlier baseline restoration; this section records validation after vendoring and relocation.",
+      "Upstream tests used a dummy OPENAI_API_KEY; two tests require PDF fixtures not shipped by upstream.",
+      "The sdist respects the existing .claude ignore rule; the full upstream snapshot is tracked in Git and included in the desktop source export.",
+      "No live-model quality claim or installer build/acceptance; runtime and packaging source paths were verified."
+    ]
+  }
 }
