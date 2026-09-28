@@ -4,6 +4,7 @@ import copy
 import math
 import random
 import re
+from .toc_titles import reconcile_body_title
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,8 @@ async def check_title_appearance(item, page_list, start_index=1, model=None):
     
     
     page_number = item['physical_index']
+    if type(page_number) is not int or not start_index <= page_number < start_index + len(page_list):
+        return {'list_index': item.get('list_index'), 'answer': 'no', 'title': title, 'page_number': None}
     page_text = page_list[page_number-start_index][0]
 
     
@@ -827,6 +830,14 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         check_item['physical_index'] = physical_index_int
         check_result = await check_title_appearance(check_item, page_list, start_index, model)
 
+        if check_result['answer'] != 'yes':
+            replacement = await reconcile_body_title(
+                toc_with_page_number[list_index], page_list, start_index,
+                prev_correct, next_correct, model, llm_acompletion,
+            )
+            if replacement is not None:
+                return {'list_index': list_index, 'is_valid': True, **replacement}
+
         return {
             'list_index': list_index,
             'title': incorrect_item['title'],
@@ -840,20 +851,26 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         for item in incorrect_results
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    invalid_results = []
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
             print(f"Processing item {item} generated an exception: {result}")
-            continue
+            # A failed request is still unresolved; do not silently drop it.
+            invalid_results.append(dict(item))
     results = [result for result in results if not isinstance(result, Exception)]
 
     # Update the toc_with_page_number with the fixed indices and check for any invalid results
-    invalid_results = []
     for result in results:
         if result['is_valid']:
             # Add bounds checking to prevent IndexError
             list_idx = result['list_index']
             if 0 <= list_idx < len(toc_with_page_number):
                 toc_with_page_number[list_idx]['physical_index'] = result['physical_index']
+                if 'title_correction' in result:
+                    toc_with_page_number[list_idx]['title'] = result['title']
+                    toc_with_page_number[list_idx]['title_correction'] = result['title_correction']
+                    if logger:
+                        logger.info({'body_title_correction': result['title_correction']})
             else:
                 # Index is out of bounds, treat as invalid
                 invalid_results.append({
@@ -868,8 +885,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
                 'physical_index': result['physical_index'],
             })
 
-    logger.info(f'incorrect_results_and_range_logs: {incorrect_results_and_range_logs}')
-    logger.info(f'invalid_results: {invalid_results}')
+    if logger:
+        logger.info(f'incorrect_results_and_range_logs: {incorrect_results_and_range_logs}')
+        logger.info(f'invalid_results: {invalid_results}')
 
     return toc_with_page_number, invalid_results
 
@@ -888,7 +906,8 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
                 
         fix_attempt += 1
         if fix_attempt >= max_attempts:
-            logger.info("Maximum fix attempts reached")
+            if logger:
+                logger.info("Maximum fix attempts reached")
             break
     
     return current_toc, current_incorrect
@@ -1116,13 +1135,13 @@ def page_index_main(doc, opt=None):
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=opt.model)
-                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
-        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'summary', 'text', 'nodes'])
         return {
             'doc_name': get_pdf_name(doc),
             'structure': structure,

@@ -426,6 +426,8 @@ def list_to_tree(data):
             'end_index': item.get('end_index'),
             'nodes': []
         }
+        if 'title_correction' in item:
+            node['title_correction'] = copy.deepcopy(item['title_correction'])
 
         nodes[structure] = node
 
