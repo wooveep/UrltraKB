@@ -9,6 +9,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from export_desktop_source import verify_source
+from local_pageindex import verify_local_pageindex
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = ROOT / "packaging/desktop"
@@ -16,6 +17,7 @@ PACKAGING = ROOT / "packaging/desktop"
 
 def main() -> None:
     identity = verify_source(ROOT)
+    verify_local_pageindex(ROOT)
     if version("openkb") != identity["version"]:
         raise ValueError("Install this exported source with its recorded version before freezing")
     cache = PACKAGING / "build/token-cache"

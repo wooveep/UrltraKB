@@ -1,11 +1,16 @@
 # Build the actual desktop, CLI, REST and acceptance entry points together.
 import json
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 packaging = Path(SPECPATH)
 repo = packaging.parents[1]
+sys.path.insert(0, str(repo / "scripts"))
+from local_pageindex import verify_local_pageindex
+
+verify_local_pageindex(repo)
 assets = repo / "openkb/rendering/assets"
 if not (assets / "manifest.json").is_file():
     raise RuntimeError("Run scripts/prepare_desktop_assets.py before freezing")

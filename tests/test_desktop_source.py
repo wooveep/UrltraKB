@@ -16,6 +16,11 @@ def _repository(tmp_path):
         "openkb/version.txt": "$Format:%H$\n",
         "assets/fonts/SourceCodePro-Regular.ttf": "committed font fixture",
         "assets/private.txt": "private asset",
+        "vendor/PageIndex/pageindex/__init__.py": "VENDORED = True\n",
+        "vendor/PageIndex/pyproject.toml": "[tool.poetry]\nname = 'pageindex'\n",
+        "vendor/PageIndex/LICENSE": "upstream MIT license",
+        "vendor/PageIndex/UPSTREAM.json": "{}\n",
+        "vendor/private/notes.txt": "not a vendored dependency",
         "openkb/web/index.html": "retired browser bundle",
         "pyproject.toml": "[project]\nname = 'openkb'\n",
         "LICENSE": "original license",
@@ -55,6 +60,8 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
     identity = export_source(repo, output)
     assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
     assert (output / "openkb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
+    assert (output / "vendor/PageIndex/pageindex/__init__.py").read_text() == "VENDORED = True\n"
+    assert (output / "vendor/PageIndex/LICENSE").read_text() == "upstream MIT license"
     assert (
         output / "assets/fonts/SourceCodePro-Regular.ttf"
     ).read_text() == "committed font fixture"
@@ -65,6 +72,7 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
         "openkb/web",
         "openkb/untracked.py",
         "assets/private.txt",
+        "vendor/private/notes.txt",
     ):
         assert not (output / name).exists()
     assert json.loads((output / "openkb/_build_info.json").read_text("utf-8")) == identity
@@ -86,6 +94,12 @@ def test_build_refuses_modified_export_or_additional_application_source(tmp_path
     with pytest.raises(ValueError, match="changed"):
         verify_source(output)
     source.write_bytes(original)
+    vendored = output / "vendor/PageIndex/pageindex/__init__.py"
+    original_vendored = vendored.read_bytes()
+    vendored.write_text("MODIFIED = True\n")
+    with pytest.raises(ValueError, match="changed"):
+        verify_source(output)
+    vendored.write_bytes(original_vendored)
     (output / "openkb/injected.py").write_text("EXTRA = True\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Unexpected"):
         verify_source(output)

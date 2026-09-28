@@ -1,0 +1,2 @@
+# Preserve the imported upstream snapshot, including its original whitespace.
+vendor/PageIndex/** -whitespace

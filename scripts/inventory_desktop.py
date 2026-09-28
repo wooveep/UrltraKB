@@ -55,6 +55,16 @@ class Inputs:
             )
             for item in dist.files or ():
                 self.owners[Path(dist.locate_file(item)).resolve()] = (key, item.as_posix())
+        self.pageindex_source = source / "vendor/PageIndex"
+        provenance = json.loads((self.pageindex_source / "UPSTREAM.json").read_text("utf-8"))
+        self.pageindex = self.add(
+            "python/pageindex",
+            metadata.version("pageindex"),
+            declared_license="MIT",
+            source="vendor/PageIndex",
+            upstream_repository=provenance["repository"],
+            upstream_commit=provenance["commit"],
+        )
         self.npm = json.loads((source / "openkb/rendering/package-lock.json").read_text("utf-8"))[
             "packages"
         ]
@@ -119,6 +129,8 @@ class Inputs:
 
     def owner(self, path: Path) -> tuple[str, str]:
         path = path.resolve(strict=True)
+        if path.is_relative_to(self.pageindex_source):
+            return self.pageindex, path.relative_to(self.source).as_posix()
         if path.is_relative_to(self.assets):
             relative = path.relative_to(self.assets).as_posix()
             for name in sorted(self.npm, key=len, reverse=True):

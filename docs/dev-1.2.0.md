@@ -1,8 +1,9 @@
 # dev-1.2.0：原始处理流程与原生桌面
 
 本分支从最早提交 `0cec254bb2f37adff8b1af2e1bd2802ea56910ee` 创建。
-桌面开发来源为任务开始时的 `dev-1.1.0`（`5547919`）。分支在独立
-worktree 开发；原 `dev-1.1.0` 工作目录与未提交文件不参与移植。
+桌面开发来源为任务开始时的 `dev-1.1.0`（`5547919`）。初次移植在独立
+worktree 开发；随后将 `dev-1.2.0` 切换到项目主目录，移除临时 worktree。
+原 `dev-1.1.0` 分支继续保留。
 
 ## 合入范围
 
@@ -38,7 +39,10 @@ worktree 开发；原 `dev-1.1.0` 工作目录与未提交文件不参与移植�
 
 必须使用本分支自己的依赖环境。`dev-1.1.0` 使用的
 `pageindex==0.3.0.dev3+openkb.1` 修改包与本分支原始接口不兼容；这里使用
-锁文件固定的 `pageindex==0.3.0.dev3`，无需更改最初的索引逻辑。
+项目内 `vendor/PageIndex` 的 `v0.3.0.dev3` 源码，构建版本为
+`pageindex==0.3.0.dev3+urltrakb.1`。`uv sync` 直接以 editable 模式安装本目录，
+索引代码与原始 `0.3.0.dev3` 一致。来源和升级说明见
+[PageIndex 源码依赖](../vendor/PageIndex/README.urltrakb.md)。
 
 ```bash
 uv sync --frozen --python 3.12.13 --extra desktop --extra api --extra dev

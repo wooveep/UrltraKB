@@ -5,6 +5,22 @@ points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
 bundled into the runtime archive.
 
+PageIndex is built from the tracked `vendor/PageIndex` directory. The root
+`uv.lock` resolves it as an editable local dependency, and both the desktop build
+script and PyInstaller spec reject PageIndex loaded from another directory.
+Source exports include its source, MIT license and upstream provenance. The
+build inventory attributes these files to the local PageIndex component.
+For Python wheel delivery, build and supply both packages:
+
+```sh
+uv build vendor/PageIndex --wheel --out-dir dist
+uv build --wheel --out-dir dist
+```
+
+For pip-based source setup, install `./vendor/PageIndex` alongside this project.
+The local version `0.3.0.dev3+urltrakb.1` prevents accidental fallback to a registry
+release. See [the vendored dependency guide](../../vendor/PageIndex/README.urltrakb.md).
+
 Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected
 committed source to a new directory:

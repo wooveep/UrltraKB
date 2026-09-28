@@ -11,8 +11,9 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-_TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "assets"}
+_TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "assets", "vendor"}
 _FILES = {
+    ".gitattributes",
     ".gitignore",
     "README.md",
     "LICENSE",
@@ -58,6 +59,11 @@ def _source(name: str) -> bool:
         return False
     if name.startswith("assets/"):
         return name.startswith("assets/fonts/") and len(path.parts) == 3
+    if name.startswith("vendor/"):
+        return name.startswith("vendor/PageIndex/") and not any(
+            part in {".git", ".venv", "dist", "build"} or part.endswith(".egg-info")
+            for part in path.parts
+        )
     return not name.startswith("openkb/web/") and (name in _FILES or path.parts[0] in _TREES)
 
 
@@ -101,6 +107,7 @@ def _source_files(root: Path):
             name
             for name in dirs
             if name != "__pycache__"
+            and name not in {".git", ".venv"}
             and (relative / name).as_posix() not in _GENERATED
             and (relative.parts or name in _TREES or name == "docs")
         ]
