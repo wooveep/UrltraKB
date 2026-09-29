@@ -40,6 +40,11 @@ class DocumentFamily(Record):
     purpose: Label
 
 
+class FamilyDefault(Record):
+    family_id: RecordId
+    view_id: ViewId | None
+
+
 class KnowledgeView(Record):
     view_id: ViewId
     product_id: RecordId | None = None

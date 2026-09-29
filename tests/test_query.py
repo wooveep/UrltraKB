@@ -55,7 +55,8 @@ class TestRunQuery:
             mock_run.return_value = mock_result
             answer = await run_query("What is the answer?", tmp_path, "gpt-4o-mini")
 
-        assert answer == "The answer is 42."
+        assert answer.startswith("The answer is 42.\n\n---\n")
+        assert "view=legacy" in answer
 
     @pytest.mark.asyncio
     async def test_run_query_passes_question_to_agent(self, tmp_path):

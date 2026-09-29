@@ -32,7 +32,7 @@ from openkb.agent.skills import PreparedSkill
 from openkb.config import LlmCredentialBundle
 from openkb.deck import DEFAULT_DECK_SKILL as DEFAULT_DECK_SKILL
 from openkb.deck import deck_dir
-from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.knowledge_scope import KnowledgeScope
 
 CRITIC_SKILL = "openkb-html-critic"
 """Skill chained after the producer when ``--critique`` is set."""
@@ -75,7 +75,6 @@ async def run_deck_create(
     # Ensure the conventional deck dir exists. Skills that use
     # output_path_template = "output/decks/{slug}/index.html" need this;
     # skills that pick their own location won't be hindered.
-    scope = resolve_scope(kb_dir, scope)
     deck_root = (
         prepared.output_path.parent
         if prepared and prepared.output_path

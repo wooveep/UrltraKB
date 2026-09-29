@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from openkb.application.file_state import file_versions
-from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.knowledge_scope import KnowledgeScope
 from openkb.locks import kb_ingest_lock
 from openkb.mutation import mutation_scope
 from openkb.skill import skill_dir, skill_workspace_dir, validate_skill_name
@@ -34,7 +34,6 @@ async def critique_artifact(
     kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None
 ) -> Path:
     """Review one existing output with the same lease and recovery as chat."""
-    scope = resolve_scope(kb_dir, scope)
     import asyncio
 
     from openkb.agent.skill_runner import run_skill

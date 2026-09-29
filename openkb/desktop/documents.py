@@ -91,6 +91,9 @@ class DocumentsDialog(ManagementPanel):
         self.correct_versions_button = QPushButton("补充所选资料版本")
         self.correct_versions_button.clicked.connect(lambda: self.review_versions(selected=True))
         recompilation.addWidget(self.correct_versions_button)
+        self.defaults_button = QPushButton("问答默认版本")
+        self.defaults_button.clicked.connect(self.select_defaults)
+        recompilation.addWidget(self.defaults_button)
         self.map_legacy = QPushButton("映射旧库来源（无模型）")
         self.map_legacy.clicked.connect(self.map_legacy_sources)
         recompilation.addWidget(self.map_legacy)
@@ -105,6 +108,12 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def select_defaults(self):
+        from openkb.desktop.version_defaults import VersionDefaultsDialog
+
+        dialog = VersionDefaultsDialog(self.window, self.kb)
+        dialog.show()
 
     def review_versions(self, *, selected=False):
         from openkb.desktop.version_reviews import VersionReviewsDialog

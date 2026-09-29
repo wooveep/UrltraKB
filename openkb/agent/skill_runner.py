@@ -120,6 +120,10 @@ async def run_skill(
         RuntimeError: on turn-cap, model error, or missing
             output file after a templated-path run.
     """
+    from openkb.agent.query_evidence import restrict_query_agent
+    from openkb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, intent, scope=scope)
     scope = resolve_scope(kb_dir, scope)
     definition = prepared or prepare_skill(
         kb_dir, skill_name, slug=slug, extra_roots=extra_skill_roots, scope=scope
@@ -137,6 +141,7 @@ async def run_skill(
     wiki_root = str(scope.wiki_dir)
     kb_root = str(kb_dir)
     base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    base = restrict_query_agent(base, selection)
 
     @function_tool
     def write_file(path: str, content: str) -> str:
@@ -162,6 +167,9 @@ async def run_skill(
             path: File path relative to the KB root, e.g.
                 ``"output/decks/foo/index.html"``.
         """
+        target = (kb_dir / path).resolve()
+        if not any(target.is_relative_to(kb_dir.resolve() / area) for area in ("output", "skills")):
+            return "Use the permitted wiki readers for knowledge evidence."
         return read_kb_file(path, kb_root, scope=scope)
 
     agent = base.clone(

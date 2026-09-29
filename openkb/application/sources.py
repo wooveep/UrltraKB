@@ -273,10 +273,27 @@ def read_admitted_source(
                 pages = len(page_list)
             else:
                 content = base_path.read_text("utf-8")
+        annotation_id = source.annotation_id
+        if actual and actual[1].unit_revision_id:
+            body_revision = read_record(
+                root, "unit-revisions", actual[1].unit_revision_id, UnitRevision
+            )
+            annotation_id = body_revision.annotation_id
+        annotation = (
+            read_record(root, "annotations", annotation_id, VersionAnnotation)
+            if annotation_id
+            else None
+        )
+        metadata = (
+            annotation.metadata.model_dump(mode="json")
+            if annotation and annotation.source_revision_id == target.source_revision_id
+            else {}
+        )
         return {
             "hash": source.source_id,
             "source_id": source.source_id,
             "view_id": view_id,
+            "version_metadata": metadata,
             "original_kind": target.original_kind,
             "source_revision_id": target.source_revision_id,
             "target_source_revision_id": target_id,

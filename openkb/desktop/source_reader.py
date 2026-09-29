@@ -19,11 +19,16 @@ class SourceReader(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
         if source.get("source_revision_id"):
+            metadata = source.get("version_metadata", {})
             target_revision = (
                 source.get("target_source_revision_id") or source["source_revision_id"]
             )
             revision = QLabel(
+                f"产品：{metadata.get('product') or '未知'} · "
+                f"适用版本：{', '.join(metadata.get('applicable_versions', [])) or '未知'} · "
+                f"资料修订：{metadata.get('document_revision') or '未提供'}\n"
                 f"正文依据：{source['source_revision_id']}\n"
+                f"知识修订：{source.get('knowledge_revision_id') or '尚未发布'}\n"
                 f"目标修订：{target_revision}\n"
                 f"处理状态：{source.get('status', '')}\n{source.get('message') or ''}"
             )

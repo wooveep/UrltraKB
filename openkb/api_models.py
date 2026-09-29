@@ -338,6 +338,7 @@ class DocumentSourceRequest(ViewRequest):
 
 class DocumentSourceResponse(BaseModel):
     view_id: str = "legacy"
+    version_metadata: dict = Field(default_factory=dict)
     hash: str
     name: str
     doc_name: str

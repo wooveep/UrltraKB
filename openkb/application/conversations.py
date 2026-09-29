@@ -55,6 +55,7 @@ async def ask_question(
     context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
 ) -> AnswerResult:
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     root = _validate_question(kb_dir, question, scope=scope)
     context = context or ExecutionContext()
@@ -69,11 +70,17 @@ async def ask_question(
             )
 
             config = (await asyncio.to_thread(resolve_effective_config, root))[0]
+            from openkb.application.query_views import resolve_query_views
+
+            selection = resolve_query_views(root, question, scope=query_scope)
             model = config["model"]
             agent = build_query_agent(str(scope.wiki_dir), model, config["language"], bundle)
             context.on_event({"stage": "answering"})
             stream = iter_agent_response_events(
-                agent, question, run_config=build_run_config_from_bundle(model, bundle)
+                agent,
+                question,
+                run_config=build_run_config_from_bundle(model, bundle),
+                selection=selection,
             )
             parts = []
             path = None
@@ -131,6 +138,7 @@ async def continue_conversation(
     context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
 ) -> AnswerResult:
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     root = _validate_question(kb_dir, message, scope=scope)
     context = context or ExecutionContext()
@@ -174,7 +182,7 @@ async def continue_conversation(
                     run_config=build_run_config_from_bundle(session.model, bundle),
                     outputs=(outputs := ModelOutputs()),
                     attempt_id=attempt_id,
-                    scope=scope,
+                    scope=query_scope,
                 )
                 parts = []
                 usage = None

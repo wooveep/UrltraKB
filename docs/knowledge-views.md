@@ -60,6 +60,29 @@ applicable versions, family and revision for file, directory and URL imports.
 Each queued operation retains the view selected when it was submitted.
 Conversations and page drafts belong to their own view.
 
+For questions without a selected view, choose defaults explicitly per series:
+
+```bash
+openkb versions defaults
+openkb versions default <family-id> <view-id>
+openkb versions default <family-id> --clear
+```
+
+The desktop has **资料管理 → 问答默认版本**. HTTP clients use
+`GET /api/v1/versions/defaults` and `POST /api/v1/versions/default` with `kb`,
+`family_id`, and `view_id` (null clears the choice). Imports never change a
+default. Without defaults, each version remains a separate evidence scope.
+Explicit requests such as `WinStack V2` and comparison questions override
+defaults. Missing target evidence is reported; unknown and legacy material
+cannot establish facts for an explicitly requested version. A request for
+historical reference can include that material with a separate label.
+
+CLI, HTTP, desktop, chat and skill generation use the same pinned readers.
+Answers identify the actual product applicability, source revisions and
+knowledge revision. Source reading also displays the annotation belonging to
+the published body. If knowledge changes during an answer, its retained
+evidence is labelled historical and current verification requires a new question.
+
 HTTP clients list views with `GET /api/v1/views?kb=<name>`. Supply `view_id` in
 JSON requests or as a multipart field for `/api/v1/add`. The upload's `metadata`
 field accepts a JSON object with `product`, `applicable_versions` (an array),

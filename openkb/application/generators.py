@@ -34,10 +34,14 @@ def preflight_generation(
     error = validate_name(name)
     if error:
         return error
-    wiki = resolve_scope(kb_dir, scope).wiki_dir
-    if not wiki.is_dir():
+    from openkb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, scope=scope)
+    if not selection.views:
         return "No wiki found in this KB. Run `openkb add <source>` to ingest documents first."
-    if not any((wiki / sub).is_dir() and any((wiki / sub).iterdir()) for sub in PAGE_CONTENT_DIRS):
+    if not any(
+        path.split("/")[0] in PAGE_CONTENT_DIRS for view in selection.views for path in view.files
+    ):
         return (
             "Wiki has no compiled content yet. Ingest at least one "
             "document with `openkb add` first."
@@ -207,6 +211,7 @@ async def generate_artifact(
     failures commit files already produced; interruption before commit rolls
     back this generation while preserving the independently committed archive.
     """
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
@@ -215,7 +220,7 @@ async def generate_artifact(
         cancelled=context.cancelled if context else None,
         on_wait=context.waiting if context else None,
     ):
-        error = preflight_generation(kb_dir, options.name, scope=scope)
+        error = preflight_generation(kb_dir, options.name, scope=query_scope)
         if error:
             return GenerationResult("invalid", message=error)
         try:
@@ -260,7 +265,7 @@ async def generate_artifact(
                     critique=options.critique,
                     skill_name=options.skill_name,
                     bundle=credentials,
-                    scope=scope,
+                    scope=query_scope,
                     **({"prepared": prepared} if prepared is not None else {}),
                 )
                 failure: Exception | None = None

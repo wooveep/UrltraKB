@@ -9,6 +9,7 @@ from typing import Any
 
 from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 
+from openkb.agent.query_evidence import evidence_answer, evidence_input, restrict_query_agent
 from openkb.agent.streaming import settled_stream
 from openkb.agent.tools import (
     artifact_event_from_write,
@@ -17,6 +18,7 @@ from openkb.agent.tools import (
     read_wiki_image,
     write_kb_file,
 )
+from openkb.application.query_views import QuerySelection, resolve_query_views
 from openkb.config import LlmCredentialBundle, resolve_model_settings
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.schema import get_agents_md
@@ -151,6 +153,7 @@ async def iter_agent_response_events(
     *,
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
+    selection: QuerySelection | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -163,6 +166,26 @@ async def iter_agent_response_events(
     """
     from agents import RawResponsesStreamEvent, RunItemStreamEvent
     from openai.types.responses import ResponseTextDeltaEvent
+
+    if selection is not None:
+        input_data = evidence_input(input_data)
+        if not selection.views:
+            answer = evidence_answer("", selection)
+            history = (
+                [{"role": "user", "content": input_data}]
+                if isinstance(input_data, str)
+                else input_data
+            )
+            yield {"event": "delta", "data": {"text": answer}}
+            yield {
+                "event": "final",
+                "data": {
+                    "answer": answer,
+                    "history": [*history, {"role": "assistant", "content": answer}],
+                },
+            }
+            return
+        agent = restrict_query_agent(agent, selection)
 
     result = (
         Runner.run_streamed(agent, input_data, max_turns=max_turns, run_config=run_config)
@@ -224,6 +247,11 @@ async def iter_agent_response_events(
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
     answer = visible_answer(final if isinstance(final, str) else "".join(collected))
+    if selection is not None:
+        decorated = evidence_answer(answer, selection)
+        remaining = decorated[len(answer) :] if "".join(collected).strip() else decorated
+        yield {"event": "delta", "data": {"text": remaining}}
+        answer = decorated
     yield {
         "event": "final",
         "data": {
@@ -402,6 +430,12 @@ async def run_query(
     Returns:
         The agent's final answer as a string.
     """
+    selection = resolve_query_views(kb_dir, question, scope=scope)
+    if not selection.views:
+        answer = evidence_answer("", selection)
+        if stream:
+            print(answer)
+        return answer
     scope = resolve_scope(kb_dir, scope)
     import sys
 
@@ -416,6 +450,7 @@ async def run_query(
     wiki_root = str(scope.wiki_dir)
 
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    agent = restrict_query_agent(agent, selection)
 
     if not stream:
         result = (
@@ -423,7 +458,7 @@ async def run_query(
             if run_config
             else await Runner.run(agent, question, max_turns=MAX_TURNS)
         )
-        return result.final_output or ""
+        return evidence_answer(result.final_output or "", selection)
 
     import os
 
@@ -521,7 +556,10 @@ async def run_query(
                 live.update(_make_markdown("".join(segment)))
             live.stop()
         print()
-    return "".join(collected) if collected else result.final_output or ""
+    answer = "".join(collected) if collected else result.final_output or ""
+    decorated = evidence_answer(answer, selection)
+    print(decorated[len(answer) :])
+    return decorated
 
 
 def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None") -> Any:

@@ -1,5 +1,7 @@
 """Review provenance and explicitly continue sources waiting for version metadata."""
 
+import json
+
 import click
 
 from openkb.application.version_review import (
@@ -26,6 +28,42 @@ def _selection(ctx):
 @click.group("versions")
 def versions():
     """Inspect, supplement, cancel and resume version clarifications."""
+
+
+@versions.command("defaults")
+@click.pass_context
+def defaults(ctx):
+    """List explicit series defaults and available knowledge views."""
+    from openkb.application.query_views import list_family_defaults
+
+    root, _ = _selection(ctx)
+    click.echo(
+        json.dumps(
+            list_family_defaults(root),
+            default=lambda item: item.model_dump(),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@versions.command("default")
+@click.argument("family_id")
+@click.argument("view_id", required=False)
+@click.option("--clear", is_flag=True, help="Return this series to separate version answers.")
+@click.pass_context
+def default(ctx, family_id, view_id, clear):
+    """Explicitly choose FAMILY_ID's default VIEW_ID for unspecified questions."""
+    from openkb.application.query_views import select_default_view
+
+    if bool(view_id) == clear:
+        raise click.UsageError("Supply a view ID or --clear")
+    root, _ = _selection(ctx)
+    try:
+        choice = select_default_view(root, family_id, None if clear else view_id)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(choice.model_dump_json())
 
 
 @versions.command("open")

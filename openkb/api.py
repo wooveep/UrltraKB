@@ -304,7 +304,8 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
+        query_scope = await resolve_api_scope(kb_dir, request.view_id)
+        scope = resolve_scope(kb_dir, query_scope)
         bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         model = config.get("model", DEFAULT_CONFIG["model"])
@@ -327,7 +328,7 @@ def create_app() -> FastAPI:
                     stream=False,
                     run_config=run_config,
                     bundle=bundle,
-                    scope=scope,
+                    scope=query_scope,
                 )
                 append_log(scope.wiki_dir, "query", request.question, scope=scope)
                 saved_path = (
@@ -352,7 +353,8 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
+        query_scope = await resolve_api_scope(kb_dir, request.view_id)
+        scope = resolve_scope(kb_dir, query_scope)
         bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         try:
             session = await asyncio.to_thread(
@@ -374,7 +376,7 @@ def create_app() -> FastAPI:
                 build_chat_session_agent, kb_dir, session, bundle=bundle, scope=scope
             )
             async for event in iter_chat_turn_events(
-                agent, session, request.message, run_config=run_config, scope=scope
+                agent, session, request.message, run_config=run_config, scope=query_scope
             ):
                 if event["event"] == "final":
                     answer = event["data"]["answer"]

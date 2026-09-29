@@ -104,7 +104,8 @@ async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_di
     monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: ModelRun())
     result = await continue_conversation(kb_dir, "请回答")
     assert result.status == "completed"
-    assert result.answer == "**可见回答**\n\nUse `<think>` literally."
+    assert result.answer.startswith("**可见回答**\n\nUse `<think>` literally.\n\n---\n")
+    assert "private deliberation" not in result.answer
     saved = read_conversation(kb_dir, result.session_id)
     assert saved.turns == (("请回答", result.answer),)
 
@@ -157,7 +158,8 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
     result = await continue_conversation(kb_dir, "接着问", session_id=result.session_id)
     assert result.status == "completed"
     restored = read_conversation(kb_dir, result.session_id)
-    assert restored.turns == (("接着问", "Answer"),)
+    assert result.answer.startswith("Answer\n\n---\n")
+    assert restored.turns == (("接着问", result.answer),)
     assert len(restored.timeline) == 2
 
 

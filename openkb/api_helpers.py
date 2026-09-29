@@ -428,7 +428,8 @@ async def _stream_query(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
-    scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
+    query_scope = await resolve_api_scope(kb_dir, request.view_id)
+    scope = resolve_scope(kb_dir, query_scope)
     yield _sse("start", {"endpoint": "query"})
     run_config = build_run_config_from_bundle(model, bundle)
     try:
@@ -439,7 +440,12 @@ async def _stream_query(
             language = config.get("language", "en")
             agent = build_query_agent(str(scope.wiki_dir), model, language=language, bundle=bundle)
             final_answer = ""
-            stream = iter_agent_response_events(agent, request.question, run_config=run_config)
+            from openkb.application.query_views import resolve_query_views
+
+            selection = resolve_query_views(kb_dir, request.question, scope=query_scope)
+            stream = iter_agent_response_events(
+                agent, request.question, run_config=run_config, selection=selection
+            )
             async with aclosing(stream):
                 async for event in stream:
                     data = event["data"]
@@ -481,7 +487,7 @@ async def _stream_chat(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
-    scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     yield _sse("start", {"endpoint": "chat", "session_id": session.id})
     run_config = build_run_config_from_bundle(session.model, bundle)
     try:

@@ -213,6 +213,10 @@ async def run_skill_create(
     forwarded to :func:`build_skill_create_agent`; ``None`` (CLI default)
     preserves the existing behavior.
     """
+    from openkb.agent.query_evidence import restrict_query_agent
+    from openkb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, intent, scope=scope)
     scope = resolve_scope(kb_dir, scope)
     wiki_root = str(scope.wiki_dir)
     skill_root = skill_dir(kb_dir, skill_name)
@@ -226,6 +230,7 @@ async def run_skill_create(
         bundle=bundle,
         scope=scope,
     )
+    agent = restrict_query_agent(agent, selection)
 
     # Single user message kicks off the compile. The system prompt already
     # contains the intent — this just nudges the agent to start.

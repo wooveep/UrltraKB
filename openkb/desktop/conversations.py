@@ -262,7 +262,7 @@ class Conversations:
                 new_session_id=None if chat.persisted else chat.identity,
                 attempt_id=chat.attempt,
                 submission_order=accepted.order,
-                view_id=chat.view_id,
+                view_id=getattr(w, "view_id", None),
             )
             task = w.manager.submit(chat.root, [request])
             self._remember(chat)

@@ -15,7 +15,8 @@ class ViewPicker(FocusComboBox):
     def set_views(self, views):
         self.blockSignals(True)
         self.clear()
-        self.addItem("未指定 · 导入自动判断", None)
+        self.addItem("未指定 · 问答按系列默认", None)
+        self.setToolTip("未指定时导入自动判断版本；问答按各系列默认版本取证据，无默认则分别回答。")
         for view in views:
             label = (
                 "旧知识 · legacy"

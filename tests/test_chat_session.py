@@ -257,7 +257,9 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
 
     monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: ModelRun())
     session = ChatSession.new(kb_dir, "test", "en")
-    stream = iter_chat_turn_events(object(), session, "Question")
+    from agents import Agent
+
+    stream = iter_chat_turn_events(Agent(name="test"), session, "Question")
     assert (await anext(stream))["event"] == "delta"
     await stream.aclose()
     assert settled.is_set()
@@ -303,7 +305,7 @@ async def test_cancelling_consumer_keeps_lease_until_real_sdk_work_settles(kb_di
     session = ChatSession.new(kb_dir, "test", "en")
 
     async def consume():
-        return [event async for event in iter_chat_turn_events(object(), session, "x")]
+        return [event async for event in iter_chat_turn_events(Agent(name="test"), session, "x")]
 
     async def next_writer():
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True, on_wait=competing.set):

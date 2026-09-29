@@ -347,6 +347,7 @@ async def _run_turn(
     *,
     use_color: bool = True,
     raw: bool = False,
+    scope: KnowledgeScope | None = None,
 ) -> None:
     """Run one agent turn with streaming output and persist the new history."""
     from openkb.locks import async_kb_lock, async_session_lock
@@ -354,10 +355,22 @@ async def _run_turn(
     root = session.path.parent.parent.parent
     async with async_session_lock(root, session.id):
         async with async_kb_lock(root / ".openkb", exclusive=True):
+            from openkb.agent.query_evidence import evidence_answer, restrict_query_agent
+            from openkb.application.query_views import resolve_query_views
+
+            selection = resolve_query_views(root, user_input, scope=scope)
+            agent = restrict_query_agent(agent, selection)
             with model_output_scope(root):
-                answer, history = await _stream_tty_turn(
-                    agent, session, user_input, style, use_color=use_color, raw=raw
-                )
+                if selection.views:
+                    answer, history = await _stream_tty_turn(
+                        agent, session, user_input, style, use_color=use_color, raw=raw
+                    )
+                else:
+                    answer = ""
+                    history = session.history + [{"role": "user", "content": user_input}]
+            decorated = evidence_answer(answer, selection)
+            print(decorated[len(answer) :])
+            answer = decorated
             session.record_turn(user_input, answer, history)
 
 
@@ -377,7 +390,9 @@ async def _stream_tty_turn(
     )
     from openai.types.responses import ResponseTextDeltaEvent
 
-    new_input = session.history + [{"role": "user", "content": user_input}]
+    from openkb.agent.query_evidence import evidence_input
+
+    new_input = evidence_input(session.history + [{"role": "user", "content": user_input}])
 
     result = Runner.run_streamed(agent, new_input, max_turns=MAX_TURNS)
 
@@ -518,7 +533,6 @@ async def _handle_slash_skill(
     arg: str, kb_dir: Path, style: Style, *, scope: KnowledgeScope | None = None
 ) -> None:
     """Dispatch ``/skill new <name> "<intent>"`` and any future skill subcommands."""
-    scope = resolve_scope(kb_dir, scope)
     import shlex
 
     try:
@@ -621,7 +635,6 @@ async def _handle_slash_deck(
     same wiki preflight gate, refuses to overwrite an existing deck
     (chat has no ``-y`` flag), then invokes ``Generator(target_type="deck")``.
     """
-    scope = resolve_scope(kb_dir, scope)
     import shlex
 
     try:
@@ -750,6 +763,7 @@ async def _handle_slash(
 ) -> str | None:
     """Return ``"exit"`` to end the REPL, ``"new_session"`` to swap sessions,
     or ``None`` to continue with the current session."""
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     parts = cmd.split(maxsplit=1)
     head = parts[0].lower()
@@ -820,15 +834,15 @@ async def _handle_slash(
         return None
 
     if head == "/skill":
-        await _handle_slash_skill(arg, kb_dir, style, scope=scope)
+        await _handle_slash_skill(arg, kb_dir, style, scope=query_scope)
         return None
 
     if head == "/deck":
-        await _handle_slash_deck(arg, kb_dir, style, scope=scope)
+        await _handle_slash_deck(arg, kb_dir, style, scope=query_scope)
         return None
 
     if head == "/critique":
-        await _handle_slash_critique(arg, kb_dir, style, scope=scope)
+        await _handle_slash_critique(arg, kb_dir, style, scope=query_scope)
         return None
 
     _fmt(
@@ -847,7 +861,6 @@ async def _handle_slash_critique(
     self-containment violations, and writes the corrected file back. It
     will not touch slide content (numbers, names, quotes).
     """
-    scope = resolve_scope(kb_dir, scope)
     path = arg.strip()
     if not path:
         _fmt(
@@ -917,6 +930,7 @@ async def iter_chat_turn_events(
     from openkb.locks import async_kb_lock, async_session_lock
 
     kb_dir = session.path.parent.parent.parent
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     async with async_session_lock(kb_dir, session.id):
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
@@ -924,6 +938,9 @@ async def iter_chat_turn_events(
             session.require_view(scope.view_id)
             append_log(scope.wiki_dir, "query", user_input, scope=scope)
             new_input = session.history + [{"role": "user", "content": user_input}]
+            from openkb.application.query_views import resolve_query_views
+
+            selection = resolve_query_views(kb_dir, user_input, scope=query_scope)
 
             # Accumulate the ordered, interleaved trace (narration text + tool reads) in
             # SSE arrival order, mirroring the frontend's live fold, so a RESTORED turn
@@ -941,7 +958,11 @@ async def iter_chat_turn_events(
             usage_recorded = False
             with model_output_scope(kb_dir, outputs):
                 stream = iter_agent_response_events(
-                    agent, new_input, max_turns=MAX_TURNS, run_config=run_config
+                    agent,
+                    new_input,
+                    max_turns=MAX_TURNS,
+                    run_config=run_config,
+                    selection=selection,
                 )
                 async with aclosing(stream):
                     async for event in stream:
@@ -1024,6 +1045,7 @@ async def run_chat(
     scope: KnowledgeScope | None = None,
 ) -> None:
     """Run the chat REPL against ``session`` until the user exits."""
+    query_scope = scope
     scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
@@ -1065,7 +1087,7 @@ async def run_chat(
 
         if user_input.startswith("/"):
             try:
-                action = await _handle_slash(user_input, kb_dir, session, style, scope=scope)
+                action = await _handle_slash(user_input, kb_dir, session, style, scope=query_scope)
             except KeyboardInterrupt:
                 _fmt(style, ("class:error", "\n[aborted]\n"))
                 continue
@@ -1087,7 +1109,15 @@ async def run_chat(
                     session.reload()
                     session.require_view(scope.view_id)
                     append_log(scope.wiki_dir, "query", user_input, scope=scope)
-                    await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
+                    await _run_turn(
+                        agent,
+                        session,
+                        user_input,
+                        style,
+                        use_color=use_color,
+                        raw=raw,
+                        scope=query_scope,
+                    )
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))
         except Exception as exc:
