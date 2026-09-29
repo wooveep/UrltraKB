@@ -1,6 +1,6 @@
 # 随包 LibreOffice、UNO 与字体的可交付组合
 
-研究日期：2026-09-29。对应 [研究票 #67](https://github.com/wooveep/UrltraKB/issues/67)；本地代码基线为 `f4d7d1d34bbaf5330963accecf4f5304a9155aed`。
+研究日期：2026-09-29。对应[《研究：随包 LibreOffice、UNO 与字体的可交付组合是什么？》](https://github.com/wooveep/UrltraKB/issues/67)；本地代码基线为 `f4d7d1d34bbaf5330963accecf4f5304a9155aed`。
 
 ## 可交接结论与证据边界
 
@@ -72,9 +72,9 @@ helper 可用 `loadComponentFromURL` 加载，`storeToURL` 导出 PDF，外层�
 | 原文附加流 | `IsAddStream=false`，不生成带原文流的 hybrid PDF |
 | 备注/评论 | `ExportNotes=false`、`ExportNotesInMargin=false` |
 | Impress 备注页 | `ExportNotesPages=false`、`ExportOnlyNotesPages=false`；备注文本单独读取 |
-| 隐藏幻灯片 | `ExportHiddenSlides` 必须显式设置；`false` 排除隐藏页，`true` 包含。若契约要保持全部源 slide 序号，建议 `true` 并记录隐藏标记；本研究不替代页映射契约 |
+| 隐藏幻灯片 | 用户已确认导入所有隐藏 slide，必须显式设置 `ExportHiddenSlides=true` 并记录隐藏标记；`false` 仅用于验证排除隐藏页行为的专门对照，不是待选择的交付配置 |
 | 幻灯片过渡 | `UseTransitionEffects=false`；输出为静态页面，不声称复制动画播放后的任意时刻 |
-| Writer 自动空白页 | 候选 `IsSkipEmptyPages=false`，保留排版产生的页；是否抑制必须进入页映射契约 |
+| Writer 自动空白页 | 用户已要求保留排版产生的空白页；`IsSkipEmptyPages=false` 是该候选版本满足既定页序的验证配置 |
 | Writer 修订 | 26.2.6.3 源码支持 `ExportTrackedChanges=false`；见下段限制 |
 
 **最终可见 Word 正文需要单独验收。** 26.2.6.3 的 exporter 读取 `ExportTrackedChanges`，通过控制器 `PDFExport_ShowChanges` 切换 `SetHideRedlines` 并在导出后恢复；它控制修订显示，不是“接受全部修订”并改写文件。不要用 `RecordChanges=false` 冒充最终稿显示，也不要在源文件上执行接受修订。隐藏文字还需固定 Writer 文档打印设置中的 `PrintHiddenText=false`（通过文档 `com.sun.star.text.DocumentSettings`/打印属性入口，运行时检查 property 是否存在）；同版源码显示 PDF render 路径读取该打印设置。DOC/DOCX 的插入、删除、移动、隐藏段落和受保护修订都须用样本核对，未通过前只能称“源码支持该入口”。[PDF 显示切换](https://github.com/LibreOffice/core/blob/libreoffice-26.2.6.3/sw/source/uibase/uno/unotxvw.cxx#L688)、[PrintHiddenText 属性实现](https://github.com/LibreOffice/core/blob/libreoffice-26.2.6.3/sw/source/uibase/uno/unomod.cxx#L193)、[Writer PDF render 读取](https://github.com/LibreOffice/core/blob/libreoffice-26.2.6.3/sw/source/uibase/uno/unotxdoc.cxx#L2649)
@@ -119,7 +119,7 @@ helper 可用 `loadComponentFromURL` 加载，`storeToURL` 导出 PDF，外层�
 | 样本组 | 必含内容 | 最低观察 |
 | --- | --- | --- |
 | DOC 与 DOCX 各一份 | 中文/英文、常用与缺失字体、粗斜体；分页/分节、页眉页脚、表格跨页、浮动图片、公式；插入/删除/移动修订、隐藏文字、评论、日期字段与外链 | 最终可见正文没有删除文字/隐藏标记泄漏；应见文字、表格、图和公式不丢失；源文件散列不变；PDF 可读且页数进入记录 |
-| PPT 与 PPTX 各一份 | 三张源 slide，其中一张隐藏；每张不同备注标记，至少一张空备注/模板对象；中文字体、图表/图片、动画/媒体占位 | 开启隐藏页时 3 个 slide 页面，关闭时 2 个；notes 关闭时均无额外备注页；sidecar 按源索引对应，空占位符不误识别；静态画面与缺失能力有记录 |
+| PPT 与 PPTX 各一份 | 三张源 slide，其中一张隐藏；每张不同备注标记，至少一张空备注/模板对象；中文字体、图表/图片、动画/媒体占位 | 既定配置 `ExportHiddenSlides=true` 应得到 3 个 slide 页面；专门对照设为 `false` 时应为 2 个；notes 关闭时均无额外备注页；sidecar 按源索引对应，空占位符不误识别；静态画面与缺失能力有记录 |
 | 小型异常变体 | 密码文件、截断文件、外链不可达、超时或取消 | 不弹不可见对话框、不无限等待、不发布半成品、不遗留本任务子进程 |
 
 干净机器门槛是 Windows x64 与 Debian 13.6 x86_64 **各自**从最终 archive 开始：机器无独立 Office、无项目 Python/UNO、无开发工具路径和应用中文字体；普通用户、中文及空格路径、应用目录只读而任务目录可写、网络断开。能启动同包 helper/UNO、导出四类文件、读备注、确认字体命中；任务结束和强制取消后进程/临时目录可回收。再检查已安装另一份 Office 时并行运行不复用用户 profile，并验证两个任务相互隔离。
@@ -138,4 +138,4 @@ helper 可用 `loadComponentFromURL` 加载，`storeToURL` 导出 PDF，外层�
 4. DOC/DOCX 的最终修订显示、隐藏文字、字段及分页；PPT/PPTX 的隐藏页、备注对象识别、静态动画/媒体表示。
 5. 干净机器、只读程序目录、并发、已有 Office 共存、超时取消和全进程树清理。
 
-**未发现必须新增独立产品决策票的问题。** 精确发行物选择、Linux x86-64-v2 条件、native runtime、显式导出参数和验证门槛交给已有交付实施契约；隐藏页与源 slide→PDF page 的政策交给已有页映射契约。若后续实际验收发现无法满足既定交付边界，再用具体失败证据提出分支决策。本票可以在这些事实与限制交接后结束研究，不以未做的发行包实测冒充结论。
+**未发现必须新增独立产品决策票的问题。** 精确发行物选择、Linux x86-64-v2 条件、native runtime、显式导出参数和验证门槛交给[《决策：多格式方案达到什么依赖与验收条件才可交付实施？》](https://github.com/wooveep/UrltraKB/issues/72)。已确认隐藏页纳入且 Writer 空白页保留，[《决策：PDF 与 Markdown 如何冻结最小共同索引和回读契约？》](https://github.com/wooveep/UrltraKB/issues/70)只细化页映射的实现与断言。若后续实际验收发现无法满足既定交付边界，再用具体失败证据提出分支决策。本票可以在这些事实与限制交接后结束研究，不以未做的发行包实测冒充结论。
