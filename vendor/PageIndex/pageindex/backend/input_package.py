@@ -23,6 +23,10 @@ def parser_identity(parser) -> str:
     return f"{type(parser).__module__}.{type(parser).__qualname__}"
 
 
+def parser_policy(parser) -> str:
+    return getattr(parser, "policy", PARSER_POLICY)
+
+
 def processing_key(path: Path, parser, model, config) -> str:
     # Credentials, transport settings, timestamps and temporary paths are not
     # input identity. Include only generation parameters that affect the tree.
@@ -36,7 +40,7 @@ def processing_key(path: Path, parser, model, config) -> str:
         ) if key in params
     }
     payload = {
-        "source_digest": digest(path), "parser_policy": PARSER_POLICY,
+        "source_digest": digest(path), "parser_policy": parser_policy(parser),
         "parser": parser_identity(parser),
         "model": model, "config": options,
     }
@@ -47,6 +51,10 @@ def freeze_pages(parsed, base: Path, model) -> list[dict]:
     """Keep every physical page, including empty bodies, and portable image paths."""
     pages = []
     base = base.resolve()
+    if (parsed.metadata or {}).get("unit_kind") == "block":
+        units = [{**node.metadata, "content": node.content} for node in parsed.nodes]
+        parsed.metadata["units_digest"] = hashlib.sha256(json.dumps(units, sort_keys=True).encode()).hexdigest()
+        return units
     for node in parsed.nodes:
         content = node.content
         images = []
@@ -78,6 +86,30 @@ def materialize_pages(pages, base: Path, metadata: dict) -> list[dict]:
         raise ValueError("Cached input must contain a page list")
     if not isinstance(metadata, dict):
         raise ValueError("Cached input has invalid metadata")
+    if metadata.get("unit_kind") == "block":
+        from ..index.block_policy import BlockPolicy
+        policy = BlockPolicy(metadata)
+        if hashlib.sha256(json.dumps(pages, sort_keys=True).encode()).hexdigest() != metadata.get("units_digest"):
+            raise ValueError("Cached content-block source mapping changed")
+        if len(pages) != len(policy.units):
+            raise ValueError("Cached content-block coverage changed")
+        result = copy.deepcopy(pages)
+        assets = {}
+        for name, expected in metadata.get("assets", {}).items():
+            path = Path(name)
+            target = (base / path).resolve()
+            if path.is_absolute() or ".." in path.parts or not target.is_relative_to(base.resolve()):
+                raise ValueError("Block asset escaped its retained package")
+            if digest(target) != expected:
+                raise ValueError("Block asset digest changed")
+            assets[name] = {"digest": expected, "path": str(target)}
+        for cached, unit in zip(result, policy.units):
+            if any(cached.get(key) != value for key, value in unit.items()):
+                raise ValueError("Cached content-block mapping changed")
+            if cached.get("content") != "".join(policy.text[a:b] for a, b in unit["source_spans"]):
+                raise ValueError("Cached content-block original changed")
+            cached["assets"] = assets
+        return result
     result = copy.deepcopy(pages)
     ordinals = []
     for page in result:

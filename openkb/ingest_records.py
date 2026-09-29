@@ -71,7 +71,7 @@ class KnowledgeHead(Record):
 class SourceMap(Record):
     path: Annotated[RelativePath, Field(pattern=r"^sources/")]
     digest: Digest
-    unit_kind: Literal["page", "text"] = "page"
+    unit_kind: Literal["page", "text", "block"] = "page"
     unit_count: int = Field(ge=1)
     assets: dict[RelativePath, Digest] = Field(default_factory=dict)
 

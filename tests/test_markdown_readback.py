@@ -123,7 +123,7 @@ def test_fixed_markdown_classification_boundary(tokens, length):
     assert decision.length_class == length and decision.measurement_value == tokens
 
 
-def test_unavailable_segmentation_keeps_measured_text_readable(kb_dir, tmp_path, pdf_model):
+def test_failed_segmentation_keeps_measured_text_readable(kb_dir, tmp_path, pdf_model):
     from openkb.application.documents import import_document
     from openkb.application.knowledge_bases import get_kb_list
     from openkb.application.settings import apply_kb_config_patch
@@ -142,8 +142,9 @@ def test_unavailable_segmentation_keeps_measured_text_readable(kb_dir, tmp_path,
     )
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
+
     result = import_document(kb_dir, path)
-    assert result.status == "failed" and "not available yet" in result.message
+    assert result.status == "failed" and "Unverified content-block anchors" in result.message
     saved = read_document_source(kb_dir, result.source_id, chars="6:11")
     assert saved["knowledge_revision_id"] is None and saved["content"] == "world"
     assert saved["tokens"] == 2 and saved["length_class"] == "short"

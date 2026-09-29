@@ -290,6 +290,8 @@ class DocumentsDialog(ManagementPanel):
                     if doc.get("pages") is not None
                     else "未记录"
                 )
+                if doc.get("block_count") is not None:
+                    measured += f" / {doc['block_count']} 内容块"
                 self.table.setItem(row, 6, QTableWidgetItem(measured))
                 classification = {"short": "短文", "long": "长文"}.get(
                     doc.get("length_class"), "分类未知"

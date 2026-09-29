@@ -42,11 +42,13 @@ def normalization_fingerprint(
     )
     text_policy = {}
     if source_revision and source_revision.source_format in {"md", "markdown"}:
+        from openkb.content_blocks import BLOCK_POLICY
         from openkb.text_measurement import MEASUREMENT_FINGERPRINT
         from openkb.text_source import NORMALIZATION_POLICY
 
         text_policy = {
             "pipeline": NORMALIZATION_POLICY,
+            "block_policy": BLOCK_POLICY,
             "classification": {"short_max_tokens": 5000, "measurement": MEASUREMENT_FINGERPRINT},
             "input": {
                 "body": source_revision.digest,
@@ -147,6 +149,12 @@ def retain_normalization(
                 bundle=bundle,
             )
             converted.is_long_doc = converted.processing.execution_mode == "segmented"
+        if converted.is_long_doc and admission.revision.source_format in {"md", "markdown"}:
+            from openkb.block_package import freeze_block_package
+
+            if converted.source_path is None:
+                raise ValueError("Normalized text is missing")
+            freeze_block_package(converted.source_path, admission.source.doc_name)
         saved = NormalizedInput(
             normalization_id=identity,
             source_revision_id=admission.revision.source_revision_id,
@@ -182,6 +190,7 @@ def read_retained_text(
     *,
     chars: str | None = None,
     pages: str | None = None,
+    blocks: str | None = None,
 ) -> tuple[Path, dict] | None:
     """Read a frozen, unpublished text input without inventing a knowledge revision."""
     from openkb.ingest_records import UnitRevision
@@ -199,7 +208,7 @@ def read_retained_text(
         return None
     reference = freeze_text_map(directory / "wiki", doc_name)
     return directory / path, read_source_map(
-        directory / "wiki", reference, doc_name, pages, chars=chars
+        directory / "wiki", reference, doc_name, pages, chars=chars, blocks=blocks
     )
 
 

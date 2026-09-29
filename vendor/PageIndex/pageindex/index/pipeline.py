@@ -86,7 +86,11 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     with max_concurrency_scope(getattr(opt, "max_concurrency", None)), \
          llm_params_scope(getattr(opt, "llm_params", None)):
         nodes = parsed.nodes
-        strategy = detect_strategy(nodes)
+        policy = None
+        if (parsed.metadata or {}).get("unit_kind") == "block":
+            from .block_policy import BlockPolicy
+            policy = BlockPolicy(parsed.metadata)
+        strategy = "content_based" if policy else detect_strategy(nodes)
 
         if strategy == "level_based":
             structure = build_tree_from_levels(nodes)
@@ -94,7 +98,12 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
         else:
             # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
             page_list = [(n.content, n.tokens) for n in nodes]
-            structure = _run_async(_content_based_pipeline(page_list, opt))
+            index_pages = page_list
+            if policy:
+                from ..tokens import count_tokens
+                index_pages = [(policy.render(i), count_tokens(policy.render(i), model))
+                               for i in range(1, len(nodes) + 1)]
+            structure = _run_async(_content_based_pipeline(index_pages, opt, **({"policy": policy} if policy else {})))
 
         # Unified enhancement
         if opt.if_add_node_id:
@@ -141,7 +150,7 @@ class _NullLogger:
     def debug(self, message, **kwargs): pass
 
 
-async def _content_based_pipeline(page_list, opt):
+async def _content_based_pipeline(page_list, opt, policy=None):
     """Strategies 1-3: delegates to the existing PDF pipeline from pageindex/page_index.py.
 
     The page_list is already in the format expected by tree_parser:
@@ -150,5 +159,5 @@ async def _content_based_pipeline(page_list, opt):
     from .page_index import tree_parser
 
     logger = _NullLogger()
-    structure = await tree_parser(page_list, opt, doc=None, logger=logger)
+    structure = await tree_parser(page_list, opt, doc=None, logger=logger, **({"policy": policy} if policy else {}))
     return structure

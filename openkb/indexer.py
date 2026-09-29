@@ -194,7 +194,12 @@ def index_long_document(
     model: str = config.get("model", "gpt-5.4")
     index_config = _build_index_config(config, bundle=resolve_credential_bundle(kb_dir))
 
-    client = LocalClient(
+    client_factory = LocalClient
+    if pdf_path.suffix == ".okbi":
+        from openkb.block_package import create_index_client
+
+        client_factory = create_index_client
+    client = client_factory(
         model=model,
         storage_path=str(openkb_dir),
         index_config=index_config,
@@ -246,6 +251,14 @@ def index_long_document(
             "doc_description": description,
             "structure": structure,
         }
+
+        if (doc.get("metadata") or {}).get("unit_kind") == "block":
+            tree["unit_kind"] = "block"
+            summary = scope.wiki_dir / "summaries" / f"{source_name}.md"
+            atomic_write_text(
+                summary, render_summary_md(tree, source_name, doc_id, description=description)
+            )
+            return IndexResult(doc_id=doc_id, description=description, tree=tree)
 
         # Write wiki/sources/ — per-page content
         sources_dir = scope.wiki_dir / "sources"

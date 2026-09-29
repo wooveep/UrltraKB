@@ -1339,6 +1339,8 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
             click.echo(
                 f"    Text: {meta.get('characters')} characters; {meta['tokens']} tokens (cl100k_base)"
             )
+        if meta.get("block_count") is not None:
+            click.echo(f"    Content blocks: {meta['block_count']}")
         if meta.get("source_id"):
             click.echo(f"    View: {meta.get('view_id', 'legacy')}")
             click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")

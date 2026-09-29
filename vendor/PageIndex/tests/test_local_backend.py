@@ -101,14 +101,14 @@ def _invoke_tool(tool, args: dict) -> str:
 def test_open_mode_includes_list_documents(populated_backend):
     tools = populated_backend.get_agent_tools("papers", doc_ids=None)
     names = {t.name for t in tools.function_tools}
-    assert names == {"list_documents", "get_document", "get_document_structure", "get_page_content"}
+    assert names == {"list_documents", "get_document", "get_document_structure", "get_page_content", "get_block_content"}
 
 
 def test_scoped_mode_excludes_list_documents(populated_backend):
     tools = populated_backend.get_agent_tools("papers", doc_ids=["d1"])
     names = {t.name for t in tools.function_tools}
     assert "list_documents" not in names
-    assert names == {"get_document", "get_document_structure", "get_page_content"}
+    assert names == {"get_document", "get_document_structure", "get_page_content", "get_block_content"}
 
 
 def test_scoped_mode_rejects_out_of_scope_doc_id(populated_backend):

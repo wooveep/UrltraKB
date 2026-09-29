@@ -14,7 +14,7 @@ from ..storage.protocol import StorageEngine
 from ..index.pipeline import build_index
 from ..index.utils import parse_pages, remove_fields
 from .input_package import (
-    PARSER_POLICY, digest, freeze_pages, materialize_pages, parser_identity, processing_key,
+    digest, freeze_pages, materialize_pages, parser_identity, parser_policy, processing_key,
 )
 from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
@@ -137,7 +137,7 @@ class LocalBackend:
                 "structure": result["structure"],
                 "pages": pages,
                 "metadata": {
-                    **(parsed.metadata or {}), "parser_policy": PARSER_POLICY,
+                    **(parsed.metadata or {}), "parser_policy": parser_policy(parser),
                     "parser": parser_identity(parser), "model": self._model,
                     "source_digest": digest(managed_path),
                     "processing_fingerprint": file_hash,
@@ -191,12 +191,16 @@ class LocalBackend:
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
             pages = self._recover_pages(collection, doc_id, doc)
-            page_map = {p["page"]: p["content"] for p in pages}
-            self._fill_node_text(doc["structure"], page_map)
+            blocks = doc["metadata"].get("unit_kind") == "block"
+            page_map = {p["ordinal" if blocks else "page"]: p["content"] for p in pages}
+            self._fill_node_text(doc["structure"], page_map, separator="" if blocks else "\n")
+        if doc["metadata"].get("unit_kind") == "block":
+            doc["page_count"] = None
+            doc["block_count"] = doc["metadata"]["unit_count"]
         return doc
 
     @staticmethod
-    def _fill_node_text(nodes: list, page_map: dict) -> None:
+    def _fill_node_text(nodes: list, page_map: dict, separator="\n") -> None:
         """Recursively fill 'text' on structure nodes from cached page content.
 
         Two node conventions, one per indexing strategy: content_based (PDF)
@@ -208,13 +212,13 @@ class LocalBackend:
             start = node.get("start_index")
             end = node.get("end_index")
             if start is not None and end is not None:
-                node["text"] = "\n".join(
+                node["text"] = separator.join(
                     page_map.get(p, "") for p in range(start, end + 1)
                 )
             elif "line_num" in node:
                 node["text"] = page_map.get(node["line_num"], "")
             if "nodes" in node:
-                LocalBackend._fill_node_text(node["nodes"], page_map)
+                LocalBackend._fill_node_text(node["nodes"], page_map, separator=separator)
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
         self._require_document(collection, doc_id)
@@ -222,8 +226,20 @@ class LocalBackend:
 
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
         doc = self._require_document(collection, doc_id)
+        if (doc.get("metadata") or {}).get("unit_kind") == "block":
+            raise ValueError("This source has content blocks; use get_block_content")
         page_nums = parse_pages(pages)
         return [p for p in self._recover_pages(collection, doc_id, doc) if p["page"] in page_nums]
+
+    def get_block_content(self, collection: str, doc_id: str, blocks: str) -> list:
+        doc = self._require_document(collection, doc_id)
+        if (doc.get("metadata") or {}).get("unit_kind") != "block":
+            raise ValueError("This source does not have content blocks")
+        requested = parse_pages(blocks)
+        units = self._recover_pages(collection, doc_id, doc)
+        if not requested or set(requested) - {unit["ordinal"] for unit in units}:
+            raise ValueError("Block range is outside the frozen source")
+        return [unit for unit in units if unit["ordinal"] in requested]
 
     def _managed_input(self, collection: str, doc_id: str, doc: dict) -> Path:
         self._validate_collection_name(collection)
@@ -241,16 +257,20 @@ class LocalBackend:
         cached = self._storage.get_pages(collection, doc_id)
         base = self._files_dir / collection / doc_id
         if cached is not None:
+            if metadata.get("unit_kind") == "block":
+                source = self._managed_input(collection, doc_id, doc)
+                if digest(source) != metadata.get("source_digest"):
+                    raise ValueError("Managed block package digest changed")
             return materialize_pages(cached, base, metadata)
         if metadata.get("parser_policy"):
-            if metadata["parser_policy"] != PARSER_POLICY:
-                raise ValueError("The saved parser policy cannot be reconstructed by this version")
             source = self._managed_input(collection, doc_id, doc)
             if digest(source) != metadata.get("source_digest"):
                 raise ValueError("Managed source digest changed")
         else:
             source = Path(doc["file_path"])
         parser = self._resolve_parser(str(source))
+        if metadata.get("parser_policy") and metadata["parser_policy"] != parser_policy(parser):
+            raise ValueError("The saved parser policy cannot be reconstructed by this version")
         if metadata.get("parser_policy") and metadata.get("parser") != parser_identity(parser):
             raise ValueError("The saved parser is unavailable; cannot reconstruct its input")
         parsed = parser.parse(str(source), model=metadata.get("model", self._model),
@@ -259,7 +279,7 @@ class LocalBackend:
         # These assets were just extracted and verified by this parser. Their
         # relative paths need resolving even when an old index has no policy
         # metadata; the index's own provenance remains unknown.
-        recovered_metadata = {**(parsed.metadata or {}), "parser_policy": PARSER_POLICY}
+        recovered_metadata = {**(parsed.metadata or {}), "parser_policy": parser_policy(parser)}
         return materialize_pages(
             pages, base, metadata if metadata.get("parser_policy") else recovered_metadata
         )
@@ -318,6 +338,8 @@ class LocalBackend:
                 doc = backend._require_document(col_name, doc_id)
             except DocumentNotFoundError:
                 return json.dumps({"error": f"doc_id '{doc_id}' not found."})
+            if (doc.get("metadata") or {}).get("unit_kind") == "block":
+                doc = {**doc, "metadata": {key: value for key, value in doc["metadata"].items() if key != "source"}}
             return json.dumps(doc)
 
         @function_tool
@@ -353,7 +375,18 @@ class LocalBackend:
                 })
             return json.dumps(result, ensure_ascii=False)
 
-        tools = [get_document, get_document_structure, get_page_content]
+        @function_tool
+        def get_block_content(doc_id: str, blocks: str) -> str:
+            """Read original content blocks (not pages), with exact spans and separate display context."""
+            rejection = _reject(doc_id)
+            if rejection:
+                return rejection
+            try:
+                return json.dumps(backend.get_block_content(col_name, doc_id, blocks), ensure_ascii=False)
+            except (DocumentNotFoundError, ValueError) as exc:
+                return json.dumps({"error": str(exc)})
+
+        tools = [get_document, get_document_structure, get_page_content, get_block_content]
 
         if scope is None:
             @function_tool

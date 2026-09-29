@@ -7,6 +7,11 @@ class PageRangeError(ValueError):
     """The requested range cannot be applied to this source."""
 
 
+def validate_source_ranges(pages=None, chars=None, blocks=None) -> None:
+    if sum(value is not None for value in (pages, chars, blocks)) > 1:
+        raise PageRangeError("Choose one of pages, characters, or blocks")
+
+
 def read_page_selection(raw: Any, specification: str | None = None) -> dict:
     if not isinstance(raw, list):
         raise ValueError("Stored source must contain a page list")

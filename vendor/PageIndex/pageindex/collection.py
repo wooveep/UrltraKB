@@ -95,6 +95,10 @@ class Collection:
         """
         self._backend.delete_document(self._name, doc_id)
 
+    def get_block_content(self, doc_id: str, blocks: str) -> list[dict]:
+        """Read frozen content-block ordinals, with source spans and separate display context."""
+        return self._backend.get_block_content(self._name, doc_id, blocks)
+
     def query(self, question: str,
               doc_ids: str | list[str] | None = None,
               stream: bool = False) -> str | QueryStream:

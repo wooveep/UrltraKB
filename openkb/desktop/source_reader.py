@@ -85,16 +85,19 @@ class SourceReader(QDialog):
         if source.get("units"):
             controls = QHBoxLayout()
             self.pages = QLineEdit()
-            self.pages.setAccessibleName("来源页范围")
-            self.pages.setPlaceholderText("物理页，如 1,3-5；留空显示全文")
-            select = QPushButton("读取页范围")
+            blocks = source.get("unit_kind") == "block"
+            self.pages.setAccessibleName("来源块范围" if blocks else "来源页范围")
+            self.pages.setPlaceholderText(
+                "内容块，如 1,3-5；留空显示全文" if blocks else "物理页，如 1,3-5；留空显示全文"
+            )
+            select = QPushButton("读取块范围" if blocks else "读取页范围")
             select.setAutoDefault(False)
             select.clicked.connect(self.select_pages)
             self.pages.returnPressed.connect(self.select_pages)
             controls.addWidget(self.pages, 1)
             controls.addWidget(select)
             layout.addLayout(controls)
-        if source.get("unit_kind") == "text":
+        if source.get("unit_kind") in {"text", "block"}:
             controls = QHBoxLayout()
             self.characters = QLineEdit()
             self.characters.setAccessibleName("来源字符范围")
@@ -134,7 +137,13 @@ class SourceReader(QDialog):
             if self.source.get("units")
             else ""
         )
-        if source.get("unit_kind") == "text":
+        if source.get("unit_kind") == "block":
+            self.coverage.setText(
+                f"内容块：{', '.join(map(str, source.get('block_range') or []))} · "
+                f"全文 {source['block_count']} 块 / {source['characters']} 字符 / "
+                f"{source['tokens']} tokens\n" + "\n".join(source.get("diagnostics", []))
+            )
+        if source.get("unit_kind") in {"text", "block"} and source.get("char_range") is not None:
             start, end = source["char_range"]
             self.coverage.setText(
                 f"字符范围：[{start}, {end}) · 全文 {source['characters']} 字符 / "
@@ -151,6 +160,26 @@ class SourceReader(QDialog):
         from openkb.source_pages import read_page_selection
 
         try:
+            if self.source.get("unit_kind") == "block":
+                from pageindex.index.utils import parse_pages
+
+                numbers = (
+                    parse_pages(self.pages.text().strip())
+                    if self.pages.text().strip()
+                    else self.source["block_range"]
+                )
+                if not numbers or set(numbers) - set(self.source["block_range"]):
+                    raise ValueError("内容块范围超出已保存原文")
+                units = [unit for unit in self.source["units"] if unit["ordinal"] in numbers]
+                self.show_content(
+                    {
+                        **self.source,
+                        "content": "".join(unit["content"] for unit in units),
+                        "block_range": [unit["ordinal"] for unit in units],
+                        "char_range": None,
+                    }
+                )
+                return
             selected = read_page_selection(self.source["units"], self.pages.text().strip() or None)
         except ValueError as exc:
             self.coverage.setText(str(exc))

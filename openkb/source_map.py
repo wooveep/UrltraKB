@@ -37,8 +37,12 @@ def read_source_map(
     pages: str | None = None,
     *,
     chars: str | None = None,
+    blocks: str | None = None,
 ) -> dict:
-    suffix = ".content.json" if reference.unit_kind == "text" else ".json"
+    from openkb.source_pages import PageRangeError, validate_source_ranges
+
+    validate_source_ranges(pages, chars, blocks)
+    suffix = ".json" if reference.unit_kind == "page" else ".content.json"
     if reference.path != f"sources/{doc_name}{suffix}":
         raise ValueError("Source map belongs to another processing unit")
     target = wiki / reference.path
@@ -46,7 +50,7 @@ def read_source_map(
     if HashRegistry.hash_file(target) != reference.digest:
         raise ValueError("Source map digest changed")
     raw = json.loads(target.read_text("utf-8"))
-    if reference.unit_kind == "text":
+    if reference.unit_kind in {"text", "block"}:
         from openkb.text_source import read_text_selection
 
         if pages is not None:
@@ -54,6 +58,12 @@ def read_source_map(
 
             raise PageRangeError("Markdown has character positions, not physical pages")
         selected = read_text_selection(raw, chars)
+        if blocks is not None or (reference.unit_kind == "block" and chars is None):
+            from openkb.block_package import read_block_selection
+
+            selected = read_block_selection(raw, blocks)
+        if reference.unit_kind == "block" and selected["block_count"] != reference.unit_count:
+            raise ValueError("Source block coverage changed")
         body = wiki / "sources" / f"{doc_name}.md"
         contained_paths(wiki, [body])
         if body.read_bytes().decode("utf-8") != raw["text"] or raw["assets"] != reference.assets:
@@ -62,7 +72,7 @@ def read_source_map(
             if HashRegistry.hash_file(wiki / path) != digest:
                 raise ValueError("Source map image digest changed")
         return selected
-    if chars is not None:
+    if chars is not None or blocks is not None:
         from openkb.source_pages import PageRangeError
 
         raise PageRangeError("This source has physical pages, not frozen character positions")
@@ -85,8 +95,8 @@ def freeze_text_map(wiki: Path, doc_name: str) -> SourceMap:
     reference = SourceMap(
         path=path,
         digest=HashRegistry.hash_file(wiki / path),
-        unit_kind="text",
-        unit_count=1,
+        unit_kind=raw.unit_kind,
+        unit_count=len(raw.blocks) if raw.blocks else 1,
         assets=raw.assets,
     )
     read_source_map(wiki, reference, doc_name)

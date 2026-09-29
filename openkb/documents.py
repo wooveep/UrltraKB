@@ -65,6 +65,7 @@ def read_document_source(
     source_revision_id: str | None = None,
     pages: str | None = None,
     chars: str | None = None,
+    blocks: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
@@ -74,7 +75,9 @@ def read_document_source(
     source lacks a physical-page map. This is independent of compilation mode.
     """
     from openkb.application.sources import read_admitted_source
+    from openkb.source_pages import validate_source_ranges
 
+    validate_source_ranges(pages, chars, blocks)
     admitted = read_admitted_source(
         kb_dir,
         file_hash,
@@ -82,10 +85,11 @@ def read_document_source(
         scope=scope,
         page_range=pages,
         char_range=chars,
+        block_range=blocks,
     )
     if admitted is not None:
         return admitted
-    if chars is not None:
+    if chars is not None or blocks is not None:
         raise PageRangeError("Legacy source has no frozen character map")
     scope = resolve_scope(kb_dir, scope)
     if scope.view_id != "legacy":

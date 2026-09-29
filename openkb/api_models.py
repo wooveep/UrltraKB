@@ -165,6 +165,7 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    block_count: int | None = None
     tokens: int | None = None
     characters: int | None = None
     target_processing: dict | None = None
@@ -345,6 +346,7 @@ class PageResponse(BaseModel):
 
 
 class DocumentSourceRequest(ViewRequest):
+    blocks: str | None = None
     chars: str | None = None
     knowledge_revision_id: str | None = None
     pages: str | None = None
@@ -356,6 +358,8 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    block_count: int | None = None
+    block_range: list[int] | None = None
     tokens: int | None = None
     characters: int | None = None
     char_range: list[int] | None = None

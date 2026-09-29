@@ -11,8 +11,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ################### check title in page #########################################################
-async def check_title_appearance(item, page_list, start_index=1, model=None):    
+async def check_title_appearance(item, page_list, start_index=1, model=None, policy=None):    
     title=item['title']
+    if policy:
+        return {'list_index': item.get('list_index'), 'title': title,
+                'page_number': item.get('physical_index'),
+                'answer': 'yes' if policy.valid(item, start_index, len(page_list)) else 'no'}
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
     
@@ -74,7 +78,11 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     return response.get("start_begin", "no")
 
 
-async def check_title_appearance_in_start_concurrent(structure, page_list, model=None, logger=None):
+async def check_title_appearance_in_start_concurrent(structure, page_list, model=None, logger=None, policy=None):
+    if policy:
+        for item in structure:
+            item["appear_start"] = policy.starts_unit(item)
+        return structure
     if logger:
         logger.info("Checking title appearance in start concurrently")
     
@@ -504,7 +512,7 @@ def remove_first_physical_index_section(text):
     return text
 
 ### add verify completeness
-def generate_toc_continue(toc_content, part, model=None):
+def generate_toc_continue(toc_content, part, model=None, policy=None):
     print('start generate_toc_continue')
     prompt = """
     You are an expert in extracting hierarchical tree structure.
@@ -531,7 +539,7 @@ def generate_toc_continue(toc_content, part, model=None):
 
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
-    prompt = prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
+    prompt = policy.prompt(part, toc_content) if policy else prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
         return extract_json(response)
@@ -539,7 +547,7 @@ def generate_toc_continue(toc_content, part, model=None):
         raise Exception(f'finish reason: {finish_reason}')
     
 ### add verify completeness
-def generate_toc_init(part, model=None):
+def generate_toc_init(part, model=None, policy=None):
     print('start generate_toc_init')
     prompt = """
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
@@ -565,7 +573,7 @@ def generate_toc_init(part, model=None):
 
     Directly return the final JSON structure. Do not output anything else."""
 
-    prompt = prompt + '\nGiven text\n:' + part
+    prompt = policy.prompt(part) if policy else prompt + '\nGiven text\n:' + part
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
 
     if finish_reason == 'finished':
@@ -573,7 +581,7 @@ def generate_toc_init(part, model=None):
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None):
+def process_no_toc(page_list, start_index=1, model=None, logger=None, policy=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
@@ -583,9 +591,9 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None):
     group_texts = page_list_to_group_text(page_contents, token_lengths)
     logger.info(f'len(group_texts): {len(group_texts)}')
 
-    toc_with_page_number= generate_toc_init(group_texts[0], model)
+    toc_with_page_number= generate_toc_init(group_texts[0], model, **({"policy": policy} if policy else {}))
     for group_text in group_texts[1:]:
-        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model)    
+        toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model, **({"policy": policy} if policy else {}))    
         toc_with_page_number.extend(toc_with_page_number_additional)
     logger.info(f'generate_toc: {toc_with_page_number}')
 
@@ -693,7 +701,9 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
 
 
 
-def check_toc(page_list, opt=None):
+def check_toc(page_list, opt=None, policy=None):
+    if policy:
+        return {"toc_content": None, "toc_page_list": [], "page_index_given_in_toc": "no"}
     toc_page_list = find_toc_pages(start_page_index=0, page_list=page_list, opt=opt)
     if len(toc_page_list) == 0:
         print('no toc found')
@@ -760,7 +770,7 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
 
 
 
-async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None):
+async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None, policy=None):
     print(f'start fix_incorrect_toc with {len(incorrect_results)} incorrect results')
     incorrect_indices = {result['list_index'] for result in incorrect_results}
     
@@ -811,6 +821,12 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
             'prev_correct': prev_correct,
             'next_correct': next_correct
         })
+
+        if policy:
+            replacement = await policy.fix(toc_with_page_number[list_index],
+                max(start_index, prev_correct), next_correct, model, llm_acompletion, extract_json)
+            return {'title': incorrect_item['title'], **(replacement or {}),
+                    'list_index': list_index, 'is_valid': replacement is not None}
 
         page_contents=[]
         for page_index in range(prev_correct, next_correct+1):
@@ -866,6 +882,9 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
             list_idx = result['list_index']
             if 0 <= list_idx < len(toc_with_page_number):
                 toc_with_page_number[list_idx]['physical_index'] = result['physical_index']
+                if policy:
+                    for key in ('title', 'title_origin', 'anchor'):
+                        toc_with_page_number[list_idx][key] = result[key]
                 if 'title_correction' in result:
                     toc_with_page_number[list_idx]['title'] = result['title']
                     toc_with_page_number[list_idx]['title_correction'] = result['title_correction']
@@ -876,13 +895,13 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
                 invalid_results.append({
                     'list_index': result['list_index'],
                     'title': result['title'],
-                    'physical_index': result['physical_index'],
+                    'physical_index': result.get('physical_index'),
                 })
         else:
             invalid_results.append({
                 'list_index': result['list_index'],
                 'title': result['title'],
-                'physical_index': result['physical_index'],
+                'physical_index': result.get('physical_index'),
             })
 
     if logger:
@@ -893,7 +912,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
 
 
 
-async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None):
+async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None, policy=None):
     print('start fix_incorrect_toc')
     fix_attempt = 0
     current_toc = toc_with_page_number
@@ -902,7 +921,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
     while current_incorrect:
         print(f"Fixing {len(current_incorrect)} incorrect results")
         
-        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger)
+        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger, **({"policy": policy} if policy else {}))
                 
         fix_attempt += 1
         if fix_attempt >= max_attempts:
@@ -916,7 +935,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
 
 ################### verify toc #########################################################
-async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
+async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, policy=None):
     print('start verify_toc')
     # Find the last non-None physical_index
     last_physical_index = None
@@ -926,7 +945,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
             break
     
     # Early return if we don't have valid physical indices
-    if last_physical_index is None or last_physical_index < len(page_list)/2:
+    if not policy and (last_physical_index is None or last_physical_index < len(page_list)/2):
         return 0, []
     
     # Determine which items to check
@@ -943,7 +962,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
     for idx in sample_indices:
         item = list_result[idx]
         # Skip items with None physical_index (these were invalidated by validate_and_truncate_physical_indices)
-        if item.get('physical_index') is not None:
+        if policy or item.get('physical_index') is not None:
             item_with_index = item.copy()
             item_with_index['list_index'] = idx  # Add the original index in list_result
             indexed_sample_list.append(item_with_index)
@@ -953,7 +972,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
     # unavailable physical_index above), not abort verification for the
     # whole document.
     tasks = [
-        check_title_appearance(item, page_list, start_index, model)
+        check_title_appearance(item, page_list, start_index, model, **({"policy": policy} if policy else {}))
         for item in indexed_sample_list
     ]
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -985,7 +1004,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
 
 
 ################### main process #########################################################
-async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None):
+async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None, policy=None):
     print(mode)
     print(f'start_index: {start_index}')
     
@@ -994,9 +1013,9 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     elif mode == 'process_toc_no_page_numbers':
         toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
+        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
             
-    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
+    toc_with_page_number = [item for item in toc_with_page_number if policy or item.get('physical_index') is not None] 
     
     toc_with_page_number = validate_and_truncate_physical_indices(
         toc_with_page_number, 
@@ -1005,7 +1024,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         logger=logger
     )
     
-    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
+    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model, **({"policy": policy} if policy else {}))
         
     logger.info({
         'mode': 'process_toc_with_page_numbers',
@@ -1013,9 +1032,19 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         'incorrect_results': incorrect_results
     })
     if accuracy == 1.0 and len(incorrect_results) == 0:
+        if policy:
+            policy.validate_order(toc_with_page_number, start_index, len(page_list))
+            for item in toc_with_page_number:
+                item['unit_kind'] = 'block'
         return toc_with_page_number
-    if accuracy > 0.6 and len(incorrect_results) > 0:
-        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger)
+    if (policy or accuracy > 0.6) and len(incorrect_results) > 0:
+        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
+        if policy and incorrect_results:
+            raise ValueError("Unverified content-block anchors after correction")
+        if policy:
+            policy.validate_order(toc_with_page_number, start_index, len(page_list))
+            for item in toc_with_page_number:
+                item['unit_kind'] = 'block'
         return toc_with_page_number
     else:
         if mode == 'process_toc_with_page_numbers':
@@ -1026,29 +1055,33 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
             raise Exception('Processing failed')
         
  
-async def process_large_node_recursively(node, page_list, opt=None, logger=None):
+async def process_large_node_recursively(node, page_list, opt=None, logger=None, policy=None):
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
     if node['end_index'] - node['start_index'] > opt.max_page_num_each_node and token_num >= opt.max_token_num_each_node:
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
 
-        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger)
-        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger)
+        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger, **({'policy': policy} if policy else {}))
+        node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
         
         # Filter out items with None physical_index before post_processing
         valid_node_toc_items = [item for item in node_toc_tree if item.get('physical_index') is not None]
+        if policy and len(valid_node_toc_items) == 1 and valid_node_toc_items[0]['physical_index'] == node['start_index']:
+            # A generated label may vary on an unchanged single section. No
+            # smaller range was found; keep this leaf instead of recursing forever.
+            return node
         
         if valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
-            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'])
+            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], **({"policy": policy} if policy else {}))
             node['end_index'] = valid_node_toc_items[1]['start_index'] if len(valid_node_toc_items) > 1 else node['end_index']
         else:
-            node['nodes'] = post_processing(valid_node_toc_items, node['end_index'])
+            node['nodes'] = post_processing(valid_node_toc_items, node['end_index'], **({"policy": policy} if policy else {}))
             node['end_index'] = valid_node_toc_items[0]['start_index'] if valid_node_toc_items else node['end_index']
         
     if 'nodes' in node and node['nodes']:
         tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger)
+            process_large_node_recursively(child_node, page_list, opt, logger=logger, **({"policy": policy} if policy else {}))
             for child_node in node['nodes']
         ]
         # return_exceptions=True: one child subtree failing to expand further
@@ -1061,8 +1094,8 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
 
     return node
 
-async def tree_parser(page_list, opt, doc=None, logger=None):
-    check_toc_result = check_toc(page_list, opt)
+async def tree_parser(page_list, opt, doc=None, logger=None, policy=None):
+    check_toc_result = check_toc(page_list, opt, **({"policy": policy} if policy else {}))
     logger.info(check_toc_result)
 
     if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "yes":
@@ -1073,24 +1106,24 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
             toc_content=check_toc_result['toc_content'], 
             toc_page_list=check_toc_result['toc_page_list'], 
             opt=opt,
-            logger=logger)
+            logger=logger, **({"policy": policy} if policy else {}))
     else:
         toc_with_page_number = await meta_processor(
             page_list, 
             mode='process_no_toc', 
             start_index=1, 
             opt=opt,
-            logger=logger)
+            logger=logger, **({"policy": policy} if policy else {}))
 
-    toc_with_page_number = add_preface_if_needed(toc_with_page_number)
-    toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger)
+    toc_with_page_number = policy.preface(toc_with_page_number) if policy else add_preface_if_needed(toc_with_page_number)
+    toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
     
     # Filter out items with None physical_index before post_processings
     valid_toc_items = [item for item in toc_with_page_number if item.get('physical_index') is not None]
     
-    toc_tree = post_processing(valid_toc_items, len(page_list))
+    toc_tree = post_processing(valid_toc_items, len(page_list), **({"policy": policy} if policy else {}))
     tasks = [
-        process_large_node_recursively(node, page_list, opt, logger=logger)
+        process_large_node_recursively(node, page_list, opt, logger=logger, **({"policy": policy} if policy else {}))
         for node in toc_tree
     ]
     # return_exceptions=True: one top-level node failing to expand further

@@ -5,13 +5,18 @@ from __future__ import annotations
 from openkb import frontmatter
 
 
-def _yaml_frontmatter(source_name: str, doc_id: str, description: str = "") -> str:
+def _yaml_frontmatter(
+    source_name: str, doc_id: str, description: str = "", unit_kind="page"
+) -> str:
     """Return a YAML frontmatter block for a PageIndex wiki page."""
     lines = [frontmatter.kv_line("type", "Summary")]
     if description:
         lines.append(frontmatter.kv_line("description", description))
     lines.append("doc_type: pageindex")
-    lines.append(frontmatter.kv_line("full_text", f"sources/{source_name}.json"))
+    suffix = ".content.json" if unit_kind == "block" else ".json"
+    lines.append(frontmatter.kv_line("full_text", f"sources/{source_name}{suffix}"))
+    if unit_kind == "block":
+        lines.append("unit_kind: block")
     return "---\n" + "\n".join(lines) + "\n---\n"
 
 
@@ -26,7 +31,8 @@ def _render_nodes_summary(nodes: list[dict], depth: int) -> str:
         summary = node.get("summary", "")
         children = node.get("nodes", [])
 
-        lines.append(f"{heading_prefix} {title} (pages {start}–{end})\n")
+        label = "blocks" if node.get("unit_kind") == "block" else "pages"
+        lines.append(f"{heading_prefix} {title} ({label} {start}–{end})\n")
         if summary:
             lines.append(f"Summary: {summary}\n")
         if children:
@@ -42,7 +48,7 @@ def render_summary_md(tree: dict, source_name: str, doc_id: str, description: st
     Includes a YAML frontmatter block with ``type: "Summary"`` and an
     optional ``description`` field.
     """
-    frontmatter = _yaml_frontmatter(source_name, doc_id, description)
+    frontmatter = _yaml_frontmatter(source_name, doc_id, description, tree.get("unit_kind", "page"))
     structure = tree.get("structure", [])
     body = _render_nodes_summary(structure, depth=1)
     return frontmatter + "\n" + body

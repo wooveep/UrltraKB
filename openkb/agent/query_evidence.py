@@ -34,10 +34,17 @@ def selection_catalog(selection: QuerySelection) -> str:
                     from openkb.text_source import read_text_selection
 
                     text = read_text_selection(pages)
+                    doc_name = Path(name).name.removesuffix(".content.json")
+                    if text["block_count"] is not None:
+                        lines.append(
+                            f"  Content blocks: doc_name={doc_name}; "
+                            f"blocks=1-{text['block_count']}; read with get_block_content."
+                        )
                     lines.append(
-                        f"  Source: doc_name={Path(name).name.removesuffix('.content.json')}; "
+                        f"  Source: doc_name={doc_name}; "
                         f"characters=0:{text['characters']}; tokens={text['tokens']}; "
-                        "unit_kind=text; pages=none; use get_text_content with chars=START:END"
+                        f"unit_kind={text['unit_kind']}; pages=none; "
+                        "use get_text_content with chars=START:END"
                     )
                     continue
                 if not isinstance(pages, list):
@@ -124,6 +131,25 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return view.provenance + "\n\n" + json.dumps(selected, ensure_ascii=False)
 
     @function_tool
+    def get_block_content(doc_name: str, blocks: str, view_id: str = "") -> str:
+        """Read frozen blocks, original ranges and display context in one allowed view.
+
+        blocks uses one-based ordinals (e.g. 1,3-5). These are not physical pages.
+        """
+        import json
+
+        from openkb.block_package import read_block_selection
+
+        view = _selected(selection, view_id)
+        path = f"sources/{doc_name}.content.json"
+        if not _available(view, path):
+            return "No permitted content blocks in this evidence view."
+        selected = read_block_selection(
+            json.loads((view.scope.wiki_dir / path).read_text("utf-8")), blocks
+        )
+        return view.provenance + "\n\n" + json.dumps(selected, ensure_ascii=False)
+
+    @function_tool
     def get_image(image_path: str, view_id: str = "") -> ToolOutputImage | ToolOutputText:
         """View a retained image belonging to one permitted evidence view."""
         view = _selected(selection, view_id)
@@ -140,6 +166,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     readers = {
         "read_file",
         "get_page_content",
+        "get_block_content",
         "get_text_content",
         "get_image",
         "read_wiki_file",
@@ -162,7 +189,14 @@ def restrict_query_agent(agent, selection: QuerySelection):
         + selection_catalog(selection)
     )
     return agent.clone(
-        tools=[read_file, get_page_content, get_text_content, get_image, *extra_tools],
+        tools=[
+            read_file,
+            get_page_content,
+            get_text_content,
+            get_block_content,
+            get_image,
+            *extra_tools,
+        ],
         instructions=(agent.instructions or "") + instructions,
     )
 

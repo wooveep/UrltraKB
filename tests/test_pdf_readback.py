@@ -301,3 +301,36 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
         )
     assert response.status_code == 200, response.text
     assert response.json()["content"] == last["content"]
+
+
+@pytest.mark.parametrize(
+    "selection", [{"blocks": "999"}, {"chars": "0:3"}, {"pages": "1", "blocks": "1"}]
+)
+def test_legacy_pdf_without_a_source_map_rejects_character_and_block_selectors(
+    kb_dir, physical_pdf, pdf_model, selection
+):
+    from openkb.application.documents import import_document
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+    from openkb.documents import read_document_source
+    from openkb.source_pages import PageRangeError
+
+    apply_kb_config_patch(
+        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
+    )
+    result = import_document(kb_dir, physical_pdf)
+    assert result.status == "added", result.message
+    unit = result.units[0]
+    path = (
+        kb_dir
+        / ".openkb/knowledge"
+        / unit.view_id
+        / "revisions"
+        / unit.knowledge_revision_id
+        / "manifest.json"
+    )
+    manifest = json.loads(path.read_text("utf-8"))
+    manifest["source_map"] = None
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PageRangeError):
+        read_document_source(kb_dir, result.source_id, **selection)

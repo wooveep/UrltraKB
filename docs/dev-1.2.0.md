@@ -40,7 +40,7 @@ worktree 开发；随后将 `dev-1.2.0` 切换到项目主目录，移除临时 
 必须使用本分支自己的依赖环境。`dev-1.1.0` 使用的
 `pageindex==0.3.0.dev3+openkb.1` 修改包与本分支原始接口不兼容；这里使用
 项目内 `vendor/PageIndex` 的 `v0.3.0.dev3` 源码，构建版本为
-`pageindex==0.3.0.dev3+urltrakb.2`。`uv sync` 直接以 editable 模式安装本目录，
+`pageindex==0.3.0.dev3+urltrakb.3`。`uv sync` 直接以 editable 模式安装本目录，
 本地索引算法与原始 `0.3.0.dev3` 一致，云端后端已移除。来源和升级说明见
 [PageIndex 源码依赖](../vendor/PageIndex/README.urltrakb.md)。
 

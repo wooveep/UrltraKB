@@ -175,11 +175,15 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
             from openkb.source_changes import source_validity
 
             measurement = {}
-            if actual and actual[1].source_map and actual[1].source_map.unit_kind == "text":
+            if (
+                actual
+                and actual[1].source_map
+                and actual[1].source_map.unit_kind in {"text", "block"}
+            ):
                 from openkb.source_map import read_source_map
 
                 text = read_source_map(actual[0] / "wiki", actual[1].source_map, source.doc_name)
-                measurement = {key: text[key] for key in ("tokens", "characters")}
+                measurement = {key: text[key] for key in ("tokens", "characters", "block_count")}
             elif not actual and states:
                 from openkb.normalization import read_retained_text
 
@@ -187,7 +191,9 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     root, states[0].target_revision_id, revision.source_revision_id, source.doc_name
                 )
                 if retained:
-                    measurement = {key: retained[1][key] for key in ("tokens", "characters")}
+                    measurement = {
+                        key: retained[1][key] for key in ("tokens", "characters", "block_count")
+                    }
             documents.append(
                 {
                     **measurement,
@@ -236,7 +242,11 @@ def read_admitted_source(
     scope: KnowledgeScope | None = None,
     page_range: str | None = None,
     char_range: str | None = None,
+    block_range: str | None = None,
 ) -> dict | None:
+    from openkb.source_pages import PageRangeError, validate_source_ranges
+
+    validate_source_ranges(page_range, char_range, block_range)
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
@@ -330,16 +340,19 @@ def read_admitted_source(
                     units[0].doc_name,
                     page_range,
                     chars=char_range,
+                    blocks=block_range,
                 )
             elif base_path.suffix == ".json":
                 from openkb.source_pages import read_page_selection
 
+                if char_range is not None or block_range is not None:
+                    raise PageRangeError(
+                        "This retained source has no frozen character or block map"
+                    )
                 page_list = json.loads(base_path.read_text("utf-8"))
                 selection = read_page_selection(page_list, page_range)
             else:
-                if page_range is not None or char_range is not None:
-                    from openkb.source_pages import PageRangeError
-
+                if page_range is not None or char_range is not None or block_range is not None:
                     raise PageRangeError("This retained source has no physical-page map")
                 content = base_path.read_text("utf-8")
             if selection:
@@ -354,10 +367,15 @@ def read_admitted_source(
                 source.doc_name,
                 pages=page_range,
                 chars=char_range,
+                blocks=block_range,
             )
             if retained:
                 base_path, selection = retained
                 content, pages = selection["content"], selection["pages"]
+        if not selection and any(
+            value is not None for value in (page_range, char_range, block_range)
+        ):
+            raise PageRangeError("No retained source map is available for this range")
         annotation_id = source.annotation_id
         if actual and actual[1].unit_revision_id:
             body_revision = read_record(
@@ -407,7 +425,8 @@ def read_admitted_source(
             "original_path": target.original,
             "base_path": (
                 base_path.parent.parent
-                if base_path.suffix == ".json" and selection.get("unit_kind") != "text"
+                if base_path.suffix == ".json"
+                and selection.get("unit_kind") not in {"text", "block"}
                 else base_path.parent
             )
             .relative_to(root)

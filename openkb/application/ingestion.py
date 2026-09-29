@@ -222,15 +222,15 @@ def import_prepared_source(
                 index_ref = None
                 if converted.is_long_doc:
                     stage = "indexing"
+                    index_input = converted.raw_path
                     if admission.revision.source_format in {"md", "markdown"}:
-                        raise ValueError(
-                            "Segmented Markdown processing is not available yet; "
-                            "complete input retained"
-                        )
-                    if converted.raw_path is None:
-                        raise ValueError("Normalized PDF is missing")
+                        if converted.source_path is None:
+                            raise ValueError("Normalized text is missing")
+                        index_input = converted.source_path.with_suffix(".okbi")
+                    if index_input is None:
+                        raise ValueError("Normalized input is missing")
                     indexed = index_long_document(
-                        converted.raw_path,
+                        index_input,
                         kb_dir,
                         doc_name=unit.doc_name,
                         scope=view.scope,
@@ -268,7 +268,8 @@ def import_prepared_source(
                 _run_compile_with_retry(compile_document, "Compiling wiki", report=report)
                 check_stop()
             stage = "publication"
-            extension = "json" if converted.is_long_doc else "md"
+            segmented_pdf = converted.is_long_doc and admission.revision.source_format == "pdf"
+            extension = "json" if segmented_pdf else "md"
             from openkb.source_map import freeze_pdf_map
 
             page_map = view.scope.wiki_dir / "sources" / f"{unit.doc_name}.json"
@@ -296,7 +297,7 @@ def import_prepared_source(
                 normalized_source=f"sources/{unit.doc_name}.{extension}",
                 source_map=source_map,
                 processing=converted.processing,
-                normalized_format="pdf" if converted.is_long_doc else "markdown",
+                normalized_format="pdf" if segmented_pdf else "markdown",
                 is_long=converted.is_long_doc,
                 index_ref=index_ref,
                 check_stop=check_stop,

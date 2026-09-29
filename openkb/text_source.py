@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from openkb.content_blocks import BLOCK_POLICY, ContentBlock, validate_blocks
 from openkb.source_pages import PageRangeError
 from openkb.source_records import Digest, Record, RelativePath
 from openkb.text_measurement import MEASUREMENT_FINGERPRINT, measure_markdown
@@ -23,7 +24,7 @@ class TextOrigin(Record):
 
 
 class FrozenText(Record):
-    unit_kind: Literal["text"] = "text"
+    unit_kind: Literal["text", "block"] = "text"
     text: str
     original_characters: int = Field(ge=0)
     original_digest: Digest
@@ -33,6 +34,8 @@ class FrozenText(Record):
     measurement_fingerprint: str = MEASUREMENT_FINGERPRINT
     normalization_policy: str = NORMALIZATION_POLICY
     diagnostics: tuple[str, ...] = ()
+    blocks: tuple[ContentBlock, ...] = ()
+    block_policy: str | None = None
 
     @model_validator(mode="after")
     def complete_mapping(self):
@@ -50,6 +53,12 @@ class FrozenText(Record):
             original_cursor = b
         if cursor != len(self.text) or original_cursor != self.original_characters:
             raise ValueError("Text map does not cover its complete source")
+        if self.unit_kind == "block":
+            if self.block_policy != BLOCK_POLICY:
+                raise ValueError("Unsupported frozen block policy")
+            validate_blocks(self.text, self.blocks)
+        elif self.blocks or self.block_policy:
+            raise ValueError("Unsegmented text cannot carry a block index")
         return self
 
     @property
@@ -140,9 +149,8 @@ def character_range(text: str, specification: str | None) -> tuple[int, int]:
     return start, end
 
 
-def read_text_selection(raw: dict, chars: str | None = None) -> dict:
-    frozen = FrozenText.model_validate_json(json.dumps(raw))
-    start, end = character_range(frozen.text, chars)
+def text_origins(frozen: FrozenText, start: int, end: int) -> list[dict]:
+    """Clip original locations without reparsing a complete text map for each block."""
     origins = []
     for origin in frozen.origins:
         left, right = max(start, origin.normalized_span[0]), min(end, origin.normalized_span[1])
@@ -161,15 +169,22 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
                 "original_span": list(original),
             }
         )
+    return origins
+
+
+def read_text_selection(raw: dict, chars: str | None = None) -> dict:
+    frozen = FrozenText.model_validate_json(json.dumps(raw))
+    start, end = character_range(frozen.text, chars)
     return {
-        "unit_kind": "text",
+        "unit_kind": frozen.unit_kind,
+        "block_count": len(frozen.blocks) if frozen.blocks else None,
         "content": frozen.text[start:end],
         "pages": None,
         "characters": len(frozen.text),
         "tokens": frozen.tokens,
         "char_range": [start, end],
         "source_spans": [[start, end]],
-        "origin_locators": origins,
+        "origin_locators": text_origins(frozen, start, end),
         "normalized_fingerprint": frozen.fingerprint,
         "measurement_fingerprint": frozen.measurement_fingerprint,
         "assets": frozen.assets,
