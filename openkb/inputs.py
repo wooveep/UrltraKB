@@ -14,7 +14,8 @@ from typing import Iterator
 
 from openkb.state import HashRegistry
 
-FROZEN_SOURCE_EXTENSIONS = {".pdf", ".md", ".markdown"}
+TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv"}
+FROZEN_SOURCE_EXTENSIONS = {".pdf", *TEXT_SOURCE_EXTENSIONS}
 
 
 def input_version(body_digest: str, assets: dict[str, str | None]) -> str:

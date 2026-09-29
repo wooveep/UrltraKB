@@ -14,6 +14,8 @@ class BlockPolicy:
         source = metadata.get("source", {})
         self.text = source.get("text")
         self.units = source.get("blocks")
+        self.generated = [origin["normalized_span"] for origin in source.get("origins", [])
+                          if origin.get("kind") in {"generated", "csv_separator"}]
         if not isinstance(self.text, str) or not isinstance(self.units, list) or not self.units:
             raise ValueError("Block policy requires frozen text and units")
         cursor = 0
@@ -32,6 +34,9 @@ class BlockPolicy:
         body = [{"range": span, "text": self.text[span[0]:span[1]]}
                 for span in unit["source_spans"]]
         return json.dumps({"unit": ordinal, "part": "body", "source": body,
+                           "generated_formatting": [span for span in self.generated
+                                                    if any(a < span[1] and b > span[0]
+                                                           for a, b in unit["source_spans"])],
                            "headings": unit.get("headings", []),
                            "display_context": unit.get("display_context", [])}, ensure_ascii=False)
 
@@ -46,6 +51,8 @@ generate a concise title (title_origin="generated"); it need not appear verbatim
 Every title MUST have a real anchor in the original body: unit ordinal, part="body",
 range=[start,end] in zero-based Unicode code points (end exclusive), exact excerpt.
 Display context (repeated headings/headers/fences) is supplementary, never an anchor.
+Generated formatting ranges (such as synthetic CSV column names) are not original
+evidence. Anchor only outside these ranges, in an actual source value or text.
 Return a JSON list of {structure: "1.1", title, title_origin, physical_index: integer,
 anchor: {unit: integer, part: "body", range: [start,end], excerpt: "exact original"}}.
 physical_index is the block ordinal and must match anchor.unit. Include each section
@@ -71,6 +78,7 @@ Continue any previous structure with additional sections only. No other output.
         left, right = span
         unit = self.units[number - 1]
         if (not left < right or not any(a <= left < right <= b for a, b in unit["source_spans"])
+                or any(left < b and right > a for a, b in self.generated)
                 or self.text[left:right] != anchor.get("excerpt")
                 or not isinstance(item.get("title"), str) or not item["title"].strip()):
             return False
@@ -96,13 +104,30 @@ Continue any previous structure with additional sections only. No other output.
 
     def preface(self, items):
         if items and items[0]["physical_index"] > 1:
-            left, right = self.units[0]["source_spans"][0]
-            if left == right:
-                raise ValueError("Cannot anchor an empty preface block")
-            end = min(right, left + 80)
-            items.insert(0, {"structure": "0", "title": "Preface", "title_origin": "generated",
-                             "physical_index": 1, "anchor": {"unit": 1, "part": "body",
-                             "range": [left, end], "excerpt": self.text[left:end]}})
+            # Wide generated table headers can fill a block. Skip their ranges
+            # when finding evidence for an otherwise omitted source preface.
+            for unit in self.units[:items[0]["physical_index"] - 1]:
+                spans = unit["source_spans"]
+                evidence = []
+                for start, end in spans:
+                    cursor = start
+                    for a, b in self.generated:
+                        if b <= cursor or a >= end:
+                            continue
+                        if cursor < a:
+                            evidence.append((cursor, min(a, end)))
+                        cursor = max(cursor, b)
+                    if cursor < end:
+                        evidence.append((cursor, end))
+                evidence = [(a, b) for a, b in evidence if self.text[a:b].strip()]
+                if evidence:
+                    left, right = evidence[0]
+                    end = min(right, left + 80)
+                    number = unit["ordinal"]
+                    items.insert(0, {"structure": "0", "title": "Preface", "title_origin": "generated",
+                                     "physical_index": number, "anchor": {"unit": number, "part": "body",
+                                     "range": [left, end], "excerpt": self.text[left:end]}})
+                    break
         for item in items:
             item["unit_kind"] = "block"
         return items

@@ -358,6 +358,7 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    encoding: dict | None = None
     block_count: int | None = None
     block_range: list[int] | None = None
     tokens: int | None = None

@@ -8,7 +8,7 @@ from typing import Callable
 from openkb.config import resolve_effective_config
 from openkb.converter import ConvertResult, convert_document
 from openkb.file_state import contained_paths
-from openkb.inputs import PreparedInput
+from openkb.inputs import TEXT_SOURCE_EXTENSIONS, PreparedInput
 from openkb.mutation import _copy_file_atomic, mutation_scope
 from openkb.processing_policy import ProcessingDecision
 from openkb.source_catalog import Admission, read_record, record_path, write_record
@@ -41,17 +41,22 @@ def normalization_fingerprint(
         "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
     )
     text_policy = {}
-    if source_revision and source_revision.source_format in {"md", "markdown"}:
+    if source_revision and f".{source_revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
         from openkb.content_blocks import BLOCK_POLICY
+        from openkb.text_formats import text_normalization_policy
         from openkb.text_measurement import MEASUREMENT_FINGERPRINT
-        from openkb.text_source import NORMALIZATION_POLICY
 
         text_policy = {
-            "pipeline": NORMALIZATION_POLICY,
+            "pipeline": text_normalization_policy(source_revision.source_format),
             "block_policy": BLOCK_POLICY,
             "classification": {"short_max_tokens": 5000, "measurement": MEASUREMENT_FINGERPRINT},
             "input": {
                 "body": source_revision.digest,
+                **(
+                    {"decoding": source_revision.text_decoding.model_dump(mode="json")}
+                    if source_revision.text_decoding
+                    else {}
+                ),
                 "doc_name": doc_name,
                 "assets": {
                     asset.original_reference: asset.digest for asset in source_revision.assets
@@ -134,6 +139,7 @@ def retain_normalization(
             staging_dir=directory,
             prepared=prepared,
             doc_name=admission.source.doc_name,
+            decoding=admission.revision.text_decoding,
         )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")
@@ -149,7 +155,10 @@ def retain_normalization(
                 bundle=bundle,
             )
             converted.is_long_doc = converted.processing.execution_mode == "segmented"
-        if converted.is_long_doc and admission.revision.source_format in {"md", "markdown"}:
+        if (
+            converted.is_long_doc
+            and f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS
+        ):
             from openkb.block_package import freeze_block_package
 
             if converted.source_path is None:

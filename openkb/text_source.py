@@ -10,17 +10,27 @@ from pydantic import Field, model_validator
 
 from openkb.content_blocks import BLOCK_POLICY, ContentBlock, validate_blocks
 from openkb.source_pages import PageRangeError
-from openkb.source_records import Digest, Record, RelativePath
+from openkb.source_records import Digest, EncodingDecision, Record, RelativePath
 from openkb.text_measurement import MEASUREMENT_FINGERPRINT, measure_markdown
 
 NORMALIZATION_POLICY = "markdown-unicode-preserved-v1:markdown-it-py-4.2.0-commonmark-images"
+
+
+class CsvCell(Record):
+    row: int = Field(ge=1)
+    column: int = Field(ge=1)
+    physical_lines: tuple[int, int]
+    value: str
 
 
 class TextOrigin(Record):
     normalized_span: tuple[int, int]
     original_span: tuple[int, int]
     coordinate: Literal["unicode_codepoint"] = "unicode_codepoint"
-    kind: Literal["identity", "image_reference", "bom"] = "identity"
+    kind: Literal[
+        "identity", "image_reference", "bom", "generated", "csv_cell", "csv_separator"
+    ] = "identity"
+    csv: CsvCell | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class FrozenText(Record):
@@ -34,6 +44,7 @@ class FrozenText(Record):
     measurement_fingerprint: str = MEASUREMENT_FINGERPRINT
     normalization_policy: str = NORMALIZATION_POLICY
     diagnostics: tuple[str, ...] = ()
+    encoding: EncodingDecision | None = Field(default=None, exclude_if=lambda value: value is None)
     blocks: tuple[ContentBlock, ...] = ()
     block_policy: str | None = None
 
@@ -49,6 +60,12 @@ class FrozenText(Record):
                 raise ValueError("Text origin is outside the original file")
             if origin.kind == "identity" and end - start != b - a:
                 raise ValueError("Identity text mapping changed length")
+            if origin.kind == "generated" and a != b:
+                raise ValueError("Generated formatting cannot own original text")
+            if (origin.kind == "csv_cell") != (origin.csv is not None):
+                raise ValueError("CSV cells must retain their string value and row/column")
+            if origin.csv and not 1 <= origin.csv.physical_lines[0] <= origin.csv.physical_lines[1]:
+                raise ValueError("Invalid CSV physical line range")
             cursor = end
             original_cursor = b
         if cursor != len(self.text) or original_cursor != self.original_characters:
@@ -151,24 +168,45 @@ def character_range(text: str, specification: str | None) -> tuple[int, int]:
 
 def text_origins(frozen: FrozenText, start: int, end: int) -> list[dict]:
     """Clip original locations without reparsing a complete text map for each block."""
+    return clip_text_origins(
+        [
+            origin.model_dump(mode="json")
+            for origin in frozen.origins
+            if origin.normalized_span[0] <= end and origin.normalized_span[1] >= start
+        ],
+        start,
+        end,
+    )
+
+
+def clip_text_origins(locators: list[dict], start: int, end: int) -> list[dict]:
+    """The API and desktop narrow the same normalized coordinates and cell metadata."""
     origins = []
-    for origin in frozen.origins:
-        left, right = max(start, origin.normalized_span[0]), min(end, origin.normalized_span[1])
-        if left >= right:
-            continue
-        original = origin.original_span
-        if origin.kind == "identity":
-            original = (
-                original[0] + left - origin.normalized_span[0],
-                original[0] + right - origin.normalized_span[0],
-            )
-        origins.append(
-            {
-                **origin.model_dump(mode="json"),
-                "normalized_span": [left, right],
-                "original_span": list(original),
-            }
+    for origin in locators:
+        span = origin["normalized_span"]
+        left, right = max(start, span[0]), min(end, span[1])
+        empty_cell = (
+            origin.get("csv") is not None and span[0] == span[1] and start <= span[0] <= end
         )
+        if left >= right and not empty_cell:
+            continue
+        original = origin["original_span"]
+        if origin["kind"] == "identity":
+            original = (
+                original[0] + left - span[0],
+                original[0] + right - span[0],
+            )
+        selected = {
+            **origin,
+            "normalized_span": [left, right],
+            "original_span": list(original),
+        }
+        if origin.get("csv") and [left, right] != list(span):
+            # The original cell location remains usable; do not leak/duplicate
+            # a huge complete value in every block or narrow character read.
+            selected["csv"] = {key: value for key, value in origin["csv"].items() if key != "value"}
+            selected["csv"]["value_complete"] = False
+        origins.append(selected)
     return origins
 
 
@@ -189,5 +227,6 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
         "measurement_fingerprint": frozen.measurement_fingerprint,
         "assets": frozen.assets,
         "diagnostics": list(frozen.diagnostics),
+        "encoding": frozen.encoding.model_dump(mode="json") if frozen.encoding else None,
         "coverage": "complete",
     }

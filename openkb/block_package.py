@@ -82,14 +82,21 @@ def read_block_selection(raw: dict, blocks: str | None = None) -> dict:
                 "origin_locators": origins,
             }
         )
+    spans = [span for item in units for span in item["source_spans"]]
+    ranges: list[list[int]] = []
+    for start, end in spans:
+        if ranges and ranges[-1][1] == start:
+            ranges[-1][1] = end
+        else:
+            ranges.append([start, end])
     return {
         **read_text_selection(raw),
         "content": "".join(item["content"] for item in units),
         "char_range": None,
         "block_range": list(numbers),
         "units": units,
-        "source_spans": [span for item in units for span in item["source_spans"]],
-        "origin_locators": [origin for item in units for origin in item["origin_locators"]],
+        "source_spans": spans,
+        "origin_locators": [origin for a, b in ranges for origin in text_origins(frozen, a, b)],
     }
 
 

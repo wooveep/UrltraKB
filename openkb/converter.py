@@ -17,6 +17,7 @@ from openkb.images import convert_pdf_with_images, extract_base64_images
 from openkb.inputs import PreparedInput
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 from openkb.processing_policy import ProcessingDecision, classify_pdf
+from openkb.source_records import TextDecoding
 from openkb.state import HashRegistry
 
 logger = logging.getLogger(__name__)
@@ -153,17 +154,23 @@ def convert_document(
     staging_dir: Path | None = None,
     prepared: PreparedInput | None = None,
     doc_name: str | None = None,
+    decoding: TextDecoding | None = None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
 
     if prepared is not None:
         return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, ready=prepared, doc_name=doc_name
+            src,
+            kb_dir,
+            staging_dir=staging_dir,
+            ready=prepared,
+            doc_name=doc_name,
+            decoding=decoding,
         )
     with prepared_input(src) as ready:
         return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, ready=ready, doc_name=doc_name
+            src, kb_dir, staging_dir=staging_dir, ready=ready, doc_name=doc_name, decoding=decoding
         )
 
 
@@ -174,6 +181,7 @@ def _convert_prepared_document(
     staging_dir: Path | None = None,
     ready: PreparedInput,
     doc_name: str | None = None,
+    decoding: TextDecoding | None = None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -259,11 +267,18 @@ def _convert_prepared_document(
         images_dir = artifact_root / "wiki" / "sources" / "images" / doc_name
         images_dir.mkdir(parents=True, exist_ok=True)
 
-        if src.suffix.lower() in {".md", ".markdown"}:
+        from openkb.inputs import TEXT_SOURCE_EXTENSIONS
+
+        if src.suffix.lower() in TEXT_SOURCE_EXTENSIONS:
             from openkb.processing_policy import classify_markdown_tokens
+            from openkb.text_formats import freeze_decoded_text
             from openkb.text_source import freeze_markdown
 
-            frozen = freeze_markdown(ready, doc_name, artifact_root / "wiki")
+            frozen = (
+                freeze_markdown(ready, doc_name, artifact_root / "wiki")
+                if src.suffix.lower() in {".md", ".markdown"}
+                else freeze_decoded_text(ready, decoding)
+            )
             markdown = frozen.text
             processing = classify_markdown_tokens(frozen.tokens)
             atomic_write_json(

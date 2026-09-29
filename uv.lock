@@ -1959,6 +1959,7 @@ wheels = [
 name = "openkb"
 source = { editable = "." }
 dependencies = [
+    { name = "charset-normalizer" },
     { name = "click" },
     { name = "json-repair" },
     { name = "litellm" },
@@ -2001,6 +2002,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "charset-normalizer", specifier = "==3.4.7" },
     { name = "click", specifier = "==8.4.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = "==0.139.0" },
     { name = "httpx", marker = "extra == 'dev'" },

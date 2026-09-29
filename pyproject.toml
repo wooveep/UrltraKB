@@ -34,6 +34,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 dependencies = [
     "pageindex==0.3.0.dev3+urltrakb.3",
     "regex==2026.5.9",
+    "charset-normalizer==3.4.7",
     "markitdown[docx,pptx,xlsx,xls]==0.1.5",
     "trafilatura==2.0.0",
     "click==8.4.0",

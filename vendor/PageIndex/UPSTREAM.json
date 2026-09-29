@@ -122,7 +122,8 @@
     "Replace upstream hosted-service README with local-source installation and use instructions",
     "Index title repair: prefer evidenced body headings over stale TOC titles; retain correction provenance and unresolved request failures",
     "Physical PDF readback: retain blank pages and printed labels; freeze managed parser inputs, relative assets and policy fingerprints; share validated full/range cache recovery; preserve Markdown default titles.",
-    "Content blocks (#84): optional anchor policy through the shared content algorithm; preserve original summaries and PDF recursive AND predicate; portable frozen package parser registration, separate block ranges, verified cache/recovery mapping and assets."
+    "Content blocks (#84): optional anchor policy through the shared content algorithm; preserve original summaries and PDF recursive AND predicate; portable frozen package parser registration, separate block ranges, verified cache/recovery mapping and assets.",
+    "CSV locations (#85): generated column labels, padding and separators cannot anchor original sections; prefaces skip generated ranges."
   ],
   "local_patch": {
     "date": "2026-09-30",
@@ -154,7 +155,7 @@
       "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d",
       "tests/test_local_backend.py": "41f426976c1ec6b6d15fa13e38a6448896c9a036acc2d98a3f1da9843725a066",
       "README.urltrakb.md": "75dfcb90af334f564736d268b082a34a0166c1bbffb1f37d16949d98f1066577",
-      "pageindex/index/block_policy.py": "4ee6cd3d6c2a5ca412af96b2b98acde72e65817ae1e4764a487e1d3a56e0dc38",
+      "pageindex/index/block_policy.py": "d5734a661999eab0310d5da18267330585aa405a59ef98630124b3b0b9aec0ff",
       "pageindex/index/pipeline.py": "e8d1afa3f3482eb8f83051f019f3f49003955a8fc96abc536a62d0233b3f2f33"
     },
     "deleted": [

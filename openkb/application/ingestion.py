@@ -11,7 +11,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.ingest_records import UnitPublication, UnitRevision
 from openkb.ingest_result import ImportUnitOutcome, IngestResult
-from openkb.inputs import PreparedInput
+from openkb.inputs import TEXT_SOURCE_EXTENSIONS, PreparedInput
 from openkb.knowledge_scope import KnowledgeScope
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, mutation_scope
@@ -223,7 +223,7 @@ def import_prepared_source(
                 if converted.is_long_doc:
                     stage = "indexing"
                     index_input = converted.raw_path
-                    if admission.revision.source_format in {"md", "markdown"}:
+                    if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
                         if converted.source_path is None:
                             raise ValueError("Normalized text is missing")
                         index_input = converted.source_path.with_suffix(".okbi")
@@ -283,7 +283,7 @@ def import_prepared_source(
                 and (converted.processing is not None or page_map.exists())
                 else None
             )
-            if admission.revision.source_format in {"md", "markdown"}:
+            if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
                 from openkb.source_map import freeze_text_map
 
                 source_map = freeze_text_map(view.scope.wiki_dir, unit.doc_name)

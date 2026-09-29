@@ -394,7 +394,22 @@ def read_admitted_source(
         )
         from openkb.source_changes import source_validity
 
+        decoding = target.text_decoding
+        input_diagnostics = (
+            {
+                "encoding": decoding.encoding.model_dump(mode="json")
+                if decoding.encoding
+                else None,
+                "diagnostics": [
+                    *decoding.diagnostics,
+                    *([content] if not actual and content else []),
+                ],
+            }
+            if decoding
+            else {}
+        )
         return {
+            **input_diagnostics,
             "hash": source.source_id,
             "validity": source_validity(
                 root,

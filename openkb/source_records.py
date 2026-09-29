@@ -29,6 +29,24 @@ class Record(BaseModel):
     schema_version: Literal[1] = 1
 
 
+ENCODING_POLICY = "bom-utf8-charset-normalizer-3.4.7-v1"
+
+
+class EncodingDecision(Record):
+    name: str
+    basis: Literal["bom", "utf8", "detected"]
+    policy: str = ENCODING_POLICY
+    chaos: float | None = Field(default=None, ge=0, le=1)
+    coherence: float | None = Field(default=None, ge=0, le=1)
+
+
+class TextDecoding(Record):
+    encoding: EncodingDecision | None = None
+    diagnostics: tuple[str, ...] = ()
+    error: str | None = None
+    policy: str = ENCODING_POLICY
+
+
 class Source(Record):
     source_id: RecordId
     identity: str
@@ -59,6 +77,7 @@ class FrozenAsset(Record):
 
 
 class SourceRevision(Record):
+    text_decoding: TextDecoding | None = Field(default=None, exclude_if=lambda value: value is None)
     source_revision_id: RecordId
     source_id: RecordId
     discovery_intent_id: RecordId

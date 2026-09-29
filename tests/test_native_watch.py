@@ -71,7 +71,7 @@ def eventually(condition, timeout=5):
     assert condition()
 
 
-def test_startup_scan_deduplicates_and_observes_recursive_atomic_moves(kb_dir):
+def test_startup_scan_admits_frozen_identities_and_observes_recursive_atomic_moves(kb_dir):
     raw = kb_dir / "raw"
     known = raw / "known.txt"
     known.write_text("known")
@@ -84,19 +84,21 @@ def test_startup_scan_deduplicates_and_observes_recursive_atomic_moves(kb_dir):
     sink = TaskSink()
     watch = NativeWatch(kb_dir, sink, debounce=0.08, scan_interval=0.03)
     try:
-        eventually(lambda: len(sink.items) == 1)
-        assert sink.items["0"][0].source == str(note)
+        # A legacy content hash does not identify this raw TXT source. Its
+        # migration/admission belongs to the common service, not the scanner.
+        eventually(lambda: len(sink.items) == 2)
+        assert {item[0].source for item in sink.items.values()} == {str(known), str(note)}
         assert watch.view().startup_found == 2
         temporary = folder / ".temporary"
         temporary.write_text("atomic")
         temporary.rename(folder / "second.md")
-        eventually(lambda: len(sink.items) == 2)
+        eventually(lambda: len(sink.items) == 3)
     finally:
         watch.stop()
         assert watch.join(5)
     (folder / "late.md").write_text("late")
     time.sleep(0.15)
-    assert len(sink.items) == 2 and watch.view().state == "stopped"
+    assert len(sink.items) == 3 and watch.view().state == "stopped"
     assert sink.get("0").state == "queued"  # Stopping subscription does not stop accepted tasks.
 
 

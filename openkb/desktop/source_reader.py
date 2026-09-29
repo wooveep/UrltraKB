@@ -1,5 +1,7 @@
 """Read retained original-format artifacts without exposing compilation internals."""
 
+import re
+
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
@@ -149,12 +151,34 @@ class SourceReader(QDialog):
                 f"字符范围：[{start}, {end}) · 全文 {source['characters']} 字符 / "
                 f"{source['tokens']} tokens\n" + "\n".join(source.get("diagnostics", []))
             )
+        content = source["content"]
+        if self.source.get("type") == "txt":
+            fence = "`" * max(
+                3, 1 + max((len(run) for run in re.findall(r"`+", content)), default=0)
+            )
+            content = f"{fence}\n{content}\n{fence}"
         self.reader.show_markdown(
-            source["content"],
+            content,
             self.kb / (self.source.get("base_path") or "wiki/sources"),
             dark=self.window.appearance.dark,
             scale=self.window.zoom.currentData(),
         )
+        if source.get("encoding"):
+            encoding = source["encoding"]
+            basis = {"bom": "BOM", "utf8": "严格 UTF-8", "detected": "自动判断"}[encoding["basis"]]
+            self.coverage.setText(
+                self.coverage.text() + f"\n原件编码：{encoding['name']}（{basis}）"
+            )
+        cells = [item["csv"] for item in source.get("origin_locators", []) if item.get("csv")]
+        if cells:
+            self.coverage.setText(
+                self.coverage.text()
+                + "\nCSV 原始记录："
+                + _ranges(cell["row"] for cell in cells)
+                + "；列："
+                + _ranges(cell["column"] for cell in cells)
+                + "。行列号从 1 开始，所有值按文本保留。"
+            )
 
     def select_pages(self):
         from openkb.source_pages import read_page_selection
@@ -177,6 +201,9 @@ class SourceReader(QDialog):
                         "content": "".join(unit["content"] for unit in units),
                         "block_range": [unit["ordinal"] for unit in units],
                         "char_range": None,
+                        "origin_locators": [
+                            origin for unit in units for origin in unit["origin_locators"]
+                        ],
                     }
                 )
                 return
@@ -187,7 +214,7 @@ class SourceReader(QDialog):
         self.show_content(selected)
 
     def select_characters(self):
-        from openkb.text_source import character_range
+        from openkb.text_source import character_range, clip_text_origins
 
         try:
             start, end = character_range(
@@ -201,6 +228,9 @@ class SourceReader(QDialog):
                 **self.source,
                 "content": self.source["content"][start:end],
                 "char_range": [start, end],
+                "origin_locators": clip_text_origins(
+                    self.source.get("origin_locators", []), start, end
+                ),
             }
         )
 
@@ -213,3 +243,13 @@ def show_source(window, kb, source):
     dialog = SourceReader(window, kb, source)
     dialog.show()
     return dialog
+
+
+def _ranges(values):
+    intervals = []
+    for value in sorted(set(values)):
+        if intervals and intervals[-1][1] + 1 == value:
+            intervals[-1][1] = value
+        else:
+            intervals.append([value, value])
+    return ", ".join(str(a) if a == b else f"{a}–{b}" for a, b in intervals)
