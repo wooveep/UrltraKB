@@ -122,6 +122,7 @@ class TestNormalizePageContent:
 
         assert pages == [
             {"page": 1, "content": "page one", "images": []},
+            {"page": 2, "content": "", "images": []},
             {"page": 3, "content": "page three", "images": []},
         ]
 

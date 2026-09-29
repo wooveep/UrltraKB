@@ -33,9 +33,12 @@ class PdfParser:
                     tokens=tokens,
                     index=page_num,
                     images=images if images else None,
+                    metadata={"unit_kind": "page", "printed_page_label": page.get_label() or None},
                 ))
 
-        return ParsedDocument(doc_name=path.stem, nodes=nodes)
+        return ParsedDocument(doc_name=path.stem, nodes=nodes, metadata={
+            "unit_kind": "page", "unit_count": len(nodes), "coverage": "complete",
+        })
 
     @staticmethod
     def _extract_page_with_images(doc, page, page_num: int,

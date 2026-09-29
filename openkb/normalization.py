@@ -28,7 +28,13 @@ class NormalizedInput(Record):
 def normalization_fingerprint(kb_dir: Path) -> str:
     config = resolve_effective_config(kb_dir)[0]
     return json.dumps(
-        {"pipeline": "pdf-v1", "threshold": config.get("pageindex_threshold", 20)}, sort_keys=True
+        {
+            "pipeline": "pdf-physical-v2",
+            "threshold": config.get("pageindex_threshold", 20),
+            "index_model": config.get("model"),
+            "index_policy": "content-based-physical-v1",
+        },
+        sort_keys=True,
     )
 
 
@@ -139,6 +145,12 @@ def retain_published_normalization(kb_dir: Path, admission: Admission, unit, vie
     copies = {directory / raw: original}
     if source:
         copies[directory / source] = published / source
+    if manifest.source_map:
+        from openkb.source_map import read_source_map
+
+        read_source_map(published / "wiki", manifest.source_map, unit.doc_name)
+        source_map = f"wiki/{manifest.source_map.path}"
+        copies[directory / source_map] = published / source_map
     images = f"wiki/sources/images/{unit.doc_name}"
     contained_paths(kb_dir, [directory, *copies.values(), published / images])
     with mutation_scope(kb_dir, [directory, path], operation="retain-published-normalization"):

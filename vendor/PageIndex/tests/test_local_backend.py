@@ -242,12 +242,20 @@ def test_add_document_race_returns_existing_id(backend, tmp_path, monkeypatch):
     """If the pre-check misses but the INSERT hits UNIQUE (concurrent add),
     add_document must clean up and return the winner's doc_id, not duplicate."""
     import pageindex.backend.local as local_mod
+    from pageindex.backend.input_package import processing_key
+    from pageindex.parser.protocol import ParsedDocument
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(b"%PDF-1.4 body")
     backend.get_or_create_collection("papers")
 
-    # Pretend a winning add already stored this content under "winner-id".
-    file_hash = backend._file_hash(str(pdf))
+    class Parser:
+        def parse(self, path, **kwargs):
+            return ParsedDocument(doc_name="doc", nodes=[])
+
+    parser = Parser()
+    monkeypatch.setattr(backend, "_resolve_parser", lambda path: parser)
+    # Pretend a winning add stored the same frozen input and processing policy.
+    file_hash = processing_key(pdf, parser, "gpt-4o", None)
     backend._storage.save_document("papers", "winner-id", {
         "doc_name": "doc", "doc_type": "pdf", "file_hash": file_hash, "structure": [],
     })
@@ -258,10 +266,7 @@ def test_add_document_race_returns_existing_id(backend, tmp_path, monkeypatch):
         calls["n"] += 1
         return None if calls["n"] == 1 else "winner-id"
     monkeypatch.setattr(backend._storage, "find_document_by_hash", fake_find)
-    # avoid real parsing/LLM: stub parser + build_index
-    monkeypatch.setattr(backend, "_resolve_parser", lambda p: type("P", (), {
-        "parse": lambda self, fp, **k: type("PD", (), {"doc_name": "doc", "nodes": []})()
-    })())
+    # Existing storage-race regression: avoid model work.
     monkeypatch.setattr(local_mod, "build_index", lambda parsed, model=None, opt=None: {"structure": [], "doc_description": ""})
 
     result = backend.add_document("papers", str(pdf))

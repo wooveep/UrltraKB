@@ -54,8 +54,8 @@ class Collection:
         """Index a document (PDF or Markdown) into this collection.
 
         Returns the ``doc_id``. Re-adding byte-identical content returns the
-        existing doc_id (content-hash dedup); change ``IndexConfig`` won't
-        force a re-index — delete the doc first if you need a fresh tree.
+        existing doc_id when the parser, model and indexing policy also match.
+        Changing the policy creates an independent retained index.
         """
         return self._backend.add_document(self._name, file_path)
 

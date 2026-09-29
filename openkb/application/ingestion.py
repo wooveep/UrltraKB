@@ -240,6 +240,11 @@ def import_prepared_pdf(
                 check_stop()
             stage = "publication"
             extension = "json" if converted.is_long_doc else "md"
+            from openkb.source_map import freeze_pdf_map
+
+            source_map = freeze_pdf_map(
+                view.scope.wiki_dir, unit.doc_name, kb_dir / admission.revision.original
+            )
             state = publish_unit_revision(
                 kb_dir,
                 admission,
@@ -248,6 +253,8 @@ def import_prepared_pdf(
                 state,
                 view,
                 normalized_source=f"sources/{unit.doc_name}.{extension}",
+                source_map=source_map,
+                normalized_format="pdf" if converted.is_long_doc else "markdown",
                 is_long=converted.is_long_doc,
                 index_ref=index_ref,
                 check_stop=check_stop,

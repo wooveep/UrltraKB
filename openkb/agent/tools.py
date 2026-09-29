@@ -114,26 +114,12 @@ def get_wiki_page_content(doc_name: str, pages: str, wiki_root: str) -> str:
     if not target.exists():
         return f"File not found: sources/{doc_name}.json"
 
-    data = _json.loads(target.read_text(encoding="utf-8"))
-    requested = set(parse_pages(pages))
-    matches = [entry for entry in data if entry.get("page") in requested]
+    from openkb.source_pages import read_page_selection
 
-    if not matches:
+    result = read_page_selection(_json.loads(target.read_text(encoding="utf-8")), pages)
+    if not result["page_range"]:
         return f"No content found for pages {pages} in {doc_name}."
-
-    parts: list[str] = []
-    for entry in matches:
-        page_num = entry["page"]
-        content = entry.get("content", "")
-        block = f"[Page {page_num}]\n{content}"
-        images = entry.get("images")
-        if images:
-            paths = ", ".join(img["path"] for img in images if "path" in img)
-            if paths:
-                block += f"\n[Images: {paths}]"
-        parts.append(block)
-
-    return "\n\n".join(parts) + "\n\n"
+    return result["content"] + "\n\n"
 
 
 _MIME_TYPES = {

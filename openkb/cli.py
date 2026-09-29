@@ -765,7 +765,9 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
         return
 
     scope = _selected_scope(ctx, kb_dir)
-    preview = preview_removal(kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope)
+    preview = preview_removal(
+        kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
+    )
     if preview.status == "not_found":
         click.echo(f"No document matching '{identifier}' found in the KB.")
         click.echo("Try `openkb list` to see indexed documents.")
@@ -808,8 +810,14 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
             click.echo("Aborted.")
             return
 
-    outcome = remove_document(kb_dir, identifier, version=preview.version,
-                              keep_raw=keep_raw, keep_empty=keep_empty, scope=scope)
+    outcome = remove_document(
+        kb_dir,
+        identifier,
+        version=preview.version,
+        keep_raw=keep_raw,
+        keep_empty=keep_empty,
+        scope=scope,
+    )
     result = outcome.result
     if result is None:
         raise click.ClickException(f"Removal {outcome.status}; review the latest preview")
@@ -1328,7 +1336,9 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
             click.echo(f"    View: {meta.get('view_id', 'legacy')}")
             click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
             click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
-            click.echo(f"    Validity: {meta.get('validity', 'current')}; generation: {meta.get('source_generation', '?')}")
+            click.echo(
+                f"    Validity: {meta.get('validity', 'current')}; generation: {meta.get('source_generation', '?')}"
+            )
 
     # Display summaries
     summaries_dir = resolve_scope(kb_dir, scope).wiki_dir / "summaries"
@@ -2243,11 +2253,13 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
+from openkb.cli_source import source
 from openkb.cli_versions import versions
 from openkb.cli_views import views
 
 cli.add_command(proposals)
 cli.add_command(refresh)
+cli.add_command(source)
 cli.add_command(views)
 cli.add_command(versions)
 

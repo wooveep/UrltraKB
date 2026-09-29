@@ -107,7 +107,14 @@ class SQLiteStorage:
             CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection_name);
             CREATE INDEX IF NOT EXISTS idx_docs_hash ON documents(collection_name, file_hash);
         """)
-        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if "metadata" not in {row[1] for row in conn.execute("PRAGMA table_info(documents)")}:
+                conn.execute("ALTER TABLE documents ADD COLUMN metadata JSON")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def create_collection(self, name: str) -> None:
         _validate_collection_name(name)
@@ -145,12 +152,13 @@ class SQLiteStorage:
             conn = self._get_conn()
             conn.execute(
                 """INSERT INTO documents
-                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (doc_id, collection_name, doc_name, doc_description, file_path, file_hash, doc_type, structure, pages, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (doc_id, collection, doc.get("doc_name"), doc.get("doc_description"),
                  doc.get("file_path"), doc.get("file_hash"), doc["doc_type"],
                  json.dumps(doc.get("structure", [])),
-                 json.dumps(doc.get("pages")) if doc.get("pages") else None),
+                 json.dumps(doc.get("pages")) if doc.get("pages") is not None else None,
+                 json.dumps(doc.get("metadata")) if doc.get("metadata") is not None else None),
             )
             conn.commit()
 
@@ -165,13 +173,14 @@ class SQLiteStorage:
     def get_document(self, collection: str, doc_id: str) -> dict:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT doc_id, doc_name, doc_description, file_path, doc_type FROM documents WHERE doc_id = ? AND collection_name = ?",
+            "SELECT doc_id, doc_name, doc_description, file_path, doc_type, metadata FROM documents WHERE doc_id = ? AND collection_name = ?",
             (doc_id, collection),
         ).fetchone()
         if not row:
             return {}
         return {"doc_id": row[0], "doc_name": row[1], "doc_description": row[2],
-                "file_path": row[3], "doc_type": row[4]}
+                "file_path": row[3], "doc_type": row[4],
+                "metadata": json.loads(row[5]) if row[5] else None}
 
     def get_document_structure(self, collection: str, doc_id: str) -> list:
         conn = self._get_conn()

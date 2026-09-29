@@ -12,7 +12,10 @@ from ..parser.pdf import PdfParser
 from ..parser.markdown import MarkdownParser
 from ..storage.protocol import StorageEngine
 from ..index.pipeline import build_index
-from ..index.utils import parse_pages, get_pdf_page_content, remove_fields
+from ..index.utils import parse_pages, remove_fields
+from .input_package import (
+    PARSER_POLICY, digest, freeze_pages, materialize_pages, parser_identity, processing_key,
+)
 from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
                       IndexingError, PageIndexError)
@@ -95,27 +98,28 @@ class LocalBackend:
             )
         parser = self._resolve_parser(file_path)
 
-        # Dedup is content-only — same file is reused regardless of IndexConfig
-        # changes. If you've changed IndexConfig and need a fresh tree, delete
-        # the existing doc first or use a new collection.
-        file_hash = self._file_hash(file_path)
-        existing_id = self._storage.find_document_by_hash(collection, file_hash)
-        if existing_id:
-            return existing_id
-
         doc_id = str(uuid.uuid4())
 
         # Copy file to managed directory
         ext = os.path.splitext(file_path)[1]
         col_dir = self._files_dir / collection
         col_dir.mkdir(parents=True, exist_ok=True)
-        managed_path = col_dir / f"{doc_id}{ext}"
+        managed_path = self._managed_input(collection, doc_id, {"doc_type": ext.lstrip(".")})
         shutil.copy2(file_path, managed_path)
 
         try:
+            # Derive identity from the exact managed copy that will be parsed.
+            file_hash = processing_key(managed_path, parser, self._model, self._index_config)
+            existing_id = self._storage.find_document_by_hash(collection, file_hash)
+            if existing_id:
+                managed_path.unlink()
+                return existing_id
             # Store images alongside the document: files/{collection}/{doc_id}/images/
             images_dir = str(col_dir / doc_id / "images")
-            parsed = parser.parse(file_path, model=self._model, images_dir=images_dir)
+            parsed = parser.parse(str(managed_path), model=self._model, images_dir=images_dir,
+                                  doc_name=Path(file_path).stem)
+            parsed.doc_name = Path(file_path).stem
+            pages = freeze_pages(parsed, col_dir / doc_id, self._model)
             result = build_index(parsed, model=self._model, opt=self._index_config)
 
             # Cache page text for fast retrieval (avoids re-reading files) and to
@@ -124,10 +128,6 @@ class LocalBackend:
             # text in the stored structure. build_index() already applies
             # if_add_node_text to result["structure"] for every strategy, so no
             # extra stripping is needed here.
-            pages = [{"page": n.index, "content": n.content,
-                      **({"images": n.images} if n.images else {})}
-                     for n in parsed.nodes if n.content]
-
             self._storage.save_document(collection, doc_id, {
                 "doc_name": parsed.doc_name,
                 "doc_description": result.get("doc_description", ""),
@@ -136,6 +136,12 @@ class LocalBackend:
                 "doc_type": ext.lstrip("."),
                 "structure": result["structure"],
                 "pages": pages,
+                "metadata": {
+                    **(parsed.metadata or {}), "parser_policy": PARSER_POLICY,
+                    "parser": parser_identity(parser), "model": self._model,
+                    "source_digest": digest(managed_path),
+                    "processing_fingerprint": file_hash,
+                },
             })
         except sqlite3.IntegrityError:
             # Lost a concurrent add of the same content (UNIQUE collection+hash).
@@ -179,9 +185,12 @@ class LocalBackend:
                 use in agent/LLM contexts as it can exhaust the context window.
         """
         doc = self._require_document(collection, doc_id)
+        doc["metadata"] = doc.get("metadata") or {"coverage": "unknown", "unit_kind": None}
+        if doc["metadata"].get("parser_policy"):
+            doc["file_path"] = str(self._managed_input(collection, doc_id, doc))
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
         if include_text:
-            pages = self._storage.get_pages(collection, doc_id) or []
+            pages = self._recover_pages(collection, doc_id, doc)
             page_map = {p["page"]: p["content"] for p in pages}
             self._fill_node_text(doc["structure"], page_map)
         return doc
@@ -214,31 +223,55 @@ class LocalBackend:
     def get_page_content(self, collection: str, doc_id: str, pages: str) -> list:
         doc = self._require_document(collection, doc_id)
         page_nums = parse_pages(pages)
+        return [p for p in self._recover_pages(collection, doc_id, doc) if p["page"] in page_nums]
 
-        # Try cached pages first (fast, no file I/O)
-        cached_pages = self._storage.get_pages(collection, doc_id)
-        if cached_pages:
-            return [p for p in cached_pages if p["page"] in page_nums]
+    def _managed_input(self, collection: str, doc_id: str, doc: dict) -> Path:
+        self._validate_collection_name(collection)
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", doc_id) or not re.fullmatch(r"[a-zA-Z0-9]+", doc["doc_type"]):
+            raise ValueError("Invalid managed document identity")
+        base = self._files_dir.resolve() / collection
+        target = (base / f"{doc_id}.{doc['doc_type']}").resolve()
+        if base.resolve() != base or not target.is_relative_to(base):
+            raise ValueError("Managed input escaped its collection")
+        return target
 
-        # Fallback: re-derive from the source file, same as the PDF path below
-        # — never from the stored structure, whose 'text' field may have been
-        # stripped (if_add_node_text=False, the default). Reachable only for a
-        # custom StorageEngine that doesn't cache pages (the built-in
-        # SQLiteStorage always does).
-        if doc["doc_type"] == "pdf":
-            return get_pdf_page_content(doc["file_path"], page_nums)
+    def _recover_pages(self, collection: str, doc_id: str, doc: dict) -> list:
+        """All full/range reads use the same immutable input and image extraction."""
+        metadata = doc.get("metadata") or {}
+        cached = self._storage.get_pages(collection, doc_id)
+        base = self._files_dir / collection / doc_id
+        if cached is not None:
+            return materialize_pages(cached, base, metadata)
+        if metadata.get("parser_policy"):
+            if metadata["parser_policy"] != PARSER_POLICY:
+                raise ValueError("The saved parser policy cannot be reconstructed by this version")
+            source = self._managed_input(collection, doc_id, doc)
+            if digest(source) != metadata.get("source_digest"):
+                raise ValueError("Managed source digest changed")
         else:
-            parser = self._resolve_parser(doc["file_path"])
-            parsed = parser.parse(doc["file_path"], model=self._model)
-            page_map = {n.index: n.content for n in parsed.nodes}
-            return [{"page": p, "content": page_map[p]} for p in page_nums if p in page_map]
+            source = Path(doc["file_path"])
+        parser = self._resolve_parser(str(source))
+        if metadata.get("parser_policy") and metadata.get("parser") != parser_identity(parser):
+            raise ValueError("The saved parser is unavailable; cannot reconstruct its input")
+        parsed = parser.parse(str(source), model=metadata.get("model", self._model),
+                              images_dir=str(base / "images"), doc_name=doc["doc_name"])
+        pages = freeze_pages(parsed, base, self._model)
+        # These assets were just extracted and verified by this parser. Their
+        # relative paths need resolving even when an old index has no policy
+        # metadata; the index's own provenance remains unknown.
+        recovered_metadata = {**(parsed.metadata or {}), "parser_policy": PARSER_POLICY}
+        return materialize_pages(
+            pages, base, metadata if metadata.get("parser_policy") else recovered_metadata
+        )
 
     def list_documents(self, collection: str) -> list[dict]:
         return self._storage.list_documents(collection)
 
     def delete_document(self, collection: str, doc_id: str) -> None:
         doc = self._require_document(collection, doc_id)
-        if doc.get("file_path"):
+        if (doc.get("metadata") or {}).get("parser_policy"):
+            self._managed_input(collection, doc_id, doc).unlink(missing_ok=True)
+        elif doc.get("file_path"):
             Path(doc["file_path"]).unlink(missing_ok=True)
         # Clean up images directory: files/{collection}/{doc_id}/
         doc_dir = self._files_dir / collection / doc_id

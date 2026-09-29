@@ -67,6 +67,14 @@ class KnowledgeHead(Record):
     needs_refresh: dict[RelativePath, tuple[RefreshReason, ...]] = Field(default_factory=dict)
 
 
+class SourceMap(Record):
+    path: Annotated[RelativePath, Field(pattern=r"^sources/")]
+    digest: Digest
+    unit_kind: Literal["page"] = "page"
+    unit_count: int = Field(ge=1)
+    assets: dict[RelativePath, Digest] = Field(default_factory=dict)
+
+
 class KnowledgeRevision(Record):
     knowledge_revision_id: RecordId
     view_id: ViewId
@@ -78,6 +86,7 @@ class KnowledgeRevision(Record):
     generated_baselines: dict[RelativePath, Digest]
     original_references: tuple[RelativePath, ...]
     normalized_source: Annotated[RelativePath, Field(pattern=r"^sources/")] | None = None
+    source_map: SourceMap | None = None
     source_format: str | None = None
     normalized_format: Literal["pdf", "markdown"] | None = None
     length_class: Literal["short", "long"] | None = None

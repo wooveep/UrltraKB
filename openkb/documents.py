@@ -15,17 +15,14 @@ from typing import Any
 
 from openkb.cli import _LONG_DOC_TYPES
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.source_pages import PageRangeError
 from openkb.state import HashRegistry
 
 
 def _render_pages(pages: list[dict[str, Any]]) -> str:
-    """Join a long doc's per-page ``content`` into one Markdown string.
+    from openkb.source_pages import read_page_selection
 
-    Pages are separated by a thematic break (``---``) so the reader keeps
-    page boundaries; blank/missing content and non-dict entries are skipped.
-    """
-    parts = [str(page.get("content", "")).strip() for page in pages if isinstance(page, dict)]
-    return "\n\n---\n\n".join(part for part in parts if part)
+    return read_page_selection(pages)["content"]
 
 
 def _resolve_source_file(
@@ -66,18 +63,19 @@ def read_document_source(
     *,
     scope: KnowledgeScope | None = None,
     source_revision_id: str | None = None,
+    pages: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
     Returns ``None`` when the hash is unknown OR its source file is missing,
     so the caller maps both to a 404. ``format`` is always ``"markdown"``;
-    ``pages`` is the page count for long docs (per-page JSON) and ``None`` for
-    short docs.
+    ``pages`` is the verified physical page count, or ``None`` when the saved
+    source lacks a physical-page map. This is independent of compilation mode.
     """
     from openkb.application.sources import read_admitted_source
 
     admitted = read_admitted_source(
-        kb_dir, file_hash, source_revision_id=source_revision_id, scope=scope
+        kb_dir, file_hash, source_revision_id=source_revision_id, scope=scope, page_range=pages
     )
     if admitted is not None:
         return admitted
@@ -94,13 +92,16 @@ def read_document_source(
     if source is None:
         return None
 
+    selection = {}
     if source.suffix == ".json":
-        pages = json.loads(source.read_text(encoding="utf-8"))
-        if not isinstance(pages, list):
-            raise ValueError(f"source JSON is not a page list: {source.name}")
-        content = _render_pages(pages)
-        page_count: int | None = len(pages)
+        from openkb.source_pages import read_page_selection
+
+        selection = read_page_selection(json.loads(source.read_text(encoding="utf-8")), pages)
+        content = selection["content"]
+        page_count: int | None = selection["pages"]
     else:
+        if pages is not None:
+            raise PageRangeError("This retained source has no physical-page map")
         content = source.read_text(encoding="utf-8")
         page_count = None
 
@@ -112,4 +113,8 @@ def read_document_source(
         "format": "markdown",
         "content": content,
         "pages": page_count,
+        "base_path": (scope.wiki_dir if source.suffix == ".json" else source.parent)
+        .relative_to(kb_dir.resolve())
+        .as_posix(),
+        **selection,
     }

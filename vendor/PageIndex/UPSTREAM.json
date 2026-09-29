@@ -120,7 +120,8 @@
     "Keep local parsing, storage and retrieval; reconcile stale TOC titles against evidenced body headings",
     "Remove cloud demos, notebooks and retired-API tests; retain and adapt local tests",
     "Replace upstream hosted-service README with local-source installation and use instructions",
-    "Index title repair: prefer evidenced body headings over stale TOC titles; retain correction provenance and unresolved request failures"
+    "Index title repair: prefer evidenced body headings over stale TOC titles; retain correction provenance and unresolved request failures",
+    "Physical PDF readback: retain blank pages and printed labels; freeze managed parser inputs, relative assets and policy fingerprints; share validated full/range cache recovery; preserve Markdown default titles."
   ],
   "local_patch": {
     "date": "2026-09-28",
@@ -142,7 +143,15 @@
       "pageindex/index/page_index.py": "6dd469247b4b42cebdeec8c87a72e568e24153491c41a38c835295d8b21949d9",
       "pageindex/index/utils.py": "cb5eb8d1d458c21f029ced0461c65da53e3eaedcf7758f0b45b655b540d9ac10",
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
-      "tests/test_toc_body_titles.py": "df975d616d0c533e39ccdef34233a5d6057373bc83109546d3c354abeadb53ba"
+      "tests/test_toc_body_titles.py": "df975d616d0c533e39ccdef34233a5d6057373bc83109546d3c354abeadb53ba",
+      "pageindex/backend/input_package.py": "e51c0d6cab35843ecf5fa18ac96c87dddb7c1db4131a44add57315f526afa2b5",
+      "pageindex/backend/local.py": "595971fb3bd1a75b743d47fe867b931ff758ddc25ec1ab47e2971b5a2d20e8b2",
+      "pageindex/collection.py": "f478fb23c4d6ec4fa9916d0eae4badefa979e7dd50c777f21a74c16feff6774d",
+      "pageindex/parser/pdf.py": "a0d4fca17c2b842c9776e2044d44f6982dcf7a3723ec3e349e1453f5893f4874",
+      "pageindex/parser/markdown.py": "226370fca1ce4aaccb5609cb6ec22bdc1a406c9e16ce2f68a0d98faa589f1bb6",
+      "pageindex/parser/protocol.py": "b783d22b02de480f2621c4ee9df1693daefb8ec46692b6f4b6c6c2bc2af803b0",
+      "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d",
+      "tests/test_local_backend.py": "8e866e9b044406c4fee990d4aff114675a1a826ced9145aded006e188a4d71bd"
     },
     "deleted": [
       "cookbook/README.md",

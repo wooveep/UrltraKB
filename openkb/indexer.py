@@ -42,8 +42,7 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
     for index, item in enumerate(raw_pages, start=1):
         if isinstance(item, str):
             content = item.strip()
-            if content:
-                pages.append({"page": index, "content": content, "images": []})
+            pages.append({"page": index, "content": content, "images": []})
             continue
 
         if not isinstance(item, dict):
@@ -71,12 +70,19 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
             if isinstance(image, dict) and isinstance(image.get("path"), str)
         ]
 
-        if content or normalized_images:
+        if (
+            content
+            or normalized_images
+            or any(key in item for key in ("page", "page_number", "page_num"))
+        ):
             pages.append(
                 {
                     "page": page_number,
                     "content": content,
                     "images": normalized_images,
+                    **{
+                        key: item[key] for key in ("unit_kind", "printed_page_label") if key in item
+                    },
                 }
             )
 

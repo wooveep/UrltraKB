@@ -69,10 +69,16 @@ async def recompile_source(
     intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
     admission = Admission(source, frozen, intent)
     actual = _manifest(kb_dir, previous) if previous else None
+    source_map = None
     if actual and previous and previous.successful_revision_id == revision.unit_revision_id:
         directory, manifest = actual
         normalized_source = manifest.normalized_source
         normalized_format = manifest.normalized_format
+        source_map = manifest.source_map
+        if source_map:
+            from openkb.source_map import read_source_map
+
+            read_source_map(directory / "wiki", source_map, unit.doc_name)
         index_ref = manifest.index_ref
         is_long = manifest.execution_mode == "segmented"
     elif source.legacy_hash and (previous is None or previous.successful_revision_id is None):
@@ -124,6 +130,10 @@ async def recompile_source(
             with mutation_scope(kb_dir, [view.scope.wiki_dir.parent], operation="recompile-unit"):
                 normalized = view.scope.wiki_dir / normalized_source
                 _copy_file_atomic(directory / "wiki" / normalized_source, normalized)
+                if source_map and source_map.path != normalized_source:
+                    _copy_file_atomic(
+                        directory / "wiki" / source_map.path, view.scope.wiki_dir / source_map.path
+                    )
                 assets = directory / "wiki/sources/images" / unit.doc_name
                 if assets.exists():
                     copy_tree(assets, view.scope.wiki_dir / "sources/images" / unit.doc_name)
@@ -150,6 +160,7 @@ async def recompile_source(
                 state,
                 view,
                 normalized_source=normalized_source,
+                source_map=source_map,
                 is_long=is_long,
                 index_ref=index_ref,
                 normalized_format=normalized_format or "markdown",

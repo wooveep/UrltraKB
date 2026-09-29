@@ -339,6 +339,8 @@ class PageResponse(BaseModel):
 
 
 class DocumentSourceRequest(ViewRequest):
+    knowledge_revision_id: str | None = None
+    pages: str | None = None
     kb: str = Field(..., min_length=1)
     # SHA-256 hash key from /list — the unique document identifier (avoids
     # ambiguity when two documents share a doc_name/filename stem).
@@ -347,6 +349,13 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    unit_kind: str | None = None
+    page_range: list[int] = Field(default_factory=list)
+    coverage: str = "unknown"
+    units: list[dict] = Field(default_factory=list)
+    diagnostics: list[str] = Field(default_factory=list)
+    unit_revision_id: str | None = None
+    processing_fingerprint: str | None = None
     validity: str = "current"
     view_id: str = "legacy"
     version_metadata: dict = Field(default_factory=dict)

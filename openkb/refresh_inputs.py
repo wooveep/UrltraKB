@@ -39,6 +39,15 @@ async def compile_refresh_inputs(
             originals.update(asset.artifact for asset in frozen.assets if asset.artifact)
             normalized = scope.wiki_dir / manifest.normalized_source
             _copy_file_atomic(directory / "wiki" / manifest.normalized_source, normalized)
+            if manifest.source_map:
+                from openkb.source_map import read_source_map
+
+                read_source_map(directory / "wiki", manifest.source_map, unit.doc_name)
+                if manifest.source_map.path != manifest.normalized_source:
+                    _copy_file_atomic(
+                        directory / "wiki" / manifest.source_map.path,
+                        scope.wiki_dir / manifest.source_map.path,
+                    )
             images = f"sources/images/{unit.doc_name}"
             if (directory / "wiki" / images).exists():
                 copy_tree(directory / "wiki" / images, scope.wiki_dir / images)

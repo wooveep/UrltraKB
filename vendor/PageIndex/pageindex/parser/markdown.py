@@ -22,9 +22,10 @@ class MarkdownParser:
 
         lines = content.split("\n")
         headers = self._extract_headers(lines)
-        nodes = self._build_nodes(headers, lines, model, doc_title=path.stem)
+        doc_name = kwargs.get("doc_name") or path.stem
+        nodes = self._build_nodes(headers, lines, model, doc_title=doc_name)
 
-        return ParsedDocument(doc_name=path.stem, nodes=nodes)
+        return ParsedDocument(doc_name=doc_name, nodes=nodes)
 
     def _extract_headers(self, lines: list[str]) -> list[dict]:
         header_pattern = r"^(#{1,6})\s+(.+)$"

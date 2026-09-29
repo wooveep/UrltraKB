@@ -15,7 +15,7 @@ import pymupdf
 from openkb.config import resolve_effective_config
 from openkb.images import convert_pdf_with_images, copy_relative_images, extract_base64_images
 from openkb.inputs import PreparedInput
-from openkb.locks import atomic_write_text, kb_ingest_lock
+from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 from openkb.state import HashRegistry
 
 logger = logging.getLogger(__name__)
@@ -263,7 +263,11 @@ def _convert_prepared_document(
             )
         elif src.suffix.lower() == ".pdf":
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
-            markdown = convert_pdf_with_images(prepared, doc_name, images_dir)
+            page_records: list[dict] = []
+            markdown = convert_pdf_with_images(
+                prepared, doc_name, images_dir, page_records=page_records
+            )
+            atomic_write_json(sources_dir / f"{doc_name}.json", page_records, ensure_ascii=False)
         else:
             # Non-PDF, non-MD: use markitdown (docx, pptx, html, etc.).
             # Imported lazily: markitdown pulls in magika → onnxruntime (tens

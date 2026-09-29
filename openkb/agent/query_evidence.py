@@ -32,14 +32,16 @@ def selection_catalog(selection: QuerySelection) -> str:
                 pages = json.loads((view.scope.wiki_dir / name).read_text("utf-8"))
                 if not isinstance(pages, list):
                     raise ValueError("Indexed evidence must contain a page list")
-                numbers: list[int] = []
-                for page in pages:
-                    number = page.get("page") if isinstance(page, dict) else None
-                    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-                        raise ValueError("Indexed evidence has invalid page ordinals")
-                    numbers.append(number)
+                from openkb.source_pages import read_page_selection
+
+                selected = read_page_selection(pages)
+                numbers = selected["page_range"]
                 available = f"{min(numbers)}-{max(numbers)}" if numbers else "none"
-                lines.append(f"  Indexed source: doc_name={Path(name).stem}; pages={available}")
+                lines.append(
+                    f"  Source: doc_name={Path(name).stem}; pages={available}; "
+                    f"unit_kind={selected['unit_kind'] or 'unknown'}; "
+                    f"coverage={selected['coverage']}"
+                )
     return "\n".join(lines) or "No permitted knowledge evidence is available."
 
 

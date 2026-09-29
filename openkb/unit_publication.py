@@ -17,6 +17,7 @@ from openkb.ingest_records import (
     KnowledgeHead,
     KnowledgeRevision,
     Proposal,
+    SourceMap,
     UnitPublication,
     UnitRevision,
 )
@@ -312,6 +313,7 @@ def publish_unit_revision(
     view: CompileView,
     *,
     normalized_source: str,
+    source_map: SourceMap | None = None,
     is_long: bool,
     normalized_format: Literal["pdf", "markdown"] = "pdf",
     index_ref: str | None = None,
@@ -374,6 +376,7 @@ def publish_unit_revision(
         generated_baselines=baselines,
         original_references=tuple(sorted(originals)),
         normalized_source=normalized_source,
+        source_map=source_map,
         source_format=admission.revision.source_format,
         normalized_format=normalized_format,
         length_class="long" if is_long else "short",

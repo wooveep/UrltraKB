@@ -182,6 +182,13 @@ def _pin_view(
         unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
         sources.append(read_source_revision(kb_dir, unit.source_revision_id).source_revision_id)
         named = read_record(kb_dir, "units", unit.unit_id, ImportUnit)
+        if selected.read_only:
+            from openkb.application.sources import _snapshot_source
+            from openkb.source_map import read_source_map
+
+            saved = _snapshot_source(kb_dir, selected, named.unit_id)
+            if saved and saved[1].source_map:
+                read_source_map(selected.wiki_dir, saved[1].source_map, named.doc_name)
         source_paths.update((f"sources/{named.doc_name}.md", f"sources/{named.doc_name}.json"))
         image_roots.append(f"sources/images/{named.doc_name}/")
     files = wiki_versions(kb_dir, selected.wiki_dir)

@@ -74,7 +74,8 @@ def test_document_source_long_json_concatenates_pages(monkeypatch, kb_dir):
     assert "Page two text." in payload["content"]
     # page boundaries preserved via a thematic break
     assert "---" in payload["content"]
-    assert payload["pages"] == 2
+    assert payload["pages"] is None
+    assert payload["coverage"] == "unknown"
 
 
 def test_document_source_prefers_stored_source_path(monkeypatch, kb_dir):
@@ -145,7 +146,7 @@ def test_document_source_doc_name_collision_resolves_by_type(monkeypatch, kb_dir
     assert long_resp.status_code == 200
     assert "LONG page one" in long_resp.json()["content"]
     assert "SHORT content" not in long_resp.json()["content"]
-    assert long_resp.json()["pages"] == 1
+    assert long_resp.json()["pages"] is None
 
     short_resp = client.post(
         "/api/v1/document/source", json={"kb": kb, "hash": "short"}, headers=_auth()

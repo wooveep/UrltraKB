@@ -146,12 +146,16 @@ def convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> lis
                     "page": page_num,
                     "content": "\n".join(parts),
                     "images": page_images,
+                    "unit_kind": "page",
+                    "printed_page_label": page.get_label() or None,
                 }
             )
     return pages
 
 
-def convert_pdf_with_images(pdf_path: Path, doc_name: str, images_dir: Path) -> str:
+def convert_pdf_with_images(
+    pdf_path: Path, doc_name: str, images_dir: Path, *, page_records: list[dict] | None = None
+) -> str:
     """Convert a PDF to markdown with inline images using pymupdf dict-mode.
 
     Iterates blocks in reading order per page. Text blocks become text,
@@ -170,6 +174,9 @@ def convert_pdf_with_images(pdf_path: Path, doc_name: str, images_dir: Path) -> 
             page = doc[page_idx]
             page_num = page_idx + 1
             parts.append("\n\n")
+            page_start = len(parts)
+            page_images = []
+            image_refs = {}
 
             for block in page.get_text("dict")["blocks"]:
                 if block["type"] == 0:  # text block
@@ -196,8 +203,26 @@ def convert_pdf_with_images(pdf_path: Path, doc_name: str, images_dir: Path) -> 
                         (images_dir / filename).write_bytes(pix.tobytes("png"))
                         pix = None
                         parts.append(f"\n{md_image_ref('image', doc_name, filename)}\n")
+                        image_path = f"sources/images/{doc_name}/{filename}"
+                        page_images.append({"path": image_path})
+                        image_refs[md_image_ref("image", doc_name, filename)] = (
+                            f"![image]({image_path})"
+                        )
                     except Exception:
                         logger.warning("Failed to save image block on page %d", page_num)
+            if page_records is not None:
+                page_content = "\n".join(parts[page_start:])
+                for reference, replacement in image_refs.items():
+                    page_content = page_content.replace(reference, replacement)
+                page_records.append(
+                    {
+                        "page": page_num,
+                        "content": page_content,
+                        "images": page_images,
+                        "unit_kind": "page",
+                        "printed_page_label": page.get_label() or None,
+                    }
+                )
     return "\n".join(parts)
 
 

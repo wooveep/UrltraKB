@@ -18,6 +18,7 @@ from openkb.api_helpers import _resolve_kb, require_bearer_token
 from openkb.api_models import DocumentSourceRequest, DocumentSourceResponse
 from openkb.api_views import ViewRequest, resolve_api_scope
 from openkb.documents import read_document_source
+from openkb.source_pages import PageRangeError
 
 documents_router = APIRouter()
 
@@ -88,14 +89,29 @@ async def document_source_endpoint(
 ) -> DocumentSourceResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     scope = await resolve_api_scope(kb_dir, request.view_id)
+    if request.knowledge_revision_id:
+        from openkb.application.views import view_scope
+
+        try:
+            scope = await asyncio.to_thread(
+                view_scope,
+                kb_dir,
+                request.view_id or "legacy",
+                historical_revision=request.knowledge_revision_id,
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail="Knowledge revision unavailable.") from exc
     try:
         result = await run_in_threadpool(
             read_document_source,
             kb_dir,
             request.hash,
             source_revision_id=request.source_revision_id,
+            pages=request.pages,
             scope=scope,
         )
+    except PageRangeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, ValueError) as exc:
         # Corrupt/unreadable source file (bad JSON, unexpected shape, I/O error):
         # a controlled 500 with a clean message beats an unhandled stack trace.

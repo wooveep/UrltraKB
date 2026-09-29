@@ -195,6 +195,7 @@ def read_admitted_source(
     *,
     source_revision_id: str | None = None,
     scope: KnowledgeScope | None = None,
+    page_range: str | None = None,
 ) -> dict | None:
     root = kb_dir.resolve()
     if scope is not None:
@@ -262,6 +263,7 @@ def read_admitted_source(
             else "Frozen original retained; no published body for this revision."
         )
         pages = None
+        selection = {}
         base_path = root / target.original
         contained_paths(root, [base_path])
         artifact_dir = root / ".openkb/artifacts" / target.digest
@@ -271,21 +273,33 @@ def read_admitted_source(
             directory, manifest = actual
             if manifest.normalized_source is None:
                 raise ValueError("Published source revision is missing its body reference")
-            base_path = directory / "wiki" / manifest.normalized_source
+            source_path = (
+                manifest.source_map.path if manifest.source_map else manifest.normalized_source
+            )
+            base_path = directory / "wiki" / source_path
             contained_paths(root, [base_path])
             if not base_path.resolve().is_relative_to(directory / "wiki"):
                 raise ValueError("Source body is outside its knowledge snapshot")
         if actual or target.original_kind == "legacy_snapshot":
-            if base_path.suffix == ".json":
-                from openkb.documents import _render_pages
+            if actual and actual[1].source_map:
+                from openkb.source_map import read_source_map
+
+                selection = read_source_map(
+                    actual[0] / "wiki", actual[1].source_map, units[0].doc_name, page_range
+                )
+            elif base_path.suffix == ".json":
+                from openkb.source_pages import read_page_selection
 
                 page_list = json.loads(base_path.read_text("utf-8"))
-                if not isinstance(page_list, list):
-                    raise ValueError("Stored source must contain a page list")
-                content = _render_pages(page_list)
-                pages = len(page_list)
+                selection = read_page_selection(page_list, page_range)
             else:
+                if page_range is not None:
+                    from openkb.source_pages import PageRangeError
+
+                    raise PageRangeError("This retained source has no physical-page map")
                 content = base_path.read_text("utf-8")
+            if selection:
+                content, pages = selection["content"], selection["pages"]
         annotation_id = source.annotation_id
         if actual and actual[1].unit_revision_id:
             body_revision = read_record(
@@ -319,6 +333,10 @@ def read_admitted_source(
             "version_metadata": metadata,
             "original_kind": target.original_kind,
             "source_revision_id": target.source_revision_id,
+            "unit_revision_id": actual[1].unit_revision_id if actual else None,
+            "processing_fingerprint": body_revision.processing_fingerprint
+            if actual and actual[1].unit_revision_id
+            else None,
             "target_source_revision_id": target_id,
             "knowledge_revision_id": actual[1].knowledge_revision_id if actual else None,
             "name": source.name,
@@ -328,8 +346,13 @@ def read_admitted_source(
             "content": content,
             "pages": pages,
             "original_path": target.original,
-            "base_path": base_path.parent.relative_to(root).as_posix(),
+            "base_path": (
+                base_path.parent.parent if base_path.suffix == ".json" else base_path.parent
+            )
+            .relative_to(root)
+            .as_posix(),
             "status": state.status if state else "admitted",
             "message": state.message if state else None,
             "error_type": state.error_type if state else None,
+            **selection,
         }

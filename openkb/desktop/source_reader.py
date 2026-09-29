@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from openkb.desktop.reader import MarkdownView
 
@@ -14,6 +14,7 @@ class SourceReader(QDialog):
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(900, 720)
+        self.window, self.kb, self.source = window, kb, source
         layout = QVBoxLayout(self)
         hint = QLabel("导入时保留的原文 · 摘要、概念和实体请在知识页阅读")
         hint.setWordWrap(True)
@@ -41,12 +42,28 @@ class SourceReader(QDialog):
                 if source.get("original_kind") == "legacy_snapshot"
                 else "打开冻结原件"
             )
+            original.setAutoDefault(False)
             original.clicked.connect(
                 lambda: QDesktopServices.openUrl(
                     QUrl.fromLocalFile(str(kb / source["original_path"]))
                 )
             )
             layout.addWidget(original)
+        self.coverage = QLabel()
+        self.coverage.setWordWrap(True)
+        layout.addWidget(self.coverage)
+        if source.get("units"):
+            controls = QHBoxLayout()
+            self.pages = QLineEdit()
+            self.pages.setAccessibleName("来源页范围")
+            self.pages.setPlaceholderText("物理页，如 1,3-5；留空显示全文")
+            select = QPushButton("读取页范围")
+            select.setAutoDefault(False)
+            select.clicked.connect(self.select_pages)
+            self.pages.returnPressed.connect(self.select_pages)
+            controls.addWidget(self.pages, 1)
+            controls.addWidget(select)
+            layout.addLayout(controls)
         self.reader = MarkdownView()
 
         def follow(url):
@@ -59,12 +76,36 @@ class SourceReader(QDialog):
 
         self.reader.anchorClicked.connect(follow)
         layout.addWidget(self.reader, 1)
+        self.show_content(source)
+
+    def show_content(self, source):
+        physical = source.get("unit_kind") == "page"
+        numbers = source.get("page_range", [])
+        self.coverage.setText(
+            ("物理页：" if physical else "来源页号（物理对应关系未知）：")
+            + (", ".join(map(str, numbers)) or "未记录")
+            + (f" · 全文 {source['pages']} 页" if source.get("pages") is not None else "")
+            + "\n"
+            + "\n".join(source.get("diagnostics", []))
+            if self.source.get("units")
+            else ""
+        )
         self.reader.show_markdown(
             source["content"],
-            kb / (source.get("base_path") or "wiki/sources"),
-            dark=window.appearance.dark,
-            scale=window.zoom.currentData(),
+            self.kb / (self.source.get("base_path") or "wiki/sources"),
+            dark=self.window.appearance.dark,
+            scale=self.window.zoom.currentData(),
         )
+
+    def select_pages(self):
+        from openkb.source_pages import read_page_selection
+
+        try:
+            selected = read_page_selection(self.source["units"], self.pages.text().strip() or None)
+        except ValueError as exc:
+            self.coverage.setText(str(exc))
+            return
+        self.show_content(selected)
 
     def closeEvent(self, event):
         self.reader.stop_rendering()

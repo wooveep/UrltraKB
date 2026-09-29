@@ -12,6 +12,7 @@ class ContentNode:
     index: int | None = None
     level: int | None = None
     images: list[dict] | None = None  # [{"path": str, "width": int, "height": int}, ...]
+    metadata: dict | None = None
 
 
 @dataclass
