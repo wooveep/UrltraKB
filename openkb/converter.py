@@ -13,7 +13,7 @@ from pathlib import Path
 import pymupdf
 
 from openkb.config import resolve_effective_config
-from openkb.images import convert_pdf_with_images, copy_relative_images, extract_base64_images
+from openkb.images import convert_pdf_with_images, extract_base64_images
 from openkb.inputs import PreparedInput
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 from openkb.processing_policy import ProcessingDecision, classify_pdf
@@ -260,9 +260,16 @@ def _convert_prepared_document(
         images_dir.mkdir(parents=True, exist_ok=True)
 
         if src.suffix.lower() in {".md", ".markdown"}:
-            markdown = prepared.read_text(encoding="utf-8")
-            markdown = copy_relative_images(
-                markdown, src.parent, doc_name, images_dir, prepared=ready.images
+            from openkb.processing_policy import classify_markdown_tokens
+            from openkb.text_source import freeze_markdown
+
+            frozen = freeze_markdown(ready, doc_name, artifact_root / "wiki")
+            markdown = frozen.text
+            processing = classify_markdown_tokens(frozen.tokens)
+            atomic_write_json(
+                sources_dir / f"{doc_name}.content.json",
+                frozen.model_dump(mode="json"),
+                ensure_ascii=False,
             )
         elif src.suffix.lower() == ".pdf":
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
@@ -296,4 +303,5 @@ def _convert_prepared_document(
             doc_name=doc_name,
             source_identity=source_identity,
             processing=processing,
+            is_long_doc=processing is not None and processing.execution_mode == "segmented",
         )

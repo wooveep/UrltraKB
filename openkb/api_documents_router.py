@@ -108,6 +108,7 @@ async def document_source_endpoint(
             request.hash,
             source_revision_id=request.source_revision_id,
             pages=request.pages,
+            chars=request.chars,
             scope=scope,
         )
     except PageRangeError as exc:

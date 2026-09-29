@@ -9,6 +9,8 @@ from click.testing import CliRunner
 
 from openkb.cli import SUPPORTED_EXTENSIONS, _find_kb_dir, cli
 
+pytest_plugins = ("test_pdf_readback",)
+
 
 class TestSupportedExtensions:
     def test_pdf_supported(self):
@@ -100,7 +102,7 @@ class TestAddCommand:
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
         ):
             runner.invoke(cli, ["add", str(doc)])
-            mock_add.assert_called_once_with(doc, kb_dir)
+            mock_add.assert_called_once_with(doc, kb_dir, scope=None, metadata=None)
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
         from openkb.cli import add_single_file
@@ -145,36 +147,18 @@ class TestAddCommand:
         assert outcome == "added"
         assert mock_compile.call_args.kwargs["max_concurrency"] == 3
 
-    def test_add_single_file_uses_add_mutation_coordinator(self, tmp_path):
+    def test_add_single_file_publishes_an_immutable_source(self, tmp_path, pdf_model):
+        from openkb.application.knowledge_bases import get_kb_list
         from openkb.cli import add_single_file
-        from openkb.converter import ConvertResult
+        from openkb.documents import read_document_source
 
-        kb_dir = self._setup_kb(tmp_path)
+        kb = self._setup_kb(tmp_path)
         doc = tmp_path / "coordinated.md"
         doc.write_text("# Coordinated\n", encoding="utf-8")
-        staging_root = kb_dir / ".openkb" / "staging" / "fake"
-        source_path = staging_root / "wiki" / "sources" / "coordinated.md"
-        raw_path = staging_root / "raw" / "coordinated.md"
-        result = ConvertResult(
-            raw_path=raw_path,
-            source_path=source_path,
-            file_hash="abc123",
-            doc_name="coordinated",
-        )
-
-        with (
-            patch("openkb.application.documents.convert_document", return_value=result),
-            patch("openkb.application.documents.publish_staged_tree"),
-            patch("openkb.cli.asyncio.run"),
-            patch("openkb.cli._setup_llm_key"),
-            patch("openkb.add_coordinator.run_add_mutation", return_value=True) as mock_run,
-        ):
-            assert add_single_file(doc, kb_dir) == "added"
-
-        plan = mock_run.call_args.args[1]
-        assert plan.operation == "add"
-        assert plan.details["doc_name"] == "coordinated"
-        assert kb_dir / ".openkb" / "hashes.json" in plan.touched_paths
+        assert add_single_file(doc, kb) == "added"
+        saved = read_document_source(kb, get_kb_list(kb)["documents"][0]["hash"])
+        assert saved["content"] == "# Coordinated\n"
+        assert saved["knowledge_revision_id"] is not None
 
     def _long_doc_conv(self, kb_dir, name, file_hash):
         from openkb.converter import ConvertResult
@@ -327,115 +311,45 @@ class TestAddCommand:
             result = runner.invoke(cli, ["add", str(tmp_path / "nonexistent.pdf")])
             assert "does not exist" in result.output
 
-    def test_add_skipped_file(self, tmp_path):
-        kb_dir = self._setup_kb(tmp_path)
+    def test_add_skipped_file(self, tmp_path, pdf_model):
+        kb = self._setup_kb(tmp_path)
         doc = tmp_path / "test.md"
         doc.write_text("# Hello")
-
-        from openkb.converter import ConvertResult
-
-        mock_result = ConvertResult(skipped=True)
-
         runner = CliRunner()
-        with (
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.application.documents.convert_document", return_value=mock_result),
-            patch("openkb.cli.asyncio.run") as mock_arun,
-        ):
-            result = runner.invoke(cli, ["add", str(doc)])
-            assert "SKIP" in result.output
-            mock_arun.assert_not_called()
+        arguments = ["--kb-dir", str(kb), "add", str(doc)]
+        first = runner.invoke(cli, arguments)
+        assert first.exit_code == 0 and "; added" in first.output
+        second = runner.invoke(cli, arguments)
+        assert second.exit_code == 0 and "; skipped" in second.output
 
-    def test_add_short_doc_runs_compiler(self, tmp_path):
-        kb_dir = self._setup_kb(tmp_path)
+    def test_add_short_doc_runs_compiler(self, tmp_path, pdf_model):
+        from openkb.application.knowledge_bases import get_kb_list
+        from openkb.application.pages import read_page
+        from openkb.application.views import view_scope
+
+        kb = self._setup_kb(tmp_path)
         doc = tmp_path / "test.md"
         doc.write_text("# Hello")
+        result = CliRunner().invoke(cli, ["--kb-dir", str(kb), "add", str(doc)])
+        assert result.exit_code == 0 and "; added" in result.output
+        saved = get_kb_list(kb)["documents"][0]
+        scope = view_scope(kb, saved["view_id"])
+        assert "First and last sections." in read_page(kb, "summaries/test", scope=scope).body
+        assert saved["length_class"] == "short"
 
-        source_path = kb_dir / "wiki" / "sources" / "test.md"
-        source_path.write_text("# Hello converted")
-
-        from openkb.converter import ConvertResult
-
-        mock_result = ConvertResult(
-            raw_path=kb_dir / "raw" / "test.md",
-            source_path=source_path,
-            is_long_doc=False,
-            file_hash="deadbeef00" * 8,
-            doc_name="test",
-        )
-
-        # An edited doc arrives with a new content hash; the stale entry
-        # for the same doc_name must be replaced, leaving exactly ONE entry.
+    def test_new_markdown_preserves_an_unmapped_legacy_entry(self, tmp_path, pdf_model):
+        from openkb.application.knowledge_bases import get_kb_list
         from openkb.state import HashRegistry
 
-        HashRegistry(kb_dir / ".openkb" / "hashes.json").add(
-            "stale-old-hash", {"name": "test.md", "doc_name": "test", "type": "md"}
-        )
-
-        compile_calls = []
-
-        async def compile_noop(*args, **kwargs):
-            compile_calls.append((args, kwargs))
-
-        runner = CliRunner()
-        with (
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.application.documents.convert_document", return_value=mock_result),
-            patch("openkb.agent.compiler.compile_short_doc", new=compile_noop),
-        ):
-            result = runner.invoke(cli, ["add", str(doc)])
-            assert len(compile_calls) == 1
-            assert "OK" in result.output
-
-        import json as json_mod
-
-        hashes = json_mod.loads((kb_dir / ".openkb" / "hashes.json").read_text(encoding="utf-8"))
-        meta = hashes[mock_result.file_hash]
-        assert meta["doc_name"] == "test"
-        assert meta["raw_path"] == "raw/test.md"
-        assert meta["source_path"] == "wiki/sources/test.md"
-        assert "path" in meta
-        assert "stale-old-hash" not in hashes
-
-    def test_add_oldest_legacy_entry_converges_to_single_entry(self, tmp_path):
-        """Editing a pre-doc_name-era document must not fork the registry.
-
-        convert_document backfills doc_name/path onto the legacy entry on
-        disk; the cli's registry instance must see that backfill (i.e. be
-        constructed after convert), otherwise its full-file rewrite clobbers
-        the backfill and leaves two entries for one document.
-        """
-        import json as json_mod
-
-        from openkb.state import HashRegistry
-
-        kb_dir = self._setup_kb(tmp_path)
-        # oldest-generation entry: name only, no doc_name, no path
-        HashRegistry(kb_dir / ".openkb" / "hashes.json").add(
-            "old-hash", {"name": "notes.md", "type": "md"}
-        )
+        kb = self._setup_kb(tmp_path)
+        HashRegistry(kb / ".openkb/hashes.json").add("old-hash", {"name": "notes.md", "type": "md"})
         doc = tmp_path / "notes.md"
-        doc.write_text("# Notes, edited")  # new content hash != "old-hash"
-
-        # Compilation mocked out, but convert_document REAL so
-        # the legacy backfill actually happens on disk mid-pipeline.
-        def close_coro(coro):
-            if hasattr(coro, "close"):
-                coro.close()
-
-        runner = CliRunner()
-        with (
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.cli.asyncio.run", side_effect=close_coro),
-        ):
-            result = runner.invoke(cli, ["add", str(doc)])
-            assert "OK" in result.output
-
-        hashes = json_mod.loads((kb_dir / ".openkb" / "hashes.json").read_text(encoding="utf-8"))
-        assert "old-hash" not in hashes  # stale entry replaced…
-        new_entries = [m for m in hashes.values() if m.get("doc_name") == "notes"]
-        assert len(new_entries) == 1  # …exactly one entry survives
-        assert new_entries[0]["path"]  # with path identity persisted
+        doc.write_text("# Notes, edited")
+        result = CliRunner().invoke(cli, ["--kb-dir", str(kb), "add", str(doc)])
+        assert result.exit_code == 0 and "; added" in result.output
+        documents = get_kb_list(kb)["documents"]
+        assert len(documents) == 2
+        assert {bool(item.get("source_id")) for item in documents} == {False, True}
 
     def test_add_requires_path(self, tmp_path):
         kb_dir = self._setup_kb(tmp_path)

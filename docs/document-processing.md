@@ -52,3 +52,11 @@ retained classification, estimate, and unknown-capacity reason.
 Recompilation reuses the retained normalization, index, and execution decision;
 changing settings does not silently reclassify old input. Historical reads show
 the decision belonging to the selected knowledge revision.
+
+Markdown uses the original full-text compiler after retaining its text and local
+images. Its independent length policy is at most 5,000 tokens with the bundled,
+digest-checked tiktoken 0.13.0 cl100k_base resource. Literal special-token strings
+count as ordinary text. Settings or execution-model changes never change that
+measurement policy. See `source-reading.md` for Unicode coordinates and ranges.
+At this implementation stage, segmented Markdown returns a capability-unavailable
+failure with the complete input retained; the shared block index is added in #84.

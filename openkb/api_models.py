@@ -165,6 +165,8 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    tokens: int | None = None
+    characters: int | None = None
     target_processing: dict | None = None
     length_class: str | None = None
     execution_mode: str | None = None
@@ -343,6 +345,7 @@ class PageResponse(BaseModel):
 
 
 class DocumentSourceRequest(ViewRequest):
+    chars: str | None = None
     knowledge_revision_id: str | None = None
     pages: str | None = None
     kb: str = Field(..., min_length=1)
@@ -353,6 +356,14 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    tokens: int | None = None
+    characters: int | None = None
+    char_range: list[int] | None = None
+    source_spans: list[list[int]] = Field(default_factory=list)
+    origin_locators: list[dict] = Field(default_factory=list)
+    normalized_fingerprint: str | None = None
+    measurement_fingerprint: str | None = None
+    assets: dict[str, str] = Field(default_factory=dict)
     target_processing: dict | None = None
     length_class: str | None = None
     execution_mode: str | None = None

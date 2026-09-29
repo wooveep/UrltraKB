@@ -190,6 +190,7 @@ def _pin_view(
             if saved and saved[1].source_map:
                 read_source_map(selected.wiki_dir, saved[1].source_map, named.doc_name)
         source_paths.update((f"sources/{named.doc_name}.md", f"sources/{named.doc_name}.json"))
+        source_paths.add(f"sources/{named.doc_name}.content.json")
         image_roots.append(f"sources/images/{named.doc_name}/")
     files = wiki_versions(kb_dir, selected.wiki_dir)
     if not historical:
@@ -343,7 +344,7 @@ def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> st
         evidence = page_evidence(view.scope, path)
         if evidence["source_revision_ids"]:
             view = replace(view, source_revision_ids=evidence["source_revision_ids"])
-    return f"{view.provenance}\n\n{target.read_text('utf-8')}"
+    return f"{view.provenance}\n\n{target.read_bytes().decode('utf-8')}"
 
 
 def selection_current(selection: QuerySelection) -> bool:

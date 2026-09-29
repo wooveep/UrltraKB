@@ -41,6 +41,8 @@ def assess_version(
                 previous.candidates
                 if previous and same_input
                 else pdf_title_candidates(kb_dir / admission.revision.original)
+                if admission.revision.source_format == "pdf"
+                else ()
             )
         except (OSError, ValueError, RuntimeError):
             # Conversion owns malformed-input diagnostics and its durable failure.

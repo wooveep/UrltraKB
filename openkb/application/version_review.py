@@ -361,7 +361,7 @@ def resume_version_review(
 ) -> IngestResult:
     from dataclasses import replace
 
-    from openkb.application.ingestion import import_prepared_pdf
+    from openkb.application.ingestion import import_prepared_source
     from openkb.compilation_report import collect_compile_report
     from openkb.inputs import prepared_input
     from openkb.lifecycle import read_lifecycle
@@ -389,7 +389,7 @@ def resume_version_review(
             metadata = SourceMetadata.model_validate(
                 {name: getattr(review.metadata, name) for name in review.user_fields}
             )
-            result = import_prepared_pdf(
+            result = import_prepared_source(
                 kb_dir,
                 prepared,
                 context=context,

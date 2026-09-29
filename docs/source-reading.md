@@ -30,3 +30,22 @@ API `POST /api/v1/document/source` 接受 `kb`、`hash`（来源 ID）、`view_i
 本地 PageIndex 将索引输入和图片保存在受管目录，缓存键包含原件摘要与处理策略。
 全文读取和范围读取共用缓存校验与恢复。缺少页缓存时，从同一受管输入重新提取；
 图片摘要不符、原件损坏或处理策略不再可重建时会明确报错。
+
+Markdown 原文固定为 UTF-8 Unicode 码点序列，保留换行（包括 CRLF）、空白、前言、
+代码和表格。去除开头 BOM 及搬移图片引用的位置由 `origin_locators` 单独映射回原文件；
+`source_spans` / `char_range` 始终指向冻结正文的 0-based 半开字符范围。
+图片支持 Markdown 行内/引用式链接、HTML img src 和 base64 图；代码示例不会被改写。
+未能保留的图片会列入诊断，远程图片不会自动下载。
+
+文本度量固定使用离线 tiktoken 0.13.0 / cl100k_base：5,000 tokens 及以下为短文，
+与执行模型无关。`tokens` 和 `characters` 显示完整冻结文本的大小，`pages` 为空。
+首次编译失败时仍可阅读已保留的规范化正文，`knowledge_revision_id` 为空且状态保留失败原因。
+已有成功正文时继续显示该正文及其度量，失败的新目标另列 `target_processing`。
+
+```sh
+openkb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
+```
+
+API 对应可选字段为 `chars: "0:120"`；桌面原文窗口提供相同范围输入。
+问答来源工具 `get_text_content` 返回相同字符范围和原文件映射，且受当前版本证据范围限制。
+重编译复用冻结输入和分类；watch 对本地图片的更改和缺失状态也生成新的输入版本。

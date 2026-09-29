@@ -479,12 +479,14 @@ def import_document(
                 context.begin(root) if context else nullcontext(bundle) as credentials,
                 collect_compile_report() as compilation,
             ):
-                if ready.source.suffix.lower() == ".pdf":
+                from openkb.inputs import FROZEN_SOURCE_EXTENSIONS
+
+                if ready.source.suffix.lower() in FROZEN_SOURCE_EXTENSIONS:
                     from dataclasses import replace
 
-                    from openkb.application.ingestion import import_prepared_pdf
+                    from openkb.application.ingestion import import_prepared_source
 
-                    result = import_prepared_pdf(
+                    result = import_prepared_source(
                         root,
                         ready,
                         bundle=credentials,

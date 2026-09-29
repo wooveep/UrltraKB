@@ -25,9 +25,9 @@ class ProcessingDecision(Record):
     length_class: Literal["short", "long"]
     execution_mode: Literal["full", "segmented"]
     measurement_value: int = Field(ge=0, strict=True)
-    measurement_unit: Literal["physical_page"] = "physical_page"
+    measurement_unit: Literal["physical_page", "token"] = "physical_page"
     measurement_fingerprint: str = "pdf-physical-pages-v1"
-    pdf_limit: PdfLimit
+    pdf_limit: PdfLimit | None = None
     capacity_status: Literal["not_needed", "unknown", "sufficient", "insufficient"] = "unknown"
     capacity_reason: str = "No reliable request capacity has been established"
     capacity_source: str = "unknown"
@@ -75,4 +75,22 @@ def classify_pdf(page_count: int, config: dict) -> ProcessingDecision:
         capacity_reason="Long document uses the shared index"
         if length == "long"
         else ("No reliable request capacity has been established"),
+    )
+
+
+def classify_markdown_tokens(token_count: int) -> ProcessingDecision:
+    """The inclusive 5,000-token business threshold never depends on an LLM model."""
+    from openkb.text_measurement import MEASUREMENT_FINGERPRINT
+
+    length = "short" if token_count <= 5000 else "long"
+    return ProcessingDecision(
+        length_class=length,
+        execution_mode="full" if length == "short" else "segmented",
+        measurement_value=token_count,
+        measurement_unit="token",
+        measurement_fingerprint=MEASUREMENT_FINGERPRINT,
+        capacity_status="not_needed" if length == "long" else "unknown",
+        capacity_reason="Long document uses the shared index"
+        if length == "long"
+        else "No reliable request capacity has been established",
     )

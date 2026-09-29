@@ -64,6 +64,7 @@ def read_document_source(
     scope: KnowledgeScope | None = None,
     source_revision_id: str | None = None,
     pages: str | None = None,
+    chars: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
@@ -75,10 +76,17 @@ def read_document_source(
     from openkb.application.sources import read_admitted_source
 
     admitted = read_admitted_source(
-        kb_dir, file_hash, source_revision_id=source_revision_id, scope=scope, page_range=pages
+        kb_dir,
+        file_hash,
+        source_revision_id=source_revision_id,
+        scope=scope,
+        page_range=pages,
+        char_range=chars,
     )
     if admitted is not None:
         return admitted
+    if chars is not None:
+        raise PageRangeError("Legacy source has no frozen character map")
     scope = resolve_scope(kb_dir, scope)
     if scope.view_id != "legacy":
         return None

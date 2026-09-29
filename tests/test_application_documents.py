@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from openkb.application.pages import read_page
+from openkb.application.views import view_scope
+from openkb.documents import read_document_source
 
 
 def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch):
@@ -33,7 +35,11 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     events = []
     result = import_document(kb_dir, source, on_event=events.append)
     assert result.status == "added"
-    assert read_page(kb_dir, "summaries/notes").body.strip() == "# Notes\n\nCompiled knowledge."
+    scope = view_scope(kb_dir, result.units[0].view_id)
+    assert (
+        read_page(kb_dir, "summaries/notes", scope=scope).body.strip()
+        == "# Notes\n\nCompiled knowledge."
+    )
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
     assert [event["stage"] for event in events] == ["converting", "compiling", "committed"]
@@ -122,11 +128,12 @@ def test_import_freezes_relative_images_at_the_business_boundary(
     )
     result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
     assert result.status == "added"
-    assert next((kb_dir / "raw").iterdir()).read_bytes() == original
-    images = list((kb_dir / "wiki/sources/images").rglob("*.png"))
+    saved = read_document_source(kb_dir, result.source_id)
+    assert (kb_dir / saved["original_path"]).read_bytes() == original
+    images = list((kb_dir / saved["base_path"] / "images").rglob("*.png"))
     assert len(images) == 1 and images[0].read_bytes() == b"original image"
-    converted = next((kb_dir / "wiki/sources").glob("*.md")).read_text()
-    assert converted.count("图.png)") == 2 and "![missing](later.png)" in converted
+    converted = saved["content"]
+    assert converted.count("%E5%9B%BE.png)") == 2 and "![missing](later.png)" in converted
 
 
 def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp_path, monkeypatch):
@@ -177,7 +184,8 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
         release.set()
         holder.join(10)
     assert result.status == "added"
-    assert next((kb_dir / "wiki/sources/images").rglob("*.png")).read_bytes() == b"latest"
+    saved = read_document_source(kb_dir, result.source_id)
+    assert next((kb_dir / saved["base_path"] / "images").rglob("*.png")).read_bytes() == b"latest"
 
 
 def test_watched_source_replaced_with_external_symlink_while_waiting_never_starts(kb_dir, tmp_path):
@@ -235,7 +243,6 @@ def test_import_keeps_frozen_identity_when_original_path_changes_after_start(kb_
         pytest.skip("POSIX symlink fixture")
     source = kb_dir / "notes.md"
     source.write_text("# Original prepared input")
-    digest = HashRegistry.hash_file(source)
     other = kb_dir / "other.md"
     other.write_text("# Another document")
     registry = HashRegistry(kb_dir / ".openkb/hashes.json")
@@ -265,8 +272,10 @@ def test_import_keeps_frozen_identity_when_original_path_changes_after_start(kb_
     )
     result = import_document(kb_dir, source, context=ExecutionContext(on_snapshot=after_start))
     assert result.status == "added"
-    saved = HashRegistry(kb_dir / ".openkb/hashes.json").get(digest)
-    assert saved["path"] == "notes.md"
+    from openkb.source_catalog import read_source
+
+    saved = read_document_source(kb_dir, result.source_id)
+    assert read_source(kb_dir, result.source_id).identity == "notes.md"
     assert saved["doc_name"] == "notes"
-    assert (kb_dir / "raw/notes.md").read_text() == "# Original prepared input"
+    assert (kb_dir / saved["original_path"]).read_text() == "# Original prepared input"
     assert summary.read_text() == "# Keep this unrelated page"

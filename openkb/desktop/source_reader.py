@@ -29,11 +29,15 @@ class SourceReader(QDialog):
                 "sufficient": "可容纳首次全文请求",
                 "not_needed": "长文直接分段",
             }[decision["capacity_status"]]
-            limit = decision["pdf_limit"]
-            policy = QLabel(
-                f"分类：{classification} · 执行：{execution} · 容量：{capacity}\n"
+            limit = decision.get("pdf_limit")
+            measured = (
                 f"导入时短 PDF 上限：{limit['short_max_pages']} 页；"
                 f"来源：{limit['source']} / {limit['key']}"
+                if limit
+                else f"文本：{decision['measurement_value']} tokens · cl100k_base；短文上限 5,000"
+            )
+            policy = QLabel(
+                f"分类：{classification} · 执行：{execution} · 容量：{capacity}\n" + measured
             )
             policy.setWordWrap(True)
             layout.addWidget(policy)
@@ -90,6 +94,20 @@ class SourceReader(QDialog):
             controls.addWidget(self.pages, 1)
             controls.addWidget(select)
             layout.addLayout(controls)
+        if source.get("unit_kind") == "text":
+            controls = QHBoxLayout()
+            self.characters = QLineEdit()
+            self.characters.setAccessibleName("来源字符范围")
+            self.characters.setPlaceholderText(
+                "Unicode 字符 START:END，从 0 开始、不含 END；留空显示全文"
+            )
+            select = QPushButton("读取字符范围")
+            select.setAutoDefault(False)
+            select.clicked.connect(self.select_characters)
+            self.characters.returnPressed.connect(self.select_characters)
+            controls.addWidget(self.characters, 1)
+            controls.addWidget(select)
+            layout.addLayout(controls)
         self.reader = MarkdownView()
 
         def follow(url):
@@ -116,6 +134,12 @@ class SourceReader(QDialog):
             if self.source.get("units")
             else ""
         )
+        if source.get("unit_kind") == "text":
+            start, end = source["char_range"]
+            self.coverage.setText(
+                f"字符范围：[{start}, {end}) · 全文 {source['characters']} 字符 / "
+                f"{source['tokens']} tokens\n" + "\n".join(source.get("diagnostics", []))
+            )
         self.reader.show_markdown(
             source["content"],
             self.kb / (self.source.get("base_path") or "wiki/sources"),
@@ -132,6 +156,24 @@ class SourceReader(QDialog):
             self.coverage.setText(str(exc))
             return
         self.show_content(selected)
+
+    def select_characters(self):
+        from openkb.text_source import character_range
+
+        try:
+            start, end = character_range(
+                self.source["content"], self.characters.text().strip() or None
+            )
+        except ValueError as exc:
+            self.coverage.setText(str(exc))
+            return
+        self.show_content(
+            {
+                **self.source,
+                "content": self.source["content"][start:end],
+                "char_range": [start, end],
+            }
+        )
 
     def closeEvent(self, event):
         self.reader.stop_rendering()

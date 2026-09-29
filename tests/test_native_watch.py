@@ -7,6 +7,28 @@ from types import SimpleNamespace
 from openkb.runtime.watch import NativeWatch
 from openkb.state import HashRegistry
 
+pytest_plugins = ("test_pdf_readback",)
+
+
+def test_markdown_asset_change_is_a_new_watch_input(kb_dir, pdf_model):
+    from openkb.application.documents import import_document
+
+    source = kb_dir / "raw/note.md"
+    source.write_text("![figure](figure.png)")
+    sink = TaskSink()
+    watch = NativeWatch(kb_dir, sink, debounce=0.03, scan_interval=0.02)
+    try:
+        eventually(lambda: len(sink.items) == 1)
+        result = import_document(kb_dir, source)
+        assert result.status == "added"
+        sink.finish("0", revision=result.input_version)
+        (kb_dir / "raw/figure.png").write_bytes(b"new resource")
+        eventually(lambda: len(sink.items) == 2)
+        assert sink.items["1"][0].source == str(source)
+    finally:
+        watch.stop()
+        assert watch.join(5)
+
 
 class TaskSink:
     def __init__(self):
@@ -51,7 +73,7 @@ def eventually(condition, timeout=5):
 
 def test_startup_scan_deduplicates_and_observes_recursive_atomic_moves(kb_dir):
     raw = kb_dir / "raw"
-    known = raw / "known.md"
+    known = raw / "known.txt"
     known.write_text("known")
     registry = HashRegistry(kb_dir / ".openkb/hashes.json")
     registry.add(registry.hash_file(known), {"name": known.name})

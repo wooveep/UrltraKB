@@ -42,6 +42,7 @@ def result_from_publication(
 ) -> IngestResult:
     resources = [str(kb_dir / admission.revision.original)]
     from openkb.application.sources import processing_details
+    from openkb.inputs import input_version
 
     actual_source = None
     manifest = None
@@ -85,7 +86,10 @@ def result_from_publication(
         status,
         tuple(resources),
         unfinished=() if status in {"added", "skipped"} else (state.stage,),
-        input_version=admission.revision.digest,
+        input_version=input_version(
+            admission.revision.digest,
+            {asset.original_reference: asset.digest for asset in admission.revision.assets},
+        ),
         source_id=admission.source.source_id,
         source_revision_id=admission.revision.source_revision_id,
         units=(outcome,),
@@ -94,7 +98,7 @@ def result_from_publication(
     )
 
 
-def import_prepared_pdf(
+def import_prepared_source(
     kb_dir: Path,
     prepared: PreparedInput,
     *,
@@ -167,7 +171,13 @@ def import_prepared_pdf(
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint
         if review
-        else normalization_fingerprint(kb_dir, scope=scope, bundle=bundle)
+        else normalization_fingerprint(
+            kb_dir,
+            scope=scope,
+            bundle=bundle,
+            source_revision=admission.revision,
+            doc_name=admission.source.doc_name,
+        )
     )
 
     unit, revision = plan_import_units(kb_dir, admission, fingerprint)
@@ -212,6 +222,11 @@ def import_prepared_pdf(
                 index_ref = None
                 if converted.is_long_doc:
                     stage = "indexing"
+                    if admission.revision.source_format in {"md", "markdown"}:
+                        raise ValueError(
+                            "Segmented Markdown processing is not available yet; "
+                            "complete input retained"
+                        )
                     if converted.raw_path is None:
                         raise ValueError("Normalized PDF is missing")
                     indexed = index_long_document(
@@ -263,9 +278,14 @@ def import_prepared_pdf(
                 freeze_pdf_map(
                     view.scope.wiki_dir, unit.doc_name, kb_dir / admission.revision.original
                 )
-                if converted.processing is not None or page_map.exists()
+                if admission.revision.source_format == "pdf"
+                and (converted.processing is not None or page_map.exists())
                 else None
             )
+            if admission.revision.source_format in {"md", "markdown"}:
+                from openkb.source_map import freeze_text_map
+
+                source_map = freeze_text_map(view.scope.wiki_dir, unit.doc_name)
             state = publish_unit_revision(
                 kb_dir,
                 admission,

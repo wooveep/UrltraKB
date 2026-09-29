@@ -174,8 +174,23 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     ]
             from openkb.source_changes import source_validity
 
+            measurement = {}
+            if actual and actual[1].source_map and actual[1].source_map.unit_kind == "text":
+                from openkb.source_map import read_source_map
+
+                text = read_source_map(actual[0] / "wiki", actual[1].source_map, source.doc_name)
+                measurement = {key: text[key] for key in ("tokens", "characters")}
+            elif not actual and states:
+                from openkb.normalization import read_retained_text
+
+                retained = read_retained_text(
+                    root, states[0].target_revision_id, revision.source_revision_id, source.doc_name
+                )
+                if retained:
+                    measurement = {key: retained[1][key] for key in ("tokens", "characters")}
             documents.append(
                 {
+                    **measurement,
                     "hash": source.source_id,
                     "source_generation": source.target_generation,
                     "validity": source_validity(
@@ -205,7 +220,7 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     "units": [state.model_dump(mode="json") for state in states],
                     "message": states[0].message if states else None,
                     "pages": actual[1].source_map.unit_count
-                    if actual and actual[1].source_map
+                    if actual and actual[1].source_map and actual[1].source_map.unit_kind == "page"
                     else None,
                     "original_path": revision.original,
                 }
@@ -220,6 +235,7 @@ def read_admitted_source(
     source_revision_id: str | None = None,
     scope: KnowledgeScope | None = None,
     page_range: str | None = None,
+    char_range: str | None = None,
 ) -> dict | None:
     root = kb_dir.resolve()
     if scope is not None:
@@ -309,7 +325,11 @@ def read_admitted_source(
                 from openkb.source_map import read_source_map
 
                 selection = read_source_map(
-                    actual[0] / "wiki", actual[1].source_map, units[0].doc_name, page_range
+                    actual[0] / "wiki",
+                    actual[1].source_map,
+                    units[0].doc_name,
+                    page_range,
+                    chars=char_range,
                 )
             elif base_path.suffix == ".json":
                 from openkb.source_pages import read_page_selection
@@ -317,12 +337,26 @@ def read_admitted_source(
                 page_list = json.loads(base_path.read_text("utf-8"))
                 selection = read_page_selection(page_list, page_range)
             else:
-                if page_range is not None:
+                if page_range is not None or char_range is not None:
                     from openkb.source_pages import PageRangeError
 
                     raise PageRangeError("This retained source has no physical-page map")
                 content = base_path.read_text("utf-8")
             if selection:
+                content, pages = selection["content"], selection["pages"]
+        elif state:
+            from openkb.normalization import read_retained_text
+
+            retained = read_retained_text(
+                root,
+                state.target_revision_id,
+                target.source_revision_id,
+                source.doc_name,
+                pages=page_range,
+                chars=char_range,
+            )
+            if retained:
+                base_path, selection = retained
                 content, pages = selection["content"], selection["pages"]
         annotation_id = source.annotation_id
         if actual and actual[1].unit_revision_id:
@@ -372,7 +406,9 @@ def read_admitted_source(
             "pages": pages,
             "original_path": target.original,
             "base_path": (
-                base_path.parent.parent if base_path.suffix == ".json" else base_path.parent
+                base_path.parent.parent
+                if base_path.suffix == ".json" and selection.get("unit_kind") != "text"
+                else base_path.parent
             )
             .relative_to(root)
             .as_posix(),

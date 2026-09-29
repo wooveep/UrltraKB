@@ -99,7 +99,7 @@ def select_execution_mode(
         return processing.model_copy(update={**updates, "capacity_reason": reason})
     messages = short_document_messages(
         doc_name,
-        source_path.read_text("utf-8"),
+        source_path.read_bytes().decode("utf-8"),
         get_agents_md(resolve_scope(kb_dir, scope).wiki_dir),
         config.get("language", "en"),
     )

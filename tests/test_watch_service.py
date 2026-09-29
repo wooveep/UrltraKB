@@ -21,6 +21,37 @@ from openkb.watch_service import (
     _record_event,
 )
 
+pytest_plugins = ("test_pdf_readback",)
+
+
+def test_asset_event_reimports_its_markdown_source(kb_dir, pdf_model):
+    from openkb.application.documents import import_document
+    from openkb.documents import read_document_source
+
+    source = kb_dir / "raw/figure.md"
+    image = kb_dir / "raw/figure.png"
+    source.write_text("![figure](figure.png)")
+    image.write_bytes(b"before")
+    first = import_document(kb_dir, source)
+    registry = WatchRegistry()
+    registry.start("test-kb", kb_dir, debounce=0.03)
+    try:
+        image.write_bytes(b"after")
+        deadline = time.monotonic() + 7
+        while time.monotonic() < deadline:
+            saved = read_document_source(kb_dir, first.source_id)
+            if saved["target_source_revision_id"] != first.source_revision_id:
+                break
+            time.sleep(0.03)
+        assert saved["target_source_revision_id"] != first.source_revision_id
+        saved = read_document_source(
+            kb_dir, first.source_id, source_revision_id=saved["target_source_revision_id"]
+        )
+        retained = kb_dir / saved["base_path"] / "images/figure/figure.png"
+        assert retained.read_bytes() == b"after"
+    finally:
+        registry.stop("test-kb")
+
 
 def _fake_add_ok(path: Path, kb_dir: Path, bundle=None, **kwargs) -> AddFileResult:
     return AddFileResult("x", str(path), "added", "ok")

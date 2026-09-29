@@ -40,10 +40,10 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setAccessibleName("已导入资料")
         self.table.setHorizontalHeaderLabels(
-            ["资料", "格式", "导入方式", "处理状态", "来源修订", "知识视图"]
+            ["资料", "格式", "导入方式", "处理状态", "来源修订", "知识视图", "度量"]
         )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -276,8 +276,21 @@ class DocumentsDialog(ManagementPanel):
                 item.setToolTip(
                     f"来源：{doc.get('source_id') or doc['hash']}\n"
                     f"{doc.get('message') or ''}{target_hint}"
+                    + (
+                        f"\n文本：{doc['characters']} 字符 / {doc['tokens']} tokens"
+                        if doc.get("tokens") is not None
+                        else ""
+                    )
                 )
                 self.table.setItem(row, 5, QTableWidgetItem(doc.get("view_id", "legacy")))
+                measured = (
+                    f"{doc['characters']} 字符 / {doc['tokens']} tokens"
+                    if doc.get("tokens") is not None
+                    else f"{doc['pages']} 物理页"
+                    if doc.get("pages") is not None
+                    else "未记录"
+                )
+                self.table.setItem(row, 6, QTableWidgetItem(measured))
                 classification = {"short": "短文", "long": "长文"}.get(
                     doc.get("length_class"), "分类未知"
                 )

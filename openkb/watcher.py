@@ -94,10 +94,15 @@ class DebouncedHandler(FileSystemEventHandler):
         """Handle file modification events."""
         self._handle_event(event)
 
+    def on_deleted(self, event) -> None:
+        """Missing assets change their owner's frozen input too."""
+        self._handle_event(event)
+
     def on_moved(self, event) -> None:
         from watchdog.events import FileCreatedEvent
 
         if not event.is_directory:
+            self._handle_event(event)
             self._handle_event(FileCreatedEvent(event.dest_path))
 
     def stop(self) -> None:
@@ -196,7 +201,32 @@ def start_watch(
     Returns:
         The started watchdog Observer.
     """
-    handler = DebouncedHandler(callback, debounce_seconds=debounce)
+
+    def changed(paths):
+        from openkb.inputs import local_image_inputs
+
+        affected = set(paths)
+        root = raw_dir.resolve()
+        if root == raw_dir:
+            resources = {Path(path).resolve() for path in paths}
+            for source in root.rglob("*"):
+                if (
+                    source.suffix.lower() not in {".md", ".markdown"}
+                    or any(part.startswith(".") for part in source.relative_to(root).parts)
+                    or source.is_symlink()
+                    or not source.is_file()
+                    or not source.resolve().is_relative_to(root)
+                ):
+                    continue
+                try:
+                    if resources.intersection(local_image_inputs(source).values()):
+                        affected.add(str(source))
+                except (OSError, ValueError):
+                    # The source's own event/import reports malformed or unstable input.
+                    continue
+        callback(sorted(affected))
+
+    handler = DebouncedHandler(changed, debounce_seconds=debounce)
     observer = Observer()
     observer.schedule(handler, str(raw_dir), recursive=True)
     observer.start()

@@ -52,6 +52,8 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
         if unit.length_class:
             lines.append(f"Processing: {unit.length_class} / {unit.execution_mode}")
         if unit.processing:
+            if unit.processing["measurement_unit"] == "token":
+                lines.append(f"Text: {unit.processing['measurement_value']} tokens (cl100k_base)")
             lines.append(
                 f"Capacity: {unit.processing['capacity_status']}; "
                 f"{unit.processing['capacity_reason'] or ''}"

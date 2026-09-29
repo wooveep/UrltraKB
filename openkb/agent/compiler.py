@@ -2246,7 +2246,7 @@ async def compile_short_doc(
 
     wiki_dir = resolve_scope(kb_dir, scope, writable=True).wiki_dir
     schema_md = get_agents_md(wiki_dir)
-    content = source_path.read_text(encoding="utf-8")
+    content = source_path.read_bytes().decode("utf-8")
 
     # Base context A: system + document. cache_control marker on the doc
     # message creates a cache breakpoint that covers (system + doc) for

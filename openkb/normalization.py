@@ -27,7 +27,9 @@ class NormalizedInput(Record):
     processing: ProcessingDecision | None = None
 
 
-def normalization_fingerprint(kb_dir: Path, *, scope=None, bundle=None) -> str:
+def normalization_fingerprint(
+    kb_dir: Path, *, scope=None, bundle=None, source_revision=None, doc_name=None
+) -> str:
     from openkb.agent.compiler import get_agents_md, short_document_messages
     from openkb.config import resolve_credential_bundle
     from openkb.execution_capacity import capacity_policy
@@ -38,6 +40,22 @@ def normalization_fingerprint(kb_dir: Path, *, scope=None, bundle=None) -> str:
     request_basis = short_document_messages(
         "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
     )
+    text_policy = {}
+    if source_revision and source_revision.source_format in {"md", "markdown"}:
+        from openkb.text_measurement import MEASUREMENT_FINGERPRINT
+        from openkb.text_source import NORMALIZATION_POLICY
+
+        text_policy = {
+            "pipeline": NORMALIZATION_POLICY,
+            "classification": {"short_max_tokens": 5000, "measurement": MEASUREMENT_FINGERPRINT},
+            "input": {
+                "body": source_revision.digest,
+                "doc_name": doc_name,
+                "assets": {
+                    asset.original_reference: asset.digest for asset in source_revision.assets
+                },
+            },
+        }
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
@@ -48,6 +66,7 @@ def normalization_fingerprint(kb_dir: Path, *, scope=None, bundle=None) -> str:
             "request_basis": hashlib.sha256(
                 json.dumps(request_basis, sort_keys=True).encode()
             ).hexdigest(),
+            **text_policy,
         },
         sort_keys=True,
     )
@@ -152,6 +171,35 @@ def restore_normalization(directory: Path, saved: NormalizedInput, working: Path
         source_path=working / saved.source_path if saved.source_path else None,
         is_long_doc=saved.is_long,
         processing=saved.processing,
+    )
+
+
+def read_retained_text(
+    kb_dir: Path,
+    unit_revision_id: str,
+    source_revision_id: str,
+    doc_name: str,
+    *,
+    chars: str | None = None,
+    pages: str | None = None,
+) -> tuple[Path, dict] | None:
+    """Read a frozen, unpublished text input without inventing a knowledge revision."""
+    from openkb.ingest_records import UnitRevision
+    from openkb.source_map import freeze_text_map, read_source_map
+
+    used = read_record(kb_dir, "unit-revisions", unit_revision_id, UnitRevision)
+    if used.source_revision_id != source_revision_id:
+        return None
+    identity = normalization_id(source_revision_id, used.processing_fingerprint)
+    if not record_path(kb_dir, "normalizations", identity).exists():
+        return None
+    directory, saved = read_normalization(kb_dir, identity)
+    path = f"wiki/sources/{doc_name}.content.json"
+    if path not in saved.files:
+        return None
+    reference = freeze_text_map(directory / "wiki", doc_name)
+    return directory / path, read_source_map(
+        directory / "wiki", reference, doc_name, pages, chars=chars
     )
 
 

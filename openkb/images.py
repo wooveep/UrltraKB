@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import pymupdf
 
+from openkb.markdown_images import apply_image_edits, image_references
+
 if TYPE_CHECKING:
     from openkb.inputs import PreparedImage
 
@@ -226,7 +228,13 @@ def convert_pdf_with_images(
     return "\n".join(parts)
 
 
-def extract_base64_images(markdown: str, doc_name: str, images_dir: Path) -> str:
+def extract_base64_images(
+    markdown: str,
+    doc_name: str,
+    images_dir: Path,
+    *,
+    edits: list[tuple[int, int, str]] | None = None,
+) -> str:
     """Decode base64-embedded images, save to disk, and rewrite markdown links.
 
     For each ``![alt](data:image/ext;base64,DATA)`` match:
@@ -235,10 +243,16 @@ def extract_base64_images(markdown: str, doc_name: str, images_dir: Path) -> str
     - On decode failure: log a warning and leave the original text unchanged.
     """
     counter = 0
-    result = markdown
+    replacements = []
 
-    for match in _BASE64_RE.finditer(markdown):
-        alt, ext, b64_data = match.group(1), match.group(2), match.group(3)
+    for reference in image_references(markdown):
+        data = re.fullmatch(r"data:image/([^;]+);base64,(.+)", reference.source)
+        if data is None:
+            continue
+        alt, ext, b64_data = reference.alt, data.group(1), data.group(2)
+        if not re.fullmatch(r"[a-zA-Z0-9.+-]+", ext):
+            logger.warning("Invalid data-image media type; leaving original reference")
+            continue
         try:
             image_bytes = base64.b64decode(b64_data, validate=True)
         except Exception:
@@ -250,24 +264,30 @@ def extract_base64_images(markdown: str, doc_name: str, images_dir: Path) -> str
             continue
 
         counter += 1
+        ext = {"svg+xml": "svg", "x-icon": "ico"}.get(ext.lower(), ext)
         filename = f"img_{counter:03d}.{ext}"
         dest = images_dir / filename
         images_dir.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(image_bytes)
+        from openkb.locks import atomic_write_bytes
 
-        new_ref = md_image_ref(alt, doc_name, filename)
-        result = result.replace(match.group(0), new_ref, 1)
+        atomic_write_bytes(dest, image_bytes)
 
-    return result
+        new_ref = reference.relocated(f"images/{doc_name}/{filename}")
+        replacements.append((reference.start, reference.end, new_ref))
+
+    if edits is not None:
+        edits.extend(replacements)
+    return apply_image_edits(markdown, replacements)
 
 
 def relative_image_paths(markdown: str, source_dir: Path) -> dict[str, Path]:
     """Resolve local image references contained by the original document directory."""
     root = source_dir.resolve()
     return {
-        match.group(2): path
-        for match in _RELATIVE_RE.finditer(markdown)
-        if (path := (root / match.group(2)).resolve()).is_relative_to(root)
+        reference.source: path
+        for reference in image_references(markdown)
+        if reference.local_path is not None
+        and (path := (root / reference.local_path).resolve()).is_relative_to(root)
     }
 
 
@@ -278,6 +298,7 @@ def copy_relative_images(
     images_dir: Path,
     *,
     prepared: dict[str, PreparedImage] | None = None,
+    edits: list[tuple[int, int, str]] | None = None,
 ) -> str:
     """Copy locally-referenced images into the KB images directory and rewrite links.
 
@@ -287,22 +308,24 @@ def copy_relative_images(
     - Replace link with ``![alt](images/{doc_name}/{filename})``
     - Missing source file: log a warning and leave the original text unchanged.
     """
-    result = markdown
+    replacements = []
     # Track the destination chosen for each already-copied source so the same
     # image referenced twice isn't duplicated, plus the set of taken names so
     # two *different* sources that share a basename (e.g. ``a/logo.png`` and
     # ``b/logo.png``) don't overwrite each other and collapse both links onto a
     # single image.
     assigned: dict[Path, str] = {}
-    taken: set[str] = set()
+    taken: set[str] = {path.name for path in images_dir.iterdir()} if images_dir.exists() else set()
     paths = (
         relative_image_paths(markdown, source_dir)
         if prepared is None
         else {reference: image.original for reference, image in prepared.items()}
     )
 
-    for match in _RELATIVE_RE.finditer(markdown):
-        alt, rel_path = match.group(1), match.group(2)
+    for reference in image_references(markdown):
+        if reference.local_path is None:
+            continue
+        rel_path = reference.source
         src = paths.get(rel_path)
         if src is None:
             logger.warning("Image path escapes source dir: %s; skipping.", rel_path)
@@ -326,7 +349,9 @@ def copy_relative_images(
 
             copy_stable(frozen, images_dir / filename)
 
-        new_ref = md_image_ref(alt, doc_name, filename)
-        result = result.replace(match.group(0), new_ref, 1)
+        new_ref = reference.relocated(f"images/{doc_name}/{filename}")
+        replacements.append((reference.start, reference.end, new_ref))
 
-    return result
+    if edits is not None:
+        edits.extend(replacements)
+    return apply_image_edits(markdown, replacements)

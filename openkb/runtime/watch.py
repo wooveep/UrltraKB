@@ -19,7 +19,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Generator
 
-from openkb.inputs import SUPPORTED_EXTENSIONS
+from openkb.inputs import (
+    FROZEN_SOURCE_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    current_input_version,
+    local_image_inputs,
+)
 from openkb.lifecycle import (
     KnowledgeBaseRemoved,
     current_generation,
@@ -68,7 +73,14 @@ def _busy() -> None:
 
 def _stamp(path: Path) -> str:
     value = path.stat()
-    return f"{value.st_dev}:{value.st_ino}:{value.st_size}:{value.st_mtime_ns}"
+    stamp = f"{value.st_dev}:{value.st_ino}:{value.st_size}:{value.st_mtime_ns}"
+    for ref, asset in local_image_inputs(path).items():
+        try:
+            info = asset.stat()
+            stamp += f"|{ref}:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+        except FileNotFoundError:
+            stamp += f"|{ref}:missing"
+    return stamp
 
 
 def _files(directory: Path, report: Callable[[Path, OSError], None]) -> Generator[Path, None, None]:
@@ -221,7 +233,7 @@ class NativeWatch:
         if now - candidate.changed_at < self.debounce:
             return False
         if candidate.digest is None or now - candidate.verified_at >= self.verify_interval:
-            candidate.digest = HashRegistry.hash_file(path)
+            candidate.digest = current_input_version(path)
             candidate.verified_at = now
         digest = candidate.digest
         if _stamp(path) != stamp:
@@ -235,7 +247,7 @@ class NativeWatch:
         with kb_read_lock(self.root / ".openkb", cancelled=self._stop.is_set, on_wait=_busy):
             registry = HashRegistry(self.root / ".openkb/hashes.json")
             entry = registry.get(digest)
-            if entry and path.suffix.lower() != ".pdf":
+            if entry and path.suffix.lower() not in FROZEN_SOURCE_EXTENSIONS:
                 self._remember(db, path, stamp, digest)
                 return True
         with self._gate:

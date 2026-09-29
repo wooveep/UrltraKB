@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import tempfile
 from contextlib import contextmanager
@@ -11,6 +13,39 @@ from pathlib import Path
 from typing import Iterator
 
 from openkb.state import HashRegistry
+
+FROZEN_SOURCE_EXTENSIONS = {".pdf", ".md", ".markdown"}
+
+
+def input_version(body_digest: str, assets: dict[str, str | None]) -> str:
+    """Version the bytes consumed by an import, including absent local resources."""
+    if not assets:
+        return body_digest
+    return hashlib.sha256(json.dumps([body_digest, assets], sort_keys=True).encode()).hexdigest()
+
+
+def local_image_inputs(source: Path) -> dict[str, Path]:
+    from openkb.images import relative_image_paths
+
+    if source.suffix.lower() not in {".md", ".markdown"}:
+        return {}
+    try:
+        text = source.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        # Admission/conversion owns the persisted malformed-input diagnosis.
+        return {}
+    return relative_image_paths(text, source.parent)
+
+
+def current_input_version(source: Path) -> str:
+    return input_version(
+        HashRegistry.hash_file(source),
+        {
+            ref: HashRegistry.hash_file(path) if path.is_file() else None
+            for ref, path in local_image_inputs(source).items()
+        },
+    )
+
 
 _preparation_root: ContextVar[Path | None] = ContextVar("openkb_preparation_root", default=None)
 

@@ -30,6 +30,16 @@ def selection_catalog(selection: QuerySelection) -> str:
                 from pathlib import Path
 
                 pages = json.loads((view.scope.wiki_dir / name).read_text("utf-8"))
+                if name.endswith(".content.json"):
+                    from openkb.text_source import read_text_selection
+
+                    text = read_text_selection(pages)
+                    lines.append(
+                        f"  Source: doc_name={Path(name).name.removesuffix('.content.json')}; "
+                        f"characters=0:{text['characters']}; tokens={text['tokens']}; "
+                        "unit_kind=text; pages=none; use get_text_content with chars=START:END"
+                    )
+                    continue
                 if not isinstance(pages, list):
                     raise ValueError("Indexed evidence must contain a page list")
                 from openkb.source_pages import read_page_selection
@@ -94,6 +104,26 @@ def restrict_query_agent(agent, selection: QuerySelection):
         )
 
     @function_tool
+    def get_text_content(doc_name: str, chars: str, view_id: str = "") -> str:
+        """Read a frozen Unicode codepoint range START:END (0-based, end exclusive).
+
+        Returns exact original-file locators separately from normalized text coordinates.
+        Text has no physical pages. Choose doc_name and view_id from the evidence catalog.
+        """
+        import json
+
+        from openkb.text_source import read_text_selection
+
+        view = _selected(selection, view_id)
+        path = f"sources/{doc_name}.content.json"
+        if not _available(view, path):
+            return "No permitted frozen text in this evidence view."
+        selected = read_text_selection(
+            json.loads((view.scope.wiki_dir / path).read_text("utf-8")), chars
+        )
+        return view.provenance + "\n\n" + json.dumps(selected, ensure_ascii=False)
+
+    @function_tool
     def get_image(image_path: str, view_id: str = "") -> ToolOutputImage | ToolOutputText:
         """View a retained image belonging to one permitted evidence view."""
         view = _selected(selection, view_id)
@@ -110,6 +140,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     readers = {
         "read_file",
         "get_page_content",
+        "get_text_content",
         "get_image",
         "read_wiki_file",
         "list_wiki_dir",
@@ -131,7 +162,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         + selection_catalog(selection)
     )
     return agent.clone(
-        tools=[read_file, get_page_content, get_image, *extra_tools],
+        tools=[read_file, get_page_content, get_text_content, get_image, *extra_tools],
         instructions=(agent.instructions or "") + instructions,
     )
 
