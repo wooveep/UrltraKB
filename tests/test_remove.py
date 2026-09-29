@@ -977,61 +977,21 @@ def test_cli_remove_dry_run_does_not_touch_images(kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_add_long_pdf_persists_doc_id_to_registry(tmp_path):
-    """Long-doc ingest must record `doc_id` in the registry. Without it,
-    the remove path has no handle to feed `Collection.delete_document`.
+def test_legacy_long_pdf_preview_retains_the_cleanup_reference(kb_dir):
+    """A preview retains the exact index identity needed by subsequent cleanup.
+
+    New imports publish their index reference in immutable knowledge revisions;
+    the old registry remains the compatibility boundary for legacy removal.
     """
-    from openkb.converter import ConvertResult
-    from openkb.indexer import IndexResult
+    from openkb.application.removal import run_remove_for_api
 
-    # Minimal KB
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources" / "images").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "explorations").mkdir(parents=True)
-    (tmp_path / "wiki" / "reports").mkdir(parents=True)
-    (tmp_path / "wiki" / "index.md").write_text(
-        "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "wiki" / "log.md").write_text("# Log\n", encoding="utf-8")
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    (openkb_dir / "hashes.json").write_text("{}")
-
-    pdf = tmp_path / "long.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n" + b"\x00" * 200)
-    raw_path = tmp_path / "raw" / "long.pdf"
-    raw_path.write_bytes(pdf.read_bytes())
-
-    convert_mock = ConvertResult(
-        raw_path=raw_path,
-        source_path=None,
-        is_long_doc=True,
-        file_hash="cafebabe" * 8,
-    )
-    index_mock = IndexResult(
-        doc_id="pi-doc-abc123",
-        description="A long PDF",
-        tree={},
-    )
-
-    runner = CliRunner()
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.application.documents.convert_document", return_value=convert_mock),
-        patch("openkb.indexer.index_long_document", return_value=index_mock),
-        patch("openkb.cli.asyncio.run"),
-    ):
-        result = runner.invoke(cli, ["add", str(pdf)])
-
-    assert result.exit_code == 0, result.output
-    hashes = json.loads((openkb_dir / "hashes.json").read_text())
-    ((_, meta),) = hashes.items()
-    assert meta["type"] == "long_pdf"
-    assert meta["doc_id"] == "pi-doc-abc123"
+    _seed_long_pdf_kb(kb_dir, doc_id="pi-doc-abc123")
+    registry = kb_dir / ".openkb/hashes.json"
+    before = registry.read_bytes()
+    result = run_remove_for_api(kb_dir, "paper.pdf", dry_run=True)
+    assert result["status"] == "dry_run"
+    assert registry.read_bytes() == before
+    assert _index_ids(kb_dir) == {"pi-doc-abc123"}
 
 
 # ---------------------------------------------------------------------------

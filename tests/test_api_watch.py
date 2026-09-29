@@ -217,7 +217,7 @@ def test_watch_events_default_timeout_terminates(monkeypatch, kb_dir):
     from openkb.api_helpers import _stream_watch_events
     from openkb.watch_service import WatchRegistry
 
-    monkeypatch.setattr("openkb.api_helpers._WATCH_SSE_TIMEOUT", 0.05)
+    monkeypatch.setattr("openkb.api_watch_events._WATCH_SSE_TIMEOUT", 0.05)
 
     reg = WatchRegistry()
     reg.start("t", kb_dir, debounce=0.1)

@@ -5,7 +5,9 @@ from pathlib import Path
 from openkb.file_state import contained_paths
 from openkb.source_records import Record
 
-SUPPORTED_CAPABILITIES = frozenset({"source-revisions-v1", "unit-publications-v1"})
+SUPPORTED_CAPABILITIES = frozenset(
+    {"source-revisions-v1", "unit-publications-v1", "knowledge-views-v1"}
+)
 
 
 class CatalogSchema(Record):

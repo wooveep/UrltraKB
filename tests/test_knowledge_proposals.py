@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from openkb.application.pages import read_page, save_page
+from openkb.knowledge_scope import legacy_scope
 
 
 def test_manual_edit_creates_a_new_snapshot_without_rewriting_the_generated_baseline(kb_dir):
@@ -67,7 +68,7 @@ def pending_proposal(kb_dir, monkeypatch):
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         ),
     )
-    result = import_document(kb_dir, source)
+    result = import_document(kb_dir, source, scope=legacy_scope(kb_dir))
     assert result.status == "blocked"
     return result.units[0].proposal_id
 
@@ -95,6 +96,20 @@ def test_editing_after_review_keeps_the_proposal_and_current_page(kb_dir, pendin
     assert accept_proposal(kb_dir, pending_proposal, version=opened.version).status == "blocked"
     assert read_page(kb_dir, page.path).body == "New human explanation."
     assert list_proposals(kb_dir)[0].proposal_id == pending_proposal
+
+
+def test_proposals_are_confined_to_the_selected_view(kb_dir, pending_proposal):
+    from openkb.application.proposals import accept_proposal, list_proposals, read_proposal
+    from openkb.knowledge_scope import live_scope
+
+    foreign = live_scope(kb_dir, "a" * 32)
+    opened = read_proposal(kb_dir, pending_proposal)
+    assert list_proposals(kb_dir, scope=foreign) == ()
+    with pytest.raises(ValueError, match="view"):
+        read_proposal(kb_dir, pending_proposal, scope=foreign)
+    with pytest.raises(ValueError, match="view"):
+        accept_proposal(kb_dir, pending_proposal, version=opened.version, scope=foreign)
+    assert read_page(kb_dir, "summaries/guide").body == "Human explanation."
 
 
 def test_recompile_preserves_manual_changes_as_a_new_proposal(
@@ -172,11 +187,11 @@ def test_another_source_cannot_restore_a_manually_deleted_shared_page(kb_dir, mo
 
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)
-    assert import_document(kb_dir, source).status == "added"
+    assert import_document(kb_dir, source, scope=legacy_scope(kb_dir)).status == "added"
     delete_wiki_page(kb_dir, "concepts/fact")
     another = kb_dir / "another.pdf"
     another.write_bytes(source.read_bytes())
-    result = import_document(kb_dir, another)
+    result = import_document(kb_dir, another, scope=legacy_scope(kb_dir))
     assert result.status == "blocked" and result.units[0].proposal_id
     assert not (kb_dir / "wiki/concepts/fact.md").exists()
 
@@ -312,6 +327,7 @@ from openkb.desktop.proposals import ProposalsDialog
 
 app = QApplication([])
 window = QMainWindow()
+window.scope = None
 window.io = LocalIO()
 view = ProposalsDialog(window, Path(sys.argv[1]))
 view.show()

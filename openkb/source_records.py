@@ -38,6 +38,8 @@ class Source(Record):
     target_generation: int = Field(ge=1)
     removed: bool = False
     legacy_hash: str | None = None
+    annotation_id: RecordId | None = None
+    family_id: RecordId | None = None
 
 
 class FrozenAsset(Record):

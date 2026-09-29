@@ -150,6 +150,9 @@ def _build_remove_plan(
     scope = resolve_scope(kb_dir, scope)
     from openkb.source_refs import scan_affected_pages
 
+    if scope.view_id != "legacy":
+        raise ValueError("Legacy sources can only be removed from the legacy view")
+
     kb_dir = scope.kb_dir
     name = meta.get("name", "?")
     doc_name = meta.get("doc_name") or Path(name).stem
@@ -300,6 +303,9 @@ def _execute_remove_plan(
     )
     from openkb.lint import fix_broken_links
 
+    if scope.view_id != "legacy":
+        raise ValueError("Legacy sources can only be removed from the legacy view")
+
     wiki_dir = scope.wiki_dir
     openkb_dir = kb_dir / ".openkb"
     doc_name = plan.doc_name
@@ -415,6 +421,9 @@ def run_remove_for_api(
     """
     scope = resolve_scope(kb_dir, scope)
     from openkb.state import HashRegistry
+
+    if scope.view_id != "legacy":
+        return {"status": "not_found", "identifier": identifier}
 
     kb_dir = scope.kb_dir
     openkb_dir = kb_dir / ".openkb"
@@ -551,6 +560,8 @@ def preview_removal(
     scope: KnowledgeScope | None = None,
 ) -> RemovalPreview:
     scope = resolve_scope(kb_dir, scope)
+    if scope.view_id != "legacy":
+        return RemovalPreview("not_found")
     kb_dir = kb_dir.resolve()
     if not identifier.strip():
         raise ValueError("Document identifier is required")

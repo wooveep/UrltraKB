@@ -24,6 +24,8 @@ class MaintenanceDialog(QDialog):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        self.scope = getattr(window, "scope", None)
+        self.view_id = self.scope.view_id if self.scope else None
         self._closed = False
         self._task = None
         self._preparing = False
@@ -66,7 +68,9 @@ class MaintenanceDialog(QDialog):
         self.details.clear()
         semantic = self.semantic.isChecked()
         if not fix:
-            self._task = self.window.manager.submit(self.kb, [CheckKnowledge(semantic=semantic)])
+            self._task = self.window.manager.submit(
+                self.kb, [CheckKnowledge(semantic=semantic, view_id=self.view_id)]
+            )
             self.status.setText("检查任务已提交。可在主窗口查看状态或安全停止。")
             return
         self._preparing = True
@@ -91,12 +95,17 @@ class MaintenanceDialog(QDialog):
             question.setDefaultButton(QMessageBox.StandardButton.No)
             if question.exec() == QMessageBox.StandardButton.Yes:
                 self._task = self.window.manager.submit(
-                    self.kb, [CheckKnowledge(semantic=semantic, fix=True, version=version)]
+                    self.kb,
+                    [
+                        CheckKnowledge(
+                            semantic=semantic, fix=True, version=version, view_id=self.view_id
+                        )
+                    ],
                 )
                 self.status.setText("修复与检查任务已提交。")
 
         self.window.io.submit(
-            lambda: preview_link_repair(self.kb),
+            lambda: preview_link_repair(self.kb, scope=self.scope),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed,
@@ -139,15 +148,27 @@ class MaintenanceDialog(QDialog):
                     self.details.verticalScrollBar().setValue(0)
 
             self.window.io.submit(
-                lambda: read_page(self.kb, str(report.relative_to(self.kb / "wiki"))),
+                lambda: read_page(
+                    self.kb,
+                    str(
+                        report.relative_to(self.scope.wiki_dir if self.scope else self.kb / "wiki")
+                    ),
+                    scope=self.scope,
+                ),
                 loaded,
                 kb=self.kb,
                 obsolete=lambda: self._closed or self._task is not None or self._report != report,
             )
 
     def open_report(self):
-        if self._report and self.window.kb == self.kb:
-            self.window.open_page(str(self._report.relative_to(self.kb / "wiki")))
+        if self._report and self.window.kb == self.kb and self.window.scope == self.scope:
+            self.window.open_page(
+                str(
+                    self._report.relative_to(
+                        self.scope.wiki_dir if self.scope else self.kb / "wiki"
+                    )
+                )
+            )
             self.accept()
 
     def done(self, result):

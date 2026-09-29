@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from openkb.api_views import ViewRequest
 from openkb.application.settings_data import (
     _KB_CONFIG_WRITABLE_KEYS as _KB_CONFIG_WRITABLE_KEYS,
 )
@@ -29,7 +30,7 @@ from openkb.application.settings_data import (
 from openkb.ingest_result import ImportUnitOutcome
 
 
-class QueryRequest(BaseModel):
+class QueryRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
     stream: bool = True
@@ -41,7 +42,7 @@ class QueryResponse(BaseModel):
     saved_path: str | None = None
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
     session_id: str | None = None
@@ -55,6 +56,7 @@ class ChatResponse(BaseModel):
 
 
 class ChatSessionItem(BaseModel):
+    view_id: str = "legacy"
     id: str
     title: str
     turn_count: int
@@ -92,7 +94,7 @@ class ChatSessionLoadResponse(BaseModel):
     assistant_traces: list[list[ChatTraceStep]] = Field(default_factory=list)
 
 
-class ChatSessionLoadRequest(BaseModel):
+class ChatSessionLoadRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
 
@@ -153,16 +155,19 @@ class AddResponse(BaseModel):
     discovery_pending_count: int = 0
 
 
-class KbRequest(BaseModel):
+class KbRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
 
 
-class LintRequest(BaseModel):
+class LintRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     fix: bool = False
 
 
 class DocumentItem(BaseModel):
+    view_id: str = "legacy"
+    family_id: str | None = None
+    annotation_id: str | None = None
     hash: str
     name: str
     type: str
@@ -204,7 +209,7 @@ class LintResponse(BaseModel):
     lint_ghosts_removed: int | None = None
 
 
-class RemoveRequest(BaseModel):
+class RemoveRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     identifier: str = Field(..., min_length=1)
     keep_raw: bool = False
@@ -242,7 +247,7 @@ class RecompileDocItem(BaseModel):
     message: str | None = None
 
 
-class RecompileRequest(BaseModel):
+class RecompileRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     doc_name: str | None = None
     all_docs: bool = False
@@ -269,7 +274,7 @@ class RecompileResponse(BaseModel):
     message: str | None = None
 
 
-class DeckRequest(BaseModel):
+class DeckRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
     intent: str = Field(..., min_length=1)
@@ -286,7 +291,7 @@ class DeckListResponse(BaseModel):
     decks: list[dict]
 
 
-class SkillRequest(BaseModel):
+class SkillRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
     intent: str = Field(..., min_length=1)
@@ -303,7 +308,7 @@ class SkillListResponse(BaseModel):
     skills: list[dict]
 
 
-class GraphRequest(BaseModel):
+class GraphRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
 
 
@@ -313,7 +318,7 @@ class GraphResponse(BaseModel):
     types: list[str]
 
 
-class PageRequest(BaseModel):
+class PageRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
 
@@ -323,7 +328,7 @@ class PageResponse(BaseModel):
     content: str
 
 
-class DocumentSourceRequest(BaseModel):
+class DocumentSourceRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     # SHA-256 hash key from /list — the unique document identifier (avoids
     # ambiguity when two documents share a doc_name/filename stem).
@@ -332,6 +337,7 @@ class DocumentSourceRequest(BaseModel):
 
 
 class DocumentSourceResponse(BaseModel):
+    view_id: str = "legacy"
     hash: str
     name: str
     doc_name: str
@@ -352,7 +358,7 @@ class DocumentSourceResponse(BaseModel):
     original_kind: str | None = None
 
 
-class PageDeleteRequest(BaseModel):
+class PageDeleteRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     # A '<section>/<name>' wiki-page ref, e.g. "concepts/attention". Only
     # concepts/ and entities/ pages are user-deletable (validated server-side).
@@ -372,7 +378,7 @@ class PageDeleteResponse(BaseModel):
     ghosts_stripped: int | None = None
 
 
-class PageLinksRequest(BaseModel):
+class PageLinksRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
 
@@ -384,7 +390,7 @@ class PageLinksResponse(BaseModel):
     backlinks: list[str] = []  # pages that link to this page
 
 
-class PageEditRequest(BaseModel):
+class PageEditRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
     # New page BODY. The OKF frontmatter (type/description/sources) is

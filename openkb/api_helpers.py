@@ -7,7 +7,6 @@ import hmac
 import json
 import os
 import threading
-import time
 from contextlib import aclosing
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
@@ -39,6 +38,8 @@ from openkb.api_models import (
 from openkb.api_recompile import iter_recompile
 from openkb.api_uploads import cleanup_uploads as _cleanup_uploads
 from openkb.api_uploads import reserve_upload
+from openkb.api_views import resolve_api_scope
+from openkb.api_watch_events import _stream_watch_events as _stream_watch_events
 from openkb.application.answers import save_exploration
 from openkb.application.documents import _add_for_api
 from openkb.application.knowledge_bases import initialize_kb
@@ -50,8 +51,9 @@ from openkb.config import (
     resolve_effective_config,
     resolve_kb_alias,
 )
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.log import append_log
-from openkb.watch_service import WatchRegistry
+from openkb.view_records import SourceMetadata
 
 security = HTTPBearer(auto_error=False)
 UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -158,8 +160,10 @@ def _init_kb_for_api(
     return result
 
 
-def _save_query_answer(kb_dir: Path, question: str, answer: str) -> Path | None:
-    return save_exploration(kb_dir, question, answer)
+def _save_query_answer(
+    kb_dir: Path, question: str, answer: str, *, scope: KnowledgeScope | None = None
+) -> Path | None:
+    return save_exploration(kb_dir, question, answer, scope=scope)
 
 
 def _parse_stream_form(value: str | bool | None) -> bool:
@@ -275,11 +279,17 @@ async def _run_add_uploads(
     saved_uploads: list[tuple[Path, str]],
     *,
     bundle=None,
+    scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> AddResponse:
     results = []
     try:
         for saved_path, original_name in saved_uploads:
-            results.append(await _add_saved_file(kb_dir, saved_path, original_name, bundle=bundle))
+            results.append(
+                await _add_saved_file(
+                    kb_dir, saved_path, original_name, bundle=bundle, scope=scope, metadata=metadata
+                )
+            )
     finally:
         _cleanup_uploads(saved_uploads)
     return _summarize_add_results(kb, results)
@@ -291,6 +301,8 @@ async def _stream_add_uploads(
     saved_uploads: list[tuple[Path, str]],
     *,
     bundle=None,
+    scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> AsyncIterator[str]:
     results: list[AddFileItem] = []
     try:
@@ -312,6 +324,8 @@ async def _stream_add_uploads(
                     saved_path,
                     original_name,
                     bundle=bundle,
+                    scope=scope,
+                    metadata=metadata,
                     on_published=on_published,
                     cancelled=cancelled.is_set,
                 )
@@ -354,6 +368,8 @@ async def _add_saved_file(
     original_name: str,
     *,
     bundle=None,
+    scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
     on_published: Callable[[Path], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> AddFileItem:
@@ -362,7 +378,9 @@ async def _add_saved_file(
             with published_input(kb_dir, saved_path, cancelled=cancelled) as owned:
                 if on_published:
                     on_published(owned.path)
-                result = _add_for_api(owned.path, kb_dir, bundle=bundle)
+                result = _add_for_api(
+                    owned.path, kb_dir, bundle=bundle, scope=scope, metadata=metadata
+                )
                 item = AddFileItem(**result.__dict__)
                 item.original_name = original_name
                 if item.status == "skipped":
@@ -376,10 +394,15 @@ async def _add_saved_file(
         return await run_in_threadpool(consume)
 
 
-def _load_or_create_session(kb_dir: Path, session_id: str | None) -> ChatSession:
+def _load_or_create_session(
+    kb_dir: Path, session_id: str | None, *, scope: KnowledgeScope | None = None
+) -> ChatSession:
+    scope = resolve_scope(kb_dir, scope)
     if session_id:
         try:
-            return load_session(kb_dir, session_id)
+            session = load_session(kb_dir, session_id)
+            session.require_view(scope.view_id)
+            return session
         except FileNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -389,7 +412,7 @@ def _load_or_create_session(kb_dir: Path, session_id: str | None) -> ChatSession
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     language = config.get("language", "en")
-    return ChatSession.new(kb_dir, model, language)
+    return ChatSession.new(kb_dir, model, language, view_id=scope.view_id)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -405,6 +428,7 @@ async def _stream_query(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
+    scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
     yield _sse("start", {"endpoint": "query"})
     run_config = build_run_config_from_bundle(model, bundle)
     try:
@@ -413,7 +437,7 @@ async def _stream_query(
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
             language = config.get("language", "en")
-            agent = build_query_agent(str(kb_dir / "wiki"), model, language=language, bundle=bundle)
+            agent = build_query_agent(str(scope.wiki_dir), model, language=language, bundle=bundle)
             final_answer = ""
             stream = iter_agent_response_events(agent, request.question, run_config=run_config)
             async with aclosing(stream):
@@ -426,11 +450,11 @@ async def _stream_query(
                         # client-facing SSE frame is skipped when disconnected.
                         final_answer = data["answer"]
                         saved_path = (
-                            _save_query_answer(kb_dir, request.question, final_answer)
+                            _save_query_answer(kb_dir, request.question, final_answer, scope=scope)
                             if request.save
                             else None
                         )
-                        append_log(kb_dir / "wiki", "query", request.question)
+                        append_log(scope.wiki_dir, "query", request.question, scope=scope)
                         if await fastapi_request.is_disconnected():
                             break
                         yield _sse(
@@ -457,11 +481,16 @@ async def _stream_chat(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
+    scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
     yield _sse("start", {"endpoint": "chat", "session_id": session.id})
     run_config = build_run_config_from_bundle(session.model, bundle)
     try:
-        agent = await asyncio.to_thread(build_chat_session_agent, kb_dir, session, bundle=bundle)
-        stream = iter_chat_turn_events(agent, session, request.message, run_config=run_config)
+        agent = await asyncio.to_thread(
+            build_chat_session_agent, kb_dir, session, bundle=bundle, scope=scope
+        )
+        stream = iter_chat_turn_events(
+            agent, session, request.message, run_config=run_config, scope=scope
+        )
         async with aclosing(stream):
             async for event in stream:
                 if await fastapi_request.is_disconnected():
@@ -491,6 +520,7 @@ async def _stream_remove(
             keep_raw=request.keep_raw,
             keep_empty=request.keep_empty,
             dry_run=request.dry_run,
+            scope=await resolve_api_scope(kb_dir, request.view_id),
         )
         status_value = result.get("status")
         if status_value == "not_found":
@@ -548,6 +578,7 @@ async def _stream_recompile(
                 request.doc_name,
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
+                scope=await resolve_api_scope(kb_dir, request.view_id),
                 refresh_schema=request.refresh_schema,
                 bundle=bundle,
             ):
@@ -600,7 +631,8 @@ async def _iter_deck(
     )
 
     yield {"event": "start", "endpoint": "deck"}
-    err = preflight_generation(kb_dir, request.name)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
+    err = preflight_generation(kb_dir, request.name, scope=scope)
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
@@ -610,6 +642,7 @@ async def _iter_deck(
         result = await generate_artifact(
             kb_dir,
             GenerationOptions("deck", request.name, request.intent, overwrite="overlay"),
+            scope=scope,
             model=model,
             bundle=bundle,
         )
@@ -664,7 +697,8 @@ async def _iter_skill(
     )
 
     yield {"event": "start", "endpoint": "skill"}
-    err = preflight_generation(kb_dir, request.name)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
+    err = preflight_generation(kb_dir, request.name, scope=scope)
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
@@ -674,6 +708,7 @@ async def _iter_skill(
         result = await generate_artifact(
             kb_dir,
             GenerationOptions("skill", request.name, request.intent, overwrite="overlay"),
+            scope=scope,
             model=model,
             bundle=bundle,
         )
@@ -711,58 +746,4 @@ async def _stream_skill(
                 break
             name = event.pop("event")
             yield _sse(name, event)
-    yield _sse("done", {})
-
-
-# Default cap for /watch/events SSE so abandoned clients do not poll forever.
-_WATCH_SSE_TIMEOUT = float(os.environ.get("OPENKB_WATCH_SSE_TIMEOUT", "300"))
-
-
-async def _stream_watch_events(
-    registry: WatchRegistry,
-    kb: str,
-    max_events: int | None,
-    timeout_seconds: float | None,
-    request: Request,
-) -> AsyncIterator[str]:
-    """Tail a KB's watch event ring buffer as an SSE stream.
-
-    Replays existing events then polls for new ones. Terminates when the
-    watcher stops, or when ``max_events``/``timeout_seconds`` is reached (so
-    bounded clients and tests can drain without hanging). With both unset the
-    stream is capped by a default timeout when none is given.
-    """
-    state = await asyncio.to_thread(registry.get, kb)
-    yield _sse("start", {"endpoint": "watch", "kb": kb, "active": state is not None})
-    if state is None:
-        yield _sse("error", {"message": f"No active watcher for KB: {kb}"})
-        yield _sse("done", {})
-        return
-    if timeout_seconds is None:
-        timeout_seconds = _WATCH_SSE_TIMEOUT
-    next_seq = 0
-    emitted = 0
-    started = time.monotonic()
-    try:
-        while True:
-            if await request.is_disconnected():
-                return
-            for ev in list(state.events):
-                if ev["seq"] < next_seq:
-                    continue
-                next_seq = ev["seq"] + 1
-                yield _sse(ev["event"], ev["data"])
-                emitted += 1
-                if ev["event"] == "watcher_stopped":
-                    yield _sse("done", {})
-                    return
-                if max_events is not None and emitted >= max_events:
-                    yield _sse("done", {})
-                    return
-            if timeout_seconds is not None and (time.monotonic() - started) >= timeout_seconds:
-                yield _sse("done", {})
-                return
-            await asyncio.sleep(0.5)
-    except Exception as exc:
-        yield _sse("error", {"message": f"Watch events stream failed: {exc}"})
     yield _sse("done", {})

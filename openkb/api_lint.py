@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from openkb.application.maintenance import LintOptions, check_knowledge
+from openkb.knowledge_scope import KnowledgeScope
 
 
 def fix_summary(files_changed: int | None, ghosts: int | None) -> str:
@@ -24,7 +25,13 @@ def echo_lint_event(event: dict) -> None:
 
 
 async def run_lint_report(
-    kb_dir: Path, *, fix: bool = False, echo: bool = False, bundle=None, prepare_model=None
+    kb_dir: Path,
+    *,
+    fix: bool = False,
+    echo: bool = False,
+    bundle=None,
+    prepare_model=None,
+    scope: KnowledgeScope | None = None,
 ) -> dict:
     result = await check_knowledge(
         kb_dir,
@@ -32,6 +39,7 @@ async def run_lint_report(
         bundle=bundle,
         on_event=echo_lint_event if echo else None,
         prepare_model=prepare_model,
+        scope=scope,
     )
     if result.status in {"failed", "blocked", "conflict"}:
         raise RuntimeError(f"Lint failed ({result.error_type or result.status})")

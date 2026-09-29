@@ -1115,7 +1115,7 @@ def test_remove_dry_run_returns_plan(monkeypatch, kb_dir):
 
     captured = {}
 
-    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run):
+    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None):
         captured["dry_run"] = dry_run
         captured["keep_raw"] = keep_raw
         return {
@@ -1146,7 +1146,7 @@ def test_remove_passes_keep_empty(monkeypatch, kb_dir):
 
     captured = {}
 
-    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run):
+    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None):
         captured["keep_empty"] = keep_empty
         return {"status": "removed", "name": "p", "doc_name": "p", "actions": []}
 

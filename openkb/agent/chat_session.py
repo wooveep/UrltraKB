@@ -129,6 +129,7 @@ class ChatSession:
     # CLI-recorded turns): the frontend falls back to the flat text for those.
     assistant_traces: list[list[dict[str, Any]]]
     path: Path
+    view_id: str = "legacy"
     incomplete: list[dict[str, Any]] = field(default_factory=list)
     completed_attempts: list[str] = field(default_factory=list)
     token_usage: dict[str, int | None] | None = None
@@ -136,8 +137,19 @@ class ChatSession:
 
     @classmethod
     def new(
-        cls, kb_dir: Path, model: str, language: str, *, identity: str | None = None
+        cls,
+        kb_dir: Path,
+        model: str,
+        language: str,
+        *,
+        identity: str | None = None,
+        view_id: str = "legacy",
     ) -> "ChatSession":
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import ViewId
+
+        TypeAdapter(ViewId).validate_python(view_id)
         now = _utcnow_iso()
         sid = identity or _gen_id()
         return cls(
@@ -153,7 +165,14 @@ class ChatSession:
             assistant_texts=[],
             assistant_traces=[],
             path=_session_path(kb_dir, sid),
+            view_id=view_id,
         )
+
+    def require_view(self, view_id: str) -> None:
+        if self.view_id != view_id:
+            raise ValueError(
+                "Conversation belongs to another knowledge view; start a new conversation"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -162,6 +181,7 @@ class ChatSession:
             "updated_at": self.updated_at,
             "model": self.model,
             "language": self.language,
+            "view_id": self.view_id,
             "title": self.title,
             "turn_count": self.turn_count,
             "history": self.history,
@@ -300,6 +320,10 @@ class ChatSession:
 
 
 def load_session(kb_dir: Path, session_id: str) -> ChatSession:
+    from pydantic import TypeAdapter
+
+    from openkb.source_records import ViewId
+
     path = _session_path(kb_dir, session_id)
     content = path.read_bytes()
     data = json.loads(content.decode("utf-8"))
@@ -346,6 +370,7 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         updated_at=data["updated_at"],
         model=data["model"],
         language=data.get("language", "en"),
+        view_id=TypeAdapter(ViewId).validate_python(data.get("view_id", "legacy")),
         title=data.get("title", ""),
         turn_count=data.get("turn_count", 0),
         history=sanitize_history(data.get("history", [])),
@@ -378,6 +403,7 @@ def list_sessions(kb_dir: Path) -> list[dict[str, Any]]:
                 "turn_count": session.turn_count,
                 "updated_at": session.updated_at,
                 "model": session.model,
+                "view_id": session.view_id,
             }
         )
     out.sort(key=lambda s: (s["updated_at"], s["id"]), reverse=True)

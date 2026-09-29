@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 
 from openkb.application.documents import DocumentResult, import_document
 from openkb.application.execution import ExecutionContext
+from openkb.knowledge_scope import KnowledgeScope
+from openkb.view_records import SourceMetadata
 
 
 def validate_url(url: str) -> str:
@@ -28,6 +30,8 @@ def import_url(
     *,
     context: ExecutionContext | None = None,
     prepared_dir: Path | None = None,
+    scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> DocumentResult:
     from openkb.url_ingest import fetch_url_to_raw
 
@@ -86,7 +90,9 @@ def import_url(
         context.check_stop()
         if source is None:
             return DocumentResult(url, "failed", (), tuple(quality), ("acquisition",))
-        result = import_document(kb_dir, source, context=context, origin_url=url)
+        result = import_document(
+            kb_dir, source, context=context, origin_url=url, scope=scope, metadata=metadata
+        )
         return replace(
             result,
             source=url,

@@ -159,6 +159,9 @@ class Workspaces:
         )
         hint.setObjectName("documentWorkflow")
         self.hosts["资料"].addWidget(hint)
+        from openkb.desktop.views import source_metadata_form
+
+        source_metadata_form(self.window, self.hosts["资料"])
         row = FlowLayout()
         self.import_controls = QWidget()
         self.import_controls.setLayout(row)

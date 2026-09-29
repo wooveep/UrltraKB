@@ -88,9 +88,17 @@ def _execute(
     request: UnitRequest, identity: UnitIdentity, context: Any, prepared_dir: Path | None = None
 ) -> UnitResult:
     from openkb.application.pages import save_page
+    from openkb.application.views import view_scope
+    from openkb.knowledge_scope import resolve_scope
     from openkb.locks import kb_ingest_lock
+    from openkb.runtime.requests import ViewSelection
 
     root = Path(identity.kb_dir)
+    scope = (
+        view_scope(root, request.view_id)
+        if isinstance(request, ViewSelection) and request.view_id is not None
+        else None
+    )
     from openkb.runtime.requests import AcceptProposal
 
     if isinstance(request, AcceptProposal):
@@ -98,7 +106,7 @@ def _execute(
         from openkb.ingest_result import describe_ingest
 
         accepted = accept_proposal(
-            root, request.proposal_id, version=request.version, context=context
+            root, request.proposal_id, version=request.version, context=context, scope=scope
         )
         return UnitResult(
             "completed" if accepted.status == "added" else accepted.status,
@@ -111,10 +119,14 @@ def _execute(
         with kb_ingest_lock(root / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
             with context.begin(root):
                 context.on_event({"stage": "saving"})
-                saved = save_page(root, request.path, request.body, version=request.version)
+                saved = save_page(
+                    root, request.path, request.body, version=request.version, scope=scope
+                )
                 return UnitResult(
                     "completed" if saved.status == "saved" else "failed",
-                    resources=(str(root / "wiki" / f"{saved.page.path}.md"),) if saved.page else (),
+                    resources=(str(resolve_scope(root, scope).wiki_dir / f"{saved.page.path}.md"),)
+                    if saved.page
+                    else (),
                     error=None if saved.status == "saved" else saved.status,
                     output=saved.draft or "",
                     revision=saved.page.version if saved.page else None,
@@ -126,7 +138,9 @@ def _execute(
         session_result = (
             delete_conversation(root, request.session_id, version=request.version, context=context)
             if isinstance(request, DeleteConversation)
-            else export_conversation(root, request.session_id, unique=True, context=context)
+            else export_conversation(
+                root, request.session_id, unique=True, context=context, scope=scope
+            )
         )
         return UnitResult(
             "completed"
@@ -146,7 +160,7 @@ def _execute(
     if isinstance(request, GenerateGraph):
         from openkb.application.artifacts import generate_graph
 
-        graph = generate_graph(root, context=context)
+        graph = generate_graph(root, context=context, scope=scope)
         return UnitResult(
             "completed" if graph.path else "skipped",
             resources=(str(graph.path),) if graph.path else (),
@@ -170,6 +184,7 @@ def _execute(
                     version=request.version,
                 ),
                 context=context,
+                scope=scope,
             )
         )
         return UnitResult(
@@ -195,6 +210,7 @@ def _execute(
                 root,
                 LintOptions(fix=request.fix, semantic=request.semantic, version=request.version),
                 context=context,
+                scope=scope,
             )
         )
         return UnitResult(
@@ -218,7 +234,9 @@ def _execute(
         from openkb.application.recompilation import recompile_document
 
         recompiled = asyncio.run(
-            recompile_document(root, request.file_hash, context=context, version=request.version)
+            recompile_document(
+                root, request.file_hash, context=context, version=request.version, scope=scope
+            )
         )
         return UnitResult(
             {"compiled": "completed", "conflict": "failed"}.get(
@@ -243,6 +261,7 @@ def _execute(
             keep_raw=request.keep_raw,
             keep_empty=request.keep_empty,
             context=context,
+            scope=scope,
         )
         removal_result = removal.result
         return UnitResult(
@@ -270,13 +289,22 @@ def _execute(
         if isinstance(request, ImportUrl):
             from openkb.application.urls import import_url
 
-            result = import_url(root, request.url, context=context, prepared_dir=prepared_dir)
+            result = import_url(
+                root,
+                request.url,
+                context=context,
+                prepared_dir=prepared_dir,
+                scope=scope,
+                metadata=request.metadata,
+            )
         else:
             result = import_document(
                 root,
                 Path(request.source),
                 context=context,
+                scope=scope,
                 source_root=root / "raw" if request.wait_for_stable else None,
+                metadata=request.metadata,
             )
         return UnitResult(
             "completed" if result.status == "added" else result.status,
@@ -305,7 +333,9 @@ def _execute(
 
         if isinstance(request, AskQuestion):
             answer = asyncio.run(
-                ask_question(root, request.question, save=request.save, context=context)
+                ask_question(
+                    root, request.question, save=request.save, context=context, scope=scope
+                )
             )
         else:
             answer = asyncio.run(
@@ -317,6 +347,7 @@ def _execute(
                     attempt_id=request.attempt_id,
                     submission_order=request.submission_order,
                     context=context,
+                    scope=scope,
                 )
             )
         return UnitResult(

@@ -30,7 +30,7 @@ class ChatOutbox:
     def _directory(self, root):
         return self.directory / sha256(str(root).encode()).hexdigest()
 
-    def accept(self, root, identity, message, *, new, after_turn=0):
+    def accept(self, root, identity, message, *, new, after_turn=0, view_id="legacy"):
         record = {
             "id": uuid4().hex,
             "session_id": identity,
@@ -38,6 +38,7 @@ class ChatOutbox:
             "new": new,
             "generation": current_generation(root),
             "after_turn": after_turn,
+            "view_id": view_id,
         }
         directory = self._directory(root)
         with file_write_lock(directory / ".lock"):
@@ -102,7 +103,14 @@ class ChatOutbox:
                                     # An explicitly deleted existing conversation must stay deleted.
                                     path.unlink()
                                     continue
-                                session = ChatSession.new(root, "", "", identity=identity)
+                                session = ChatSession.new(
+                                    root,
+                                    "",
+                                    "",
+                                    identity=identity,
+                                    view_id=record.get("view_id", "legacy"),
+                                )
+                            session.require_view(record.get("view_id", "legacy"))
                             if record["id"] not in session.completed_attempts:
                                 session.begin_attempt(
                                     record["message"],

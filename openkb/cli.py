@@ -312,8 +312,8 @@ def add_single_file(
     bundle=None,
     scope: KnowledgeScope | None = None,
     origin_url: str | None = None,
+    metadata=None,
 ):
-    scope = resolve_scope(kb_dir, scope)
     if bundle is None:
         _setup_llm_key(kb_dir)
     return document_use_cases.add_single_file(
@@ -324,6 +324,7 @@ def add_single_file(
         report=click.echo,
         scope=scope,
         origin_url=origin_url,
+        metadata=metadata,
     )
 
 
@@ -343,7 +344,8 @@ def add_single_file(
     help="Path to a KB root directory (overrides auto-detection).",
 )
 @click.pass_context
-def cli(ctx, verbose, kb_dir_override):
+@click.option("--view", "view_id", help="Knowledge view ID; use views list to inspect scopes.")
+def cli(ctx, verbose, kb_dir_override, view_id):
     """OpenKB — Karpathy's LLM Knowledge Base workflow, powered by PageIndex."""
     logging.basicConfig(
         format="%(name)s %(levelname)s: %(message)s",
@@ -352,6 +354,7 @@ def cli(ctx, verbose, kb_dir_override):
     if verbose:
         logging.getLogger("openkb").setLevel(logging.DEBUG)
     ctx.ensure_object(dict)
+    ctx.obj["view_id"] = view_id
     if kb_dir_override:
         ctx.obj["kb_dir_override"] = Path(kb_dir_override)
     else:
@@ -360,6 +363,13 @@ def cli(ctx, verbose, kb_dir_override):
             ctx.obj["kb_dir_override"] = Path(env_kb).resolve()
         else:
             ctx.obj["kb_dir_override"] = None
+
+
+def _selected_scope(ctx, kb_dir):
+    from openkb.application.views import view_scope
+
+    identity = ctx.obj.get("view_id")
+    return view_scope(kb_dir, identity) if identity else None
 
 
 def _with_kb_lock(*, exclusive: bool):
@@ -546,8 +556,12 @@ def init(model, language):
 
 @cli.command()
 @click.argument("path", required=False)
+@click.option("--product")
+@click.option("--applicable-version", "versions", multiple=True)
+@click.option("--family")
+@click.option("--document-revision")
 @click.pass_context
-def add(ctx, path):
+def add(ctx, path, product, versions, family, document_revision):
     """Add a document or directory of documents at PATH to the knowledge base.
 
     PATH may be a local file, a local directory (which is walked
@@ -566,6 +580,19 @@ def add(ctx, path):
         return
 
     from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path
+    from openkb.view_records import SourceMetadata
+
+    metadata = (
+        SourceMetadata(
+            product=product,
+            applicable_versions=versions,
+            family=family,
+            document_revision=document_revision,
+        )
+        if any((product, versions, family, document_revision))
+        else None
+    )
+    options = {"scope": _selected_scope(ctx, kb_dir), "metadata": metadata}
 
     if looks_like_url(path):
         from tempfile import TemporaryDirectory
@@ -588,7 +615,7 @@ def add(ctx, path):
                         length = len(published.path.read_text(encoding="utf-8"))
                         description = f"{length // 1024 or 1} KB clean markdown"
                     click.echo(f"  Saved: raw/{published.path.name} ({description})")
-                    outcome = add_single_file(published.path, kb_dir, origin_url=path)
+                    outcome = add_single_file(published.path, kb_dir, origin_url=path, **options)
                     if outcome == "skipped":
                         published.discard_if_unregistered()
             return
@@ -611,7 +638,7 @@ def add(ctx, path):
         click.echo(f"Found {total} supported file(s) in {path}.")
         for i, f in enumerate(files, 1):
             click.echo(f"\n[{i}/{total}] ", nl=False)
-            add_single_file(f, kb_dir)
+            add_single_file(f, kb_dir, **options)
     else:
         if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
             click.echo(
@@ -619,7 +646,7 @@ def add(ctx, path):
                 f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
             )
             return
-        add_single_file(target, kb_dir)
+        add_single_file(target, kb_dir, **options)
 
 
 def _stream_to_tty() -> bool:
@@ -662,18 +689,22 @@ def query(ctx, question, save, raw):
     model: str = config.get("model", DEFAULT_CONFIG["model"])
 
     stream = _stream_to_tty()
+    scope = _selected_scope(ctx, kb_dir)
     try:
-        answer = asyncio.run(run_query(question, kb_dir, model, stream=stream, raw=raw))
+        answer = asyncio.run(
+            run_query(question, kb_dir, model, stream=stream, raw=raw, scope=scope)
+        )
         if not stream and answer:
             click.echo(answer)
     except Exception as exc:
         click.echo(f"[ERROR] Query failed: {exc}")
         return
 
-    append_log(kb_dir / "wiki", "query", question)
+    scope = resolve_scope(kb_dir, scope)
+    append_log(scope.wiki_dir, "query", question, scope=scope)
 
     if save and answer:
-        explore_path = save_exploration(kb_dir, question, answer, unique=False)
+        explore_path = save_exploration(kb_dir, question, answer, unique=False, scope=scope)
         click.echo(f"\nSaved to {explore_path}")
 
 
@@ -732,6 +763,11 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
 
+    scope = _selected_scope(ctx, kb_dir)
+    if scope is not None and scope.view_id != "legacy":
+        click.echo(f"No legacy document matching '{identifier}' in the selected view.")
+        return
+
     openkb_dir = kb_dir / ".openkb"
     registry = HashRegistry(openkb_dir / "hashes.json")
 
@@ -754,6 +790,7 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
         meta,
         keep_raw=keep_raw,
         keep_empty=keep_empty,
+        scope=scope,
     )
 
     # ----- Print the plan -----
@@ -784,7 +821,7 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
             click.echo("Aborted.")
             return
 
-    result = _execute_remove_plan(kb_dir, plan, registry, keep_empty=keep_empty)
+    result = _execute_remove_plan(kb_dir, plan, registry, keep_empty=keep_empty, scope=scope)
 
     if result.lint_files_changed:
         click.echo(
@@ -900,7 +937,8 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs)
+    scope = _selected_scope(ctx, kb_dir)
+    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs, scope=scope)
     targets = selection.targets
     if selection.status != "ready":
         if selection.status == "invalid":
@@ -940,7 +978,10 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
             click.echo("Aborted.")
             return
     if refresh_schema:
-        _refresh_schema(kb_dir / "wiki")
+        document_scope = resolve_scope(kb_dir, scope)
+        from openkb.application.recompilation import refresh_schema as refresh_view_schema
+
+        refresh_view_schema(kb_dir, scope=document_scope)
     _setup_llm_key(kb_dir)
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
@@ -949,7 +990,9 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     for i, target in enumerate(targets, 1):
         click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
         result = asyncio.run(
-            recompile_document(kb_dir, target.file_hash, model=model, max_concurrency=concurrency)
+            recompile_document(
+                kb_dir, target.file_hash, model=model, max_concurrency=concurrency, scope=scope
+            )
         )
         if result.status == "compiled":
             recompiled += 1
@@ -963,7 +1006,12 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
             detail = f" ({result.error_type})" if result.error_type else ""
             click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
     click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}.")
-    append_log(kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}")
+    append_log(
+        resolve_scope(kb_dir, scope).wiki_dir,
+        "recompile",
+        f"recompiled {recompiled}, skipped {skipped}",
+        scope=resolve_scope(kb_dir, scope),
+    )
 
 
 # Temporary import compatibility for callers migrating to the REST adapter.
@@ -1074,12 +1122,21 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
     else:
         model: str = config.get("model", DEFAULT_CONFIG["model"])
         language: str = config.get("language", "en")
-        session = ChatSession.new(kb_dir, model, language)
+        session = ChatSession.new(
+            kb_dir,
+            model,
+            language,
+            view_id=resolve_scope(kb_dir, _selected_scope(ctx, kb_dir)).view_id,
+        )
 
     from openkb.agent.chat import run_chat
 
     try:
-        asyncio.run(run_chat(kb_dir, session, no_color=no_color, raw=raw))
+        asyncio.run(
+            run_chat(
+                kb_dir, session, no_color=no_color, raw=raw, scope=_selected_scope(ctx, kb_dir)
+            )
+        )
     except Exception as exc:
         click.echo(f"[ERROR] Chat failed: {exc}")
 
@@ -1209,7 +1266,7 @@ def lint(ctx, fix):
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    asyncio.run(run_lint(kb_dir, fix=fix))
+    asyncio.run(run_lint(kb_dir, fix=fix, scope=_selected_scope(ctx, kb_dir)))
 
 
 @cli.command()
@@ -1228,7 +1285,7 @@ def visualize(ctx, open_browser):
         return
     from openkb.application.artifacts import generate_graph
 
-    result = generate_graph(kb_dir)
+    result = generate_graph(kb_dir, scope=_selected_scope(ctx, kb_dir))
     graph, out = result.graph, result.path
     if out is None:
         click.echo("No wiki pages to visualize yet. Run `openkb add` first.")
@@ -1251,11 +1308,11 @@ def visualize(ctx, open_browser):
             )
 
 
-def print_list(kb_dir: Path) -> None:
+def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
     """Print all documents in the knowledge base. Usable from CLI and chat REPL."""
     from openkb.application.knowledge_bases import get_kb_list
 
-    documents = get_kb_list(kb_dir)["documents"]
+    documents = get_kb_list(kb_dir, scope=scope)["documents"]
     if not documents:
         click.echo("No documents indexed yet.")
         return
@@ -1273,11 +1330,12 @@ def print_list(kb_dir: Path) -> None:
         pages_str = str(pages) if pages else ""
         click.echo(f"  {name:<40} {display:<12} {pages_str:<8}")
         if meta.get("source_id"):
+            click.echo(f"    View: {meta.get('view_id', 'legacy')}")
             click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
             click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
 
     # Display summaries
-    summaries_dir = kb_dir / "wiki" / "summaries"
+    summaries_dir = resolve_scope(kb_dir, scope).wiki_dir / "summaries"
     if summaries_dir.exists():
         summaries = sorted(p.stem for p in summaries_dir.glob("*.md"))
         if summaries:
@@ -1286,7 +1344,7 @@ def print_list(kb_dir: Path) -> None:
                 click.echo(f"  - {s}")
 
     # Display concepts
-    concepts_dir = kb_dir / "wiki" / "concepts"
+    concepts_dir = resolve_scope(kb_dir, scope).wiki_dir / "concepts"
     if concepts_dir.exists():
         concepts = sorted(p.stem for p in concepts_dir.glob("*.md"))
         if concepts:
@@ -1295,7 +1353,7 @@ def print_list(kb_dir: Path) -> None:
                 click.echo(f"  - {c}")
 
     # Display entities
-    entities_dir = kb_dir / "wiki" / "entities"
+    entities_dir = resolve_scope(kb_dir, scope).wiki_dir / "entities"
     if entities_dir.exists():
         entities = sorted(p.stem for p in entities_dir.glob("*.md"))
         if entities:
@@ -1304,7 +1362,7 @@ def print_list(kb_dir: Path) -> None:
                 click.echo(f"  - {e}")
 
     # Display reports
-    reports_dir = kb_dir / "wiki" / "reports"
+    reports_dir = resolve_scope(kb_dir, scope).wiki_dir / "reports"
     if reports_dir.exists():
         reports = sorted(p.name for p in reports_dir.glob("*.md"))
         if reports:
@@ -1322,12 +1380,12 @@ def list_cmd(ctx):
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    print_list(kb_dir)
+    print_list(kb_dir, scope=_selected_scope(ctx, kb_dir))
 
 
-def print_status(kb_dir: Path) -> None:
+def print_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
     """Print knowledge base status. Usable from CLI and chat REPL."""
-    wiki_dir = kb_dir / "wiki"
+    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
     subdirs = ["sources", "summaries", "concepts", "entities", "reports"]
 
     # Print the active KB path as the first line. Agents and scripts
@@ -1358,7 +1416,7 @@ def print_status(kb_dir: Path) -> None:
     if hashes_file.exists():
         from openkb.application.knowledge_bases import get_kb_list
 
-        count = get_kb_list(kb_dir)["document_count"]
+        count = get_kb_list(kb_dir, scope=scope)["document_count"]
         click.echo(f"\n  Total indexed: {count} document(s)")
 
     # Last compile time: newest compiled page across summaries/, concepts/,
@@ -1401,7 +1459,7 @@ def status(ctx):
     if kb_dir is None:
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
-    print_status(kb_dir)
+    print_status(kb_dir, scope=_selected_scope(ctx, kb_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -1597,7 +1655,8 @@ def skill_new(ctx, name, intent, yes_flag):
         click.echo("No knowledge base found. Run `openkb init` first.", err=True)
         ctx.exit(1)
 
-    err = _preflight_skill_new(kb_dir, name)
+    scope = _selected_scope(ctx, kb_dir)
+    err = _preflight_skill_new(kb_dir, name, scope=scope)
     if err:
         click.echo(f"[ERROR] {err}", err=True)
         ctx.exit(1)
@@ -1619,7 +1678,7 @@ def skill_new(ctx, name, intent, yes_flag):
         preview_generation,
     )
 
-    preview = preview_generation(kb_dir, "skill", name)
+    preview = preview_generation(kb_dir, "skill", name, scope=scope)
     if preview.exists and not yes_flag:
         if not sys.stdin.isatty():
             click.echo(
@@ -1636,6 +1695,7 @@ def skill_new(ctx, name, intent, yes_flag):
             kb_dir,
             GenerationOptions("skill", name, intent, overwrite="archive", version=preview.version),
             model=model,
+            scope=scope,
         )
     )
     if gen.status != "completed":
@@ -2051,7 +2111,8 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
 
     # Reuse the shared safety gates: name validation + wiki content check.
     # Matches chat's `/deck new` so users see the same errors in both UIs.
-    err = _preflight_skill_new(kb_dir, name)
+    scope = _selected_scope(ctx, kb_dir)
+    err = _preflight_skill_new(kb_dir, name, scope=scope)
     if err:
         # _preflight_skill_new returns messages like "Skill name must not be empty."
         # and "Wiki at ... is empty — add documents with `openkb add` first."
@@ -2082,7 +2143,7 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
     from openkb.deck.creator import DEFAULT_DECK_SKILL
 
     try:
-        preview = preview_generation(kb_dir, "deck", name, skill_name=skill_name)
+        preview = preview_generation(kb_dir, "deck", name, skill_name=skill_name, scope=scope)
     except (RuntimeError, ValueError, OSError) as exc:
         click.echo(f"[ERROR] {exc}", err=True)
         ctx.exit(1)
@@ -2114,6 +2175,7 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
                 skill_name=skill_name,
             ),
             model=model,
+            scope=scope,
         )
     )
     if gen.status != "completed":
@@ -2180,8 +2242,10 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
+from openkb.cli_views import views
 
 cli.add_command(proposals)
+cli.add_command(views)
 
 _fix_summary = fix_summary
 

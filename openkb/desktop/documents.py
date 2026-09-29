@@ -28,6 +28,8 @@ class DocumentsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        self.scope = getattr(window, "scope", None)
+        self.view_id = self.scope.view_id if self.scope else None
         self._closed = False
         self._generation = 0
         self._confirmed = None
@@ -38,9 +40,11 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setAccessibleName("已导入资料")
-        self.table.setHorizontalHeaderLabels(["资料", "格式", "导入方式", "处理状态", "来源修订"])
+        self.table.setHorizontalHeaderLabels(
+            ["资料", "格式", "导入方式", "处理状态", "来源修订", "知识视图"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -81,6 +85,9 @@ class DocumentsDialog(ManagementPanel):
         self.proposals_button = QPushButton("查看待接受差异")
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
+        self.map_legacy = QPushButton("映射旧库来源（无模型）")
+        self.map_legacy.clicked.connect(self.map_legacy_sources)
+        recompilation.addWidget(self.map_legacy)
         layout.addLayout(recompilation)
         self.status = QLabel("正在读取资料…")
         self.status.setWordWrap(True)
@@ -92,6 +99,26 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def map_legacy_sources(self):
+        from openkb.application.views import map_legacy_sources
+
+        def loaded(result, error):
+            if error:
+                self.status.setText(str(error))
+                return
+            self.details.setPlainText(
+                f"已映射 {len(result['source_ids'])} 份来源；无法映射：{result['unavailable']}"
+            )
+            self.reload(preserve_result=True)
+
+        self.window.io.submit(
+            lambda: map_legacy_sources(self.kb),
+            loaded,
+            kb=self.kb,
+            exclusive=True,
+            obsolete=lambda: self._closed,
+        )
 
     def review_proposals(self):
         from openkb.desktop.proposals import ProposalsDialog
@@ -121,7 +148,7 @@ class DocumentsDialog(ManagementPanel):
             show_source(self.window, self.kb, value)
 
         self.window.io.submit(
-            lambda: read_document_source(self.kb, identifier),
+            lambda: read_document_source(self.kb, identifier, scope=self.scope),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
@@ -155,6 +182,7 @@ class DocumentsDialog(ManagementPanel):
                 item.setToolTip(
                     f"来源：{doc.get('source_id') or doc['hash']}\n{doc.get('message') or ''}"
                 )
+                self.table.setItem(row, 5, QTableWidgetItem(doc.get("view_id", "legacy")))
                 is_long = doc.get("display_type") == "pageindex"
                 self.table.setItem(
                     row,
@@ -174,7 +202,10 @@ class DocumentsDialog(ManagementPanel):
             self.read_button.setEnabled(bool(value["documents"]))
 
         self.window.io.submit(
-            lambda: get_kb_list(self.kb), loaded, kb=self.kb, obsolete=lambda: self._closed
+            lambda: get_kb_list(self.kb, scope=self.scope),
+            loaded,
+            kb=self.kb,
+            obsolete=lambda: self._closed,
         )
 
     def preview(self):
@@ -197,13 +228,17 @@ class DocumentsDialog(ManagementPanel):
             if value.status != "ready":
                 self.status.setText("资料已变化，请刷新资料列表。")
                 return
-            self._confirmed = RemoveDocument(identifier, value.version, keep_raw, keep_empty)
+            self._confirmed = RemoveDocument(
+                identifier, value.version, keep_raw, keep_empty, view_id=self.view_id
+            )
             self.details.setPlainText("\n".join(f"{a.tag}  {a.target}" for a in value.plan.actions))
             self.status.setText("确认后执行以上清理。若知识库已变化，将要求重新查看并确认计划。")
             self.confirm_button.setEnabled(True)
 
         self.window.io.submit(
-            lambda: preview_removal(self.kb, identifier, keep_raw=keep_raw, keep_empty=keep_empty),
+            lambda: preview_removal(
+                self.kb, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=self.scope
+            ),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
@@ -254,12 +289,18 @@ class DocumentsDialog(ManagementPanel):
             if question.exec() != QMessageBox.StandardButton.Yes:
                 return
             self._task = self.window.manager.submit(
-                self.kb, [RecompileDocument(t.file_hash, selection.version) for t in targets]
+                self.kb,
+                [
+                    RecompileDocument(t.file_hash, selection.version, view_id=self.view_id)
+                    for t in targets
+                ],
             )
             self.status.setText("重编译任务已提交，可在主窗口查看逐项结果或安全停止。")
 
         self.window.io.submit(
-            lambda: select_recompilation(self.kb, all_docs=True, confirmation=True),
+            lambda: select_recompilation(
+                self.kb, all_docs=True, confirmation=True, scope=self.scope
+            ),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,

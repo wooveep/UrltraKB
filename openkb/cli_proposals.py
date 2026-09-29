@@ -15,6 +15,12 @@ def _root(ctx):
     return root
 
 
+def _scope(ctx):
+    from openkb.cli import _selected_scope
+
+    return _selected_scope(ctx, _root(ctx))
+
+
 @click.group("proposals")
 def proposals():
     """Review and accept saved knowledge differences."""
@@ -23,16 +29,20 @@ def proposals():
 @proposals.command("list")
 @click.pass_context
 def list_pending(ctx):
-    for item in list_proposals(_root(ctx)):
-        click.echo(f"{item.proposal_id}  source={item.source_id}  {item.status}")
+    for item in list_proposals(_root(ctx), scope=_scope(ctx)):
+        click.echo(
+            f"{item.proposal_id}  view={item.view_id}  source={item.source_id}  {item.status}"
+        )
 
 
 @proposals.command("show")
 @click.argument("proposal_id")
 @click.pass_context
 def show(ctx, proposal_id):
-    item = read_proposal(_root(ctx), proposal_id)
-    click.echo(f"Proposal {item.proposal_id}\nVersion: {item.version}\n{item.diff}")
+    item = read_proposal(_root(ctx), proposal_id, scope=_scope(ctx))
+    click.echo(
+        f"Proposal {item.proposal_id}\nView: {item.view_id}\nVersion: {item.version}\n{item.diff}"
+    )
 
 
 @proposals.command("accept")
@@ -40,7 +50,7 @@ def show(ctx, proposal_id):
 @click.option("--version", required=True, help="Version printed by proposals show.")
 @click.pass_context
 def accept(ctx, proposal_id, version):
-    result = accept_proposal(_root(ctx), proposal_id, version=version)
+    result = accept_proposal(_root(ctx), proposal_id, version=version, scope=_scope(ctx))
     for line in describe_ingest(result):
         click.echo(line)
     if result.status not in {"added", "skipped"}:

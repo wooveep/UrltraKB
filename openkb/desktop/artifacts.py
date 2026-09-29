@@ -27,6 +27,8 @@ class ArtifactsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        self.scope = getattr(window, "scope", None)
+        self.view_id = self.scope.view_id if self.scope else None
         self._closed = False
         self._preparing = False
         self._tasks = set()
@@ -89,6 +91,7 @@ class ArtifactsDialog(ManagementPanel):
                         name,
                         intent,
                         preview.version,
+                        view_id=self.view_id,
                         replace=preview.exists,
                     )
                 ],
@@ -99,14 +102,14 @@ class ArtifactsDialog(ManagementPanel):
             self.status.setText("正在生成成果，可继续阅读已有成果。在「任务」中查看进度或停止。")
 
         self.window.io.submit(
-            lambda: preview_generation(self.kb, kind, name),
+            lambda: preview_generation(self.kb, kind, name, scope=self.scope),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed,
         )
 
     def graph(self):
-        self._tasks.add(self.window.manager.submit(self.kb, [GenerateGraph()]))
+        self._tasks.add(self.window.manager.submit(self.kb, [GenerateGraph(view_id=self.view_id)]))
         self._preferred_path = "output/visualize/graph.html"
         self.status.setText("正在整理知识之间的关联，完成后可预览知识图谱。")
 

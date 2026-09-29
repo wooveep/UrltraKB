@@ -193,7 +193,13 @@ def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypat
             command = ["add", str(external)]
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), *command])
         assert result.exception is None, result.output
-    assert read_page(kb_dir, "summaries/small").body.strip() == "# Small\n\nCompiled knowledge."
+    from openkb.application.views import view_scope
+
     document = get_kb_list(kb_dir)["documents"][0]
+    scope = view_scope(kb_dir, document["view_id"])
+    assert (
+        read_page(kb_dir, "summaries/small", scope=scope).body.strip()
+        == "# Small\n\nCompiled knowledge."
+    )
     source = read_document_source(kb_dir, document["source_id"])
     assert "A fixed PDF for every entrypoint." in source["content"]

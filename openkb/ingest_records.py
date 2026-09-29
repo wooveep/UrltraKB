@@ -22,6 +22,7 @@ class UnitRevision(Record):
     source_revision_id: RecordId
     processing_fingerprint: str
     job_id: RecordId
+    annotation_id: RecordId | None = None
 
 
 class UnitPublication(Record):

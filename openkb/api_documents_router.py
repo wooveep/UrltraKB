@@ -12,17 +12,17 @@ import asyncio
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from openkb.api_helpers import _resolve_kb, require_bearer_token
 from openkb.api_models import DocumentSourceRequest, DocumentSourceResponse
+from openkb.api_views import ViewRequest, resolve_api_scope
 from openkb.documents import read_document_source
 
 documents_router = APIRouter()
 
 
-class ProposalRequest(BaseModel):
+class ProposalRequest(ViewRequest):
     kb: str = "default"
     proposal_id: str
 
@@ -32,11 +32,14 @@ class ProposalAcceptRequest(ProposalRequest):
 
 
 @documents_router.get("/api/v1/proposals")
-async def proposals_endpoint(kb: str = "default", _: None = Depends(require_bearer_token)):
+async def proposals_endpoint(
+    kb: str = "default", view_id: str | None = None, _: None = Depends(require_bearer_token)
+):
     from openkb.application.proposals import list_proposals
 
     root = await asyncio.to_thread(_resolve_kb, kb)
-    return [asdict(view) for view in await run_in_threadpool(list_proposals, root)]
+    scope = await resolve_api_scope(root, view_id)
+    return [asdict(view) for view in await run_in_threadpool(list_proposals, root, scope=scope)]
 
 
 @documents_router.post("/api/v1/proposal")
@@ -45,7 +48,14 @@ async def proposal_endpoint(request: ProposalRequest, _: None = Depends(require_
 
     root = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
-        return asdict(await run_in_threadpool(read_proposal, root, request.proposal_id))
+        return asdict(
+            await run_in_threadpool(
+                read_proposal,
+                root,
+                request.proposal_id,
+                scope=await resolve_api_scope(root, request.view_id),
+            )
+        )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=409, detail="Proposal is unavailable or changed") from exc
 
@@ -60,7 +70,11 @@ async def accept_proposal_endpoint(
     try:
         return asdict(
             await run_in_threadpool(
-                accept_proposal, root, request.proposal_id, version=request.version
+                accept_proposal,
+                root,
+                request.proposal_id,
+                version=request.version,
+                scope=await resolve_api_scope(root, request.view_id),
             )
         )
     except (OSError, ValueError) as exc:
@@ -73,12 +87,14 @@ async def document_source_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> DocumentSourceResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     try:
         result = await run_in_threadpool(
             read_document_source,
             kb_dir,
             request.hash,
             source_revision_id=request.source_revision_id,
+            scope=scope,
         )
     except (OSError, ValueError) as exc:
         # Corrupt/unreadable source file (bad JSON, unexpected shape, I/O error):

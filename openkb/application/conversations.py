@@ -134,7 +134,7 @@ async def continue_conversation(
     scope = resolve_scope(kb_dir, scope)
     root = _validate_question(kb_dir, message, scope=scope)
     context = context or ExecutionContext()
-    session = ChatSession.new(root, "", "", identity=new_session_id)
+    session = ChatSession.new(root, "", "", identity=new_session_id, view_id=scope.view_id)
     identity = session_id or session.id
     async with async_session_lock(
         root, identity, cancelled=context.cancelled, on_wait=context.waiting
@@ -148,6 +148,7 @@ async def continue_conversation(
                 session = load_session(root, session_id)
             elif new_session_id and session.path.exists():
                 session = load_session(root, new_session_id)
+            session.require_view(scope.view_id)
             with context.begin(root) as bundle:
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
@@ -247,11 +248,15 @@ class ConversationView:
         return tuple(rows)
 
 
-def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
+def read_conversation(
+    kb_dir: Path, session_id: str, *, view_id: str | None = None
+) -> ConversationView:
     from openkb.locks import kb_read_lock
 
     with kb_read_lock(kb_dir / ".openkb"):
         session = load_session(kb_dir, session_id)
+        if view_id is not None:
+            session.require_view(view_id)
         return ConversationView(
             session.id,
             session.title,

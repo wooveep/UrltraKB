@@ -25,6 +25,7 @@ from openkb.api_models import (
     PageRequest,
     PageResponse,
 )
+from openkb.api_views import resolve_api_scope
 from openkb.application.pages import read_page, save_page
 from openkb.page_ops import delete_wiki_page, page_link_context
 
@@ -37,8 +38,9 @@ async def page_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     try:
-        page = await run_in_threadpool(read_page, kb_dir, request.path)
+        page = await run_in_threadpool(read_page, kb_dir, request.path, scope=scope)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid page path.") from exc
     except FileNotFoundError as exc:
@@ -52,9 +54,10 @@ async def delete_page_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageDeleteResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     try:
         result = await run_in_threadpool(
-            delete_wiki_page, kb_dir, request.path, dry_run=request.dry_run
+            delete_wiki_page, kb_dir, request.path, dry_run=request.dry_run, scope=scope
         )
     except ValueError as exc:  # invalid/traversal-unsafe page ref
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -69,8 +72,9 @@ async def page_links_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageLinksResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     try:
-        result = await run_in_threadpool(page_link_context, kb_dir, request.path)
+        result = await run_in_threadpool(page_link_context, kb_dir, request.path, scope=scope)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result["status"] == "not_found":
@@ -84,8 +88,11 @@ async def edit_page_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageEditResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     try:
-        result = await run_in_threadpool(save_page, kb_dir, request.path, request.content)
+        result = await run_in_threadpool(
+            save_page, kb_dir, request.path, request.content, scope=scope
+        )
     except ValueError as exc:  # invalid/traversal-unsafe page ref
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result.page is None:

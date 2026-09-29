@@ -74,12 +74,16 @@ def read_document_source(
     ``pages`` is the page count for long docs (per-page JSON) and ``None`` for
     short docs.
     """
-    scope = resolve_scope(kb_dir, scope)
     from openkb.application.sources import read_admitted_source
 
-    admitted = read_admitted_source(kb_dir, file_hash, source_revision_id=source_revision_id)
+    admitted = read_admitted_source(
+        kb_dir, file_hash, source_revision_id=source_revision_id, scope=scope
+    )
     if admitted is not None:
         return admitted
+    scope = resolve_scope(kb_dir, scope)
+    if scope.view_id != "legacy":
+        return None
     registry = HashRegistry(kb_dir / ".openkb" / "hashes.json")
     meta = registry.get(file_hash)
     if meta is None:

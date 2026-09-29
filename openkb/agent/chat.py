@@ -795,7 +795,7 @@ async def _handle_slash(
         from openkb.locks import async_kb_lock
 
         async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
-            print_status(kb_dir)
+            print_status(kb_dir, scope=scope)
         return None
 
     if head == "/list":
@@ -803,7 +803,7 @@ async def _handle_slash(
         from openkb.locks import async_kb_lock
 
         async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
-            print_list(kb_dir)
+            print_list(kb_dir, scope=scope)
         return None
 
     if head == "/lint":
@@ -891,6 +891,7 @@ def build_chat_session_agent(
     scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
+    session.require_view(scope.view_id)
     config = resolve_effective_config(kb_dir)[0]
     language = session.language or config.get("language", "en")
     return build_chat_agent(kb_dir, session.model, language=language, bundle=bundle, scope=scope)
@@ -920,6 +921,7 @@ async def iter_chat_turn_events(
     async with async_session_lock(kb_dir, session.id):
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             session.reload()
+            session.require_view(scope.view_id)
             append_log(scope.wiki_dir, "query", user_input, scope=scope)
             new_input = session.history + [{"role": "user", "content": user_input}]
 
@@ -1025,6 +1027,7 @@ async def run_chat(
     scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
+    session.require_view(scope.view_id)
     use_color = _use_color(force_off=no_color)
     style = _build_style(use_color)
 
@@ -1069,7 +1072,9 @@ async def run_chat(
             if action == "exit":
                 return
             if action == "new_session":
-                session = ChatSession.new(kb_dir, session.model, session.language)
+                session = ChatSession.new(
+                    kb_dir, session.model, session.language, view_id=scope.view_id
+                )
                 agent = build_chat_agent(kb_dir, session.model, language=language, scope=scope)
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue
@@ -1080,6 +1085,7 @@ async def run_chat(
             async with async_session_lock(kb_dir, session.id):
                 async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
                     session.reload()
+                    session.require_view(scope.view_id)
                     append_log(scope.wiki_dir, "query", user_input, scope=scope)
                     await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
         except KeyboardInterrupt:

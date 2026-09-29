@@ -8,6 +8,7 @@ from pathlib import Path
 from openkb.application.recompilation import recompile_document, select_recompilation
 from openkb.application.recompilation import refresh_schema as refresh_kb_schema
 from openkb.config import DEFAULT_CONFIG, resolve_credential_bundle, resolve_effective_config
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.log import append_log
 
 
@@ -19,8 +20,11 @@ async def iter_recompile(
     dry_run=False,
     refresh_schema=False,
     bundle=None,
+    scope: KnowledgeScope | None = None,
 ):
-    selection = await asyncio.to_thread(select_recompilation, kb_dir, doc_name, all_docs=all_docs)
+    selection = await asyncio.to_thread(
+        select_recompilation, kb_dir, doc_name, all_docs=all_docs, scope=scope
+    )
     targets = selection.targets
     if selection.status != "ready":
         messages = {
@@ -60,7 +64,7 @@ async def iter_recompile(
         }
         return
     if refresh_schema:
-        await asyncio.to_thread(refresh_kb_schema, kb_dir)
+        await asyncio.to_thread(refresh_kb_schema, kb_dir, scope=scope)
     if bundle is None:
         bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
@@ -68,7 +72,9 @@ async def iter_recompile(
     docs = []
     recompiled = skipped = blocked = 0
     for target in targets:
-        result = await recompile_document(kb_dir, target.file_hash, bundle=bundle, model=model)
+        result = await recompile_document(
+            kb_dir, target.file_hash, bundle=bundle, model=model, scope=scope
+        )
         doc = {
             "name": result.name or None,
             "doc_name": result.name or None,
@@ -89,7 +95,11 @@ async def iter_recompile(
             # Historical REST totals fold ordinary failures into skipped.
             skipped += 1
     await asyncio.to_thread(
-        append_log, kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}"
+        append_log,
+        resolve_scope(kb_dir, scope).wiki_dir,
+        "recompile",
+        f"recompiled {recompiled}, skipped {skipped}",
+        scope=resolve_scope(kb_dir, scope),
     )
     yield {
         "event": "final",

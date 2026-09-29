@@ -55,13 +55,14 @@ def select_recompilation(
     confirmation: bool = False,
     scope: KnowledgeScope | None = None,
 ) -> RecompileSelection:
+    selected_scope = scope
     scope = resolve_scope(kb_dir, scope)
     if bool(identifier) == all_docs:
         return RecompileSelection("invalid")
     with kb_read_lock(kb_dir / ".openkb"):
         from openkb.application.sources import source_inventory
 
-        admitted = source_inventory(kb_dir)
+        admitted = source_inventory(kb_dir, scope=selected_scope)
         mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
         for meta in registry.all_entries().values():
@@ -71,6 +72,8 @@ def select_recompilation(
             if all_docs
             else _resolve_doc_identifier(registry, identifier or "")
         )
+        if scope.view_id != "legacy":
+            matches = []
         matched_legacy = {file_hash for file_hash, _ in matches}
         targets = tuple(
             RecompileTarget(
@@ -100,7 +103,7 @@ def select_recompilation(
         if not all_docs and len(targets) > 1:
             return RecompileSelection("multiple", targets)
         return RecompileSelection(
-            "ready", targets, _version(kb_dir, scope=scope) if confirmation else None
+            "ready", targets, _version(kb_dir, scope=selected_scope) if confirmation else None
         )
 
 
@@ -111,12 +114,18 @@ def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     its resulting version so its own batch can continue without authorizing
     intervening changes made by another operation.
     """
-    scope = resolve_scope(kb_dir, scope)
+    from openkb.application.views import list_views, view_scope
+
+    scopes = [scope] if scope else [view_scope(kb_dir, view.view_id) for view in list_views(kb_dir)]
     roots = [
         kb_dir / ".openkb/hashes.json",
         kb_dir / ".openkb/catalog",
-        kb_dir / ".openkb/knowledge/legacy/head.json",
-    ] + [scope.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")]
+        *sorted((kb_dir / ".openkb/knowledge").glob("*/head.json")),
+    ] + [
+        selected.wiki_dir / name
+        for selected in scopes
+        for name in ("summaries", "concepts", "entities", "index.md")
+    ]
     values = file_versions(kb_dir, roots)
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
@@ -178,6 +187,7 @@ async def recompile_document(
     Desktop passes an execution context. Legacy adapters keep their own model
     and credential resolution, including REST request overrides.
     """
+    requested_scope = scope
     scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
@@ -186,7 +196,7 @@ async def recompile_document(
         cancelled=context.cancelled if context else None,
         on_wait=context.waiting if context else None,
     ):
-        if version is not None and _version(kb_dir, scope=scope) != version:
+        if version is not None and _version(kb_dir, scope=requested_scope) != version:
             return RecompileResult(
                 "conflict",
                 message="Knowledge changed after confirmation; review and confirm again",
@@ -197,8 +207,6 @@ async def recompile_document(
         from openkb.source_catalog import list_sources
 
         started = time.monotonic()
-        roots = [scope.wiki_dir]
-        before = file_versions(kb_dir, roots)
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
         meta = registry.get(file_hash)
         admitted = next(
@@ -210,6 +218,21 @@ async def recompile_document(
             ),
             None,
         )
+        from openkb.application.sources import source_inventory
+
+        if requested_scope is not None and (
+            (
+                admitted is not None
+                and not any(
+                    item["source_id"] == admitted.source_id
+                    for item in source_inventory(kb_dir, scope=requested_scope)
+                )
+            )
+            or (admitted is None and requested_scope.view_id != "legacy")
+        ):
+            return RecompileResult(
+                "blocked", message="Source is not assigned to this knowledge view", version=version
+            )
         if admitted is None or admitted.legacy_hash:
             meta = registry.get(admitted.legacy_hash) if admitted and admitted.legacy_hash else meta
             if meta is None and admitted is not None:
@@ -246,6 +269,12 @@ async def recompile_document(
                     error_type=type(exc).__name__,
                     version=version,
                 )
+        from openkb.application.sources import source_view_id
+        from openkb.knowledge_scope import live_scope
+
+        scope = requested_scope or live_scope(kb_dir, source_view_id(kb_dir, admitted))
+        roots = [scope.wiki_dir]
+        before = file_versions(kb_dir, roots)
         result = await recompile_source(
             kb_dir,
             admitted.source_id,
@@ -253,6 +282,7 @@ async def recompile_document(
             bundle=bundle,
             model=model,
             max_concurrency=max_concurrency,
+            scope=scope,
         )
         status: Literal["compiled", "skipped", "failed", "blocked", "stopped"] = "blocked"
         if result.status == "added":
@@ -280,6 +310,6 @@ async def recompile_document(
             + result.resources,
             changes=changed_files(kb_dir, roots, before),
             unfinished=result.unfinished,
-            version=_version(kb_dir, scope=scope) if version is not None else None,
+            version=_version(kb_dir, scope=requested_scope) if version is not None else None,
             quality=result.quality,
         )

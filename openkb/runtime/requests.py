@@ -5,30 +5,47 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from openkb.view_records import SourceMetadata
+
+
+@dataclass(frozen=True, kw_only=True)
+class ViewSelection:
+    view_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.view_id is not None:
+            from pydantic import TypeAdapter
+
+            from openkb.source_records import ViewId
+
+            TypeAdapter(ViewId).validate_python(self.view_id)
+
 
 @dataclass(frozen=True)
-class SavePage:
+class SavePage(ViewSelection):
     path: str
     body: str = field(repr=False)
     version: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not self.path or not isinstance(self.body, str) or not self.version:
             raise ValueError("Page saving requires a path, body and opened version")
 
 
 @dataclass(frozen=True)
-class AskQuestion:
+class AskQuestion(ViewSelection):
     question: str = field(repr=False)
     save: bool = False
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.question, str) or not self.question.strip():
             raise ValueError("Enter a question")
 
 
 @dataclass(frozen=True)
-class ContinueConversation:
+class ContinueConversation(ViewSelection):
     message: str = field(repr=False)
     session_id: str | None = None
     new_session_id: str | None = None
@@ -36,6 +53,7 @@ class ContinueConversation:
     submission_order: int | None = None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.message, str) or not self.message.strip():
             raise ValueError("Enter a message")
         if self.submission_order is not None and (
@@ -54,11 +72,13 @@ class ContinueConversation:
 
 
 @dataclass(frozen=True)
-class ImportFile:
+class ImportFile(ViewSelection):
     source: str
     wait_for_stable: bool = False
+    metadata: SourceMetadata | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         from pathlib import Path
 
         if not Path(self.source).is_absolute():
@@ -68,22 +88,25 @@ class ImportFile:
 
 
 @dataclass(frozen=True)
-class RemoveDocument:
+class RemoveDocument(ViewSelection):
     identifier: str
     version: str
     keep_raw: bool = False
     keep_empty: bool = False
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not self.identifier or not self.version:
             raise ValueError("Document removal requires a confirmed preview")
 
 
 @dataclass(frozen=True)
-class ImportUrl:
+class ImportUrl(ViewSelection):
     url: str = field(repr=False)
+    metadata: SourceMetadata | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         from urllib.parse import urlsplit
 
         parsed = urlsplit(self.url)
@@ -92,11 +115,12 @@ class ImportUrl:
 
 
 @dataclass(frozen=True)
-class RecompileDocument:
+class RecompileDocument(ViewSelection):
     file_hash: str
     version: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if (
             not isinstance(self.file_hash, str)
             or not self.file_hash
@@ -117,27 +141,29 @@ class DeleteConversation:
 
 
 @dataclass(frozen=True)
-class ExportConversation:
+class ExportConversation(ViewSelection):
     session_id: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.session_id, str) or not self.session_id:
             raise ValueError("Select a completed conversation to export")
 
 
 @dataclass(frozen=True)
-class CheckKnowledge:
+class CheckKnowledge(ViewSelection):
     semantic: bool = True
     fix: bool = False
     version: str | None = None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.fix and (not isinstance(self.version, str) or not self.version):
             raise ValueError("Link repair requires confirmation of the latest wiki")
 
 
 @dataclass(frozen=True)
-class GenerateArtifact:
+class GenerateArtifact(ViewSelection):
     target_type: Literal["skill", "deck"]
     name: str
     intent: str = field(repr=False)
@@ -145,6 +171,7 @@ class GenerateArtifact:
     replace: bool = False
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         from openkb.application.generators import GenerationOptions
 
         GenerationOptions(self.target_type, self.name, self.intent)
@@ -153,11 +180,12 @@ class GenerateArtifact:
 
 
 @dataclass(frozen=True)
-class AcceptProposal:
+class AcceptProposal(ViewSelection):
     proposal_id: str
     version: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         from pydantic import TypeAdapter
 
         from openkb.source_records import Digest, RecordId
@@ -167,7 +195,7 @@ class AcceptProposal:
 
 
 @dataclass(frozen=True)
-class GenerateGraph:
+class GenerateGraph(ViewSelection):
     pass
 
 

@@ -7,14 +7,26 @@ from pathlib import Path
 
 from openkb.file_state import contained_paths
 from openkb.ingest_records import KnowledgeRevision, UnitPublication, UnitRevision
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_read_lock
 from openkb.source_catalog import list_sources, read_record, read_source_revision
+from openkb.source_records import Source
 from openkb.unit_publication import list_source_units, read_unit_publication
+from openkb.view_records import VersionAnnotation
 
 
-def _publication(kb_dir: Path, unit_id: str) -> UnitPublication | None:
+def source_view_id(kb_dir: Path, source: Source) -> str:
+    if source.annotation_id is None:
+        return "legacy"
+    annotation = read_record(kb_dir, "annotations", source.annotation_id, VersionAnnotation)
+    if annotation.source_id != source.source_id:
+        raise ValueError("Version annotation belongs to another source")
+    return annotation.view_id
+
+
+def _publication(kb_dir: Path, unit_id: str, view_id: str = "legacy") -> UnitPublication | None:
     try:
-        return read_unit_publication(kb_dir, unit_id)
+        return read_unit_publication(kb_dir, unit_id, view_id)
     except FileNotFoundError:
         return None
 
@@ -63,8 +75,45 @@ def _historical_manifest(
     return None
 
 
-def source_inventory(kb_dir: Path) -> list[dict]:
+def _snapshot_source(kb_dir: Path, scope: KnowledgeScope, unit_id: str):
+    """Find the input used by the selected immutable snapshot, never today's head."""
+    relative = scope.wiki_dir.relative_to(kb_dir).parts
+    if len(relative) != 6 or relative[3] != "revisions":
+        return None
+    directory = scope.wiki_dir.parent
+    manifest = KnowledgeRevision.model_validate_json((directory / "manifest.json").read_text())
+    if manifest.view_id != scope.view_id or manifest.knowledge_revision_id != directory.name:
+        raise ValueError("Knowledge snapshot belongs to another view")
+    matching = [
+        identity
+        for identity in manifest.input_revisions
+        if read_record(kb_dir, "unit-revisions", identity, UnitRevision).unit_id == unit_id
+    ]
+    if len(matching) > 1:
+        raise ValueError("Snapshot contains multiple revisions of one unit")
+    if not matching:
+        return None
+    seen = set()
+    while manifest.knowledge_revision_id not in seen:
+        seen.add(manifest.knowledge_revision_id)
+        if manifest.unit_revision_id == matching[0]:
+            return directory, manifest
+        if manifest.base_revision_id is None:
+            return None
+        directory = (
+            kb_dir / ".openkb/knowledge" / scope.view_id / "revisions" / manifest.base_revision_id
+        )
+        contained_paths(kb_dir, [directory])
+        manifest = KnowledgeRevision.model_validate_json((directory / "manifest.json").read_text())
+        if manifest.view_id != scope.view_id or manifest.knowledge_revision_id != directory.name:
+            raise ValueError("Knowledge snapshot ancestry belongs to another view")
+    raise ValueError("Knowledge revision ancestry contains a cycle")
+
+
+def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> list[dict]:
     root = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
         documents = []
         for source in list_sources(root):
@@ -72,14 +121,47 @@ def source_inventory(kb_dir: Path) -> list[dict]:
                 continue
             revision = read_source_revision(root, source.target_revision_id)
             units = list_source_units(root, source.source_id)
-            states = [state for unit in units if (state := _publication(root, unit.unit_id))]
+            view_id = scope.view_id if scope else source_view_id(root, source)
+            states = [
+                state for unit in units if (state := _publication(root, unit.unit_id, view_id))
+            ]
+            if scope and not states and source_view_id(root, source) != view_id:
+                continue
             actual = _manifest(root, states[0]) if states else None
+            if scope and scope.read_only:
+                actual = _snapshot_source(root, scope, units[0].unit_id) if units else None
+                if actual is None:
+                    continue
+            annotation_id = source.annotation_id
+            family_id = source.family_id
+            if scope and (actual or states):
+                input_id = actual[1].unit_revision_id if actual else states[0].target_revision_id
+                if input_id is None:
+                    raise ValueError("Published source is missing its input revision")
+                used = read_record(root, "unit-revisions", input_id, UnitRevision)
+                revision = read_source_revision(root, used.source_revision_id)
+                annotation_id = used.annotation_id
+                annotation = (
+                    read_record(root, "annotations", annotation_id, VersionAnnotation)
+                    if annotation_id
+                    else None
+                )
+                family_id = annotation.family_id if annotation else None
+                if scope.read_only and actual:
+                    states = [
+                        UnitPublication.model_validate_json(
+                            (actual[0] / "publication.json").read_text()
+                        )
+                    ]
             documents.append(
                 {
                     "hash": source.source_id,
                     "source_id": source.source_id,
                     "legacy_hash": source.legacy_hash,
                     "source_revision_id": revision.source_revision_id,
+                    "view_id": view_id,
+                    "annotation_id": annotation_id,
+                    "family_id": family_id,
                     "name": source.name,
                     "type": revision.source_format,
                     "doc_name": source.doc_name,
@@ -97,23 +179,51 @@ def source_inventory(kb_dir: Path) -> list[dict]:
 
 
 def read_admitted_source(
-    kb_dir: Path, identifier: str, *, source_revision_id: str | None = None
+    kb_dir: Path,
+    identifier: str,
+    *,
+    source_revision_id: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> dict | None:
     root = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
         sources = list_sources(root)
         source = next((source for source in sources if source.source_id == identifier), None)
         if source is None:
             return None
         units = list_source_units(root, source.source_id)
-        state = _publication(root, units[0].unit_id) if units else None
-        target = read_source_revision(root, source_revision_id or source.target_revision_id)
+        view_id = scope.view_id if scope else source_view_id(root, source)
+        state = _publication(root, units[0].unit_id, view_id) if units else None
+        if scope and state is None and source_view_id(root, source) != view_id:
+            return None
+        target_id = (
+            read_record(
+                root, "unit-revisions", state.target_revision_id, UnitRevision
+            ).source_revision_id
+            if state
+            else source.target_revision_id
+        )
+        target = read_source_revision(root, source_revision_id or target_id)
         if target.source_id != source.source_id:
             raise ValueError("Source revision belongs to another document")
         actual = _manifest(root, state) if state else None
         # The current source body belongs to its last successful input, even if a
         # newer input failed. Explicit history never falls back to different bytes.
-        if actual and state and state.successful_revision_id:
+        if scope and scope.read_only:
+            actual = _snapshot_source(root, scope, units[0].unit_id) if units else None
+            if actual is None or actual[1].unit_revision_id is None:
+                return None
+            used = read_record(root, "unit-revisions", actual[1].unit_revision_id, UnitRevision)
+            if source_revision_id and source_revision_id != used.source_revision_id:
+                return None
+            target = read_source_revision(root, used.source_revision_id)
+            state = UnitPublication.model_validate_json(
+                (actual[0] / "publication.json").read_text()
+            )
+            target_id = target.source_revision_id
+        elif actual and state and state.successful_revision_id:
             used = read_record(root, "unit-revisions", state.successful_revision_id, UnitRevision)
             if used.unit_id != state.unit_id:
                 raise ValueError("Successful revision belongs to another unit")
@@ -123,6 +233,16 @@ def read_admitted_source(
                     raise ValueError("Successful source revision belongs to another document")
             else:
                 actual = _historical_manifest(root, state, source_revision_id)
+        if scope and actual is None:
+            assigned = any(
+                annotation.source_id == source.source_id
+                and annotation.source_revision_id == target.source_revision_id
+                and annotation.view_id == scope.view_id
+                for path in (root / ".openkb/catalog/annotations").glob("*.json")
+                for annotation in [read_record(root, "annotations", path.stem, VersionAnnotation)]
+            )
+            if not assigned and not (scope.view_id == "legacy" and source.annotation_id is None):
+                return None
         content = (
             state.message
             if state and state.message
@@ -142,6 +262,7 @@ def read_admitted_source(
             contained_paths(root, [base_path])
             if not base_path.resolve().is_relative_to(directory / "wiki"):
                 raise ValueError("Source body is outside its knowledge snapshot")
+        if actual or target.original_kind == "legacy_snapshot":
             if base_path.suffix == ".json":
                 from openkb.documents import _render_pages
 
@@ -155,9 +276,10 @@ def read_admitted_source(
         return {
             "hash": source.source_id,
             "source_id": source.source_id,
+            "view_id": view_id,
             "original_kind": target.original_kind,
             "source_revision_id": target.source_revision_id,
-            "target_source_revision_id": source.target_revision_id,
+            "target_source_revision_id": target_id,
             "knowledge_revision_id": actual[1].knowledge_revision_id if actual else None,
             "name": source.name,
             "doc_name": source.doc_name,

@@ -20,7 +20,7 @@ from openkb.ingest_records import (
     UnitPublication,
     UnitRevision,
 )
-from openkb.knowledge_scope import KnowledgeScope, legacy_scope
+from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.lifecycle import current_generation
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
@@ -72,6 +72,7 @@ def plan_import_units(
             if (
                 previous.source_revision_id == admission.revision.source_revision_id
                 and previous.processing_fingerprint == fingerprint
+                and previous.annotation_id == admission.source.annotation_id
             ):
                 return known, previous
         unit_id = known.unit_id if known else uuid.uuid4().hex
@@ -81,6 +82,7 @@ def plan_import_units(
             source_revision_id=admission.revision.source_revision_id,
             processing_fingerprint=fingerprint,
             job_id=uuid.uuid4().hex,
+            annotation_id=admission.source.annotation_id,
         )
         unit = ImportUnit(
             unit_id=unit_id,
@@ -106,8 +108,9 @@ def begin_unit_attempt(
     *,
     discovery_intent: DiscoveryIntent | None = None,
     recompile: bool = False,
+    view_id: str = "legacy",
 ) -> tuple[UnitPublication, bool]:
-    identity = publication_id(unit.unit_id, "legacy")
+    identity = publication_id(unit.unit_id, view_id)
     path = record_path(kb_dir, "publications", identity)
     previous = (
         read_record(kb_dir, "publications", identity, UnitPublication) if path.exists() else None
@@ -137,6 +140,7 @@ def begin_unit_attempt(
     state = UnitPublication(
         publication_id=identity,
         unit_id=unit.unit_id,
+        view_id=view_id,
         target_revision_id=revision.unit_revision_id,
         attempt_id=uuid.uuid4().hex,
         job_id=revision.job_id,
@@ -166,14 +170,19 @@ def begin_unit_attempt(
     return state, True
 
 
-def read_head(kb_dir: Path) -> KnowledgeHead:
-    path = kb_dir / ".openkb/knowledge/legacy/head.json"
+def read_head(kb_dir: Path, view_id: str = "legacy") -> KnowledgeHead:
+    live_scope(kb_dir, view_id)
+    path = kb_dir / ".openkb/knowledge" / view_id / "head.json"
     contained_paths(kb_dir, [path])
-    return (
+    head = (
         KnowledgeHead.model_validate_json(path.read_text("utf-8"))
         if path.exists()
-        else KnowledgeHead()
+        else KnowledgeHead(view_id=view_id)
     )
+
+    if head.view_id != view_id:
+        raise ValueError("Knowledge head belongs to another view")
+    return head
 
 
 def wiki_versions(kb_dir: Path, wiki: Path) -> dict[str, str]:
@@ -206,13 +215,13 @@ class CompileView:
 
 
 @contextmanager
-def prepare_compile_view(kb_dir: Path) -> Iterator[CompileView]:
+def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[CompileView]:
     """Use the real KB environment with a private copy of its knowledge content."""
-    live = legacy_scope(kb_dir)
+    live = live_scope(kb_dir, view_id)
     stage = kb_dir / ".openkb/staging" / f"unit-{uuid.uuid4().hex}"
     view = CompileView(
-        KnowledgeScope(kb_dir, stage / "wiki"),
-        read_head(kb_dir),
+        KnowledgeScope(kb_dir, stage / "wiki", view_id),
+        read_head(kb_dir, view_id),
         wiki_versions(kb_dir, live.wiki_dir),
         current_generation(kb_dir),
     )
@@ -283,6 +292,7 @@ def _check_target(
         or current_source.target_revision_id != source.target_revision_id
         or current_unit != unit
         or current_state.attempt_id != state.attempt_id
+        or state.view_id != view.scope.view_id
     ):
         raise ValueError("Import target was replaced by a newer request")
 
@@ -304,8 +314,8 @@ def publish_unit_revision(
     """The knowledge head, exact input, output and checkpoint commit together."""
     check_stop()
     _check_target(kb_dir, admission.source, unit, state, view)
-    live = legacy_scope(kb_dir).wiki_dir
-    current_head = read_head(kb_dir)
+    live = live_scope(kb_dir, state.view_id).wiki_dir
+    current_head = read_head(kb_dir, state.view_id)
     current_pages = wiki_versions(kb_dir, live)
     generated = wiki_versions(kb_dir, view.scope.wiki_dir)
     changed = {
@@ -412,20 +422,21 @@ def commit_unit_revision(
     """Commit a generated or explicitly reviewed candidate and its exact checkpoint."""
     check_stop()
     _check_target(kb_dir, admission.source, unit, state, view)
-    if read_head(kb_dir) != view.head:
+    if read_head(kb_dir, state.view_id) != view.head:
         raise ValueError("Knowledge view changed before publication")
-    live = legacy_scope(kb_dir).wiki_dir
+    live = live_scope(kb_dir, state.view_id).wiki_dir
     if wiki_versions(kb_dir, live) != view.base_pages:
         raise ValueError("Knowledge pages changed before publication")
     generated = wiki_versions(kb_dir, view.scope.wiki_dir)
     knowledge_id = manifest.knowledge_revision_id
-    directory = kb_dir / ".openkb/knowledge/legacy/revisions" / knowledge_id
+    directory = kb_dir / ".openkb/knowledge" / state.view_id / "revisions" / knowledge_id
     if directory.exists():
         raise ValueError("An immutable knowledge revision already exists")
     state_path = record_path(kb_dir, "publications", state.publication_id)
     attempt_path = record_path(kb_dir, "attempts", state.attempt_id)
-    head_path = kb_dir / ".openkb/knowledge/legacy/head.json"
+    head_path = kb_dir / ".openkb/knowledge" / state.view_id / "head.json"
     head = KnowledgeHead(
+        view_id=state.view_id,
         generation=view.head.generation + 1,
         knowledge_revision_id=knowledge_id,
         inputs={**view.head.inputs, unit.unit_id: revision.unit_revision_id},

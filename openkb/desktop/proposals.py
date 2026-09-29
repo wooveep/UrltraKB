@@ -21,6 +21,7 @@ class ProposalsDialog(QDialog):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        self.scope = window.scope
         self._closed, self._task = False, None
         self._generation = 0
         self.setWindowTitle("待接受知识差异")
@@ -65,13 +66,13 @@ class ProposalsDialog(QDialog):
                 self.status.setText(f"无法读取建议（{type(error).__name__}）")
                 return
             for view in items:
-                item = QListWidgetItem(f"{view.proposal_id} · {view.status}")
+                item = QListWidgetItem(f"{view.proposal_id} · {view.view_id} · {view.status}")
                 item.setData(Qt.ItemDataRole.UserRole, view)
                 self.list.addItem(item)
             self.status.setText(f"{len(items)} 项待处理建议。接受前请阅读全部差异。")
 
         self.window.io.submit(
-            lambda: list_proposals(self.kb),
+            lambda: list_proposals(self.kb, scope=self.scope),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
@@ -87,7 +88,7 @@ class ProposalsDialog(QDialog):
             return
         view = item.data(Qt.ItemDataRole.UserRole)
         self._task = self.window.manager.submit(
-            self.kb, [AcceptProposal(view.proposal_id, view.version)]
+            self.kb, [AcceptProposal(view.proposal_id, view.version, view_id=view.view_id)]
         )
         self.accept_button.setEnabled(False)
         self.status.setText("正在核对当前正文和输入后发布…")

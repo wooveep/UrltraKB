@@ -26,6 +26,7 @@ class SessionsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        self.view_id = getattr(window, "view_id", None) or "legacy"
         self._closed = False
         self._generation = 0
         self._task = None
@@ -103,7 +104,7 @@ class SessionsDialog(ManagementPanel):
                 self.table.setItem(row, 2, QTableWidgetItem(session["updated_at"][:10]))
 
         self.window.io.submit(
-            lambda: list_sessions(self.kb),
+            lambda: [item for item in list_sessions(self.kb) if item["view_id"] == self.view_id],
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
@@ -120,7 +121,9 @@ class SessionsDialog(ManagementPanel):
     def export(self):
         identity = self.selected()
         if identity and not self._task:
-            self._task = self.window.manager.submit(self.kb, [ExportConversation(identity)])
+            self._task = self.window.manager.submit(
+                self.kb, [ExportConversation(identity, view_id=self.view_id)]
+            )
             self.status.setText("已提交导出；完整历史将保存为新的 Markdown 副本。")
 
     def delete(self):
@@ -151,7 +154,7 @@ class SessionsDialog(ManagementPanel):
                 self.status.setText("已提交删除，可在任务面板查看结果或安全停止。")
 
         self.window.io.submit(
-            lambda: read_conversation(self.kb, identity),
+            lambda: read_conversation(self.kb, identity, view_id=self.view_id),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,

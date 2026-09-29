@@ -11,6 +11,7 @@ from openkb.application.conversations import read_conversation
 from openkb.desktop.chat_outbox import ChatOutbox
 from openkb.desktop.conversation_activity import failure_status, task_status
 from openkb.desktop.io import _defer_wait
+from openkb.knowledge_scope import live_scope
 from openkb.runtime.records import TERMINAL, TaskView
 from openkb.runtime.requests import ContinueConversation
 
@@ -37,6 +38,7 @@ class Chat:
     answer: str = ""
     usage: dict | None = None
     pending_usage: dict | None = None
+    view_id: str = "legacy"
 
 
 class Conversations:
@@ -50,17 +52,22 @@ class Conversations:
         self.awaiting_catalog = False
         window.question.textChanged.connect(self.update_controls)
 
-    def _key(self, root):
-        return "chat/" + sha256(str(root).encode()).hexdigest()
+    def _key(self, root, view_id=None):
+        view_id = view_id or getattr(self.window, "view_id", None) or "legacy"
+        return "chat/" + sha256((str(root) + "/" + view_id).encode()).hexdigest()
 
     def _remember(self, chat):
-        self.window.shell.preferences.setValue(self._key(chat.root), chat.identity or "new")
+        self.window.shell.preferences.setValue(
+            self._key(chat.root, chat.view_id), chat.identity or "new"
+        )
         self.window.shell.preferences.sync()
 
     def reset(self):
         if self.active:
             self.active.draft = self.window.question.toPlainText()
-        self.active = self.recent.get(self.window.kb)
+        self.active = self.recent.get(
+            (self.window.kb, getattr(self.window, "view_id", None) or "legacy")
+        )
         self.awaiting_catalog = bool(self.window.kb and self.active is None)
         self.render()
 
@@ -116,7 +123,7 @@ class Conversations:
         if self.active:
             self.active.draft = self.window.question.toPlainText()
         self.active = chat
-        self.recent[chat.root] = chat
+        self.recent[chat.root, chat.view_id] = chat
         if chat.identity:
             self.saved[chat.root, chat.identity] = chat
         self.awaiting_catalog = False
@@ -127,7 +134,9 @@ class Conversations:
 
     def new(self):
         if self.window.kb:
-            self.select(Chat(self.window.kb))
+            self.select(
+                Chat(self.window.kb, view_id=getattr(self.window, "view_id", None) or "legacy")
+            )
 
     def open(self, identity):
         root = self.window.kb
@@ -135,7 +144,12 @@ class Conversations:
             return
         chat = self.saved.get((root, identity))
         if chat is None:
-            chat = Chat(root, identity, persisted=True)
+            chat = Chat(
+                root,
+                identity,
+                persisted=True,
+                view_id=getattr(self.window, "view_id", None) or "legacy",
+            )
         self.select(chat)
         # Reading a session while its worker holds the write lease would leave
         # the drawer waiting for the answer. The in-memory transcript is current.
@@ -190,7 +204,7 @@ class Conversations:
                 self.render(restore_draft=False)
 
         self.window.io.submit(
-            lambda: read_conversation(chat.root, chat.identity),
+            lambda: read_conversation(chat.root, chat.identity, view_id=chat.view_id),
             loaded,
             kb=chat.root,
             obsolete=obsolete,
@@ -239,6 +253,7 @@ class Conversations:
                 question,
                 new=not chat.persisted,
                 after_turn=chat.completed_count,
+                view_id=chat.view_id,
             )
             chat.attempt = accepted.id
             request = ContinueConversation(
@@ -247,6 +262,7 @@ class Conversations:
                 new_session_id=None if chat.persisted else chat.identity,
                 attempt_id=chat.attempt,
                 submission_order=accepted.order,
+                view_id=chat.view_id,
             )
             task = w.manager.submit(chat.root, [request])
             self._remember(chat)
@@ -312,7 +328,7 @@ class Conversations:
             if task.state == "completed":
                 chat.turns.append((chat.question, visible_answer(task.results[-1].output)))
             chat.question = chat.status = ""
-            if self.recent.get(chat.root) is chat:
+            if self.recent.get((chat.root, chat.view_id)) is chat:
                 self._remember(chat)
             self.load(chat)
             if chat.attempt:
@@ -352,7 +368,12 @@ class Conversations:
         w.conversation_notice.setVisible(bool(notice))
         if chat:
             pending = (chat.question, chat.answer) if chat.question else None
-            w.chat.show_turns(chat.turns, chat.root / "wiki", pending=pending, identity=id(chat))
+            w.chat.show_turns(
+                chat.turns,
+                live_scope(chat.root, chat.view_id).wiki_dir,
+                pending=pending,
+                identity=id(chat),
+            )
         else:
             w.chat.show_temporary("")
         if hasattr(w, "token_usage"):

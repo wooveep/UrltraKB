@@ -24,6 +24,7 @@ from openkb.lifecycle import read_lifecycle
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, publish_staged_tree
+from openkb.view_records import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +114,9 @@ def add_single_file(
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
     scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped"]:
     """Compatibility projection of the shared import use case's status."""
-    scope = resolve_scope(kb_dir, scope)
     result = import_document(
         kb_dir,
         file_path,
@@ -126,6 +127,7 @@ def add_single_file(
         prepared=prepared,
         origin_url=origin_url,
         scope=scope,
+        metadata=metadata,
     )
     for line in describe_ingest(result):
         report(line)
@@ -371,14 +373,16 @@ def _add_for_api(
     bundle=None,
     source_root: Path | None = None,
     scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
 
     Import preparation, locking and business work belong to ``import_document``.
     On ``skipped`` the upload owner checks whether its raw copy can be discarded.
     """
-    scope = resolve_scope(kb_dir, scope)
-    result = import_document(kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope)
+    result = import_document(
+        kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope, metadata=metadata
+    )
     status_str = result.status
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
@@ -413,8 +417,10 @@ def import_document(
     prepared: PreparedInput | None = None,
     report=logger.info,
     scope: KnowledgeScope | None = None,
+    metadata: SourceMetadata | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
+    requested_scope = scope
     scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.state import HashRegistry
 
@@ -486,6 +492,8 @@ def import_document(
                         on_event=on_event or (context.on_event if context else None),
                         origin_url=origin_url,
                         report=report,
+                        metadata=metadata,
+                        scope=requested_scope,
                     )
                     return replace(
                         result,

@@ -200,6 +200,7 @@ UrltraKB commands fall into two layers: the **wiki foundation** (compile + manag
 | <code>openkb&nbsp;remove&nbsp;&lt;doc&gt;</code>                   | Remove a document and clean up its wiki pages, images, registry, and PageIndex state (`--dry-run` to preview, `--keep-raw` / `--keep-empty` to retain artifacts)                                                                     |
 | <code>openkb&nbsp;recompile&nbsp;[&lt;doc&gt;]&nbsp;[--all]</code> | Re-run the compile pipeline on already-indexed docs without re-indexing. Regenerates summaries and rewrites concept pages; manual edits are preserved as durable proposals for explicit review (`--dry-run` to preview, `--refresh-schema` to also update `wiki/AGENTS.md`) |
 | `openkb proposals list` / `show <id>` / `accept <id> --version <hash>` | Review saved knowledge differences and accept the exact reviewed candidate after current pages and inputs are checked again |
+| `openkb views list` / `map-legacy` | Select product and applicability views with `--view <id>`, or map retained legacy sources without model work; see [knowledge views](docs/knowledge-views.md) |
 | <code>openkb&nbsp;feedback&nbsp;["msg"]</code>                     | File feedback by opening a prefilled GitHub issue (`--type bug/feature/question` to tag it)                                                                                                                                          |
 
 </details>

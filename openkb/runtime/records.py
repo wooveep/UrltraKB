@@ -198,7 +198,13 @@ class UnitIdentity:
         *,
         generation: str | None = None,
     ) -> UnitIdentity:
-        payload = json.dumps(asdict(request), sort_keys=True, ensure_ascii=False)
+        from pydantic import TypeAdapter
+
+        payload = json.dumps(
+            TypeAdapter(type(request)).dump_python(request, mode="json"),
+            sort_keys=True,
+            ensure_ascii=False,
+        )
         digest = hashlib.sha256((type(request).__name__ + payload).encode()).hexdigest()
         return cls(task_id, str(index), kb_dir, digest, generation=generation)
 

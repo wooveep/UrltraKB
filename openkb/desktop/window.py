@@ -82,9 +82,10 @@ class Workbench(QMainWindow):
         self.setWindowTitle(NAME)
         self.resize(1320, 900)
         self.kb: Path | None = None
+        self.view_id: str | None = None
         self._requested_page: str | None = None
         self.page: Page | None = None
-        self._drafts: dict[tuple[str, str], PageDraft] = {}
+        self._drafts: dict[tuple[str, str, str], PageDraft] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
         self._seen_terminal: set[str] = set()
         self._deleting_kbs: set[Path] = set()
@@ -110,6 +111,12 @@ class Workbench(QMainWindow):
             "资料、页面、对话和任务始终归属于各自的知识库。",
             Path.cwd(),
         )
+
+    @property
+    def scope(self):
+        from openkb.knowledge_scope import live_scope
+
+        return live_scope(self.kb, self.view_id) if self.kb and self.view_id else None
 
     def _watch(self):
         self.shell.navigate("任务")
@@ -289,6 +296,8 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         self.kb, self.page = root, None
+        self.view_id = None
+        self.view_picker.set_views(())
         self.page_context.clear()
         self._page_request_id += 1
         self._chat_task = None
@@ -313,27 +322,34 @@ class Workbench(QMainWindow):
         if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
+        scope, view_id = self.scope, self.view_id
         request_id = self._open_request_id
 
         def obsolete():
             return (
-                root != self.kb or request_id != self._open_request_id or root in self._deleting_kbs
+                root != self.kb
+                or view_id != self.view_id
+                or request_id != self._open_request_id
+                or root in self._deleting_kbs
             )
 
         def read():
             from openkb.application.knowledge import list_knowledge
+            from openkb.application.views import list_views
 
             return (
-                list_knowledge(root),
-                list_sessions(root),
-                get_kb_list(root),
-                get_kb_status(root),
+                list_knowledge(root, scope=scope),
+                [item for item in list_sessions(root) if item["view_id"] == (view_id or "legacy")],
+                get_kb_list(root, scope=scope),
+                get_kb_status(root, scope=scope),
+                list_views(root),
             )
 
         def loaded(value, error):
             if obsolete() or self._error(error):
                 return
-            pages, sessions, info, status = value
+            pages, sessions, info, status, views = value
+            self.view_picker.set_views(views)
             self.workspaces.overview_loaded(info, status)
             self.workspaces.knowledge.set_entries(pages)
             if self.page:
@@ -365,6 +381,7 @@ class Workbench(QMainWindow):
         if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
+        scope, view_id = self.scope, self.view_id
         self._requested_page = path.removesuffix(".md")
         self._page_request_id += 1
         request_id = self._page_request_id
@@ -380,7 +397,7 @@ class Workbench(QMainWindow):
             editable = page.path.split("/")[0] in EDITABLE_SECTIONS
             self.save_button.setEnabled(editable)
             self.editor.setReadOnly(not editable)
-            draft = self._drafts.get((str(root), page.path))
+            draft = self._drafts.get((str(root), view_id or "legacy", page.path))
             self.editor.blockSignals(True)
             self.editor.setPlainText(draft.body if draft else page.body)
             self.editor.blockSignals(False)
@@ -389,13 +406,17 @@ class Workbench(QMainWindow):
             section = KNOWLEDGE_LABELS.get(page.path.split("/")[0], "阅读")
             self.location.setText(f"{section}  /  {page_title(page.content, Path(page.path).name)}")
             self.workspaces.ask_page.setEnabled(True)
-            self.reader.show_markdown(page.body, (root / "wiki" / page.path).parent, anchor=anchor)
+            self.reader.show_markdown(
+                page.body,
+                ((scope.wiki_dir if scope else root / "wiki") / page.path).parent,
+                anchor=anchor,
+            )
             if activate:
                 self.tabs.setCurrentIndex(0)
                 self.shell.navigate("知识")
 
         self.io.submit(
-            lambda: read_page_context(root, path),
+            lambda: read_page_context(root, path, scope=scope),
             loaded,
             kb=root,
             obsolete=lambda: root != self.kb or request_id != self._page_request_id,
@@ -403,7 +424,7 @@ class Workbench(QMainWindow):
 
     def _keep_draft(self):
         if self.kb and self.page:
-            key = (str(self.kb), self.page.path)
+            key = (str(self.kb), self.view_id or "legacy", self.page.path)
             previous = self._drafts.get(key)
             if self.editor.toPlainText() == self.page.body:
                 self._drafts.pop(key, None)
@@ -417,10 +438,12 @@ class Workbench(QMainWindow):
         if not self.kb or not self.page:
             return
         self._keep_draft()
-        key = (str(self.kb), self.page.path)
+        key = (str(self.kb), self.view_id or "legacy", self.page.path)
         draft = self._drafts.get(key, PageDraft(self.page.body, self.page.version))
         body, version = draft.body, draft.version
-        task_id = self.manager.submit(self.kb, [SavePage(self.page.path, body, version)])
+        task_id = self.manager.submit(
+            self.kb, [SavePage(self.page.path, body, version, view_id=self.view_id)]
+        )
         self._save_tasks[task_id] = (key, body)
         self.statusBar().showMessage("保存任务已提交；出现版本冲突时草稿会保留。")
 
@@ -428,6 +451,7 @@ class Workbench(QMainWindow):
         if not self.kb or not self.page or self.kb in self._deleting_kbs:
             return
         root, path = self.kb, self.page.path
+        scope, view_id = self.scope, self.view_id
         request_id = self._page_request_id
         self._keep_draft()
 
@@ -445,18 +469,20 @@ class Workbench(QMainWindow):
                 return
             self._keep_draft()
             draft = self._drafts.get(
-                (str(root), path), PageDraft(self.page.body, self.page.version)
+                (str(root), view_id or "legacy", path), PageDraft(self.page.body, self.page.version)
             )
             dialog = DraftDialog(latest, draft, self)
             if dialog.exec():
                 self.page = latest
-                self._drafts[(str(root), path)] = PageDraft(
+                self._drafts[(str(root), view_id or "legacy", path)] = PageDraft(
                     dialog.draft.toPlainText(), latest.version
                 )
                 self.editor.setPlainText(dialog.draft.toPlainText())
                 self._save_page()
 
-        self.io.submit(lambda: read_page(root, path), loaded, kb=root, obsolete=obsolete)
+        self.io.submit(
+            lambda: read_page(root, path, scope=scope), loaded, kb=root, obsolete=obsolete
+        )
 
     def _export_draft(self):
         if not self.page:
@@ -476,14 +502,26 @@ class Workbench(QMainWindow):
             )
 
     def _import_files(self):
+        from openkb.desktop.views import import_metadata
+
         if self.kb:
             files, _ = QFileDialog.getOpenFileNames(self, "导入资料")
             if files and not self._quitting:
                 self.manager.submit(
-                    self.kb, [ImportFile(str(Path(path).resolve())) for path in files]
+                    self.kb,
+                    [
+                        ImportFile(
+                            str(Path(path).resolve()),
+                            view_id=self.view_id,
+                            metadata=import_metadata(self),
+                        )
+                        for path in files
+                    ],
                 )
 
     def _import_urls(self):
+        from openkb.desktop.views import import_metadata
+
         if self.kb is None:
             return
         value, accepted = QInputDialog.getMultiLineText(
@@ -491,17 +529,25 @@ class Workbench(QMainWindow):
         )
         if accepted and value.strip() and not self._quitting:
             try:
-                requests = [ImportUrl(line.strip()) for line in value.splitlines() if line.strip()]
+                requests = [
+                    ImportUrl(line.strip(), view_id=self.view_id, metadata=import_metadata(self))
+                    for line in value.splitlines()
+                    if line.strip()
+                ]
                 self.manager.submit(self.kb, requests)
             except ValueError as exc:
                 self._error(exc)
 
     def _import_directory(self):
+        from openkb.desktop.views import import_metadata
+
         if not self.kb:
             return
         path = QFileDialog.getExistingDirectory(self, "递归导入目录")
         if path and not self._quitting:
             root = self.kb
+            view_id = self.view_id
+            metadata = import_metadata(self)
             deletion_version = self._kb_deletion_versions.get(root, 0)
 
             def obsolete():
@@ -518,7 +564,13 @@ class Workbench(QMainWindow):
                     if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
                 )
                 if files and not obsolete():
-                    task_id = self.manager.submit(root, [ImportFile(str(path)) for path in files])
+                    task_id = self.manager.submit(
+                        root,
+                        [
+                            ImportFile(str(path), view_id=view_id, metadata=metadata)
+                            for path in files
+                        ],
+                    )
                     if obsolete():
                         self.manager.stop(task_id)
 
@@ -543,8 +595,9 @@ class Workbench(QMainWindow):
             self.open_page(url.path(QUrl.ComponentFormattingOption.FullyDecoded), url.fragment())
         elif url.isLocalFile():
             path = Path(url.toLocalFile()).resolve()
-            if path.is_relative_to(self.kb / "wiki") and path.suffix == ".md":
-                self.open_page(str(path.relative_to(self.kb / "wiki")), url.fragment())
+            wiki = self.scope.wiki_dir if self.scope else self.kb / "wiki"
+            if path.is_relative_to(wiki) and path.suffix == ".md":
+                self.open_page(str(path.relative_to(wiki)), url.fragment())
         elif not url.scheme() and url.fragment():
             from openkb.rendering.markdown import heading_anchor
 
@@ -661,7 +714,13 @@ class Workbench(QMainWindow):
             key, body = self._save_tasks.pop(task.id)
             draft = self._drafts.get(key)
             version = task.results[-1].revision
-            active = self.kb and str(self.kb) == key[0] and self.page and self.page.path == key[1]
+            active = (
+                self.kb
+                and str(self.kb) == key[0]
+                and self.page
+                and (self.view_id or "legacy") == key[1]
+                and self.page.path == key[2]
+            )
             current_body = self.editor.toPlainText() if active else draft.body if draft else body
             confirmed = task.results[-1].page
             if version and (current_body != body or confirmed is None):

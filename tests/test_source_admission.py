@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from openkb.inputs import prepared_input
+from openkb.knowledge_scope import legacy_scope
 
 
 @pytest.fixture
@@ -113,7 +114,7 @@ def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, fixed_mod
     monkeypatch.setattr(MutationSnapshot, "mark_committed", fail_publication)
     result = import_document(kb_dir, pdf_source)
     assert result.status == "failed"
-    assert read_head(kb_dir).knowledge_revision_id is None
+    assert read_head(kb_dir, result.units[0].view_id).knowledge_revision_id is None
     assert not (kb_dir / "wiki/summaries/notes.md").exists()
     assert (kb_dir / read_source_revision(kb_dir, result.source_revision_id).original).exists()
 
@@ -123,7 +124,7 @@ def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
 
     page = kb_dir / "wiki/summaries/notes.md"
     page.write_text("Keep the existing human explanation.")
-    result = import_document(kb_dir, pdf_source)
+    result = import_document(kb_dir, pdf_source, scope=legacy_scope(kb_dir))
     assert result.status == "blocked"
     assert page.read_text() == "Keep the existing human explanation."
     assert result.units[0].proposal_id
@@ -220,7 +221,10 @@ def test_source_reader_rejects_corrupt_snapshot_links(
 
     result = import_document(kb_dir, pdf_source)
     revision_id = result.units[0].knowledge_revision_id
-    manifest = kb_dir / f".openkb/knowledge/legacy/revisions/{revision_id}/manifest.json"
+    manifest = (
+        kb_dir
+        / f".openkb/knowledge/{result.units[0].view_id}/revisions/{revision_id}/manifest.json"
+    )
     data = json.loads(manifest.read_text())
     data[field] = value
     manifest.write_text(json.dumps(data))

@@ -14,7 +14,7 @@ from openkb.application.ingestion import result_from_publication
 from openkb.file_state import contained_paths
 from openkb.ingest_records import ImportUnit, Proposal, UnitPublication, UnitRevision
 from openkb.ingest_result import IngestResult
-from openkb.knowledge_scope import KnowledgeScope, legacy_scope
+from openkb.knowledge_scope import KnowledgeScope, live_scope, resolve_scope
 from openkb.lifecycle import current_generation
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, mutation_scope
@@ -92,10 +92,16 @@ def _diff(directory: Path, proposal: Proposal) -> str:
     return "".join(chunks)
 
 
-def read_proposal(kb_dir: Path, proposal_id: str) -> ProposalView:
+def read_proposal(
+    kb_dir: Path, proposal_id: str, *, scope: KnowledgeScope | None = None
+) -> ProposalView:
     root = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
         directory, proposal = _read(root, proposal_id)
+        if scope and (scope.view_id != proposal.view_id or scope.read_only):
+            raise ValueError("Proposal does not belong to the selected live view")
         revision = read_record(root, "unit-revisions", proposal.unit_revision_id, UnitRevision)
         unit = read_record(root, "units", revision.unit_id, ImportUnit)
         state = read_unit_publication(root, unit.unit_id, proposal.view_id)
@@ -111,14 +117,25 @@ def read_proposal(kb_dir: Path, proposal_id: str) -> ProposalView:
         )
 
 
-def list_proposals(kb_dir: Path) -> tuple[ProposalView, ...]:
+def list_proposals(
+    kb_dir: Path, *, scope: KnowledgeScope | None = None
+) -> tuple[ProposalView, ...]:
     root = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(root, scope)
+        if scope.read_only:
+            return ()
     with kb_read_lock(root / ".openkb"):
         views = (
             read_proposal(root, path.parent.name)
             for path in sorted((root / ".openkb/proposals").glob("*/proposal.json"))
         )
-        return tuple(view for view in views if view.status not in {"completed", "superseded"})
+        return tuple(
+            view
+            for view in views
+            if view.status not in {"completed", "superseded"}
+            and (scope is None or view.view_id == scope.view_id)
+        )
 
 
 def accept_proposal(
@@ -127,8 +144,11 @@ def accept_proposal(
     *,
     version: str,
     context: ExecutionContext | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> IngestResult:
     root = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(root, scope, writable=True)
     check_stop = context.check_stop if context else lambda: None
     with kb_ingest_lock(
         root / ".openkb",
@@ -137,6 +157,8 @@ def accept_proposal(
     ):
         check_stop()
         directory, proposal = _read(root, proposal_id)
+        if scope and scope.view_id != proposal.view_id:
+            raise ValueError("Proposal belongs to another knowledge view")
         revision = read_record(root, "unit-revisions", proposal.unit_revision_id, UnitRevision)
         unit = read_record(root, "units", revision.unit_id, ImportUnit)
         source = read_source(root, unit.source_id)
@@ -168,15 +190,13 @@ def accept_proposal(
             ):
                 raise ValueError("Proposal completion checkpoint is inconsistent")
             return result_from_publication(root, admission, accepted, status="skipped")
-        head = read_head(root)
-        pages = wiki_versions(root, legacy_scope(root).wiki_dir)
+        head = read_head(root, proposal.view_id)
+        pages = wiki_versions(root, live_scope(root, proposal.view_id).wiki_dir)
         if (
             version != HashRegistry.hash_file(directory / "proposal.json")
             or source.removed
             or source.target_generation != proposal.expected_source_generation
-            or source.target_revision_id != frozen.source_revision_id
             or unit.generation != proposal.expected_unit_generation
-            or unit.target_revision_id != revision.unit_revision_id
             or state.target_revision_id != revision.unit_revision_id
             or state.proposal_id != proposal_id
             or head.generation != proposal.expected_view_generation

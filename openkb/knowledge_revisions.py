@@ -6,7 +6,7 @@ from typing import Iterator
 
 from openkb.catalog_schema import CatalogSchema, catalog_schema_path
 from openkb.ingest_records import KnowledgeHead, KnowledgeRevision, UnitRevision
-from openkb.knowledge_scope import KnowledgeScope, legacy_scope
+from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_record, read_source_revision, write_record
 from openkb.unit_publication import copy_tree, read_head, wiki_versions
@@ -16,13 +16,13 @@ from openkb.unit_publication import copy_tree, read_head, wiki_versions
 def manual_knowledge_change(scope: KnowledgeScope) -> Iterator[None]:
     """The caller holds the write lease; generated baselines stay unchanged."""
     kb = scope.kb_dir
-    if scope.wiki_dir != legacy_scope(kb).wiki_dir:
+    if scope.wiki_dir != live_scope(kb, scope.view_id).wiki_dir:
         raise ValueError("Historical and staged knowledge cannot be edited directly")
     before = wiki_versions(kb, scope.wiki_dir)
-    head = read_head(kb)
+    head = read_head(kb, scope.view_id)
     identity = uuid.uuid4().hex
-    directory = kb / ".openkb/knowledge/legacy/revisions" / identity
-    head_path = kb / ".openkb/knowledge/legacy/head.json"
+    directory = kb / ".openkb/knowledge" / scope.view_id / "revisions" / identity
+    head_path = kb / ".openkb/knowledge" / scope.view_id / "head.json"
     schema = catalog_schema_path(kb)
     with mutation_scope(
         kb, [scope.wiki_dir, directory, head_path, schema], operation="manual-knowledge"

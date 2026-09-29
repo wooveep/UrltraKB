@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from openkb.config import DEFAULT_CONFIG, load_config, register_kb, save_config
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.schema import AGENTS_MD, INDEX_SEED
 
@@ -271,12 +272,14 @@ def initialize_kb(
         }
 
 
-def get_kb_list(kb_dir: Path) -> dict[str, Any]:
+def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return a structured inventory of the knowledge base (REST ``/list``)."""
     with kb_read_lock(kb_dir / ".openkb"):
         openkb_dir = kb_dir / ".openkb"
         hashes_file = openkb_dir / "hashes.json"
         hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
+        if scope and scope.view_id != "legacy":
+            hashes = {}
 
         documents = []
         for file_hash, meta in hashes.items():
@@ -294,15 +297,16 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
 
         from openkb.application.sources import source_inventory
 
-        admitted = source_inventory(kb_dir)
+        admitted = source_inventory(kb_dir, scope=scope)
         mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
         documents = [item for item in documents if item["hash"] not in mapped]
         documents.extend(admitted)
 
-        summaries_dir = kb_dir / "wiki" / "summaries"
-        concepts_dir = kb_dir / "wiki" / "concepts"
-        entities_dir = kb_dir / "wiki" / "entities"
-        reports_dir = kb_dir / "wiki" / "reports"
+        wiki = resolve_scope(kb_dir, scope).wiki_dir
+        summaries_dir = wiki / "summaries"
+        concepts_dir = wiki / "concepts"
+        entities_dir = wiki / "entities"
+        reports_dir = wiki / "reports"
         return {
             "documents": documents,
             "document_count": len(documents),
@@ -321,10 +325,10 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
         }
 
 
-def get_kb_status(kb_dir: Path) -> dict[str, Any]:
+def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
     with kb_read_lock(kb_dir / ".openkb"):
-        wiki_dir = kb_dir / "wiki"
+        wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
         subdirs = ["sources", "summaries", "concepts", "reports"]
         directories = {}
         for subdir in subdirs:
@@ -343,7 +347,7 @@ def get_kb_status(kb_dir: Path) -> dict[str, Any]:
         return {
             "directories": directories,
             "raw_count": raw_count,
-            "total_indexed": get_kb_list(kb_dir)["document_count"],
+            "total_indexed": get_kb_list(kb_dir, scope=scope)["document_count"],
             "last_compile": _newest_mtime_iso(summaries),
             "last_lint": _newest_mtime_iso(reports),
         }

@@ -12,6 +12,7 @@ from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.ingest_records import UnitRevision
 from openkb.ingest_result import IngestResult
+from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
 from openkb.source_catalog import Admission, read_record, read_source, read_source_revision
@@ -35,14 +36,15 @@ async def recompile_source(
     bundle=None,
     model: str | None = None,
     max_concurrency: int | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> IngestResult:
     """Caller holds the KB write lease and checks the review precondition."""
     from openkb.agent import compiler
 
     source = read_source(kb_dir, source_id)
-    frozen = read_source_revision(kb_dir, source.target_revision_id)
-    intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
-    admission = Admission(source, frozen, intent)
+    from openkb.application.sources import source_view_id
+
+    scope = scope or live_scope(kb_dir, source_view_id(kb_dir, source))
     units = list_source_units(kb_dir, source_id)
     if source.removed or not units:
         return IngestResult(
@@ -54,11 +56,20 @@ async def recompile_source(
         )
     unit = units[0]
     try:
-        previous = read_unit_publication(kb_dir, unit.unit_id)
+        previous = read_unit_publication(kb_dir, unit.unit_id, scope.view_id)
     except FileNotFoundError:
         previous = None
+    revision = read_record(
+        kb_dir,
+        "unit-revisions",
+        previous.target_revision_id if previous else unit.target_revision_id,
+        UnitRevision,
+    )
+    frozen = read_source_revision(kb_dir, revision.source_revision_id)
+    intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
+    admission = Admission(source, frozen, intent)
     actual = _manifest(kb_dir, previous) if previous else None
-    if actual and previous and previous.successful_revision_id == unit.target_revision_id:
+    if actual and previous and previous.successful_revision_id == revision.unit_revision_id:
         directory, manifest = actual
         normalized_source = manifest.normalized_source
         normalized_format = manifest.normalized_format
@@ -87,9 +98,8 @@ async def recompile_source(
             source_id=source_id,
             message="No saved normalization for this input",
         )
-    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
     state, runnable = begin_unit_attempt(
-        kb_dir, unit, revision, recompile=True, discovery_intent=intent
+        kb_dir, unit, revision, recompile=True, discovery_intent=intent, view_id=scope.view_id
     )
     if not runnable:
         return result_from_publication(kb_dir, admission, state, status="blocked")
@@ -98,7 +108,7 @@ async def recompile_source(
         with (
             context.begin(kb_dir) if context else nullcontext(bundle) as credentials,
             collect_compile_report() as report,
-            prepare_compile_view(kb_dir) as view,
+            prepare_compile_view(kb_dir, scope.view_id) as view,
         ):
             config = resolve_effective_config(kb_dir)[0]
             options: dict[str, Any] = {

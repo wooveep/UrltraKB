@@ -13,6 +13,7 @@ from openkb.converter import convert_document
 from openkb.ingest_records import UnitPublication, UnitRevision
 from openkb.ingest_result import ImportUnitOutcome, IngestResult
 from openkb.inputs import PreparedInput
+from openkb.knowledge_scope import KnowledgeScope
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, mutation_scope
 from openkb.source_catalog import Admission, admit_source_revision, read_record
@@ -23,6 +24,7 @@ from openkb.unit_publication import (
     publish_unit_revision,
     record_unit_failure,
 )
+from openkb.view_records import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,8 @@ def import_prepared_pdf(
     on_event: Callable[[dict], None] | None = None,
     origin_url: str | None = None,
     report=logger.info,
+    metadata: SourceMetadata | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> IngestResult:
     """Caller owns the real KB write lease and frozen input for the whole call."""
     from openkb.agent.compiler import (
@@ -101,9 +105,12 @@ def import_prepared_pdf(
 
     check_stop = context.check_stop if context else lambda: None
     admission = admit_source_revision(kb_dir, prepared, identity=origin_url, check_stop=check_stop)
+    from openkb.application.views import bind_source_view
+
+    admission, scope = bind_source_view(kb_dir, admission, metadata, scope=scope)
     unit, revision = plan_import_units(kb_dir, admission, "pdf-content-pipeline-v1")
     state, runnable = begin_unit_attempt(
-        kb_dir, unit, revision, discovery_intent=admission.discovery_intent
+        kb_dir, unit, revision, discovery_intent=admission.discovery_intent, view_id=scope.view_id
     )
     if not runnable:
         return result_from_publication(
@@ -114,7 +121,7 @@ def import_prepared_pdf(
     concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
     stage = "conversion"
     try:
-        with prepare_compile_view(kb_dir) as view:
+        with prepare_compile_view(kb_dir, scope.view_id) as view:
             working = view.scope.wiki_dir.parent
             check_stop()
             with mutation_scope(kb_dir, [working], operation="compile-import-unit"):

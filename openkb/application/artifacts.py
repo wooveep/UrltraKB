@@ -11,6 +11,7 @@ from pathlib import Path
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
 from openkb.config import _is_kb_dir
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 
@@ -136,17 +137,17 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
             raise
 
 
-def read_graph(kb_dir: Path) -> dict:
+def read_graph(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict:
     from openkb.visualize import build_graph
 
     with kb_read_lock(kb_dir / ".openkb"):
-        return build_graph(kb_dir / "wiki")
+        return build_graph(resolve_scope(kb_dir, scope).wiki_dir)
 
 
-def graph_html(kb_dir: Path) -> str:
+def graph_html(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     from openkb.visualize import render_html
 
-    return render_html(read_graph(kb_dir))
+    return render_html(read_graph(kb_dir, scope=scope))
 
 
 @dataclass(frozen=True)
@@ -155,7 +156,9 @@ class GraphResult:
     path: Path | None = None
 
 
-def generate_graph(kb_dir: Path, *, context: ExecutionContext | None = None) -> GraphResult:
+def generate_graph(
+    kb_dir: Path, *, context: ExecutionContext | None = None, scope: KnowledgeScope | None = None
+) -> GraphResult:
     from openkb.visualize import build_graph, render_html
 
     kb_dir = kb_dir.resolve()
@@ -169,7 +172,7 @@ def generate_graph(kb_dir: Path, *, context: ExecutionContext | None = None) -> 
         with context.begin(kb_dir) if context else nullcontext():
             if context:
                 context.on_event({"stage": "generating_graph"})
-            graph = build_graph(kb_dir / "wiki")
+            graph = build_graph(resolve_scope(kb_dir, scope).wiki_dir)
             if not graph["nodes"]:
                 return GraphResult(graph)
             html = render_html(graph)

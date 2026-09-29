@@ -87,6 +87,7 @@ def export_conversation(
             if not source.exists():
                 return SessionResult("missing")
             session = load_session(root, identity)
+        session.require_view(scope.view_id)
         base = name or session.title or (session.user_turns[0] if session.user_turns else identity)
         slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:60] or identity
         date = re.sub(r"[^0-9]", "", session.created_at[:10])

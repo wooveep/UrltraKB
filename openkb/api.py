@@ -23,7 +23,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
@@ -67,7 +67,6 @@ from openkb.api_models import (
     ChatSessionListResponse,
     ChatSessionLoadRequest,
     ChatSessionLoadResponse,
-    DeckListResponse,
     DeckRequest,
     DeckResponse,
     EnvWritten,
@@ -87,7 +86,6 @@ from openkb.api_models import (
     RecompileResponse,
     RemoveRequest,
     RemoveResponse,
-    SkillListResponse,
     SkillRequest,
     SkillResponse,
     StatusResponse,
@@ -97,6 +95,7 @@ from openkb.api_models import (
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
 from openkb.api_recompile import iter_recompile
+from openkb.api_views import make_views_router, resolve_api_scope
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.application.removal import run_remove_for_api
 from openkb.config import (
@@ -106,7 +105,9 @@ from openkb.config import (
     resolve_init_kb_dir,
     validate_kb_name,
 )
+from openkb.knowledge_scope import resolve_scope
 from openkb.log import append_log
+from openkb.view_records import SourceMetadata
 from openkb.watch_service import WatchRegistry
 
 logger = logging.getLogger(__name__)
@@ -164,11 +165,15 @@ def create_app() -> FastAPI:
 
     _configure_cors(app)
     app.include_router(graph_router)
+    from openkb.api_artifacts_router import artifacts_router
+
     app.include_router(output_router)
+    app.include_router(artifacts_router)
     app.include_router(config_router)
     app.include_router(kbs_router)
     app.include_router(pages_router)
     app.include_router(documents_router)
+    app.include_router(make_views_router())
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(
@@ -245,9 +250,16 @@ def create_app() -> FastAPI:
         kb: str = Form(...),
         stream: str = Form("true"),
         files: list[UploadFile] = File(default=[]),
+        view_id: str | None = Form(None),
+        metadata: str | None = Form(None),
         _: None = Depends(require_bearer_token),
     ) -> Any:
         resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
+        selected = await resolve_api_scope(resolved_kb_dir, view_id)
+        try:
+            source_metadata = SourceMetadata.model_validate_json(metadata) if metadata else None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid source metadata") from exc
         bundle = await asyncio.to_thread(resolve_credential_bundle, resolved_kb_dir)
         if not files:
             raise HTTPException(
@@ -262,11 +274,25 @@ def create_app() -> FastAPI:
             from openkb.api_uploads import UploadStreamingResponse
 
             return UploadStreamingResponse(
-                _stream_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle),
+                _stream_add_uploads(
+                    kb,
+                    resolved_kb_dir,
+                    saved_uploads,
+                    bundle=bundle,
+                    scope=selected,
+                    metadata=source_metadata,
+                ),
                 uploads=saved_uploads,
                 media_type="text/event-stream",
             )
-        return await _run_add_uploads(kb, resolved_kb_dir, saved_uploads, bundle=bundle)
+        return await _run_add_uploads(
+            kb,
+            resolved_kb_dir,
+            saved_uploads,
+            bundle=bundle,
+            scope=selected,
+            metadata=source_metadata,
+        )
 
     @app.post("/api/v1/query", response_model=QueryResponse)
     async def query_endpoint(
@@ -275,6 +301,7 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
         bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
         model = config.get("model", DEFAULT_CONFIG["model"])
@@ -297,10 +324,13 @@ def create_app() -> FastAPI:
                     stream=False,
                     run_config=run_config,
                     bundle=bundle,
+                    scope=scope,
                 )
-                append_log(kb_dir / "wiki", "query", request.question)
+                append_log(scope.wiki_dir, "query", request.question, scope=scope)
                 saved_path = (
-                    _save_query_answer(kb_dir, request.question, answer) if request.save else None
+                    _save_query_answer(kb_dir, request.question, answer, scope=scope)
+                    if request.save
+                    else None
                 )
         except Exception as exc:
             raise HTTPException(
@@ -319,8 +349,14 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        scope = resolve_scope(kb_dir, await resolve_api_scope(kb_dir, request.view_id))
         bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
-        session = await asyncio.to_thread(_load_or_create_session, kb_dir, request.session_id)
+        try:
+            session = await asyncio.to_thread(
+                _load_or_create_session, kb_dir, request.session_id, scope=scope
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         run_config = build_run_config_from_bundle(session.model, bundle)
 
         if request.stream:
@@ -332,10 +368,10 @@ def create_app() -> FastAPI:
         try:
             answer = ""
             agent = await asyncio.to_thread(
-                build_chat_session_agent, kb_dir, session, bundle=bundle
+                build_chat_session_agent, kb_dir, session, bundle=bundle, scope=scope
             )
             async for event in iter_chat_turn_events(
-                agent, session, request.message, run_config=run_config
+                agent, session, request.message, run_config=run_config, scope=scope
             ):
                 if event["event"] == "final":
                     answer = event["data"]["answer"]
@@ -363,6 +399,12 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"List sessions failed: {exc}",
             ) from exc
+        if request.view_id is not None:
+            sessions = [
+                session
+                for session in sessions
+                if session.get("view_id", "legacy") == request.view_id
+            ]
         return ChatSessionListResponse(kb=request.kb, sessions=sessions)
 
     @app.post("/api/v1/chat/sessions/load", response_model=ChatSessionLoadResponse)
@@ -383,6 +425,11 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Load session failed: {exc}",
             ) from exc
+        if request.view_id is not None:
+            try:
+                session.require_view(request.view_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return ChatSessionLoadResponse(
             session_id=session.id,
             title=session.title,
@@ -419,7 +466,11 @@ def create_app() -> FastAPI:
     ) -> ListResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
-            return ListResponse(**await run_in_threadpool(get_kb_list, kb_dir))
+            return ListResponse(
+                **await run_in_threadpool(
+                    get_kb_list, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
+                )
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -433,7 +484,11 @@ def create_app() -> FastAPI:
     ) -> StatusResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         try:
-            return StatusResponse(**await run_in_threadpool(get_kb_status, kb_dir))
+            return StatusResponse(
+                **await run_in_threadpool(
+                    get_kb_status, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
+                )
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -452,8 +507,22 @@ def create_app() -> FastAPI:
             # (fix=False) is a report and may run concurrently.
             if request.fix:
                 async with _kb_mutation_lock(request.kb):
-                    return LintResponse(**await run_lint_report(kb_dir, fix=True, bundle=bundle))
-            return LintResponse(**await run_lint_report(kb_dir, fix=False, bundle=bundle))
+                    return LintResponse(
+                        **await run_lint_report(
+                            kb_dir,
+                            fix=True,
+                            bundle=bundle,
+                            scope=await resolve_api_scope(kb_dir, request.view_id),
+                        )
+                    )
+            return LintResponse(
+                **await run_lint_report(
+                    kb_dir,
+                    fix=False,
+                    bundle=bundle,
+                    scope=await resolve_api_scope(kb_dir, request.view_id),
+                )
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -478,6 +547,7 @@ def create_app() -> FastAPI:
             keep_raw=request.keep_raw,
             keep_empty=request.keep_empty,
             dry_run=request.dry_run,
+            scope=await resolve_api_scope(kb_dir, request.view_id),
         )
         status_value = result.get("status")
         if status_value == "not_found":
@@ -521,6 +591,7 @@ def create_app() -> FastAPI:
                 request.doc_name,
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
+                scope=await resolve_api_scope(kb_dir, request.view_id),
                 refresh_schema=request.refresh_schema,
                 bundle=bundle,
             ):
@@ -633,45 +704,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=error_code, detail=error_message)
         return DeckResponse(name=result["name"], status=result["status"], path=result["path"])
 
-    @app.get("/api/v1/deck", response_model=DeckListResponse)
-    async def deck_list_endpoint(
-        kb: str = Query(...),
-        _: None = Depends(require_bearer_token),
-    ) -> DeckListResponse:
-        from openkb.deck import decks_root
-
-        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        root = decks_root(kb_dir)
-        decks = (
-            sorted(
-                p.name for p in root.iterdir() if p.is_dir() and not p.name.endswith("-workspace")
-            )
-            if root.is_dir()
-            else []
-        )
-        return DeckListResponse(decks=[{"name": n} for n in decks])
-
-    @app.get("/api/v1/deck/{name}")
-    async def deck_download_endpoint(
-        name: str,
-        kb: str = Query(...),
-        _: None = Depends(require_bearer_token),
-    ) -> Any:
-        from openkb.cli import _validate_skill_name
-        from openkb.deck import deck_dir, decks_root
-
-        if _validate_skill_name(name):
-            raise HTTPException(status_code=400, detail="Invalid deck name.")
-        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        root = decks_root(kb_dir).resolve()
-        target = deck_dir(kb_dir, name).resolve()
-        if not target.is_relative_to(root):
-            raise HTTPException(status_code=400, detail="Invalid deck name.")
-        index = target / "index.html"
-        if not index.is_file():
-            raise HTTPException(status_code=404, detail=f"Deck not found: {name}")
-        return FileResponse(index, media_type="text/html")
-
     @app.post("/api/v1/skill", response_model=SkillResponse)
     async def skill_endpoint(
         request: SkillRequest,
@@ -700,53 +732,6 @@ def create_app() -> FastAPI:
         if error_code is not None:
             raise HTTPException(status_code=error_code, detail=error_message)
         return SkillResponse(name=result["name"], status=result["status"], path=result["path"])
-
-    @app.get("/api/v1/skill", response_model=SkillListResponse)
-    async def skill_list_endpoint(
-        kb: str = Query(...),
-        _: None = Depends(require_bearer_token),
-    ) -> SkillListResponse:
-        from openkb.skill import skills_root
-
-        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        root = skills_root(kb_dir)
-        skills = (
-            sorted(
-                p.name for p in root.iterdir() if p.is_dir() and not p.name.endswith("-workspace")
-            )
-            if root.is_dir()
-            else []
-        )
-        return SkillListResponse(skills=[{"name": n} for n in skills])
-
-    @app.get("/api/v1/skill/{name}/archive")
-    async def skill_archive_endpoint(
-        name: str,
-        kb: str = Query(...),
-        _: None = Depends(require_bearer_token),
-    ) -> Any:
-        import io
-        import zipfile
-
-        from openkb.cli import _validate_skill_name
-        from openkb.skill import skill_dir, skills_root
-
-        if _validate_skill_name(name):
-            raise HTTPException(status_code=400, detail="Invalid skill name.")
-        kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        root = skills_root(kb_dir).resolve()
-        target = skill_dir(kb_dir, name).resolve()
-        if not target.is_relative_to(root):
-            raise HTTPException(status_code=400, detail="Invalid skill name.")
-        if not target.is_dir():
-            raise HTTPException(status_code=404, detail=f"Skill not found: {name}")
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in target.rglob("*"):
-                if f.is_file():
-                    zf.write(f, f.relative_to(target))
-        buf.seek(0)
-        return StreamingResponse(buf, media_type="application/zip")
 
     # Preserve the established JSON error shape for unknown API paths.
     @app.api_route(
