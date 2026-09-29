@@ -76,6 +76,7 @@ class ImportFile(ViewSelection):
     source: str
     wait_for_stable: bool = False
     metadata: SourceMetadata | None = field(default=None, kw_only=True)
+    download_remote_assets: bool | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -85,6 +86,11 @@ class ImportFile(ViewSelection):
             raise ValueError("Import source must be an absolute path")
         if type(self.wait_for_stable) is not bool:
             raise ValueError("Invalid input stability policy")
+        if (
+            self.download_remote_assets is not None
+            and type(self.download_remote_assets) is not bool
+        ):
+            raise ValueError("Invalid remote asset download policy")
 
 
 @dataclass(frozen=True)

@@ -115,6 +115,7 @@ def add_single_file(
     origin_url: str | None = None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped"]:
     """Compatibility projection of the shared import use case's status."""
     result = import_document(
@@ -128,6 +129,7 @@ def add_single_file(
         origin_url=origin_url,
         scope=scope,
         metadata=metadata,
+        download_remote_assets=download_remote_assets,
     )
     for line in describe_ingest(result):
         report(line)
@@ -374,6 +376,7 @@ def _add_for_api(
     source_root: Path | None = None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
 
@@ -381,7 +384,13 @@ def _add_for_api(
     On ``skipped`` the upload owner checks whether its raw copy can be discarded.
     """
     result = import_document(
-        kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope, metadata=metadata
+        kb_dir,
+        file_path,
+        bundle=bundle,
+        source_root=source_root,
+        scope=scope,
+        metadata=metadata,
+        download_remote_assets=download_remote_assets,
     )
     status_str = result.status
     if status_str == "skipped":
@@ -418,8 +427,11 @@ def import_document(
     report=logger.info,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
+    if download_remote_assets is not None and type(download_remote_assets) is not bool:
+        raise ValueError("download_remote_assets must be a boolean")
     requested_scope = scope
     scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.state import HashRegistry
@@ -496,6 +508,7 @@ def import_document(
                         report=report,
                         metadata=metadata,
                         scope=requested_scope,
+                        download_remote_assets=download_remote_assets,
                     )
                     return replace(
                         result,

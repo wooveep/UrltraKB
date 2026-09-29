@@ -356,6 +356,7 @@ def _execute(
                 scope=scope,
                 source_root=root / "raw" if request.wait_for_stable else None,
                 metadata=request.metadata,
+                download_remote_assets=request.download_remote_assets,
             )
         return UnitResult(
             "completed" if result.status == "added" else result.status,

@@ -111,6 +111,7 @@ def import_prepared_source(
     scope: KnowledgeScope | None = None,
     admission: Admission | None = None,
     retry_confirmed: bool = False,
+    download_remote_assets: bool | None = None,
 ) -> IngestResult:
     """Caller owns the real KB write lease and frozen input for the whole call."""
     from openkb.agent.compiler import (
@@ -168,6 +169,11 @@ def import_prepared_source(
         evidence=assessment.evidence,
         candidates=assessment.candidates,
     )
+    resource_policy = None
+    if admission.revision.source_format in {"html", "htm"}:
+        from openkb.remote_assets import resolve_resource_policy
+
+        resource_policy = resolve_resource_policy(kb_dir, download_remote_assets)
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint
         if review
@@ -177,6 +183,7 @@ def import_prepared_source(
             bundle=bundle,
             source_revision=admission.revision,
             doc_name=admission.source.doc_name,
+            resource_policy=resource_policy,
         )
     )
 
@@ -210,6 +217,7 @@ def import_prepared_source(
             check_stop=check_stop,
             scope=scope,
             bundle=bundle,
+            resource_policy=resource_policy,
         )
         if assessment.missing_fields:
             state = save_version_wait(kb_dir, admission, normalized, state, assessment)

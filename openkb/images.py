@@ -7,6 +7,7 @@ import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import unquote_to_bytes
 
 import pymupdf
 
@@ -234,6 +235,7 @@ def extract_base64_images(
     images_dir: Path,
     *,
     edits: list[tuple[int, int, str]] | None = None,
+    references=None,
 ) -> str:
     """Decode base64-embedded images, save to disk, and rewrite markdown links.
 
@@ -245,16 +247,22 @@ def extract_base64_images(
     counter = 0
     replacements = []
 
-    for reference in image_references(markdown):
-        data = re.fullmatch(r"data:image/([^;]+);base64,(.+)", reference.source)
+    for reference in references if references is not None else image_references(markdown):
+        data = re.fullmatch(r"data:image/([^;,]+)((?:;[^,]*)?),(.*)", reference.source, re.DOTALL)
         if data is None:
             continue
-        alt, ext, b64_data = reference.alt, data.group(1), data.group(2)
+        alt, ext, parameters, payload = reference.alt, data.group(1), data.group(2), data.group(3)
         if not re.fullmatch(r"[a-zA-Z0-9.+-]+", ext):
             logger.warning("Invalid data-image media type; leaving original reference")
             continue
         try:
-            image_bytes = base64.b64decode(b64_data, validate=True)
+            image_bytes = (
+                base64.b64decode(payload, validate=True)
+                if "base64" in parameters.lower().split(";")
+                else unquote_to_bytes(payload)
+            )
+            if not image_bytes:
+                raise ValueError("Empty data image")
         except Exception:
             logger.warning(
                 "Failed to decode base64 image (alt=%r, ext=%r); leaving original.",
@@ -280,12 +288,12 @@ def extract_base64_images(
     return apply_image_edits(markdown, replacements)
 
 
-def relative_image_paths(markdown: str, source_dir: Path) -> dict[str, Path]:
+def relative_image_paths(markdown: str, source_dir: Path, *, references=None) -> dict[str, Path]:
     """Resolve local image references contained by the original document directory."""
     root = source_dir.resolve()
     return {
         reference.source: path
-        for reference in image_references(markdown)
+        for reference in (references if references is not None else image_references(markdown))
         if reference.local_path is not None
         and (path := (root / reference.local_path).resolve()).is_relative_to(root)
     }
@@ -299,6 +307,7 @@ def copy_relative_images(
     *,
     prepared: dict[str, PreparedImage] | None = None,
     edits: list[tuple[int, int, str]] | None = None,
+    references=None,
 ) -> str:
     """Copy locally-referenced images into the KB images directory and rewrite links.
 
@@ -317,12 +326,12 @@ def copy_relative_images(
     assigned: dict[Path, str] = {}
     taken: set[str] = {path.name for path in images_dir.iterdir()} if images_dir.exists() else set()
     paths = (
-        relative_image_paths(markdown, source_dir)
+        relative_image_paths(markdown, source_dir, references=references)
         if prepared is None
         else {reference: image.original for reference, image in prepared.items()}
     )
 
-    for reference in image_references(markdown):
+    for reference in references if references is not None else image_references(markdown):
         if reference.local_path is None:
             continue
         rel_path = reference.source

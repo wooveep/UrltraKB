@@ -358,6 +358,8 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    resource_policy: dict | None = None
+    resources: list[dict] = Field(default_factory=list)
     encoding: dict | None = None
     block_count: int | None = None
     block_range: list[int] | None = None

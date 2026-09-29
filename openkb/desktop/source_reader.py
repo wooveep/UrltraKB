@@ -165,11 +165,36 @@ class SourceReader(QDialog):
         )
         if source.get("encoding"):
             encoding = source["encoding"]
-            basis = {"bom": "BOM", "utf8": "严格 UTF-8", "detected": "自动判断"}[encoding["basis"]]
+            basis = {
+                "bom": "BOM",
+                "utf8": "严格 UTF-8",
+                "detected": "自动判断",
+                "signature": "XML 字节签名",
+                "declaration": "XML 编码声明",
+            }[encoding["basis"]]
             self.coverage.setText(
                 self.coverage.text() + f"\n原件编码：{encoding['name']}（{basis}）"
             )
         cells = [item["csv"] for item in source.get("origin_locators", []) if item.get("csv")]
+        if source.get("resource_policy"):
+            from collections import Counter
+
+            policy = source["resource_policy"]
+            enabled = "下载并保留" if policy["download_remote_assets"] else "保留链接，不下载"
+            basis = {"single": "单次", "kb": "本库", "global": "全局", "default": "默认"}[
+                policy["source"]
+            ]
+            counts = Counter(resource["status"] for resource in source.get("resources", []))
+            labels = {
+                "retained": "已保留",
+                "missing": "未找到",
+                "not_requested": "未请求",
+                "failed": "获取失败",
+            }
+            state = " · ".join(f"{labels[key]} {count}" for key, count in counts.items())
+            self.coverage.setText(
+                self.coverage.text() + f"\nHTML 远程图片：{enabled}（{basis}）\n{state}"
+            )
         if cells:
             self.coverage.setText(
                 self.coverage.text()

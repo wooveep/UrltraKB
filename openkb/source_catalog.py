@@ -185,10 +185,15 @@ def admit_source_revision(
             excluded_inputs=known.excluded_inputs if known else {},
         )
         decoding = None
-        if prepared.source.suffix.lower() in {".txt", ".csv"} and original_kind == "original":
+        if (
+            prepared.source.suffix.lower() in {".txt", ".csv", ".xml", ".html", ".htm"}
+            and original_kind == "original"
+        ):
             from openkb.text_encoding import inspect_text_encoding
 
-            decoding = inspect_text_encoding(prepared.path.read_bytes())
+            decoding = inspect_text_encoding(
+                prepared.path.read_bytes(), source_format=prepared.path.suffix[1:].lower()
+            )
         revision = SourceRevision(
             text_decoding=decoding,
             source_revision_id=revision_id,

@@ -1959,11 +1959,14 @@ wheels = [
 name = "openkb"
 source = { editable = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "charset-normalizer" },
     { name = "click" },
+    { name = "defusedxml" },
     { name = "json-repair" },
     { name = "litellm" },
     { name = "markdown-it-py" },
+    { name = "markdownify" },
     { name = "markitdown", extra = ["docx", "pptx", "xls", "xlsx"] },
     { name = "openai" },
     { name = "openai-agents" },
@@ -2002,14 +2005,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = "==4.14.3" },
     { name = "charset-normalizer", specifier = "==3.4.7" },
     { name = "click", specifier = "==8.4.0" },
+    { name = "defusedxml", specifier = "==0.7.1" },
     { name = "fastapi", marker = "extra == 'api'", specifier = "==0.139.0" },
     { name = "httpx", marker = "extra == 'dev'" },
     { name = "json-repair", specifier = "==0.59.10" },
     { name = "litellm", specifier = "==1.87.2" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdown-it-py", marker = "extra == 'desktop'", specifier = "==4.2.0" },
+    { name = "markdownify", specifier = "==1.2.2" },
     { name = "markitdown", extras = ["docx", "pptx", "xls", "xlsx"], specifier = "==0.1.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.15.0" },
     { name = "openai", specifier = "==2.44.0" },

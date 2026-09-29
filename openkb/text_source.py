@@ -23,14 +23,36 @@ class CsvCell(Record):
     value: str
 
 
+class HtmlLocation(Record):
+    tag: str
+    path: str
+
+
+class ResourcePolicy(Record):
+    download_remote_assets: bool = False
+    source: Literal["single", "kb", "global", "default"] = "default"
+
+
+class SourceResource(Record):
+    reference: str
+    resolved_reference: str | None = None
+    original_span: tuple[int, int]
+    kind: Literal["local", "data", "remote"]
+    status: Literal["retained", "missing", "not_requested", "failed"]
+    path: RelativePath | None = None
+    digest: Digest | None = None
+    message: str | None = None
+
+
 class TextOrigin(Record):
     normalized_span: tuple[int, int]
     original_span: tuple[int, int]
     coordinate: Literal["unicode_codepoint"] = "unicode_codepoint"
     kind: Literal[
-        "identity", "image_reference", "bom", "generated", "csv_cell", "csv_separator"
+        "identity", "image_reference", "bom", "generated", "csv_cell", "csv_separator", "html"
     ] = "identity"
     csv: CsvCell | None = Field(default=None, exclude_if=lambda value: value is None)
+    html: HtmlLocation | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class FrozenText(Record):
@@ -45,11 +67,28 @@ class FrozenText(Record):
     normalization_policy: str = NORMALIZATION_POLICY
     diagnostics: tuple[str, ...] = ()
     encoding: EncodingDecision | None = Field(default=None, exclude_if=lambda value: value is None)
+    resources: tuple[SourceResource, ...] = Field(default=(), exclude_if=lambda value: not value)
+    resource_policy: ResourcePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     blocks: tuple[ContentBlock, ...] = ()
     block_policy: str | None = None
 
     @model_validator(mode="after")
     def complete_mapping(self):
+        for resource in self.resources:
+            a, b = resource.original_span
+            if not 0 <= a <= b <= self.original_characters:
+                raise ValueError("Resource reference is outside the original source")
+            if resource.status == "retained":
+                if (
+                    not resource.path
+                    or not resource.digest
+                    or self.assets.get(resource.path) != resource.digest
+                ):
+                    raise ValueError("Retained resource must refer to a frozen verified asset")
+            elif resource.path is not None or resource.digest is not None:
+                raise ValueError("Unretained resource cannot identify a frozen asset")
         cursor = original_cursor = 0
         for origin in self.origins:
             start, end = origin.normalized_span
@@ -85,16 +124,33 @@ class FrozenText(Record):
         ).hexdigest()
 
 
-def freeze_markdown(prepared, doc_name: str, wiki: Path) -> FrozenText:
+def freeze_markdown(
+    prepared,
+    doc_name: str,
+    wiki: Path,
+    *,
+    original: str | None = None,
+    additional_image_edits: list[tuple[int, int, str]] | None = None,
+    references=None,
+) -> FrozenText:
     from openkb.images import copy_relative_images, extract_base64_images
     from openkb.state import HashRegistry
 
-    original = prepared.path.read_bytes().decode("utf-8")
+    if original is None:
+        original = prepared.path.read_bytes().decode("utf-8")
     images = wiki / "sources/images" / doc_name
-    edits: list[tuple[int, int, str]] = []
-    extract_base64_images(original, f"{doc_name}/embedded", images / "embedded", edits=edits)
+    edits: list[tuple[int, int, str]] = list(additional_image_edits or [])
+    extract_base64_images(
+        original, f"{doc_name}/embedded", images / "embedded", edits=edits, references=references
+    )
     copy_relative_images(
-        original, prepared.source.parent, doc_name, images, prepared=prepared.images, edits=edits
+        original,
+        prepared.source.parent,
+        doc_name,
+        images,
+        prepared=prepared.images,
+        edits=edits,
+        references=references,
     )
     if original.startswith("\ufeff"):
         edits.append((0, 1, ""))
@@ -141,7 +197,7 @@ def freeze_markdown(prepared, doc_name: str, wiki: Path) -> FrozenText:
     rewritten = {(start, end) for start, end, _ in edits}
     diagnostics = tuple(
         f"Image not retained: {reference.source[:160]}"
-        for reference in image_references(original)
+        for reference in (references if references is not None else image_references(original))
         if (reference.start, reference.end) not in rewritten
     )
     return FrozenText(
@@ -228,5 +284,11 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
         "assets": frozen.assets,
         "diagnostics": list(frozen.diagnostics),
         "encoding": frozen.encoding.model_dump(mode="json") if frozen.encoding else None,
+        "resource_policy": frozen.resource_policy.model_dump(
+            mode="json", exclude={"schema_version"}
+        )
+        if frozen.resource_policy
+        else None,
+        "resources": [resource.model_dump(mode="json") for resource in frozen.resources],
         "coverage": "complete",
     }

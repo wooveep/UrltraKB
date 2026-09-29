@@ -203,7 +203,7 @@ def start_watch(
     """
 
     def changed(paths):
-        from openkb.inputs import local_image_inputs
+        from openkb.inputs import IMAGE_SOURCE_EXTENSIONS, local_image_inputs
 
         affected = set(paths)
         root = raw_dir.resolve()
@@ -211,7 +211,7 @@ def start_watch(
             resources = {Path(path).resolve() for path in paths}
             for source in root.rglob("*"):
                 if (
-                    source.suffix.lower() not in {".md", ".markdown"}
+                    source.suffix.lower() not in IMAGE_SOURCE_EXTENSIONS
                     or any(part.startswith(".") for part in source.relative_to(root).parts)
                     or source.is_symlink()
                     or not source.is_file()

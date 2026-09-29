@@ -52,6 +52,7 @@ DEFAULT_ENTITY_TYPES: tuple[str, ...] = (
 )
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "download_remote_assets": False,
     "model": "gpt-5.4",
     "language": "en",
     "pageindex_threshold": 11,  # Compatibility projection; only explicit legacy values are policy.
@@ -455,6 +456,11 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     resolvers in charge of optional overrides. Errors name fields, never
     credential-bearing values from user configuration.
     """
+    if (
+        config.get("download_remote_assets") is not None
+        and type(config["download_remote_assets"]) is not bool
+    ):
+        raise ValueError("Configuration field 'download_remote_assets' must be a boolean")
     for key in ("model", "language"):
         value = config.get(key)
         if allow_inherited and value is None:
@@ -492,6 +498,7 @@ def load_global_config() -> dict[str, Any]:
 # one list-valued member — the layering rule (a non-null value wins over the
 # layer below) is type-agnostic, so a KB list overrides the global list wholesale.
 GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
+    "download_remote_assets",
     "model",
     "language",
     "pageindex_threshold",

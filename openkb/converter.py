@@ -155,6 +155,7 @@ def convert_document(
     prepared: PreparedInput | None = None,
     doc_name: str | None = None,
     decoding: TextDecoding | None = None,
+    resource_policy=None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
@@ -167,10 +168,17 @@ def convert_document(
             ready=prepared,
             doc_name=doc_name,
             decoding=decoding,
+            resource_policy=resource_policy,
         )
     with prepared_input(src) as ready:
         return _convert_prepared_document(
-            src, kb_dir, staging_dir=staging_dir, ready=ready, doc_name=doc_name, decoding=decoding
+            src,
+            kb_dir,
+            staging_dir=staging_dir,
+            ready=ready,
+            doc_name=doc_name,
+            decoding=decoding,
+            resource_policy=resource_policy,
         )
 
 
@@ -182,6 +190,7 @@ def _convert_prepared_document(
     ready: PreparedInput,
     doc_name: str | None = None,
     decoding: TextDecoding | None = None,
+    resource_policy=None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -271,13 +280,18 @@ def _convert_prepared_document(
 
         if src.suffix.lower() in TEXT_SOURCE_EXTENSIONS:
             from openkb.processing_policy import classify_markdown_tokens
-            from openkb.text_formats import freeze_decoded_text
-            from openkb.text_source import freeze_markdown
+            from openkb.text_formats import normalize_text_document
 
-            frozen = (
-                freeze_markdown(ready, doc_name, artifact_root / "wiki")
-                if src.suffix.lower() in {".md", ".markdown"}
-                else freeze_decoded_text(ready, decoding)
+            if src.suffix.lower() in {".html", ".htm"} and resource_policy is None:
+                from openkb.remote_assets import resolve_resource_policy
+
+                resource_policy = resolve_resource_policy(kb_dir)
+            frozen = normalize_text_document(
+                ready,
+                doc_name,
+                artifact_root / "wiki",
+                decoding=decoding,
+                resource_policy=resource_policy,
             )
             markdown = frozen.text
             processing = classify_markdown_tokens(frozen.tokens)

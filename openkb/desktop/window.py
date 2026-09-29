@@ -514,6 +514,7 @@ class Workbench(QMainWindow):
                             str(Path(path).resolve()),
                             view_id=self.view_id,
                             metadata=import_metadata(self),
+                            download_remote_assets=self.remote_assets.currentData(),
                         )
                         for path in files
                     ],
@@ -548,6 +549,7 @@ class Workbench(QMainWindow):
             root = self.kb
             view_id = self.view_id
             metadata = import_metadata(self)
+            download_remote_assets = self.remote_assets.currentData()
             deletion_version = self._kb_deletion_versions.get(root, 0)
 
             def obsolete():
@@ -567,7 +569,12 @@ class Workbench(QMainWindow):
                     task_id = self.manager.submit(
                         root,
                         [
-                            ImportFile(str(path), view_id=view_id, metadata=metadata)
+                            ImportFile(
+                                str(path),
+                                view_id=view_id,
+                                metadata=metadata,
+                                download_remote_assets=download_remote_assets,
+                            )
                             for path in files
                         ],
                     )

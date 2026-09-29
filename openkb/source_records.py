@@ -34,7 +34,7 @@ ENCODING_POLICY = "bom-utf8-charset-normalizer-3.4.7-v1"
 
 class EncodingDecision(Record):
     name: str
-    basis: Literal["bom", "utf8", "detected"]
+    basis: Literal["bom", "utf8", "detected", "signature", "declaration"]
     policy: str = ENCODING_POLICY
     chaos: float | None = Field(default=None, ge=0, le=1)
     coherence: float | None = Field(default=None, ge=0, le=1)

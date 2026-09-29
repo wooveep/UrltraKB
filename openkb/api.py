@@ -258,6 +258,7 @@ def create_app() -> FastAPI:
         files: list[UploadFile] = File(default=[]),
         view_id: str | None = Form(None),
         metadata: str | None = Form(None),
+        download_remote_assets: bool | None = Form(None),
         _: None = Depends(require_bearer_token),
     ) -> Any:
         resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
@@ -287,6 +288,7 @@ def create_app() -> FastAPI:
                     bundle=bundle,
                     scope=selected,
                     metadata=source_metadata,
+                    download_remote_assets=download_remote_assets,
                 ),
                 uploads=saved_uploads,
                 media_type="text/event-stream",
@@ -298,6 +300,7 @@ def create_app() -> FastAPI:
             bundle=bundle,
             scope=selected,
             metadata=source_metadata,
+            download_remote_assets=download_remote_assets,
         )
 
     @app.post("/api/v1/query", response_model=QueryResponse)

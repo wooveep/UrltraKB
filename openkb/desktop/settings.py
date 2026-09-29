@@ -38,6 +38,7 @@ _FIELDS = {
     "pdf_short_max_pages": "短 PDF 页数上限（含）",
     "pageindex_threshold": "兼容旧 PDF 阈值（≤0 强制分段）",
     "model_capacity": "模型容量（JSON，可清除以自动判断）",
+    "download_remote_assets": "下载 HTML 远程图片（true/false）",
     "entity_types": "实体类型（逗号分隔）",
     "openai_api_base": "API base URL",
     "api_key": "API Key",
@@ -96,6 +97,10 @@ class SettingField(QWidget):
             return ModelCapacity.model_validate_json(text).model_dump(mode="json")
         if self.key == "entity_types":
             return [part.strip() for part in text.replace("，", ",").split(",") if part.strip()]
+        if self.key == "download_remote_assets":
+            if text.lower() not in {"true", "false"}:
+                raise ValueError("下载 HTML 远程图片：请输入 true 或 false")
+            return text.lower() == "true"
         return text
 
 

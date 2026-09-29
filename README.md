@@ -41,7 +41,7 @@ UrltraKB has two layers: a **wiki foundation** that compiles and maintains your 
 
 ### Features
 
-- **Broad format support:** PDF, Word, Markdown, PowerPoint, HTML, Excel, CSV, text, URLs, and more.
+- **Broad format support:** PDF, Word, Markdown, PowerPoint, HTML, XML, Excel, CSV, text, URLs, and more. [HTML/XML source retention and resource settings](docs/markup-format-readback.md).
 - **Scales to long documents:** Long and complex documents are handled via [PageIndex](https://github.com/VectifyAI/PageIndex) tree indexing, enabling accurate, vectorless, context-aware retrieval.
 - **Native multi-modality:** Retrieves and understands figures, tables, and images, not just text.
 - **Compiled wiki:** The LLM compiles your documents into summaries, concept pages, entity pages, and cross-links, all kept in sync.

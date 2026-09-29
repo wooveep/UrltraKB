@@ -28,7 +28,13 @@ class NormalizedInput(Record):
 
 
 def normalization_fingerprint(
-    kb_dir: Path, *, scope=None, bundle=None, source_revision=None, doc_name=None
+    kb_dir: Path,
+    *,
+    scope=None,
+    bundle=None,
+    source_revision=None,
+    doc_name=None,
+    resource_policy=None,
 ) -> str:
     from openkb.agent.compiler import get_agents_md, short_document_messages
     from openkb.config import resolve_credential_bundle
@@ -63,6 +69,11 @@ def normalization_fingerprint(
                 },
             },
         }
+        if source_revision.source_format in {"html", "htm"}:
+            from openkb.remote_assets import REMOTE_POLICY, resolve_resource_policy
+
+            selected = resource_policy or resolve_resource_policy(kb_dir)
+            text_policy["resources"] = {"policy": REMOTE_POLICY, **selected.model_dump(mode="json")}
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
@@ -119,6 +130,7 @@ def retain_normalization(
     check_stop: Callable[[], None] = lambda: None,
     scope=None,
     bundle=None,
+    resource_policy=None,
 ) -> tuple[Path, NormalizedInput]:
     identity = normalization_id(admission.revision.source_revision_id, fingerprint)
     record = record_path(kb_dir, "normalizations", identity)
@@ -140,6 +152,7 @@ def retain_normalization(
             prepared=prepared,
             doc_name=admission.source.doc_name,
             decoding=admission.revision.text_decoding,
+            resource_policy=resource_policy,
         )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")

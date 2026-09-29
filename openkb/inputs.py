@@ -14,7 +14,8 @@ from typing import Iterator
 
 from openkb.state import HashRegistry
 
-TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv"}
+TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv", ".xml", ".html", ".htm"}
+IMAGE_SOURCE_EXTENSIONS = {".md", ".markdown", ".html", ".htm"}
 FROZEN_SOURCE_EXTENSIONS = {".pdf", *TEXT_SOURCE_EXTENSIONS}
 
 
@@ -26,16 +27,28 @@ def input_version(body_digest: str, assets: dict[str, str | None]) -> str:
 
 
 def local_image_inputs(source: Path) -> dict[str, Path]:
+    return _image_inputs(source, source.parent)
+
+
+def _image_inputs(source: Path, base: Path) -> dict[str, Path]:
     from openkb.images import relative_image_paths
 
-    if source.suffix.lower() not in {".md", ".markdown"}:
+    if source.suffix.lower() not in IMAGE_SOURCE_EXTENSIONS:
         return {}
     try:
-        text = source.read_bytes().decode("utf-8")
-    except UnicodeDecodeError:
+        references = None
+        if source.suffix.lower() in {".html", ".htm"}:
+            from openkb.html_images import html_image_references
+            from openkb.text_encoding import decode_text
+
+            text = decode_text(source.read_bytes())[0]
+            references = html_image_references(text)
+        else:
+            text = source.read_bytes().decode("utf-8")
+    except ValueError:
         # Admission/conversion owns the persisted malformed-input diagnosis.
         return {}
-    return relative_image_paths(text, source.parent)
+    return relative_image_paths(text, base, references=references)
 
 
 def current_input_version(source: Path) -> str:
@@ -108,15 +121,13 @@ class PreparedInput:
     identity: Path
 
     def is_current(self) -> bool:
-        from openkb.images import relative_image_paths
-
         if self.source.resolve() != self.identity:
             return False
         if HashRegistry.hash_file(self.source) != self.digest:
             return False
-        if self.source.suffix.lower() not in {".md", ".markdown"}:
+        if self.source.suffix.lower() not in IMAGE_SOURCE_EXTENSIONS:
             return True
-        paths = relative_image_paths(self.path.read_text(encoding="utf-8"), self.source.parent)
+        paths = _image_inputs(self.path, self.source.parent)
         if paths.keys() != self.images.keys():
             return False
         for reference, path in paths.items():
@@ -131,8 +142,6 @@ class PreparedInput:
 
 
 def _prepare(source: Path, directory: Path) -> PreparedInput:
-    from openkb.images import relative_image_paths
-
     # Freeze identity with the bytes. Later conversion/registration must not
     # follow a replacement symlink at this pathname to another document.
     identity = source.resolve()
@@ -143,10 +152,8 @@ def _prepare(source: Path, directory: Path) -> PreparedInput:
     if resources.exists():
         shutil.rmtree(resources)
     images = {}
-    if source.suffix.lower() in {".md", ".markdown"}:
-        for index, (reference, original) in enumerate(
-            relative_image_paths(frozen.read_text(encoding="utf-8"), source.parent).items()
-        ):
+    if source.suffix.lower() in IMAGE_SOURCE_EXTENSIONS:
+        for index, (reference, original) in enumerate(_image_inputs(frozen, source.parent).items()):
             target = None
             image_digest = None
             if original.is_file():
@@ -182,4 +189,5 @@ SUPPORTED_EXTENSIONS = {
     ".htm",
     ".txt",
     ".csv",
+    ".xml",
 }

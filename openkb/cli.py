@@ -313,6 +313,7 @@ def add_single_file(
     scope: KnowledgeScope | None = None,
     origin_url: str | None = None,
     metadata=None,
+    download_remote_assets: bool | None = None,
 ):
     if bundle is None:
         _setup_llm_key(kb_dir)
@@ -325,6 +326,7 @@ def add_single_file(
         scope=scope,
         origin_url=origin_url,
         metadata=metadata,
+        download_remote_assets=download_remote_assets,
     )
 
 
@@ -560,8 +562,13 @@ def init(model, language):
 @click.option("--applicable-version", "versions", multiple=True)
 @click.option("--family")
 @click.option("--document-revision")
+@click.option(
+    "--download-remote-assets/--no-download-remote-assets",
+    default=None,
+    help="Download remote HTML image assets for this import; otherwise inherit KB/global settings.",
+)
 @click.pass_context
-def add(ctx, path, product, versions, family, document_revision):
+def add(ctx, path, product, versions, family, document_revision, download_remote_assets):
     """Add a document or directory of documents at PATH to the knowledge base.
 
     PATH may be a local file, a local directory (which is walked
@@ -594,6 +601,8 @@ def add(ctx, path, product, versions, family, document_revision):
     }
     metadata = SourceMetadata.model_validate(supplied) if supplied else None
     options = {"scope": _selected_scope(ctx, kb_dir), "metadata": metadata}
+    if download_remote_assets is not None:
+        options["download_remote_assets"] = download_remote_assets
 
     if looks_like_url(path):
         from tempfile import TemporaryDirectory

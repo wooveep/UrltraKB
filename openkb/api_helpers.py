@@ -281,13 +281,20 @@ async def _run_add_uploads(
     bundle=None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> AddResponse:
     results = []
     try:
         for saved_path, original_name in saved_uploads:
             results.append(
                 await _add_saved_file(
-                    kb_dir, saved_path, original_name, bundle=bundle, scope=scope, metadata=metadata
+                    kb_dir,
+                    saved_path,
+                    original_name,
+                    bundle=bundle,
+                    scope=scope,
+                    metadata=metadata,
+                    download_remote_assets=download_remote_assets,
                 )
             )
     finally:
@@ -303,6 +310,7 @@ async def _stream_add_uploads(
     bundle=None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> AsyncIterator[str]:
     results: list[AddFileItem] = []
     try:
@@ -326,6 +334,7 @@ async def _stream_add_uploads(
                     bundle=bundle,
                     scope=scope,
                     metadata=metadata,
+                    download_remote_assets=download_remote_assets,
                     on_published=on_published,
                     cancelled=cancelled.is_set,
                 )
@@ -370,6 +379,7 @@ async def _add_saved_file(
     bundle=None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
     on_published: Callable[[Path], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> AddFileItem:
@@ -379,7 +389,12 @@ async def _add_saved_file(
                 if on_published:
                     on_published(owned.path)
                 result = _add_for_api(
-                    owned.path, kb_dir, bundle=bundle, scope=scope, metadata=metadata
+                    owned.path,
+                    kb_dir,
+                    bundle=bundle,
+                    scope=scope,
+                    metadata=metadata,
+                    download_remote_assets=download_remote_assets,
                 )
                 item = AddFileItem(**result.__dict__)
                 item.original_name = original_name

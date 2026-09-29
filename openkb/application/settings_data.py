@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, StrictBool, field_validator
 
 from openkb.processing_policy import ModelCapacity, PdfLimit
 
@@ -24,6 +24,7 @@ class _KbConfigWritable(BaseModel):
     """
 
     model: str | None = None
+    download_remote_assets: StrictBool | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
     pdf_short_max_pages: int | None = Field(default=None, ge=0)
@@ -50,6 +51,7 @@ class GlobalConfigValues(BaseModel):
     """Raw global-layer values (null where global.yaml is silent)."""
 
     model: str | None = None
+    download_remote_assets: StrictBool | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
     pdf_short_max_pages: int | None = None
@@ -58,6 +60,7 @@ class GlobalConfigValues(BaseModel):
 
 
 class GlobalConfigResponse(BaseModel):
+    download_remote_assets: bool = False
     capacity: dict = Field(default_factory=dict)
     model: str
     language: str
@@ -97,6 +100,7 @@ class GlobalConfigPatchRequest(BaseModel):
 
 
 class KbConfigResponse(BaseModel):
+    download_remote_assets: bool = False
     capacity: dict = Field(default_factory=dict)
     model: str
     language: str

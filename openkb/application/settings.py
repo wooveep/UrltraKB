@@ -154,6 +154,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     from openkb.execution_capacity import capacity_policy
 
     return KbConfigResponse(
+        download_remote_assets=effective["download_remote_assets"],
         capacity=capacity_policy(
             effective, custom_endpoint=bool(bundle.base_url), origin=sources["model_capacity"]
         ),
@@ -170,6 +171,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         has_api_key=bundle.api_key is not None,
         sources=sources,
         global_values=GlobalConfigValues(
+            download_remote_assets=global_config.get("download_remote_assets"),
             model=global_config.get("model"),
             language=global_config.get("language"),
             pageindex_threshold=global_config.get("pageindex_threshold"),
@@ -276,6 +278,7 @@ def _read_global_config() -> GlobalConfigResponse:
     from openkb.execution_capacity import capacity_policy
 
     return GlobalConfigResponse(
+        download_remote_assets=gc.get("download_remote_assets", False),
         capacity=capacity_policy(
             {**DEFAULT_CONFIG, **gc},
             custom_endpoint=bool(env_values.get("OPENAI_API_BASE")),
