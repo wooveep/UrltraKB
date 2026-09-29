@@ -15,6 +15,7 @@ def pdf_source(kb_dir):
 
     original = kb_dir / "notes.pdf"
     with pymupdf.open() as pdf:
+        pdf.set_metadata({"title": "FixtureProduct V1 User Manual"})
         pdf.new_page().insert_text((72, 72), "A frozen source fact.")
         pdf.save(original)
     return original
@@ -121,10 +122,16 @@ def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, fixed_mod
 
 def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
     from openkb.application.documents import import_document
+    from openkb.view_records import SourceMetadata
 
     page = kb_dir / "wiki/summaries/notes.md"
     page.write_text("Keep the existing human explanation.")
-    result = import_document(kb_dir, pdf_source, scope=legacy_scope(kb_dir))
+    result = import_document(
+        kb_dir,
+        pdf_source,
+        scope=legacy_scope(kb_dir),
+        metadata=SourceMetadata(product=None, applicable_versions=()),
+    )
     assert result.status == "blocked"
     assert page.read_text() == "Keep the existing human explanation."
     assert result.units[0].proposal_id

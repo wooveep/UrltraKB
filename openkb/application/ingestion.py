@@ -9,14 +9,18 @@ from typing import Callable, Literal
 
 from openkb.application.execution import ExecutionContext
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
-from openkb.converter import convert_document
 from openkb.ingest_records import UnitPublication, UnitRevision
 from openkb.ingest_result import ImportUnitOutcome, IngestResult
 from openkb.inputs import PreparedInput
 from openkb.knowledge_scope import KnowledgeScope
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, mutation_scope
-from openkb.source_catalog import Admission, admit_source_revision, read_record
+from openkb.source_catalog import (
+    Admission,
+    admit_source_revision,
+    read_record,
+    record_path,
+)
 from openkb.unit_publication import (
     begin_unit_attempt,
     plan_import_units,
@@ -93,6 +97,8 @@ def import_prepared_pdf(
     report=logger.info,
     metadata: SourceMetadata | None = None,
     scope: KnowledgeScope | None = None,
+    admission: Admission | None = None,
+    retry_confirmed: bool = False,
 ) -> IngestResult:
     """Caller owns the real KB write lease and frozen input for the whole call."""
     from openkb.agent.compiler import (
@@ -104,15 +110,70 @@ def import_prepared_pdf(
     from openkb.indexer import index_long_document
 
     check_stop = context.check_stop if context else lambda: None
-    admission = admit_source_revision(kb_dir, prepared, identity=origin_url, check_stop=check_stop)
+    admission = admission or admit_source_revision(
+        kb_dir, prepared, identity=origin_url, check_stop=check_stop
+    )
+    if prepared.digest != admission.revision.digest:
+        raise ValueError("Retained input no longer matches the source revision")
+    from openkb.application.version_review import (
+        VersionReview,
+        complete_version_review,
+        save_version_wait,
+    )
     from openkb.application.views import bind_source_view
+    from openkb.normalization import (
+        normalization_fingerprint,
+        read_normalization,
+        restore_normalization,
+        retain_normalization,
+    )
+    from openkb.version_metadata import assess_version
 
-    admission, scope = bind_source_view(kb_dir, admission, metadata, scope=scope)
-    unit, revision = plan_import_units(kb_dir, admission, "pdf-content-pipeline-v1")
+    review_path = record_path(kb_dir, "version-reviews", admission.revision.source_revision_id)
+    review = (
+        read_record(kb_dir, "version-reviews", admission.revision.source_revision_id, VersionReview)
+        if review_path.exists()
+        else None
+    )
+    if review and review.status == "cancelled":
+        return IngestResult(
+            admission.source.identity,
+            "blocked",
+            (str(kb_dir / admission.revision.original),),
+            source_id=admission.source.source_id,
+            source_revision_id=admission.revision.source_revision_id,
+            unfinished=("version_metadata",),
+            message="Version clarification was cancelled; no work resumed.",
+        )
+    assessment = assess_version(
+        kb_dir, admission, metadata, scope=scope, candidates=review.candidates if review else None
+    )
+    admission, scope = bind_source_view(
+        kb_dir,
+        admission,
+        assessment.metadata,
+        scope=scope,
+        evidence=assessment.evidence,
+        candidates=assessment.candidates,
+    )
+    fingerprint = (
+        read_normalization(kb_dir, review.normalization_id)[1].fingerprint
+        if review
+        else normalization_fingerprint(kb_dir)
+    )
+
+    unit, revision = plan_import_units(kb_dir, admission, fingerprint)
     state, runnable = begin_unit_attempt(
-        kb_dir, unit, revision, discovery_intent=admission.discovery_intent, view_id=scope.view_id
+        kb_dir,
+        unit,
+        revision,
+        discovery_intent=admission.discovery_intent,
+        view_id=scope.view_id,
+        retry_confirmed=retry_confirmed,
     )
     if not runnable:
+        if review:
+            complete_version_review(kb_dir, review, admission, state)
         return result_from_publication(
             kb_dir, admission, state, status="skipped" if state.status == "completed" else "blocked"
         )
@@ -121,19 +182,19 @@ def import_prepared_pdf(
     concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
     stage = "conversion"
     try:
+        if on_event:
+            on_event({"stage": "converting", "source": admission.source.name})
+        directory, normalized = retain_normalization(
+            kb_dir, admission, prepared, fingerprint, check_stop=check_stop
+        )
+        if assessment.missing_fields:
+            state = save_version_wait(kb_dir, admission, normalized, state, assessment)
+            return result_from_publication(kb_dir, admission, state, status="blocked")
         with prepare_compile_view(kb_dir, scope.view_id) as view:
             working = view.scope.wiki_dir.parent
             check_stop()
             with mutation_scope(kb_dir, [working], operation="compile-import-unit"):
-                if on_event:
-                    on_event({"stage": "converting", "source": admission.source.name})
-                converted = convert_document(
-                    prepared.source,
-                    kb_dir,
-                    staging_dir=working,
-                    prepared=prepared,
-                    doc_name=unit.doc_name,
-                )
+                converted = restore_normalization(directory, normalized, working)
                 index_ref = None
                 if converted.is_long_doc:
                     stage = "indexing"
@@ -212,6 +273,13 @@ def import_prepared_pdf(
             )
         except Exception:
             logger.warning("Import committed but its progress notification was not delivered")
+    if review and state.status in {"completed", "awaiting_confirmation"}:
+        try:
+            complete_version_review(kb_dir, review, admission, state)
+        except RecoveryRequired:
+            raise
+        except Exception:
+            logger.warning("Knowledge published; clarification completion will reconcile on retry")
     return result_from_publication(
         kb_dir, admission, state, status="added" if state.status == "completed" else "blocked"
     )

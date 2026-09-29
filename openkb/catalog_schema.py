@@ -6,7 +6,7 @@ from openkb.file_state import contained_paths
 from openkb.source_records import Record
 
 SUPPORTED_CAPABILITIES = frozenset(
-    {"source-revisions-v1", "unit-publications-v1", "knowledge-views-v1"}
+    {"source-revisions-v1", "unit-publications-v1", "knowledge-views-v1", "version-review-v1"}
 )
 
 

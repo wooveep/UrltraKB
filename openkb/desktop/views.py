@@ -73,13 +73,11 @@ def import_metadata(window):
     values = {key: field.text().strip() for key, field in window.source_metadata_fields.items()}
     if not any(values.values()):
         return None
-    return SourceMetadata(
-        product=values["product"] or None,
-        applicable_versions=tuple(
+    supplied = {name: value for name, value in values.items() if value}
+    if values["applicable_versions"]:
+        supplied["applicable_versions"] = tuple(
             part.strip()
             for part in values["applicable_versions"].replace("，", ",").split(",")
             if part.strip()
-        ),
-        family=values["family"] or None,
-        document_revision=values["document_revision"] or None,
-    )
+        )
+    return SourceMetadata.model_validate(supplied)

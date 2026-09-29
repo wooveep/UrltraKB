@@ -1,6 +1,6 @@
 """Applicability, document lineage, and immutable annotation identities."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field, model_validator
 
@@ -57,6 +57,13 @@ class KnowledgeView(Record):
         return self
 
 
+class VersionCandidate(Record):
+    field: Literal["product", "applicable_versions", "family", "document_revision"]
+    values: tuple[Label, ...] = Field(min_length=1)
+    location: Label
+    excerpt: Label
+
+
 class VersionAnnotation(Record):
     annotation_id: RecordId
     source_id: RecordId
@@ -66,3 +73,4 @@ class VersionAnnotation(Record):
     view_id: ViewId
     metadata: SourceMetadata
     evidence: dict[str, str] = Field(default_factory=dict)
+    candidates: tuple[VersionCandidate, ...] = ()

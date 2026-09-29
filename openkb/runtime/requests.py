@@ -199,8 +199,22 @@ class GenerateGraph(ViewSelection):
     pass
 
 
+@dataclass(frozen=True)
+class ResumeVersionReview(ViewSelection):
+    review_id: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import RecordId
+
+        TypeAdapter(RecordId).validate_python(self.review_id)
+
+
 UnitRequest = (
     AcceptProposal
+    | ResumeVersionReview
     | SavePage
     | AskQuestion
     | ContinueConversation
@@ -216,6 +230,7 @@ UnitRequest = (
 )
 REQUEST_TYPES = (
     AcceptProposal,
+    ResumeVersionReview,
     SavePage,
     AskQuestion,
     ContinueConversation,

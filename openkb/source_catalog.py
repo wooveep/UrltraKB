@@ -44,6 +44,9 @@ def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
         "families",
         "annotations",
         "views",
+        "normalizations",
+        "version-reviews",
+        "metadata-corrections",
     }:
         raise ValueError("Unknown source catalog collection")
     path = kb_dir / ".openkb/catalog" / collection / f"{identity}.json"
@@ -65,6 +68,9 @@ def read_record(kb_dir: Path, collection: str, identity: str, model: type[R]) ->
         "families": "family_id",
         "annotations": "annotation_id",
         "views": "view_id",
+        "normalizations": "normalization_id",
+        "version-reviews": "review_id",
+        "metadata-corrections": "correction_id",
     }[collection]
     if getattr(record, field) != identity:
         raise ValueError("Catalog record identity does not match its filename")

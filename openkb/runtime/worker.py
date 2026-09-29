@@ -99,7 +99,21 @@ def _execute(
         if isinstance(request, ViewSelection) and request.view_id is not None
         else None
     )
-    from openkb.runtime.requests import AcceptProposal
+    from openkb.runtime.requests import AcceptProposal, ResumeVersionReview
+
+    if isinstance(request, ResumeVersionReview):
+        from openkb.application.version_review import resume_version_review
+        from openkb.ingest_result import describe_ingest
+
+        resumed = resume_version_review(root, request.review_id, context=context, scope=scope)
+        return UnitResult(
+            "completed" if resumed.status == "added" else resumed.status,
+            resources=resumed.resources,
+            error=resumed.message,
+            quality=resumed.quality,
+            changes=describe_ingest(resumed),
+            unfinished=resumed.unfinished,
+        )
 
     if isinstance(request, AcceptProposal):
         from openkb.application.proposals import accept_proposal

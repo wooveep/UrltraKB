@@ -59,20 +59,20 @@ def test_omitted_metadata_preserves_confirmed_labels(kb_dir, import_pdf):
 
 
 @pytest.mark.parametrize(
-    "first_metadata,second_metadata",
+    "first_metadata,second_metadata,second_status",
     [
-        ({"product": "A"}, {"product": "B"}),
-        ({"applicable_versions": ("1",)}, {"applicable_versions": ("2",)}),
+        ({"product": "A"}, {"product": "B"}, "added"),
+        ({"applicable_versions": ("1",)}, {"applicable_versions": ("2",)}, "blocked"),
     ],
 )
 def test_changed_partial_applicability_gets_its_own_view(
-    kb_dir, import_pdf, first_metadata, second_metadata
+    kb_dir, import_pdf, first_metadata, second_metadata, second_status
 ):
     from openkb.view_records import SourceMetadata
 
     first = import_pdf(metadata=SourceMetadata(**first_metadata))
     second = import_pdf("Changed instruction.", metadata=SourceMetadata(**second_metadata))
-    assert first.status == second.status == "added"
+    assert first.status == "added" and second.status == second_status
     assert first.units[0].view_id != second.units[0].view_id
 
 

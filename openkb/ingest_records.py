@@ -40,6 +40,7 @@ class UnitPublication(Record):
         "awaiting_confirmation",
         "interrupted",
         "stopped",
+        "blocked",
     ]
     successful_revision_id: RecordId | None = None
     knowledge_revision_id: RecordId | None = None

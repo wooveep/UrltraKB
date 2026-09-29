@@ -16,6 +16,7 @@ from openkb.view_records import (
     Product,
     SourceMetadata,
     VersionAnnotation,
+    VersionCandidate,
 )
 
 
@@ -90,6 +91,8 @@ def bind_source_view(
     metadata: SourceMetadata | None = None,
     *,
     scope: KnowledgeScope | None = None,
+    evidence: dict[str, str] | None = None,
+    candidates: tuple[VersionCandidate, ...] = (),
 ) -> tuple[Admission, KnowledgeScope]:
     """Persist metadata separately from bytes before model work. Caller owns its write lease."""
     root = kb_dir.resolve()
@@ -195,6 +198,7 @@ def bind_source_view(
             and previous.metadata == confirmed
             and previous.view_id == scope.view_id
             and previous.source_revision_id == admission.revision.source_revision_id
+            and (evidence is None or previous.evidence == evidence)
         ):
             return admission, scope
         annotation = VersionAnnotation(
@@ -205,11 +209,14 @@ def bind_source_view(
             family_id=family.family_id if family else None,
             view_id=scope.view_id,
             metadata=confirmed,
-            evidence={
+            evidence=evidence
+            if evidence is not None
+            else {
                 key: "user"
                 for key, value in confirmed.model_dump().items()
                 if value and key != "schema_version"
             },
+            candidates=candidates,
         )
         source = admission.source.model_copy(
             update={

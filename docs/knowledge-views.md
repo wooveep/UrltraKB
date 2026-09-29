@@ -20,7 +20,39 @@ Repeat `--applicable-version` for a complete set of supported versions. Missing
 product or applicability creates a separate unknown view for that source.
 Choosing an existing view explicitly supplies its product and applicability;
 conflicting metadata is rejected. Reimporting without metadata preserves the
-source's confirmed labels. Importing never copies another view's knowledge.
+source's confirmed labels for the same input. Changed bytes need fresh
+applicability evidence. Importing never copies another view's knowledge.
+
+Reliable PDF titles supply candidates with their locations. Product versions
+and document revisions remain separate; user corrections take precedence over
+title candidates. The first source with unknown applicability imports normally.
+A later related manual with missing or conflicting applicability waits for
+clarification. Its original and conversion are retained, and its worker exits.
+
+```bash
+openkb versions list
+openkb versions show <review-id>
+openkb versions supplement <review-id> --metadata '{"applicable_versions":["9.4"]}'
+openkb versions resume <review-id>
+openkb versions cancel <review-id>
+openkb versions open <source-id>
+```
+
+Supplement and resume accept multiple review IDs. Omitted metadata fields stay
+unchanged. Supplementing saves a metadata revision; `resume` explicitly starts
+another attempt using retained conversion without another upload. Cancelled
+clarifications do not resume automatically. Replaced inputs cease to appear as
+pending. `open` starts correction of an already imported source: resuming
+compiles its retained input into the confirmed view, preserving the old view
+and historical citations. It never relabels or copies mixed knowledge pages.
+
+Desktop **资料管理** offers **查看版本待补** and **补充所选资料版本** with evidence,
+batch editing, cancellation and explicit continuation. HTTP clients use
+`GET /api/v1/version-reviews`, `POST /api/v1/version-review` (read),
+`POST /api/v1/version-review/open` (`source_id`),
+`POST /api/v1/version-reviews/supplement` (`updates` maps review IDs to metadata),
+and `POST /api/v1/version-review/cancel` or `/resume` (`review_id`). All accept
+the selected `view_id`; no action waits indefinitely for human input.
 
 The desktop's **知识视图** selector applies to documents, knowledge pages,
 conversations, maintenance and generation. The Documents form accepts product,

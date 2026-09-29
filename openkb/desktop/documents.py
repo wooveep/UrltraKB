@@ -85,6 +85,12 @@ class DocumentsDialog(ManagementPanel):
         self.proposals_button = QPushButton("查看待接受差异")
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
+        self.versions_button = QPushButton("查看版本待补")
+        self.versions_button.clicked.connect(lambda: self.review_versions())
+        recompilation.addWidget(self.versions_button)
+        self.correct_versions_button = QPushButton("补充所选资料版本")
+        self.correct_versions_button.clicked.connect(lambda: self.review_versions(selected=True))
+        recompilation.addWidget(self.correct_versions_button)
         self.map_legacy = QPushButton("映射旧库来源（无模型）")
         self.map_legacy.clicked.connect(self.map_legacy_sources)
         recompilation.addWidget(self.map_legacy)
@@ -99,6 +105,23 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def review_versions(self, *, selected=False):
+        from openkb.desktop.version_reviews import VersionReviewsDialog
+
+        identities = (
+            tuple(
+                self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
+                for row in self.table.selectionModel().selectedRows()
+            )
+            if selected
+            else ()
+        )
+        if selected and not identities:
+            self.status.setText("请选择需要补充版本的资料。")
+            return
+        dialog = VersionReviewsDialog(self.window, self.kb, scope=self.scope, source_ids=identities)
+        dialog.show()
 
     def map_legacy_sources(self):
         from openkb.application.views import map_legacy_sources

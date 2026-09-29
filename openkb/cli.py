@@ -582,16 +582,17 @@ def add(ctx, path, product, versions, family, document_revision):
     from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path
     from openkb.view_records import SourceMetadata
 
-    metadata = (
-        SourceMetadata(
-            product=product,
-            applicable_versions=versions,
-            family=family,
-            document_revision=document_revision,
-        )
-        if any((product, versions, family, document_revision))
-        else None
-    )
+    supplied = {
+        key: value
+        for key, value in {
+            "product": product,
+            "applicable_versions": versions,
+            "family": family,
+            "document_revision": document_revision,
+        }.items()
+        if value
+    }
+    metadata = SourceMetadata.model_validate(supplied) if supplied else None
     options = {"scope": _selected_scope(ctx, kb_dir), "metadata": metadata}
 
     if looks_like_url(path):
@@ -2242,10 +2243,12 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
+from openkb.cli_versions import versions
 from openkb.cli_views import views
 
 cli.add_command(proposals)
 cli.add_command(views)
+cli.add_command(versions)
 
 _fix_summary = fix_summary
 

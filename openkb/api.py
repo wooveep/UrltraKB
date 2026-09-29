@@ -174,6 +174,9 @@ def create_app() -> FastAPI:
     app.include_router(pages_router)
     app.include_router(documents_router)
     app.include_router(make_views_router())
+    from openkb.api_versions import versions_router
+
+    app.include_router(versions_router)
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(

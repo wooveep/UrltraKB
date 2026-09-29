@@ -109,6 +109,7 @@ def begin_unit_attempt(
     discovery_intent: DiscoveryIntent | None = None,
     recompile: bool = False,
     view_id: str = "legacy",
+    retry_confirmed: bool = False,
 ) -> tuple[UnitPublication, bool]:
     identity = publication_id(unit.unit_id, view_id)
     path = record_path(kb_dir, "publications", identity)
@@ -131,7 +132,9 @@ def begin_unit_attempt(
         previous
         and previous.target_revision_id == revision.unit_revision_id
         and (
-            previous.status in {"awaiting_confirmation", "interrupted"}
+            previous.status == "awaiting_confirmation"
+            or previous.status in {"interrupted", "blocked"}
+            and not retry_confirmed
             or previous.status == "completed"
             and not recompile
         )
