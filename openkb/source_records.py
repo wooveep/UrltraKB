@@ -37,6 +37,7 @@ class Source(Record):
     target_revision_id: RecordId
     target_generation: int = Field(ge=1)
     removed: bool = False
+    legacy_hash: str | None = None
 
 
 class FrozenAsset(Record):
@@ -62,6 +63,7 @@ class SourceRevision(Record):
     source_format: str
     assets: tuple[FrozenAsset, ...] = ()
     created_at: str
+    original_kind: Literal["original", "legacy_snapshot"] = "original"
 
     @model_validator(mode="after")
     def matching_digest(self):

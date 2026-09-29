@@ -70,7 +70,7 @@ def export_conversation(
     A persisted conversation is reloaded under both leases. The CLI can also
     export a newly created in-memory session which has never been persisted.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     root = kb_dir.resolve()
     identity = session if isinstance(session, str) else session.id
     source = _session_path(root, identity)

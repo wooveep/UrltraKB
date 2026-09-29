@@ -18,10 +18,13 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
     summary = kb_dir / "wiki/summaries/paper.md"
     original = "---\nsources: [raw/paper.pdf]\n---\n# Previous paper\n"
     summary.write_text(original)
+    (kb_dir / "wiki/sources/paper.json").write_text(
+        json.dumps([{"page": 1, "text": "Retained PDF content"}])
+    )
 
     def unavailable(**kwargs):
-        # Long compilation backfills metadata before contacting the model.
-        assert "Summary" in summary.read_text()
+        # Metadata backfilling stays in the candidate until publication succeeds.
+        assert summary.read_text() == original
         raise ConnectionError("private provider detail")
 
     monkeypatch.setattr(litellm, "completion", unavailable)

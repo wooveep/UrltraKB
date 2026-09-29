@@ -521,7 +521,8 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
     saved_path = kb_dir / "raw" / "paper.md"
     assert saved_path.read_bytes() == b"# Paper"
     assert calls == [(saved_path, kb_dir)]
-    assert response.json()["files"][0] == {
+    item = response.json()["files"][0]
+    assert {key: item[key] for key in ("original_name", "saved_path", "status", "message")} == {
         "original_name": "paper.md",
         "saved_path": str(saved_path),
         "status": "added",
@@ -597,7 +598,11 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
     assert paper_path.read_bytes() == b"# Paper"
     assert not notes_path.exists()
     assert calls == [(paper_path, kb_dir), (notes_path, kb_dir)]
-    assert response.json() == {
+    payload = response.json()
+    for item in payload["files"]:
+        for key in ("source_id", "source_revision_id", "units", "discovery_pending"):
+            item.pop(key)
+    assert payload == {
         "kb": kb,
         "files": [
             {
@@ -616,6 +621,11 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
         "added_count": 1,
         "skipped_count": 1,
         "failed_count": 0,
+        "blocked_count": 0,
+        "partial_count": 0,
+        "source_count": 2,
+        "unit_counts": {},
+        "discovery_pending_count": 0,
     }
 
 
@@ -670,7 +680,8 @@ def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir):
     assert response.status_code == 200
     assert skipped_path == kb_dir / "raw" / "paper.md"
     assert not skipped_path.exists()
-    assert response.json()["files"][0] == {
+    item = response.json()["files"][0]
+    assert {key: item[key] for key in ("original_name", "saved_path", "status", "message")} == {
         "original_name": "paper.md",
         "saved_path": None,
         "status": "skipped",
@@ -813,7 +824,8 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
     assert response.status_code == 200
     payload = response.json()
     assert payload["document_count"] == 2
-    assert payload["documents"] == [
+    fields = ("hash", "name", "type", "display_type", "pages")
+    assert [{key: item[key] for key in fields} for item in payload["documents"]] == [
         {
             "hash": "abc123",
             "name": "paper.pdf",
@@ -1231,6 +1243,10 @@ def _seed_long(
     )
     (kb_dir / "wiki" / "log.md").write_text("# Log\n\n", encoding="utf-8")
 
+    (kb_dir / "wiki/sources" / f"{slug}.json").write_text(
+        json.dumps([{"page": 1, "text": "Retained PDF content"}])
+    )
+
 
 def _patch_recompile(monkeypatch):
     monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
@@ -1427,7 +1443,7 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["recompiled"] == 1
-    assert body["skipped"] == 1
+    assert body["blocked"] == 1
     assert short.call_count == 1
 
 

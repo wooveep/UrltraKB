@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Literal, TypeVar
 
 from pydantic import TypeAdapter
 
@@ -102,6 +102,10 @@ def admit_source_revision(
     *,
     identity: str | None = None,
     check_stop: Callable[[], None] = lambda: None,
+    legacy_hash: str | None = None,
+    doc_name: str | None = None,
+    name: str | None = None,
+    original_kind: Literal["original", "legacy_snapshot"] = "original",
 ) -> Admission:
     """Commit original, related assets, target revision and discovery as one unit."""
     root = kb_dir.resolve()
@@ -143,8 +147,9 @@ def admit_source_revision(
                             _copy_file_atomic(copies[path], path)
                         check_stop()
                 return Admission(known, previous, intent)
-        doc_name = known.doc_name if known else _sanitize_stem(prepared.source.stem)
-        if not known:
+        requested_name = doc_name
+        doc_name = known.doc_name if known else doc_name or _sanitize_stem(prepared.source.stem)
+        if not known and requested_name is None:
             legacy = HashRegistry(root / ".openkb/hashes.json").all_entries()
             occupied = {source.doc_name for source in sources} | {
                 meta.get("doc_name") or Path(meta.get("name", "")).stem for meta in legacy.values()
@@ -154,10 +159,11 @@ def admit_source_revision(
         source = Source(
             source_id=source_id,
             identity=identity,
-            name=prepared.source.name,
+            name=name or prepared.source.name,
             doc_name=doc_name,
             target_revision_id=revision_id,
             target_generation=(known.target_generation + 1 if known else 1),
+            legacy_hash=legacy_hash,
         )
         revision = SourceRevision(
             source_revision_id=revision_id,
@@ -168,6 +174,7 @@ def admit_source_revision(
             source_format=prepared.source.suffix.lower().lstrip("."),
             assets=tuple(assets),
             created_at=datetime.now(timezone.utc).isoformat(),
+            original_kind=original_kind,
         )
         intent = DiscoveryIntent(
             intent_id=intent_id,
@@ -175,6 +182,7 @@ def admit_source_revision(
             original=original,
             root_import_id=uuid.uuid4().hex,
             kb_generation=generation,
+            status="completed" if original_kind == "legacy_snapshot" else "pending",
         )
         records = {
             catalog_schema_path(root): CatalogSchema(),

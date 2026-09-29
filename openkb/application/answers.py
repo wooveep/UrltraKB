@@ -25,7 +25,7 @@ def save_exploration(
     frontmatter. ``unique=False`` retains the CLI's original slug/overwrite
     policy, including its empty CJK slug.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     import hashlib
     import re
 

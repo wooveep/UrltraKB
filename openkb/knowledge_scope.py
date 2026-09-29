@@ -17,7 +17,9 @@ class KnowledgeScope:
             raise ValueError("Invalid page path: wiki escapes its knowledge base")
         relative = wiki.relative_to(root).parts
         managed = (
-            len(relative) == 4 and relative[:2] == (".openkb", "staging") and relative[-1] == "wiki"
+            len(relative) == 4
+            and relative[:2] in {(".openkb", "staging"), (".openkb", "proposals")}
+            and relative[-1] == "wiki"
         ) or (
             len(relative) == 6
             and relative[:3] == (".openkb", "knowledge", "legacy")
@@ -29,15 +31,24 @@ class KnowledgeScope:
         object.__setattr__(self, "kb_dir", root)
         object.__setattr__(self, "wiki_dir", wiki)
 
+    @property
+    def read_only(self) -> bool:
+        relative = self.wiki_dir.relative_to(self.kb_dir).parts
+        return len(relative) > 1 and relative[1] in {"knowledge", "proposals"}
+
 
 def legacy_scope(kb_dir: Path) -> KnowledgeScope:
     root = kb_dir.expanduser().resolve()
     return KnowledgeScope(root, root / "wiki")
 
 
-def resolve_scope(kb_dir: Path, scope: KnowledgeScope | None = None) -> KnowledgeScope:
+def resolve_scope(
+    kb_dir: Path, scope: KnowledgeScope | None = None, *, writable: bool = False
+) -> KnowledgeScope:
     """Adapt old callers once; scoped calls must belong to the same real KB."""
     selected = scope if scope is not None else legacy_scope(kb_dir)
     if selected.kb_dir != kb_dir.expanduser().resolve():
         raise ValueError("Knowledge scope belongs to a different knowledge base")
+    if writable and selected.read_only:
+        raise ValueError("Knowledge revisions and proposals are read-only")
     return selected

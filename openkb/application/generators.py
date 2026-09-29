@@ -91,6 +91,8 @@ def _paths(
         if target_type == "skill"
         else [kb_dir / "output", scope.wiki_dir / "explorations"]
     )
+    if scope.read_only:
+        roots = [path for path in roots if not path.is_relative_to(scope.wiki_dir)]
     contained_paths(kb_dir, [target, *roots])
     return target, roots
 
@@ -223,6 +225,8 @@ async def generate_artifact(
         except (ValueError, RuntimeError, OSError) as exc:
             return GenerationResult("invalid", message=str(exc), error_type=type(exc).__name__)
         target, roots = _paths(kb_dir, options.target_type, options.name, prepared, scope=scope)
+        if scope.read_only and target.is_relative_to(scope.wiki_dir):
+            return GenerationResult("blocked", message="Knowledge revisions are read-only")
         if options.version is not None and _version(kb_dir, roots, prepared) != options.version:
             return GenerationResult(
                 "conflict", message="Artifacts changed; review and confirm again"

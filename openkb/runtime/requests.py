@@ -153,12 +153,27 @@ class GenerateArtifact:
 
 
 @dataclass(frozen=True)
+class AcceptProposal:
+    proposal_id: str
+    version: str
+
+    def __post_init__(self) -> None:
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import Digest, RecordId
+
+        TypeAdapter(RecordId).validate_python(self.proposal_id)
+        TypeAdapter(Digest).validate_python(self.version)
+
+
+@dataclass(frozen=True)
 class GenerateGraph:
     pass
 
 
 UnitRequest = (
-    SavePage
+    AcceptProposal
+    | SavePage
     | AskQuestion
     | ContinueConversation
     | ImportFile
@@ -172,6 +187,7 @@ UnitRequest = (
     | GenerateGraph
 )
 REQUEST_TYPES = (
+    AcceptProposal,
     SavePage,
     AskQuestion,
     ContinueConversation,

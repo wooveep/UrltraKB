@@ -91,6 +91,22 @@ def _execute(
     from openkb.locks import kb_ingest_lock
 
     root = Path(identity.kb_dir)
+    from openkb.runtime.requests import AcceptProposal
+
+    if isinstance(request, AcceptProposal):
+        from openkb.application.proposals import accept_proposal
+        from openkb.ingest_result import describe_ingest
+
+        accepted = accept_proposal(
+            root, request.proposal_id, version=request.version, context=context
+        )
+        return UnitResult(
+            "completed" if accepted.status == "added" else accepted.status,
+            resources=accepted.resources,
+            error=accepted.message,
+            changes=describe_ingest(accepted),
+            unfinished=accepted.unfinished,
+        )
     if isinstance(request, SavePage):
         with kb_ingest_lock(root / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
             with context.begin(root):

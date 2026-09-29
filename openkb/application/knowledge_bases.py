@@ -294,7 +294,10 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
 
         from openkb.application.sources import source_inventory
 
-        documents.extend(source_inventory(kb_dir))
+        admitted = source_inventory(kb_dir)
+        mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
+        documents = [item for item in documents if item["hash"] not in mapped]
+        documents.extend(admitted)
 
         summaries_dir = kb_dir / "wiki" / "summaries"
         concepts_dir = kb_dir / "wiki" / "concepts"
@@ -320,8 +323,6 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
 
 def get_kb_status(kb_dir: Path) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
-    from openkb.application.sources import source_inventory
-
     with kb_read_lock(kb_dir / ".openkb"):
         wiki_dir = kb_dir / "wiki"
         subdirs = ["sources", "summaries", "concepts", "reports"]
@@ -333,9 +334,6 @@ def get_kb_status(kb_dir: Path) -> dict[str, Any]:
         raw_dir = kb_dir / "raw"
         raw_count = len([f for f in raw_dir.iterdir() if f.is_file()]) if raw_dir.exists() else 0
 
-        hashes_file = kb_dir / ".openkb" / "hashes.json"
-        hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
-
         summaries = (
             list((wiki_dir / "summaries").glob("*.md")) if (wiki_dir / "summaries").exists() else []
         )
@@ -345,7 +343,7 @@ def get_kb_status(kb_dir: Path) -> dict[str, Any]:
         return {
             "directories": directories,
             "raw_count": raw_count,
-            "total_indexed": len(hashes) + len(source_inventory(kb_dir)),
+            "total_indexed": get_kb_list(kb_dir)["document_count"],
             "last_compile": _newest_mtime_iso(summaries),
             "last_lint": _newest_mtime_iso(reports),
         }

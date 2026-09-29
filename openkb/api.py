@@ -545,6 +545,7 @@ def create_app() -> FastAPI:
             total=result.get("total", 0),
             recompiled=result.get("recompiled", 0),
             skipped=result.get("skipped", 0),
+            blocked=result.get("blocked", 0),
             docs=result.get("docs", []),
             targets=targets,
             candidates=candidates,

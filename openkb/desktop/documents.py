@@ -78,6 +78,9 @@ class DocumentsDialog(ManagementPanel):
         self.recompile_all.clicked.connect(lambda: self.recompile(all_docs=True))
         recompilation.addWidget(self.recompile_selected)
         recompilation.addWidget(self.recompile_all)
+        self.proposals_button = QPushButton("查看待接受差异")
+        self.proposals_button.clicked.connect(self.review_proposals)
+        recompilation.addWidget(self.proposals_button)
         layout.addLayout(recompilation)
         self.status = QLabel("正在读取资料…")
         self.status.setWordWrap(True)
@@ -89,6 +92,12 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def review_proposals(self):
+        from openkb.desktop.proposals import ProposalsDialog
+
+        dialog = ProposalsDialog(self.window, self.kb)
+        dialog.show()
 
     def read_source(self):
         """Render the original pipeline's retained Markdown or per-page JSON text."""
@@ -235,7 +244,7 @@ class DocumentsDialog(ManagementPanel):
             question.setText(f"重编译 {len(targets)} 份资料？")
             question.setInformativeText(
                 "将使用已有来源与长文索引重新生成摘要、概念和实体页面。"
-                "这些页面的手工编辑可能被覆盖。每份资料完成后保留结果；停止任务不会撤销已完成项。"
+                "人工编辑将保留为待接受差异。每份资料完成后保留结果；停止不会撤销已完成项。"
             )
             question.setDetailedText("\n".join(t.doc_name for t in targets))
             question.setStandardButtons(

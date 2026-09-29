@@ -258,6 +258,8 @@ def write_kb_file(
     if not allowed:
         return "Access denied: path must be a file under wiki/explorations/ or output/."
     if parts[0] == "wiki":
+        if scope.read_only:
+            return "Access denied: knowledge revisions and proposals are read-only."
         full_path = scope.wiki_dir.joinpath(*parts[1:]).resolve()
         if not full_path.is_relative_to(scope.wiki_dir / "explorations"):
             return "Access denied: path escapes wiki explorations."

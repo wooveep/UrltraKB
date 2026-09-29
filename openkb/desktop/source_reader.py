@@ -30,7 +30,11 @@ class SourceReader(QDialog):
             revision.setWordWrap(True)
             layout.addWidget(revision)
         if source.get("original_path"):
-            original = QPushButton("打开冻结原件")
+            original = QPushButton(
+                "打开旧库来源快照"
+                if source.get("original_kind") == "legacy_snapshot"
+                else "打开冻结原件"
+            )
             original.clicked.connect(
                 lambda: QDesktopServices.openUrl(
                     QUrl.fromLocalFile(str(kb / source["original_path"]))

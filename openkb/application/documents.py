@@ -160,7 +160,7 @@ def _add_single_file_locked(
         be an orphan) while preserving it on failure so the user can
         retry without re-downloading.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.agent.compiler import (
         DEFAULT_COMPILE_CONCURRENCY,
         compile_long_doc,
@@ -415,7 +415,7 @@ def import_document(
     scope: KnowledgeScope | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.state import HashRegistry
 
     root = kb_dir.expanduser().resolve()

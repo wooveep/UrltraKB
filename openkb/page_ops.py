@@ -115,7 +115,7 @@ def delete_wiki_page(
     ``dry_run``, ``deleted``. Only concept/entity pages are deletable (a summary
     is removed by deleting its source document, not on its own).
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     section, stem = validate_page_ref(path, allowed=DELETABLE_SECTIONS)
     wiki = scope.wiki_dir
     page = wiki / section / f"{stem}.md"
@@ -151,12 +151,16 @@ def delete_wiki_page(
         # the page's own entry line was already removed above). Surgical restrict
         # leaves pre-existing dangling links elsewhere untouched (like remove).
         restrict = [wiki / f"{ref}.md" for ref in backlinks] + [wiki / "index.md"]
+        from openkb.knowledge_revisions import manual_knowledge_change
         from openkb.mutation import mutation_scope
 
-        with mutation_scope(
-            kb_dir,
-            [page, *restrict],
-            operation="delete-page",
+        with (
+            manual_knowledge_change(scope),
+            mutation_scope(
+                kb_dir,
+                [page, *restrict],
+                operation="delete-page",
+            ),
         ):
             page.unlink(missing_ok=True)
             remove_doc_from_index(
@@ -216,7 +220,8 @@ def edit_wiki_page(
     the KB ingest lock. Returns ``status`` ``not_found`` when the page is absent.
     """
     section, stem = validate_page_ref(path)
-    wiki = resolve_scope(kb_dir, scope).wiki_dir
+    scope = resolve_scope(kb_dir, scope, writable=True)
+    wiki = scope.wiki_dir
     page = wiki / section / f"{stem}.md"
     target = f"{section}/{stem}"
     if not page.is_file():
@@ -236,9 +241,10 @@ def edit_wiki_page(
         # legitimately opens with a '---' block must not be mistaken for
         # frontmatter and silently dropped. The existing block is re-attached.
         cleaned_body, ghosts = strip_ghost_wikilinks(content, list_existing_wiki_targets(wiki))
+        from openkb.knowledge_revisions import manual_knowledge_change
         from openkb.mutation import mutation_scope
 
-        with mutation_scope(kb_dir, [page], operation="edit-page"):
+        with manual_knowledge_change(scope), mutation_scope(kb_dir, [page], operation="edit-page"):
             atomic_write_text(page, fm_block + cleaned_body)
 
     return {

@@ -920,7 +920,7 @@ async def iter_chat_turn_events(
     async with async_session_lock(kb_dir, session.id):
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             session.reload()
-            append_log(scope.wiki_dir, "query", user_input)
+            append_log(scope.wiki_dir, "query", user_input, scope=scope)
             new_input = session.history + [{"role": "user", "content": user_input}]
 
             # Accumulate the ordered, interleaved trace (narration text + tool reads) in
@@ -1080,7 +1080,7 @@ async def run_chat(
             async with async_session_lock(kb_dir, session.id):
                 async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
                     session.reload()
-                    append_log(scope.wiki_dir, "query", user_input)
+                    append_log(scope.wiki_dir, "query", user_input, scope=scope)
                     await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))

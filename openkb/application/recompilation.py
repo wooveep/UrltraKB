@@ -2,35 +2,27 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.application.removal import _resolve_doc_identifier
-from openkb.compilation_report import collect_compile_report
 from openkb.config import (
-    DEFAULT_CONFIG,
     LlmCredentialBundle,
-    resolve_concurrency,
-    resolve_effective_config,
 )
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import (
-    LockCancelled,
     async_kb_lock,
     atomic_write_text,
     kb_ingest_lock,
     kb_read_lock,
 )
-from openkb.log import append_log
-from openkb.mutation import RecoveryRequired, mutation_scope
+from openkb.mutation import mutation_scope
 from openkb.state import HashRegistry
 
 LONG_DOC_TYPES = frozenset({"long_pdf", "pageindex_cloud"})
@@ -67,6 +59,10 @@ def select_recompilation(
     if bool(identifier) == all_docs:
         return RecompileSelection("invalid")
     with kb_read_lock(kb_dir / ".openkb"):
+        from openkb.application.sources import source_inventory
+
+        admitted = source_inventory(kb_dir)
+        mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
         for meta in registry.all_entries().values():
             _validate_metadata(meta)
@@ -75,6 +71,7 @@ def select_recompilation(
             if all_docs
             else _resolve_doc_identifier(registry, identifier or "")
         )
+        matched_legacy = {file_hash for file_hash, _ in matches}
         targets = tuple(
             RecompileTarget(
                 h,
@@ -83,6 +80,20 @@ def select_recompilation(
                 "long" if is_long_doc(m) else "short",
             )
             for h, m in matches
+            if h not in mapped
+        )
+        targets += tuple(
+            RecompileTarget(
+                item["source_id"],
+                item["name"],
+                item["doc_name"],
+                "long" if item["display_type"] == "pageindex" else "short",
+            )
+            for item in admitted
+            if all_docs
+            or item["legacy_hash"] in matched_legacy
+            or identifier
+            in {item["source_id"], item["name"], item["doc_name"], item["legacy_hash"]}
         )
         if not targets:
             return RecompileSelection("empty" if all_docs else "not_found")
@@ -101,9 +112,11 @@ def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     intervening changes made by another operation.
     """
     scope = resolve_scope(kb_dir, scope)
-    roots = [kb_dir / ".openkb/hashes.json"] + [
-        scope.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")
-    ]
+    roots = [
+        kb_dir / ".openkb/hashes.json",
+        kb_dir / ".openkb/catalog",
+        kb_dir / ".openkb/knowledge/legacy/head.json",
+    ] + [scope.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")]
     values = file_versions(kb_dir, roots)
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
@@ -118,7 +131,7 @@ def _validate_metadata(meta: object) -> None:
 
 def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool:
     """Atomically keep the legacy .bak and install the current schema."""
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.schema import AGENTS_MD
 
     with kb_ingest_lock(kb_dir / ".openkb"):
@@ -136,7 +149,7 @@ def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool
 
 @dataclass(frozen=True)
 class RecompileResult:
-    status: Literal["compiled", "skipped", "failed", "conflict"]
+    status: Literal["compiled", "skipped", "failed", "conflict", "blocked", "stopped"]
     name: str = ""
     kind: str = "short"
     message: str | None = None
@@ -165,7 +178,7 @@ async def recompile_document(
     Desktop passes an execution context. Legacy adapters keep their own model
     and credential resolution, including REST request overrides.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
         kb_dir / ".openkb",
@@ -179,105 +192,94 @@ async def recompile_document(
                 message="Knowledge changed after confirmation; review and confirm again",
                 unfinished=("compilation",),
             )
-        meta = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries().get(file_hash)
-        if meta is None:
-            return RecompileResult(
-                "skipped", message="document is no longer indexed.", version=version
-            )
-        _validate_metadata(meta)
-        name = meta.get("doc_name") or Path(meta.get("name") or "").stem
-        kind = "long" if is_long_doc(meta) else "short"
-        reason = None
-        if not name:
-            reason = "registry entry has no doc_name."
-        elif not isinstance(name, str) or name in {".", ".."} or any(c in name for c in "/\\\0"):
-            reason = "invalid document name in registry."
-        doc_id = meta.get("doc_id")
-        if reason is None and kind == "long" and not doc_id:
-            reason = "legacy long-doc entry without a doc_id; re-add to refresh."
-        source = scope.wiki_dir / ("summaries" if kind == "long" else "sources") / f"{name}.md"
-        if reason is None:
-            contained_paths(kb_dir, [source])
-            if not source.is_file():
-                label = "summary" if kind == "long" else "source"
-                reason = f"missing {label} at {source.relative_to(kb_dir)}."
-        if reason:
-            return RecompileResult("skipped", name, kind, message=reason, version=version)
-        paths = contained_paths(
-            kb_dir,
-            [
-                scope.wiki_dir / "summaries" / f"{name}.md",
-                scope.wiki_dir / "concepts",
-                scope.wiki_dir / "entities",
-                scope.wiki_dir / "index.md",
-                scope.wiki_dir / "log.md",
-            ],
-        )
-        before = file_versions(kb_dir, paths)
-        with context.begin(kb_dir) if context else nullcontext(bundle) as credentials:
-            from openkb.agent import compiler
+        from openkb.application.source_recompilation import recompile_source
+        from openkb.legacy_sources import admit_legacy_snapshot
+        from openkb.source_catalog import list_sources
 
-            if model is None or context:
-                config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-                model = model or config.get("model", DEFAULT_CONFIG["model"])
-                if context and max_concurrency is None:
-                    max_concurrency = (
-                        resolve_concurrency(config) or compiler.DEFAULT_COMPILE_CONCURRENCY
-                    )
-            options: dict[str, Any] = {"bundle": credentials}
-            if max_concurrency is not None:
-                options["max_concurrency"] = max_concurrency
-            start = time.monotonic()
-            if context:
-                context.on_event({"stage": "compiling", "document": name})
-            try:
-                with (
-                    collect_compile_report() as report,
-                    mutation_scope(kb_dir, paths, operation="recompile"),
-                ):
-                    if kind == "long":
-                        assert isinstance(doc_id, str)  # validated before configuration capture
-                        await compiler.compile_long_doc(
-                            name, source, doc_id, kb_dir, model, **options, scope=scope
-                        )
-                    else:
-                        await compiler.compile_short_doc(
-                            name, source, kb_dir, model, **options, scope=scope
-                        )
-                    append_log(scope.wiki_dir, "recompile", f"recompiled {name}")
-                    # Compute the receipt before commit. A filesystem error here rolls
-                    # back the whole unit; it cannot discard already committed facts.
-                    changes = changed_files(kb_dir, paths, before)
-                    resources = {
-                        str(kb_dir / change.split(": ", 1)[1])
-                        for change in changes
-                        if not change.startswith("deleted:")
-                    }
-                    summary = scope.wiki_dir / "summaries" / f"{name}.md"
-                    if summary.is_file():
-                        resources.add(str(summary))
-                    next_version = _version(kb_dir, scope=scope) if version is not None else None
-            except (LockCancelled, RecoveryRequired):
-                raise
-            except Exception as exc:
+        started = time.monotonic()
+        roots = [scope.wiki_dir]
+        before = file_versions(kb_dir, roots)
+        registry = HashRegistry(kb_dir / ".openkb/hashes.json")
+        meta = registry.get(file_hash)
+        admitted = next(
+            (
+                source
+                for source in list_sources(kb_dir)
+                if file_hash == source.source_id
+                or (source.legacy_hash == file_hash and meta is not None)
+            ),
+            None,
+        )
+        if admitted is None or admitted.legacy_hash:
+            meta = registry.get(admitted.legacy_hash) if admitted and admitted.legacy_hash else meta
+            if meta is None and admitted is not None:
+                meta = {"name": admitted.name, "doc_name": admitted.doc_name}
+            if meta is None:
                 return RecompileResult(
-                    "failed",
+                    "skipped", message="document is no longer indexed.", version=version
+                )
+            _validate_metadata(meta)
+            name = meta.get("doc_name") or Path(meta.get("name") or "").stem
+            kind = "long" if is_long_doc(meta) else "short"
+            if kind == "long" and not meta.get("doc_id"):
+                return RecompileResult(
+                    "skipped",
                     name,
                     kind,
-                    message="Compilation failed",
-                    error_type=type(exc).__name__,
-                    elapsed=time.monotonic() - start,
-                    unfinished=("compilation",),
+                    message="legacy long-doc entry without a doc_id; re-add to refresh.",
                     version=version,
                 )
-            return RecompileResult(
-                "compiled",
-                name,
-                kind,
-                elapsed=time.monotonic() - start,
-                resources=tuple(sorted(resources)),
-                changes=changes,
-                version=next_version,
-                quality=tuple(report.quality),
-                unfinished=tuple(report.unfinished),
-            )
+            try:
+                admitted = admit_legacy_snapshot(
+                    kb_dir,
+                    admitted.legacy_hash if admitted and admitted.legacy_hash else file_hash,
+                    meta,
+                )
+            except (OSError, ValueError) as exc:
+                from openkb.ingest_diagnostics import failure_reason
+
+                return RecompileResult(
+                    "blocked",
+                    name,
+                    kind,
+                    message=failure_reason(exc),
+                    error_type=type(exc).__name__,
+                    version=version,
+                )
+        result = await recompile_source(
+            kb_dir,
+            admitted.source_id,
+            context=context,
+            bundle=bundle,
+            model=model,
+            max_concurrency=max_concurrency,
+        )
+        status: Literal["compiled", "skipped", "failed", "blocked", "stopped"] = "blocked"
+        if result.status == "added":
+            status = "compiled"
+        elif result.status == "skipped":
+            status = "skipped"
+        elif result.status == "failed":
+            status = "failed"
+        elif result.status == "stopped":
+            status = "stopped"
+        summary = scope.wiki_dir / "summaries" / f"{admitted.doc_name}.md"
+        kind = (
+            "long"
+            if (scope.wiki_dir / "sources" / f"{admitted.doc_name}.json").exists()
+            else "short"
+        )
+        return RecompileResult(
+            status,
+            admitted.doc_name,
+            kind,
+            message=result.message,
+            error_type=result.units[0].error_type if result.units else None,
+            elapsed=time.monotonic() - started,
+            resources=((str(summary),) if status == "compiled" and summary.exists() else ())
+            + result.resources,
+            changes=changed_files(kb_dir, roots, before),
+            unfinished=result.unfinished,
+            version=_version(kb_dir, scope=scope) if version is not None else None,
+            quality=result.quality,
+        )

@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from openkb.source_records import Digest, DocName, Record, RecordId, RelativePath, ViewId
 
@@ -60,17 +60,35 @@ class KnowledgeRevision(Record):
     knowledge_revision_id: RecordId
     view_id: ViewId
     base_revision_id: RecordId | None
-    unit_revision_id: RecordId
+    change_kind: Literal["compile", "manual"] = "compile"
+    unit_revision_id: RecordId | None = None
     input_revisions: tuple[RecordId, ...]
     page_dependencies: dict[RelativePath, tuple[RecordId, ...]]
     generated_baselines: dict[RelativePath, Digest]
     original_references: tuple[RelativePath, ...]
-    normalized_source: Annotated[RelativePath, Field(pattern=r"^sources/")]
-    source_format: str
-    normalized_format: Literal["pdf", "markdown"]
-    length_class: Literal["short", "long"]
-    execution_mode: Literal["full", "segmented"]
+    normalized_source: Annotated[RelativePath, Field(pattern=r"^sources/")] | None = None
+    source_format: str | None = None
+    normalized_format: Literal["pdf", "markdown"] | None = None
+    length_class: Literal["short", "long"] | None = None
+    execution_mode: Literal["full", "segmented"] | None = None
     index_ref: str | None = None
+
+    @model_validator(mode="after")
+    def validate_compile_input(self) -> "KnowledgeRevision":
+        if self.change_kind == "compile":
+            required = (
+                self.unit_revision_id,
+                self.normalized_source,
+                self.source_format,
+                self.normalized_format,
+                self.length_class,
+                self.execution_mode,
+            )
+            if any(value is None for value in required):
+                raise ValueError("A compile revision requires complete normalized input metadata")
+            if self.execution_mode == "segmented" and not self.index_ref:
+                raise ValueError("A segmented compile revision requires an index reference")
+        return self
 
 
 class Proposal(Record):
@@ -78,7 +96,16 @@ class Proposal(Record):
     unit_revision_id: RecordId
     view_id: ViewId
     expected_source_generation: int
+    expected_unit_generation: int
     expected_view_generation: int
+    expected_kb_generation: str
     expected_pages: dict[RelativePath, Digest]
+    candidate_pages: dict[RelativePath, Digest]
     conflicts: tuple[str, ...]
     candidate_manifest: KnowledgeRevision
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> "Proposal":
+        if self.candidate_manifest.change_kind != "compile":
+            raise ValueError("A proposal requires a compile candidate")
+        return self

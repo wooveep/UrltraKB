@@ -68,7 +68,7 @@ async def check_knowledge(
     scope: KnowledgeScope | None = None,
 ) -> LintResult:
     root = kb_dir.resolve()
-    scope = resolve_scope(root, scope)
+    scope = resolve_scope(root, scope, writable=True)
     wiki = scope.wiki_dir
     cancelled = context.cancelled if context else None
     on_wait = context.waiting if context else None
@@ -193,5 +193,5 @@ def _save_report(scope: KnowledgeScope, result: LintResult, *, unique: bool) -> 
         content += f"\n## Semantic\n\n{result.knowledge_report}\n"
     with mutation_scope(root, [path, log], operation="lint-report"):
         atomic_write_text(path, content)
-        append_log(scope.wiki_dir, "lint", f"report → {path.name}")
+        append_log(scope.wiki_dir, "lint", f"report → {path.name}", scope=scope)
     return path

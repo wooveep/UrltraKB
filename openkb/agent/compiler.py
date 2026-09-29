@@ -2230,7 +2230,7 @@ async def compile_short_doc(
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 
-    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
+    wiki_dir = resolve_scope(kb_dir, scope, writable=True).wiki_dir
     schema_md = get_agents_md(wiki_dir)
     content = source_path.read_text(encoding="utf-8")
 
@@ -2320,7 +2320,7 @@ async def compile_long_doc(
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 
-    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
+    wiki_dir = resolve_scope(kb_dir, scope, writable=True).wiki_dir
     schema_md = get_agents_md(wiki_dir)
     summary_content = summary_path.read_text(encoding="utf-8")
 

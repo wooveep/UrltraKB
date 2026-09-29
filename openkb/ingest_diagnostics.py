@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 def failure_reason(error: Exception) -> str:
     category = type(error).__name__
+    if isinstance(error, ConnectionError):
+        return "provider unavailable; connection failed"
     if isinstance(error, ValidationError):
         return "; ".join(
             f"{'.'.join(map(str, item['loc']))}: {item['msg']}"

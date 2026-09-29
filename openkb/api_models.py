@@ -262,6 +262,7 @@ class RecompileResponse(BaseModel):
     total: int
     recompiled: int
     skipped: int
+    blocked: int = 0
     docs: list[RecompileDocItem] = []
     targets: list[RecompileTargetItem] | None = None
     candidates: list[dict[str, str]] | None = None
@@ -348,6 +349,7 @@ class DocumentSourceResponse(BaseModel):
     status: str | None = None
     message: str | None = None
     error_type: str | None = None
+    original_kind: str | None = None
 
 
 class PageDeleteRequest(BaseModel):

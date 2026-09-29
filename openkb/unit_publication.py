@@ -8,7 +8,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Literal
 
 from openkb.file_state import contained_paths
 from openkb.ingest_diagnostics import failure_reason
@@ -105,6 +105,7 @@ def begin_unit_attempt(
     revision: UnitRevision,
     *,
     discovery_intent: DiscoveryIntent | None = None,
+    recompile: bool = False,
 ) -> tuple[UnitPublication, bool]:
     identity = publication_id(unit.unit_id, "legacy")
     path = record_path(kb_dir, "publications", identity)
@@ -126,7 +127,11 @@ def begin_unit_attempt(
     if (
         previous
         and previous.target_revision_id == revision.unit_revision_id
-        and previous.status in {"completed", "awaiting_confirmation", "interrupted"}
+        and (
+            previous.status in {"awaiting_confirmation", "interrupted"}
+            or previous.status == "completed"
+            and not recompile
+        )
     ):
         return previous, False
     state = UnitPublication(
@@ -175,7 +180,7 @@ def wiki_versions(kb_dir: Path, wiki: Path) -> dict[str, str]:
     contained_paths(kb_dir, [wiki])
     paths = sorted(wiki.rglob("*")) if wiki.exists() else []
     if any(path.is_symlink() for path in paths):
-        raise ValueError("Knowledge revisions require regular files")
+        raise ValueError("Knowledge revisions cannot contain symbolic links")
     return {
         path.relative_to(wiki).as_posix(): HashRegistry.hash_file(path)
         for path in paths
@@ -187,7 +192,7 @@ def copy_tree(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for path in sorted(source.rglob("*")):
         if path.is_symlink():
-            raise ValueError("Knowledge revisions require regular files")
+            raise ValueError("Knowledge revisions cannot contain symbolic links")
         if path.is_file():
             _copy_file_atomic(path, target / path.relative_to(source))
 
@@ -292,6 +297,7 @@ def publish_unit_revision(
     *,
     normalized_source: str,
     is_long: bool,
+    normalized_format: Literal["pdf", "markdown"] = "pdf",
     index_ref: str | None = None,
     check_stop: Callable[[], None] = lambda: None,
 ) -> UnitPublication:
@@ -311,8 +317,8 @@ def publish_unit_revision(
         name
         for name in changed
         if name.split("/")[0] in {"summaries", "concepts", "entities"}
-        and name in view.base_pages
-        and view.head.generated_baselines.get(name) != view.base_pages[name]
+        and (name in view.base_pages or name in view.head.generated_baselines)
+        and view.head.generated_baselines.get(name) != view.base_pages.get(name)
     }
     if current_head != view.head or current_pages != view.base_pages:
         protected.add("knowledge_baseline_changed")
@@ -343,7 +349,7 @@ def publish_unit_revision(
         original_references=tuple(sorted(originals)),
         normalized_source=normalized_source,
         source_format=admission.revision.source_format,
-        normalized_format="pdf",
+        normalized_format=normalized_format,
         length_class="long" if is_long else "short",
         execution_mode="segmented" if is_long else "full",
         index_ref=index_ref,
@@ -358,8 +364,11 @@ def publish_unit_revision(
             unit_revision_id=revision.unit_revision_id,
             view_id=state.view_id,
             expected_source_generation=admission.source.target_generation,
+            expected_unit_generation=unit.generation,
             expected_view_generation=current_head.generation,
+            expected_kb_generation=view.kb_generation,
             expected_pages=current_pages,
+            candidate_pages=generated,
             conflicts=tuple(sorted(protected)),
             candidate_manifest=manifest,
         )
@@ -375,6 +384,7 @@ def publish_unit_revision(
             kb_dir, [directory, state_path, attempt_path], operation="save-unit-proposal"
         ):
             copy_tree(view.scope.wiki_dir, directory / "wiki")
+            copy_tree(live, directory / "base")
             if index_ref:
                 copy_tree(view.scope.wiki_dir.parent / "index", directory / "index")
             write_record(directory / "proposal.json", proposal)
@@ -383,13 +393,43 @@ def publish_unit_revision(
             check_stop()
             _check_target(kb_dir, admission.source, unit, awaiting, view)
         return awaiting
+    return commit_unit_revision(
+        kb_dir, admission, unit, revision, state, view, manifest, check_stop=check_stop
+    )
+
+
+def commit_unit_revision(
+    kb_dir: Path,
+    admission: Admission,
+    unit: ImportUnit,
+    revision: UnitRevision,
+    state: UnitPublication,
+    view: CompileView,
+    manifest: KnowledgeRevision,
+    *,
+    check_stop: Callable[[], None] = lambda: None,
+) -> UnitPublication:
+    """Commit a generated or explicitly reviewed candidate and its exact checkpoint."""
+    check_stop()
+    _check_target(kb_dir, admission.source, unit, state, view)
+    if read_head(kb_dir) != view.head:
+        raise ValueError("Knowledge view changed before publication")
+    live = legacy_scope(kb_dir).wiki_dir
+    if wiki_versions(kb_dir, live) != view.base_pages:
+        raise ValueError("Knowledge pages changed before publication")
+    generated = wiki_versions(kb_dir, view.scope.wiki_dir)
+    knowledge_id = manifest.knowledge_revision_id
     directory = kb_dir / ".openkb/knowledge/legacy/revisions" / knowledge_id
+    if directory.exists():
+        raise ValueError("An immutable knowledge revision already exists")
+    state_path = record_path(kb_dir, "publications", state.publication_id)
+    attempt_path = record_path(kb_dir, "attempts", state.attempt_id)
     head_path = kb_dir / ".openkb/knowledge/legacy/head.json"
     head = KnowledgeHead(
         generation=view.head.generation + 1,
         knowledge_revision_id=knowledge_id,
-        inputs=inputs,
-        generated_baselines=baselines,
+        inputs={**view.head.inputs, unit.unit_id: revision.unit_revision_id},
+        generated_baselines=manifest.generated_baselines,
     )
     completed = state.model_copy(
         update={
@@ -407,9 +447,10 @@ def publish_unit_revision(
         operation="publish-unit-revision",
     ):
         copy_tree(view.scope.wiki_dir, directory / "wiki")
-        if index_ref:
+        if manifest.index_ref:
             copy_tree(view.scope.wiki_dir.parent / "index", directory / "index")
         write_record(directory / "manifest.json", manifest)
+        write_record(directory / "publication.json", completed)
         copy_tree(view.scope.wiki_dir, live)
         for name in view.base_pages.keys() - generated.keys():
             (live / name).unlink(missing_ok=True)

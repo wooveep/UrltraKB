@@ -292,7 +292,7 @@ def _execute_remove_plan(
     sweep doesn't strip pre-existing dangling links in unrelated pages
     (issue #58).
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     from openkb.agent.compiler import (
         remove_doc_from_concept_pages,
         remove_doc_from_entity_pages,
@@ -588,7 +588,7 @@ def remove_document(
     one lease or submit an immediate request. Native confirmation supplies the
     preview version; any changed input requires another explicit confirmation.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):

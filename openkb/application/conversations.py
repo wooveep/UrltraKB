@@ -91,7 +91,7 @@ async def ask_question(
                                 else None
                             )
                             unfinished_stage = "record question log"
-                            append_log(scope.wiki_dir, "query", question)
+                            append_log(scope.wiki_dir, "query", question, scope=scope)
                             return AnswerResult(
                                 "completed",
                                 answer,

@@ -10,7 +10,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import asyncio
-import json
 import logging
 import shutil
 import sys
@@ -893,7 +892,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     Exactly one of DOC_NAME or ``--all`` is required.
 
     Side effect: this regenerates summaries (short docs) and rewrites concept
-    pages with the current logic — manual edits to those pages are overwritten.
+    pages with the current logic. Manual changes require explicit proposal acceptance.
     """
     from openkb.application.recompilation import recompile_document, select_recompilation
 
@@ -927,7 +926,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
             click.echo(f"  - {target.doc_name}  ({target.kind})")
         click.echo(
             "\nNote: recompiling regenerates summaries (short docs) and rewrites "
-            "concept pages — manual edits would be overwritten."
+            "concept pages — manual edits require explicit acceptance of the proposed changes."
         )
         click.echo("(dry-run — nothing modified)")
         return
@@ -935,7 +934,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         click.echo(
             f"This will recompile {len(targets)} document(s), regenerating "
             "summaries and rewriting concept pages with the current logic.\n"
-            "Manual edits to those pages will be overwritten."
+            "Manual edits will be preserved until you accept the proposed changes."
         )
         if not click.confirm("Proceed?", default=False):
             click.echo("Aborted.")
@@ -946,7 +945,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
-    recompiled = skipped = 0
+    recompiled = skipped = blocked = 0
     for i, target in enumerate(targets, 1):
         click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
         result = asyncio.run(
@@ -956,11 +955,14 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
             recompiled += 1
             click.echo(f"  [OK] {result.name} ({result.elapsed:.1f}s)")
         else:
-            skipped += 1
-            label = "ERROR" if result.status == "failed" else "SKIP"
+            if result.status == "blocked":
+                blocked += 1
+            else:
+                skipped += 1
+            label = {"failed": "ERROR", "blocked": "BLOCKED"}.get(result.status, "SKIP")
             detail = f" ({result.error_type})" if result.error_type else ""
             click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
-    click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}.")
+    click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}.")
     append_log(kb_dir / "wiki", "recompile", f"recompiled {recompiled}, skipped {skipped}")
 
 
@@ -1354,10 +1356,9 @@ def print_status(kb_dir: Path) -> None:
     openkb_dir = kb_dir / ".openkb"
     hashes_file = openkb_dir / "hashes.json"
     if hashes_file.exists():
-        hashes = json.loads(hashes_file.read_text(encoding="utf-8"))
-        from openkb.application.sources import source_inventory
+        from openkb.application.knowledge_bases import get_kb_list
 
-        count = len(hashes) + len(source_inventory(kb_dir))
+        count = get_kb_list(kb_dir)["document_count"]
         click.echo(f"\n  Total indexed: {count} document(s)")
 
     # Last compile time: newest compiled page across summaries/, concepts/,
@@ -2178,6 +2179,9 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 
 from openkb.api_lint import fix_summary
+from openkb.cli_proposals import proposals
+
+cli.add_command(proposals)
 
 _fix_summary = fix_summary
 

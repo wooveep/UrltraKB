@@ -104,7 +104,7 @@ def _write_long_doc_artifacts(
     Returns the summary path. Page images, when present, are written separately by the
     caller's page extractor — this helper only persists page text + summary.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     sources_dir = scope.wiki_dir / "sources"
     sources_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(
@@ -180,7 +180,7 @@ def index_long_document(
     ``doc_name`` is the collision-resistant wiki name used for all written
     artifacts; defaults to the PDF's stem for backward compatibility.
     """
-    scope = resolve_scope(kb_dir, scope)
+    scope = resolve_scope(kb_dir, scope, writable=True)
     source_name = doc_name or pdf_path.stem
     openkb_dir = storage_path if storage_path is not None else kb_dir / ".openkb"
     config = resolve_effective_config(kb_dir)[0]

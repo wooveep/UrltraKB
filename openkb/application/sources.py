@@ -55,9 +55,10 @@ def _historical_manifest(
         )
         if manifest.knowledge_revision_id != identity or manifest.view_id != state.view_id:
             raise ValueError("Knowledge revision does not match its location")
-        used = read_record(kb_dir, "unit-revisions", manifest.unit_revision_id, UnitRevision)
-        if used.unit_id == state.unit_id and used.source_revision_id == source_revision_id:
-            return directory, manifest
+        if manifest.unit_revision_id:
+            used = read_record(kb_dir, "unit-revisions", manifest.unit_revision_id, UnitRevision)
+            if used.unit_id == state.unit_id and used.source_revision_id == source_revision_id:
+                return directory, manifest
         identity = manifest.base_revision_id
     return None
 
@@ -77,6 +78,7 @@ def source_inventory(kb_dir: Path) -> list[dict]:
                 {
                     "hash": source.source_id,
                     "source_id": source.source_id,
+                    "legacy_hash": source.legacy_hash,
                     "source_revision_id": revision.source_revision_id,
                     "name": source.name,
                     "type": revision.source_format,
@@ -134,6 +136,8 @@ def read_admitted_source(
             raise ValueError("Frozen original moved outside its artifact directory")
         if actual:
             directory, manifest = actual
+            if manifest.normalized_source is None:
+                raise ValueError("Published source revision is missing its body reference")
             base_path = directory / "wiki" / manifest.normalized_source
             contained_paths(root, [base_path])
             if not base_path.resolve().is_relative_to(directory / "wiki"):
@@ -151,6 +155,7 @@ def read_admitted_source(
         return {
             "hash": source.source_id,
             "source_id": source.source_id,
+            "original_kind": target.original_kind,
             "source_revision_id": target.source_revision_id,
             "target_source_revision_id": source.target_revision_id,
             "knowledge_revision_id": actual[1].knowledge_revision_id if actual else None,

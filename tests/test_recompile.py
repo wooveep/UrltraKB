@@ -76,6 +76,9 @@ def _seed_long(kb_dir: Path) -> None:
         "---\nsources: [raw/paper.pdf]\nbrief: P\n---\n# Paper\n",
         encoding="utf-8",
     )
+    (kb_dir / "wiki/sources/paper-h_l.json").write_text(
+        json.dumps([{"page": 1, "text": "Retained PDF content"}])
+    )
     (kb_dir / "wiki" / "log.md").write_text("# Log\n\n", encoding="utf-8")
 
 
@@ -96,7 +99,8 @@ def test_recompile_short_dispatches_compile_short_doc(kb_dir):
     short.assert_called_once()
     args = short.call_args.args
     assert args[0] == "notes-h_s"  # doc_name
-    assert args[1] == kb_dir / "wiki" / "sources" / "notes-h_s.md"  # source_path
+    assert args[1].relative_to(kb_dir).parts[:2] == (".openkb", "staging")
+    assert args[1].name == "notes-h_s.md"
     assert args[2] == kb_dir  # kb_dir
     long_.assert_not_called()
     assert "recompiled 1" in result.output
@@ -120,7 +124,8 @@ def test_recompile_long_dispatches_compile_long_doc_with_doc_id(kb_dir):
     long_.assert_called_once()
     args = long_.call_args.args
     assert args[0] == "paper-h_l"  # doc_name
-    assert args[1] == kb_dir / "wiki" / "summaries" / "paper-h_l.md"
+    assert args[1].relative_to(kb_dir).parts[:2] == (".openkb", "staging")
+    assert args[1].name == "paper-h_l.md"
     assert args[2] == "doc-abc123"  # doc_id
     assert args[3] == kb_dir
     short.assert_not_called()
@@ -249,8 +254,8 @@ def test_recompile_dry_run_no_calls_no_writes(kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_recompile_skips_short_missing_source(kb_dir):
-    """Short doc with no source on disk is warned + skipped; others run."""
+def test_recompile_blocks_short_missing_source(kb_dir):
+    """Short doc with no source on disk is reported as blocked; others run."""
     (kb_dir / ".openkb" / "hashes.json").write_text(
         json.dumps(
             {
@@ -270,7 +275,7 @@ def test_recompile_skips_short_missing_source(kb_dir):
     assert short.call_count == 1
     assert short.call_args.args[0] == "ok-h_ok"
     assert "recompiled 1" in result.output
-    assert "skipped 1" in result.output
+    assert "blocked 1" in result.output
 
 
 def test_recompile_skips_long_missing_doc_id(kb_dir):
@@ -294,8 +299,8 @@ def test_recompile_skips_long_missing_doc_id(kb_dir):
     assert "recompiled 0" in result.output
 
 
-def test_recompile_skips_long_missing_summary(kb_dir):
-    """Long doc with doc_id but no summary on disk is warned + skipped."""
+def test_recompile_blocks_long_missing_summary(kb_dir):
+    """Long doc with doc_id but no summary on disk is reported as blocked."""
     (kb_dir / ".openkb" / "hashes.json").write_text(
         json.dumps(
             {
@@ -315,7 +320,7 @@ def test_recompile_skips_long_missing_summary(kb_dir):
 
     assert result.exit_code == 0, result.output
     long_.assert_not_called()
-    assert "skipped 1" in result.output
+    assert "blocked 1" in result.output
 
 
 # ---------------------------------------------------------------------------

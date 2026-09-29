@@ -66,23 +66,25 @@ async def iter_recompile(
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     docs = []
-    recompiled = skipped = 0
+    recompiled = skipped = blocked = 0
     for target in targets:
         result = await recompile_document(kb_dir, target.file_hash, bundle=bundle, model=model)
         doc = {
             "name": result.name or None,
             "doc_name": result.name or None,
             "type": result.kind,
-            "status": {"compiled": "ok", "failed": "error", "skipped": "skipped"}[result.status],
+            "status": {"compiled": "ok", "failed": "error"}.get(result.status, result.status),
             "elapsed": round(result.elapsed, 1) if result.elapsed is not None else None,
             "message": result.message,
         }
-        if result.error_type:
+        if result.error_type and not result.message:
             doc["message"] = f"Compilation failed ({result.error_type})"
         docs.append(doc)
         yield {"event": "doc", **doc}
         if result.status == "compiled":
             recompiled += 1
+        elif result.status == "blocked":
+            blocked += 1
         else:
             # Historical REST totals fold ordinary failures into skipped.
             skipped += 1
@@ -95,5 +97,6 @@ async def iter_recompile(
         "total": total,
         "recompiled": recompiled,
         "skipped": skipped,
+        "blocked": blocked,
         "docs": docs,
     }
