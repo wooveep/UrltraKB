@@ -22,6 +22,43 @@ class _AnswerReader(MessageReader):
         self.document().documentLayout().documentSizeChanged.connect(self.fit_height)
         self.textChanged.connect(owner.textChanged)
         self.anchorClicked.connect(owner.anchorClicked)
+        self._target = self._shown = ""
+        self._live = False
+        self._typing = QTimer(self)
+        self._typing.setInterval(40)
+        self._typing.timeout.connect(self._type_next)
+
+    def stream_to(self, text, *, live):
+        self.show_temporary(None)
+        self._live = live
+        if not text.startswith(self._shown):
+            self._shown = ""
+        self._target = text
+        if not self._typing.isActive():
+            self._typing.start()
+
+    def _type_next(self):
+        from openkb.rendering.markdown import render_markdown
+
+        following = self.owner.following()
+        remaining = len(self._target) - len(self._shown)
+        # Smooth small deltas, catch up large bursts without a long typing tail.
+        step = max(2, math.ceil(remaining / 8))
+        self._shown = self._target[: len(self._shown) + step]
+        self._apply_presentation()
+        self.document().setBaseUrl(QUrl.fromLocalFile(str(self.owner._base) + "/"))
+        self.setHtml(render_markdown(self._shown, None, dark=self._dark).html)
+        self.fit_height()
+        if following:
+            self.owner.follow_end()
+        if self._shown == self._target:
+            self._typing.stop()
+            if not self._live:
+                self.show_markdown(self._target, self.owner._base, preserve=True)
+
+    def stop_rendering(self):
+        self._typing.stop()
+        super().stop_rendering()
 
     def fit_height(self, *_):
         height = max(40, math.ceil(self.document().size().height()) + 16)
@@ -45,6 +82,8 @@ class _AnswerReader(MessageReader):
     def set_presentation(self, *, dark, scale):
         self.owner.style_cards(dark, scale)
         super().set_presentation(dark=dark, scale=scale)
+        if self._live or self._typing.isActive():
+            self._type_next()
 
 
 class ConversationView(QScrollArea):
@@ -61,6 +100,7 @@ class ConversationView(QScrollArea):
         self._dark, self._scale = False, 1.0
         self._base = Path.cwd()
         self._signature = None
+        self._identity = None
         self._entries = []
         self._retired = []
         self._closed = False
@@ -83,8 +123,8 @@ class ConversationView(QScrollArea):
             0, lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
         )
 
-    def _clear(self):
-        for _, _, row, _, reader in self._entries:
+    def _clear(self, start=0):
+        for _, _, row, _, reader in self._entries[start:]:
             if reader:
                 reader.stop_rendering()
                 self._retired.append(reader)
@@ -92,35 +132,60 @@ class ConversationView(QScrollArea):
             row.hide()
             if not reader:
                 row.deleteLater()
-        self._entries.clear()
+        del self._entries[start:]
         # Closed readers stay owned until their asynchronous rendering has settled.
         for reader in list(self._retired):
             if reader.rendering_stopped():
                 reader.parentWidget().parentWidget().deleteLater()
                 self._retired.remove(reader)
 
-    def show_turns(self, turns, base, *, pending=None):
-        signature = (tuple(turns), pending, Path(base))
+    def show_turns(self, turns, base, *, pending=None, identity=None):
+        turns = tuple(turns)
+        signature = (turns, pending, Path(base), identity)
         if self._closed or signature == self._signature:
             return
+        finishing = bool(
+            self._signature
+            and self._signature[1]
+            and not pending
+            and identity == self._identity
+            and turns
+            and self._signature[1][0] == turns[-1][0]
+        )
         wanted = []
-        for question, answer in (*tuple(turns), *((pending,) if pending else ())):
+        rows = (*turns, *((pending,) if pending else ()))
+        for index, (question, answer) in enumerate(rows):
             wanted.append(("question", question))
             if answer:
-                wanted.append(("answer", visible_answer(answer)))
-        old = [(role, text) for role, text, *_ in self._entries]
+                live = bool(pending) and index == len(rows) - 1
+                wanted.append(("answer", visible_answer(answer, streaming=live)))
         following = self.following()
-        if Path(base) != self._base or wanted[: len(old)] != old:
+        if Path(base) != self._base or identity != self._identity:
             self._clear()
+        self._identity = identity
         self._signature, self._base = signature, Path(base)
+        for index, (role, text) in enumerate(wanted):
+            if index >= len(self._entries):
+                break
+            old_role, old_text, row, label, reader = self._entries[index]
+            if role == old_role and (text == old_text or role == "answer"):
+                if reader and (text != old_text or reader._live):
+                    reader.stream_to(text, live=bool(pending) and index == len(wanted) - 1)
+                    self._entries[index] = (role, text, row, label, reader)
+            else:
+                self._clear(index)
+                break
+        if len(self._entries) > len(wanted):
+            self._clear(len(wanted))
         for role, text in wanted[len(self._entries) :]:
-            self._append(role, text)
+            last = len(self._entries) == len(wanted) - 1
+            self._append(role, text, live=bool(pending) and last, animate=finishing and last)
         self.style_cards(self._dark, self._scale)
         self.textChanged.emit()
         if following:
             self.follow_end()
 
-    def _append(self, role, text):
+    def _append(self, role, text, *, live=False, animate=False):
         row = QWidget()
         outer = QHBoxLayout(row)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -139,8 +204,11 @@ class ConversationView(QScrollArea):
             outer.addWidget(card, 4)
         else:
             reader = _AnswerReader(self)
-            reader.show_markdown(text, self._base)
             reader.set_presentation(dark=self._dark, scale=self._scale)
+            if live or animate:
+                reader.stream_to(text, live=live)
+            else:
+                reader.show_markdown(text, self._base)
             layout.addWidget(reader)
             outer.addWidget(card, 1)
         self.body.insertWidget(self.body.count() - 1, row)

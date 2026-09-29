@@ -12,7 +12,7 @@ def verify_settings(window, kb, wait_until):
     from openkb.mutation import repair_marker
 
     window.open_knowledge_base(kb)
-    wait_until(lambda: window.kb == kb and window.page is not None)
+    wait_until(lambda: window.kb == kb and not window.io._callbacks)
     button(window, "设置").click()
     window.workspaces.settings_tabs.setCurrentIndex(1)
     dialog = next(p for p in window.findChildren(SettingsDialog) if p.isVisible())

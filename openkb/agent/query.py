@@ -116,6 +116,7 @@ def build_query_agent(
         }
     else:
         model_settings = resolve_model_settings()
+    model_settings["include_usage"] = True
 
     return Agent(
         name="wiki-query",
@@ -169,11 +170,21 @@ async def iter_agent_response_events(
     )
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
+    from openkb.agent.token_usage import TokenUsage, add_usage
+
+    usage = None
 
     stream = settled_stream(result)
     try:
         async for event in stream:
             if isinstance(event, RawResponsesStreamEvent):
+                if getattr(event.data, "type", "") == "response.created":
+                    yield {"event": "answer_start", "data": {}}
+                if getattr(event.data, "type", "") == "response.completed":
+                    reported = getattr(event.data.response, "usage", None)
+                    current = TokenUsage.from_provider(reported).to_dict()
+                    usage = add_usage(usage, current)
+                    yield {"event": "usage", "data": usage}
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text:
@@ -217,6 +228,7 @@ async def iter_agent_response_events(
         "data": {
             "answer": answer,
             "history": result.to_input_list(),
+            "usage": usage,
         },
     }
 

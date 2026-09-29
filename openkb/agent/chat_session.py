@@ -131,6 +131,7 @@ class ChatSession:
     path: Path
     incomplete: list[dict[str, Any]] = field(default_factory=list)
     completed_attempts: list[str] = field(default_factory=list)
+    token_usage: dict[str, int | None] | None = None
     _version: str | None = field(default=None, repr=False)
 
     @classmethod
@@ -169,6 +170,7 @@ class ChatSession:
             "assistant_traces": self.assistant_traces,
             "incomplete": self.incomplete,
             "completed_attempts": self.completed_attempts,
+            "token_usage": self.token_usage,
         }
 
     def save(self) -> None:
@@ -202,9 +204,13 @@ class ChatSession:
         trace: list[dict[str, Any]] | None = None,
         *,
         attempt_id: str | None = None,
+        usage: dict[str, int | None] | None = None,
     ) -> None:
         previous = deepcopy(self.__dict__)
         try:
+            from openkb.agent.token_usage import add_usage
+
+            self.token_usage = add_usage(self.token_usage, usage)
             if attempt_id:
                 self.completed_attempts.append(attempt_id)
                 self.incomplete = [item for item in self.incomplete if item["id"] != attempt_id]
@@ -325,6 +331,11 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
     ):
         raise ValueError("Invalid incomplete conversation entries")
     completed_attempts = data.get("completed_attempts", [])
+    token_usage = data.get("token_usage")
+    if token_usage is not None:
+        from openkb.agent.token_usage import TokenUsage
+
+        token_usage = TokenUsage.from_dict(token_usage).to_dict()
     if not isinstance(completed_attempts, list) or any(
         not isinstance(item, str) for item in completed_attempts
     ):
@@ -344,6 +355,7 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         path=path,
         incomplete=incomplete,
         completed_attempts=completed_attempts,
+        token_usage=token_usage,
         _version=hashlib.sha256(content).hexdigest(),
     )
 

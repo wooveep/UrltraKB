@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from openkb.agent.token_usage import TokenUsage
 from openkb.application.pages import Page
 from openkb.locks import atomic_write_json
 from openkb.runtime.requests import UnitRequest
@@ -32,8 +33,11 @@ class UnitResult:
     page: Page | None = field(default=None, repr=False)
     changes: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    usage: dict[str, int | None] | None = None
 
     def __post_init__(self) -> None:
+        if self.usage is not None:
+            TokenUsage.from_dict(self.usage)
         if self.status not in {"completed", "skipped", "failed", "stopped", "blocked"}:
             raise ValueError("Invalid unit status")
         if self.output_state not in {"none", "available", "unavailable"}:
@@ -87,6 +91,7 @@ class UnitResult:
             revision=value.get("revision"),
             changes=tuple(value.get("changes", ())),
             unfinished=tuple(value.get("unfinished", ())),
+            usage=value.get("usage"),
         )
 
 
@@ -106,8 +111,11 @@ class TaskView:
     text: str = field(default="", repr=False)
     text_truncated: bool = False
     retry_of: str | None = None
+    usage: dict[str, int | None] | None = None
 
     def __post_init__(self) -> None:
+        if self.usage is not None:
+            TokenUsage.from_dict(self.usage)
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):
             raise ValueError("Invalid task identity")
         if self.retry_of is not None and not re.fullmatch(r"[0-9a-f]{32}", self.retry_of):

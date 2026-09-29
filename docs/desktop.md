@@ -90,6 +90,14 @@ Chinese text, mathematics and the supported Mermaid families display natively.
 Single-click a directory entry to read it. Images resize with the reading pane;
 switching themes preserves the reading position and unsaved drafts.
 
+**我的知识** groups pages as **资料摘要、主题与概念、人物与事物、探索笔记**.
+Search titles and descriptions or sort by recent updates and title. Page headings
+replace storage filenames in the directory. Internal instructions, index, log,
+raw sources and inspection reports are excluded; source reading stays in
+**资料**, and reports remain accessible from **产物** and maintenance results.
+**围绕此页提问** opens a new conversation with a reference to the current page;
+edit the proposed question before sending it.
+
 In **资料**, the inventory distinguishes **Markdown 全文编译** from **PageIndex 长文索引**.
 Select one document and choose **阅读原文** to open the converted text or retained
 PDF page text. Ordinary imports and PDF imports below the configured threshold
@@ -114,23 +122,48 @@ context and **对话历史** opens saved chats with one click. Reopening a KB re
 the last selected conversation. The complete transcript stays visible during a
 follow-up, and the composer offers **停止** while a reply is running.
 
-The chat displays task status and elapsed time separately from the message cards
-until the final answer is ready. It uses Wiki tools and the original long-document
-retrieval; no separate source-review stages are displayed. Tool
-narration and explicitly tagged reasoning are excluded from the answer. Quoted
+The chat streams response text into the current card with a progressive typing
+effect, retaining previous message cards and the reader's scroll position.
+Task status and elapsed time appear separately. A tool call clears that request's
+intermediate narration; the completed answer replaces any provisional text.
+It uses Wiki tools and the original long-document retrieval. Explicitly tagged
+reasoning stays hidden, including tags split across chunks. Quoted
 code, citations, formulas and diagrams remain available. Completed turns retain
 the established session model/language and reusable SDK history. Accepted submissions are first saved in a private desktop outbox, including
 while the KB is busy. Recovery transfers them into the conversation without
 replaying model requests; interrupted submissions remain in the timeline
 with an unfinished notice and are never counted as completed model turns.
 
+Below the composer, **本对话 tokens** shows reported cumulative input cache hits,
+input cache misses, output tokens and reasoning tokens, including model requests
+made while using tools. The model is asked to return streaming usage; counters
+update as each request reports its usage, not as each character appears. Output
+already includes reasoning tokens. **—** means no usable count was reported;
+older conversations are not retrospectively estimated. Counts are saved with the
+conversation, including reported requests from an unfinished turn. SDK/provider
+normalization may report zero for unsupported detail fields.
+
+Code fences use selectable syntax colors in both themes. The delimiter's final
+line ending does not create a blank code line; intentional internal blank lines
+are preserved. Formulas and diagrams receive their full rendering when the reply
+finishes.
+
 History's **更多** menu exports a Markdown copy or confirms deletion. Exports use
 new filenames to preserve prior copies. CLI/API one-shot queries remain available.
 
 ## Generate and export outputs
 
-Use **产物** (Artifacts) to generate Skills, HTML slide decks and the existing HTML knowledge graph from
-the KB. The artifact list provides access to saved files and export actions.
+**产物 → 创作工作台** follows a brief-to-result workflow. Choose **新建创作**, select
+a reusable Skill or HTML presentation, name it and describe its audience and
+purpose. Generation continues in the background; **查看任务进度** opens the task
+page. The brief remains available for another iteration. **生成知识图谱** is a
+separate action for exploring existing knowledge relationships.
+
+**我的成果** supports name search and type filters. Selecting a result opens its
+primary guide or preview instructions. Supporting files, source and task records
+remain available as secondary views. **导出完整成果** exports the entire artifact
+bundle; a browser preview opens the chosen HTML file. Internal generation workspace
+directories are excluded from this result library.
 An existing Skill or deck name requires a new name or explicit consent to archive
 and replace its output. Graph generation retains its established fixed path.
 

@@ -27,7 +27,7 @@ def verify_baseline(window, kb, root, wait):
             },
         )
     window.open_knowledge_base(kb)
-    wait(lambda: window.kb == kb and window.page is not None)
+    wait(lambda: window.kb == kb and not window.io._callbacks)
     window.shell.navigate("资料")
     panel = window.workspaces.panels["资料"][0]
     wait(lambda: panel.table.rowCount() == 2)

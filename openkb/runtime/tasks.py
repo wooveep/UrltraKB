@@ -383,11 +383,20 @@ class TaskManager:
             data = event["data"]
             stage = data.get("stage", task.view.stage)
             text = task.view.text
+            usage = task.view.usage
+            if data.get("event") in {"answer_start", "tool_call"}:
+                text = ""
+            if data.get("event") == "usage":
+                from openkb.agent.token_usage import TokenUsage
+
+                usage = TokenUsage.from_dict(data["data"]).to_dict()
             if data.get("event") == "delta":
                 text += data["data"]["text"]
                 if len(text) > 1_000_000:
                     text, truncated = text[-1_000_000:], True
-            self._update(task, persist=False, stage=stage, text=text, text_truncated=truncated)
+            self._update(
+                task, persist=False, stage=stage, text=text, text_truncated=truncated, usage=usage
+            )
 
     def _finish(self, task: _Task, attempt: _Attempt) -> None:
         attempt.process.join()

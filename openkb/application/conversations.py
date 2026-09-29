@@ -33,6 +33,7 @@ class AnswerResult:
     changes: tuple[str, ...] = ()
     error: str | None = None
     unfinished: tuple[str, ...] = ()
+    usage: dict[str, int | None] | None = None
 
 
 def _validate_question(kb_dir: Path, question: str) -> Path:
@@ -87,6 +88,7 @@ async def ask_question(
                                 "completed",
                                 answer,
                                 str(path) if path else None,
+                                usage=event["data"].get("usage"),
                                 resources=(str(path),) if path else (),
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
                                 if path
@@ -161,6 +163,7 @@ async def continue_conversation(
                     attempt_id=attempt_id,
                 )
                 parts = []
+                usage = None
                 try:
                     async with aclosing(stream):
                         async for event in stream:
@@ -172,11 +175,14 @@ async def continue_conversation(
                                     turn_count=session.turn_count,
                                     resources=(*outputs.resources, str(session.path)),
                                     changes=(*outputs.changes, f"saved turn: {session.id}"),
+                                    usage=event["data"].get("usage", usage),
                                 )
                             if context.cancelled():
                                 break
                             if event["event"] == "delta":
                                 parts.append(event["data"]["text"])
+                            if event["event"] == "usage":
+                                usage = event["data"]
                             context.on_event(event)
                 except Exception as exc:
                     return AnswerResult(
@@ -188,6 +194,7 @@ async def continue_conversation(
                         changes=outputs.changes,
                         error=f"Conversation did not complete ({type(exc).__name__})",
                         unfinished=("complete conversation turn",),
+                        usage=usage,
                     )
                 return AnswerResult(
                     "stopped",
@@ -197,6 +204,7 @@ async def continue_conversation(
                     resources=(*outputs.resources, str(session.path)),
                     changes=outputs.changes,
                     unfinished=("complete conversation turn",),
+                    usage=usage,
                 )
 
 
@@ -209,6 +217,7 @@ class ConversationView:
     turns: tuple[tuple[str, str], ...]
     version: str
     incomplete: tuple[tuple[int, str], ...] = ()
+    usage: dict[str, int | None] | None = None
 
     @property
     def timeline(self) -> tuple[tuple[str, str], ...]:
@@ -238,4 +247,5 @@ def read_conversation(kb_dir: Path, session_id: str) -> ConversationView:
             tuple(zip(session.user_turns, session.assistant_texts)),
             session._version or "",
             tuple((item["after_turn"], item["message"]) for item in session.incomplete),
+            session.token_usage,
         )

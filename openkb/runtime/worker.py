@@ -301,6 +301,7 @@ def _execute(
             session_id=answer.session_id,
             turn_count=answer.turn_count,
             output=answer.answer,
+            usage=answer.usage,
             output_state="available",
         )
     raise ValueError("Unsupported task request")

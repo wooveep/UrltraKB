@@ -121,6 +121,9 @@ def verify_workbench(window, first, other, root, wait):
     from openkb.desktop.verification_conversations import verify_conversations
 
     verify_conversations(window, first, root, wait)
+    from openkb.desktop.verification_experience import verify_experience
+
+    verify_experience(window, first, root, wait)
 
     # System palette changes are supplied at the Qt platform boundary.
     from PySide6.QtGui import QColor

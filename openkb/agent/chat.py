@@ -912,6 +912,8 @@ async def iter_chat_turn_events(
             trace: list[dict[str, Any]] = []
 
             data = None
+            base_usage = session.token_usage
+            usage_recorded = False
             with model_output_scope(kb_dir, outputs):
                 stream = iter_agent_response_events(
                     agent, new_input, max_turns=MAX_TURNS, run_config=run_config
@@ -919,6 +921,14 @@ async def iter_chat_turn_events(
                 async with aclosing(stream):
                     async for event in stream:
                         kind = event["event"]
+                        if kind == "usage":
+                            from openkb.agent.token_usage import add_usage
+
+                            session.token_usage = add_usage(base_usage, event["data"])
+                            session.save()
+                            usage_recorded = True
+                            yield event
+                            continue
                         if kind == "delta":
                             text = event["data"].get("text", "")
                             if text:
@@ -962,7 +972,12 @@ async def iter_chat_turn_events(
                         break
             if data is not None and "answer" in data:
                 session.record_turn(
-                    user_input, answer, data["history"], trace=trace, attempt_id=attempt_id
+                    user_input,
+                    answer,
+                    data["history"],
+                    trace=trace,
+                    attempt_id=attempt_id,
+                    usage=None if usage_recorded else data.get("usage"),
                 )
                 yield {
                     "event": "final",
@@ -970,6 +985,7 @@ async def iter_chat_turn_events(
                         "answer": answer,
                         "session_id": session.id,
                         "turn_count": session.turn_count,
+                        "usage": data.get("usage"),
                     },
                 }
 

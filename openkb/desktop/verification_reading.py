@@ -39,7 +39,7 @@ def verify_reading(window, root, wait):
     window.editor.setPlainText(original + "\n目录切换保留草稿。")
     click(target)
     assert window.tabs.currentIndex() == 0, "clicking the selected page must return to reading"
-    click("index")
+    window.open_page("index")
     wait(lambda: window.page.path == "index")
     click(target)
     wait(lambda: window.page.path == target)
@@ -47,7 +47,7 @@ def verify_reading(window, root, wait):
     window.editor.setPlainText(original)
 
     # The last selection wins even if previous page reads are still queued.
-    click("index")
+    window.open_page("index")
     click(target)
     wait(lambda: window.page.path == target and not window.io._callbacks)
     assert tree.currentItem() is item(target)

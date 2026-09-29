@@ -16,7 +16,7 @@ def verify_watch(window, kb, wait_until, *, model=False):
             )
     before = {task.id for task in window.manager.tasks()}
     window.open_knowledge_base(kb)
-    wait_until(lambda: window.kb == kb and window.page is not None)
+    wait_until(lambda: window.kb == kb and not window.io._callbacks)
     window._watch()
     dialog = next(p for p in window.findChildren(WatchDialog) if p.isVisible())
     try:

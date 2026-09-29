@@ -321,7 +321,7 @@ print("UrltraKB")  # fenced_code 中文知识
             from openkb.runtime.requests import ImportFile
 
             window.open_knowledge_base(other)
-            wait_until(lambda: window.kb == other and window.page is not None)
+            wait_until(lambda: window.kb == other and not window.io._callbacks)
             window.shell.navigate("资料")
             if args.inputs:
                 inputs = sorted(

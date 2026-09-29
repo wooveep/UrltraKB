@@ -62,7 +62,7 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
     try:
         kb = state / "kb"
         window.open_knowledge_base(kb)
-        wait(lambda: window.kb == kb and window.page is not None)
+        wait(lambda: window.kb == kb and not window.io._callbacks)
         if mode == "restart":
             assert _hashes(kb) == saved["kb_hashes"], "Restart changed stored KB files"
             before = [task.summary() for task in window.manager.tasks()]

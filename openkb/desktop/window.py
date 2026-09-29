@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSystemTrayIcon,
     QTableWidgetItem,
-    QTreeWidgetItem,
 )
 
 from openkb.agent.chat_session import list_sessions
@@ -83,6 +82,7 @@ class Workbench(QMainWindow):
         self.setWindowTitle(NAME)
         self.resize(1320, 900)
         self.kb: Path | None = None
+        self._requested_page: str | None = None
         self.page: Page | None = None
         self._drafts: dict[tuple[str, str], PageDraft] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
@@ -321,10 +321,10 @@ class Workbench(QMainWindow):
             )
 
         def read():
+            from openkb.application.knowledge import list_knowledge
+
             return (
-                sorted(
-                    p.relative_to(root / "wiki").as_posix() for p in (root / "wiki").rglob("*.md")
-                ),
+                list_knowledge(root),
                 list_sessions(root),
                 get_kb_list(root),
                 get_kb_status(root),
@@ -335,21 +335,19 @@ class Workbench(QMainWindow):
                 return
             pages, sessions, info, status = value
             self.workspaces.overview_loaded(info, status)
-            self.pages.clear()
-            groups = {}
-            for path in pages:
-                group = path.split("/")[0] if "/" in path else "知识库"
-                if group not in groups:
-                    groups[group] = QTreeWidgetItem(self.pages, [group])
-                item = QTreeWidgetItem(groups[group], [Path(path).stem])
-                item.setData(0, Qt.ItemDataRole.UserRole, path)
-            self.pages.expandToDepth(0)
+            self.workspaces.knowledge.set_entries(pages)
             if self.page:
                 self.workspaces.select_page(self.page.path)
             self.conversations.catalog_loaded(sessions)
             self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
-            if self.page is None and (root / "wiki/index.md").exists():
-                self.open_page("index.md", activate=False)
+            if self.page is None:
+                if pages:
+                    self.open_page(pages[0].path, activate=False)
+                else:
+                    self.location.setText("我的知识")
+                    self.reader.show_temporary(
+                        "还没有知识页面。\n\n从「资料」导入文件或网址，整理完成后即可阅读、关联和提问。"
+                    )
 
         self.io.submit(read, loaded, kb=root, global_settings=True, obsolete=obsolete)
 
@@ -367,6 +365,7 @@ class Workbench(QMainWindow):
         if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
+        self._requested_page = path.removesuffix(".md")
         self._page_request_id += 1
         request_id = self._page_request_id
         self._keep_draft()
@@ -385,7 +384,11 @@ class Workbench(QMainWindow):
             self.editor.blockSignals(True)
             self.editor.setPlainText(draft.body if draft else page.body)
             self.editor.blockSignals(False)
-            self.location.setText(f"{root}  /  {page.path}.md")
+            from openkb.application.knowledge import KNOWLEDGE_LABELS, page_title
+
+            section = KNOWLEDGE_LABELS.get(page.path.split("/")[0], "阅读")
+            self.location.setText(f"{section}  /  {page_title(page.content, Path(page.path).name)}")
+            self.workspaces.ask_page.setEnabled(True)
             self.reader.show_markdown(page.body, (root / "wiki" / page.path).parent, anchor=anchor)
             if activate:
                 self.tabs.setCurrentIndex(0)

@@ -39,15 +39,32 @@ def list_artifacts(kb_dir: Path) -> tuple[Artifact, ...]:
         grouped = []
         for folder, kind in (("skills", "Skill"), ("decks", "幻灯片")):
             for path in sorted((kb_dir / "output" / folder).glob("*")):
-                if path.is_dir():
+                if path.is_dir() and not path.name.endswith("-workspace"):
                     _artifact_path(kb_dir, str(path.relative_to(kb_dir)))
                     items.append(Artifact(path.relative_to(kb_dir).as_posix(), kind))
                     grouped.append(path)
         for folder in ("output", "wiki/reports", "wiki/explorations"):
             for path in sorted((kb_dir / folder).rglob("*")):
-                if path.is_file() and not any(path.is_relative_to(group) for group in grouped):
+                if (
+                    path.is_file()
+                    and not any(path.is_relative_to(group) for group in grouped)
+                    and not any(
+                        part.startswith(".") or part.endswith("-workspace")
+                        for part in path.relative_to(kb_dir).parts
+                    )
+                ):
                     _artifact_path(kb_dir, str(path.relative_to(kb_dir)))
-                    items.append(Artifact(path.relative_to(kb_dir).as_posix(), "文件"))
+                    relative = path.relative_to(kb_dir).as_posix()
+                    kind = (
+                        "检查报告"
+                        if folder == "wiki/reports"
+                        else "探索笔记"
+                        if folder == "wiki/explorations"
+                        else "知识图谱"
+                        if relative == "output/visualize/graph.html"
+                        else "文件"
+                    )
+                    items.append(Artifact(relative, kind))
         return tuple(items)
 
 

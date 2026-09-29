@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from markdown_it import MarkdownIt
 
+from openkb.rendering.code import code_html
 from openkb.rendering.renderer import RenderedBlock, Renderer
 
 _INLINE = re.compile(
@@ -31,13 +32,14 @@ def heading_anchor(title: str) -> str:
 
 
 def render_markdown(
-    source: str, renderer: Renderer, *, dark: bool = False, scale: float = 1
+    source: str, renderer: Renderer | None, *, dark: bool = False, scale: float = 1
 ) -> RenderedMarkdown:
     objects: list[tuple[str, RenderedBlock]] = []
     prefix = f"OPENKB{uuid.uuid4().hex}"
     markdown = MarkdownIt("commonmark").enable(["table", "strikethrough"])
 
     def placeholder(body: str, kind: str, display: bool) -> str:
+        assert renderer is not None
         block = renderer.render(body, kind, display=display, dark=dark, scale=scale)
         token = f"{prefix}{len(objects)}END"
         objects.append((token, block))
@@ -54,7 +56,7 @@ def render_markdown(
                 token.content = f'<a href="{href}">{html.escape(match[2] or match[1])}</a>'
             state.pos = match.end()
             return True
-        match = _INLINE.match(state.src, state.pos)
+        match = _INLINE.match(state.src, state.pos) if renderer else None
         if not match:
             return False
         if not silent:
@@ -65,6 +67,8 @@ def render_markdown(
         return True
 
     def math_block(state, start, end, silent):
+        if renderer is None:
+            return False
         if state.sCount[start] - state.blkIndent >= 4:
             return False
         first = state.src[state.bMarks[start] + state.tShift[start] : state.eMarks[start]]
@@ -89,9 +93,10 @@ def render_markdown(
 
     def fence(tokens, index, options, env):
         token = tokens[index]
-        if token.info.strip() == "mermaid":
+        if token.info.strip() == "mermaid" and renderer:
             return f"<p>{placeholder(token.content, 'mermaid', True)}</p>\n"
-        return default_fence(tokens, index, options, env)
+        language = token.info.strip().split()[0] if token.info.strip() else ""
+        return code_html(token.content, language, dark=dark)
 
     markdown.inline.ruler.before("escape", "openkb_inline", inline)
     headings: dict[str, int] = {}
@@ -116,6 +121,6 @@ def render_markdown(
     markdown.renderer.rules["th_open"] = table_cell
     markdown.renderer.rules["td_open"] = table_cell
     markdown.block.ruler.before("fence", "openkb_math", math_block)
-    default_fence = markdown.renderer.rules["fence"]
     markdown.renderer.rules["fence"] = fence
+    markdown.renderer.rules["code_block"] = fence
     return RenderedMarkdown(markdown.render(source), tuple(objects))

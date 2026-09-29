@@ -140,6 +140,6 @@ def verify_catalog(window, output, wait_until):
     with kb_ingest_lock(first / ".openkb"):
         atomic_write_text(first / "wiki/index.md", "# 新建的知识库\n")
     window.open_knowledge_base(first)
-    wait_until(lambda: window.kb == first and window.page is not None)
-    wait_until(lambda: "新建的知识库" in window.reader.toPlainText())
+    wait_until(lambda: window.kb == first and not window.io._callbacks)
+    wait_until(lambda: "还没有知识页面" in window.reader.toPlainText())
     assert "关联阅读" not in window.reader.toPlainText()

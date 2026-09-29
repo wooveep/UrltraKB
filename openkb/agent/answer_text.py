@@ -13,7 +13,7 @@ _TOKENS = re.compile(
 )
 
 
-def visible_answer(text: str) -> str:
+def visible_answer(text: str, *, streaming: bool = False) -> str:
     """Remove tagged reasoning, including an unfinished envelope, outside code."""
     parts: list[str] = []
     stack: list[str] = []
@@ -32,5 +32,16 @@ def visible_answer(text: str) -> str:
             stack.append(match.group("name").lower())
         start = match.end()
     if not stack:
-        parts.append(text[start:])
+        tail = text[start:]
+        # A reasoning tag can be split across network chunks. Hold its prefix
+        # until it is identifiable; never briefly display hidden reasoning.
+        if streaming and "<" in tail:
+            position = tail.rfind("<")
+            candidate = re.sub(r"^<\s*/?\s*", "", tail[position:]).lower().rstrip()
+            if any(
+                name.startswith(candidate)
+                for name in ("think", "thinking", "analysis", "reasoning")
+            ):
+                tail = tail[:position]
+        parts.append(tail)
     return "".join(parts).strip()

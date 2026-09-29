@@ -6,6 +6,7 @@ from pathlib import Path
 
 from openkb.agent.answer_text import visible_answer
 from openkb.agent.chat_session import ChatSession
+from openkb.agent.token_usage import add_usage
 from openkb.application.conversations import read_conversation
 from openkb.desktop.chat_outbox import ChatOutbox
 from openkb.desktop.conversation_activity import failure_status, task_status
@@ -33,6 +34,9 @@ class Chat:
     generation: int = 0
     activity: TaskView | None = None
     failure: str = ""
+    answer: str = ""
+    usage: dict | None = None
+    pending_usage: dict | None = None
 
 
 class Conversations:
@@ -180,6 +184,8 @@ class Conversations:
                         )
                 chat.persisted = True
                 chat.completed_count = len(session.turns)
+                chat.usage = session.usage
+                chat.pending_usage = None
             if self.active is chat:
                 self.render(restore_draft=False)
 
@@ -254,6 +260,8 @@ class Conversations:
         chat.question, chat.task = question, task
         chat.running = True
         chat.activity = None
+        chat.answer = ""
+        chat.pending_usage = None
         chat.failure = ""
         chat.status = "已排队，等待执行…"
         chat.draft = ""
@@ -274,8 +282,11 @@ class Conversations:
         chat.activity = task
         if self.active is chat and hasattr(self.window.conversation_notice, "set_task"):
             self.window.conversation_notice.set_task(task)
-        if chat.status != status:
+        answer = visible_answer(task.text, streaming=True) if not task.text_truncated else ""
+        if chat.status != status or chat.answer != answer or chat.pending_usage != task.usage:
             chat.status = status
+            chat.answer = answer
+            chat.pending_usage = task.usage
             if self.active is chat:
                 self.render(restore_draft=False)
 
@@ -284,6 +295,7 @@ class Conversations:
         if not chat or chat.task != task.id:
             return
         chat.running = False
+        chat.answer = ""
         chat.activity = None
         chat.failure = (
             failure_status(
@@ -339,9 +351,21 @@ class Conversations:
             w.conversation_notice.setText(notice)
         w.conversation_notice.setVisible(bool(notice))
         if chat:
-            # Public stages are separate from unverified deltas and tool narration.
-            pending = (chat.question, "") if chat.question else None
-            w.chat.show_turns(chat.turns, chat.root / "wiki", pending=pending)
+            pending = (chat.question, chat.answer) if chat.question else None
+            w.chat.show_turns(chat.turns, chat.root / "wiki", pending=pending, identity=id(chat))
         else:
             w.chat.show_temporary("")
+        if hasattr(w, "token_usage"):
+            usage = add_usage(chat.usage, chat.pending_usage) if chat else None
+            fields = (
+                ("输入命中缓存", "input_cached"),
+                ("输入未命中缓存", "input_uncached"),
+                ("输出", "output"),
+                ("思考", "reasoning"),
+            )
+            counts = [
+                f"{label} {usage[key]:,}" if usage and usage.get(key) is not None else f"{label} —"
+                for label, key in fields
+            ]
+            w.token_usage.setText("本对话 tokens · " + " · ".join(counts))
         self.update_controls()

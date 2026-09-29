@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTabWidget,
     QToolButton,
-    QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -175,14 +174,20 @@ class Workspaces:
         self.hosts["资料"].addWidget(self.import_controls)
 
     def _knowledge(self):
+        from openkb.desktop.knowledge import KnowledgeDirectory
+
         w = self.window
         layout = self.hosts["知识"]
+        self.knowledge = KnowledgeDirectory(w)
         row = FlowLayout()
         self.directory_toggle = action("知识目录", self.toggle_directory)
         self.context_toggle = action("来源与链接", self.toggle_context)
         for button in (self.directory_toggle, self.context_toggle):
             button.setCheckable(True)
             row.addWidget(button)
+        self.ask_page = action("围绕此页提问", self.knowledge.ask)
+        self.ask_page.setEnabled(False)
+        row.addWidget(self.ask_page)
         row.addWidget(action("检查与修复…", w._maintenance))
         row.addWidget(action("刷新", w._refresh_current))
         w.zoom = FocusComboBox()
@@ -196,11 +201,7 @@ class Workspaces:
         w.location = LocationLabel("尚未选择知识页面")
         layout.addWidget(w.location)
         self.reading = QSplitter()
-        w.pages = QTreeWidget()
-        w.pages.setObjectName("knowledgeDirectory")
-        w.pages.setHeaderLabel("知识目录")
-        w.pages.setMinimumWidth(160)
-        w.pages.setMaximumWidth(320)
+        w.pages = self.knowledge.tree
         # Selection covers one mouse click and keyboard navigation. Activation
         # (often a double click) must not issue a second asynchronous page read.
         w.pages.currentItemChanged.connect(
@@ -212,13 +213,16 @@ class Workspaces:
             if item.childCount()
             else None
         )
-        w.pages.itemClicked.connect(
-            lambda item, column: w.tabs.setCurrentIndex(0)
-            if w.page
-            and (item.data(0, Qt.ItemDataRole.UserRole) or "").removesuffix(".md") == w.page.path
-            else None
-        )
-        self.reading.addWidget(w.pages)
+
+        def clicked(item, column):
+            target = (item.data(0, Qt.ItemDataRole.UserRole) or "").removesuffix(".md")
+            if w.page and target == w.page.path:
+                w.tabs.setCurrentIndex(0)
+                if w._requested_page != target:
+                    w.open_page(target)
+
+        w.pages.itemClicked.connect(clicked)
+        self.reading.addWidget(self.knowledge)
         w.tabs = QTabWidget()
         w.reader = MarkdownView()
         w.reader.anchorClicked.connect(w._follow_link)
@@ -246,7 +250,7 @@ class Workspaces:
         w.page_context = PageContextView(w)
         w.page_context.setMinimumWidth(180)
         self.reading.setStretchFactor(1, 1)
-        self.reading.setSizes([210, 800])
+        self.reading.setSizes([260, 800])
         reading_host, reading_layout = page()
         reading_layout.addWidget(self.reading)
         layout.addWidget(reading_host, 1)
@@ -274,6 +278,9 @@ class Workspaces:
                 tree.scrollToItem(item)
                 tree.blockSignals(blocked)
                 return
+        blocked = tree.blockSignals(True)
+        tree.setCurrentItem(None)
+        tree.blockSignals(blocked)
 
     def toggle_context(self):
         # On narrow windows secondary panes share the reading space, never stack up.
@@ -290,7 +297,7 @@ class Workspaces:
             self.context_toggle.setChecked(False)
         self._narrow = narrow
         visible = self._directory_narrow if narrow else self._directory_wide
-        self.window.pages.setVisible(visible)
+        self.knowledge.setVisible(visible)
         self.directory_toggle.setChecked(visible)
         if visible and narrow:
             self.context_drawer.set_open(False, immediate=True)
@@ -362,9 +369,6 @@ class Workspaces:
         w.question = QuestionEdit()
         composer_body.addWidget(w.question)
         controls = QHBoxLayout()
-        self.autosave_hint = QLabel("对话自动保存")
-        self.autosave_hint.setObjectName("muted")
-        controls.addWidget(self.autosave_hint)
         controls.addStretch()
         w.ask_button = action("发送", w._ask)
         w.ask_button.setObjectName("sendButton")
@@ -376,6 +380,16 @@ class Workspaces:
         composer_body.addLayout(controls)
         w.question.submitted.connect(w._ask)
         composer_layout.addWidget(composer)
+        w.token_usage = QLabel()
+        w.token_usage.setObjectName("composerHint")
+        w.token_usage.setWordWrap(True)
+        w.token_usage.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        w.token_usage.setToolTip(
+            "本对话已报告的累计用量，包含工具调用产生的模型请求。"
+            "— 表示没有统计；旧对话未记录的用量不补算。"
+            "输出包含思考 tokens，二者不应再次相加。"
+        )
+        composer_layout.addWidget(w.token_usage)
         hint = QLabel("Enter 发送 · Shift + Enter 换行")
         hint.setObjectName("composerHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -551,6 +565,9 @@ class Workspaces:
         self.history_toggle.setEnabled(enabled)
         self.window.conversations.update_controls()
         self.window.save_button.setEnabled(False)
+        self.ask_page.setEnabled(False)
+        self.knowledge.search.clear()
+        self.knowledge.set_entries(())
         for hint in self.empty.values():
             hint.setVisible(not enabled)
         self.overview_location.setText(str(self.window.kb) if enabled else "尚未打开知识库")

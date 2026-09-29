@@ -47,6 +47,16 @@ def model_service():
                 }
                 self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
                 self.wfile.flush()
+            if body.get("stream_options", {}).get("include_usage"):
+                event["choices"] = []
+                event["usage"] = {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 25,
+                    "total_tokens": 125,
+                    "prompt_tokens_details": {"cached_tokens": 60},
+                    "completion_tokens_details": {"reasoning_tokens": 10},
+                }
+                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
             self.wfile.write(b"data: [DONE]\n\n")
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -153,6 +163,40 @@ def test_worker_loss_is_interrupted_and_never_replays_remaining_units(
         assert result.unfinished == 2
         assert result.processes_reaped
         assert requests.qsize() == 1
+    finally:
+        release.set()
+        manager.shutdown(stop=True)
+        assert manager.join(30)
+
+
+def test_streamed_usage_reaches_receipt_and_restored_conversation(kb_dir, tmp_path, model_service):
+    from openkb.application.conversations import read_conversation
+    from openkb.runtime.requests import ContinueConversation
+
+    url, _, _, release = model_service
+    configure(kb_dir, url, "unit-b")
+    manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
+    try:
+        first = manager.wait(manager.submit(kb_dir, [ContinueConversation("hello")]), timeout=30)
+        assert first.state == "completed", first
+        result = first.results[0]
+        assert result.usage == {
+            "input_cached": 60,
+            "input_uncached": 40,
+            "output": 25,
+            "reasoning": 10,
+        }
+        second = manager.wait(
+            manager.submit(kb_dir, [ContinueConversation("again", result.session_id)]), timeout=30
+        )
+        assert second.state == "completed", second
+        restored = read_conversation(kb_dir, result.session_id)
+        assert restored.usage == {
+            "input_cached": 120,
+            "input_uncached": 80,
+            "output": 50,
+            "reasoning": 20,
+        }
     finally:
         release.set()
         manager.shutdown(stop=True)

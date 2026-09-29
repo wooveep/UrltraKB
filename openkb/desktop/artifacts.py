@@ -5,21 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QSplitter,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
 )
 
 from openkb import frontmatter
@@ -31,7 +19,6 @@ from openkb.application.artifacts import (
 )
 from openkb.application.generators import GenerationOptions, preview_generation
 from openkb.desktop.panels import ManagementPanel
-from openkb.desktop.reader import MarkdownView
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import GenerateArtifact, GenerateGraph
 
@@ -47,69 +34,10 @@ class ArtifactsDialog(ManagementPanel):
         self._refresh_id = 0
         self.setWindowTitle(f"生成与产物 · {kb.name}")
         self.resize(1080, 800)
-        layout = QVBoxLayout(self)
-        from openkb.desktop.location import LocationLabel
+        from openkb.desktop.artifact_workspace import build_workspace
 
-        layout.addWidget(LocationLabel(str(kb)))
-        form = QFormLayout()
-        self.kind = QComboBox()
-        self.kind.addItem("Skill", "skill")
-        self.kind.addItem("HTML 幻灯片", "deck")
-        self.name = QLineEdit()
-        self.name.setPlaceholderText("例如 attention-guide")
-        self.intent = QPlainTextEdit()
-        self.intent.setPlaceholderText("希望产物说明什么、面向谁、如何使用…")
-        self.intent.setMaximumHeight(85)
-        form.addRow("类型", self.kind)
-        form.addRow("名称", self.name)
-        form.addRow("生成要求", self.intent)
-        layout.addLayout(form)
-        actions = QHBoxLayout()
-        self.generate_button = QPushButton("生成…")
-        self.graph_button = QPushButton("生成知识图谱")
-        refresh = QPushButton("刷新产物")
-        for button, callback in (
-            (self.generate_button, self.generate),
-            (self.graph_button, self.graph),
-            (refresh, self.refresh),
-        ):
-            button.clicked.connect(callback)
-            actions.addWidget(button)
-        layout.addLayout(actions)
-        self.status = QLabel("同名产物可修改名称，或确认归档旧版后替换。")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-        self.items = QListWidget()
-        self.items.currentItemChanged.connect(self.select)
-        self.files = QComboBox()
-        self.files.currentIndexChanged.connect(self.read)
-        self.reader = MarkdownView()
-        self.source = QPlainTextEdit()
-        self.source.setReadOnly(True)
-        self.results = QPlainTextEdit()
-        self.results.setReadOnly(True)
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.reader, "阅读")
-        self.tabs.addTab(self.source, "源文件")
-        self.tabs.addTab(self.results, "执行结果")
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.addWidget(self.files)
-        content_layout.addWidget(self.tabs)
-        splitter = QSplitter()
-        splitter.addWidget(self.items)
-        splitter.addWidget(content)
-        splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter, 1)
-        outputs = QHBoxLayout()
-        self.export_button = QPushButton("导出所选产物…")
-        self.export_button.clicked.connect(self.export)
-        self.preview_button = QPushButton("在外部浏览器预览 HTML")
-        self.preview_button.setEnabled(False)
-        self.preview_button.clicked.connect(self.preview)
-        outputs.addWidget(self.export_button)
-        outputs.addWidget(self.preview_button)
-        layout.addLayout(outputs)
+        self._preferred_path = None
+        build_workspace(self)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
@@ -129,10 +57,12 @@ class ArtifactsDialog(ManagementPanel):
             self.status.setText(str(exc))
             return
         self._preparing = True
+        self.generate_button.setEnabled(False)
         self.status.setText("正在读取现有产物与覆盖范围…")
 
         def loaded(preview, error):
             self._preparing = False
+            self.generate_button.setEnabled(True)
             if error:
                 self.status.setText(f"无法准备生成（{type(error).__name__}）")
                 return
@@ -164,7 +94,9 @@ class ArtifactsDialog(ManagementPanel):
                 ],
             )
             self._tasks.add(task)
-            self.status.setText("生成任务已提交。要求会保留在表单中；可在主窗口安全停止任务。")
+            self._preferred_path = f"output/{'skills' if kind == 'skill' else 'decks'}/{name}"
+            self.new_button.setChecked(False)
+            self.status.setText("正在生成成果，可继续阅读已有成果。在「任务」中查看进度或停止。")
 
         self.window.io.submit(
             lambda: preview_generation(self.kb, kind, name),
@@ -175,7 +107,45 @@ class ArtifactsDialog(ManagementPanel):
 
     def graph(self):
         self._tasks.add(self.window.manager.submit(self.kb, [GenerateGraph()]))
-        self.status.setText("图谱任务已提交，将更新 output/visualize/graph.html。")
+        self._preferred_path = "output/visualize/graph.html"
+        self.status.setText("正在整理知识之间的关联，完成后可预览知识图谱。")
+
+    def describe_kind(self):
+        self.kind_hint.setText(
+            "将知识整理为 AI 可复用的操作指南，包含步骤与参考资料。"
+            if self.kind.currentData() == "skill"
+            else "围绕一个主题生成用于讲解、培训或分享的演示文稿，可在浏览器播放。"
+        )
+
+    def filter_items(self):
+        query, kind = self.search.text().strip().casefold(), self.filter_kind.currentText()
+        count = 0
+        for index in range(self.items.count()):
+            item = self.items.item(index)
+            visible = query in item.text().casefold() and (
+                kind == "全部成果" or item.data(Qt.ItemDataRole.UserRole + 1) == kind
+            )
+            item.setHidden(not visible)
+            count += visible
+        self.library_count.setText(f"我的成果 · {count}")
+        self.empty_hint.setVisible(count == 0)
+        self.empty_hint.setText(
+            "没有匹配的成果，试试其他条件。"
+            if self.items.count()
+            else "还没有成果。点击「新建创作」，把知识变成可用的成果。"
+        )
+        selected = self.items.currentItem()
+        if selected and selected.isHidden():
+            self.items.setCurrentItem(
+                next(
+                    (
+                        self.items.item(i)
+                        for i in range(self.items.count())
+                        if not self.items.item(i).isHidden()
+                    ),
+                    None,
+                )
+            )
 
     def refresh(self):
         self._refresh_id += 1
@@ -185,16 +155,26 @@ class ArtifactsDialog(ManagementPanel):
             if error:
                 self.status.setText(f"无法读取产物（{type(error).__name__}）")
                 return
-            if not items:
-                self.reader.show_temporary("暂无产物。生成 Skill、幻灯片或知识图谱后在这里查看。")
             selected = self.items.currentItem()
-            selected_path = selected.data(Qt.ItemDataRole.UserRole) if selected else None
+            selected_path = self._preferred_path or (
+                selected.data(Qt.ItemDataRole.UserRole) if selected else None
+            )
+            blocked = self.items.blockSignals(True)
             self.items.clear()
             for artifact in items:
-                item = QListWidgetItem(f"{artifact.kind} · {artifact.path}", self.items)
+                title = "知识关联图谱" if artifact.kind == "知识图谱" else Path(artifact.path).stem
+                item = QListWidgetItem(f"{title}\n{artifact.kind}", self.items)
                 item.setData(Qt.ItemDataRole.UserRole, artifact.path)
+                item.setData(Qt.ItemDataRole.UserRole + 1, artifact.kind)
+                item.setToolTip(artifact.path)
                 if artifact.path == selected_path:
                     self.items.setCurrentItem(item)
+                    self._preferred_path = None
+            if self.items.currentItem() is None and self.items.count():
+                self.items.setCurrentRow(0)
+            self.filter_items()
+            self.items.blockSignals(blocked)
+            self.select(self.items.currentItem())
 
         self.window.io.submit(
             lambda: list_artifacts(self.kb),
@@ -207,15 +187,46 @@ class ArtifactsDialog(ManagementPanel):
         self._selection += 1
         selection = self._selection
         self.files.clear()
+        self.export_button.setEnabled(bool(item))
         if not item:
+            self.files.hide()
+            self.reader.show_temporary(
+                "从左侧选择已有成果进行阅读、预览与导出。\n\n还没有成果？点击「新建创作」，选择目标并描述要求。"
+            )
+            self.artifact_title.setText("选择一个成果")
+            self.artifact_hint.setText("从左侧选择成果进行预览，或新建一次创作。")
             return
         path = item.data(Qt.ItemDataRole.UserRole)
+        self.artifact_title.setText(item.text().splitlines()[0])
+        kind = item.data(Qt.ItemDataRole.UserRole + 1)
+        self.artifact_hint.setText(
+            {
+                "Skill": "阅读操作指南；导出完整文件包后，可交给支持 Skill 的 AI 工具使用。",
+                "幻灯片": "在浏览器中播放演示文稿；导出会包含展示所需的全部文件。",
+                "知识图谱": "在浏览器中探索知识之间的关联，也可以导出分享。",
+                "检查报告": "查看知识质量检查的发现，再到知识页修订内容。",
+            }.get(kind, "阅读成果，或导出文件用于后续工作。")
+        )
 
         def loaded(files, error):
             if error:
                 self.status.setText(f"无法读取产物文件（{type(error).__name__}）")
                 return
+            blocked = self.files.blockSignals(True)
             self.files.addItems(files)
+            preferred = next(
+                (
+                    file
+                    for file in files
+                    if Path(file).name in {"SKILL.md", "index.html", "graph.html"}
+                ),
+                None,
+            )
+            if preferred:
+                self.files.setCurrentText(preferred)
+            self.files.blockSignals(blocked)
+            self.files.setVisible(len(files) > 1)
+            self.read()
 
         self.window.io.submit(
             lambda: artifact_files(self.kb, path),
@@ -251,9 +262,11 @@ class ArtifactsDialog(ManagementPanel):
                 self.tabs.setCurrentIndex(0)
             else:
                 self.reader.show_temporary(
-                    "HTML 可通过下方按钮在外部浏览器预览。其他文件可查看源文件或导出。"
+                    "点击「在浏览器预览」查看完整效果。也可以导出成果用于分享。"
+                    if html
+                    else "此文件可通过「源文件」查看，或导出后使用对应程序打开。"
                 )
-                self.tabs.setCurrentIndex(1)
+                self.tabs.setCurrentIndex(0)
 
         self.window.io.submit(
             lambda: read_artifact(self.kb, relative),
@@ -306,9 +319,15 @@ class ArtifactsDialog(ManagementPanel):
                     lines.append(result.error)
                 if result.output:
                     lines.append(result.output)
-        self.status.setText("任务已结束。请查看结果；生成要求已保留，可修改名称或重新确认后再试。")
+        failed = any(task.state not in {"completed"} for task in completed)
+        self.status.setText(
+            "任务已结束。请查看任务记录，调整要求后可再次生成。"
+            if failed
+            else "任务已结束，成果已就绪。可以预览或导出，也可以发起新的创作。"
+        )
         self.results.setPlainText("\n".join(lines))
-        self.tabs.setCurrentIndex(2)
+        if failed:
+            self.tabs.setCurrentIndex(2)
         self.refresh()
 
     def done(self, result):
