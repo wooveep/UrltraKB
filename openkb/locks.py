@@ -232,6 +232,9 @@ def kb_lock(
                 time.sleep(0.05)
             if lease.first:
                 if exclusive:
+                    from openkb.catalog_schema import validate_catalog_writer
+
+                    validate_catalog_writer(openkb_dir.parent)
                     _drain_pending_journals(openkb_dir)
                 elif _pending_recovery(openkb_dir):
                     # Release the read lease before independent exclusive recovery;
@@ -291,6 +294,9 @@ async def async_kb_lock(
                 await asyncio.sleep(0.05)
             if lease.first:
                 if exclusive:
+                    from openkb.catalog_schema import validate_catalog_writer
+
+                    validate_catalog_writer(openkb_dir.parent)
                     _drain_pending_journals(openkb_dir)
                 elif _pending_recovery(openkb_dir):
                     lease.release()

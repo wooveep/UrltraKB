@@ -27,7 +27,12 @@ async def document_source_endpoint(
 ) -> DocumentSourceResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     try:
-        result = await run_in_threadpool(read_document_source, kb_dir, request.hash)
+        result = await run_in_threadpool(
+            read_document_source,
+            kb_dir,
+            request.hash,
+            source_revision_id=request.source_revision_id,
+        )
     except (OSError, ValueError) as exc:
         # Corrupt/unreadable source file (bad JSON, unexpected shape, I/O error):
         # a controlled 500 with a clean message beats an unhandled stack trace.

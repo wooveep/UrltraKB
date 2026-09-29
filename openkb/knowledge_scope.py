@@ -15,7 +15,16 @@ class KnowledgeScope:
         wiki = self.wiki_dir.expanduser().resolve()
         if not wiki.is_relative_to(root):
             raise ValueError("Invalid page path: wiki escapes its knowledge base")
-        if self.view_id != "legacy" or wiki != root / "wiki":
+        relative = wiki.relative_to(root).parts
+        managed = (
+            len(relative) == 4 and relative[:2] == (".openkb", "staging") and relative[-1] == "wiki"
+        ) or (
+            len(relative) == 6
+            and relative[:3] == (".openkb", "knowledge", "legacy")
+            and relative[3] == "revisions"
+            and relative[-1] == "wiki"
+        )
+        if self.view_id != "legacy" or (wiki != root / "wiki" and not managed):
             raise ValueError("Only the knowledge base's legacy scope is available")
         object.__setattr__(self, "kb_dir", root)
         object.__setattr__(self, "wiki_dir", wiki)

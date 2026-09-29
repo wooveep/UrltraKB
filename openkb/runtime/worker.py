@@ -265,10 +265,22 @@ def _execute(
         return UnitResult(
             "completed" if result.status == "added" else result.status,
             resources=result.resources,
-            error="Document import failed" if result.status == "failed" else None,
+            error=result.message
+            or ("Document import failed" if result.status == "failed" else None),
             quality=result.quality,
             unfinished=result.unfinished,
             revision=result.input_version,
+            changes=(
+                f"Source: {result.source_id}",
+                f"Source revision: {result.source_revision_id}",
+                *(
+                    f"Unit {unit.unit_id}: {unit.status}; "
+                    f"actual input: {unit.successful_source_revision_id or 'none'}"
+                    for unit in result.units
+                ),
+            )
+            if result.source_id
+            else (),
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio

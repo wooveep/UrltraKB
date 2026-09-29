@@ -214,12 +214,19 @@ async def _write_upload(
 
 
 def _summarize_add_results(kb: str, results: list[AddFileItem]) -> AddResponse:
+    from collections import Counter
+
     return AddResponse(
         kb=kb,
         files=results,
         added_count=sum(1 for item in results if item.status == "added"),
         skipped_count=sum(1 for item in results if item.status == "skipped"),
         failed_count=sum(1 for item in results if item.status == "failed"),
+        blocked_count=sum(1 for item in results if item.status == "blocked"),
+        partial_count=sum(1 for item in results if item.status == "partial"),
+        source_count=len(results),
+        unit_counts=dict(Counter(unit.status for item in results for unit in item.units)),
+        discovery_pending_count=sum(item.discovery_pending or 0 for item in results),
     )
 
 

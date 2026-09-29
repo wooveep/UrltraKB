@@ -16,6 +16,8 @@ from openkb.application.execution import ExecutionContext
 from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
+from openkb.ingest_result import ImportUnitOutcome, describe_ingest
+from openkb.ingest_result import IngestResult as DocumentResult
 from openkb.inputs import InputChanged, PreparedInput, prepared_input, validate_source_root
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lifecycle import read_lifecycle
@@ -111,10 +113,10 @@ def add_single_file(
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
     scope: KnowledgeScope | None = None,
-) -> Literal["added", "skipped", "failed"]:
+) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped"]:
     """Compatibility projection of the shared import use case's status."""
     scope = resolve_scope(kb_dir, scope)
-    return import_document(
+    result = import_document(
         kb_dir,
         file_path,
         stage=stage,
@@ -124,7 +126,10 @@ def add_single_file(
         prepared=prepared,
         origin_url=origin_url,
         scope=scope,
-    ).status
+    )
+    for line in describe_ingest(result):
+        report(line)
+    return result.status
 
 
 def _add_single_file_locked(
@@ -353,6 +358,10 @@ class AddFileResult:
     saved_path: str | None
     status: str
     message: str
+    source_id: str | None = None
+    source_revision_id: str | None = None
+    units: tuple[ImportUnitOutcome, ...] = ()
+    discovery_pending: int | None = None
 
 
 def _add_for_api(
@@ -369,13 +378,14 @@ def _add_for_api(
     On ``skipped`` the upload owner checks whether its raw copy can be discarded.
     """
     scope = resolve_scope(kb_dir, scope)
-    status_str = import_document(
-        kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope
-    ).status
+    result = import_document(kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope)
+    status_str = result.status
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
     elif status_str == "failed":
-        message = f"Failed to add: {file_path.name} (see server logs)"
+        message = result.message or f"Failed to add: {file_path.name} (see server logs)"
+    elif status_str != "added":
+        message = result.message or f"Import {status_str}: {file_path.name}"
     else:
         message = f"Added: {file_path.name}"
     return AddFileResult(
@@ -383,17 +393,11 @@ def _add_for_api(
         saved_path=str(file_path) if status_str == "added" else None,
         status=status_str,
         message=message,
+        source_id=result.source_id,
+        source_revision_id=result.source_revision_id,
+        units=result.units,
+        discovery_pending=result.discovery_pending,
     )
-
-
-@dataclass(frozen=True)
-class DocumentResult:
-    source: str
-    status: Literal["added", "skipped", "failed"]
-    resources: tuple[str, ...]
-    quality: tuple[str, ...] = ()
-    unfinished: tuple[str, ...] = ()
-    input_version: str | None = None
 
 
 def import_document(
@@ -469,6 +473,25 @@ def import_document(
                 context.begin(root) if context else nullcontext(bundle) as credentials,
                 collect_compile_report() as compilation,
             ):
+                if ready.source.suffix.lower() == ".pdf":
+                    from dataclasses import replace
+
+                    from openkb.application.ingestion import import_prepared_pdf
+
+                    result = import_prepared_pdf(
+                        root,
+                        ready,
+                        bundle=credentials,
+                        context=context,
+                        on_event=on_event or (context.on_event if context else None),
+                        origin_url=origin_url,
+                        report=report,
+                    )
+                    return replace(
+                        result,
+                        quality=tuple(compilation.quality),
+                        unfinished=result.unfinished + tuple(compilation.unfinished),
+                    )
                 outcome = _add_single_file_locked(
                     source,
                     root,

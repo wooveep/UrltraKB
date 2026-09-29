@@ -26,6 +26,7 @@ from openkb.application.settings_data import (
 from openkb.application.settings_data import (
     KbConfigResponse as KbConfigResponse,
 )
+from openkb.ingest_result import ImportUnitOutcome
 
 
 class QueryRequest(BaseModel):
@@ -133,6 +134,10 @@ class AddFileItem(BaseModel):
     saved_path: str | None = None
     status: str
     message: str
+    source_id: str | None = None
+    source_revision_id: str | None = None
+    units: tuple[ImportUnitOutcome, ...] = ()
+    discovery_pending: int | None = None
 
 
 class AddResponse(BaseModel):
@@ -141,6 +146,11 @@ class AddResponse(BaseModel):
     added_count: int
     skipped_count: int
     failed_count: int
+    blocked_count: int = 0
+    partial_count: int = 0
+    source_count: int = 0
+    unit_counts: dict[str, int] = Field(default_factory=dict)
+    discovery_pending_count: int = 0
 
 
 class KbRequest(BaseModel):
@@ -158,6 +168,12 @@ class DocumentItem(BaseModel):
     type: str
     display_type: str
     pages: int | None = None
+    source_id: str | None = None
+    source_revision_id: str | None = None
+    status: str | None = None
+    message: str | None = None
+    units: list[dict] = Field(default_factory=list)
+    original_path: str | None = None
 
 
 class ListResponse(BaseModel):
@@ -311,6 +327,7 @@ class DocumentSourceRequest(BaseModel):
     # SHA-256 hash key from /list — the unique document identifier (avoids
     # ambiguity when two documents share a doc_name/filename stem).
     hash: str = Field(..., min_length=1)
+    source_revision_id: str | None = None
 
 
 class DocumentSourceResponse(BaseModel):
@@ -322,6 +339,15 @@ class DocumentSourceResponse(BaseModel):
     content: str
     # Page count for long docs (per-page JSON); None for short (single .md).
     pages: int | None = None
+    source_id: str | None = None
+    source_revision_id: str | None = None
+    target_source_revision_id: str | None = None
+    knowledge_revision_id: str | None = None
+    original_path: str | None = None
+    base_path: str | None = None
+    status: str | None = None
+    message: str | None = None
+    error_type: str | None = None
 
 
 class PageDeleteRequest(BaseModel):

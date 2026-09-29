@@ -312,12 +312,19 @@ def add_single_file(
     stage: bool = True,
     bundle=None,
     scope: KnowledgeScope | None = None,
+    origin_url: str | None = None,
 ):
     scope = resolve_scope(kb_dir, scope)
     if bundle is None:
         _setup_llm_key(kb_dir)
     return document_use_cases.add_single_file(
-        file_path, kb_dir, stage=stage, bundle=bundle, report=click.echo, scope=scope
+        file_path,
+        kb_dir,
+        stage=stage,
+        bundle=bundle,
+        report=click.echo,
+        scope=scope,
+        origin_url=origin_url,
     )
 
 
@@ -582,7 +589,7 @@ def add(ctx, path):
                         length = len(published.path.read_text(encoding="utf-8"))
                         description = f"{length // 1024 or 1} KB clean markdown"
                     click.echo(f"  Saved: raw/{published.path.name} ({description})")
-                    outcome = add_single_file(published.path, kb_dir)
+                    outcome = add_single_file(published.path, kb_dir, origin_url=path)
                     if outcome == "skipped":
                         published.discard_if_unregistered()
             return
@@ -1138,9 +1145,13 @@ def watch(ctx):
                 try:
                     with expected_generation(kb_dir, generation):
                         _setup_llm_key(kb_dir)
-                        document_use_cases.import_document(
+                        result = document_use_cases.import_document(
                             kb_dir, fp, source_root=raw_dir, report=click.echo
                         )
+                        from openkb.ingest_result import describe_ingest
+
+                        for line in describe_ingest(result):
+                            click.echo(line)
                 except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete) as exc:
                     stop(str(exc))
                     return
@@ -1240,29 +1251,28 @@ def visualize(ctx, open_browser):
 
 def print_list(kb_dir: Path) -> None:
     """Print all documents in the knowledge base. Usable from CLI and chat REPL."""
-    openkb_dir = kb_dir / ".openkb"
-    hashes_file = openkb_dir / "hashes.json"
-    if not hashes_file.exists():
-        click.echo("No documents indexed yet.")
-        return
+    from openkb.application.knowledge_bases import get_kb_list
 
-    hashes = json.loads(hashes_file.read_text(encoding="utf-8"))
-    if not hashes:
+    documents = get_kb_list(kb_dir)["documents"]
+    if not documents:
         click.echo("No documents indexed yet.")
         return
 
     # Display documents table with count in header
-    doc_count = len(hashes)
+    doc_count = len(documents)
     click.echo(f"Documents ({doc_count}):")
     click.echo(f"  {'Name':<40} {'Type':<12} {'Pages':<8}")
     click.echo(f"  {'-' * 40} {'-' * 12} {'-' * 8}")
-    for file_hash, meta in hashes.items():
+    for meta in documents:
         name = meta.get("name", "unknown")
         raw_type = meta.get("type", "unknown")
         display = _display_type(raw_type)
         pages = meta.get("pages", "")
         pages_str = str(pages) if pages else ""
         click.echo(f"  {name:<40} {display:<12} {pages_str:<8}")
+        if meta.get("source_id"):
+            click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
+            click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
 
     # Display summaries
     summaries_dir = kb_dir / "wiki" / "summaries"
@@ -1345,7 +1355,10 @@ def print_status(kb_dir: Path) -> None:
     hashes_file = openkb_dir / "hashes.json"
     if hashes_file.exists():
         hashes = json.loads(hashes_file.read_text(encoding="utf-8"))
-        click.echo(f"\n  Total indexed: {len(hashes)} document(s)")
+        from openkb.application.sources import source_inventory
+
+        count = len(hashes) + len(source_inventory(kb_dir))
+        click.echo(f"\n  Total indexed: {count} document(s)")
 
     # Last compile time: newest compiled page across summaries/, concepts/,
     # and entities/ (an entity-only compile must still bump the shown time).

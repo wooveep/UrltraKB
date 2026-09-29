@@ -18,6 +18,7 @@ from openkb.config import (
     resolve_per_request_overrides,
 )
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.locks import atomic_write_text
 from openkb.tree_renderer import render_summary_md
 
 logger = logging.getLogger(__name__)
@@ -106,16 +107,15 @@ def _write_long_doc_artifacts(
     scope = resolve_scope(kb_dir, scope)
     sources_dir = scope.wiki_dir / "sources"
     sources_dir.mkdir(parents=True, exist_ok=True)
-    (sources_dir / f"{doc_name}.json").write_text(
-        json_mod.dumps(pages, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    atomic_write_text(
+        sources_dir / f"{doc_name}.json", json_mod.dumps(pages, ensure_ascii=False, indent=2)
     )
 
     summaries_dir = scope.wiki_dir / "summaries"
     summaries_dir.mkdir(parents=True, exist_ok=True)
     summary_path = summaries_dir / f"{doc_name}.md"
-    summary_path.write_text(
-        render_summary_md(tree, doc_name, doc_id, description=description), encoding="utf-8"
+    atomic_write_text(
+        summary_path, render_summary_md(tree, doc_name, doc_id, description=description)
     )
     return summary_path
 
@@ -173,6 +173,7 @@ def index_long_document(
     doc_name: str | None = None,
     *,
     scope: KnowledgeScope | None = None,
+    storage_path: Path | None = None,
 ) -> IndexResult:
     """Index a long PDF document using PageIndex and write wiki pages.
 
@@ -181,7 +182,7 @@ def index_long_document(
     """
     scope = resolve_scope(kb_dir, scope)
     source_name = doc_name or pdf_path.stem
-    openkb_dir = kb_dir / ".openkb"
+    openkb_dir = storage_path if storage_path is not None else kb_dir / ".openkb"
     config = resolve_effective_config(kb_dir)[0]
 
     model: str = config.get("model", "gpt-5.4")

@@ -145,9 +145,9 @@ def _model_boundary_worker(*args):
 
 @pytest.mark.parametrize("entrypoint", ["cli", "api", "desktop", "watch"])
 def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypatch, entrypoint):
+    from openkb.application.knowledge_bases import get_kb_list
     from openkb.application.pages import read_page
     from openkb.documents import read_document_source
-    from openkb.state import HashRegistry
 
     cli = importlib.import_module("openkb.cli")
     external = kb_dir / "input" / "small.pdf"
@@ -194,5 +194,6 @@ def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypat
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), *command])
         assert result.exception is None, result.output
     assert read_page(kb_dir, "summaries/small").body.strip() == "# Small\n\nCompiled knowledge."
-    source = read_document_source(kb_dir, HashRegistry.hash_file(external))
+    document = get_kb_list(kb_dir)["documents"][0]
+    source = read_document_source(kb_dir, document["source_id"])
     assert "A fixed PDF for every entrypoint." in source["content"]

@@ -38,9 +38,9 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 3)
+        self.table = QTableWidget(0, 5)
         self.table.setAccessibleName("已导入资料")
-        self.table.setHorizontalHeaderLabels(["资料", "格式", "导入方式"])
+        self.table.setHorizontalHeaderLabels(["资料", "格式", "导入方式", "处理状态", "来源修订"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -143,6 +143,9 @@ class DocumentsDialog(ManagementPanel):
                 item = QTableWidgetItem(doc["name"])
                 item.setData(Qt.ItemDataRole.UserRole, doc["hash"])
                 self.table.setItem(row, 0, item)
+                item.setToolTip(
+                    f"来源：{doc.get('source_id') or doc['hash']}\n{doc.get('message') or ''}"
+                )
                 is_long = doc.get("display_type") == "pageindex"
                 self.table.setItem(
                     row,
@@ -153,6 +156,10 @@ class DocumentsDialog(ManagementPanel):
                     row,
                     2,
                     QTableWidgetItem("PageIndex 长文索引" if is_long else "Markdown 全文编译"),
+                )
+                self.table.setItem(row, 3, QTableWidgetItem(doc.get("status") or "legacy"))
+                self.table.setItem(
+                    row, 4, QTableWidgetItem(doc.get("source_revision_id") or "legacy")
                 )
             self.recompile_all.setEnabled(bool(value["documents"]))
             self.read_button.setEnabled(bool(value["documents"]))

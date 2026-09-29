@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
+from openkb.artifact_references import list_artifact_references
 from openkb.inputs import copy_stable
 from openkb.locks import LockCancelled, kb_ingest_lock
 from openkb.mutation import mutation_scope
@@ -21,12 +22,9 @@ class PublishedInput:
 
     def discard_if_unregistered(self) -> None:
         """A dedup response never authorizes removing a retained registry source."""
-        entries = HashRegistry(self.kb_dir / ".openkb/hashes.json").all_entries()
-        for entry in entries.values():
-            for key in ("path", "raw_path", "source_path"):
-                raw = entry.get(key)
-                if raw and (self.kb_dir / raw).resolve() == self.path.resolve():
-                    return
+        references = list_artifact_references(self.kb_dir)
+        if not references.complete or self.path.resolve() in references.paths:
+            return
         if not self.path.is_file() or HashRegistry.hash_file(self.path) != self.digest:
             return
         with mutation_scope(self.kb_dir, [self.path], operation="discard-duplicate-upload"):

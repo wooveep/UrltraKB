@@ -61,7 +61,11 @@ def _resolve_source_file(
 
 
 def read_document_source(
-    kb_dir: Path, file_hash: str, *, scope: KnowledgeScope | None = None
+    kb_dir: Path,
+    file_hash: str,
+    *,
+    scope: KnowledgeScope | None = None,
+    source_revision_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
@@ -71,6 +75,11 @@ def read_document_source(
     short docs.
     """
     scope = resolve_scope(kb_dir, scope)
+    from openkb.application.sources import read_admitted_source
+
+    admitted = read_admitted_source(kb_dir, file_hash, source_revision_id=source_revision_id)
+    if admitted is not None:
+        return admitted
     registry = HashRegistry(kb_dir / ".openkb" / "hashes.json")
     meta = registry.get(file_hash)
     if meta is None:

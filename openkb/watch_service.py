@@ -25,7 +25,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +183,7 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
         if isinstance(exc, (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete)):
             raise
         return
-    status = result.status if result.status in ("added", "skipped", "failed") else "failed"
+    status = result.status
     _record_event(
         state,
         "file_done",
@@ -192,6 +192,10 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
             "original_name": path.name,
             "status": status,
             "message": result.message,
+            "source_id": result.source_id,
+            "source_revision_id": result.source_revision_id,
+            "units": [asdict(unit) for unit in result.units],
+            "discovery_pending": result.discovery_pending,
         },
     )
     _inc(state, status)

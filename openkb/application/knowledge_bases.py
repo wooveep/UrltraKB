@@ -292,6 +292,10 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
                 }
             )
 
+        from openkb.application.sources import source_inventory
+
+        documents.extend(source_inventory(kb_dir))
+
         summaries_dir = kb_dir / "wiki" / "summaries"
         concepts_dir = kb_dir / "wiki" / "concepts"
         entities_dir = kb_dir / "wiki" / "entities"
@@ -316,6 +320,8 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
 
 def get_kb_status(kb_dir: Path) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
+    from openkb.application.sources import source_inventory
+
     with kb_read_lock(kb_dir / ".openkb"):
         wiki_dir = kb_dir / "wiki"
         subdirs = ["sources", "summaries", "concepts", "reports"]
@@ -339,7 +345,7 @@ def get_kb_status(kb_dir: Path) -> dict[str, Any]:
         return {
             "directories": directories,
             "raw_count": raw_count,
-            "total_indexed": len(hashes),
+            "total_indexed": len(hashes) + len(source_inventory(kb_dir)),
             "last_compile": _newest_mtime_iso(summaries),
             "last_lint": _newest_mtime_iso(reports),
         }

@@ -150,14 +150,19 @@ def convert_document(
     *,
     staging_dir: Path | None = None,
     prepared: PreparedInput | None = None,
+    doc_name: str | None = None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
 
     if prepared is not None:
-        return _convert_prepared_document(src, kb_dir, staging_dir=staging_dir, ready=prepared)
+        return _convert_prepared_document(
+            src, kb_dir, staging_dir=staging_dir, ready=prepared, doc_name=doc_name
+        )
     with prepared_input(src) as ready:
-        return _convert_prepared_document(src, kb_dir, staging_dir=staging_dir, ready=ready)
+        return _convert_prepared_document(
+            src, kb_dir, staging_dir=staging_dir, ready=ready, doc_name=doc_name
+        )
 
 
 def _convert_prepared_document(
@@ -166,6 +171,7 @@ def _convert_prepared_document(
     *,
     staging_dir: Path | None = None,
     ready: PreparedInput,
+    doc_name: str | None = None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -192,7 +198,7 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         # 1. Hash check + identity resolution
         # ------------------------------------------------------------------
-        if registry.is_known(file_hash):
+        if doc_name is None and registry.is_known(file_hash):
             logger.info("Skipping already-known file: %s", src.name)
             stored = registry.get(file_hash) or {}
             return ConvertResult(
@@ -200,13 +206,15 @@ def _convert_prepared_document(
                 file_hash=file_hash,
                 doc_name=stored.get("doc_name") or Path(stored.get("name", src.name)).stem,
             )
-        doc_name = resolve_doc_name(
+        doc_name = doc_name or resolve_doc_name(
             src,
             kb_dir,
             registry,
             persist_legacy=staging_dir is None,
             path_key=source_identity,
         )
+        if _sanitize_stem(doc_name) != doc_name:
+            raise ValueError("Invalid normalized document name")
 
         # ------------------------------------------------------------------
         # 2. Copy to raw/

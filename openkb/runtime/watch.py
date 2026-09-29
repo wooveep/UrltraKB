@@ -180,7 +180,10 @@ class NativeWatch:
                 # A queued import can refresh to newer bytes before starting.
                 # Even its failed processed version must not be replayed.
                 self._remember(db, path, "", task.results[-1].revision)
-            if task.state in {"interrupted", "blocked"}:
+            if task.state == "interrupted" or (
+                task.state == "blocked"
+                and (not task.results or any(result.halt for result in task.results))
+            ):
                 self._halted = "监听任务成果需要核实或知识库需要修复；检查任务后可重新启用监听。"
             del self._active[path]
 
@@ -231,7 +234,8 @@ class NativeWatch:
             return True
         with kb_read_lock(self.root / ".openkb", cancelled=self._stop.is_set, on_wait=_busy):
             registry = HashRegistry(self.root / ".openkb/hashes.json")
-            if registry.is_known(digest):
+            entry = registry.get(digest)
+            if entry and path.suffix.lower() != ".pdf":
                 self._remember(db, path, stamp, digest)
                 return True
         with self._gate:
