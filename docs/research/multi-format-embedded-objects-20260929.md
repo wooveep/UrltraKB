@@ -1,6 +1,6 @@
 # 内嵌 Office 对象与图表工作簿：字节恢复能力调查
 
-调查日期：2026-09-29。对应研究票：[UrltraKB #68](https://github.com/wooveep/UrltraKB/issues/68)。仓库基线：`f4d7d1d34bbaf5330963accecf4f5304a9155aed`。这是规范、锁文件及候选库源码调查，不是已实现能力或样本验收结论。
+调查日期：2026-09-29。对应研究票：[《研究：内嵌 Office 对象与图表工作簿能可靠恢复到哪些标准文件？》](https://github.com/wooveep/UrltraKB/issues/68)。仓库基线：`f4d7d1d34bbaf5330963accecf4f5304a9155aed`。这是规范、锁文件及候选库源码调查，不是已实现能力或样本验收结论。
 
 沿用已定语义：从 DOC/DOCX、PPT/PPTX、XLS/XLSX 原件恢复可识别附件；附件是独立 Source，正文失败不阻断附件；递归受预算约束；内嵌图表 workbook 标记 `chart_data`；删除父 Source 只解除关联、附件全部保留；无法重建的私有对象明确不支持。本文不从派生 PDF 寻找附件，不调整这些政策。
 
@@ -63,7 +63,7 @@ DOCX/PPTX 图表：宿主 drawing/graphicFrame → c:chart/@r:id
 - `rId` 只在所属关系集合中解释。关系键应包含 `owner_part + relationship_id`，目标 URI 按所属 part 解析；`TargetMode=External` 只记录，不访问。不能把所有 `.rels` 合成一个全局 rId 字典。[OPC part relationships](https://learn.microsoft.com/en-us/dotnet/api/system.io.packaging.packagepart.createrelationship?view=windowsdesktop-9.0)、[python-pptx 1.0.2 的包加载及目标解析](https://github.com/scanny/python-pptx/blob/v1.0.2/src/pptx/opc/package.py#L231-L267)
 - 文件字节可以按目标 part/内容摘要去重，**每个引用元素仍保留 occurrence**：宿主 part、元素路径或稳定标识、局部 rId、完整关系链、目标 part、位置种类与可用坐标。两处引用同一 chart、两个 chart 共用 workbook、同一 workbook 同时用于普通附件和 `chart_data`，都不能因文件去重丢失关系用途。OPC 允许同一 target 参与多条关系；这里的 occurrence 结构是本报告建议。[Microsoft 的 OOXML Packages 说明](https://download.microsoft.com/download/E/1/4/E14FB96F-83B8-4A2A-84DB-7FA8ACBE061A/tc45-2006-334.pdf)
 - 预览图按其 image 关系和形状用途识别，不能成为 OLE 文件成功恢复的证据。Word 的官方示例将 `v:imagedata/@r:id` 与 `o:OLEObject/@r:id` 分开；OLE2 的 `\x02OlePres…` 是 presentation data。[Word OLEObject 示例](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.vml.office.oleobject?view=openxml-3.0.1)、[MS-OLEDS §1.3.1](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-oleds/2677fcf2-ad48-4386-ba8f-b1b7baf4c02f)
-- “有 relationship”与“正文元素正在引用”分开记录；没有可追溯 occurrence 的 package part 不能伪造段落或页码。可识别的孤立 payload 可以标记 `orphan/unreferenced` 证据状态，按既定附件政策继续处理；不能只扫描 ZIP 文件名后宣称它出现于正文。存在 XML `AlternateContent` 时还要防止 Choice/Fallback 形成重复 occurrence；具体兼容分支解析尚未验证。
+- “有 relationship”与“正文元素正在引用”分开记录；没有可追溯 occurrence 的 package part 不能伪造段落或页码。可识别的孤立 payload 应保留原件、对象与 `orphan/unreferenced` 未关联状态；自动导入行为由交付契约明确，不能只扫描 ZIP 文件名后宣称它出现于正文或伪造 occurrence。存在 XML `AlternateContent` 时还要防止 Choice/Fallback 形成重复 occurrence；具体兼容分支解析尚未验证。
 - 类型判定同时参考关系、Content Types 和原始字节结构。内嵌 OPC 文档核对 `[Content_Types].xml`、根 officeDocument 关系及 main part；`ProgID`、文件名仅作线索。Strict 与 Transitional 的关系 URI 不同，不能只写一个 URI 字面量后宣称全覆盖。[MS-OI29500 §3.10](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oi29500/32be961f-d71a-4812-913f-b675c79aa88a)
 
 ### 不编造位置
@@ -162,6 +162,6 @@ MS-XLS 要求 `MBD` 加八位十六进制名称对应一个 sheet substream 的 
 
 未验证：真实样本的六格式恢复成功率；原生 DOC/XLS 子树重建后的有效性；PPT 活记录/slide/shape 完整映射；DOC CP 与 XLS sheet/anchor 专门解析；Strict/AlternateContent/ChartEx 全覆盖；加密/损坏 Office 的细节；新依赖的全量锁定、许可证闭包及当前 Python/平台兼容性。本报告没有对用户测试库批量解包，也未执行任何 Office、宏或模型。
 
-**可带入已有《交付实施》契约的精确问题：原生标准 Office 子 storage 的 CFB 重打包是否纳入首版交付，采用什么已验收的 writer/重建路径？** 这与“私有无法重建对象不支持”不同：有些对象的数据格式已知，只是现最小 reader 组合没有导出能力。现证据支持把它单独标为 `requires_container_rebuild` 并建立专门验收项，不能偷偷归为私有格式，亦不能仅凭 stream 枚举标记成功。它不改变六宿主扫描、独立 Source、图表角色、正文隔离和删除保留等已定政策；无需为此扩张本研究票或立即新增决策票。
+**可带入已有[《决策：多格式方案达到什么依赖与验收条件才可交付实施？》](https://github.com/wooveep/UrltraKB/issues/72)契约的精确问题：原生标准 Office 子 storage 的重建路径与能力诊断如何满足已约定提取范围？** 这与“私有无法重建对象不支持”不同：有些对象的数据格式已知，只是现最小 reader 组合没有导出能力。现证据支持把它单独标为 `requires_container_rebuild` 并建立专门验收项，不能偷偷归为私有格式，亦不能仅凭 stream 枚举标记成功。它不改变六宿主扫描、独立 Source、图表角色、正文隔离和删除保留等已定政策；无需为此扩张本研究票或立即新增决策票。
 
 依赖选择及二进制位置映射应由后续交付契约根据上述覆盖表具体化；本调查不替用户新增决定、不关闭或编辑 issue/map。研究过程使用 CodeGraph 定位仓库转换路径、agent-reach 的 gh CLI/Jina Reader 读取上游，并以微软规范与固定 tag 源码交叉核验；Exa 未配置时使用内置网页检索。Agent Reach 版本检查结果为 v1.5.0，已是最新。
