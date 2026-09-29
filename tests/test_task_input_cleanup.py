@@ -36,7 +36,7 @@ def _crash_with_fixed_input(*args):
         )
         os._exit(86)
 
-    with patch("openkb.application.documents.add_single_file", side_effect=crash):
+    with patch("openkb.application.documents._add_single_file_locked", side_effect=crash):
         run_unit(*args)
 
 
@@ -173,7 +173,7 @@ def _holding_worker(*args):
         (root / "worker-read.txt").write_text(frozen.read_text("utf-8"), encoding="utf-8")
         return "skipped"
 
-    with patch("openkb.application.documents.add_single_file", side_effect=hold):
+    with patch("openkb.application.documents._add_single_file_locked", side_effect=hold):
         run_unit(*args)
 
 

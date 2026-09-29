@@ -534,23 +534,11 @@ def test_add_endpoint_runs_real_add_helper_outside_event_loop(monkeypatch, kb_di
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.converter import ConvertResult
-
-    def fake_convert(path, target_kb, *, staging_dir=None):
-        assert target_kb == kb_dir
-        return ConvertResult(
-            raw_path=path,
-            source_path=target_kb / "wiki" / "sources" / path.name,
-            is_long_doc=False,
-            file_hash="abc123",
-        )
-
     async def fake_compile_short_doc(doc_name, source_path, target_kb, model, **kwargs):
         assert doc_name == "paper"
         assert target_kb == kb_dir
 
     monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.application.documents.convert_document", fake_convert)
     monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fake_compile_short_doc)
 
     response = client.post(

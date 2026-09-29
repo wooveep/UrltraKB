@@ -16,7 +16,8 @@ from openkb.application.execution import ExecutionContext
 from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
-from openkb.inputs import PreparedInput, prepared_input, validate_source_root
+from openkb.inputs import InputChanged, PreparedInput, prepared_input, validate_source_root
+from openkb.lifecycle import read_lifecycle
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, publish_staged_tree
@@ -103,18 +104,17 @@ def add_single_file(
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
 ) -> Literal["added", "skipped", "failed"]:
-    """Convert, index, and compile a single document under the KB mutation lock."""
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        return _add_single_file_locked(
-            file_path,
-            kb_dir,
-            stage=stage,
-            bundle=bundle,
-            report=report,
-            on_event=on_event,
-            prepared=prepared,
-            origin_url=origin_url,
-        )
+    """Compatibility projection of the shared import use case's status."""
+    return import_document(
+        kb_dir,
+        file_path,
+        stage=stage,
+        bundle=bundle,
+        report=report,
+        on_event=on_event,
+        prepared=prepared,
+        origin_url=origin_url,
+    ).status
 
 
 def _add_single_file_locked(
@@ -328,7 +328,7 @@ def _add_single_file_locked(
 class AddFileResult:
     """Structured add outcome for the REST API.
 
-    Wraps the plain ``Literal`` returned by the locked ``add_single_file`` with
+    Projects the shared ``import_document`` outcome with
     the original filename and a human-readable message, which the API's
     ``/add`` endpoint surfaces per file in its JSON/SSE response.
     """
@@ -344,17 +344,10 @@ def _add_for_api(
 ) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
 
-    Reuses the upstream ``add_single_file`` (which already holds the ingest
-    lock and handles conversion / registry dedup) so the API and CLI share a
-    single ingest code path. Maps the ``Literal`` status to a message-bearing
-    ``AddFileResult``; on ``skipped`` the caller (api._add_saved_file) deletes
-    the freshly uploaded raw copy to avoid orphaning it.
+    Import preparation, locking and business work belong to ``import_document``.
+    On ``skipped`` the upload owner checks whether its raw copy can be discarded.
     """
-    status_str = (
-        import_document(kb_dir, file_path, bundle=bundle, source_root=source_root).status
-        if source_root is not None
-        else add_single_file(file_path, kb_dir, bundle=bundle)
-    )
+    status_str = import_document(kb_dir, file_path, bundle=bundle, source_root=source_root).status
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
     elif status_str == "failed":
@@ -372,7 +365,7 @@ def _add_for_api(
 @dataclass(frozen=True)
 class DocumentResult:
     source: str
-    status: str
+    status: Literal["added", "skipped", "failed"]
     resources: tuple[str, ...]
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
@@ -388,6 +381,8 @@ def import_document(
     context: ExecutionContext | None = None,
     origin_url: str | None = None,
     source_root: Path | None = None,
+    stage: bool = True,
+    prepared: PreparedInput | None = None,
     report=logger.info,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
@@ -399,30 +394,59 @@ def import_document(
     source = requested_source.resolve()
     if not (root / ".openkb/config.yaml").is_file():
         raise ValueError(f"Not a knowledge base: {root}")
-    if not source.is_file():
-        raise FileNotFoundError(source)
-    from contextlib import nullcontext
+    from contextlib import ExitStack, nullcontext
 
     if context:
         context.on_event({"stage": "preparing", "source": str(source)})
         context.check_stop()
-    with prepared_input(source) as ready:
+    with (
+        read_lifecycle(
+            root,
+            cancelled=context.cancelled if context else None,
+            on_wait=context.waiting if context else None,
+        ),
+        ExitStack() as inputs,
+    ):
+        try:
+            ready = (
+                prepared if prepared is not None else inputs.enter_context(prepared_input(source))
+            )
+        except (OSError, UnicodeError, InputChanged) as exc:
+            if isinstance(exc, InputChanged) and context is not None:
+                raise
+            report(f"  [ERROR] Input preparation failed: {exc}")
+            retained = (
+                (str(source),) if source.is_file() and source.is_relative_to(root / "raw") else ()
+            )
+            return DocumentResult(str(source), "failed", retained)
         with kb_ingest_lock(
             root / ".openkb",
             cancelled=context.cancelled if context else None,
             on_wait=context.waiting if context else None,
         ):
             validate_source_root(requested_source, source_root)
-            if not ready.is_current():
-                ready = ready.refresh()
+            try:
+                if not ready.is_current():
+                    ready = ready.refresh()
+            except (OSError, UnicodeError, InputChanged) as exc:
+                if isinstance(exc, InputChanged) and context is not None:
+                    raise
+                report(f"  [ERROR] Input preparation failed: {exc}")
+                retained = (
+                    (str(source),)
+                    if source.is_file() and source.is_relative_to(root / "raw")
+                    else ()
+                )
+                return DocumentResult(str(source), "failed", retained)
             validate_source_root(requested_source, source_root)
             with (
                 context.begin(root) if context else nullcontext(bundle) as credentials,
                 collect_compile_report() as compilation,
             ):
-                outcome = add_single_file(
+                outcome = _add_single_file_locked(
                     source,
                     root,
+                    stage=stage,
                     bundle=credentials,
                     prepared=ready,
                     on_event=on_event or (context.on_event if context else None),
