@@ -12,6 +12,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "knowledge-views-v1",
         "version-review-v1",
         "query-views-v1",
+        "knowledge-refresh-v1",
     }
 )
 

@@ -232,6 +232,9 @@ def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[Comp
     try:
         with mutation_scope(kb_dir, [stage], operation="prepare-compile-view"):
             copy_tree(live.wiki_dir, view.scope.wiki_dir)
+            from openkb.source_changes import filter_compile_context
+
+            filter_compile_context(kb_dir, view.scope.wiki_dir, view.head)
         yield view
     except RecoveryRequired:
         preserve_evidence = True
@@ -320,6 +323,10 @@ def publish_unit_revision(
     live = live_scope(kb_dir, state.view_id).wiki_dir
     current_head = read_head(kb_dir, state.view_id)
     current_pages = wiki_versions(kb_dir, live)
+    from openkb.source_changes import retain_pending_pages
+
+    with mutation_scope(kb_dir, [view.scope.wiki_dir], operation="retain-pending-knowledge"):
+        retain_pending_pages(kb_dir, view.scope.wiki_dir, view.head)
     generated = wiki_versions(kb_dir, view.scope.wiki_dir)
     changed = {
         name
@@ -336,6 +343,11 @@ def publish_unit_revision(
     if current_head != view.head or current_pages != view.base_pages:
         protected.add("knowledge_baseline_changed")
     inputs = {**view.head.inputs, unit.unit_id: revision.unit_revision_id}
+    from openkb.knowledge_evidence import publication_dependencies
+
+    dependencies = publication_dependencies(
+        kb_dir, view.head, generated, view.base_pages, inputs.values()
+    )
     baselines = dict(view.head.generated_baselines)
     for name in changed:
         if name in generated:
@@ -343,7 +355,10 @@ def publish_unit_revision(
         else:
             baselines.pop(name, None)
     originals = set()
-    for input_id in inputs.values():
+    referenced_inputs = set(inputs.values()) | {
+        identity for values in dependencies.values() for identity in values
+    }
+    for input_id in referenced_inputs:
         input_revision = read_record(kb_dir, "unit-revisions", input_id, UnitRevision)
         source_revision = read_source_revision(kb_dir, input_revision.source_revision_id)
         originals.add(source_revision.original)
@@ -355,9 +370,7 @@ def publish_unit_revision(
         base_revision_id=view.head.knowledge_revision_id,
         unit_revision_id=revision.unit_revision_id,
         input_revisions=tuple(sorted(inputs.values())),
-        page_dependencies={
-            name: tuple(sorted(inputs.values())) for name in generated if name.endswith(".md")
-        },
+        page_dependencies=dependencies,
         generated_baselines=baselines,
         original_references=tuple(sorted(originals)),
         normalized_source=normalized_source,
@@ -444,6 +457,7 @@ def commit_unit_revision(
         knowledge_revision_id=knowledge_id,
         inputs={**view.head.inputs, unit.unit_id: revision.unit_revision_id},
         generated_baselines=manifest.generated_baselines,
+        needs_refresh=view.head.needs_refresh,
     )
     completed = state.model_copy(
         update={

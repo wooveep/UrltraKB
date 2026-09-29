@@ -711,9 +711,9 @@ def query(ctx, question, save, raw):
 
 # Transitional private exports for existing CLI integrations. Business lives in application.
 from openkb.application.removal import (  # noqa: E402
-    _build_remove_plan,
-    _execute_remove_plan,
-    _resolve_doc_identifier,
+    _build_remove_plan as _build_remove_plan,
+    _execute_remove_plan as _execute_remove_plan,
+    _resolve_doc_identifier as _resolve_doc_identifier,
     run_remove_for_api as run_remove_for_api,
 )
 
@@ -757,7 +757,7 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
     Concept and entity pages whose only source was this doc are deleted by
     default; use --keep-empty to retain them.
     """
-    from openkb.state import HashRegistry
+    from openkb.application.removal import preview_removal, remove_document
 
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
@@ -765,34 +765,20 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
         return
 
     scope = _selected_scope(ctx, kb_dir)
-    if scope is not None and scope.view_id != "legacy":
-        click.echo(f"No legacy document matching '{identifier}' in the selected view.")
-        return
-
-    openkb_dir = kb_dir / ".openkb"
-    registry = HashRegistry(openkb_dir / "hashes.json")
-
-    matches = _resolve_doc_identifier(registry, identifier)
-    if not matches:
+    preview = preview_removal(kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope)
+    if preview.status == "not_found":
         click.echo(f"No document matching '{identifier}' found in the KB.")
         click.echo("Try `openkb list` to see indexed documents.")
         return
-    if len(matches) > 1:
+    if preview.status == "multiple":
         click.echo(f"'{identifier}' matches multiple documents:")
-        for _, m in matches:
-            click.echo(f"  - {m.get('name', '?')}  (doc_name: {m.get('doc_name', '?')})")
+        for name in preview.candidates:
+            click.echo(f"  - {name}")
         click.echo("Use a more specific name or the exact doc_name slug.")
         return
 
-    file_hash, meta = matches[0]
-    plan = _build_remove_plan(
-        kb_dir,
-        file_hash,
-        meta,
-        keep_raw=keep_raw,
-        keep_empty=keep_empty,
-        scope=scope,
-    )
+    plan = preview.plan
+    assert plan is not None
 
     # ----- Print the plan -----
     click.echo(f"Removing '{plan.name}' (doc_name: {plan.doc_name}, type: {plan.doc_type or '?'}).")
@@ -822,7 +808,15 @@ def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
             click.echo("Aborted.")
             return
 
-    result = _execute_remove_plan(kb_dir, plan, registry, keep_empty=keep_empty, scope=scope)
+    outcome = remove_document(kb_dir, identifier, version=preview.version,
+                              keep_raw=keep_raw, keep_empty=keep_empty, scope=scope)
+    result = outcome.result
+    if result is None:
+        raise click.ClickException(f"Removal {outcome.status}; review the latest preview")
+    if outcome.retained and plan.doc_type == "admitted":
+        click.echo(result.message)
+    for item in outcome.unfinished:
+        click.echo(f"Deferred: {item}")
 
     if result.lint_files_changed:
         click.echo(
@@ -1334,6 +1328,7 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
             click.echo(f"    View: {meta.get('view_id', 'legacy')}")
             click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
             click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
+            click.echo(f"    Validity: {meta.get('validity', 'current')}; generation: {meta.get('source_generation', '?')}")
 
     # Display summaries
     summaries_dir = resolve_scope(kb_dir, scope).wiki_dir / "summaries"
@@ -1392,6 +1387,10 @@ def print_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
     # Print the active KB path as the first line. Agents and scripts
     # parse this to locate the wiki without assuming cwd == KB root.
     click.echo(f"Knowledge base: {kb_dir}")
+    from openkb.application.knowledge_bases import get_kb_status
+
+    for view_id, reasons in get_kb_status(kb_dir, scope=scope)["needs_refresh"].items():
+        click.echo(f"  Needs refresh: {view_id} ({len(reasons)} pages)")
     click.echo("")
     click.echo("Knowledge Base Status:")
     click.echo(f"  {'Directory':<20} {'Files':<10}")
@@ -2243,10 +2242,12 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
+from openkb.cli_refresh import refresh
 from openkb.cli_versions import versions
 from openkb.cli_views import views
 
 cli.add_command(proposals)
+cli.add_command(refresh)
 cli.add_command(views)
 cli.add_command(versions)
 

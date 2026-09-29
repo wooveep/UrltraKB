@@ -31,8 +31,14 @@ def manual_knowledge_change(scope: KnowledgeScope) -> Iterator[None]:
         pages = wiki_versions(kb, scope.wiki_dir)
         if pages == before:
             return
+        from openkb.knowledge_evidence import publication_dependencies
+
+        # A manual edit does not verify a new source; preserve existing page provenance.
+        dependencies = publication_dependencies(kb, head, pages, pages, head.inputs.values())
         originals = set()
-        for revision_id in head.inputs.values():
+        for revision_id in set(head.inputs.values()) | {
+            identity for values in dependencies.values() for identity in values
+        }:
             unit = read_record(kb, "unit-revisions", revision_id, UnitRevision)
             source = read_source_revision(kb, unit.source_revision_id)
             originals.add(source.original)
@@ -43,9 +49,7 @@ def manual_knowledge_change(scope: KnowledgeScope) -> Iterator[None]:
             base_revision_id=head.knowledge_revision_id,
             change_kind="manual",
             input_revisions=tuple(sorted(head.inputs.values())),
-            page_dependencies={
-                name: tuple(sorted(head.inputs.values())) for name in pages if name.endswith(".md")
-            },
+            page_dependencies=dependencies,
             generated_baselines=head.generated_baselines,
             original_references=tuple(sorted(originals)),
         )
@@ -59,6 +63,7 @@ def manual_knowledge_change(scope: KnowledgeScope) -> Iterator[None]:
                 knowledge_revision_id=identity,
                 inputs=head.inputs,
                 generated_baselines=head.generated_baselines,
+                needs_refresh=head.needs_refresh,
             ),
         )
         write_record(schema, CatalogSchema())

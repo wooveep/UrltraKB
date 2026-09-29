@@ -179,9 +179,10 @@ def admit_source_revision(
             doc_name=doc_name,
             target_revision_id=revision_id,
             target_generation=(known.target_generation + 1 if known else 1),
-            legacy_hash=legacy_hash,
+            legacy_hash=legacy_hash or (known.legacy_hash if known else None),
             annotation_id=known.annotation_id if known else None,
             family_id=known.family_id if known else None,
+            excluded_inputs=known.excluded_inputs if known else {},
         )
         revision = SourceRevision(
             source_revision_id=revision_id,
@@ -208,6 +209,9 @@ def admit_source_revision(
             record_path(root, "source-revisions", revision_id): revision,
             record_path(root, "discovery-intents", intent_id): intent,
         }
+        from openkb.source_changes import source_change_heads
+
+        records.update(source_change_heads(root, source, "updated"))
         contained_paths(root, list(copies))
         new_artifacts = [path for path in copies if not path.exists()]
         with mutation_scope(root, [*new_artifacts, *records], operation="admit-source-revision"):

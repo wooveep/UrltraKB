@@ -107,6 +107,7 @@ class RemovePlan:
     source_json: Path
     images_dir: Path
     kept_raw: Path | None = None
+    cleanup_deferred: bool = False
 
 
 @dataclass
@@ -235,6 +236,10 @@ def _build_remove_plan(
     # path that no longer exists must NOT fall through, or it could
     # delete a same-named raw file belonging to another document.
     raw_path = kept_raw = None
+    from openkb.artifact_references import list_artifact_references
+
+    references = list_artifact_references(kb_dir, excluding_registry_entry=file_hash)
+    deferred = not references.complete
     if meta.get("origin") != "cloud" and doc_type != "pageindex_cloud":
         raw_dir = kb_dir / "raw"
         if meta.get("raw_path"):
@@ -252,7 +257,7 @@ def _build_remove_plan(
                 and (kb_dir / other["raw_path"]).resolve() == candidate
                 for other_hash, other in entries.items()
             )
-            if keep_raw or shared:
+            if keep_raw or shared or not references.complete or candidate in references.paths:
                 kept_raw = candidate
                 actions.append(RemoveAction("KEEP", str(candidate.relative_to(kb_dir))))
             else:
@@ -275,6 +280,7 @@ def _build_remove_plan(
         source_json=source_json,
         images_dir=images_dir,
         kept_raw=kept_raw,
+        cleanup_deferred=deferred,
     )
 
 
@@ -354,11 +360,11 @@ def _execute_remove_plan(
         with mutation_scope(
             kb_dir, _commit_paths(kb_dir, plan, scope=scope), operation="remove-index-and-registry"
         ):
+            registry.remove_by_hash(plan.file_hash)
             if plan.cleanup_pageindex:
                 _, pageindex_message = _cleanup_pageindex(
                     openkb_dir, kb_dir, doc_name, plan.pageindex_doc_id
                 )
-            registry.remove_by_hash(plan.file_hash)
             if plan.raw_path is not None:
                 plan.raw_path.unlink(missing_ok=True)
             append_log(wiki_dir, "remove", name)
@@ -419,6 +425,40 @@ def run_remove_for_api(
     Returns a dict whose ``status`` is one of ``not_found``, ``multiple``,
     ``dry_run``, ``removed``, ``partial``.
     """
+    from dataclasses import asdict
+
+    from openkb.application.source_removal import preview_source_removal, unmapped_removal_matches
+
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        admitted = preview_source_removal(kb_dir.resolve(), identifier, scope)
+        if admitted is not None:
+            if admitted.status != "ready":
+                return {
+                    "status": admitted.status,
+                    "candidates": [{"name": name} for name in admitted.candidates],
+                }
+            assert admitted.plan is not None
+            if dry_run:
+                return {
+                    "status": "dry_run",
+                    "name": admitted.plan.name,
+                    "doc_name": admitted.plan.doc_name,
+                    "actions": [asdict(a) for a in admitted.plan.actions],
+                }
+            outcome = remove_document(
+                kb_dir,
+                identifier,
+                keep_raw=keep_raw,
+                keep_empty=keep_empty,
+                version=admitted.version,
+                scope=scope,
+            )
+            return {
+                **(asdict(outcome.result) if outcome.result else {}),
+                "status": outcome.status,
+                "retained": outcome.retained,
+                "unfinished": outcome.unfinished,
+            }
     scope = resolve_scope(kb_dir, scope)
     from openkb.state import HashRegistry
 
@@ -429,7 +469,7 @@ def run_remove_for_api(
     openkb_dir = kb_dir / ".openkb"
     with kb_ingest_lock(openkb_dir):
         registry = HashRegistry(openkb_dir / "hashes.json")
-        matches = _resolve_doc_identifier(registry, identifier)
+        matches = unmapped_removal_matches(kb_dir, registry, identifier)
         if not matches:
             return {"status": "not_found", "identifier": identifier}
         if len(matches) > 1:
@@ -559,6 +599,14 @@ def preview_removal(
     keep_empty: bool = False,
     scope: KnowledgeScope | None = None,
 ) -> RemovalPreview:
+    from openkb.application.source_removal import preview_source_removal, unmapped_removal_matches
+
+    if scope is not None:
+        scope = resolve_scope(kb_dir, scope)
+    with kb_read_lock(kb_dir / ".openkb"):
+        admitted = preview_source_removal(kb_dir.resolve(), identifier, scope)
+    if admitted is not None:
+        return admitted
     scope = resolve_scope(kb_dir, scope)
     if scope.view_id != "legacy":
         return RemovalPreview("not_found")
@@ -569,7 +617,7 @@ def preview_removal(
         raise FileNotFoundError("Knowledge base not found")
     with kb_read_lock(kb_dir / ".openkb"):
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
-        matches = _resolve_doc_identifier(registry, identifier)
+        matches = unmapped_removal_matches(kb_dir, registry, identifier)
         if not matches:
             return RemovalPreview("not_found")
         if len(matches) > 1:
@@ -599,10 +647,22 @@ def remove_document(
     one lease or submit an immediate request. Native confirmation supplies the
     preview version; any changed input requires another explicit confirmation.
     """
-    scope = resolve_scope(kb_dir, scope, writable=True)
+    from openkb.application.source_removal import preview_source_removal, withdraw_source
+
+    if scope is not None:
+        scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
+        admitted = preview_source_removal(kb_dir, identifier, scope)
+        if admitted is not None:
+            if admitted.status != "ready":
+                return RemovalOutcome(admitted.status, admitted)
+            if version is not None and version != admitted.version:
+                return RemovalOutcome("conflict", admitted)
+            with context.begin(kb_dir):
+                return withdraw_source(kb_dir, admitted)
+        scope = resolve_scope(kb_dir, scope, writable=True)
         preview = preview_removal(
             kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
         )
@@ -634,6 +694,8 @@ def remove_document(
         )
         if result.needs_repair:
             unfinished += ("knowledge_base_repair",)
+        if preview.plan.cleanup_deferred:
+            unfinished += ("physical_cleanup_deferred",)
         return RemovalOutcome(
             "blocked" if result.needs_repair else result.status,
             preview,

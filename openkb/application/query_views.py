@@ -12,7 +12,7 @@ from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_record, read_source_revision, record_path, write_record
 from openkb.state import HashRegistry
 from openkb.unit_publication import read_head, wiki_versions
-from openkb.view_records import DocumentFamily, FamilyDefault, KnowledgeView, VersionAnnotation
+from openkb.view_records import DocumentFamily, FamilyDefault, KnowledgeView
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class QueryView:
     files: dict[str, str]
     head_generation: int
     reference_only: bool = False
+    validity: str = "current"
 
     @property
     def view_id(self) -> str:
@@ -40,7 +41,8 @@ class QueryView:
         ) + (
             f"Evidence: {self.product or 'unspecified product'} / {version}; "
             f"view={self.view_id}; knowledge={self.knowledge_revision_id or 'legacy snapshot'}; "
-            f"source revisions={', '.join(self.source_revision_ids) or 'legacy, unrecorded'}"
+            f"source revisions={', '.join(self.source_revision_ids) or 'legacy, unrecorded'}; "
+            f"status={self.validity}"
         )
 
 
@@ -52,23 +54,20 @@ class QuerySelection:
 
 
 def _input_family(kb_dir: Path, identity: str, view_id: str) -> str | None:
-    unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
-    named = read_record(kb_dir, "units", unit.unit_id, ImportUnit)
-    source = read_source_revision(kb_dir, unit.source_revision_id)
-    if named.source_id != source.source_id:
-        raise ValueError("Query input belongs to another source")
-    if unit.annotation_id is None:
-        if view_id != "legacy":
-            raise ValueError("Versioned query input is missing its annotation")
-        return None
-    annotation = read_record(kb_dir, "annotations", unit.annotation_id, VersionAnnotation)
-    if (
-        annotation.source_revision_id != source.source_revision_id
-        or annotation.source_id != source.source_id
-        or annotation.view_id != view_id
-    ):
-        raise ValueError("Query annotation belongs to another input")
-    return annotation.family_id
+    from openkb.knowledge_evidence import validated_input
+
+    annotation = validated_input(kb_dir, identity, view_id)[2]
+    return annotation.family_id if annotation else None
+
+
+def _published_inputs(kb_dir: Path, view_id: str) -> set[str]:
+    inputs = set(read_head(kb_dir, view_id).inputs.values())
+    for path in (kb_dir / ".openkb/knowledge" / view_id / "revisions").glob("*/manifest.json"):
+        manifest = KnowledgeRevision.model_validate_json(path.read_text())
+        if manifest.view_id != view_id or manifest.knowledge_revision_id != path.parent.name:
+            raise ValueError("Knowledge snapshot belongs to another view")
+        inputs.update(manifest.input_revisions)
+    return inputs
 
 
 def list_family_defaults(kb_dir: Path) -> tuple[dict, ...]:
@@ -94,7 +93,7 @@ def list_family_defaults(kb_dir: Path) -> tuple[dict, ...]:
                 and view.view_id != "legacy"
                 and any(
                     _input_family(kb_dir, identity, view.view_id) == family.family_id
-                    for identity in read_head(kb_dir, view.view_id).inputs.values()
+                    for identity in _published_inputs(kb_dir, view.view_id)
                 )
             )
             if (
@@ -162,11 +161,17 @@ def _pin_view(
     if manifest and manifest.view_id != selected.view_id:
         raise ValueError("Knowledge snapshot belongs to another view")
     inputs = manifest.input_revisions if manifest else tuple(head.inputs.values())
+    if view.view_id != "legacy" and not inputs:
+        return None
+    from openkb.source_changes import effective_input
+
+    historical = bool(scope and scope.read_only)
     families = {identity: _input_family(kb_dir, identity, view.view_id) for identity in inputs}
     allowed = tuple(
         identity
         for identity in inputs
-        if not defaults or defaults.get(families[identity] or "", view.view_id) == view.view_id
+        if (not defaults or defaults.get(families[identity] or "", view.view_id) == view.view_id)
+        and (historical or effective_input(kb_dir, view.view_id, identity))
     )
     if inputs and not allowed:
         return None
@@ -180,6 +185,8 @@ def _pin_view(
         source_paths.update((f"sources/{named.doc_name}.md", f"sources/{named.doc_name}.json"))
         image_roots.append(f"sources/images/{named.doc_name}/")
     files = wiki_versions(kb_dir, selected.wiki_dir)
+    if not historical:
+        files = {name: digest for name, digest in files.items() if name not in head.needs_refresh}
     if manifest and set(inputs) != set(allowed):
         files = {
             name: digest
@@ -200,6 +207,7 @@ def _pin_view(
         tuple(sorted(set(sources))),
         files,
         head.generation,
+        validity="historical" if historical else "current",
     )
 
 
@@ -322,6 +330,12 @@ def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> st
         return "No permitted evidence for this page."
     if not target.is_file() or HashRegistry.hash_file(target) != view.files[path]:
         return "Evidence changed after selection; start a new question."
+    if path.endswith(".md"):
+        from openkb.knowledge_evidence import page_evidence
+
+        evidence = page_evidence(view.scope, path)
+        if evidence["source_revision_ids"]:
+            view = replace(view, source_revision_ids=evidence["source_revision_ids"])
     return f"{view.provenance}\n\n{target.read_text('utf-8')}"
 
 

@@ -212,9 +212,41 @@ class ResumeVersionReview(ViewSelection):
         TypeAdapter(RecordId).validate_python(self.review_id)
 
 
+@dataclass(frozen=True)
+class RefreshKnowledge(ViewSelection):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.view_id is None:
+            raise ValueError("Select a view to refresh")
+
+
+@dataclass(frozen=True)
+class ConfirmEmptySource(ViewSelection):
+    source_id: str
+    generation: int
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import RecordId
+
+        TypeAdapter(RecordId).validate_python(self.source_id)
+        if type(self.generation) is not int or self.generation < 1:
+            raise ValueError("Empty confirmation requires the reviewed source generation")
+
+
+@dataclass(frozen=True)
+class AcceptRefreshProposal(AcceptProposal):
+    pass
+
+
 UnitRequest = (
     AcceptProposal
     | ResumeVersionReview
+    | RefreshKnowledge
+    | ConfirmEmptySource
+    | AcceptRefreshProposal
     | SavePage
     | AskQuestion
     | ContinueConversation
@@ -231,6 +263,9 @@ UnitRequest = (
 REQUEST_TYPES = (
     AcceptProposal,
     ResumeVersionReview,
+    RefreshKnowledge,
+    ConfirmEmptySource,
+    AcceptRefreshProposal,
     SavePage,
     AskQuestion,
     ContinueConversation,

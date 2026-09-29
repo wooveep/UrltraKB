@@ -223,6 +223,9 @@ def bind_source_view(
                 "annotation_id": annotation.annotation_id,
                 "family_id": annotation.family_id,
                 "target_generation": admission.source.target_generation + 1,
+                "contribution_empty": admission.source.contribution_empty
+                if previous and previous.view_id == scope.view_id
+                else False,
             }
         )
         records.update(
@@ -232,6 +235,9 @@ def bind_source_view(
                 catalog_schema_path(root): CatalogSchema(),
             }
         )
+        from openkb.source_changes import rebind_source_heads
+
+        records.update(rebind_source_heads(root, admission.source, scope.view_id))
         with mutation_scope(root, [*records, scope.wiki_dir], operation="bind-source-view"):
             for path, record in records.items():
                 write_record(path, record)

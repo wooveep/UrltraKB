@@ -117,7 +117,7 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
     with kb_read_lock(root / ".openkb"):
         documents = []
         for source in list_sources(root):
-            if source.removed:
+            if source.removed and not (scope and scope.read_only):
                 continue
             revision = read_source_revision(root, source.target_revision_id)
             units = list_source_units(root, source.source_id)
@@ -153,9 +153,20 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                             (actual[0] / "publication.json").read_text()
                         )
                     ]
+            from openkb.source_changes import source_validity
+
             documents.append(
                 {
                     "hash": source.source_id,
+                    "source_generation": source.target_generation,
+                    "validity": source_validity(
+                        root,
+                        source,
+                        view_id,
+                        revision.source_revision_id,
+                        historical=bool(scope and scope.read_only),
+                        unit_revision_id=actual[1].unit_revision_id if actual else None,
+                    ),
                     "source_id": source.source_id,
                     "legacy_hash": source.legacy_hash,
                     "source_revision_id": revision.source_revision_id,
@@ -205,6 +216,8 @@ def read_admitted_source(
             if state
             else source.target_revision_id
         )
+        if source_view_id(root, source) == view_id and not (scope and scope.read_only):
+            target_id = source.target_revision_id
         target = read_source_revision(root, source_revision_id or target_id)
         if target.source_id != source.source_id:
             raise ValueError("Source revision belongs to another document")
@@ -289,8 +302,18 @@ def read_admitted_source(
             if annotation and annotation.source_revision_id == target.source_revision_id
             else {}
         )
+        from openkb.source_changes import source_validity
+
         return {
             "hash": source.source_id,
+            "validity": source_validity(
+                root,
+                source,
+                view_id,
+                target.source_revision_id,
+                historical=bool(source_revision_id or (scope and scope.read_only)),
+                unit_revision_id=actual[1].unit_revision_id if actual else None,
+            ),
             "source_id": source.source_id,
             "view_id": view_id,
             "version_metadata": metadata,

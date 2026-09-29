@@ -39,6 +39,11 @@ def remove_index_document(kb_dir: Path, doc_name: str, doc_id: str | None) -> tu
                 "skipping (re-add to refresh)",
             )
         identity, file_path = rows[0]
+        from openkb.artifact_references import list_artifact_references
+
+        references = list_artifact_references(kb_dir)
+        if not references.complete or identity in references.index_documents:
+            return False, "retained PageIndex evidence; referenced or ownership incomplete"
         if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", identity):
             raise ValueError("Invalid local index document identity")
         owned = (root / "files/default").resolve()

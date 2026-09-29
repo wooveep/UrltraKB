@@ -15,6 +15,23 @@ class PageContextView(QTreeWidget):
     def show_context(self, root, context):
         self.clear()
         self.root = root
+        page = context.page
+        if page.validity != "current":
+            status = (
+                "待刷新：当前问答将排除这些旧依据"
+                if page.validity == "needs_refresh"
+                else "历史知识"
+            )
+            group = QTreeWidgetItem(self, [status])
+            if page.knowledge_revision_id:
+                QTreeWidgetItem(group, [f"知识修订：{page.knowledge_revision_id}"])
+            for identity in page.source_revision_ids:
+                QTreeWidgetItem(group, [f"实际来源修订：{identity}"])
+            for reason in page.refresh_reasons:
+                label = {"updated": "来源更新", "withdrawn": "来源撤回", "empty": "确认清空"}[
+                    reason["kind"]
+                ]
+                QTreeWidgetItem(group, [label])
         for title, references in (
             ("来源", context.sources),
             ("出链", context.outlinks),

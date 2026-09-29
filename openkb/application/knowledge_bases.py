@@ -298,7 +298,9 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
         from openkb.application.sources import source_inventory
 
         admitted = source_inventory(kb_dir, scope=scope)
-        mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
+        from openkb.source_catalog import list_sources
+
+        mapped = {source.legacy_hash for source in list_sources(kb_dir) if source.legacy_hash}
         documents = [item for item in documents if item["hash"] not in mapped]
         documents.extend(admitted)
 
@@ -328,6 +330,17 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
 def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
     with kb_read_lock(kb_dir / ".openkb"):
+        from openkb.application.refresh import refresh_status
+        from openkb.application.views import list_views
+        from openkb.knowledge_scope import live_scope
+
+        pending = {
+            view.view_id: refresh_status(kb_dir, scope=live_scope(kb_dir, view.view_id))[
+                "needs_refresh"
+            ]
+            for view in list_views(kb_dir)
+            if scope is None or scope.view_id == view.view_id
+        }
         wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
         subdirs = ["sources", "summaries", "concepts", "reports"]
         directories = {}
@@ -346,6 +359,7 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
         )
         return {
             "directories": directories,
+            "needs_refresh": {view: reasons for view, reasons in pending.items() if reasons},
             "raw_count": raw_count,
             "total_indexed": get_kb_list(kb_dir, scope=scope)["document_count"],
             "last_compile": _newest_mtime_iso(summaries),

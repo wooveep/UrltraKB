@@ -37,6 +37,8 @@ class Source(Record):
     target_revision_id: RecordId
     target_generation: int = Field(ge=1)
     removed: bool = False
+    contribution_empty: bool = False
+    excluded_inputs: dict[RecordId, Literal["empty", "withdrawn"]] = Field(default_factory=dict)
     legacy_hash: str | None = None
     annotation_id: RecordId | None = None
     family_id: RecordId | None = None

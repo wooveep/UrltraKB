@@ -30,6 +30,7 @@ class SourceReader(QDialog):
                 f"正文依据：{source['source_revision_id']}\n"
                 f"知识修订：{source.get('knowledge_revision_id') or '尚未发布'}\n"
                 f"目标修订：{target_revision}\n"
+                f"依据有效性：{source.get('validity', 'current')}\n"
                 f"处理状态：{source.get('status', '')}\n{source.get('message') or ''}"
             )
             revision.setWordWrap(True)

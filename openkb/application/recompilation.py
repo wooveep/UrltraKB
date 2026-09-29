@@ -63,7 +63,9 @@ def select_recompilation(
         from openkb.application.sources import source_inventory
 
         admitted = source_inventory(kb_dir, scope=selected_scope)
-        mapped = {item["legacy_hash"] for item in admitted if item["legacy_hash"]}
+        from openkb.source_catalog import list_sources
+
+        mapped = {source.legacy_hash for source in list_sources(kb_dir) if source.legacy_hash}
         registry = HashRegistry(kb_dir / ".openkb/hashes.json")
         for meta in registry.all_entries().values():
             _validate_metadata(meta)

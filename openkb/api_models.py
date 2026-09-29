@@ -165,6 +165,8 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    validity: str = "current"
+    source_generation: int | None = None
     view_id: str = "legacy"
     family_id: str | None = None
     annotation_id: str | None = None
@@ -191,6 +193,7 @@ class ListResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
+    needs_refresh: dict = Field(default_factory=dict)
     directories: dict[str, int]
     raw_count: int
     total_indexed: int
@@ -224,6 +227,8 @@ class RemoveActionItem(BaseModel):
 
 
 class RemoveResponse(BaseModel):
+    retained: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
     status: str
     name: str | None = None
     doc_name: str | None = None
@@ -319,6 +324,7 @@ class GraphResponse(BaseModel):
 
 
 class PageRequest(ViewRequest):
+    knowledge_revision_id: str | None = None
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
 
@@ -326,6 +332,10 @@ class PageRequest(ViewRequest):
 class PageResponse(BaseModel):
     path: str
     content: str
+    validity: str = "current"
+    knowledge_revision_id: str | None = None
+    source_revision_ids: tuple[str, ...] = ()
+    refresh_reasons: tuple[dict, ...] = ()
 
 
 class DocumentSourceRequest(ViewRequest):
@@ -337,6 +347,7 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    validity: str = "current"
     view_id: str = "legacy"
     version_metadata: dict = Field(default_factory=dict)
     hash: str

@@ -99,7 +99,44 @@ def _execute(
         if isinstance(request, ViewSelection) and request.view_id is not None
         else None
     )
-    from openkb.runtime.requests import AcceptProposal, ResumeVersionReview
+    from openkb.runtime.requests import (
+        AcceptProposal,
+        AcceptRefreshProposal,
+        ConfirmEmptySource,
+        RefreshKnowledge,
+        ResumeVersionReview,
+    )
+
+    if isinstance(request, (AcceptRefreshProposal, ConfirmEmptySource, RefreshKnowledge)):
+        import asyncio
+
+        from openkb.application.refresh import (
+            accept_refresh_proposal,
+            confirm_empty_source,
+            refresh_knowledge_view,
+        )
+
+        context.install_process_settings = True
+        if isinstance(request, AcceptRefreshProposal):
+            refreshed = accept_refresh_proposal(
+                root, request.proposal_id, version=request.version, scope=scope, context=context
+            )
+        elif isinstance(request, ConfirmEmptySource):
+            refreshed = confirm_empty_source(
+                root, request.source_id, generation=request.generation, scope=scope, context=context
+            )
+        else:
+            assert scope is not None
+            refreshed = asyncio.run(refresh_knowledge_view(root, scope=scope, context=context))
+        return UnitResult(
+            refreshed.status
+            if refreshed.status in {"completed", "failed", "stopped"}
+            else "blocked",
+            resources=refreshed.resources,
+            error=refreshed.message or None,
+            unfinished=refreshed.unfinished,
+            changes=(refreshed.message,) if refreshed.message else (),
+        )
 
     if isinstance(request, ResumeVersionReview):
         from openkb.application.version_review import resume_version_review

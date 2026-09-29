@@ -94,6 +94,12 @@ class DocumentsDialog(ManagementPanel):
         self.defaults_button = QPushButton("问答默认版本")
         self.defaults_button.clicked.connect(self.select_defaults)
         recompilation.addWidget(self.defaults_button)
+        self.refresh_knowledge_button = QPushButton("待刷新知识")
+        self.refresh_knowledge_button.clicked.connect(self.refresh_knowledge)
+        recompilation.addWidget(self.refresh_knowledge_button)
+        self.empty_source_button = QPushButton("确认所选资料贡献为空")
+        self.empty_source_button.clicked.connect(self.confirm_empty)
+        recompilation.addWidget(self.empty_source_button)
         self.map_legacy = QPushButton("映射旧库来源（无模型）")
         self.map_legacy.clicked.connect(self.map_legacy_sources)
         recompilation.addWidget(self.map_legacy)
@@ -108,6 +114,55 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def refresh_knowledge(self):
+        from openkb.desktop.refresh import RefreshDialog
+
+        RefreshDialog(self.window, self.kb).show()
+
+    def confirm_empty(self):
+        from openkb.runtime.requests import ConfirmEmptySource
+        from openkb.source_catalog import read_source
+
+        selected = self.table.selectionModel().selectedRows()
+        if len(selected) != 1 or self._task:
+            self.status.setText("请选择一份资料确认当前贡献为空。")
+            return
+        identity = self.table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        generation = self._generation
+
+        def loaded(source, error):
+            if error:
+                self.status.setText(str(error))
+                return
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认资料贡献为空",
+                    f"确认 {source.name} 当前修订不再提供知识依据？"
+                    "相关页面将待刷新，历史原文仍保留。",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
+            self._task = self.window.manager.submit(
+                self.kb,
+                [
+                    ConfirmEmptySource(
+                        source.source_id, source.target_generation, view_id=self.view_id
+                    )
+                ],
+            )
+            self.invalidate()
+
+        self.window.io.submit(
+            lambda: read_source(self.kb, identity),
+            loaded,
+            kb=self.kb,
+            obsolete=lambda: self._closed or generation != self._generation,
+        )
 
     def select_defaults(self):
         from openkb.desktop.version_defaults import VersionDefaultsDialog
@@ -226,7 +281,14 @@ class DocumentsDialog(ManagementPanel):
                     2,
                     QTableWidgetItem("PageIndex 长文索引" if is_long else "Markdown 全文编译"),
                 )
-                self.table.setItem(row, 3, QTableWidgetItem(doc.get("status") or "legacy"))
+                validity = {
+                    "needs_refresh": "待刷新",
+                    "empty": "贡献已清空",
+                    "historical": "历史依据",
+                }.get(doc.get("validity"))
+                self.table.setItem(
+                    row, 3, QTableWidgetItem(validity or doc.get("status") or "legacy")
+                )
                 self.table.setItem(
                     row, 4, QTableWidgetItem(doc.get("source_revision_id") or "legacy")
                 )

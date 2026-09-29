@@ -50,19 +50,28 @@ class UnitPublication(Record):
     message: str | None = None
 
 
+class RefreshReason(Record):
+    source_id: RecordId
+    source_revision_id: RecordId
+    target_revision_id: RecordId
+    source_generation: int = Field(ge=1)
+    kind: Literal["updated", "withdrawn", "empty"]
+
+
 class KnowledgeHead(Record):
     view_id: ViewId = "legacy"
     generation: int = Field(default=0, ge=0)
     knowledge_revision_id: RecordId | None = None
     inputs: dict[RecordId, RecordId] = Field(default_factory=dict)
     generated_baselines: dict[RelativePath, Digest] = Field(default_factory=dict)
+    needs_refresh: dict[RelativePath, tuple[RefreshReason, ...]] = Field(default_factory=dict)
 
 
 class KnowledgeRevision(Record):
     knowledge_revision_id: RecordId
     view_id: ViewId
     base_revision_id: RecordId | None
-    change_kind: Literal["compile", "manual"] = "compile"
+    change_kind: Literal["compile", "manual", "refresh"] = "compile"
     unit_revision_id: RecordId | None = None
     input_revisions: tuple[RecordId, ...]
     page_dependencies: dict[RelativePath, tuple[RecordId, ...]]
