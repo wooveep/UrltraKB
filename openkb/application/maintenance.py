@@ -14,6 +14,7 @@ from typing import Callable, Literal
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.config import LlmCredentialBundle, resolve_effective_config
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lint import fix_broken_links, run_structural_lint
 from openkb.locks import LockCancelled, async_kb_lock, atomic_write_text, kb_read_lock
 from openkb.log import append_log
@@ -43,16 +44,17 @@ class LintResult:
     error_type: str | None = None
 
 
-def _wiki_version(kb_dir: Path) -> str:
-    versions = file_versions(kb_dir, [kb_dir / "wiki"])
+def _wiki_version(scope: KnowledgeScope) -> str:
+    versions = file_versions(scope.kb_dir, [scope.wiki_dir])
     return hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()
 
 
-def preview_link_repair(kb_dir: Path) -> tuple[str, str]:
+def preview_link_repair(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> tuple[str, str]:
     """Bind overwrite consent to the existing wiki and show its structural issues."""
     root = kb_dir.resolve()
+    scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
-        return _wiki_version(root), run_structural_lint(root)
+        return _wiki_version(scope), run_structural_lint(root, scope=scope)
 
 
 async def check_knowledge(
@@ -63,16 +65,18 @@ async def check_knowledge(
     bundle: LlmCredentialBundle | None = None,
     on_event: Callable[[dict], None] | None = None,
     prepare_model: Callable[[], None] | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> LintResult:
     root = kb_dir.resolve()
-    wiki = root / "wiki"
+    scope = resolve_scope(root, scope)
+    wiki = scope.wiki_dir
     cancelled = context.cancelled if context else None
     on_wait = context.waiting if context else None
     emit = context.on_event if context else on_event or (lambda event: None)
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=cancelled, on_wait=on_wait
     ):
-        if options.version is not None and _wiki_version(root) != options.version:
+        if options.version is not None and _wiki_version(scope) != options.version:
             return LintResult("conflict")
         registry = root / ".openkb/hashes.json"
         hashes = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else {}
@@ -116,7 +120,7 @@ async def check_knowledge(
                     pending.remove("configuration")
                 stage = "structural_lint"
                 emit({"stage": stage})
-                result = replace(result, structural_report=run_structural_lint(root))
+                result = replace(result, structural_report=run_structural_lint(root, scope=scope))
                 pending.remove("structural_lint")
                 emit({"stage": "structural_report", "report": result.structural_report})
                 if options.semantic:
@@ -135,6 +139,7 @@ async def check_knowledge(
                             bundle=active_bundle,
                             run_config=build_run_config_from_bundle(model, active_bundle),
                             on_issue=issues.append,
+                            scope=scope,
                         )
                     except Exception as exc:
                         knowledge = (
@@ -152,7 +157,7 @@ async def check_knowledge(
                     emit({"stage": "semantic_report", "report": knowledge})
                 stage = "report"
                 emit({"stage": "saving_report"})
-                report_path = _save_report(root, result, unique=options.unique_report)
+                report_path = _save_report(scope, result, unique=options.unique_report)
                 return replace(
                     result,
                     report_path=str(report_path),
@@ -170,9 +175,10 @@ async def check_knowledge(
                 )
 
 
-def _save_report(root: Path, result: LintResult, *, unique: bool) -> Path:
+def _save_report(scope: KnowledgeScope, result: LintResult, *, unique: bool) -> Path:
+    root = scope.kb_dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    directory = root / "wiki/reports"
+    directory = scope.wiki_dir / "reports"
     if directory.exists() and not directory.is_dir():
         raise NotADirectoryError("The report directory is occupied by a file")
     path = directory / f"lint_{timestamp}.md"
@@ -180,12 +186,12 @@ def _save_report(root: Path, result: LintResult, *, unique: bool) -> Path:
     while unique and path.exists():
         path = directory / f"lint_{timestamp}_{counter}.md"
         counter += 1
-    log = root / "wiki/log.md"
+    log = scope.wiki_dir / "log.md"
     contained_paths(root, [path, log])
     content = f"# Lint Report — {timestamp}\n\n## Structural\n\n{result.structural_report}\n"
     if result.knowledge_report is not None:
         content += f"\n## Semantic\n\n{result.knowledge_report}\n"
     with mutation_scope(root, [path, log], operation="lint-report"):
         atomic_write_text(path, content)
-        append_log(root / "wiki", "lint", f"report → {path.name}")
+        append_log(scope.wiki_dir, "lint", f"report → {path.name}")
     return path

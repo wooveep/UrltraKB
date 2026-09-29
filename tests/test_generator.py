@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from openkb.deck.validator import ValidationResult as DeckValidationResult
+from openkb.knowledge_scope import legacy_scope
 from openkb.skill.generator import Generator
 
 
@@ -110,6 +111,7 @@ async def test_generator_deck_dispatches_to_deck_creator(tmp_path):
         critique=False,
         skill_name="openkb-deck-neon",
         bundle=None,
+        scope=legacy_scope(kb_dir),
     )
     regen.assert_not_called()  # marketplace is skill-only
     assert result == gen.output_dir

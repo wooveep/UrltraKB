@@ -13,6 +13,7 @@ from typing import Literal
 from openkb.agent.chat_session import ChatSession, _session_path, deletion_marker, load_session
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
 from openkb.mutation import mutation_scope
 
@@ -62,12 +63,14 @@ def export_conversation(
     *,
     unique: bool = False,
     context: ExecutionContext | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> SessionResult:
     """Export completed history; desktop uses copies, CLI keeps its overwrite policy.
 
     A persisted conversation is reloaded under both leases. The CLI can also
     export a newly created in-memory session which has never been persisted.
     """
+    scope = resolve_scope(kb_dir, scope)
     root = kb_dir.resolve()
     identity = session if isinstance(session, str) else session.id
     source = _session_path(root, identity)
@@ -87,7 +90,7 @@ def export_conversation(
         base = name or session.title or (session.user_turns[0] if session.user_turns else identity)
         slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:60] or identity
         date = re.sub(r"[^0-9]", "", session.created_at[:10])
-        directory = root / "wiki/explorations"
+        directory = scope.wiki_dir / "explorations"
         path = directory / f"{slug}-{date}.md"
         contained_paths(root, [path])
         counter = 1
@@ -97,7 +100,7 @@ def export_conversation(
             counter += 1
         change = "updated" if path.exists() else "created"
         with context.begin(root) if context else nullcontext():
-            content = _transcript(root, session)
+            content = _transcript(root, session, scope=scope)
             with mutation_scope(root, [path], operation="export-conversation"):
                 atomic_write_text(path, content)
             return SessionResult(
@@ -107,10 +110,11 @@ def export_conversation(
             )
 
 
-def _transcript(kb_dir: Path, session: ChatSession) -> str:
+def _transcript(kb_dir: Path, session: ChatSession, *, scope: KnowledgeScope | None = None) -> str:
+    scope = resolve_scope(kb_dir, scope)
     from openkb.lint import build_norm_index, list_existing_wiki_targets, strip_ghost_wikilinks
 
-    known = list_existing_wiki_targets(kb_dir / "wiki")
+    known = list_existing_wiki_targets(scope.wiki_dir)
     norm_index = build_norm_index(known)
     lines = [
         "---",

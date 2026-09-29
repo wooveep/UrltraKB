@@ -11,6 +11,7 @@ from prompt_toolkit.styles import Style
 
 from openkb.agent.chat import _handle_slash, _run_add, run_chat
 from openkb.agent.chat_session import ChatSession
+from openkb.knowledge_scope import legacy_scope
 
 
 def _setup_kb(tmp_path: Path) -> Path:
@@ -127,7 +128,7 @@ async def test_slash_add_single_file(tmp_path):
     p, _collected = _collect_fmt()
     with p, patch("openkb.cli.add_single_file") as mock_add:
         await _run_add(str(doc), kb_dir, _STYLE)
-        mock_add.assert_called_once_with(doc, kb_dir)
+        mock_add.assert_called_once_with(doc, kb_dir, scope=legacy_scope(kb_dir))
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 from agents.model_settings import ModelSettings
 
 from openkb.config import LlmCredentialBundle, resolve_model_settings
+from openkb.knowledge_scope import KnowledgeScope, legacy_scope, resolve_scope
 from openkb.prompts import load_prompt
 from openkb.schema import get_agents_md
 from openkb.skill import skill_dir
@@ -51,6 +52,7 @@ def build_skill_create_agent(
     intent: str,
     model: str,
     bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> Agent:
     """Build the openai-agents Agent for compiling one skill.
 
@@ -68,6 +70,7 @@ def build_skill_create_agent(
             share process-global config. ``None`` (CLI default) preserves
             the existing ``resolve_model_settings`` behavior.
     """
+    scope = scope or legacy_scope(Path(wiki_root).parent)
     Path(skill_root).mkdir(parents=True, exist_ok=True)
 
     wiki_schema = get_agents_md(Path(wiki_root))
@@ -134,10 +137,17 @@ def build_skill_create_agent(
         another LLM's summary.
         """
         # Lazy import to avoid a circular dependency at module load time.
-        from openkb.agent.query import run_query
+        from openkb.agent.query import build_run_config_from_bundle, run_query
 
-        kb_dir = Path(wiki_root).parent
-        return await run_query(question, kb_dir, model, stream=False)
+        return await run_query(
+            question,
+            scope.kb_dir,
+            model,
+            stream=False,
+            scope=scope,
+            bundle=bundle,
+            run_config=build_run_config_from_bundle(model, bundle),
+        )
 
     @function_tool
     def write_skill_file(path: str, content: str) -> str:
@@ -191,6 +201,7 @@ async def run_skill_create(
     intent: str,
     model: str,
     bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> Path:
     """Compile a single skill from the KB's wiki.
 
@@ -202,7 +213,8 @@ async def run_skill_create(
     forwarded to :func:`build_skill_create_agent`; ``None`` (CLI default)
     preserves the existing behavior.
     """
-    wiki_root = str(kb_dir / "wiki")
+    scope = resolve_scope(kb_dir, scope)
+    wiki_root = str(scope.wiki_dir)
     skill_root = skill_dir(kb_dir, skill_name)
 
     agent = build_skill_create_agent(
@@ -212,6 +224,7 @@ async def run_skill_create(
         intent=intent,
         model=model,
         bundle=bundle,
+        scope=scope,
     )
 
     # Single user message kicks off the compile. The system prompt already

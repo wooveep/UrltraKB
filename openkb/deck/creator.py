@@ -32,6 +32,7 @@ from openkb.agent.skills import PreparedSkill
 from openkb.config import LlmCredentialBundle
 from openkb.deck import DEFAULT_DECK_SKILL as DEFAULT_DECK_SKILL
 from openkb.deck import deck_dir
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 
 CRITIC_SKILL = "openkb-html-critic"
 """Skill chained after the producer when ``--critique`` is set."""
@@ -50,6 +51,7 @@ async def run_deck_create(
     skill_name: str = DEFAULT_DECK_SKILL,
     bundle: LlmCredentialBundle | None = None,
     prepared: PreparedSkill | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> SkillRunResult:
     """Compile a single deck from the KB's wiki via the chosen skill.
 
@@ -73,6 +75,7 @@ async def run_deck_create(
     # Ensure the conventional deck dir exists. Skills that use
     # output_path_template = "output/decks/{slug}/index.html" need this;
     # skills that pick their own location won't be hindered.
+    scope = resolve_scope(kb_dir, scope)
     deck_root = (
         prepared.output_path.parent
         if prepared and prepared.output_path
@@ -91,6 +94,7 @@ async def run_deck_create(
             **preparation,
             max_turns=MAX_TURNS_WITH_CRITIQUE if critique else MAX_TURNS,
             bundle=bundle,
+            scope=scope,
         )
     except SkillNotFoundError as exc:
         raise RuntimeError(
@@ -125,6 +129,7 @@ async def run_deck_create(
                 model=model,
                 max_turns=CRITIC_MAX_TURNS,
                 bundle=bundle,
+                scope=scope,
             )
         except SkillNotFoundError:
             # Critic missing is non-fatal — the unpatched deck still ships.

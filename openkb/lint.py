@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from openkb import frontmatter
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text
 from openkb.schema import PAGE_CONTENT_DIRS
 
@@ -568,7 +569,7 @@ def find_missing_okf_fields(
     return issues
 
 
-def run_structural_lint(kb_dir: Path) -> str:
+def run_structural_lint(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     """Run all structural lint checks and return a formatted Markdown report.
 
     Args:
@@ -577,7 +578,8 @@ def run_structural_lint(kb_dir: Path) -> str:
     Returns:
         Formatted Markdown string with lint results.
     """
-    wiki = kb_dir / "wiki"
+    scope = resolve_scope(kb_dir, scope)
+    wiki = scope.wiki_dir
     raw = kb_dir / "raw"
 
     # Load all wiki pages once and share across both frontmatter checks

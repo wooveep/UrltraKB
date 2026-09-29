@@ -37,6 +37,7 @@ from openkb.config import (
     get_timeout,
     resolve_entity_types,
 )
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
 from openkb.locks import atomic_write_text
 from openkb.schema import INDEX_SEED, get_agents_md
@@ -2215,6 +2216,8 @@ async def compile_short_doc(
     model: str,
     max_concurrency: int = DEFAULT_COMPILE_CONCURRENCY,
     bundle=None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> None:
     """Compile a short document using a multi-step LLM pipeline with caching.
 
@@ -2227,7 +2230,7 @@ async def compile_short_doc(
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 
-    wiki_dir = kb_dir / "wiki"
+    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
     schema_md = get_agents_md(wiki_dir)
     content = source_path.read_text(encoding="utf-8")
 
@@ -2303,6 +2306,8 @@ async def compile_long_doc(
     doc_description: str = "",
     max_concurrency: int = DEFAULT_COMPILE_CONCURRENCY,
     bundle=None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> None:
     """Compile a long (PageIndex) document's concepts and index.
 
@@ -2315,7 +2320,7 @@ async def compile_long_doc(
     language: str = config.get("language", "en")
     entity_types = resolve_entity_types(config)
 
-    wiki_dir = kb_dir / "wiki"
+    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
     schema_md = get_agents_md(wiki_dir)
     summary_content = summary_path.read_text(encoding="utf-8")
 

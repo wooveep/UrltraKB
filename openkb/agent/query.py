@@ -18,6 +18,7 @@ from openkb.agent.tools import (
     write_kb_file,
 )
 from openkb.config import LlmCredentialBundle, resolve_model_settings
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.schema import get_agents_md
 
 MAX_TURNS = 50
@@ -238,6 +239,8 @@ def build_chat_agent(
     model: str,
     language: str = "en",
     bundle: "LlmCredentialBundle | None" = None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> Agent:
     """Build the chat agent: query agent + a write tool restricted to
     ``<kb>/wiki/explorations/**`` and ``<kb>/output/**`` + a ``ShellTool``
@@ -254,7 +257,8 @@ def build_chat_agent(
     ``ShellTool.environment.skills`` so the model can ``cat`` the skill body
     and follow its instructions when the user's request matches.
     """
-    wiki_root = str(kb_dir / "wiki")
+    scope = resolve_scope(kb_dir, scope)
+    wiki_root = str(scope.wiki_dir)
     kb_root = str(kb_dir)
     base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
 
@@ -273,7 +277,7 @@ def build_chat_agent(
                 (e.g. ``"output/skills/demo/SKILL.md"``).
             content: Full text content to write (overwrites if file exists).
         """
-        return write_kb_file(path, content, kb_root)
+        return write_kb_file(path, content, kb_root, scope=scope)
 
     extra_tools: list = [write_file]
     skill_instructions_addendum = ""
@@ -383,6 +387,7 @@ async def run_query(
     raw: bool = False,
     run_config: Any = None,
     bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> str:
     """Run a Q&A query against the knowledge base.
 
@@ -397,6 +402,7 @@ async def run_query(
     Returns:
         The agent's final answer as a string.
     """
+    scope = resolve_scope(kb_dir, scope)
     import sys
 
     from agents import RawResponsesStreamEvent, RunItemStreamEvent
@@ -407,7 +413,7 @@ async def run_query(
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
 
-    wiki_root = str(kb_dir / "wiki")
+    wiki_root = str(scope.wiki_dir)
 
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
 

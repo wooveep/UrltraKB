@@ -40,6 +40,7 @@ from openkb.agent.skills import (
 from openkb.agent.skills import SkillNotFoundError as SkillNotFoundError
 from openkb.agent.tools import read_kb_file, write_kb_file
 from openkb.config import LlmCredentialBundle
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 
 MAX_TURNS = 80
 MAX_TURNS_WITH_CRITIQUE = 120
@@ -75,6 +76,7 @@ async def run_skill(
     extra_skill_roots: tuple[str | Path, ...] = (),
     bundle: LlmCredentialBundle | None = None,
     prepared: PreparedSkill | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> SkillRunResult:
     """Load ``skill_name`` and run it as an agent with ``intent``.
 
@@ -118,8 +120,9 @@ async def run_skill(
         RuntimeError: on turn-cap, model error, or missing
             output file after a templated-path run.
     """
+    scope = resolve_scope(kb_dir, scope)
     definition = prepared or prepare_skill(
-        kb_dir, skill_name, slug=slug, extra_roots=extra_skill_roots
+        kb_dir, skill_name, slug=slug, extra_roots=extra_skill_roots, scope=scope
     )
     if definition.name != skill_name:
         raise ValueError("Prepared skill does not match the requested skill")
@@ -131,7 +134,7 @@ async def run_skill(
             f"write_file call): {rel}\n\n{intent}"
         )
 
-    wiki_root = str(kb_dir / "wiki")
+    wiki_root = str(scope.wiki_dir)
     kb_root = str(kb_dir)
     base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
 
@@ -145,7 +148,7 @@ async def run_skill(
 
         Any other path is rejected. Parent directories are created.
         """
-        return write_kb_file(path, content, kb_root)
+        return write_kb_file(path, content, kb_root, scope=scope)
 
     @function_tool
     def read_output_or_skill_file(path: str) -> str:
@@ -159,7 +162,7 @@ async def run_skill(
             path: File path relative to the KB root, e.g.
                 ``"output/decks/foo/index.html"``.
         """
-        return read_kb_file(path, kb_root)
+        return read_kb_file(path, kb_root, scope=scope)
 
     agent = base.clone(
         name=f"skill::{skill_name}",

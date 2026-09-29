@@ -32,6 +32,7 @@ from openkb.agent.query import (
 )
 from openkb.agent.streaming import settled_stream
 from openkb.config import LlmCredentialBundle
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.log import append_log
 from openkb.model_outputs import ModelOutputs, model_output_scope
 
@@ -464,17 +465,23 @@ async def _stream_tty_turn(
     return answer, result.to_input_list()
 
 
-def _save_transcript(kb_dir: Path, session: ChatSession, name: str | None) -> Path:
+def _save_transcript(
+    kb_dir: Path, session: ChatSession, name: str | None, *, scope: KnowledgeScope | None = None
+) -> Path:
+    scope = resolve_scope(kb_dir, scope)
     from openkb.application.sessions import export_conversation
 
-    result = export_conversation(kb_dir, session, name)
+    result = export_conversation(kb_dir, session, name, scope=scope)
     if result.status != "exported":
         raise FileNotFoundError("Conversation was deleted before export")
     return Path(result.resources[0])
 
 
-async def _run_add(arg: str, kb_dir: Path, style: Style) -> None:
+async def _run_add(
+    arg: str, kb_dir: Path, style: Style, *, scope: KnowledgeScope | None = None
+) -> None:
     """Add a document or directory to the knowledge base from the chat REPL."""
+    scope = resolve_scope(kb_dir, scope)
     from openkb.cli import SUPPORTED_EXTENSIONS, add_single_file
 
     target = Path(arg).expanduser()
@@ -499,16 +506,19 @@ async def _run_add(arg: str, kb_dir: Path, style: Style) -> None:
         _fmt(style, ("class:slash.help", f"Found {total} supported file(s) in {arg}.\n"))
         for i, f in enumerate(files, 1):
             _fmt(style, ("class:slash.help", f"\n[{i}/{total}] "))
-            await asyncio.to_thread(add_single_file, f, kb_dir)
+            await asyncio.to_thread(add_single_file, f, kb_dir, scope=scope)
     else:
         if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
             _fmt(style, ("class:error", f"Unsupported file type: {target.suffix}\n"))
             return
-        await asyncio.to_thread(add_single_file, target, kb_dir)
+        await asyncio.to_thread(add_single_file, target, kb_dir, scope=scope)
 
 
-async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
+async def _handle_slash_skill(
+    arg: str, kb_dir: Path, style: Style, *, scope: KnowledgeScope | None = None
+) -> None:
     """Dispatch ``/skill new <name> "<intent>"`` and any future skill subcommands."""
+    scope = resolve_scope(kb_dir, scope)
     import shlex
 
     try:
@@ -537,7 +547,7 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
     # block with a clear instruction to delete first.
     from openkb.application.generators import preflight_generation as _preflight_skill_new
 
-    err = _preflight_skill_new(kb_dir, name)
+    err = _preflight_skill_new(kb_dir, name, scope=scope)
     if err:
         _fmt(style, ("class:error", f"[ERROR] {err}\n"))
         return
@@ -566,9 +576,7 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
 
     _fmt(style, ("class:slash.help", f"Compiling skill '{name}'...\n"))
     gen = await generate_artifact(
-        kb_dir,
-        GenerationOptions("skill", name, intent),
-        model=model,
+        kb_dir, GenerationOptions("skill", name, intent), model=model, scope=scope
     )
     if gen.status != "completed":
         _fmt(style, ("class:error", f"[ERROR] {gen.message}\n"))
@@ -604,13 +612,16 @@ async def _handle_slash_skill(arg: str, kb_dir: Path, style: Style) -> None:
     )
 
 
-async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
+async def _handle_slash_deck(
+    arg: str, kb_dir: Path, style: Style, *, scope: KnowledgeScope | None = None
+) -> None:
     """Dispatch ``/deck new [--critique] <name> "<intent>"``.
 
     Mirrors :func:`_handle_slash_skill`: validates the name, runs the
     same wiki preflight gate, refuses to overwrite an existing deck
     (chat has no ``-y`` flag), then invokes ``Generator(target_type="deck")``.
     """
+    scope = resolve_scope(kb_dir, scope)
     import shlex
 
     try:
@@ -662,7 +673,7 @@ async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
     # block with a clear instruction to delete first.
     from openkb.application.generators import preflight_generation as _preflight_skill_new
 
-    err = _preflight_skill_new(kb_dir, name)
+    err = _preflight_skill_new(kb_dir, name, scope=scope)
     if err:
         # Reword "Skill name" → "Deck name" so error matches the command.
         err = err.replace("Skill name", "Deck name")
@@ -701,6 +712,7 @@ async def _handle_slash_deck(arg: str, kb_dir: Path, style: Style) -> None:
         kb_dir,
         GenerationOptions("deck", name, intent, critique=critique, skill_name=skill_name),
         model=model,
+        scope=scope,
     )
     if gen.status != "completed":
         _fmt(style, ("class:error", f"[ERROR] {gen.message}\n"))
@@ -733,9 +745,12 @@ async def _handle_slash(
     kb_dir: Path,
     session: ChatSession,
     style: Style,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> str | None:
     """Return ``"exit"`` to end the REPL, ``"new_session"`` to swap sessions,
     or ``None`` to continue with the current session."""
+    scope = resolve_scope(kb_dir, scope)
     parts = cmd.split(maxsplit=1)
     head = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
@@ -771,7 +786,7 @@ async def _handle_slash(
         # would leave its thread free to export later, after the user stopped.
         async with async_session_lock(kb_dir, session.id):
             async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-                path = _save_transcript(kb_dir, session, arg or None)
+                path = _save_transcript(kb_dir, session, arg or None, scope=scope)
         _fmt(style, ("class:slash.ok", f"Saved to {path}\n"))
         return None
 
@@ -794,26 +809,26 @@ async def _handle_slash(
     if head == "/lint":
         from openkb.cli import run_lint
 
-        await run_lint(kb_dir)
+        await run_lint(kb_dir, scope=scope)
         return None
 
     if head == "/add":
         if not arg:
             _fmt(style, ("class:error", "Usage: /add <path>\n"))
             return None
-        await _run_add(arg, kb_dir, style)
+        await _run_add(arg, kb_dir, style, scope=scope)
         return None
 
     if head == "/skill":
-        await _handle_slash_skill(arg, kb_dir, style)
+        await _handle_slash_skill(arg, kb_dir, style, scope=scope)
         return None
 
     if head == "/deck":
-        await _handle_slash_deck(arg, kb_dir, style)
+        await _handle_slash_deck(arg, kb_dir, style, scope=scope)
         return None
 
     if head == "/critique":
-        await _handle_slash_critique(arg, kb_dir, style)
+        await _handle_slash_critique(arg, kb_dir, style, scope=scope)
         return None
 
     _fmt(
@@ -823,13 +838,16 @@ async def _handle_slash(
     return None
 
 
-async def _handle_slash_critique(arg: str, kb_dir: Path, style: Style) -> None:
+async def _handle_slash_critique(
+    arg: str, kb_dir: Path, style: Style, *, scope: KnowledgeScope | None = None
+) -> None:
     """``/critique <path>`` — run the openkb-html-critic skill on a file.
 
     The skill reads the HTML, fixes CSS specificity bugs / missing nav /
     self-containment violations, and writes the corrected file back. It
     will not touch slide content (numbers, names, quotes).
     """
+    scope = resolve_scope(kb_dir, scope)
     path = arg.strip()
     if not path:
         _fmt(
@@ -848,7 +866,7 @@ async def _handle_slash_critique(arg: str, kb_dir: Path, style: Style) -> None:
     rel_str = str(target.relative_to(kb_dir)) if target.is_relative_to(kb_dir) else str(target)
     _fmt(style, ("class:slash.ok", f"Critiquing {rel_str}...\n"))
     try:
-        await critique_artifact(kb_dir, path)
+        await critique_artifact(kb_dir, path, scope=scope)
     except (RuntimeError, ValueError, OSError) as exc:
         _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
         return
@@ -860,6 +878,8 @@ def build_chat_session_agent(
     kb_dir: Path,
     session: ChatSession,
     bundle: "LlmCredentialBundle | None" = None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> Any:
     """Build the write- and skill-capable agent for one chat session (REST ``/chat``).
 
@@ -868,11 +888,12 @@ def build_chat_session_agent(
     query.py) so the query module's ``build_chat_agent`` signature stays
     unchanged for the CLI; the API uses this session-aware variant instead.
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
     config = resolve_effective_config(kb_dir)[0]
     language = session.language or config.get("language", "en")
-    return build_chat_agent(kb_dir, session.model, language=language, bundle=bundle)
+    return build_chat_agent(kb_dir, session.model, language=language, bundle=bundle, scope=scope)
 
 
 async def iter_chat_turn_events(
@@ -883,6 +904,7 @@ async def iter_chat_turn_events(
     run_config: Any = None,
     outputs: ModelOutputs | None = None,
     attempt_id: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for one chat turn and persist the final turn.
 
@@ -894,10 +916,11 @@ async def iter_chat_turn_events(
     from openkb.locks import async_kb_lock, async_session_lock
 
     kb_dir = session.path.parent.parent.parent
+    scope = resolve_scope(kb_dir, scope)
     async with async_session_lock(kb_dir, session.id):
         async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
             session.reload()
-            append_log(kb_dir / "wiki", "query", user_input)
+            append_log(scope.wiki_dir, "query", user_input)
             new_input = session.history + [{"role": "user", "content": user_input}]
 
             # Accumulate the ordered, interleaved trace (narration text + tool reads) in
@@ -996,8 +1019,10 @@ async def run_chat(
     *,
     no_color: bool = False,
     raw: bool = False,
+    scope: KnowledgeScope | None = None,
 ) -> None:
     """Run the chat REPL against ``session`` until the user exits."""
+    scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
     use_color = _use_color(force_off=no_color)
@@ -1005,7 +1030,7 @@ async def run_chat(
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language = session.language or config.get("language", "en")
-    agent = build_chat_agent(kb_dir, session.model, language=language)
+    agent = build_chat_agent(kb_dir, session.model, language=language, scope=scope)
 
     _print_header(session, kb_dir, style)
     if session.turn_count > 0:
@@ -1037,7 +1062,7 @@ async def run_chat(
 
         if user_input.startswith("/"):
             try:
-                action = await _handle_slash(user_input, kb_dir, session, style)
+                action = await _handle_slash(user_input, kb_dir, session, style, scope=scope)
             except KeyboardInterrupt:
                 _fmt(style, ("class:error", "\n[aborted]\n"))
                 continue
@@ -1045,7 +1070,7 @@ async def run_chat(
                 return
             if action == "new_session":
                 session = ChatSession.new(kb_dir, session.model, session.language)
-                agent = build_chat_agent(kb_dir, session.model, language=language)
+                agent = build_chat_agent(kb_dir, session.model, language=language, scope=scope)
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue
 
@@ -1055,7 +1080,7 @@ async def run_chat(
             async with async_session_lock(kb_dir, session.id):
                 async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
                     session.reload()
-                    append_log(kb_dir / "wiki", "query", user_input)
+                    append_log(scope.wiki_dir, "query", user_input)
                     await _run_turn(agent, session, user_input, style, use_color=use_color, raw=raw)
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))

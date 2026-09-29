@@ -37,6 +37,8 @@ from typing import Iterable, Tuple
 
 import yaml
 
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+
 DEFAULT_SKILL_ROOTS: Tuple[str, ...] = (
     "skills",  # relative to kb_dir
     "~/.openkb/skills",
@@ -143,8 +145,10 @@ def prepare_skill(
     *,
     slug: str | None = None,
     extra_roots: Iterable[str | Path] = (),
+    scope: KnowledgeScope | None = None,
 ) -> PreparedSkill:
     """Resolve a skill and validate its declared output before beginning work."""
+    scope = resolve_scope(kb_dir, scope)
     skills = scan_local_skills(kb_dir, extra_roots=extra_roots)
     match = next((skill for skill in skills if skill["name"] == name), None)
     if match is None:
@@ -163,11 +167,16 @@ def prepare_skill(
     output = None
     if template and slug:
         relative = template.format(slug=slug)
-        output = (kb_dir / relative).resolve()
+        relative_path = Path(relative)
+        output = (
+            scope.wiki_dir / relative_path.relative_to("wiki")
+            if relative_path.parts[:1] == ("wiki",)
+            else kb_dir / relative_path
+        ).resolve()
         root = kb_dir.resolve()
         if not any(
             output != zone and output.is_relative_to(zone)
-            for zone in (root / "output", root / "wiki/explorations")
+            for zone in (root / "output", scope.wiki_dir / "explorations")
         ):
             raise ValueError("Skill output path must be a file in output/ or wiki/explorations/")
     return PreparedSkill(name, body, metadata, output)

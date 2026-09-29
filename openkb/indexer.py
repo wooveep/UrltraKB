@@ -17,6 +17,7 @@ from openkb.config import (
     resolve_effective_config,
     resolve_per_request_overrides,
 )
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.tree_renderer import render_summary_md
 
 logger = logging.getLogger(__name__)
@@ -94,20 +95,23 @@ def _write_long_doc_artifacts(
     doc_id: str,
     kb_dir: Path,
     description: str = "",
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> Path:
     """Write ``wiki/sources/<doc_name>.json`` + ``wiki/summaries/<doc_name>.md``.
 
     Returns the summary path. Page images, when present, are written separately by the
     caller's page extractor — this helper only persists page text + summary.
     """
-    sources_dir = kb_dir / "wiki" / "sources"
+    scope = resolve_scope(kb_dir, scope)
+    sources_dir = scope.wiki_dir / "sources"
     sources_dir.mkdir(parents=True, exist_ok=True)
     (sources_dir / f"{doc_name}.json").write_text(
         json_mod.dumps(pages, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
-    summaries_dir = kb_dir / "wiki" / "summaries"
+    summaries_dir = scope.wiki_dir / "summaries"
     summaries_dir.mkdir(parents=True, exist_ok=True)
     summary_path = summaries_dir / f"{doc_name}.md"
     summary_path.write_text(
@@ -163,12 +167,19 @@ def _build_index_config(
     return IndexConfig(**kwargs)
 
 
-def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = None) -> IndexResult:
+def index_long_document(
+    pdf_path: Path,
+    kb_dir: Path,
+    doc_name: str | None = None,
+    *,
+    scope: KnowledgeScope | None = None,
+) -> IndexResult:
     """Index a long PDF document using PageIndex and write wiki pages.
 
     ``doc_name`` is the collision-resistant wiki name used for all written
     artifacts; defaults to the PDF's stem for backward compatibility.
     """
+    scope = resolve_scope(kb_dir, scope)
     source_name = doc_name or pdf_path.stem
     openkb_dir = kb_dir / ".openkb"
     config = resolve_effective_config(kb_dir)[0]
@@ -230,7 +241,7 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
         }
 
         # Write wiki/sources/ — per-page content
-        sources_dir = kb_dir / "wiki" / "sources"
+        sources_dir = scope.wiki_dir / "sources"
         sources_dir.mkdir(parents=True, exist_ok=True)
         images_dir = sources_dir / "images" / source_name
 
@@ -242,7 +253,7 @@ def index_long_document(pdf_path: Path, kb_dir: Path, doc_name: str | None = Non
             raise RuntimeError(f"No page content extracted for {pdf_path.name}")
 
         _write_long_doc_artifacts(
-            tree, all_pages, source_name, doc_id, kb_dir, description=description
+            tree, all_pages, source_name, doc_id, kb_dir, description=description, scope=scope
         )
         return IndexResult(doc_id=doc_id, description=description, tree=tree)
     except BaseException:

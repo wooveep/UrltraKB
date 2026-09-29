@@ -5,6 +5,7 @@ from pathlib import Path
 
 from openkb import frontmatter
 from openkb.application.pages import Page, read_page
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lint import _extract_wikilinks, _normalize_target
 from openkb.locks import kb_read_lock
 
@@ -25,10 +26,13 @@ class PageContext:
     problems: tuple[str, ...] = ()
 
 
-def read_page_context(kb_dir: Path, path: str) -> PageContext:
+def read_page_context(
+    kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None
+) -> PageContext:
+    scope = resolve_scope(kb_dir, scope)
     with kb_read_lock(kb_dir / ".openkb"):
-        page = read_page(kb_dir, path)
-        wiki = (kb_dir / "wiki").resolve()
+        page = read_page(kb_dir, path, scope=scope)
+        wiki = (scope.wiki_dir).resolve()
         known = {
             p.relative_to(wiki).with_suffix("").as_posix(): p
             for p in wiki.rglob("*.md")

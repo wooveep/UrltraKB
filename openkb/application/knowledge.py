@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openkb import frontmatter
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_read_lock
 from openkb.schema import PAGE_CONTENT_DIRS
 
@@ -37,9 +38,12 @@ def page_title(content: str, fallback: str) -> str:
     return fallback
 
 
-def list_knowledge(kb_dir: Path) -> tuple[KnowledgeEntry, ...]:
+def list_knowledge(
+    kb_dir: Path, *, scope: KnowledgeScope | None = None
+) -> tuple[KnowledgeEntry, ...]:
+    scope = resolve_scope(kb_dir, scope)
     root = kb_dir.resolve()
-    wiki = root / "wiki"
+    wiki = scope.wiki_dir
     entries = []
     with kb_read_lock(root / ".openkb"):
         for section in (*PAGE_CONTENT_DIRS, "explorations"):

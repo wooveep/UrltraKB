@@ -16,6 +16,7 @@ from openkb.agent.chat_session import ChatSession, load_session
 from openkb.application.answers import save_exploration
 from openkb.application.execution import ExecutionContext
 from openkb.config import resolve_effective_config
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import async_kb_lock, async_session_lock
 from openkb.log import append_log
 from openkb.model_outputs import ModelOutputs
@@ -36,9 +37,10 @@ class AnswerResult:
     usage: dict[str, int | None] | None = None
 
 
-def _validate_question(kb_dir: Path, question: str) -> Path:
+def _validate_question(kb_dir: Path, question: str, *, scope: KnowledgeScope | None = None) -> Path:
+    scope = resolve_scope(kb_dir, scope)
     root = kb_dir.expanduser().resolve()
-    if not (root / ".openkb/config.yaml").is_file() or not (root / "wiki").is_dir():
+    if not (root / ".openkb/config.yaml").is_file() or not (scope.wiki_dir).is_dir():
         raise FileNotFoundError(f"Knowledge base not found: {root}")
     if not question.strip():
         raise ValueError("Enter a question before starting a conversation")
@@ -51,8 +53,10 @@ async def ask_question(
     *,
     save: bool = False,
     context: ExecutionContext | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> AnswerResult:
-    root = _validate_question(kb_dir, question)
+    scope = resolve_scope(kb_dir, scope)
+    root = _validate_question(kb_dir, question, scope=scope)
     context = context or ExecutionContext()
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
@@ -66,7 +70,7 @@ async def ask_question(
 
             config = (await asyncio.to_thread(resolve_effective_config, root))[0]
             model = config["model"]
-            agent = build_query_agent(str(root / "wiki"), model, config["language"], bundle)
+            agent = build_query_agent(str(scope.wiki_dir), model, config["language"], bundle)
             context.on_event({"stage": "answering"})
             stream = iter_agent_response_events(
                 agent, question, run_config=build_run_config_from_bundle(model, bundle)
@@ -81,9 +85,13 @@ async def ask_question(
                         if event["event"] == "final":
                             answer = event["data"]["answer"]
                             unfinished_stage = "save answer"
-                            path = save_exploration(root, question, answer) if save else None
+                            path = (
+                                save_exploration(root, question, answer, scope=scope)
+                                if save
+                                else None
+                            )
                             unfinished_stage = "record question log"
-                            append_log(root / "wiki", "query", question)
+                            append_log(scope.wiki_dir, "query", question)
                             return AnswerResult(
                                 "completed",
                                 answer,
@@ -121,8 +129,10 @@ async def continue_conversation(
     attempt_id: str | None = None,
     submission_order: int | None = None,
     context: ExecutionContext | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> AnswerResult:
-    root = _validate_question(kb_dir, message)
+    scope = resolve_scope(kb_dir, scope)
+    root = _validate_question(kb_dir, message, scope=scope)
     context = context or ExecutionContext()
     session = ChatSession.new(root, "", "", identity=new_session_id)
     identity = session_id or session.id
@@ -152,7 +162,9 @@ async def continue_conversation(
                 attempt_id = session.begin_attempt(
                     message, identity=attempt_id, submission_order=submission_order
                 )
-                agent = await asyncio.to_thread(build_chat_session_agent, root, session, bundle)
+                agent = await asyncio.to_thread(
+                    build_chat_session_agent, root, session, bundle, scope=scope
+                )
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(
                     agent,
@@ -161,6 +173,7 @@ async def continue_conversation(
                     run_config=build_run_config_from_bundle(session.model, bundle),
                     outputs=(outputs := ModelOutputs()),
                     attempt_id=attempt_id,
+                    scope=scope,
                 )
                 parts = []
                 usage = None

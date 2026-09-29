@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from openkb import frontmatter
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lint import (
     _EXCLUDED_FILES,
     _extract_wikilinks,
@@ -103,7 +104,9 @@ def _on_disk_stem(section_dir: Path, stem: str) -> str:
     return ci_match
 
 
-def delete_wiki_page(kb_dir: Path, path: str, *, dry_run: bool = False) -> dict:
+def delete_wiki_page(
+    kb_dir: Path, path: str, *, dry_run: bool = False, scope: KnowledgeScope | None = None
+) -> dict:
     """Delete a concept/entity page and clean up references to it.
 
     ``path`` is a ``'section/stem'`` ref (e.g. ``'concepts/attention'``). With
@@ -112,8 +115,9 @@ def delete_wiki_page(kb_dir: Path, path: str, *, dry_run: bool = False) -> dict:
     ``dry_run``, ``deleted``. Only concept/entity pages are deletable (a summary
     is removed by deleting its source document, not on its own).
     """
+    scope = resolve_scope(kb_dir, scope)
     section, stem = validate_page_ref(path, allowed=DELETABLE_SECTIONS)
-    wiki = kb_dir / "wiki"
+    wiki = scope.wiki_dir
     page = wiki / section / f"{stem}.md"
     target = f"{section}/{stem}"
 
@@ -172,7 +176,7 @@ def delete_wiki_page(kb_dir: Path, path: str, *, dry_run: bool = False) -> dict:
     }
 
 
-def page_link_context(kb_dir: Path, path: str) -> dict:
+def page_link_context(kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None) -> dict:
     """Outbound + inbound links for a page — the edit-impact panel.
 
     ``outlinks`` are the distinct pages this page links to (resolvable
@@ -180,8 +184,9 @@ def page_link_context(kb_dir: Path, path: str) -> dict:
     BODY does not break either (links are path-based), so this is context, not a
     blocker. Returns ``status`` ``not_found`` when the page is absent.
     """
+    scope = resolve_scope(kb_dir, scope)
     section, stem = validate_page_ref(path)
-    wiki = kb_dir / "wiki"
+    wiki = scope.wiki_dir
     page = wiki / section / f"{stem}.md"
     target = f"{section}/{stem}"
     if not page.is_file():
@@ -198,7 +203,9 @@ def page_link_context(kb_dir: Path, path: str) -> dict:
     return {"status": "ok", "target": target, "outlinks": sorted(out), "backlinks": backlinks}
 
 
-def edit_wiki_page(kb_dir: Path, path: str, content: str) -> dict:
+def edit_wiki_page(
+    kb_dir: Path, path: str, content: str, *, scope: KnowledgeScope | None = None
+) -> dict:
     """Replace a concept/entity page's BODY, preserving its OKF frontmatter.
 
     The ``type:``/``description:``/``sources:`` frontmatter is code-managed, so
@@ -209,7 +216,7 @@ def edit_wiki_page(kb_dir: Path, path: str, content: str) -> dict:
     the KB ingest lock. Returns ``status`` ``not_found`` when the page is absent.
     """
     section, stem = validate_page_ref(path)
-    wiki = kb_dir / "wiki"
+    wiki = resolve_scope(kb_dir, scope).wiki_dir
     page = wiki / section / f"{stem}.md"
     target = f"{section}/{stem}"
     if not page.is_file():

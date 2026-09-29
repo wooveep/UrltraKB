@@ -21,6 +21,7 @@ from openkb.config import (
     resolve_concurrency,
     resolve_effective_config,
 )
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import (
     LockCancelled,
     async_kb_lock,
@@ -60,7 +61,9 @@ def select_recompilation(
     *,
     all_docs: bool = False,
     confirmation: bool = False,
+    scope: KnowledgeScope | None = None,
 ) -> RecompileSelection:
+    scope = resolve_scope(kb_dir, scope)
     if bool(identifier) == all_docs:
         return RecompileSelection("invalid")
     with kb_read_lock(kb_dir / ".openkb"):
@@ -85,25 +88,21 @@ def select_recompilation(
             return RecompileSelection("empty" if all_docs else "not_found")
         if not all_docs and len(targets) > 1:
             return RecompileSelection("multiple", targets)
-        return RecompileSelection("ready", targets, _version(kb_dir) if confirmation else None)
+        return RecompileSelection(
+            "ready", targets, _version(kb_dir, scope=scope) if confirmation else None
+        )
 
 
-def _version(kb_dir: Path) -> str:
+def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     """Version every file the compiler may replace, plus document identities.
 
     Includes absent targets and newly created files. A successful unit returns
     its resulting version so its own batch can continue without authorizing
     intervening changes made by another operation.
     """
-    roots = [
-        kb_dir / name
-        for name in (
-            ".openkb/hashes.json",
-            "wiki/summaries",
-            "wiki/concepts",
-            "wiki/entities",
-            "wiki/index.md",
-        )
+    scope = resolve_scope(kb_dir, scope)
+    roots = [kb_dir / ".openkb/hashes.json"] + [
+        scope.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")
     ]
     values = file_versions(kb_dir, roots)
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
@@ -117,13 +116,14 @@ def _validate_metadata(meta: object) -> None:
         raise ValueError("Invalid document registry metadata")
 
 
-def refresh_schema(kb_dir: Path) -> bool:
+def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool:
     """Atomically keep the legacy .bak and install the current schema."""
+    scope = resolve_scope(kb_dir, scope)
     from openkb.schema import AGENTS_MD
 
     with kb_ingest_lock(kb_dir / ".openkb"):
         current, backup = contained_paths(
-            kb_dir, [kb_dir / "wiki/AGENTS.md", kb_dir / "wiki/AGENTS.md.bak"]
+            kb_dir, [scope.wiki_dir / "AGENTS.md", scope.wiki_dir / "AGENTS.md.bak"]
         )
         if not current.exists() or current.read_text(encoding="utf-8") == AGENTS_MD:
             return False
@@ -158,12 +158,14 @@ async def recompile_document(
     model: str | None = None,
     max_concurrency: int | None = None,
     version: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> RecompileResult:
     """Reload the exact document under its lease; never convert or index again.
 
     Desktop passes an execution context. Legacy adapters keep their own model
     and credential resolution, including REST request overrides.
     """
+    scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
         kb_dir / ".openkb",
@@ -171,7 +173,7 @@ async def recompile_document(
         cancelled=context.cancelled if context else None,
         on_wait=context.waiting if context else None,
     ):
-        if version is not None and _version(kb_dir) != version:
+        if version is not None and _version(kb_dir, scope=scope) != version:
             return RecompileResult(
                 "conflict",
                 message="Knowledge changed after confirmation; review and confirm again",
@@ -193,7 +195,7 @@ async def recompile_document(
         doc_id = meta.get("doc_id")
         if reason is None and kind == "long" and not doc_id:
             reason = "legacy long-doc entry without a doc_id; re-add to refresh."
-        source = kb_dir / "wiki" / ("summaries" if kind == "long" else "sources") / f"{name}.md"
+        source = scope.wiki_dir / ("summaries" if kind == "long" else "sources") / f"{name}.md"
         if reason is None:
             contained_paths(kb_dir, [source])
             if not source.is_file():
@@ -204,11 +206,11 @@ async def recompile_document(
         paths = contained_paths(
             kb_dir,
             [
-                kb_dir / "wiki/summaries" / f"{name}.md",
-                kb_dir / "wiki/concepts",
-                kb_dir / "wiki/entities",
-                kb_dir / "wiki/index.md",
-                kb_dir / "wiki/log.md",
+                scope.wiki_dir / "summaries" / f"{name}.md",
+                scope.wiki_dir / "concepts",
+                scope.wiki_dir / "entities",
+                scope.wiki_dir / "index.md",
+                scope.wiki_dir / "log.md",
             ],
         )
         before = file_versions(kb_dir, paths)
@@ -236,11 +238,13 @@ async def recompile_document(
                     if kind == "long":
                         assert isinstance(doc_id, str)  # validated before configuration capture
                         await compiler.compile_long_doc(
-                            name, source, doc_id, kb_dir, model, **options
+                            name, source, doc_id, kb_dir, model, **options, scope=scope
                         )
                     else:
-                        await compiler.compile_short_doc(name, source, kb_dir, model, **options)
-                    append_log(kb_dir / "wiki", "recompile", f"recompiled {name}")
+                        await compiler.compile_short_doc(
+                            name, source, kb_dir, model, **options, scope=scope
+                        )
+                    append_log(scope.wiki_dir, "recompile", f"recompiled {name}")
                     # Compute the receipt before commit. A filesystem error here rolls
                     # back the whole unit; it cannot discard already committed facts.
                     changes = changed_files(kb_dir, paths, before)
@@ -249,10 +253,10 @@ async def recompile_document(
                         for change in changes
                         if not change.startswith("deleted:")
                     }
-                    summary = kb_dir / "wiki/summaries" / f"{name}.md"
+                    summary = scope.wiki_dir / "summaries" / f"{name}.md"
                     if summary.is_file():
                         resources.add(str(summary))
-                    next_version = _version(kb_dir) if version is not None else None
+                    next_version = _version(kb_dir, scope=scope) if version is not None else None
             except (LockCancelled, RecoveryRequired):
                 raise
             except Exception as exc:

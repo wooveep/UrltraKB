@@ -16,6 +16,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files, contained_paths, file_versions
 from openkb.artifact_history import preserve_artifact_history
 from openkb.config import DEFAULT_CONFIG, LlmCredentialBundle, resolve_effective_config
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import LockCancelled, async_kb_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, mutation_scope
 from openkb.schema import PAGE_CONTENT_DIRS
@@ -27,11 +28,13 @@ if TYPE_CHECKING:
 TargetType = Literal["skill", "deck"]
 
 
-def preflight_generation(kb_dir: Path, name: str) -> str | None:
+def preflight_generation(
+    kb_dir: Path, name: str, *, scope: KnowledgeScope | None = None
+) -> str | None:
     error = validate_name(name)
     if error:
         return error
-    wiki = kb_dir / "wiki"
+    wiki = resolve_scope(kb_dir, scope).wiki_dir
     if not wiki.is_dir():
         return "No wiki found in this KB. Run `openkb add <source>` to ingest documents first."
     if not any((wiki / sub).is_dir() and any((wiki / sub).iterdir()) for sub in PAGE_CONTENT_DIRS):
@@ -69,13 +72,16 @@ def _paths(
     target_type: TargetType,
     name: str,
     prepared: PreparedSkill | None = None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> tuple[Path, list[Path]]:
+    scope = resolve_scope(kb_dir, scope)
     target = kb_dir / "output" / ("skills" if target_type == "skill" else "decks") / name
     if prepared and prepared.output_path:
         output = prepared.output_path
         target = (
             output
-            if output.parent in {kb_dir / "output", kb_dir / "wiki/explorations"}
+            if output.parent in {kb_dir / "output", scope.wiki_dir / "explorations"}
             else output.parent
         )
     # Deck skills can write anywhere in the runner's two allowed zones.
@@ -83,7 +89,7 @@ def _paths(
     roots = (
         [target, kb_dir / ".claude-plugin/marketplace.json"]
         if target_type == "skill"
-        else [kb_dir / "output", kb_dir / "wiki/explorations"]
+        else [kb_dir / "output", scope.wiki_dir / "explorations"]
     )
     contained_paths(kb_dir, [target, *roots])
     return target, roots
@@ -121,20 +127,29 @@ def preview_generation(
     name: str,
     *,
     skill_name: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> GenerationPreview:
+    scope = resolve_scope(kb_dir, scope)
     GenerationOptions(target_type, name, "preview")
     kb_dir = kb_dir.resolve()
     with kb_read_lock(kb_dir / ".openkb"):
-        prepared = _prepare(kb_dir, target_type, name, skill_name)
-        target, roots = _paths(kb_dir, target_type, name, prepared)
+        prepared = _prepare(kb_dir, target_type, name, skill_name, scope=scope)
+        target, roots = _paths(kb_dir, target_type, name, prepared, scope=scope)
         return GenerationPreview(target, target.exists(), _version(kb_dir, roots, prepared))
 
 
-def _prepare(kb_dir: Path, target_type: TargetType, name: str, skill_name: str | None):
+def _prepare(
+    kb_dir: Path,
+    target_type: TargetType,
+    name: str,
+    skill_name: str | None,
+    *,
+    scope: KnowledgeScope | None = None,
+):
     if target_type == "deck":
         from openkb.deck import DEFAULT_DECK_SKILL
 
-        return prepare_skill(kb_dir, skill_name or DEFAULT_DECK_SKILL, slug=name)
+        return prepare_skill(kb_dir, skill_name or DEFAULT_DECK_SKILL, slug=name, scope=scope)
     return None
 
 
@@ -181,6 +196,7 @@ async def generate_artifact(
     context: ExecutionContext | None = None,
     bundle: LlmCredentialBundle | None = None,
     model: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> GenerationResult:
     """Hold the complete read/generate/write lease and retain successful stages.
 
@@ -189,6 +205,7 @@ async def generate_artifact(
     failures commit files already produced; interruption before commit rolls
     back this generation while preserving the independently committed archive.
     """
+    scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
         kb_dir / ".openkb",
@@ -196,14 +213,16 @@ async def generate_artifact(
         cancelled=context.cancelled if context else None,
         on_wait=context.waiting if context else None,
     ):
-        error = preflight_generation(kb_dir, options.name)
+        error = preflight_generation(kb_dir, options.name, scope=scope)
         if error:
             return GenerationResult("invalid", message=error)
         try:
-            prepared = _prepare(kb_dir, options.target_type, options.name, options.skill_name)
+            prepared = _prepare(
+                kb_dir, options.target_type, options.name, options.skill_name, scope=scope
+            )
         except (ValueError, RuntimeError, OSError) as exc:
             return GenerationResult("invalid", message=str(exc), error_type=type(exc).__name__)
-        target, roots = _paths(kb_dir, options.target_type, options.name, prepared)
+        target, roots = _paths(kb_dir, options.target_type, options.name, prepared, scope=scope)
         if options.version is not None and _version(kb_dir, roots, prepared) != options.version:
             return GenerationResult(
                 "conflict", message="Artifacts changed; review and confirm again"
@@ -237,6 +256,7 @@ async def generate_artifact(
                     critique=options.critique,
                     skill_name=options.skill_name,
                     bundle=credentials,
+                    scope=scope,
                     **({"prepared": prepared} if prepared is not None else {}),
                 )
                 failure: Exception | None = None

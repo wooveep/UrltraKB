@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text, kb_ingest_lock
 from openkb.mutation import mutation_scope
 
 
 def save_exploration(
-    kb_dir: Path, question: str, answer: str, *, unique: bool = True
+    kb_dir: Path,
+    question: str,
+    answer: str,
+    *,
+    unique: bool = True,
+    scope: KnowledgeScope | None = None,
 ) -> Path | None:
     """Save a query answer to ``wiki/explorations/`` as a markdown page.
 
@@ -19,6 +25,7 @@ def save_exploration(
     frontmatter. ``unique=False`` retains the CLI's original slug/overwrite
     policy, including its empty CJK slug.
     """
+    scope = resolve_scope(kb_dir, scope)
     import hashlib
     import re
 
@@ -30,14 +37,14 @@ def save_exploration(
     # concurrent REST saves can both select the same unused suffix and one
     # answer silently overwrites the other.
     with kb_ingest_lock(kb_dir / ".openkb"):
-        explore_dir = kb_dir / "wiki" / "explorations"
+        explore_dir = scope.wiki_dir / "explorations"
         explore_dir.mkdir(parents=True, exist_ok=True)
 
         # Strip ghost wikilinks the agent may have emitted to non-existent
         # concept/summary pages -- the schema_md in the agent's instructions
         # encourages [[wikilinks]] but the agent's view of "which pages
         # exist" can drift from disk reality.
-        known = list_existing_wiki_targets(kb_dir / "wiki")
+        known = list_existing_wiki_targets(scope.wiki_dir)
         cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
 
         slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]

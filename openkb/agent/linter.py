@@ -11,6 +11,7 @@ from agents.model_settings import ModelSettings
 
 from openkb.agent.tools import list_wiki_files, read_wiki_file
 from openkb.config import LlmCredentialBundle, resolve_model_settings
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.schema import get_agents_md
 
 MAX_TURNS = 50
@@ -111,6 +112,7 @@ async def run_knowledge_lint(
     bundle: LlmCredentialBundle | None = None,
     run_config=None,
     on_issue: Callable[[str], None] | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> str:
     """Run the semantic knowledge lint agent against the wiki.
 
@@ -121,12 +123,13 @@ async def run_knowledge_lint(
     Returns:
         The agent's lint report as a Markdown string.
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     language: str = config.get("language", "en")
 
-    wiki_root = str(kb_dir / "wiki")
+    wiki_root = str(scope.wiki_dir)
     agent = build_lint_agent(wiki_root, model, language=language, bundle=bundle)
 
     prompt = (

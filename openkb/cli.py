@@ -44,6 +44,7 @@ import litellm
 litellm.suppress_debug_info = True
 from dotenv import load_dotenv
 
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
 from openkb.config import (
     DEFAULT_CONFIG,
@@ -304,15 +305,19 @@ def _clear_existing_skill_dir(kb_dir: Path, name: str) -> None:
         shutil.rmtree(target)
 
 
-def add_single_file(file_path: Path, kb_dir: Path, *, stage: bool = True, bundle=None):
+def add_single_file(
+    file_path: Path,
+    kb_dir: Path,
+    *,
+    stage: bool = True,
+    bundle=None,
+    scope: KnowledgeScope | None = None,
+):
+    scope = resolve_scope(kb_dir, scope)
     if bundle is None:
         _setup_llm_key(kb_dir)
     return document_use_cases.add_single_file(
-        file_path,
-        kb_dir,
-        stage=stage,
-        bundle=bundle,
-        report=click.echo,
+        file_path, kb_dir, stage=stage, bundle=bundle, report=click.echo, scope=scope
     )
 
 
@@ -1146,8 +1151,11 @@ def watch(ctx):
     watch_directory(raw_dir, on_new_files, cancelled=cancelled)
 
 
-async def run_lint(kb_dir: Path, *, fix: bool = False) -> Path | None:
+async def run_lint(
+    kb_dir: Path, *, fix: bool = False, scope: KnowledgeScope | None = None
+) -> Path | None:
     """CLI/chat projection; shared maintenance owns complete checks and commits."""
+    scope = resolve_scope(kb_dir, scope)
     from openkb.api_lint import echo_lint_event, fix_summary
     from openkb.application.maintenance import LintOptions, check_knowledge
 
@@ -1162,6 +1170,7 @@ async def run_lint(kb_dir: Path, *, fix: bool = False) -> Path | None:
         LintOptions(fix=fix, unique_report=False),
         on_event=event,
         prepare_model=lambda: _setup_llm_key(kb_dir),
+        scope=scope,
     )
     if result.status == "skipped":
         click.echo("Nothing to lint — no documents indexed yet. Run `openkb add` first.")

@@ -31,6 +31,7 @@ from openkb.config import LlmCredentialBundle
 from openkb.deck import deck_dir
 from openkb.deck.creator import DEFAULT_DECK_SKILL, run_deck_create
 from openkb.deck.validator import ValidationResult as DeckValidationResult
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.skill import skill_dir
 from openkb.skill.creator import run_skill_create
 from openkb.skill.marketplace import regenerate_marketplace
@@ -71,6 +72,7 @@ class Generator:
         skill_name: str | None = None,
         bundle: LlmCredentialBundle | None = None,
         prepared: PreparedSkill | None = None,
+        scope: KnowledgeScope | None = None,
     ) -> None:
         """Args:
         skill_name: For ``target_type="deck"``, which deck skill to use.
@@ -89,6 +91,7 @@ class Generator:
         self.name = name
         self.intent = intent
         self.kb_dir = kb_dir
+        self.scope = resolve_scope(kb_dir, scope)
         self.model = model
         self.critique = critique
         self.skill_name = skill_name or DEFAULT_DECK_SKILL
@@ -116,6 +119,7 @@ class Generator:
                 intent=self.intent,
                 model=self.model,
                 bundle=self.bundle,
+                scope=self.scope,
             )
             self.stage = "validation"
             self.validation = validate_skill(self.output_dir)
@@ -134,6 +138,7 @@ class Generator:
             skill_name=self.skill_name,
             **({"prepared": self.prepared} if self.prepared is not None else {}),
             bundle=self.bundle,
+            scope=self.scope,
         )
         # run_deck_create returns a SkillRunResult-like (or Path) — use its
         # validation if present; otherwise fall back to None (skill didn't

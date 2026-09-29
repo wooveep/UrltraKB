@@ -13,6 +13,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files as _changes
 from openkb.application.file_state import contained_paths as _contained
 from openkb.application.file_state import file_versions as _file_versions
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_ingest_lock, kb_ingest_lock_held, kb_read_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, mutation_scope
@@ -139,14 +140,17 @@ def _build_remove_plan(
     *,
     keep_raw: bool,
     keep_empty: bool,
+    scope: KnowledgeScope | None = None,
 ) -> RemovePlan:
     """Scan the KB and predict every file remove will touch (no writes).
 
     Only frontmatter ``sources:`` membership drives the delete/edit
     classification so the plan reflects what the executor will actually do.
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.source_refs import scan_affected_pages
 
+    kb_dir = scope.kb_dir
     name = meta.get("name", "?")
     doc_name = meta.get("doc_name") or Path(name).stem
     doc_type = meta.get("type", "")
@@ -157,7 +161,7 @@ def _build_remove_plan(
         or doc_name in {".", ".."}
     ):
         raise ValueError("Invalid document name in registry")
-    wiki_dir = kb_dir / "wiki"
+    wiki_dir = scope.wiki_dir
     openkb_dir = kb_dir / ".openkb"
 
     actions: list[RemoveAction] = []
@@ -277,6 +281,7 @@ def _execute_remove_plan(
     registry,
     *,
     keep_empty: bool,
+    scope: KnowledgeScope | None = None,
 ) -> RemoveResult:
     """Carry out a remove plan. Registry write is the commit point.
 
@@ -287,6 +292,7 @@ def _execute_remove_plan(
     sweep doesn't strip pre-existing dangling links in unrelated pages
     (issue #58).
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.agent.compiler import (
         remove_doc_from_concept_pages,
         remove_doc_from_entity_pages,
@@ -294,16 +300,16 @@ def _execute_remove_plan(
     )
     from openkb.lint import fix_broken_links
 
-    wiki_dir = kb_dir / "wiki"
+    wiki_dir = scope.wiki_dir
     openkb_dir = kb_dir / ".openkb"
     doc_name = plan.doc_name
     name = plan.name
 
     if not kb_ingest_lock_held(openkb_dir):
         raise RuntimeError("Document removal requires the KB write lease")
-    tracked = _wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan)
+    tracked = _wiki_paths(kb_dir, plan, scope=scope) + _commit_paths(kb_dir, plan, scope=scope)
     before = _file_versions(kb_dir, tracked)
-    with mutation_scope(kb_dir, _wiki_paths(kb_dir, plan), operation="remove-wiki"):
+    with mutation_scope(kb_dir, _wiki_paths(kb_dir, plan, scope=scope), operation="remove-wiki"):
         plan.summary_path.unlink(missing_ok=True)
         plan.source_md.unlink(missing_ok=True)
         plan.source_json.unlink(missing_ok=True)
@@ -330,7 +336,7 @@ def _execute_remove_plan(
 
     wiki_changes = _changes(
         kb_dir,
-        _wiki_paths(kb_dir, plan),
+        _wiki_paths(kb_dir, plan, scope=scope),
         {
             path: version
             for path, version in before.items()
@@ -340,7 +346,7 @@ def _execute_remove_plan(
     pageindex_message: str | None = None
     try:
         with mutation_scope(
-            kb_dir, _commit_paths(kb_dir, plan), operation="remove-index-and-registry"
+            kb_dir, _commit_paths(kb_dir, plan, scope=scope), operation="remove-index-and-registry"
         ):
             if plan.cleanup_pageindex:
                 _, pageindex_message = _cleanup_pageindex(
@@ -396,6 +402,7 @@ def run_remove_for_api(
     keep_raw: bool = False,
     keep_empty: bool = False,
     dry_run: bool = False,
+    scope: KnowledgeScope | None = None,
 ) -> dict:
     """Resolve ``identifier`` and run remove under the KB ingest lock.
 
@@ -406,8 +413,10 @@ def run_remove_for_api(
     Returns a dict whose ``status`` is one of ``not_found``, ``multiple``,
     ``dry_run``, ``removed``, ``partial``.
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.state import HashRegistry
 
+    kb_dir = scope.kb_dir
     openkb_dir = kb_dir / ".openkb"
     with kb_ingest_lock(openkb_dir):
         registry = HashRegistry(openkb_dir / "hashes.json")
@@ -426,11 +435,7 @@ def run_remove_for_api(
 
         file_hash, meta = matches[0]
         plan = _build_remove_plan(
-            kb_dir,
-            file_hash,
-            meta,
-            keep_raw=keep_raw,
-            keep_empty=keep_empty,
+            kb_dir, file_hash, meta, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
         )
         if dry_run:
             return {
@@ -442,7 +447,7 @@ def run_remove_for_api(
                 "entities_deleted": plan.entity_deletes,
             }
 
-        result = _execute_remove_plan(kb_dir, plan, registry, keep_empty=keep_empty)
+        result = _execute_remove_plan(kb_dir, plan, registry, keep_empty=keep_empty, scope=scope)
         return {
             "status": result.status,
             "name": result.name,
@@ -458,7 +463,10 @@ def run_remove_for_api(
         }
 
 
-def _wiki_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
+def _wiki_paths(
+    kb_dir: Path, plan: RemovePlan, *, scope: KnowledgeScope | None = None
+) -> list[Path]:
+    scope = resolve_scope(kb_dir, scope)
     return _contained(
         kb_dir,
         [
@@ -466,16 +474,19 @@ def _wiki_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
             plan.source_md,
             plan.source_json,
             plan.images_dir,
-            kb_dir / "wiki/concepts",
-            kb_dir / "wiki/entities",
-            kb_dir / "wiki/index.md",
+            scope.wiki_dir / "concepts",
+            scope.wiki_dir / "entities",
+            scope.wiki_dir / "index.md",
         ],
     )
 
 
-def _commit_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
+def _commit_paths(
+    kb_dir: Path, plan: RemovePlan, *, scope: KnowledgeScope | None = None
+) -> list[Path]:
+    scope = resolve_scope(kb_dir, scope)
     root = kb_dir / ".openkb"
-    paths = [root / "hashes.json", kb_dir / "wiki/log.md"]
+    paths = [root / "hashes.json", scope.wiki_dir / "log.md"]
     if plan.raw_path is not None:
         paths.append(plan.raw_path)
     if plan.cleanup_pageindex:
@@ -492,10 +503,13 @@ def _commit_paths(kb_dir: Path, plan: RemovePlan) -> list[Path]:
     return _contained(kb_dir, paths)
 
 
-def _plan_version(kb_dir: Path, plan: RemovePlan) -> str:
+def _plan_version(kb_dir: Path, plan: RemovePlan, *, scope: KnowledgeScope | None = None) -> str:
+    scope = resolve_scope(kb_dir, scope)
     digest = hashlib.sha256()
     digest.update(repr(plan).encode())
-    for root in sorted(set(_wiki_paths(kb_dir, plan) + _commit_paths(kb_dir, plan))):
+    for root in sorted(
+        set(_wiki_paths(kb_dir, plan, scope=scope) + _commit_paths(kb_dir, plan, scope=scope))
+    ):
         paths = sorted(root.rglob("*")) if root.is_dir() else [root]
         # Include the directory itself so adding its first child changes the view.
         digest.update(str(root.relative_to(kb_dir)).encode())
@@ -529,8 +543,14 @@ class RemovalOutcome:
 
 
 def preview_removal(
-    kb_dir: Path, identifier: str, *, keep_raw: bool = False, keep_empty: bool = False
+    kb_dir: Path,
+    identifier: str,
+    *,
+    keep_raw: bool = False,
+    keep_empty: bool = False,
+    scope: KnowledgeScope | None = None,
 ) -> RemovalPreview:
+    scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     if not identifier.strip():
         raise ValueError("Document identifier is required")
@@ -547,9 +567,9 @@ def preview_removal(
             )
         file_hash, metadata = matches[0]
         plan = _build_remove_plan(
-            kb_dir, file_hash, metadata, keep_raw=keep_raw, keep_empty=keep_empty
+            kb_dir, file_hash, metadata, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
         )
-        return RemovalPreview("ready", _plan_version(kb_dir, plan), plan)
+        return RemovalPreview("ready", _plan_version(kb_dir, plan, scope=scope), plan)
 
 
 def remove_document(
@@ -560,6 +580,7 @@ def remove_document(
     keep_empty: bool = False,
     version: str | None = None,
     context: ExecutionContext | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> RemovalOutcome:
     """Revalidate a confirmed preview before cleaning either durable phase.
 
@@ -567,10 +588,13 @@ def remove_document(
     one lease or submit an immediate request. Native confirmation supplies the
     preview version; any changed input requires another explicit confirmation.
     """
+    scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
-        preview = preview_removal(kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty)
+        preview = preview_removal(
+            kb_dir, identifier, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
+        )
         if preview.status != "ready":
             return RemovalOutcome(preview.status, preview)
         if version is not None and version != preview.version:
@@ -578,8 +602,10 @@ def remove_document(
         assert preview.plan is not None
         with context.begin(kb_dir):
             registry = HashRegistry(kb_dir / ".openkb/hashes.json")
-            result = _execute_remove_plan(kb_dir, preview.plan, registry, keep_empty=keep_empty)
-        retained_paths = [kb_dir / "wiki/log.md"]
+            result = _execute_remove_plan(
+                kb_dir, preview.plan, registry, keep_empty=keep_empty, scope=scope
+            )
+        retained_paths = [scope.wiki_dir / "log.md"]
         retained_paths += [
             kb_dir / item.split(": ", 1)[1]
             for item in result.changes
@@ -588,7 +614,7 @@ def remove_document(
         if preview.plan.kept_raw is not None:
             retained_paths.append(preview.plan.kept_raw)
         if result.status == "partial":
-            retained_paths += _commit_paths(kb_dir, preview.plan)
+            retained_paths += _commit_paths(kb_dir, preview.plan, scope=scope)
         retained = tuple(
             p.relative_to(kb_dir).as_posix() for p in sorted(set(retained_paths)) if p.exists()
         )

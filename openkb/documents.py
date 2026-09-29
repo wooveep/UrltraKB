@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.cli import _LONG_DOC_TYPES
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.state import HashRegistry
 
 
@@ -27,7 +28,9 @@ def _render_pages(pages: list[dict[str, Any]]) -> str:
     return "\n\n---\n\n".join(part for part in parts if part)
 
 
-def _resolve_source_file(kb_dir: Path, meta: dict, doc_name: str) -> Path | None:
+def _resolve_source_file(
+    kb_dir: Path, meta: dict, doc_name: str, *, scope: KnowledgeScope | None = None
+) -> Path | None:
     """Resolve a document's source file, guarding against path traversal.
 
     Prefers the registry's stored ``source_path`` (a KB-relative posix path),
@@ -35,7 +38,8 @@ def _resolve_source_file(kb_dir: Path, meta: dict, doc_name: str) -> Path | None
     (older entries carry no ``source_path``). Returns ``None`` when nothing
     resolves to an existing file inside ``wiki/sources/``.
     """
-    sources_dir = (kb_dir / "wiki" / "sources").resolve()
+    scope = resolve_scope(kb_dir, scope)
+    sources_dir = (scope.wiki_dir / "sources").resolve()
     candidates: list[Path] = []
     stored = meta.get("source_path")
     if stored:
@@ -56,7 +60,9 @@ def _resolve_source_file(kb_dir: Path, meta: dict, doc_name: str) -> Path | None
     return None
 
 
-def read_document_source(kb_dir: Path, file_hash: str) -> dict[str, Any] | None:
+def read_document_source(
+    kb_dir: Path, file_hash: str, *, scope: KnowledgeScope | None = None
+) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
     Returns ``None`` when the hash is unknown OR its source file is missing,
@@ -64,13 +70,14 @@ def read_document_source(kb_dir: Path, file_hash: str) -> dict[str, Any] | None:
     ``pages`` is the page count for long docs (per-page JSON) and ``None`` for
     short docs.
     """
+    scope = resolve_scope(kb_dir, scope)
     registry = HashRegistry(kb_dir / ".openkb" / "hashes.json")
     meta = registry.get(file_hash)
     if meta is None:
         return None
 
     doc_name = meta.get("doc_name") or Path(meta.get("name", "")).stem
-    source = _resolve_source_file(kb_dir, meta, doc_name)
+    source = _resolve_source_file(kb_dir, meta, doc_name, scope=scope)
     if source is None:
         return None
 

@@ -11,6 +11,7 @@ import contextlib
 import json as _json
 from pathlib import Path, PurePosixPath
 
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text
 
 
@@ -179,7 +180,7 @@ def read_wiki_image(path: str, wiki_root: str) -> dict:
     return {"type": "image", "image_url": f"data:{mime};base64,{b64}"}
 
 
-def read_kb_file(path: str, kb_root: str) -> str:
+def read_kb_file(path: str, kb_root: str, *, scope: KnowledgeScope | None = None) -> str:
     """Read a text file from the KB, restricted to safe read zones.
 
     Allowed prefixes (relative to *kb_root*):
@@ -198,6 +199,7 @@ def read_kb_file(path: str, kb_root: str) -> str:
     if not path:
         return "Access denied: empty path."
     root = Path(kb_root).resolve()
+    scope = resolve_scope(root, scope)
     full_path = (root / path).resolve()
     if not full_path.is_relative_to(root):
         return "Access denied: path escapes KB root."
@@ -206,12 +208,18 @@ def read_kb_file(path: str, kb_root: str) -> str:
         return "Access denied: KB root itself is not readable."
     if rel.parts[0] not in ("wiki", "output", "skills"):
         return "Access denied: path must be under wiki/, output/, or skills/."
+    if rel.parts[0] == "wiki":
+        full_path = scope.wiki_dir.joinpath(*rel.parts[1:]).resolve()
+        if not full_path.is_relative_to(scope.wiki_dir):
+            return "Access denied: path escapes wiki root."
     if not full_path.is_file():
         return f"File not found: {path}"
     return full_path.read_text(encoding="utf-8", errors="replace")
 
 
-def write_kb_file(path: str, content: str, kb_root: str) -> str:
+def write_kb_file(
+    path: str, content: str, kb_root: str, *, scope: KnowledgeScope | None = None
+) -> str:
     """Write a text file under the KB, restricted to safe write zones.
 
     Allowed prefixes (relative to *kb_root*):
@@ -233,6 +241,7 @@ def write_kb_file(path: str, content: str, kb_root: str) -> str:
     if not path:
         return "Access denied: path must be a file under wiki/explorations/ or output/."
     root = Path(kb_root).resolve()
+    scope = resolve_scope(root, scope)
     if (root / path).is_symlink():
         return "Access denied: output target is a symbolic link."
     full_path = (root / path).resolve()
@@ -248,6 +257,10 @@ def write_kb_file(path: str, content: str, kb_root: str) -> str:
     )
     if not allowed:
         return "Access denied: path must be a file under wiki/explorations/ or output/."
+    if parts[0] == "wiki":
+        full_path = scope.wiki_dir.joinpath(*parts[1:]).resolve()
+        if not full_path.is_relative_to(scope.wiki_dir / "explorations"):
+            return "Access denied: path escapes wiki explorations."
     from openkb.artifact_history import history_write_allowed
 
     if not history_write_allowed(full_path):

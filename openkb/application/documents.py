@@ -17,6 +17,7 @@ from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
 from openkb.converter import _registry_path, _sanitize_stem, convert_document
 from openkb.inputs import InputChanged, PreparedInput, prepared_input, validate_source_root
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lifecycle import read_lifecycle
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
@@ -32,13 +33,16 @@ def _staging_dir_for(kb_dir: Path, file_path: Path) -> Path:
     return path
 
 
-def _final_artifact_paths(result, kb_dir: Path) -> tuple[Path | None, Path | None]:
+def _final_artifact_paths(
+    result, kb_dir: Path, *, scope: KnowledgeScope | None = None
+) -> tuple[Path | None, Path | None]:
+    scope = resolve_scope(kb_dir, scope)
     final_raw = None
     final_source = None
     if result.raw_path is not None:
         final_raw = kb_dir / "raw" / result.raw_path.name
     if result.source_path is not None:
-        final_source = kb_dir / "wiki" / "sources" / result.source_path.name
+        final_source = scope.wiki_dir / "sources" / result.source_path.name
     return final_raw, final_source
 
 
@@ -47,6 +51,8 @@ def _snapshot_add_paths(
     doc_name: str,
     final_raw: Path | None,
     final_source: Path | None,
+    *,
+    scope: KnowledgeScope | None = None,
 ) -> list[Path]:
     # NOTE: .openkb/files (the PageIndex blob store) is intentionally NOT
     # snapshotted here. It is append-only by {doc_id}, and the doc_id is only
@@ -54,19 +60,20 @@ def _snapshot_add_paths(
     # whole tree cost one os.link per existing blob on every add; instead the
     # long-doc add path registers just the new blob via snapshot.track_new()
     # once indexing has run.
+    scope = resolve_scope(kb_dir, scope)
     paths = [
         kb_dir / ".openkb" / "hashes.json",
         kb_dir / ".openkb" / "pageindex.db",
         kb_dir / ".openkb" / "pageindex.db-wal",
         kb_dir / ".openkb" / "pageindex.db-shm",
         kb_dir / ".openkb" / "pageindex.db-journal",
-        kb_dir / "wiki" / "summaries" / f"{doc_name}.md",
-        kb_dir / "wiki" / "sources" / f"{doc_name}.json",
-        kb_dir / "wiki" / "sources" / "images" / doc_name,
-        kb_dir / "wiki" / "concepts",
-        kb_dir / "wiki" / "entities",
-        kb_dir / "wiki" / "index.md",
-        kb_dir / "wiki" / "log.md",
+        scope.wiki_dir / "summaries" / f"{doc_name}.md",
+        scope.wiki_dir / "sources" / f"{doc_name}.json",
+        scope.wiki_dir / "sources" / "images" / doc_name,
+        scope.wiki_dir / "concepts",
+        scope.wiki_dir / "entities",
+        scope.wiki_dir / "index.md",
+        scope.wiki_dir / "log.md",
     ]
     if final_raw is not None:
         paths.append(final_raw)
@@ -103,8 +110,10 @@ def add_single_file(
     on_event: Callable[[dict], None] | None = None,
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Compatibility projection of the shared import use case's status."""
+    scope = resolve_scope(kb_dir, scope)
     return import_document(
         kb_dir,
         file_path,
@@ -114,6 +123,7 @@ def add_single_file(
         on_event=on_event,
         prepared=prepared,
         origin_url=origin_url,
+        scope=scope,
     ).status
 
 
@@ -127,6 +137,7 @@ def _add_single_file_locked(
     on_event: Callable[[dict], None] | None = None,
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document into the knowledge base.
 
@@ -144,6 +155,7 @@ def _add_single_file_locked(
         be an orphan) while preserving it on failure so the user can
         retry without re-downloading.
     """
+    scope = resolve_scope(kb_dir, scope)
     from openkb.agent.compiler import (
         DEFAULT_COMPILE_CONCURRENCY,
         compile_long_doc,
@@ -182,7 +194,7 @@ def _add_single_file_locked(
     doc_name = result.doc_name or file_path.stem
     index_result = None  # populated only on the long-doc branch
 
-    final_raw, final_source = _final_artifact_paths(result, kb_dir)
+    final_raw, final_source = _final_artifact_paths(result, kb_dir, scope=scope)
 
     def commit_body(snapshot) -> None:
         nonlocal index_result
@@ -209,7 +221,9 @@ def _add_single_file_locked(
             try:
                 from openkb.indexer import index_long_document
 
-                index_result = index_long_document(result.raw_path, kb_dir, doc_name=doc_name)
+                index_result = index_long_document(
+                    result.raw_path, kb_dir, doc_name=doc_name, scope=scope
+                )
             except Exception as exc:
                 report(f"  [ERROR] Indexing failed: {exc}")
                 logger.debug("Indexing traceback:", exc_info=True)
@@ -231,7 +245,7 @@ def _add_single_file_locked(
                     ]
                 )
 
-            summary_path = kb_dir / "wiki" / "summaries" / f"{doc_name}.md"
+            summary_path = scope.wiki_dir / "summaries" / f"{doc_name}.md"
             if on_event:
                 on_event({"stage": "compiling", "source": str(file_path)})
             _run_compile_with_retry(
@@ -244,6 +258,7 @@ def _add_single_file_locked(
                     doc_description=index_result.description,
                     max_concurrency=resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY,
                     bundle=bundle,
+                    scope=scope,
                 ),
                 label=f"Compiling long doc (doc_id={index_result.doc_id})",
                 report=report,
@@ -262,6 +277,7 @@ def _add_single_file_locked(
                     model,
                     max_concurrency=resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY,
                     bundle=bundle,
+                    scope=scope,
                 ),
                 label="Compiling short doc",
                 report=report,
@@ -296,7 +312,7 @@ def _add_single_file_locked(
             registry.add(result.file_hash, meta)
 
     def append_ingest_log() -> None:
-        append_log(kb_dir / "wiki", "ingest", file_path.name)
+        append_log(scope.wiki_dir, "ingest", file_path.name)
 
     from openkb.add_coordinator import AddMutationPlan, run_add_mutation
 
@@ -307,12 +323,12 @@ def _add_single_file_locked(
             "name": file_path.name,
             "doc_name": doc_name,
         },
-        touched_paths=_snapshot_add_paths(kb_dir, doc_name, final_raw, final_source),
+        touched_paths=_snapshot_add_paths(kb_dir, doc_name, final_raw, final_source, scope=scope),
         body=commit_body,
         post_commit_hooks=[append_ingest_log],
         hardlink_dirs={
-            kb_dir / "wiki" / "concepts",
-            kb_dir / "wiki" / "entities",
+            scope.wiki_dir / "concepts",
+            scope.wiki_dir / "entities",
         },
         staging_dirs=[staging_dir],
     )
@@ -340,14 +356,22 @@ class AddFileResult:
 
 
 def _add_for_api(
-    file_path: Path, kb_dir: Path, *, bundle=None, source_root: Path | None = None
+    file_path: Path,
+    kb_dir: Path,
+    *,
+    bundle=None,
+    source_root: Path | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
 
     Import preparation, locking and business work belong to ``import_document``.
     On ``skipped`` the upload owner checks whether its raw copy can be discarded.
     """
-    status_str = import_document(kb_dir, file_path, bundle=bundle, source_root=source_root).status
+    scope = resolve_scope(kb_dir, scope)
+    status_str = import_document(
+        kb_dir, file_path, bundle=bundle, source_root=source_root, scope=scope
+    ).status
     if status_str == "skipped":
         message = f"Already in knowledge base: {file_path.name}"
     elif status_str == "failed":
@@ -384,8 +408,10 @@ def import_document(
     stage: bool = True,
     prepared: PreparedInput | None = None,
     report=logger.info,
+    scope: KnowledgeScope | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
+    scope = resolve_scope(kb_dir, scope)
     from openkb.state import HashRegistry
 
     root = kb_dir.expanduser().resolve()
@@ -452,6 +478,7 @@ def import_document(
                     on_event=on_event or (context.on_event if context else None),
                     origin_url=origin_url,
                     report=report,
+                    scope=scope,
                 )
             entries = HashRegistry(root / ".openkb/hashes.json")
             meta = entries.get(ready.digest)
@@ -463,7 +490,7 @@ def import_document(
                         if target.is_file():
                             resources.append(str(target))
                 if meta.get("doc_name"):
-                    summary = root / "wiki/summaries" / f"{meta['doc_name']}.md"
+                    summary = scope.wiki_dir / "summaries" / f"{meta['doc_name']}.md"
                     if summary.is_file():
                         resources.append(str(summary))
             elif source.is_relative_to(root / "raw"):
