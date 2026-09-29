@@ -41,11 +41,18 @@ def result_from_publication(
     status: Literal["added", "skipped", "failed", "blocked", "partial", "stopped"],
 ) -> IngestResult:
     resources = [str(kb_dir / admission.revision.original)]
+    from openkb.application.sources import processing_details
+
     actual_source = None
+    manifest = None
     if state.successful_revision_id:
         actual = read_record(kb_dir, "unit-revisions", state.successful_revision_id, UnitRevision)
         actual_source = actual.source_revision_id
     if state.knowledge_revision_id:
+        from openkb.application.sources import _manifest
+
+        published = _manifest(kb_dir, state)
+        manifest = published[1] if published else None
         wiki = (
             kb_dir
             / ".openkb/knowledge"
@@ -71,6 +78,7 @@ def result_from_publication(
         state.error_type,
         state.message,
         state.job_id,
+        **processing_details(kb_dir, state, manifest),
     )
     return IngestResult(
         admission.source.identity,
@@ -159,7 +167,7 @@ def import_prepared_pdf(
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint
         if review
-        else normalization_fingerprint(kb_dir)
+        else normalization_fingerprint(kb_dir, scope=scope, bundle=bundle)
     )
 
     unit, revision = plan_import_units(kb_dir, admission, fingerprint)
@@ -185,7 +193,13 @@ def import_prepared_pdf(
         if on_event:
             on_event({"stage": "converting", "source": admission.source.name})
         directory, normalized = retain_normalization(
-            kb_dir, admission, prepared, fingerprint, check_stop=check_stop
+            kb_dir,
+            admission,
+            prepared,
+            fingerprint,
+            check_stop=check_stop,
+            scope=scope,
+            bundle=bundle,
         )
         if assessment.missing_fields:
             state = save_version_wait(kb_dir, admission, normalized, state, assessment)
@@ -242,8 +256,15 @@ def import_prepared_pdf(
             extension = "json" if converted.is_long_doc else "md"
             from openkb.source_map import freeze_pdf_map
 
-            source_map = freeze_pdf_map(
-                view.scope.wiki_dir, unit.doc_name, kb_dir / admission.revision.original
+            page_map = view.scope.wiki_dir / "sources" / f"{unit.doc_name}.json"
+            # A pre-page-map publication can be clarified using its retained
+            # conversion. It must not gain invented coverage or be reconverted.
+            source_map = (
+                freeze_pdf_map(
+                    view.scope.wiki_dir, unit.doc_name, kb_dir / admission.revision.original
+                )
+                if converted.processing is not None or page_map.exists()
+                else None
             )
             state = publish_unit_revision(
                 kb_dir,
@@ -254,6 +275,7 @@ def import_prepared_pdf(
                 view,
                 normalized_source=f"sources/{unit.doc_name}.{extension}",
                 source_map=source_map,
+                processing=converted.processing,
                 normalized_format="pdf" if converted.is_long_doc else "markdown",
                 is_long=converted.is_long_doc,
                 index_ref=index_ref,

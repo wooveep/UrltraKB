@@ -1984,7 +1984,14 @@ def test_page_endpoint_returns_content(monkeypatch, kb_dir):
     response = client.post("/api/v1/page", json={"kb": kb, "path": "concepts/a"}, headers=_auth())
 
     assert response.status_code == 200
-    assert response.json() == {"path": "concepts/a", "content": "# A\n\nHello."}
+    assert response.json() == {
+        "path": "concepts/a",
+        "content": "# A\n\nHello.",
+        "knowledge_revision_id": None,
+        "source_revision_ids": [],
+        "validity": "current",
+        "refresh_reasons": [],
+    }
 
 
 def test_page_endpoint_404_on_missing_page(monkeypatch, kb_dir):
@@ -2318,7 +2325,7 @@ def test_kb_config_patch_rejects_bad_value_type(monkeypatch, kb_dir):
     # and returns the original int threshold (proving no config.yaml corruption).
     follow_up = client.get("/api/v1/kb/config", params={"kb": kb}, headers=_auth())
     assert follow_up.status_code == 200
-    assert follow_up.json()["pageindex_threshold"] == 20
+    assert follow_up.json()["pageindex_threshold"] == 11
 
 
 def test_kb_config_patch_coerces_numeric_string_threshold(monkeypatch, kb_dir):
@@ -2530,10 +2537,10 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
     client = _client(monkeypatch)
     body = client.get("/api/v1/config", headers=_auth()).json()
-    assert body == {
+    expected = {
         "model": "gpt-5.4",
         "language": "en",
-        "pageindex_threshold": 20,
+        "pageindex_threshold": 11,
         # Default entity-type vocabulary when global.yaml sets none.
         "entity_types": ["person", "organization", "place", "product", "work", "event", "other"],
         # kb_root reports the EFFECTIVE root; with no env/global override it is
@@ -2543,6 +2550,10 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
         "openai_api_base": None,
         "has_api_key": False,
     }
+    assert {key: body[key] for key in expected} == expected
+    assert body["pdf_short_max_pages"] == 10 and body["pdf_limit"]["source"] == "default"
+    assert body["model_capacity"] is None
+    assert body["capacity"]["source"] == "bundled_model_catalog"
 
 
 def test_global_config_patch_sets_value_and_preserves_registry(monkeypatch, tmp_path):

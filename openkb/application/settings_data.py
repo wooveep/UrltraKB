@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
+
+from openkb.processing_policy import ModelCapacity, PdfLimit
 
 
 class _KbConfigWritable(BaseModel):
@@ -24,10 +26,19 @@ class _KbConfigWritable(BaseModel):
     model: str | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
+    pdf_short_max_pages: int | None = Field(default=None, ge=0)
+    model_capacity: ModelCapacity | None = None
     # Entity-type vocabulary for extraction. A list REPLACES the layer below; an
     # explicit null reverts to inherited. Values are cleaned/deduped and "other"
     # is always ensured at read time (config.resolve_entity_types).
     entity_types: list[str] | None = None
+
+    @field_validator("pageindex_threshold", "pdf_short_max_pages", mode="before")
+    @classmethod
+    def reject_boolean_limits(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("PDF page limits must be integers, not booleans")
+        return value
 
 
 # Single source of truth for the writable config keys (derived from the model
@@ -41,13 +52,19 @@ class GlobalConfigValues(BaseModel):
     model: str | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
+    pdf_short_max_pages: int | None = None
+    model_capacity: ModelCapacity | None = None
     entity_types: list[str] | None = None
 
 
 class GlobalConfigResponse(BaseModel):
+    capacity: dict = Field(default_factory=dict)
     model: str
     language: str
     pageindex_threshold: int
+    pdf_short_max_pages: int
+    pdf_limit: PdfLimit
+    model_capacity: ModelCapacity | None = None
     # Effective global entity-type vocabulary (cleaned; always includes "other").
     entity_types: list[str]
     # Effective KB root that kb_root_dir() would return (env OPENKB_KB_ROOT >
@@ -80,9 +97,13 @@ class GlobalConfigPatchRequest(BaseModel):
 
 
 class KbConfigResponse(BaseModel):
+    capacity: dict = Field(default_factory=dict)
     model: str
     language: str
     pageindex_threshold: int
+    pdf_short_max_pages: int
+    pdf_limit: PdfLimit
+    model_capacity: ModelCapacity | None = None
     # Effective entity-type vocabulary (cleaned; always includes "other").
     entity_types: list[str]
     openai_api_base: str | None
@@ -105,3 +126,4 @@ class SettingsView(BaseModel):
 
     values: GlobalConfigResponse | KbConfigResponse
     sources: dict[str, str]
+    capacity: dict = Field(default_factory=dict)

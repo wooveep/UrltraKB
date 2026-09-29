@@ -16,6 +16,7 @@ from openkb.config import resolve_effective_config
 from openkb.images import convert_pdf_with_images, copy_relative_images, extract_base64_images
 from openkb.inputs import PreparedInput
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+from openkb.processing_policy import ProcessingDecision, classify_pdf
 from openkb.state import HashRegistry
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class ConvertResult:
     file_hash: str | None = None  # For deferred hash registration
     doc_name: str | None = None  # Stable wiki name (collision-resistant)
     source_identity: str | None = None  # Frozen alongside the prepared bytes
+    processing: ProcessingDecision | None = None
 
 
 def _registry_path(path: Path, kb_dir: Path) -> str:
@@ -191,7 +193,7 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         openkb_dir = kb_dir / ".openkb"
         config = resolve_effective_config(kb_dir)[0]
-        threshold: int = config.get("pageindex_threshold", 20)
+        processing = None
         artifact_root = staging_dir if staging_dir is not None else kb_dir
         registry = HashRegistry(openkb_dir / "hashes.json")
 
@@ -233,11 +235,11 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         if src.suffix.lower() == ".pdf":
             page_count = get_pdf_page_count(prepared)
-            if page_count >= threshold:
+            processing = classify_pdf(page_count, config)
+            if processing.execution_mode == "segmented":
                 logger.info(
-                    "Long PDF detected (%d pages >= %d threshold): %s",
+                    "PDF uses segmented compilation (%d physical pages): %s",
                     page_count,
-                    threshold,
                     src.name,
                 )
                 return ConvertResult(
@@ -246,6 +248,7 @@ def _convert_prepared_document(
                     file_hash=file_hash,
                     doc_name=doc_name,
                     source_identity=source_identity,
+                    processing=processing,
                 )
 
         # ------------------------------------------------------------------
@@ -292,4 +295,5 @@ def _convert_prepared_document(
             file_hash=file_hash,
             doc_name=doc_name,
             source_identity=source_identity,
+            processing=processing,
         )

@@ -70,11 +70,13 @@ async def recompile_source(
     admission = Admission(source, frozen, intent)
     actual = _manifest(kb_dir, previous) if previous else None
     source_map = None
+    processing = None
     if actual and previous and previous.successful_revision_id == revision.unit_revision_id:
         directory, manifest = actual
         normalized_source = manifest.normalized_source
         normalized_format = manifest.normalized_format
         source_map = manifest.source_map
+        processing = manifest.processing
         if source_map:
             from openkb.source_map import read_source_map
 
@@ -161,6 +163,7 @@ async def recompile_source(
                 view,
                 normalized_source=normalized_source,
                 source_map=source_map,
+                processing=processing,
                 is_long=is_long,
                 index_ref=index_ref,
                 normalized_format=normalized_format or "markdown",

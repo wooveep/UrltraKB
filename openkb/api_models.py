@@ -165,6 +165,10 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    target_processing: dict | None = None
+    length_class: str | None = None
+    execution_mode: str | None = None
+    processing: dict | None = None
     validity: str = "current"
     source_generation: int | None = None
     view_id: str = "legacy"
@@ -349,6 +353,10 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    target_processing: dict | None = None
+    length_class: str | None = None
+    execution_mode: str | None = None
+    processing: dict | None = None
     unit_kind: str | None = None
     page_range: list[int] = Field(default_factory=list)
     coverage: str = "unknown"

@@ -38,6 +38,7 @@ class RecompileTarget:
     name: str
     doc_name: str
     kind: str
+    execution_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,8 @@ def select_recompilation(
                 item["source_id"],
                 item["name"],
                 item["doc_name"],
-                "long" if item["display_type"] == "pageindex" else "short",
+                item["length_class"] or "unknown",
+                item["execution_mode"],
             )
             for item in admitted
             if all_docs
@@ -171,6 +173,7 @@ class RecompileResult:
     unfinished: tuple[str, ...] = ()
     version: str | None = None
     quality: tuple[str, ...] = ()
+    execution_mode: str | None = None
 
 
 async def recompile_document(
@@ -296,11 +299,7 @@ async def recompile_document(
         elif result.status == "stopped":
             status = "stopped"
         summary = scope.wiki_dir / "summaries" / f"{admitted.doc_name}.md"
-        kind = (
-            "long"
-            if (scope.wiki_dir / "sources" / f"{admitted.doc_name}.json").exists()
-            else "short"
-        )
+        kind = (result.units[0].length_class if result.units else None) or "unknown"
         return RecompileResult(
             status,
             admitted.doc_name,
@@ -314,4 +313,5 @@ async def recompile_document(
             unfinished=result.unfinished,
             version=_version(kb_dir, scope=requested_scope) if version is not None else None,
             quality=result.quality,
+            execution_mode=result.units[0].execution_mode if result.units else None,
         )

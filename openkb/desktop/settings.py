@@ -35,7 +35,9 @@ _SOURCES = {
 _FIELDS = {
     "model": "模型",
     "language": "内容语言",
-    "pageindex_threshold": "长 PDF 起始页数",
+    "pdf_short_max_pages": "短 PDF 页数上限（含）",
+    "pageindex_threshold": "兼容旧 PDF 阈值（≤0 强制分段）",
+    "model_capacity": "模型容量（JSON，可清除以自动判断）",
     "entity_types": "实体类型（逗号分隔）",
     "openai_api_base": "API base URL",
     "api_key": "API Key",
@@ -66,6 +68,8 @@ class SettingField(QWidget):
             current = "已设置（输入可更换）" if value else "未设置"
         elif isinstance(value, list):
             current = ", ".join(value)
+        elif self.key == "model_capacity" and value is not None:
+            current = value.model_dump_json(exclude_none=True, exclude={"schema_version"})
         else:
             current = str(value) if value is not None else "未设置"
         self.text.setPlaceholderText(current)
@@ -78,14 +82,18 @@ class SettingField(QWidget):
         text = self.text.text().strip() if self.key != "api_key" else self.text.text()
         if not text:
             raise ValueError(f"{_FIELDS[self.key]}：请输入值，或选择清除覆盖")
-        if self.key == "pageindex_threshold":
+        if self.key in {"pageindex_threshold", "pdf_short_max_pages"}:
             try:
                 value = int(text)
             except ValueError:
-                raise ValueError("长 PDF 起始页数须为正整数") from None
-            if value < 1:
-                raise ValueError("长 PDF 起始页数须为正整数")
+                raise ValueError("PDF 页数须为整数") from None
+            if self.key == "pdf_short_max_pages" and value < 0:
+                raise ValueError("短 PDF 页数上限须为非负整数")
             return value
+        if self.key == "model_capacity":
+            from openkb.processing_policy import ModelCapacity
+
+            return ModelCapacity.model_validate_json(text).model_dump(mode="json")
         if self.key == "entity_types":
             return [part.strip() for part in text.replace("，", ",").split(",") if part.strip()]
         return text
@@ -123,6 +131,9 @@ class SettingsDialog(ManagementPanel):
         )
         hint.setWordWrap(True)
         content_layout.addWidget(hint)
+        self.policy = QLabel()
+        self.policy.setWordWrap(True)
+        content_layout.addWidget(self.policy)
         content_layout.addStretch()
         layout.addWidget(scroll_form(content), 1)
         self.repair_button = QPushButton("检查并恢复设置…")
@@ -168,6 +179,22 @@ class SettingsDialog(ManagementPanel):
         self._loaded = True
         self.form.setEnabled(True)
         self.status.setText(str(self.kb) if self.kb else "全局默认：知识库与启动环境可覆盖这些值。")
+        limit = view.values.pdf_limit
+        capacity = view.capacity
+        classification = (
+            "全部分段" if limit.legacy_force_index else f"≤{limit.short_max_pages} 页为短文"
+        )
+        boundary = capacity.get("input_limit") if not capacity.get("unknown_reason") else "未知"
+        self.policy.setText(
+            f"当前 PDF：{classification}"
+            f"；来源：{_SOURCES[limit.source]} / {limit.key}。\n"
+            "同层新上限优先于兼容旧阈值；清除新上限后，已有旧阈值仍会生效。\n"
+            f"模型输入上限：{boundary}"
+            f"；来源：{capacity.get('source')}。"
+            "容量未知会尝试全文；已知不足的短文使用分段编译。\n"
+            "容量 JSON 可指定 max_input_tokens，或 context_window_tokens 与 output_reserve_tokens；"
+            "自定义端点还需 tokenizer_model。"
+        )
         for key, field in self.fields.items():
             value = view.values.has_api_key if key == "api_key" else getattr(view.values, key)
             field.load(value, view.sources[key])

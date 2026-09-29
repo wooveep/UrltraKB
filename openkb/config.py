@@ -54,7 +54,8 @@ DEFAULT_ENTITY_TYPES: tuple[str, ...] = (
 DEFAULT_CONFIG: dict[str, Any] = {
     "model": "gpt-5.4",
     "language": "en",
-    "pageindex_threshold": 20,
+    "pageindex_threshold": 11,  # Compatibility projection; only explicit legacy values are policy.
+    "pdf_short_max_pages": 10,
     # A GLOBAL_SCALAR_KEY like the three above, so the merged `effective` dict
     # always carries it (the layering/`sources` logic is type-agnostic). A
     # global/KB list overrides it wholesale; resolve_entity_types cleans the
@@ -460,12 +461,21 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
             continue
         if not isinstance(value, str):
             raise ValueError(f"Configuration field '{key}' must be a string")
-    threshold = config.get("pageindex_threshold")
-    if threshold is None and allow_inherited:
-        return
-    # Legacy zero/negative thresholds route every PDF through PageIndex.
-    if isinstance(threshold, bool) or not isinstance(threshold, int):
-        raise ValueError("Configuration field 'pageindex_threshold' must be an integer")
+    for key in ("pageindex_threshold", "pdf_short_max_pages"):
+        value = config.get(key)
+        if value is None and (allow_inherited or key not in config):
+            continue
+        if type(value) is not int:
+            raise ValueError(f"Configuration field '{key}' must be an integer")
+        if key == "pdf_short_max_pages" and value < 0:
+            raise ValueError("Configuration field 'pdf_short_max_pages' must be nonnegative")
+    if config.get("model_capacity") is not None:
+        from openkb.processing_policy import ModelCapacity
+
+        try:
+            ModelCapacity.model_validate(config["model_capacity"])
+        except ValueError:
+            raise ValueError("Configuration field 'model_capacity' is invalid") from None
 
 
 def load_global_config() -> dict[str, Any]:
@@ -485,6 +495,8 @@ GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
     "model",
     "language",
     "pageindex_threshold",
+    "pdf_short_max_pages",
+    "model_capacity",
     "entity_types",
 )
 
@@ -524,6 +536,7 @@ def resolve_effective_config(kb_dir: Path) -> tuple[dict[str, Any], dict[str, st
             sources[key] = "global"
 
     kb_path = kb_dir / ".openkb" / "config.yaml"
+    kb_config: dict[str, Any] = {}
     if kb_path.exists():
         with kb_path.open("r", encoding="utf-8") as fh:
             kb_config = yaml.safe_load(fh) or {}
@@ -543,6 +556,13 @@ def resolve_effective_config(kb_dir: Path) -> tuple[dict[str, Any], dict[str, st
             if key in GLOBAL_SCALAR_KEYS:
                 sources[key] = "kb"
 
+    from openkb.processing_policy import resolve_pdf_limit
+
+    limit = resolve_pdf_limit(global_config, kb_config)
+    effective["pdf_limit"] = limit.model_dump(mode="json")
+    effective["pdf_short_max_pages"] = limit.short_max_pages
+    effective["pageindex_threshold"] = limit.compatibility_threshold
+    sources["pdf_short_max_pages"] = sources["pageindex_threshold"] = limit.source
     return effective, sources
 
 

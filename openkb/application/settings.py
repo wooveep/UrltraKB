@@ -38,6 +38,20 @@ from openkb.mutation import mutation_scope
 logger = logging.getLogger(__name__)
 
 
+def _merge_config_patch(current: dict, patch: dict) -> dict:
+    """RFC 7386: nested objects merge; null removes only the named override."""
+    merged = dict(current)
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+        elif isinstance(value, dict):
+            previous = merged.get(key)
+            merged[key] = _merge_config_patch(previous if isinstance(previous, dict) else {}, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _has_line_separator(value: str) -> bool:
     """Whether ``value`` contains ANY character ``str.splitlines()`` treats as a
     line boundary — the exact splitter :func:`_merge_patch_env` uses to parse
@@ -137,10 +151,18 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     effective, sources = resolve_effective_config(kb_dir)
     bundle = resolve_credential_bundle(kb_dir)
     global_config = load_global_config()
+    from openkb.execution_capacity import capacity_policy
+
     return KbConfigResponse(
+        capacity=capacity_policy(
+            effective, custom_endpoint=bool(bundle.base_url), origin=sources["model_capacity"]
+        ),
         model=effective["model"],
         language=effective["language"],
         pageindex_threshold=effective["pageindex_threshold"],
+        pdf_short_max_pages=effective["pdf_short_max_pages"],
+        pdf_limit=effective["pdf_limit"],
+        model_capacity=effective.get("model_capacity"),
         # Cleaned effective list (what the compiler will use), not the raw stored
         # value — resolve_entity_types defaults + dedupes + ensures "other".
         entity_types=resolve_entity_types(effective, warn=False),
@@ -151,6 +173,8 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
             model=global_config.get("model"),
             language=global_config.get("language"),
             pageindex_threshold=global_config.get("pageindex_threshold"),
+            pdf_short_max_pages=global_config.get("pdf_short_max_pages"),
+            model_capacity=global_config.get("model_capacity"),
             entity_types=global_config.get("entity_types"),
         ),
     )
@@ -205,11 +229,7 @@ def _apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
         # while an absent field is left unchanged. model_fields_set (via
         # exclude_unset) distinguishes the two; a None value = explicit null.
         dumped = validated.model_dump(exclude_unset=True)
-        for key, value in dumped.items():
-            if value is None:
-                config.pop(key, None)
-            else:
-                config[key] = value
+        config = _merge_config_patch(config, dumped)
         save_config(config_path, config)
 
     if "api_key" in fields_set or "openai_api_base" in fields_set:
@@ -244,16 +264,29 @@ def _read_global_config() -> GlobalConfigResponse:
     from dotenv import dotenv_values
 
     gc = load_global_config()
+    from openkb.processing_policy import resolve_pdf_limit
+
+    limit = resolve_pdf_limit(gc, {})
     # GLOBAL_CONFIG_DIR is read through the module object (not imported by name)
     # because tests monkeypatch openkb.config.GLOBAL_CONFIG_DIR per test.
     env_path = _config_module.GLOBAL_CONFIG_DIR / ".env"
     env_values: dict[str, str | None] = {}
     if env_path.exists():
         env_values = dict(dotenv_values(str(env_path)))
+    from openkb.execution_capacity import capacity_policy
+
     return GlobalConfigResponse(
+        capacity=capacity_policy(
+            {**DEFAULT_CONFIG, **gc},
+            custom_endpoint=bool(env_values.get("OPENAI_API_BASE")),
+            origin="global",
+        ),
         model=gc.get("model", DEFAULT_CONFIG["model"]),
         language=gc.get("language", DEFAULT_CONFIG["language"]),
-        pageindex_threshold=gc.get("pageindex_threshold", DEFAULT_CONFIG["pageindex_threshold"]),
+        pageindex_threshold=limit.compatibility_threshold,
+        pdf_short_max_pages=limit.short_max_pages,
+        pdf_limit=limit,
+        model_capacity=gc.get("model_capacity"),
         # Effective global vocabulary (cleaned; defaults to DEFAULT_ENTITY_TYPES).
         entity_types=resolve_entity_types(gc, warn=False),
         # Report the EFFECTIVE root (env > global.yaml kb_root > default) via the
@@ -321,11 +354,7 @@ def apply_global_config_patch(request: GlobalConfigPatchRequest) -> None:
         if dumped is not None or write_kb_root:
             gc = _load_global_config_unlocked()
             if dumped is not None:
-                for key, value in dumped.items():
-                    if value is None:
-                        gc.pop(key, None)  # RFC 7386 removal -> back to DEFAULT_CONFIG
-                    else:
-                        gc[key] = value
+                gc = _merge_config_patch(gc, dumped)
             if write_kb_root:
                 # kb_root is a plain global.yaml key (like known_kbs), NOT a
                 # scalar in `config` and NOT a credential — it is merged directly
@@ -414,9 +443,10 @@ def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
             }
         )
         layers = []
+        sources["pdf_short_max_pages"] = sources["pageindex_threshold"] = values.pdf_limit.source
         if kb_dir:
             layers.extend([("kb", dotenv_values(kb_dir / ".env")), ("environment", os.environ)])
         layers.append(("global", dotenv_values(_config_module.GLOBAL_CONFIG_DIR / ".env")))
         for field, key in (("api_key", "LLM_API_KEY"), ("openai_api_base", "OPENAI_API_BASE")):
             sources[field] = next((name for name, data in layers if data.get(key)), "unset")
-        return SettingsView(values=values, sources=sources)
+        return SettingsView(values=values, sources=sources, capacity=values.capacity)

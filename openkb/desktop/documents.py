@@ -266,11 +266,24 @@ class DocumentsDialog(ManagementPanel):
                 item = QTableWidgetItem(doc["name"])
                 item.setData(Qt.ItemDataRole.UserRole, doc["hash"])
                 self.table.setItem(row, 0, item)
+                target = doc.get("target_processing")
+                target_hint = (
+                    f"\n新目标：{target['length_class']} / {target['execution_mode']}；"
+                    f"容量：{target['capacity_status']}"
+                    if target
+                    else ""
+                )
                 item.setToolTip(
-                    f"来源：{doc.get('source_id') or doc['hash']}\n{doc.get('message') or ''}"
+                    f"来源：{doc.get('source_id') or doc['hash']}\n"
+                    f"{doc.get('message') or ''}{target_hint}"
                 )
                 self.table.setItem(row, 5, QTableWidgetItem(doc.get("view_id", "legacy")))
-                is_long = doc.get("display_type") == "pageindex"
+                classification = {"short": "短文", "long": "长文"}.get(
+                    doc.get("length_class"), "分类未知"
+                )
+                execution = {"full": "全文编译", "segmented": "分段编译"}.get(
+                    doc.get("execution_mode"), "方式未记录"
+                )
                 self.table.setItem(
                     row,
                     1,
@@ -279,7 +292,7 @@ class DocumentsDialog(ManagementPanel):
                 self.table.setItem(
                     row,
                     2,
-                    QTableWidgetItem("PageIndex 长文索引" if is_long else "Markdown 全文编译"),
+                    QTableWidgetItem(f"{classification} · {execution}"),
                 )
                 validity = {
                     "needs_refresh": "待刷新",

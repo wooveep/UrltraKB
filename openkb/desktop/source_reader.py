@@ -19,6 +19,32 @@ class SourceReader(QDialog):
         hint = QLabel("导入时保留的原文 · 摘要、概念和实体请在知识页阅读")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        if source.get("processing"):
+            decision = source["processing"]
+            classification = {"short": "短文", "long": "长文"}[decision["length_class"]]
+            execution = {"full": "全文编译", "segmented": "分段编译"}[decision["execution_mode"]]
+            capacity = {
+                "unknown": "未知，尝试全文",
+                "insufficient": "不足，使用分段",
+                "sufficient": "可容纳首次全文请求",
+                "not_needed": "长文直接分段",
+            }[decision["capacity_status"]]
+            limit = decision["pdf_limit"]
+            policy = QLabel(
+                f"分类：{classification} · 执行：{execution} · 容量：{capacity}\n"
+                f"导入时短 PDF 上限：{limit['short_max_pages']} 页；"
+                f"来源：{limit['source']} / {limit['key']}"
+            )
+            policy.setWordWrap(True)
+            layout.addWidget(policy)
+        target = source.get("target_processing")
+        if target and target != source.get("processing"):
+            pending = QLabel(
+                f"新目标处理：{target['length_class']} / {target['execution_mode']}；"
+                f"容量：{target['capacity_status']}。当前正文仍采用上次成功结果。"
+            )
+            pending.setWordWrap(True)
+            layout.addWidget(pending)
         if source.get("source_revision_id"):
             metadata = source.get("version_metadata", {})
             target_revision = (

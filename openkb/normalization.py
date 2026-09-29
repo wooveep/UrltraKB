@@ -10,6 +10,7 @@ from openkb.converter import ConvertResult, convert_document
 from openkb.file_state import contained_paths
 from openkb.inputs import PreparedInput
 from openkb.mutation import _copy_file_atomic, mutation_scope
+from openkb.processing_policy import ProcessingDecision
 from openkb.source_catalog import Admission, read_record, record_path, write_record
 from openkb.source_records import Digest, Record, RecordId, RelativePath
 from openkb.unit_publication import copy_tree, wiki_versions
@@ -23,25 +24,51 @@ class NormalizedInput(Record):
     source_path: RelativePath | None
     is_long: bool
     files: dict[RelativePath, Digest]
+    processing: ProcessingDecision | None = None
 
 
-def normalization_fingerprint(kb_dir: Path) -> str:
+def normalization_fingerprint(kb_dir: Path, *, scope=None, bundle=None) -> str:
+    from openkb.agent.compiler import get_agents_md, short_document_messages
+    from openkb.config import resolve_credential_bundle
+    from openkb.execution_capacity import capacity_policy
+    from openkb.knowledge_scope import resolve_scope
+
     config = resolve_effective_config(kb_dir)[0]
+    credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
+    request_basis = short_document_messages(
+        "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
+    )
     return json.dumps(
         {
-            "pipeline": "pdf-physical-v2",
-            "threshold": config.get("pageindex_threshold", 20),
+            "pipeline": "pdf-physical-v3",
+            "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": "content-based-physical-v1",
+            "capacity": capacity_policy(config, custom_endpoint=bool(credentials.base_url)),
+            "request_basis": hashlib.sha256(
+                json.dumps(request_basis, sort_keys=True).encode()
+            ).hexdigest(),
         },
         sort_keys=True,
     )
 
 
-def normalization_id(admission: Admission, fingerprint: str) -> str:
-    return hashlib.sha256(
-        f"{admission.revision.source_revision_id}:{fingerprint}".encode()
-    ).hexdigest()[:32]
+def normalization_id(source_revision_id: str, fingerprint: str) -> str:
+    return hashlib.sha256(f"{source_revision_id}:{fingerprint}".encode()).hexdigest()[:32]
+
+
+def read_processing(kb_dir: Path, unit_revision_id: str | None) -> dict | None:
+    """Project a retained target decision even before its first successful publication."""
+    from openkb.ingest_records import UnitRevision
+
+    if unit_revision_id is None:
+        return None
+    revision = read_record(kb_dir, "unit-revisions", unit_revision_id, UnitRevision)
+    identity = normalization_id(revision.source_revision_id, revision.processing_fingerprint)
+    if not record_path(kb_dir, "normalizations", identity).exists():
+        return None
+    processing = read_normalization(kb_dir, identity)[1].processing
+    return processing.model_dump(mode="json") if processing else None
 
 
 def read_normalization(kb_dir: Path, identity: str) -> tuple[Path, NormalizedInput]:
@@ -64,8 +91,10 @@ def retain_normalization(
     fingerprint: str,
     *,
     check_stop: Callable[[], None] = lambda: None,
+    scope=None,
+    bundle=None,
 ) -> tuple[Path, NormalizedInput]:
-    identity = normalization_id(admission, fingerprint)
+    identity = normalization_id(admission.revision.source_revision_id, fingerprint)
     record = record_path(kb_dir, "normalizations", identity)
     if record.exists():
         directory, saved = read_normalization(kb_dir, identity)
@@ -87,6 +116,18 @@ def retain_normalization(
         )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")
+        if converted.processing and converted.source_path:
+            from openkb.execution_capacity import select_execution_mode
+
+            converted.processing = select_execution_mode(
+                kb_dir,
+                converted.processing,
+                converted.source_path,
+                admission.source.doc_name,
+                scope=scope,
+                bundle=bundle,
+            )
+            converted.is_long_doc = converted.processing.execution_mode == "segmented"
         saved = NormalizedInput(
             normalization_id=identity,
             source_revision_id=admission.revision.source_revision_id,
@@ -96,6 +137,7 @@ def retain_normalization(
             if converted.source_path
             else None,
             is_long=converted.is_long_doc,
+            processing=converted.processing,
             files=wiki_versions(kb_dir, directory),
         )
         write_record(record, saved)
@@ -109,6 +151,7 @@ def restore_normalization(directory: Path, saved: NormalizedInput, working: Path
         raw_path=working / saved.raw_path,
         source_path=working / saved.source_path if saved.source_path else None,
         is_long_doc=saved.is_long,
+        processing=saved.processing,
     )
 
 
@@ -120,7 +163,7 @@ def retain_published_normalization(kb_dir: Path, admission: Admission, unit, vie
     from openkb.unit_publication import read_unit_publication
 
     used = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
-    identity = normalization_id(admission, used.processing_fingerprint)
+    identity = normalization_id(admission.revision.source_revision_id, used.processing_fingerprint)
     path = record_path(kb_dir, "normalizations", identity)
     if path.exists():
         read_normalization(kb_dir, identity)
@@ -165,6 +208,7 @@ def retain_published_normalization(kb_dir: Path, admission: Admission, unit, vie
             raw_path=raw,
             source_path=source,
             is_long=manifest.execution_mode == "segmented",
+            processing=manifest.processing,
             files=wiki_versions(kb_dir, directory),
         )
         write_record(path, saved)

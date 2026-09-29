@@ -964,7 +964,10 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     if dry_run:
         click.echo(f"Would recompile {len(targets)} document(s):")
         for target in targets:
-            click.echo(f"  - {target.doc_name}  ({target.kind})")
+            decision = target.kind
+            if target.execution_mode:
+                decision += f" / {target.execution_mode}"
+            click.echo(f"  - {target.doc_name}  ({decision})")
         click.echo(
             "\nNote: recompiling regenerates summaries (short docs) and rewrites "
             "concept pages — manual edits require explicit acceptance of the proposed changes."
@@ -1336,6 +1339,16 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
             click.echo(f"    View: {meta.get('view_id', 'legacy')}")
             click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
             click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
+            click.echo(
+                f"    Processing: {meta.get('length_class') or 'unknown'} / "
+                f"{meta.get('execution_mode') or 'unknown'}"
+            )
+            target = meta.get("target_processing")
+            if target and target != meta.get("processing"):
+                click.echo(
+                    f"    Target processing: {target['length_class']} / {target['execution_mode']}; "
+                    f"capacity: {target['capacity_status']}"
+                )
             click.echo(
                 f"    Validity: {meta.get('validity', 'current')}; generation: {meta.get('source_generation', '?')}"
             )
@@ -2254,12 +2267,14 @@ from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
 from openkb.cli_source import source
+from openkb.cli_settings import settings
 from openkb.cli_versions import versions
 from openkb.cli_views import views
 
 cli.add_command(proposals)
 cli.add_command(refresh)
 cli.add_command(source)
+cli.add_command(settings)
 cli.add_command(views)
 cli.add_command(versions)
 

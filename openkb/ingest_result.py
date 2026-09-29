@@ -17,6 +17,10 @@ class ImportUnitOutcome:
     error_type: str | None = None
     message: str | None = None
     job_id: str | None = None
+    length_class: str | None = None
+    execution_mode: str | None = None
+    processing: dict | None = None
+    target_processing: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -44,4 +48,18 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     ]
     if result.message:
         lines.append(result.message)
+    for unit in result.units:
+        if unit.length_class:
+            lines.append(f"Processing: {unit.length_class} / {unit.execution_mode}")
+        if unit.processing:
+            lines.append(
+                f"Capacity: {unit.processing['capacity_status']}; "
+                f"{unit.processing['capacity_reason'] or ''}"
+            )
+        if unit.target_processing and unit.target_processing != unit.processing:
+            target = unit.target_processing
+            lines.append(
+                f"Target processing: {target['length_class']} / {target['execution_mode']}; "
+                f"capacity: {target['capacity_status']}; {target['capacity_reason']}"
+            )
     return tuple(lines)

@@ -142,7 +142,8 @@ def test_default_config_keys():
 def test_default_config_values():
     assert DEFAULT_CONFIG["model"] == "gpt-5.4"
     assert DEFAULT_CONFIG["language"] == "en"
-    assert DEFAULT_CONFIG["pageindex_threshold"] == 20
+    assert DEFAULT_CONFIG["pageindex_threshold"] == 11
+    assert DEFAULT_CONFIG["pdf_short_max_pages"] == 10
 
 
 def test_concurrency_not_in_default_config():

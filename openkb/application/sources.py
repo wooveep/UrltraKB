@@ -110,6 +110,25 @@ def _snapshot_source(kb_dir: Path, scope: KnowledgeScope, unit_id: str):
     raise ValueError("Knowledge revision ancestry contains a cycle")
 
 
+def processing_details(kb_dir: Path, state, manifest) -> dict:
+    """Keep the displayed body's policy distinct from its pending/failed replacement."""
+    from openkb.normalization import read_processing
+
+    target = read_processing(kb_dir, state.target_revision_id) if state else None
+    if manifest:
+        processing = manifest.processing.model_dump(mode="json") if manifest.processing else None
+        length, mode = manifest.length_class, manifest.execution_mode
+    else:
+        processing = target
+        length, mode = (target or {}).get("length_class"), (target or {}).get("execution_mode")
+    return {
+        "length_class": length,
+        "execution_mode": mode,
+        "processing": processing,
+        "target_processing": target,
+    }
+
+
 def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> list[dict]:
     root = kb_dir.resolve()
     if scope is not None:
@@ -175,6 +194,9 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     "family_id": family_id,
                     "name": source.name,
                     "type": revision.source_format,
+                    **processing_details(
+                        root, states[0] if states else None, actual[1] if actual else None
+                    ),
                     "doc_name": source.doc_name,
                     "display_type": "pageindex"
                     if actual and actual[1].execution_mode == "segmented"
@@ -182,7 +204,9 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     "status": states[0].status if states else "admitted",
                     "units": [state.model_dump(mode="json") for state in states],
                     "message": states[0].message if states else None,
-                    "pages": None,
+                    "pages": actual[1].source_map.unit_count
+                    if actual and actual[1].source_map
+                    else None,
                     "original_path": revision.original,
                 }
             )
@@ -337,6 +361,7 @@ def read_admitted_source(
             "processing_fingerprint": body_revision.processing_fingerprint
             if actual and actual[1].unit_revision_id
             else None,
+            **processing_details(root, state, actual[1] if actual else None),
             "target_source_revision_id": target_id,
             "knowledge_revision_id": actual[1].knowledge_revision_id if actual else None,
             "name": source.name,

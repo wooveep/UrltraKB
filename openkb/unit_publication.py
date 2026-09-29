@@ -25,6 +25,7 @@ from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.lifecycle import current_generation
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
+from openkb.processing_policy import ProcessingDecision
 from openkb.source_catalog import (
     Admission,
     read_record,
@@ -314,6 +315,7 @@ def publish_unit_revision(
     *,
     normalized_source: str,
     source_map: SourceMap | None = None,
+    processing: ProcessingDecision | None = None,
     is_long: bool,
     normalized_format: Literal["pdf", "markdown"] = "pdf",
     index_ref: str | None = None,
@@ -379,8 +381,9 @@ def publish_unit_revision(
         source_map=source_map,
         source_format=admission.revision.source_format,
         normalized_format=normalized_format,
-        length_class="long" if is_long else "short",
+        length_class=processing.length_class if processing else ("long" if is_long else "short"),
         execution_mode="segmented" if is_long else "full",
+        processing=processing,
         index_ref=index_ref,
     )
     state_path = record_path(kb_dir, "publications", state.publication_id)

@@ -2209,6 +2209,20 @@ async def _compile_concepts(
     )
 
 
+def short_document_messages(doc_name: str, content: str, schema_md: str, language: str) -> list:
+    """The same first request is used for capacity estimation and compilation."""
+    return [
+        {
+            "role": "system",
+            "content": _SYSTEM_TEMPLATE.format(schema_md=schema_md, language=language),
+        },
+        {
+            "role": "user",
+            "content": _cached_text(_SUMMARY_USER.format(doc_name=doc_name, content=content)),
+        },
+    ]
+
+
 async def compile_short_doc(
     doc_name: str,
     source_path: Path,
@@ -2237,22 +2251,7 @@ async def compile_short_doc(
     # Base context A: system + document. cache_control marker on the doc
     # message creates a cache breakpoint that covers (system + doc) for
     # every downstream call (summary, concepts-plan, every concept page).
-    system_msg = {
-        "role": "system",
-        "content": _SYSTEM_TEMPLATE.format(
-            schema_md=schema_md,
-            language=language,
-        ),
-    }
-    doc_msg = {
-        "role": "user",
-        "content": _cached_text(
-            _SUMMARY_USER.format(
-                doc_name=doc_name,
-                content=content,
-            )
-        ),
-    }
+    system_msg, doc_msg = short_document_messages(doc_name, content, schema_md, language)
 
     # --- Step 1: Generate summary (v1, held in memory) ---
     # The summary is NOT written to disk yet — it's used as cache context

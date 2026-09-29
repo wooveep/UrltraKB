@@ -41,6 +41,7 @@ def physical_pdf(tmp_path):
 @pytest.fixture
 def pdf_model(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "fixture-key")
+    fixture = SimpleNamespace(last_page=3)
 
     def completion(**kwargs):
         prompt = str(kwargs["messages"])
@@ -51,7 +52,11 @@ def pdf_model(monkeypatch):
                     "title": "First section",
                     "physical_index": "<physical_index_1>",
                 },
-                {"structure": "2", "title": "Last section", "physical_index": "<physical_index_3>"},
+                {
+                    "structure": "2",
+                    "title": "Last section",
+                    "physical_index": f"<physical_index_{fixture.last_page}>",
+                },
             ]
         elif "toc_detected" in prompt:
             response = {"toc_detected": "no"}
@@ -81,6 +86,7 @@ def pdf_model(monkeypatch):
 
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)
+    return fixture
 
 
 def test_pageindex_full_and_range_reads_recover_the_same_managed_pdf(

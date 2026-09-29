@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from openkb.processing_policy import ProcessingDecision
 from openkb.source_records import Digest, DocName, Record, RecordId, RelativePath, ViewId
 
 
@@ -92,9 +93,15 @@ class KnowledgeRevision(Record):
     length_class: Literal["short", "long"] | None = None
     execution_mode: Literal["full", "segmented"] | None = None
     index_ref: str | None = None
+    processing: ProcessingDecision | None = None
 
     @model_validator(mode="after")
     def validate_compile_input(self) -> "KnowledgeRevision":
+        if self.processing and (
+            self.processing.length_class != self.length_class
+            or self.processing.execution_mode != self.execution_mode
+        ):
+            raise ValueError("Processing decision does not match the published input")
         if self.change_kind == "compile":
             required = (
                 self.unit_revision_id,

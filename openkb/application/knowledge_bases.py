@@ -215,7 +215,6 @@ def initialize_kb(
                 config = {
                     "model": model,
                     "language": language or DEFAULT_CONFIG["language"],
-                    "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
                 }
                 save_config(openkb_dir / "config.yaml", config)
             elif template_config is not None and template_config.exists():
@@ -224,7 +223,6 @@ def initialize_kb(
                 config = {
                     "model": DEFAULT_CONFIG["model"],
                     "language": language or DEFAULT_CONFIG["language"],
-                    "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
                 }
                 save_config(openkb_dir / "config.yaml", config)
             atomic_write_json(openkb_dir / "hashes.json", {})
