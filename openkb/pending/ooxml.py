@@ -49,7 +49,7 @@ class OOXMLObjects:
     def __exit__(self, *args):
         self.package.close()
 
-    def scan(self, meter, *, legacy=False):
+    def scan(self, meter, *, legacy=False, policy=None):
         package = self.package
         names = package.namelist()
         if len(names) != len(set(names)):

@@ -1,6 +1,6 @@
 # Synthetic Office fixtures
 
-The `package-text.docx`, `.pptx`, and `.xlsx` files are the small external
+The `package-text.docx`, `.pptx`, `.xlsx`, `.doc`, `.ppt`, and `.xls` files are the small external
 `embedded-simple-2007` fixtures recorded in `package-fixtures.json`, under the
 adjacent `oletools-fixture-LICENSE.md`. Each holds one standard Ole10Native
 Package containing a short benign ASCII sentence. All other fixtures described
@@ -62,3 +62,30 @@ creation time to be zero. The underlying workbook and its marker stay unchanged.
 the embedded Writer's own `ObjectPool/_nested`, using pinned cfb 0.15.0 to copy
 all streams and metadata. The deliberately orphaned nested Calc must be imported
 once, by the recovered Writer's discovery, rather than also by the outer host.
+
+`standard-object.xls` extends the authored `typed-sheets.xls` with the Writer
+storage from `embedded-writer.doc`, copied under `MBD00000001` using cfb 0.15.0.
+It also has `MBD00000002/PrivateData` containing `PRIVATE OBJECT`. Neither added
+storage has a live BIFF reference. This verifies both orphan recovery and a
+private-object diagnostic without counting the latter as an imported Source.
+
+`historical-object.ppt` extends the external `package-text.ppt` (same license)
+by appending an uncompressed ExOleObjStg record to `PowerPoint Document`, using
+cfb 0.15.0 to update that stream. The appended payload is the complete authored
+`typed-sheets.xls`. It has no PersistId reference; both the original compressed
+text Package and the additional unreferenced workbook must be recovered.
+
+`legacy-nested-xls.doc` places the entire authored `standard-object.xls` tree
+inside `writer.doc` at `ObjectPool/_xls`. It exercises continued discovery under
+the saved v2 policy: the outer scanner owns the XLS's inner Writer, so the
+recovered XLS must retain v2's non-recursive XLS coverage rather than duplicate it.
+
+`object-diagnostics.xls` adds declared `LNK00000001/\x01Ole`,
+`MBD00000002/\x02OlePres000`, and `MBD00000003/PrivateData` storages to the authored
+workbook, with small literal metadata/cache/private markers. Those representation
+streams do not claim to contain a complete document. `object-diagnostics.ppt`
+extends the external Package PPT (same license) with small authored MS-PPT record
+headers: ExOleLinkContainer, an embedded-object container with only a MetafileBlob,
+and an ActiveX object atom without persisted storage. The 24-byte ExOleObjAtom
+payloads use recVer 1 as specified by MS-PPT. Tests inspect diagnostics, without
+activating links, metafiles or controls.

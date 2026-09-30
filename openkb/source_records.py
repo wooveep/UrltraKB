@@ -5,6 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from openkb.pending.policies import CURRENT_POLICY
+
 RecordId = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 ViewId = Annotated[str, Field(pattern=r"^(legacy|[a-f0-9]{32})$")]
@@ -125,4 +127,4 @@ class DiscoveryIntent(PendingJob):
     source_revision_id: RecordId
     original: FrozenArtifact
     cursor: int = Field(default=0, ge=0)
-    policy: str = "office-embedded-files-v2"
+    policy: str = CURRENT_POLICY

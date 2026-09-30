@@ -229,6 +229,9 @@ def admit_source_revision(
             created_at=datetime.now(timezone.utc).isoformat(),
             original_kind=original_kind,
         )
+        from openkb.pending.policies import CURRENT_POLICY, discovery_hosts
+
+        discovery_policy = execution.discovery_policy if execution else CURRENT_POLICY
         intent = DiscoveryIntent(
             intent_id=intent_id,
             source_revision_id=revision_id,
@@ -237,10 +240,11 @@ def admit_source_revision(
             kb_generation=generation,
             status="completed"
             if original_kind == "legacy_snapshot"
-            or revision.source_format not in {"docx", "pptx", "xlsx", "doc"}
+            or revision.source_format not in discovery_hosts(discovery_policy)
             else "pending",
             depth=execution.depth if execution else 0,
             ancestry=execution.ancestry if execution else (),
+            policy=discovery_policy,
         )
         records = {
             catalog_schema_path(root): CatalogSchema(),

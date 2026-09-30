@@ -109,7 +109,7 @@ def test_complete_binary_workbook_in_ooxml_is_detected_as_xls(kb_dir, writer_doc
     assert read_document_source(kb_dir, recovered.source_id)["status"] == "completed"
 
 
-@pytest.mark.parametrize("host", ["docx", "pptx", "xlsx"])
+@pytest.mark.parametrize("host", ["docx", "pptx", "xlsx", "doc", "xls", "ppt"])
 def test_real_ole_package_preserves_counted_native_text_file(kb_dir, pdf_model, host):
     from openkb.application.documents import import_document
     from openkb.application.pending import process_pending
@@ -125,7 +125,7 @@ def test_real_ole_package_preserves_counted_native_text_file(kb_dir, pdf_model, 
     saved = read_document_source(kb_dir, child.source_id)
     expected = (
         "This is the contents of a simple ascii text file."
-        if host == "docx"
+        if host in {"docx", "doc"}
         else "This is a simple ascii contents of this simple text file."
     )
     assert saved["content"] == expected

@@ -13,5 +13,20 @@
     "file": "package-text.xlsx",
     "sha256": "25d9f1f46aff4e460f6ebf2ab44bded0a8f93ad4e5321cf747966e8c4b917995",
     "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.xlsx"
+  },
+  {
+    "file": "package-text.doc",
+    "sha256": "046d782f71172d119204f9d7be45eb478413da3afbe97af6b787aa5cf6fa25ad",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.doc"
+  },
+  {
+    "file": "package-text.xls",
+    "sha256": "617bde67e666175c4e0a2364be76bd26751bd6f64766716461a87bb10c3b880d",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.xls"
+  },
+  {
+    "file": "package-text.ppt",
+    "sha256": "39214ac4e632b702208597175eea0174c7305aa7aab093434f0213e8cd5cd9b2",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.ppt"
   }
 ]

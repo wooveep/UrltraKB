@@ -36,22 +36,18 @@ def discover(kb_dir, intent, check_stop):
         or HashRegistry.hash_file(original) != revision.digest
     ):
         raise ValueError("Discovery original failed its frozen digest check")
-    if revision.source_format not in {"docx", "pptx", "xlsx", "doc"}:
-        return save_job(kb_dir, "discovery", intent.model_copy(update={"status": "completed"}))
-    if intent.policy not in {
-        "docx-embedded-package-v1",
-        "ooxml-embedded-package-v1",
-        "office-embedded-files-v2",
-    }:
-        raise ValueError("Unknown saved discovery policy; explicit reprocessing is required")
-    legacy = intent.policy == "docx-embedded-package-v1"
-    from openkb.pending.cfb import CompoundObjects
+    from openkb.pending.policies import discovery_hosts
 
-    provider = CompoundObjects if revision.source_format == "doc" else OOXMLObjects
+    if revision.source_format not in discovery_hosts(intent.policy):
+        return save_job(kb_dir, "discovery", intent.model_copy(update={"status": "completed"}))
+    legacy = intent.policy == "docx-embedded-package-v1"
+    from openkb.pending.cfb import CompoundObjects, ContainerRebuildRequired
+
+    provider = CompoundObjects if revision.source_format in {"doc", "xls", "ppt"} else OOXMLObjects
     with provider(original) as package:
         meter = DiscoveryMeter(group_for(kb_dir, intent), check_stop)
         try:
-            objects = package.scan(meter, legacy=legacy)
+            objects = package.scan(meter, legacy=legacy, policy=intent.policy)
         except BudgetWait as exc:
             return save_budget(kb_dir, intent, meter, exc)
         save_budget(kb_dir, intent, meter)
@@ -97,7 +93,7 @@ def discover(kb_dir, intent, check_stop):
                 extension = None
                 outcome = (
                     "requires_container_rebuild"
-                    if candidate.part and candidate.part.startswith("cfb:")
+                    if isinstance(exc, ContainerRebuildRequired)
                     else "corrupt_object"
                 )
                 diagnostic = f"Object could not be recovered: {type(exc).__name__}: {exc}"

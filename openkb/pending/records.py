@@ -71,3 +71,4 @@ class DerivedExecution(Record):
     kb_generation: str
     depth: int = Field(ge=1)
     ancestry: tuple[Digest, ...]
+    discovery_policy: str
