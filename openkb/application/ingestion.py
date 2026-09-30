@@ -189,7 +189,8 @@ def import_prepared_source(
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint
         if review
-        else normalization_fingerprint(
+        else admission.revision.reprocessing_policy
+        or normalization_fingerprint(
             kb_dir,
             scope=scope,
             bundle=bundle,
@@ -264,6 +265,16 @@ def process_import_unit(
     check_stop = context.check_stop if context else lambda: None
     import hashlib
 
+    from openkb.unit_publication import list_source_units
+
+    for existing in list_source_units(kb_dir, admission.source.source_id):
+        if existing.key == (sheet.key if sheet else "body"):
+            target = read_record(
+                kb_dir, "unit-revisions", existing.target_revision_id, UnitRevision
+            )
+            if target.source_revision_id == admission.revision.source_revision_id:
+                fingerprint = target.processing_fingerprint
+            break
     unit, revision = plan_import_units(
         kb_dir,
         admission,
@@ -337,6 +348,29 @@ def process_import_unit(
                 index_ref = None
                 if converted.is_long_doc:
                     stage = "indexing"
+                    import json
+
+                    from openkb.normalization import normalization_fingerprint
+                    from openkb.processing_policy import ReprocessingRequired
+
+                    current_policy = json.loads(
+                        normalization_fingerprint(
+                            kb_dir,
+                            scope=scope,
+                            bundle=bundle,
+                            source_revision=admission.revision,
+                            doc_name=admission.source.doc_name,
+                            resource_policy=resource_policy,
+                        )
+                    )
+                    saved_policy = json.loads(fingerprint)
+                    if any(
+                        saved_policy.get(key) != current_policy[key]
+                        for key in ("index_model", "index_policy", "index_sdk", "index_endpoint")
+                    ):
+                        raise ReprocessingRequired(
+                            "Index policy changed; preview reprocess before rebuilding the index"
+                        )
                     index_input = converted.pdf_path or converted.raw_path
                     if converted.pdf_path and converted.pdf_path.with_suffix(".okpi").is_file():
                         index_input = converted.pdf_path.with_suffix(".okpi")
@@ -435,7 +469,9 @@ def process_import_unit(
     except Exception as exc:
         logger.debug("Unit processing failed", exc_info=True)
         failed = record_unit_failure(kb_dir, state, stage, exc)
-        return result_from_publication(kb_dir, admission, failed, status="failed")
+        return result_from_publication(
+            kb_dir, admission, failed, status="blocked" if failed.status == "blocked" else "failed"
+        )
     # Receipt/notification failure must not downgrade a committed business result.
     if on_event:
         try:

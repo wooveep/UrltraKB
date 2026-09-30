@@ -34,7 +34,18 @@ def aggregate_units(results):
 
 def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=None, **options):
     from openkb.application.ingestion import process_import_unit
+    from openkb.ingest_records import UnitRevision
+    from openkb.source_catalog import read_record
+    from openkb.unit_publication import list_source_units
     from openkb.workbooks.catalog import retain_workbook
+
+    for unit in list_source_units(kb_dir, admission.source.source_id):
+        target = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
+        if target.source_revision_id == admission.revision.source_revision_id:
+            saved_basis = json.loads(target.processing_fingerprint)
+            saved_basis.pop("sheet", None)
+            fingerprint = json.dumps(saved_basis, sort_keys=True)
+            break
 
     try:
         workbook = retain_workbook(kb_dir, admission, prepared)
@@ -42,12 +53,13 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
             raise ValueError(workbook.error)
     except Exception as exc:
         from openkb.mutation import RecoveryRequired
+        from openkb.processing_policy import ReprocessingRequired
 
         if isinstance(exc, RecoveryRequired):
             raise
         return IngestResult(
             admission.source.identity,
-            "failed",
+            "blocked" if isinstance(exc, ReprocessingRequired) else "failed",
             (str(kb_dir / admission.revision.original),),
             source_id=admission.source.source_id,
             source_revision_id=admission.revision.source_revision_id,
@@ -66,10 +78,6 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
         )
     basis = json.loads(fingerprint)
     basis.pop("sheet", None)
-    from openkb.ingest_records import UnitRevision
-    from openkb.source_catalog import read_record
-    from openkb.unit_publication import list_source_units
-
     selected_unit = None
     if unit_id is not None:
         selected_unit = next(

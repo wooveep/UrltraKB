@@ -79,6 +79,11 @@ class FrozenAsset(Record):
 
 
 class SourceRevision(Record):
+    reprocessing_policy: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    reprocessing_request: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reprocessed_from: RecordId | None = Field(default=None, exclude_if=lambda value: value is None)
     text_decoding: TextDecoding | None = Field(default=None, exclude_if=lambda value: value is None)
     source_revision_id: RecordId
     source_id: RecordId
@@ -92,6 +97,13 @@ class SourceRevision(Record):
 
     @model_validator(mode="after")
     def matching_digest(self):
+        if (self.reprocessing_request is None) != (self.reprocessing_policy is None):
+            raise ValueError("A reprocessing request requires its reviewed policy")
+        if self.reprocessing_policy is not None:
+            import json
+
+            if not isinstance(json.loads(self.reprocessing_policy), dict):
+                raise ValueError("Reprocessing policy must be a JSON object")
         if self.original.split("/")[2] != self.digest:
             raise ValueError("Frozen source digest does not match its artifact")
         return self

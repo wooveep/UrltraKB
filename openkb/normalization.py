@@ -40,6 +40,8 @@ def normalization_fingerprint(
     doc_name=None,
     resource_policy=None,
 ) -> str:
+    from importlib.metadata import version
+
     from openkb.agent.compiler import get_agents_md, short_document_messages
     from openkb.config import resolve_credential_bundle
     from openkb.execution_capacity import capacity_policy
@@ -81,6 +83,12 @@ def normalization_fingerprint(
     from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
 
     office_policy: dict = {}
+    if source_revision and source_revision.source_format in {"xlsx", "xls"}:
+        from openkb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
+
+        office_policy["workbook_policy"] = (
+            XLS_POLICY if source_revision.source_format == "xls" else WORKBOOK_POLICY
+        )
     if source_revision and f".{source_revision.source_format}" in OFFICE_SOURCE_EXTENSIONS:
         from openkb.office.runtime import processing_identity
 
@@ -95,6 +103,10 @@ def normalization_fingerprint(
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": "content-based-physical-v1",
+            "index_sdk": version("pageindex"),
+            "index_endpoint": hashlib.sha256(
+                (credentials.base_url or "provider-default").encode()
+            ).hexdigest(),
             "capacity": capacity_policy(config, custom_endpoint=bool(credentials.base_url)),
             "request_basis": hashlib.sha256(
                 json.dumps(request_basis, sort_keys=True).encode()
@@ -166,6 +178,25 @@ def retain_normalization(
         ):
             raise ValueError("Normalization belongs to another input")
         return directory, saved
+    current_policy = json.loads(
+        normalization_fingerprint(
+            kb_dir,
+            scope=scope,
+            bundle=bundle,
+            source_revision=admission.revision,
+            doc_name=admission.source.doc_name,
+            resource_policy=resource_policy,
+        )
+    )
+    saved_policy = json.loads(fingerprint)
+    saved_policy.pop("sheet", None)
+    if saved_policy != current_policy:
+        from openkb.processing_policy import ReprocessingRequired
+
+        raise ReprocessingRequired(
+            "Saved normalization is unavailable and processing policy changed; "
+            "preview reprocess explicitly"
+        )
     directory = kb_dir / ".openkb/normalized" / identity
     contained_paths(kb_dir, [directory])
     with mutation_scope(kb_dir, [directory, record], operation="retain-normalization"):

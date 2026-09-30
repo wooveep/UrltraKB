@@ -273,8 +273,20 @@ class RunPendingJob:
             TypeAdapter(RecordId).validate_python(value)
 
 
+@dataclass(frozen=True)
+class ReprocessSource(ViewSelection):
+    source_id: str
+    version: str
+
+    def __post_init__(self):
+        super().__post_init__()
+        if any(not isinstance(value, str) or not value for value in (self.source_id, self.version)):
+            raise ValueError("Reprocessing requires a source and a reviewed preview token")
+
+
 UnitRequest = (
-    RunPendingJob
+    ReprocessSource
+    | RunPendingJob
     | RetryWorksheet
     | AcceptProposal
     | ResumeVersionReview
@@ -295,6 +307,7 @@ UnitRequest = (
     | GenerateGraph
 )
 REQUEST_TYPES = (
+    ReprocessSource,
     RunPendingJob,
     RetryWorksheet,
     AcceptProposal,

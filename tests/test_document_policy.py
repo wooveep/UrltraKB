@@ -227,7 +227,13 @@ def test_failed_compile_keeps_target_processing_visible(
 
     monkeypatch.setattr(litellm, "completion", unavailable_sync)
     monkeypatch.setattr(litellm, "acompletion", unavailable)
-    result = import_document(kb_dir, physical_pdf)
+    if first:
+        from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+
+        preview = preview_reprocessing(kb_dir, first.source_id)
+        result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
+    else:
+        result = import_document(kb_dir, physical_pdf)
     assert result.status == "failed"
     assert "short / full" in "\n".join(describe_ingest(result))
     reader = read_document_source(kb_dir, result.source_id)

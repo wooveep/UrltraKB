@@ -70,3 +70,30 @@ def retry_worksheet(ctx, source_id, unit_id):
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+
+
+@click.command("reprocess")
+@click.argument("source_id")
+@click.option(
+    "--execute", metavar="PREVIEW_VERSION", help="Execute exactly this reviewed preview token."
+)
+@click.pass_context
+def reprocess(ctx, source_id, execute):
+    """Preview policy and originals; use --execute to create a new processing revision."""
+    from dataclasses import asdict
+
+    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    from openkb.cli import _selected_scope
+    from openkb.cli_views import _root
+
+    root = _root(ctx)
+    try:
+        scope = _selected_scope(ctx, root)
+        value = (
+            asdict(reprocess_source(root, source_id, version=execute, scope=scope))
+            if execute
+            else preview_reprocessing(root, source_id, scope=scope)
+        )
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(value, ensure_ascii=False, indent=2))

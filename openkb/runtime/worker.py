@@ -104,6 +104,7 @@ def _execute(
         AcceptRefreshProposal,
         ConfirmEmptySource,
         RefreshKnowledge,
+        ReprocessSource,
         ResumeVersionReview,
         RetryWorksheet,
         RunPendingJob,
@@ -123,13 +124,24 @@ def _execute(
             changes=(f"Pending job: {request.job_id}; {status}",),
         )
 
-    if isinstance(request, RetryWorksheet):
+    if isinstance(request, (RetryWorksheet, ReprocessSource)):
+        from openkb.application.reprocessing import ReprocessingConflict, reprocess_source
         from openkb.application.workbook_actions import retry_worksheet
         from openkb.ingest_result import describe_ingest
 
-        result = retry_worksheet(
-            root, request.source_id, request.unit_id, context=context, scope=scope
-        )
+        context.install_process_settings = True
+        try:
+            result = (
+                reprocess_source(
+                    root, request.source_id, version=request.version, context=context, scope=scope
+                )
+                if isinstance(request, ReprocessSource)
+                else retry_worksheet(
+                    root, request.source_id, request.unit_id, context=context, scope=scope
+                )
+            )
+        except ReprocessingConflict as exc:
+            return UnitResult("blocked", error=str(exc), unfinished=("reprocessing_preview",))
         return UnitResult(
             "completed" if result.status == "added" else result.status,
             resources=result.resources,

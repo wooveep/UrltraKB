@@ -137,6 +137,19 @@ class Admission:
     discovery_intent: DiscoveryIntent
 
 
+def read_admission(kb_dir: Path, source: Source) -> Admission:
+    """Read a current admission only after checking its retained-input associations."""
+    revision = read_source_revision(kb_dir, source.target_revision_id)
+    intent = read_record(kb_dir, "discovery-intents", revision.discovery_intent_id, DiscoveryIntent)
+    if (
+        revision.source_id != source.source_id
+        or intent.source_revision_id != revision.source_revision_id
+        or intent.original != revision.original
+    ):
+        raise ValueError("Source, revision and discovery intent do not identify the same input")
+    return Admission(source, revision, intent)
+
+
 def admit_source_revision(
     kb_dir: Path,
     prepared: PreparedInput,
@@ -148,6 +161,9 @@ def admit_source_revision(
     name: str | None = None,
     original_kind: Literal["original", "legacy_snapshot"] = "original",
     execution=None,
+    reprocess_from: str | None = None,
+    reprocessing_request: str | None = None,
+    reprocessing_policy: str | None = None,
 ) -> Admission:
     """Commit original, related assets, target revision and discovery as one unit."""
     root = kb_dir.resolve()
@@ -177,7 +193,21 @@ def admit_source_revision(
             previous = read_source_revision(root, known.target_revision_id)
             if previous.source_id != known.source_id:
                 raise ValueError("Source revision belongs to another document")
-            if previous.digest == prepared.digest and previous.assets == tuple(assets):
+            if reprocess_from and (
+                previous.source_revision_id != reprocess_from
+                or previous.digest != prepared.digest
+                or previous.assets != tuple(assets)
+                or previous.original_kind != "original"
+                or previous.source_format != prepared.source.suffix.lower().lstrip(".")
+            ):
+                raise ValueError("Reprocessing requires the unchanged frozen original and assets")
+            if (
+                not reprocess_from
+                and previous.digest == prepared.digest
+                and previous.assets == tuple(assets)
+                and previous.original_kind == original_kind
+                and previous.source_format == prepared.source.suffix.lower().lstrip(".")
+            ):
                 intent = read_record(
                     root, "discovery-intents", previous.discovery_intent_id, DiscoveryIntent
                 )
@@ -189,6 +219,8 @@ def admit_source_revision(
                             _copy_file_atomic(copies[path], path)
                         check_stop()
                 return Admission(known, previous, intent)
+        elif reprocess_from:
+            raise ValueError("Reprocessing requires a current source")
         requested_name = doc_name
         doc_name = known.doc_name if known else doc_name or _sanitize_stem(prepared.source.stem)
         if not known and requested_name is None:
@@ -218,6 +250,9 @@ def admit_source_revision(
                 prepared.path.read_bytes(), source_format=prepared.path.suffix[1:].lower()
             )
         revision = SourceRevision(
+            reprocessing_request=reprocessing_request,
+            reprocessing_policy=reprocessing_policy,
+            reprocessed_from=reprocess_from,
             text_decoding=decoding,
             source_revision_id=revision_id,
             source_id=source_id,

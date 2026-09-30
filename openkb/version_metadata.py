@@ -32,6 +32,16 @@ def assess_version(
 
     previous = source_annotation(kb_dir, admission)
     same_input = previous and previous.source_revision_id == admission.revision.source_revision_id
+    if previous and previous.source_revision_id == admission.revision.reprocessed_from:
+        from openkb.source_catalog import read_source_revision
+
+        original = read_source_revision(kb_dir, previous.source_revision_id)
+        same_input = (
+            original.source_id == admission.source.source_id
+            and original.digest == admission.revision.digest
+            and original.assets == admission.revision.assets
+            and original.original_kind == admission.revision.original_kind == "original"
+        )
     values = (previous.metadata if same_input and previous else SourceMetadata()).model_dump()
     if previous and not same_input:
         values.update(product=previous.metadata.product, family=previous.metadata.family)
@@ -92,7 +102,9 @@ def assess_version(
         annotation = read_record(kb_dir, "annotations", source.annotation_id, VersionAnnotation)
         if annotation.source_id != source.source_id:
             raise ValueError("Version annotation belongs to another source")
-        if annotation.source_revision_id == admission.revision.source_revision_id:
+        if annotation.source_revision_id == admission.revision.source_revision_id or (
+            same_input and source.source_id == admission.source.source_id
+        ):
             continue
         if (
             source.source_id == admission.source.source_id

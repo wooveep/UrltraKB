@@ -25,7 +25,7 @@ from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.lifecycle import current_generation
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
-from openkb.processing_policy import ProcessingDecision
+from openkb.processing_policy import ProcessingDecision, ReprocessingRequired
 from openkb.source_catalog import (
     Admission,
     read_record,
@@ -259,7 +259,11 @@ def record_unit_failure(
     """Called after rollback; preserve the exact previous successful revision."""
     failed = state.model_copy(
         update={
-            "status": "stopped" if isinstance(error, LockCancelled) else "failed",
+            "status": "stopped"
+            if isinstance(error, LockCancelled)
+            else "blocked"
+            if isinstance(error, ReprocessingRequired)
+            else "failed",
             "stage": stage,
             "error_type": type(error).__name__,
             "message": f"{stage}: {failure_reason(error)} ({type(error).__name__})",

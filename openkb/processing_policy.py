@@ -7,6 +7,10 @@ from pydantic import Field
 from openkb.source_records import Record
 
 
+class ReprocessingRequired(ValueError):
+    """A retry cannot execute today's processor under an older saved policy."""
+
+
 class PdfLimit(Record):
     short_max_pages: int = Field(ge=0, strict=True)
     source: Literal["kb", "global", "default"]

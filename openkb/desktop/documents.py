@@ -82,6 +82,9 @@ class DocumentsDialog(ManagementPanel):
         self.recompile_all.clicked.connect(lambda: self.recompile(all_docs=True))
         recompilation.addWidget(self.recompile_selected)
         recompilation.addWidget(self.recompile_all)
+        self.reprocess_button = QPushButton("预览重新处理")
+        self.reprocess_button.clicked.connect(self.reprocess)
+        recompilation.addWidget(self.reprocess_button)
         self.proposals_button = QPushButton("查看待接受差异")
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
@@ -117,6 +120,16 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def reprocess(self):
+        from openkb.desktop.reprocessing import ReprocessingDialog
+
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) != 1 or self._task:
+            self.status.setText("请选择一份资料进行预览。")
+            return
+        source_id = self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        ReprocessingDialog(self.window, self.kb, source_id, scope=self.scope).show()
 
     def pending_work(self):
         from openkb.desktop.pending import PendingDialog

@@ -148,3 +148,49 @@ async def retry_worksheet_endpoint(
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class ReprocessPreviewRequest(ViewRequest):
+    kb: str
+    source_id: str
+
+
+class ReprocessRequest(ReprocessPreviewRequest):
+    version: str
+
+
+@documents_router.post("/api/v1/document/reprocess/preview")
+async def preview_reprocess_endpoint(
+    request: ReprocessPreviewRequest, _: None = Depends(require_bearer_token)
+):
+    from openkb.application.reprocessing import preview_reprocessing
+
+    root = await asyncio.to_thread(_resolve_kb, request.kb)
+    try:
+        return await run_in_threadpool(
+            preview_reprocessing,
+            root,
+            request.source_id,
+            scope=await resolve_api_scope(root, request.view_id),
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@documents_router.post("/api/v1/document/reprocess")
+async def reprocess_endpoint(request: ReprocessRequest, _: None = Depends(require_bearer_token)):
+    from openkb.application.reprocessing import reprocess_source
+
+    root = await asyncio.to_thread(_resolve_kb, request.kb)
+    try:
+        return asdict(
+            await run_in_threadpool(
+                reprocess_source,
+                root,
+                request.source_id,
+                version=request.version,
+                scope=await resolve_api_scope(root, request.view_id),
+            )
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

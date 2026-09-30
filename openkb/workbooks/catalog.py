@@ -14,11 +14,31 @@ def retain_workbook(kb_dir, admission, prepared):
         if saved.digest != admission.revision.digest:
             raise ValueError("Workbook inventory belongs to another original")
         return saved
+    from openkb.processing_policy import ReprocessingRequired
+    from openkb.unit_publication import list_source_units
+
+    if any(
+        read_record(
+            kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision
+        ).source_revision_id
+        == identity
+        for unit in list_source_units(kb_dir, admission.source.source_id)
+    ):
+        raise ReprocessingRequired(
+            "Workbook inventory is missing; preview reprocess before reading worksheets again"
+        )
     from openkb.workbooks.xls import read_xls
     from openkb.workbooks.xlsx import read_xlsx
 
     binary = admission.revision.source_format == "xls"
     policy = XLS_POLICY if binary else WORKBOOK_POLICY
+    if admission.revision.reprocessing_policy:
+        import json
+
+        if json.loads(admission.revision.reprocessing_policy).get("workbook_policy") != policy:
+            raise ReprocessingRequired(
+                "Workbook reader policy changed; preview reprocess before parsing"
+            )
     from openkb.workbooks.identity import previous_workbook, reconcile_sheets
 
     try:
