@@ -1,0 +1,91 @@
+"""Standalone bundled-Python supervisor. Only standard library imports are allowed.
+
+It outlives an abruptly terminated application, owns a worker process group on
+Linux, and runs inside the private launcher's kill-on-close Job Object on Windows.
+"""
+
+import ctypes
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def parent_identity(pid):
+    try:
+        # The command field can contain spaces and parentheses.
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    except OSError:
+        return None
+
+
+def main():
+    request_path = Path(sys.argv[1])
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    directory = request_path.parent
+    linux = sys.platform == "linux"
+    cancelled = False
+
+    def cancel(signum, frame):
+        nonlocal cancelled
+        cancelled = True
+
+    signal.signal(signal.SIGTERM, cancel)
+    signal.signal(signal.SIGINT, cancel)
+    if linux:
+        # Reap orphaned grandchildren from this conversion, not unrelated app jobs.
+        if ctypes.CDLL(None).prctl(36, 1, 0, 0, 0):  # PR_SET_CHILD_SUBREAPER
+            raise OSError("Cannot supervise Office descendants")
+    worker = subprocess.Popen(
+        request.get("command")
+        or [sys.executable, "-B", str(Path(__file__).with_name("worker.py")), str(request_path)],
+        start_new_session=linux,
+    )
+    deadline = time.monotonic() + request["timeout"]
+    reason = None
+    try:
+        while worker.poll() is None:
+            if cancelled or (directory / "cancel").exists():
+                reason = "Office conversion cancelled"
+            elif time.monotonic() >= deadline:
+                reason = "Office conversion timed out"
+            elif linux and parent_identity(request["parent_pid"]) != request["parent_identity"]:
+                reason = "Office application exited"
+            if reason:
+                break
+            time.sleep(0.05)
+    finally:
+        if linux:
+            for signum in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(worker.pid, signum)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.15)
+        elif worker.poll() is None:
+            worker.terminate()
+        worker.wait(timeout=5)
+        if linux:
+            reap_deadline = time.monotonic() + 3
+            while time.monotonic() < reap_deadline:
+                try:
+                    pid, _ = os.waitpid(-1, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if pid == 0:
+                    time.sleep(0.05)
+    if reason:
+        if reason == "Office application exited":
+            shutil.rmtree(directory)
+            return 124
+        (directory / "failure.json").write_text(json.dumps({"error": reason}), encoding="utf-8")
+        return 124
+    return worker.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

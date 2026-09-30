@@ -358,6 +358,8 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    internal_pdf_path: str | None = None
+    office: dict | None = None
     resource_policy: dict | None = None
     resources: list[dict] = Field(default_factory=list)
     encoding: dict | None = None

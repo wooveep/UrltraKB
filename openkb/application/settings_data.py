@@ -24,6 +24,8 @@ class _KbConfigWritable(BaseModel):
     """
 
     model: str | None = None
+    office_runtime_path: str | None = None
+    office_timeout_seconds: int | None = Field(default=None, ge=1, le=3600, strict=True)
     download_remote_assets: StrictBool | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
@@ -41,6 +43,15 @@ class _KbConfigWritable(BaseModel):
             raise ValueError("PDF page limits must be integers, not booleans")
         return value
 
+    @field_validator("office_runtime_path")
+    @classmethod
+    def absolute_runtime(cls, value):
+        from pathlib import Path
+
+        if value is not None and not Path(value).is_absolute():
+            raise ValueError("Office runtime must use an absolute path")
+        return value
+
 
 # Single source of truth for the writable config keys (derived from the model
 # above so the two never drift).
@@ -51,6 +62,8 @@ class GlobalConfigValues(BaseModel):
     """Raw global-layer values (null where global.yaml is silent)."""
 
     model: str | None = None
+    office_runtime_path: str | None = None
+    office_timeout_seconds: int | None = None
     download_remote_assets: StrictBool | None = None
     language: str | None = None
     pageindex_threshold: int | None = None
@@ -60,6 +73,8 @@ class GlobalConfigValues(BaseModel):
 
 
 class GlobalConfigResponse(BaseModel):
+    office_runtime_path: str | None = None
+    office_timeout_seconds: int = 120
     download_remote_assets: bool = False
     capacity: dict = Field(default_factory=dict)
     model: str
@@ -100,6 +115,8 @@ class GlobalConfigPatchRequest(BaseModel):
 
 
 class KbConfigResponse(BaseModel):
+    office_runtime_path: str | None = None
+    office_timeout_seconds: int = 120
     download_remote_assets: bool = False
     capacity: dict = Field(default_factory=dict)
     model: str

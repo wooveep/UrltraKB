@@ -37,6 +37,8 @@ _FILES = {
 _GENERATED = {
     "openkb/rendering/assets",
     "openkb/rendering/rust-helper/target",
+    "openkb/office/assets/runtime",
+    "openkb/office/launcher/target",
     "packaging/desktop/build",
     "packaging/desktop/dist",
 }

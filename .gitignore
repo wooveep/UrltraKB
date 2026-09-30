@@ -32,3 +32,5 @@ examples/kb/
 # Locally assembled native rendering runtimes (included by desktop packaging).
 /openkb/rendering/assets/
 /openkb/rendering/rust-helper/target/
+/openkb/office/assets/runtime/
+/openkb/office/launcher/target/

@@ -185,12 +185,12 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                 text = read_source_map(actual[0] / "wiki", actual[1].source_map, source.doc_name)
                 measurement = {key: text[key] for key in ("tokens", "characters", "block_count")}
             elif not actual and states:
-                from openkb.normalization import read_retained_text
+                from openkb.normalization import read_retained_source
 
-                retained = read_retained_text(
+                retained = read_retained_source(
                     root, states[0].target_revision_id, revision.source_revision_id, source.doc_name
                 )
-                if retained:
+                if retained and retained[1].get("unit_kind") in {"text", "block"}:
                     measurement = {
                         key: retained[1][key] for key in ("tokens", "characters", "block_count")
                     }
@@ -358,9 +358,9 @@ def read_admitted_source(
             if selection:
                 content, pages = selection["content"], selection["pages"]
         elif state:
-            from openkb.normalization import read_retained_text
+            from openkb.normalization import read_retained_source
 
-            retained = read_retained_text(
+            retained = read_retained_source(
                 root,
                 state.target_revision_id,
                 target.source_revision_id,
@@ -392,7 +392,14 @@ def read_admitted_source(
             if annotation and annotation.source_revision_id == target.source_revision_id
             else {}
         )
+        from openkb.office.readback import read_office_artifacts
         from openkb.source_changes import source_validity
+
+        office = read_office_artifacts(
+            root,
+            actual[1].unit_revision_id if actual else state.target_revision_id if state else None,
+            target.source_revision_id,
+        )
 
         decoding = target.text_decoding
         input_diagnostics = (
@@ -410,6 +417,7 @@ def read_admitted_source(
         )
         return {
             **input_diagnostics,
+            **office,
             "hash": source.source_id,
             "validity": source_validity(
                 root,

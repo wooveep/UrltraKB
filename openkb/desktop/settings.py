@@ -39,6 +39,8 @@ _FIELDS = {
     "pageindex_threshold": "兼容旧 PDF 阈值（≤0 强制分段）",
     "model_capacity": "模型容量（JSON，可清除以自动判断）",
     "download_remote_assets": "下载 HTML 远程图片（true/false）",
+    "office_runtime_path": "私有 Office 目录（清除后使用随包目录）",
+    "office_timeout_seconds": "Office 转换超时（秒，1–3600）",
     "entity_types": "实体类型（逗号分隔）",
     "openai_api_base": "API base URL",
     "api_key": "API Key",
@@ -83,7 +85,7 @@ class SettingField(QWidget):
         text = self.text.text().strip() if self.key != "api_key" else self.text.text()
         if not text:
             raise ValueError(f"{_FIELDS[self.key]}：请输入值，或选择清除覆盖")
-        if self.key in {"pageindex_threshold", "pdf_short_max_pages"}:
+        if self.key in {"pageindex_threshold", "pdf_short_max_pages", "office_timeout_seconds"}:
             try:
                 value = int(text)
             except ValueError:

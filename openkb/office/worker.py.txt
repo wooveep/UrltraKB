@@ -1,0 +1,168 @@
+"""Standalone adapter, loaded ONLY by the private Office Python/UNO interpreter."""
+
+import json
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+import uno
+import unohelper
+from com.sun.star.task import XInteractionHandler
+
+
+class AbortInteraction(unohelper.Base, XInteractionHandler):
+    def handle(self, request):
+        for continuation in request.getContinuations():
+            if hasattr(continuation, "abort"):
+                continuation.abort()
+                return
+            interfaces = uno.getTypeByName("com.sun.star.task.XInteractionAbort")
+            if continuation.queryInterface(interfaces):
+                continuation.select()
+                return
+
+
+def properties(values):
+    result = []
+    for name, (kind, value) in values.items():
+        item = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        item.Name = name
+        item.Value = uno.Any(kind, value)
+        result.append(item)
+    return tuple(result)
+
+
+def writer_fonts(document):
+    result = []
+
+    def collect(text):
+        paragraphs = text.createEnumeration()
+        while paragraphs.hasMoreElements():
+            paragraph = paragraphs.nextElement()
+            if paragraph.supportsService("com.sun.star.text.TextTable"):
+                for name in paragraph.getCellNames():
+                    collect(paragraph.getCellByName(name))
+                continue
+            if not hasattr(paragraph, "createEnumeration"):
+                continue
+            portions = paragraph.createEnumeration()
+            while portions.hasMoreElements():
+                portion = portions.nextElement()
+                value = getattr(portion, "String", "")
+                if value.strip() and not getattr(portion, "CharHidden", False):
+                    result.append(
+                        {
+                            "text": value,
+                            "requested": getattr(portion, "CharFontName", ""),
+                            "requested_asian": getattr(portion, "CharFontNameAsian", ""),
+                            "requested_complex": getattr(portion, "CharFontNameComplex", ""),
+                        }
+                    )
+
+    collect(document.Text)
+    frames = document.getTextFrames()
+    for index in range(frames.getCount()):
+        collect(frames.getByIndex(index).Text)
+    styles = document.StyleFamilies.getByName("PageStyles")
+    for name in styles.getElementNames():
+        style = styles.getByName(name)
+        for section in ("Header", "Footer"):
+            if getattr(style, section + "IsOn", False):
+                collect(getattr(style, section + "Text"))
+                if not getattr(style, section + "IsShared", True):
+                    collect(getattr(style, section + "TextLeft"))
+    return result
+
+
+def convert(request, directory):
+    pipe = "openkb_" + uuid.uuid4().hex
+    process = subprocess.Popen(
+        [
+            request["soffice"],
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--norestore",
+            "-env:UserInstallation=" + (directory / "profile").as_uri(),
+            f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
+        ]
+    )
+    document = None
+    desktop = None
+    try:
+        context = uno.getComponentContext()
+        resolver = context.ServiceManager.createInstanceWithContext(
+            "com.sun.star.bridge.UnoUrlResolver", context
+        )
+        while True:
+            try:
+                remote = resolver.resolve(f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
+                break
+            except Exception:
+                if process.poll() is not None:
+                    raise RuntimeError(
+                        "Office exited before its private UNO pipe was ready"
+                    ) from None
+                time.sleep(0.05)  # Supervisor owns the finite deadline.
+        desktop = remote.ServiceManager.createInstanceWithContext(
+            "com.sun.star.frame.Desktop", remote
+        )
+        options = properties(request["load_options"])
+        interaction = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        interaction.Name, interaction.Value = "InteractionHandler", AbortInteraction()
+        document = desktop.loadComponentFromURL(
+            Path(request["input"]).as_uri(), "_blank", 0, (*options, interaction)
+        )
+        if document is None or not document.supportsService("com.sun.star.text.TextDocument"):
+            raise ValueError("Office input did not load as a Writer document")
+        settings = document.createInstance("com.sun.star.text.DocumentSettings")
+        if not settings.getPropertySetInfo().hasPropertyByName("PrintHiddenText"):
+            raise ValueError("Pinned Writer lacks the required hidden-text setting")
+        settings.setPropertyValue("PrintHiddenText", False)
+        controller = document.getCurrentController()
+        controller.setPropertyValue("PDFExport_ShowChanges", False)
+        if controller.getPropertyValue("PDFExport_ShowChanges"):
+            raise ValueError("Writer did not apply the required final-visible revision display")
+        requested_fonts = writer_fonts(document)
+        detected = {value.Name: value.Value for value in document.getArgs()}
+        if detected.get("FilterName") not in {"Office Open XML Text", "MS Word 2007 XML"}:
+            raise ValueError("DOCX was not detected as a supported Word OOXML input")
+        export = properties({"FilterName": ("string", "writer_pdf_Export")})
+        data = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        data.Name = "FilterData"
+        data.Value = uno.Any(
+            "[]com.sun.star.beans.PropertyValue", properties(request["pdf_options"])
+        )
+        document.storeToURL((directory / "output.pdf").as_uri(), (*export, data))
+        return {
+            "filter": "writer_pdf_Export",
+            "detected_filter": str(detected.get("FilterName", "")),
+            "requested_fonts": requested_fonts,
+            "print_hidden_text": False,
+            "diagnostics": ["Writer final visible text; comments and tracked deletions excluded."],
+        }
+    finally:
+        if document is not None:
+            document.close(True)
+        if desktop is not None:
+            desktop.terminate()
+        # Supervisor reaps even a vetoed/blocked termination and the shell launcher.
+
+
+def main():
+    path = Path(sys.argv[1])
+    try:
+        result = convert(json.loads(path.read_text(encoding="utf-8")), path.parent)
+        (path.parent / "result.json").write_text(json.dumps(result), encoding="utf-8")
+        return 0
+    except Exception as exc:
+        (path.parent / "failure.json").write_text(
+            json.dumps({"error": f"{type(exc).__name__}: {exc}"}), encoding="utf-8"
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

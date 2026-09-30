@@ -67,6 +67,15 @@ def result_from_publication(
             for path in [wiki / "summaries" / f"{admission.source.doc_name}.md"]
             if path.is_file()
         )
+    from openkb.office.readback import read_office_artifacts
+
+    office = read_office_artifacts(
+        kb_dir,
+        state.successful_revision_id or state.target_revision_id,
+        actual_source or admission.revision.source_revision_id,
+    )
+    if office:
+        resources.append(str(kb_dir / office["internal_pdf_path"]))
     outcome = ImportUnitOutcome(
         state.unit_id,
         state.status,
@@ -230,7 +239,7 @@ def import_prepared_source(
                 index_ref = None
                 if converted.is_long_doc:
                     stage = "indexing"
-                    index_input = converted.raw_path
+                    index_input = converted.pdf_path or converted.raw_path
                     if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
                         if converted.source_path is None:
                             raise ValueError("Normalized text is missing")
@@ -276,7 +285,12 @@ def import_prepared_source(
                 _run_compile_with_retry(compile_document, "Compiling wiki", report=report)
                 check_stop()
             stage = "publication"
-            segmented_pdf = converted.is_long_doc and admission.revision.source_format == "pdf"
+            pdf_input = converted.pdf_path or (
+                kb_dir / admission.revision.original
+                if admission.revision.source_format == "pdf"
+                else None
+            )
+            segmented_pdf = converted.is_long_doc and pdf_input is not None
             extension = "json" if segmented_pdf else "md"
             from openkb.source_map import freeze_pdf_map
 
@@ -284,11 +298,8 @@ def import_prepared_source(
             # A pre-page-map publication can be clarified using its retained
             # conversion. It must not gain invented coverage or be reconverted.
             source_map = (
-                freeze_pdf_map(
-                    view.scope.wiki_dir, unit.doc_name, kb_dir / admission.revision.original
-                )
-                if admission.revision.source_format == "pdf"
-                and (converted.processing is not None or page_map.exists())
+                freeze_pdf_map(view.scope.wiki_dir, unit.doc_name, pdf_input)
+                if pdf_input is not None and (converted.processing is not None or page_map.exists())
                 else None
             )
             if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:

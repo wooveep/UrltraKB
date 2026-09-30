@@ -9,6 +9,7 @@ import shutil
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import pymupdf
 
@@ -35,6 +36,8 @@ class ConvertResult:
     doc_name: str | None = None  # Stable wiki name (collision-resistant)
     source_identity: str | None = None  # Frozen alongside the prepared bytes
     processing: ProcessingDecision | None = None
+    pdf_path: Path | None = None
+    office_path: Path | None = None
 
 
 def _registry_path(path: Path, kb_dir: Path) -> str:
@@ -156,6 +159,8 @@ def convert_document(
     doc_name: str | None = None,
     decoding: TextDecoding | None = None,
     resource_policy=None,
+    check_stop: Callable[[], None] = lambda: None,
+    office_identity=None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
@@ -169,6 +174,8 @@ def convert_document(
             doc_name=doc_name,
             decoding=decoding,
             resource_policy=resource_policy,
+            check_stop=check_stop,
+            office_identity=office_identity,
         )
     with prepared_input(src) as ready:
         return _convert_prepared_document(
@@ -179,6 +186,8 @@ def convert_document(
             doc_name=doc_name,
             decoding=decoding,
             resource_policy=resource_policy,
+            check_stop=check_stop,
+            office_identity=office_identity,
         )
 
 
@@ -191,6 +200,8 @@ def _convert_prepared_document(
     doc_name: str | None = None,
     decoding: TextDecoding | None = None,
     resource_policy=None,
+    check_stop: Callable[[], None] = lambda: None,
+    office_identity=None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -250,8 +261,24 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         # 3. PDF long-doc detection
         # ------------------------------------------------------------------
-        if src.suffix.lower() == ".pdf":
-            page_count = get_pdf_page_count(prepared)
+        from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
+
+        pdf_input = prepared if src.suffix.lower() == ".pdf" else None
+        internal_pdf = office_path = None
+        if src.suffix.lower() in OFFICE_SOURCE_EXTENSIONS:
+            from openkb.office.convert import convert_office
+
+            internal_pdf = raw_dir / f"{doc_name}.pdf"
+            office_path = convert_office(
+                kb_dir,
+                prepared,
+                internal_pdf,
+                check_stop=check_stop,
+                expected_identity=office_identity,
+            )
+            pdf_input = internal_pdf
+        if pdf_input is not None:
+            page_count = get_pdf_page_count(pdf_input)
             processing = classify_pdf(page_count, config)
             if processing.execution_mode == "segmented":
                 logger.info(
@@ -266,6 +293,8 @@ def _convert_prepared_document(
                     doc_name=doc_name,
                     source_identity=source_identity,
                     processing=processing,
+                    pdf_path=internal_pdf,
+                    office_path=office_path,
                 )
 
         # ------------------------------------------------------------------
@@ -300,11 +329,11 @@ def _convert_prepared_document(
                 frozen.model_dump(mode="json"),
                 ensure_ascii=False,
             )
-        elif src.suffix.lower() == ".pdf":
+        elif pdf_input is not None:
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
             page_records: list[dict] = []
             markdown = convert_pdf_with_images(
-                prepared, doc_name, images_dir, page_records=page_records
+                pdf_input, doc_name, images_dir, page_records=page_records
             )
             atomic_write_json(sources_dir / f"{doc_name}.json", page_records, ensure_ascii=False)
         else:
@@ -332,5 +361,7 @@ def _convert_prepared_document(
             doc_name=doc_name,
             source_identity=source_identity,
             processing=processing,
+            pdf_path=internal_pdf,
+            office_path=office_path,
             is_long_doc=processing is not None and processing.execution_mode == "segmented",
         )

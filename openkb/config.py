@@ -53,6 +53,8 @@ DEFAULT_ENTITY_TYPES: tuple[str, ...] = (
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "download_remote_assets": False,
+    "office_runtime_path": None,
+    "office_timeout_seconds": 120,
     "model": "gpt-5.4",
     "language": "en",
     "pageindex_threshold": 11,  # Compatibility projection; only explicit legacy values are policy.
@@ -456,6 +458,12 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     resolvers in charge of optional overrides. Errors name fields, never
     credential-bearing values from user configuration.
     """
+    runtime = config.get("office_runtime_path")
+    if runtime is not None and (not isinstance(runtime, str) or not Path(runtime).is_absolute()):
+        raise ValueError("Configuration field 'office_runtime_path' must be an absolute path")
+    timeout = config.get("office_timeout_seconds")
+    if timeout is not None and (type(timeout) is not int or not 1 <= timeout <= 3600):
+        raise ValueError("Configuration field 'office_timeout_seconds' must be between 1 and 3600")
     if (
         config.get("download_remote_assets") is not None
         and type(config["download_remote_assets"]) is not bool
@@ -498,6 +506,8 @@ def load_global_config() -> dict[str, Any]:
 # one list-valued member — the layering rule (a non-null value wins over the
 # layer below) is type-agnostic, so a KB list overrides the global list wholesale.
 GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
+    "office_runtime_path",
+    "office_timeout_seconds",
     "download_remote_assets",
     "model",
     "language",

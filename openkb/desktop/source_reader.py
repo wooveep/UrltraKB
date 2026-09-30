@@ -81,6 +81,34 @@ class SourceReader(QDialog):
                 )
             )
             layout.addWidget(original)
+        if source.get("internal_pdf_path"):
+            internal_pdf = QPushButton("打开导入时生成的 PDF")
+            internal_pdf.setAutoDefault(False)
+            internal_pdf.clicked.connect(
+                lambda: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(kb / source["internal_pdf_path"]))
+                )
+            )
+            layout.addWidget(internal_pdf)
+            office = source["office"]
+            substitutions = ", ".join(
+                f"{item['requested']} → {item['actual']}" for item in office["font_substitutions"]
+            )
+            conversion = QLabel(
+                f"LibreOffice {office['version']} · PDF {office['pages']} 页\n"
+                + "\n".join(office["diagnostics"])
+                + (f"\n已核对的字体替换：{substitutions}" if substitutions else "")
+            )
+            conversion.setWordWrap(True)
+            layout.addWidget(conversion)
+            unresolved = sum(item["status"] != "matched" for item in office["font_observations"])
+            if unresolved:
+                font_status = QLabel(
+                    f"另有 {unresolved} 段字体未能唯一对应到可见 PDF；"
+                    "其中可能包含已删除文字，未据此推断字体替换。"
+                )
+                font_status.setWordWrap(True)
+                layout.addWidget(font_status)
         self.coverage = QLabel()
         self.coverage.setWordWrap(True)
         layout.addWidget(self.coverage)

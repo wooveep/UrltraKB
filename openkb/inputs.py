@@ -16,7 +16,8 @@ from openkb.state import HashRegistry
 
 TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv", ".xml", ".html", ".htm"}
 IMAGE_SOURCE_EXTENSIONS = {".md", ".markdown", ".html", ".htm"}
-FROZEN_SOURCE_EXTENSIONS = {".pdf", *TEXT_SOURCE_EXTENSIONS}
+OFFICE_SOURCE_EXTENSIONS = {".docx"}
+FROZEN_SOURCE_EXTENSIONS = {".pdf", *TEXT_SOURCE_EXTENSIONS, *OFFICE_SOURCE_EXTENSIONS}
 
 
 def input_version(body_digest: str, assets: dict[str, str | None]) -> str:

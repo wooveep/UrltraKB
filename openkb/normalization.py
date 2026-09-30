@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Callable
 
+from pydantic import Field
+
 from openkb.config import resolve_effective_config
 from openkb.converter import ConvertResult, convert_document
 from openkb.file_state import contained_paths
@@ -25,6 +27,8 @@ class NormalizedInput(Record):
     is_long: bool
     files: dict[RelativePath, Digest]
     processing: ProcessingDecision | None = None
+    pdf_path: RelativePath | None = Field(default=None, exclude_if=lambda value: value is None)
+    office_path: RelativePath | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def normalization_fingerprint(
@@ -74,6 +78,13 @@ def normalization_fingerprint(
 
             selected = resource_policy or resolve_resource_policy(kb_dir)
             text_policy["resources"] = {"policy": REMOTE_POLICY, **selected.model_dump(mode="json")}
+    from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
+
+    office_policy = {}
+    if source_revision and f".{source_revision.source_format}" in OFFICE_SOURCE_EXTENSIONS:
+        from openkb.office.runtime import processing_identity
+
+        office_policy = {"office": processing_identity(kb_dir)}
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
@@ -85,6 +96,7 @@ def normalization_fingerprint(
                 json.dumps(request_basis, sort_keys=True).encode()
             ).hexdigest(),
             **text_policy,
+            **office_policy,
         },
         sort_keys=True,
     )
@@ -118,6 +130,11 @@ def read_normalization(kb_dir: Path, identity: str) -> tuple[Path, NormalizedInp
         saved.source_path and saved.source_path not in saved.files
     ):
         raise ValueError("Retained normalization is missing its body")
+    if any(path and path not in saved.files for path in (saved.pdf_path, saved.office_path)):
+        raise ValueError("Retained normalization is missing its Office artifacts")
+    from openkb.office.validation import validate_office_input
+
+    validate_office_input(kb_dir, directory, saved)
     return directory, saved
 
 
@@ -153,6 +170,8 @@ def retain_normalization(
             doc_name=admission.source.doc_name,
             decoding=admission.revision.text_decoding,
             resource_policy=resource_policy,
+            check_stop=check_stop,
+            office_identity=json.loads(fingerprint).get("office"),
         )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")
@@ -187,6 +206,12 @@ def retain_normalization(
             else None,
             is_long=converted.is_long_doc,
             processing=converted.processing,
+            pdf_path=converted.pdf_path.relative_to(directory).as_posix()
+            if converted.pdf_path
+            else None,
+            office_path=converted.office_path.relative_to(directory).as_posix()
+            if converted.office_path
+            else None,
             files=wiki_versions(kb_dir, directory),
         )
         write_record(record, saved)
@@ -201,10 +226,12 @@ def restore_normalization(directory: Path, saved: NormalizedInput, working: Path
         source_path=working / saved.source_path if saved.source_path else None,
         is_long_doc=saved.is_long,
         processing=saved.processing,
+        pdf_path=working / saved.pdf_path if saved.pdf_path else None,
+        office_path=working / saved.office_path if saved.office_path else None,
     )
 
 
-def read_retained_text(
+def read_retained_source(
     kb_dir: Path,
     unit_revision_id: str,
     source_revision_id: str,
@@ -214,9 +241,9 @@ def read_retained_text(
     pages: str | None = None,
     blocks: str | None = None,
 ) -> tuple[Path, dict] | None:
-    """Read a frozen, unpublished text input without inventing a knowledge revision."""
+    """Read a frozen, unpublished input without inventing a knowledge revision."""
     from openkb.ingest_records import UnitRevision
-    from openkb.source_map import freeze_text_map, read_source_map
+    from openkb.source_map import freeze_pdf_map, freeze_text_map, read_source_map
 
     used = read_record(kb_dir, "unit-revisions", unit_revision_id, UnitRevision)
     if used.source_revision_id != source_revision_id:
@@ -225,6 +252,16 @@ def read_retained_text(
     if not record_path(kb_dir, "normalizations", identity).exists():
         return None
     directory, saved = read_normalization(kb_dir, identity)
+    if saved.pdf_path:
+        path = f"wiki/sources/{doc_name}.json"
+        if path not in saved.files:
+            # Long documents have no extracted page body until index construction.
+            # The frozen PDF remains available without inventing an unpublished map.
+            return None
+        reference = freeze_pdf_map(directory / "wiki", doc_name, directory / saved.pdf_path)
+        return directory / path, read_source_map(
+            directory / "wiki", reference, doc_name, pages, chars=chars, blocks=blocks
+        )
     path = f"wiki/sources/{doc_name}.content.json"
     if path not in saved.files:
         return None

@@ -213,6 +213,9 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     if not isinstance(toc, tuple) or len(toc) != 20:
         raise ValueError("Unrecognized pinned PyInstaller analysis format")
     inputs = Inputs(source, identity)
+    from office_inventory import office_inventory
+
+    office = office_inventory(program, inputs)
     modules = {name: inputs.record(path, namespace=name) for name, path, _ in toc[14]}
     scripts = {name: inputs.record(path) for name, path, _ in toc[13]}
     collected = {}
@@ -297,6 +300,10 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
                 component="python/pyinstaller@" + metadata.version("pyinstaller"),
             )
             inputs.used.add(item["component"])
+        elif name in office:
+            item.update(office[name])
+            if item["sha256"] != item["input_sha256"]:
+                raise ValueError(f"Office runtime changed during inventory: {name}")
         elif name.startswith("_internal/") and name.removeprefix("_internal/") in collected:
             relative = name.removeprefix("_internal/")
             item.update(collected[relative])
