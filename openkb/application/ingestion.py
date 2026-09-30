@@ -240,6 +240,8 @@ def import_prepared_source(
                 if converted.is_long_doc:
                     stage = "indexing"
                     index_input = converted.pdf_path or converted.raw_path
+                    if converted.pdf_path and converted.pdf_path.with_suffix(".okpi").is_file():
+                        index_input = converted.pdf_path.with_suffix(".okpi")
                     if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
                         if converted.source_path is None:
                             raise ValueError("Normalized text is missing")

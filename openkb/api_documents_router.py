@@ -110,6 +110,7 @@ async def document_source_endpoint(
             pages=request.pages,
             chars=request.chars,
             blocks=request.blocks,
+            part=request.part,
             scope=scope,
         )
     except PageRangeError as exc:

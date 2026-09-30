@@ -10,6 +10,8 @@ import re
 
 
 class BlockPolicy:
+    unit_kind = "block"
+
     def __init__(self, metadata):
         source = metadata.get("source", {})
         self.text = source.get("text")

@@ -79,15 +79,16 @@ def build_query_agent(
         return read_wiki_file(path, wiki_root)
 
     @function_tool
-    def get_page_content(doc_name: str, pages: str) -> str:
+    def get_page_content(doc_name: str, pages: str, part: str = "") -> str:
         """Get text content of specific pages from a PageIndex (long) document.
         Only use for documents with doc_type: pageindex. For short documents,
         use read_file instead.
         Args:
             doc_name: Document name (e.g. 'attention-is-all-you-need').
             pages: Page specification (e.g. '3-5,7,10-12').
+            part: For slides, body or notes; empty includes both.
         """
-        return get_wiki_page_content(doc_name, pages, wiki_root)
+        return get_wiki_page_content(doc_name, pages, wiki_root, part or None)
 
     @function_tool
     def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:

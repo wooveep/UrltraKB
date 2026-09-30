@@ -52,46 +52,103 @@ def properties(values):
     return tuple(result)
 
 
+def text_fonts(text, result):
+    paragraphs = text.createEnumeration()
+    while paragraphs.hasMoreElements():
+        paragraph = paragraphs.nextElement()
+        if paragraph.supportsService("com.sun.star.text.TextTable"):
+            for name in paragraph.getCellNames():
+                text_fonts(paragraph.getCellByName(name), result)
+            continue
+        if not hasattr(paragraph, "createEnumeration"):
+            continue
+        portions = paragraph.createEnumeration()
+        while portions.hasMoreElements():
+            portion = portions.nextElement()
+            value = getattr(portion, "String", "")
+            if value.strip() and not getattr(portion, "CharHidden", False):
+                result.append(
+                    {
+                        "text": value,
+                        "requested": getattr(portion, "CharFontName", ""),
+                        "requested_asian": getattr(portion, "CharFontNameAsian", ""),
+                        "requested_complex": getattr(portion, "CharFontNameComplex", ""),
+                    }
+                )
+
+
 def writer_fonts(document):
     result = []
 
-    def collect(text):
-        paragraphs = text.createEnumeration()
-        while paragraphs.hasMoreElements():
-            paragraph = paragraphs.nextElement()
-            if paragraph.supportsService("com.sun.star.text.TextTable"):
-                for name in paragraph.getCellNames():
-                    collect(paragraph.getCellByName(name))
-                continue
-            if not hasattr(paragraph, "createEnumeration"):
-                continue
-            portions = paragraph.createEnumeration()
-            while portions.hasMoreElements():
-                portion = portions.nextElement()
-                value = getattr(portion, "String", "")
-                if value.strip() and not getattr(portion, "CharHidden", False):
-                    result.append(
-                        {
-                            "text": value,
-                            "requested": getattr(portion, "CharFontName", ""),
-                            "requested_asian": getattr(portion, "CharFontNameAsian", ""),
-                            "requested_complex": getattr(portion, "CharFontNameComplex", ""),
-                        }
-                    )
-
-    collect(document.Text)
+    text_fonts(document.Text, result)
     frames = document.getTextFrames()
     for index in range(frames.getCount()):
-        collect(frames.getByIndex(index).Text)
+        text_fonts(frames.getByIndex(index).Text, result)
     styles = document.StyleFamilies.getByName("PageStyles")
     for name in styles.getElementNames():
         style = styles.getByName(name)
         for section in ("Header", "Footer"):
             if getattr(style, section + "IsOn", False):
-                collect(getattr(style, section + "Text"))
+                text_fonts(getattr(style, section + "Text"), result)
                 if not getattr(style, section + "IsShared", True):
-                    collect(getattr(style, section + "TextLeft"))
+                    text_fonts(getattr(style, section + "TextLeft"), result)
     return result
+
+
+def export_pdf(document, path, export_filter, options):
+    export = properties({"FilterName": ("string", export_filter)})
+    data = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+    data.Name = "FilterData"
+    data.Value = uno.Any("[]com.sun.star.beans.PropertyValue", properties(options))
+    document.storeToURL(path.as_uri(), (*export, data))
+
+
+def presentation(request, document, directory):
+    detected = {value.Name: value.Value for value in document.getArgs()}
+    if detected.get("FilterName") != "Impress MS PowerPoint 2007 XML":
+        raise ValueError("PPTX did not match the required PowerPoint input filter")
+    pages = document.getDrawPages()
+    if not pages.getCount():
+        raise ValueError("Presentation contains no slides")
+    slides, fonts = [], []
+    for index in range(pages.getCount()):
+        page = pages.getByIndex(index)
+        notes_page = page.getNotesPage()
+        notes = []
+        for number in range(notes_page.getCount()):
+            shape = notes_page.getByIndex(number)
+            if shape.getShapeType() == "com.sun.star.presentation.NotesShape":
+                notes.append(shape.String)
+        for number in range(page.getCount()):
+            shape = page.getByIndex(number)
+            if hasattr(shape, "createEnumeration"):
+                text_fonts(shape, fonts)
+        slides.append(
+            {
+                "ordinal": index + 1,
+                "page": index + 1,
+                "name": page.Name,
+                "hidden": not page.Visible,
+                "notes": "\n".join(notes),
+            }
+        )
+        # Export an explicit original slide ordinal. The application verifies
+        # each output has exactly one page before assembling the snapshot.
+        export_pdf(
+            document,
+            directory / f"slide-{index + 1}.pdf",
+            "impress_pdf_Export",
+            {**request["pdf_options"], "PageRange": ("string", str(index + 1))},
+        )
+    return {
+        "filter": "impress_pdf_Export",
+        "detected_filter": detected["FilterName"],
+        "requested_fonts": fonts,
+        "slides": slides,
+        "diagnostics": [
+            "All slides, including hidden slides; speaker notes retain their original slide."
+        ],
+    }
 
 
 def convert(request, directory):
@@ -145,6 +202,10 @@ def convert(request, directory):
             )
         if document is None:
             raise ValueError("Office could not load the damaged or unsupported input")
+        if Path(request["input"]).suffix.lower() == ".pptx":
+            if not document.supportsService("com.sun.star.presentation.PresentationDocument"):
+                raise ValueError("PowerPoint input did not load as a presentation")
+            return presentation(request, document, directory)
         if not document.supportsService("com.sun.star.text.TextDocument"):
             raise ValueError("Office input did not load as a Writer document")
         settings = document.createInstance("com.sun.star.text.DocumentSettings")
@@ -166,13 +227,7 @@ def convert(request, directory):
             raise ValueError(
                 f"Office detected filter {detected.get('FilterName')!r} does not match {extension}"
             )
-        export = properties({"FilterName": ("string", "writer_pdf_Export")})
-        data = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
-        data.Name = "FilterData"
-        data.Value = uno.Any(
-            "[]com.sun.star.beans.PropertyValue", properties(request["pdf_options"])
-        )
-        document.storeToURL((directory / "output.pdf").as_uri(), (*export, data))
+        export_pdf(document, directory / "output.pdf", "writer_pdf_Export", request["pdf_options"])
         return {
             "filter": "writer_pdf_Export",
             "detected_filter": str(detected.get("FilterName", "")),

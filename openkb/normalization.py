@@ -80,11 +80,15 @@ def normalization_fingerprint(
             text_policy["resources"] = {"policy": REMOTE_POLICY, **selected.model_dump(mode="json")}
     from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
 
-    office_policy = {}
+    office_policy: dict = {}
     if source_revision and f".{source_revision.source_format}" in OFFICE_SOURCE_EXTENSIONS:
         from openkb.office.runtime import processing_identity
 
         office_policy = {"office": processing_identity(kb_dir)}
+        if source_revision.source_format in {"pptx", "ppt"}:
+            from openkb.office.slide_content import NOTES_POLICY
+
+            office_policy["notes_policy"] = NOTES_POLICY
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
@@ -196,6 +200,10 @@ def retain_normalization(
             if converted.source_path is None:
                 raise ValueError("Normalized text is missing")
             freeze_block_package(converted.source_path, admission.source.doc_name)
+        if converted.is_long_doc and converted.pdf_path and converted.office_path:
+            from openkb.office.slide_package import freeze_slide_package
+
+            freeze_slide_package(converted.pdf_path, converted.office_path)
         saved = NormalizedInput(
             normalization_id=identity,
             source_revision_id=admission.revision.source_revision_id,

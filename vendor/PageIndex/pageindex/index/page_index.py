@@ -1035,7 +1035,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))
             for item in toc_with_page_number:
-                item['unit_kind'] = 'block'
+                item['unit_kind'] = policy.unit_kind
         return toc_with_page_number
     if (policy or accuracy > 0.6) and len(incorrect_results) > 0:
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
@@ -1044,7 +1044,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))
             for item in toc_with_page_number:
-                item['unit_kind'] = 'block'
+                item['unit_kind'] = policy.unit_kind
         return toc_with_page_number
     else:
         if mode == 'process_toc_with_page_numbers':

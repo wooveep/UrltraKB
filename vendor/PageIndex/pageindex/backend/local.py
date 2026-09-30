@@ -186,6 +186,8 @@ class LocalBackend:
         """
         doc = self._require_document(collection, doc_id)
         doc["metadata"] = doc.get("metadata") or {"coverage": "unknown", "unit_kind": None}
+        if doc["metadata"].get("unit_kind") == "page":
+            doc["page_count"] = doc["metadata"].get("unit_count")
         if doc["metadata"].get("parser_policy"):
             doc["file_path"] = str(self._managed_input(collection, doc_id, doc))
         doc["structure"] = self._storage.get_document_structure(collection, doc_id)
@@ -338,8 +340,10 @@ class LocalBackend:
                 doc = backend._require_document(col_name, doc_id)
             except DocumentNotFoundError:
                 return json.dumps({"error": f"doc_id '{doc_id}' not found."})
-            if (doc.get("metadata") or {}).get("unit_kind") == "block":
-                doc = {**doc, "metadata": {key: value for key, value in doc["metadata"].items() if key != "source"}}
+            if ((doc.get("metadata") or {}).get("unit_kind") == "block"
+                    or (doc.get("metadata") or {}).get("notes_policy")):
+                doc = {**doc, "metadata": {key: value for key, value in doc["metadata"].items()
+                                           if key not in {"source", "page_parts"}}}
             return json.dumps(doc)
 
         @function_tool

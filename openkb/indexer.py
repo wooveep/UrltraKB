@@ -195,7 +195,7 @@ def index_long_document(
     index_config = _build_index_config(config, bundle=resolve_credential_bundle(kb_dir))
 
     client_factory = LocalClient
-    if pdf_path.suffix == ".okbi":
+    if pdf_path.suffix in {".okbi", ".okpi"}:
         from openkb.block_package import create_index_client
 
         client_factory = create_index_client
@@ -265,9 +265,21 @@ def index_long_document(
         sources_dir.mkdir(parents=True, exist_ok=True)
         images_dir = sources_dir / "images" / source_name
 
-        all_pages = _normalize_page_content(
-            _convert_pdf_to_pages(pdf_path, source_name, images_dir)
-        )
+        if pdf_path.suffix == ".okpi":
+            from openkb.office.slide_content import attach_slides
+            from openkb.office.slide_package import materialize_slide_package
+
+            with materialize_slide_package(pdf_path) as (snapshot, slides):
+                all_pages = attach_slides(
+                    _normalize_page_content(
+                        _convert_pdf_to_pages(snapshot, source_name, images_dir)
+                    ),
+                    slides,
+                )
+        else:
+            all_pages = _normalize_page_content(
+                _convert_pdf_to_pages(pdf_path, source_name, images_dir)
+            )
 
         if not all_pages:
             raise RuntimeError(f"No page content extracted for {pdf_path.name}")

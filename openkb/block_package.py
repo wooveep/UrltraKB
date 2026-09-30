@@ -154,4 +154,7 @@ def create_index_client(**kwargs):
 
     client = LocalClient(**kwargs)
     client.register_parser(FrozenBlockParser())
+    from openkb.office.slide_package import FrozenSlideParser
+
+    client.register_parser(FrozenSlideParser())
     return client

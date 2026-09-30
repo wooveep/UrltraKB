@@ -4,7 +4,15 @@ import re
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from openkb.desktop.reader import MarkdownView
 
@@ -101,6 +109,12 @@ class SourceReader(QDialog):
             )
             conversion.setWordWrap(True)
             layout.addWidget(conversion)
+            if office.get("slides"):
+                slides = office["slides"]
+                hidden = sum(slide["hidden"] for slide in slides)
+                layout.addWidget(
+                    QLabel(f"{len(slides)} 张幻灯片，含 {hidden} 张隐藏页；备注不另计页数")
+                )
             unresolved = sum(item["status"] != "matched" for item in office["font_observations"])
             if unresolved:
                 font_status = QLabel(
@@ -125,6 +139,17 @@ class SourceReader(QDialog):
             select.clicked.connect(self.select_pages)
             self.pages.returnPressed.connect(self.select_pages)
             controls.addWidget(self.pages, 1)
+            if (source.get("office") or {}).get("slides"):
+                self.part = QComboBox()
+                self.part.setAccessibleName("来源正文或演讲备注")
+                for label, value in (
+                    ("正文和备注", None),
+                    ("仅正文", "body"),
+                    ("仅演讲备注", "notes"),
+                ):
+                    self.part.addItem(label, value)
+                controls.addWidget(self.part)
+                self.part.currentIndexChanged.connect(self.select_pages)
             controls.addWidget(select)
             layout.addLayout(controls)
         if source.get("unit_kind") in {"text", "block"}:
@@ -234,7 +259,7 @@ class SourceReader(QDialog):
             )
 
     def select_pages(self):
-        from openkb.source_pages import read_page_selection
+        from openkb.source_pages import read_page_selection, select_page_part
 
         try:
             if self.source.get("unit_kind") == "block":
@@ -261,6 +286,9 @@ class SourceReader(QDialog):
                 )
                 return
             selected = read_page_selection(self.source["units"], self.pages.text().strip() or None)
+            selected = select_page_part(
+                selected, self.part.currentData() if hasattr(self, "part") else None
+            )
         except ValueError as exc:
             self.coverage.setText(str(exc))
             return

@@ -7,6 +7,19 @@ readback exposes both artifacts, physical pages and the conversion record.
 Recompilation and historical reads use retained artifacts without running Office.
 A failed replacement retains the new original and keeps the last successful body.
 
+PPTX uses Impress's full original slide inventory, including hidden slides.
+Each explicit slide ordinal is exported separately and checked for exactly one
+PDF page before assembly. This binds the stored slide map to the physical PDF.
+Speaker notes remain attached to that page in a distinct `notes` part, labelled
+“演讲备注 / Speaker notes”; they never increase the page count. CLI `source --part
+notes`, the API `part` field and the desktop selector can read notes separately.
+
+Segmented presentations freeze a portable `.okpi` PDF-and-notes package. It wraps
+the existing PDF parser and content-based tree algorithm; native PDFs keep their
+ordinary route. Notes, slide mappings and PDF bytes all affect cache identity.
+Navigation labels carry generated provenance and a validated body/notes anchor.
+Cache recovery and recompilation consume the same frozen package without Office.
+
 The locked release is LibreOffice **26.2.6.3**, build
 `8221e31b3ac356a1623c672912a3d2b492f7e3d1`, with its Python **3.12.14** and UNO bridge.
 Official Linux DEB bundle, Windows MSI and corresponding core source URLs, sizes
@@ -94,3 +107,6 @@ Passing on a development host does not enable the final distribution. Issues
 #100–#102 retain the real-model and clean Windows 11/Debian 13.6 GNOME/X11 manual
 gates, including frozen-entry-point launch, ordinary user, offline and read-only
 installation, concurrent tasks, existing user Office, and forced-stop cleanup.
+
+幻灯片正文锚点使用转换时冻结的逐页纯文本 Unicode 坐标，备注使用独立坐标域。
+富文本展示的图片链接不参与正文字符坐标；索引、来源回读及缓存迁移共用冻结的两域文本。

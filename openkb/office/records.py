@@ -58,12 +58,22 @@ class RequestedFont(Record):
     requested_complex: str
 
 
+class Slide(Record):
+    ordinal: int = Field(ge=1)
+    page: int = Field(ge=1)
+    name: str
+    hidden: bool
+    notes: str
+    body: str | None = None
+
+
 class WorkerResult(Record):
-    filter: Literal["writer_pdf_Export"]
+    filter: Literal["writer_pdf_Export", "impress_pdf_Export"]
     detected_filter: str
     requested_fonts: list[RequestedFont]
-    print_hidden_text: Literal[False]
+    print_hidden_text: Literal[False] | None = None
     diagnostics: list[str]
+    slides: list[Slide] = Field(default_factory=list)
 
 
 class FontSubstitution(Record):
@@ -94,12 +104,24 @@ class OfficeConversion(Record):
     fonts: dict[RelativePath, Digest]
     licenses: dict[RelativePath, Digest]
     elapsed_seconds: float = Field(ge=0)
-    filter: Literal["writer_pdf_Export"]
+    filter: Literal["writer_pdf_Export", "impress_pdf_Export"]
     detected_filter: str
-    print_hidden_text: Literal[False]
+    print_hidden_text: Literal[False] | None = None
     diagnostics: list[str]
     pages: int = Field(ge=1)
     pdf_digest: Digest
     pdf_fonts: list[str]
     font_substitutions: list[FontSubstitution]
     font_observations: list[FontObservation]
+    slides: list[Slide] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_slide_map(self):
+        if self.filter == "impress_pdf_Export":
+            if [slide.page for slide in self.slides] != list(range(1, self.pages + 1)) or any(
+                slide.ordinal != slide.page or slide.body is None for slide in self.slides
+            ):
+                raise ValueError("Office slides do not cover the verified physical PDF pages")
+        elif self.slides:
+            raise ValueError("Writer output cannot contain a slide map")
+        return self

@@ -99,15 +99,18 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return read_query_page(selection, path, view_id=view.view_id)
 
     @function_tool
-    def get_page_content(doc_name: str, pages: str, view_id: str = "") -> str:
-        """Read original indexed pages within one allowed evidence view."""
+    def get_page_content(doc_name: str, pages: str, view_id: str = "", part: str = "") -> str:
+        """Read original physical pages in one allowed view.
+
+        For slides, part may be body or notes; empty includes both without extra pages.
+        """
         view = _selected(selection, view_id)
         if not _available(view, f"sources/{doc_name}.json"):
             return "No permitted indexed source in this evidence view."
         return (
             view.provenance
             + "\n\n"
-            + get_wiki_page_content(doc_name, pages, str(view.scope.wiki_dir))
+            + get_wiki_page_content(doc_name, pages, str(view.scope.wiki_dir), part or None)
         )
 
     @function_tool

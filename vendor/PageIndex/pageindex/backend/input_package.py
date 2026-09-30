@@ -77,6 +77,12 @@ def freeze_pages(parsed, base: Path, model) -> list[dict]:
             node.tokens = count_tokens(content, model=model)
         node.content = content
         node.images = images or None
+    if (parsed.metadata or {}).get("notes_policy"):
+        for page in pages:
+            for locator in page.get("origin_locators", []):
+                locator["range"] = [0, len(page["parts"][locator["part"]])]
+        parsed.metadata["page_parts"] = [page["parts"] for page in pages]
+        parsed.metadata["units_digest"] = hashlib.sha256(json.dumps(pages, sort_keys=True).encode()).hexdigest()
     return pages
 
 
@@ -111,6 +117,12 @@ def materialize_pages(pages, base: Path, metadata: dict) -> list[dict]:
             cached["assets"] = assets
         return result
     result = copy.deepcopy(pages)
+    if metadata.get("notes_policy"):
+        from ..index.page_parts_policy import PagePartsPolicy
+        policy = PagePartsPolicy(metadata)
+        if (hashlib.sha256(json.dumps(pages, sort_keys=True).encode()).hexdigest() != metadata.get("units_digest")
+                or [page.get("parts") for page in pages] != policy.parts):
+            raise ValueError("Cached physical slide body/notes mapping changed")
     ordinals = []
     for page in result:
         if not isinstance(page, dict) or not isinstance(page.get("content"), str):

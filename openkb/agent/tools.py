@@ -92,7 +92,9 @@ def parse_pages(pages: str) -> list[int]:
     return sorted(n for n in result if n > 0)
 
 
-def get_wiki_page_content(doc_name: str, pages: str, wiki_root: str) -> str:
+def get_wiki_page_content(
+    doc_name: str, pages: str, wiki_root: str, part: str | None = None
+) -> str:
     """Return formatted content for specified pages of a document.
 
     Reads ``{wiki_root}/sources/{doc_name}.json`` which must be a JSON array of
@@ -114,9 +116,10 @@ def get_wiki_page_content(doc_name: str, pages: str, wiki_root: str) -> str:
     if not target.exists():
         return f"File not found: sources/{doc_name}.json"
 
-    from openkb.source_pages import read_page_selection
+    from openkb.source_pages import read_page_selection, select_page_part
 
     result = read_page_selection(_json.loads(target.read_text(encoding="utf-8")), pages)
+    result = select_page_part(result, part)
     if not result["page_range"]:
         return f"No content found for pages {pages} in {doc_name}."
     return result["content"] + "\n\n"

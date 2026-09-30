@@ -90,6 +90,9 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
         if (parsed.metadata or {}).get("unit_kind") == "block":
             from .block_policy import BlockPolicy
             policy = BlockPolicy(parsed.metadata)
+        elif (parsed.metadata or {}).get("notes_policy"):
+            from .page_parts_policy import PagePartsPolicy
+            policy = PagePartsPolicy(parsed.metadata)
         strategy = "content_based" if policy else detect_strategy(nodes)
 
         if strategy == "level_based":

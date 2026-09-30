@@ -66,11 +66,27 @@ def convert_office(
             (directory / "result.json").read_text()
         ).model_dump(mode="json")
         output = directory / "output.pdf"
+        if details["slides"]:
+            with pymupdf.open() as assembled:
+                for slide in details["slides"]:
+                    part = directory / f"slide-{slide['ordinal']}.pdf"
+                    if not part.read_bytes().startswith(b"%PDF-1.7"):
+                        raise ValueError("A slide export did not produce PDF 1.7")
+                    with pymupdf.open(part) as single:
+                        if single.page_count != 1 or single.needs_pass:
+                            raise ValueError("Cannot verify the slide-to-page mapping")
+                        assembled.insert_pdf(single)
+                assembled.save(output)
         if not output.read_bytes().startswith(b"%PDF-1.7"):
             raise ValueError("Office did not generate the required PDF 1.7")
         with pymupdf.open(output) as document:
             if document.page_count < 1 or document.needs_pass:
                 raise ValueError("Office generated an unreadable PDF")
+            if details["slides"]:
+                if len(details["slides"]) != document.page_count:
+                    raise ValueError("Slide map and frozen PDF page counts disagree")
+                for slide, page in zip(details["slides"], document):
+                    slide["body"] = page.get_text()
             spans = [
                 span
                 for page in document

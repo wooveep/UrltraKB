@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -346,6 +346,7 @@ class PageResponse(BaseModel):
 
 
 class DocumentSourceRequest(ViewRequest):
+    part: Literal["body", "notes"] | None = None
     blocks: str | None = None
     chars: str | None = None
     knowledge_revision_id: str | None = None
@@ -358,6 +359,7 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    part: Literal["body", "notes"] | None = None
     internal_pdf_path: str | None = None
     office: dict | None = None
     resource_policy: dict | None = None

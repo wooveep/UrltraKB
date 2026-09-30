@@ -7,6 +7,44 @@ class PageRangeError(ValueError):
     """The requested range cannot be applied to this source."""
 
 
+def select_page_part(source: dict, part: str | None) -> dict:
+    """Keep physical ordinals while selecting one attributable slide domain."""
+    if part is None:
+        return source
+    if part not in {"body", "notes"} or source.get("unit_kind") != "page":
+        raise PageRangeError("Body/notes selection requires a physical slide source")
+    units = []
+    for page in source.get("units", []):
+        parts = page.get("parts")
+        if (
+            not isinstance(parts, dict)
+            or set(parts) != {"body", "notes"}
+            or any(not isinstance(text, str) for text in parts.values())
+        ):
+            raise PageRangeError("This source has no verified body/notes partition")
+        units.append(
+            {
+                **page,
+                "content": parts[part],
+                "part": part,
+                "images": page.get("images", []) if part == "body" else [],
+                "origin_locators": [
+                    item for item in page.get("origin_locators", []) if item.get("part") == part
+                ],
+            }
+        )
+    label = "正文" if part == "body" else "演讲备注"
+    return {
+        **source,
+        "part": part,
+        "units": units,
+        "origin_locators": [item for page in units for item in page["origin_locators"]],
+        "content": "\n\n---\n\n".join(
+            f"[Physical page {page['page']} · {label}]\n\n{page['content']}" for page in units
+        ),
+    }
+
+
 def validate_source_ranges(pages=None, chars=None, blocks=None) -> None:
     if sum(value is not None for value in (pages, chars, blocks)) > 1:
         raise PageRangeError("Choose one of pages, characters, or blocks")
@@ -75,4 +113,5 @@ def read_page_selection(raw: Any, specification: str | None = None) -> dict:
         "coverage": "complete" if complete else "unknown",
         "diagnostics": diagnostics,
         "units": selected,
+        "origin_locators": [item for page in selected for item in page.get("origin_locators", [])],
     }

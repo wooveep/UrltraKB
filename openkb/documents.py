@@ -66,6 +66,7 @@ def read_document_source(
     pages: str | None = None,
     chars: str | None = None,
     blocks: str | None = None,
+    part: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the ingested source text for the document identified by hash.
 
@@ -88,7 +89,11 @@ def read_document_source(
         block_range=blocks,
     )
     if admitted is not None:
-        return admitted
+        from openkb.source_pages import select_page_part
+
+        return select_page_part(admitted, part)
+    if part is not None:
+        raise PageRangeError("Legacy source has no verified body/notes partition")
     if chars is not None or blocks is not None:
         raise PageRangeError("Legacy source has no frozen character map")
     scope = resolve_scope(kb_dir, scope)

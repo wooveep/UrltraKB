@@ -12,6 +12,6 @@ def verify_local_pageindex(root: Path) -> Path:
             "PageIndex must load from this checkout's vendor/PageIndex. "
             "Run uv sync --frozen in the source directory before building."
         )
-    if metadata.version("pageindex") != "0.3.0.dev3+urltrakb.3":
+    if metadata.version("pageindex") != "0.3.0.dev3+urltrakb.4":
         raise ValueError("PageIndex metadata does not match the vendored source version")
     return expected.parent
