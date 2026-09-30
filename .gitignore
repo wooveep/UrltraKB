@@ -34,3 +34,5 @@ examples/kb/
 /openkb/rendering/rust-helper/target/
 /openkb/office/assets/runtime/
 /openkb/office/launcher/target/
+/openkb/cfb_helper/assets/runtime/
+/openkb/cfb_helper/rust-helper/target/

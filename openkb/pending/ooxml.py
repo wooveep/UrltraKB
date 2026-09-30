@@ -148,4 +148,4 @@ class OOXMLObjects:
         return [candidates[key] for key in sorted(candidates)]
 
     def read(self, candidate, meter):
-        return read_part(self.package, candidate.part, meter)
+        return read_part(self.package, candidate.part, meter), candidate.key

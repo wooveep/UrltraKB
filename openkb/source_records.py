@@ -125,4 +125,4 @@ class DiscoveryIntent(PendingJob):
     source_revision_id: RecordId
     original: FrozenArtifact
     cursor: int = Field(default=0, ge=0)
-    policy: str = "ooxml-embedded-package-v1"
+    policy: str = "office-embedded-files-v2"

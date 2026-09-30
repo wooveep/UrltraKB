@@ -4,7 +4,7 @@
 
 DOCX、PPTX、XLSX 从原始 package 扫描嵌入目录、内容类型和 package/OLE 关系目标，包含图表工作簿、自定义路径和无正文引用的残留文件。同一实际 part 的多处引用不重复导入；不同 part 即使内容相同仍是不同来源。ZIP 内容类型、PDF 和 CFB 流用于识别真实文件类型，支持标准 Package/Ole10Native 包装中的完整文件。原始 OOXML、PDF、标准 DOC/XLS/PPT 和经过解码验证的支持文本按普通来源接入。
 
-待办检查点分别显示私有对象、预览图、外链（不下载）、损坏对象、循环和需要标准容器重建的对象。不能恢复的对象保留原件和技术定位，不冒充已导入文档。旧 CFB 子 storage 的重建由专门 helper 完成，未提供重建能力时明确报告 `requires_container_rebuild`。
+待办检查点分别显示私有对象、预览图、外链（不下载）、损坏对象、循环和需要标准容器重建的对象。不能恢复的对象保留原件和技术定位，不冒充已导入文档。旧 DOC 的标准 CFB 子 storage 由[随包 helper](cfb-helper.md)重建并独立核对后普通导入；未提供重建能力时明确报告 `requires_container_rebuild`。
 
 CLI 正文结束显示发现和文件导入待办数。显式排空可运行工作：
 

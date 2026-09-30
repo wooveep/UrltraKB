@@ -13,7 +13,7 @@ class ExecutionBudget(Record):
     max_object_bytes: int = Field(default=32 * 1024**2, ge=1)
     max_total_bytes: int = Field(default=256 * 1024**2, ge=1)
     max_decompressed_bytes: int = Field(default=512 * 1024**2, ge=1)
-    max_discovery_seconds: float = Field(default=30.0, gt=0)
+    max_discovery_seconds: float = Field(default=30.0, gt=0, allow_inf_nan=False)
 
 
 class ExecutionGroup(Record):

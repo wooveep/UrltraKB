@@ -36,12 +36,19 @@ def discover(kb_dir, intent, check_stop):
         or HashRegistry.hash_file(original) != revision.digest
     ):
         raise ValueError("Discovery original failed its frozen digest check")
-    if revision.source_format not in {"docx", "pptx", "xlsx"}:
+    if revision.source_format not in {"docx", "pptx", "xlsx", "doc"}:
         return save_job(kb_dir, "discovery", intent.model_copy(update={"status": "completed"}))
-    if intent.policy not in {"docx-embedded-package-v1", "ooxml-embedded-package-v1"}:
+    if intent.policy not in {
+        "docx-embedded-package-v1",
+        "ooxml-embedded-package-v1",
+        "office-embedded-files-v2",
+    }:
         raise ValueError("Unknown saved discovery policy; explicit reprocessing is required")
     legacy = intent.policy == "docx-embedded-package-v1"
-    with OOXMLObjects(original) as package:
+    from openkb.pending.cfb import CompoundObjects
+
+    provider = CompoundObjects if revision.source_format == "doc" else OOXMLObjects
+    with provider(original) as package:
         meter = DiscoveryMeter(group_for(kb_dir, intent), check_stop)
         try:
             objects = package.scan(meter, legacy=legacy)
@@ -73,8 +80,8 @@ def discover(kb_dir, intent, check_stop):
                         or group.object_bytes + candidate.size > budget.max_total_bytes
                     ):
                         raise BudgetWait("Object byte budget exhausted")
-                    payload = package.read(candidate, meter)
-                    payload, extension, outcome, diagnostic = recognize(payload, name, meter)
+                    payload, filename = package.read(candidate, meter)
+                    payload, extension, outcome, diagnostic = recognize(payload, filename, meter)
                     if legacy and extension != "docx":
                         extension, outcome, diagnostic = (
                             None,
@@ -87,7 +94,12 @@ def discover(kb_dir, intent, check_stop):
             except LockCancelled:
                 raise
             except Exception as exc:
-                extension, outcome = None, "corrupt_object"
+                extension = None
+                outcome = (
+                    "requires_container_rebuild"
+                    if candidate.part and candidate.part.startswith("cfb:")
+                    else "corrupt_object"
+                )
                 diagnostic = f"Object could not be recovered: {type(exc).__name__}: {exc}"
             digest = hashlib.sha256(payload).hexdigest()
             if digest in (*intent.ancestry, revision.digest):

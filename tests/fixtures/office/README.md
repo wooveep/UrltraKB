@@ -41,3 +41,24 @@ importer never invokes Calc or calculates formulas. No real user content.
 record changed to -42, preserving the `00000` mask. Its cached E2 result remains
 43 deliberately: stored caches are evidence, not a promise of recalculation.
 It verifies that signs do not consume a zero-padding digit.
+
+`embedded-calc.doc` and `embedded-writer.doc` were authored with the pinned Office
+UNO API: a Writer `TextEmbeddedObject` uses Calc CLSID
+`47BBB4CB-CE4C-4E80-A591-42D9AE74950F` or Writer CLSID
+`8BC6B165-B1B2-4EDD-AA47-DAE2EE689DD6`. The contained model has the literal
+`EMBEDDED_CALC_STANDARD_MARKER` in A1 or `EMBEDDED_WRITER_STANDARD_MARKER` in its
+text. Saving the outer Writer with `MS Word 97` creates actual ObjectPool CFB
+substorages with standard Workbook or WordDocument streams.
+
+`embedded-metadata.doc` extends the Calc fixture using cfb 0.15.0 as an independent
+fixture writer. Its selected storage has state `0x12345678` and creation timestamp
+1700000000 Unix seconds, modified one second later. Nested has the same CLSID,
+creation time, modification two seconds later, an Empty storage, Small stream
+`nested fixture bytes` (state `0x1357`), and Large stream of 9000 bytes `0xA5`.
+The tests check these literal values through olefile and require the rebuilt root
+creation time to be zero. The underlying workbook and its marker stay unchanged.
+
+`embedded-nested.doc` places the complete Calc fixture's standard storage under
+the embedded Writer's own `ObjectPool/_nested`, using pinned cfb 0.15.0 to copy
+all streams and metadata. The deliberately orphaned nested Calc must be imported
+once, by the recovered Writer's discovery, rather than also by the outer host.

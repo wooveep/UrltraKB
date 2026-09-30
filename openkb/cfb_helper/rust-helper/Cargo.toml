@@ -1,0 +1,16 @@
+[package]
+name = "openkb-cfb"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+cfb = "=0.15.0"
+
+[profile.release]
+strip = true
+panic = "abort"
+lto = true
+codegen-units = 1

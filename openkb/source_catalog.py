@@ -237,7 +237,7 @@ def admit_source_revision(
             kb_generation=generation,
             status="completed"
             if original_kind == "legacy_snapshot"
-            or revision.source_format not in {"docx", "pptx", "xlsx"}
+            or revision.source_format not in {"docx", "pptx", "xlsx", "doc"}
             else "pending",
             depth=execution.depth if execution else 0,
             ancestry=execution.ancestry if execution else (),

@@ -22,3 +22,15 @@ def embedded_docx(writer_document):
             "</Relationships>",
         )
     return writer_document
+
+
+@pytest.fixture
+def prepared_cfb_helper():
+    from pathlib import Path
+
+    from openkb.cfb_helper.runtime import helper_path
+
+    root = Path(__file__).parents[1] / "openkb/cfb_helper/assets/runtime"
+    if not (root / "manifest.json").exists():
+        pytest.skip("Real CFB recovery needs scripts/prepare_cfb_helper.py")
+    return helper_path()
