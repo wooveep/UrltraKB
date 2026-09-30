@@ -600,6 +600,7 @@ def create_app() -> FastAPI:
             async for event in iter_recompile(
                 kb_dir,
                 request.doc_name,
+                unit_id=request.unit_id,
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
                 scope=await resolve_api_scope(kb_dir, request.view_id),
@@ -628,6 +629,7 @@ def create_app() -> FastAPI:
             recompiled=result.get("recompiled", 0),
             skipped=result.get("skipped", 0),
             blocked=result.get("blocked", 0),
+            partial=result.get("partial", 0),
             docs=result.get("docs", []),
             targets=targets,
             candidates=candidates,

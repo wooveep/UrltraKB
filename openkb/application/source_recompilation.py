@@ -37,6 +37,7 @@ async def recompile_source(
     model: str | None = None,
     max_concurrency: int | None = None,
     scope: KnowledgeScope | None = None,
+    unit_id: str | None = None,
 ) -> IngestResult:
     """Caller holds the KB write lease and checks the review precondition."""
     from openkb.agent import compiler
@@ -54,7 +55,27 @@ async def recompile_source(
             source_id=source_id,
             message="No retained processing unit is available",
         )
-    unit = units[0]
+    if unit_id is None and len(units) > 1:
+        from openkb.application.workbook_ingestion import aggregate_units
+
+        results = []
+        for selected_unit in units:
+            results.append(
+                await recompile_source(
+                    kb_dir,
+                    source_id,
+                    unit_id=selected_unit.unit_id,
+                    context=context,
+                    bundle=bundle,
+                    model=model,
+                    max_concurrency=max_concurrency,
+                    scope=scope,
+                )
+            )
+        return aggregate_units(results)
+    unit = next((item for item in units if item.unit_id == unit_id), None) if unit_id else units[0]
+    if unit is None:
+        raise ValueError("Processing unit does not belong to this source")
     try:
         previous = read_unit_publication(kb_dir, unit.unit_id, scope.view_id)
     except FileNotFoundError:

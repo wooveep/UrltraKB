@@ -52,7 +52,8 @@ def preview_retry(manager: TaskManager, task_id: str) -> RetryPreview:
         indices = tuple(
             index
             for index in range(view.total)
-            if index >= len(results) or results[index].status in {"failed", "stopped", "blocked"}
+            if index >= len(results)
+            or results[index].status in {"failed", "stopped", "blocked", "partial"}
         )
         if not indices and reason is None:
             reason = "所有执行单元已有完成或跳过结果。可从相应操作界面发起新的请求。"

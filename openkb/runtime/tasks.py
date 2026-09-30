@@ -478,9 +478,18 @@ class TaskManager:
             )
         elif len(results) == task.view.total:
             failed = any(row.status == "failed" for row in results)
+            blocked = any(row.status == "blocked" for row in results)
             state = (
-                "partial" if failed and task.view.succeeded else "failed" if failed else "completed"
+                "partial"
+                if (failed or blocked) and task.view.succeeded
+                else "failed"
+                if failed
+                else "blocked"
+                if blocked
+                else "completed"
             )
+            if any(row.status == "partial" for row in results):
+                state = "partial"
             if result.status == "stopped":
                 state = "stopped"
             self._update(task, state=state, stage=state)

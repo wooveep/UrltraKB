@@ -40,9 +40,13 @@ def result_from_publication(
     *,
     status: Literal["added", "skipped", "failed", "blocked", "partial", "stopped"],
 ) -> IngestResult:
+    from openkb.ingest_records import ImportUnit
+
+    unit = read_record(kb_dir, "units", state.unit_id, ImportUnit)
     resources = [str(kb_dir / admission.revision.original)]
     from openkb.application.sources import processing_details
     from openkb.inputs import input_version
+    from openkb.workbooks.catalog import unit_name
 
     actual_source = None
     manifest = None
@@ -63,9 +67,7 @@ def result_from_publication(
             / "wiki"
         )
         resources.extend(
-            str(path)
-            for path in [wiki / "summaries" / f"{admission.source.doc_name}.md"]
-            if path.is_file()
+            str(path) for path in [wiki / "summaries" / f"{unit.doc_name}.md"] if path.is_file()
         )
     from openkb.office.readback import read_office_artifacts
 
@@ -88,6 +90,9 @@ def result_from_publication(
         state.error_type,
         state.message,
         state.job_id,
+        key=unit.key,
+        doc_name=unit.doc_name,
+        name=unit_name(kb_dir, unit, state.target_revision_id, admission.source.name),
         **processing_details(kb_dir, state, manifest),
     )
     return IngestResult(
@@ -121,16 +126,9 @@ def import_prepared_source(
     admission: Admission | None = None,
     retry_confirmed: bool = False,
     download_remote_assets: bool | None = None,
+    unit_id: str | None = None,
 ) -> IngestResult:
     """Caller owns the real KB write lease and frozen input for the whole call."""
-    from openkb.agent.compiler import (
-        DEFAULT_COMPILE_CONCURRENCY,
-        compile_long_doc,
-        compile_short_doc,
-    )
-    from openkb.application.documents import _run_compile_with_retry
-    from openkb.indexer import index_long_document
-
     check_stop = context.check_stop if context else lambda: None
     admission = admission or admit_source_revision(
         kb_dir, prepared, identity=origin_url, check_stop=check_stop
@@ -139,15 +137,11 @@ def import_prepared_source(
         raise ValueError("Retained input no longer matches the source revision")
     from openkb.application.version_review import (
         VersionReview,
-        complete_version_review,
-        save_version_wait,
     )
     from openkb.application.views import bind_source_view
     from openkb.normalization import (
         normalization_fingerprint,
         read_normalization,
-        restore_normalization,
-        retain_normalization,
     )
     from openkb.version_metadata import assess_version
 
@@ -196,7 +190,82 @@ def import_prepared_source(
         )
     )
 
-    unit, revision = plan_import_units(kb_dir, admission, fingerprint)
+    if admission.revision.source_format in {"xlsx"}:
+        from openkb.application.workbook_ingestion import import_workbook_units
+
+        return import_workbook_units(
+            kb_dir,
+            prepared,
+            admission=admission,
+            fingerprint=fingerprint,
+            unit_id=unit_id,
+            assessment=assessment,
+            review=review,
+            scope=scope,
+            bundle=bundle,
+            context=context,
+            on_event=on_event,
+            report=report,
+            retry_confirmed=retry_confirmed,
+        )
+    return process_import_unit(
+        kb_dir,
+        prepared,
+        admission=admission,
+        fingerprint=fingerprint,
+        assessment=assessment,
+        review=review,
+        scope=scope,
+        bundle=bundle,
+        context=context,
+        on_event=on_event,
+        report=report,
+        retry_confirmed=retry_confirmed,
+        resource_policy=resource_policy,
+    )
+
+
+def process_import_unit(
+    kb_dir,
+    prepared,
+    *,
+    admission,
+    fingerprint,
+    assessment,
+    review,
+    scope,
+    bundle=None,
+    context=None,
+    on_event=None,
+    report=logger.info,
+    retry_confirmed=False,
+    resource_policy=None,
+    sheet=None,
+):
+    from openkb.agent.compiler import (
+        DEFAULT_COMPILE_CONCURRENCY,
+        compile_long_doc,
+        compile_short_doc,
+    )
+    from openkb.application.documents import _run_compile_with_retry
+    from openkb.application.version_review import complete_version_review, save_version_wait
+    from openkb.indexer import index_long_document
+    from openkb.normalization import restore_normalization, retain_normalization
+
+    check_stop = context.check_stop if context else lambda: None
+    import hashlib
+
+    unit, revision = plan_import_units(
+        kb_dir,
+        admission,
+        fingerprint,
+        key=sheet.key if sheet else "body",
+        doc_name=admission.source.doc_name
+        + "-sheet-"
+        + hashlib.sha256(sheet.key.encode()).hexdigest()[:12]
+        if sheet
+        else None,
+    )
     state, runnable = begin_unit_attempt(
         kb_dir,
         unit,
@@ -227,6 +296,8 @@ def import_prepared_source(
             scope=scope,
             bundle=bundle,
             resource_policy=resource_policy,
+            unit=unit,
+            sheet=sheet,
         )
         if assessment.missing_fields:
             state = save_version_wait(kb_dir, admission, normalized, state, assessment)
@@ -242,7 +313,10 @@ def import_prepared_source(
                     index_input = converted.pdf_path or converted.raw_path
                     if converted.pdf_path and converted.pdf_path.with_suffix(".okpi").is_file():
                         index_input = converted.pdf_path.with_suffix(".okpi")
-                    if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
+                    if (
+                        sheet is not None
+                        or f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS
+                    ):
                         if converted.source_path is None:
                             raise ValueError("Normalized text is missing")
                         index_input = converted.source_path.with_suffix(".okbi")
@@ -304,7 +378,10 @@ def import_prepared_source(
                 if pdf_input is not None and (converted.processing is not None or page_map.exists())
                 else None
             )
-            if f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
+            if (
+                sheet is not None
+                or f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS
+            ):
                 from openkb.source_map import freeze_text_map
 
                 source_map = freeze_text_map(view.scope.wiki_dir, unit.doc_name)

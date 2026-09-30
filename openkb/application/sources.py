@@ -141,6 +141,10 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
             revision = read_source_revision(root, source.target_revision_id)
             units = list_source_units(root, source.source_id)
             view_id = scope.view_id if scope else source_view_id(root, source)
+            if scope and scope.read_only:
+                units = tuple(unit for unit in units if _snapshot_source(root, scope, unit.unit_id))
+            elif scope and source_view_id(root, source) != view_id:
+                units = tuple(unit for unit in units if _publication(root, unit.unit_id, view_id))
             states = [
                 state for unit in units if (state := _publication(root, unit.unit_id, view_id))
             ]
@@ -173,6 +177,18 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                         )
                     ]
             from openkb.source_changes import source_validity
+            from openkb.workbooks.catalog import inventory_failure
+
+            inventory_error = (
+                inventory_failure(
+                    root,
+                    source.target_revision_id
+                    if source_view_id(root, source) == view_id
+                    else revision.source_revision_id,
+                )
+                if not (scope and scope.read_only)
+                else None
+            )
 
             measurement = {}
             if (
@@ -182,13 +198,16 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
             ):
                 from openkb.source_map import read_source_map
 
-                text = read_source_map(actual[0] / "wiki", actual[1].source_map, source.doc_name)
+                text = read_source_map(actual[0] / "wiki", actual[1].source_map, units[0].doc_name)
                 measurement = {key: text[key] for key in ("tokens", "characters", "block_count")}
             elif not actual and states:
                 from openkb.normalization import read_retained_source
 
                 retained = read_retained_source(
-                    root, states[0].target_revision_id, revision.source_revision_id, source.doc_name
+                    root,
+                    states[0].target_revision_id,
+                    revision.source_revision_id,
+                    units[0].doc_name,
                 )
                 if retained and retained[1].get("unit_kind") in {"text", "block"}:
                     measurement = {
@@ -196,7 +215,7 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     }
             documents.append(
                 {
-                    **measurement,
+                    **(measurement if len(units) == 1 else {}),
                     "hash": source.source_id,
                     "source_generation": source.target_generation,
                     "validity": source_validity(
@@ -218,13 +237,24 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     **processing_details(
                         root, states[0] if states else None, actual[1] if actual else None
                     ),
+                    **(
+                        {
+                            "length_class": None,
+                            "execution_mode": None,
+                            "processing": None,
+                            "target_processing": None,
+                        }
+                        if len(units) > 1
+                        else {}
+                    ),
                     "doc_name": source.doc_name,
+                    "unit_count": len(units),
                     "display_type": "pageindex"
                     if actual and actual[1].execution_mode == "segmented"
                     else "short",
-                    "status": states[0].status if states else "admitted",
-                    "units": [state.model_dump(mode="json") for state in states],
-                    "message": states[0].message if states else None,
+                    "status": "failed" if inventory_error else source_status(states),
+                    "units": unit_inventory(root, units, view_id, scope=scope),
+                    "message": inventory_error or (states[0].message if states else None),
                     "pages": actual[1].source_map.unit_count
                     if actual and actual[1].source_map and actual[1].source_map.unit_kind == "page"
                     else None,
@@ -234,11 +264,68 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
         return documents
 
 
+def source_status(states):
+    statuses = {state.status for state in states}
+    if not statuses:
+        return "admitted"
+    if len(statuses) == 1:
+        return next(iter(statuses))
+    return "partial" if "completed" in statuses else "failed" if "failed" in statuses else "blocked"
+
+
+def unit_inventory(kb_dir, units, view_id, *, scope=None):
+    from openkb.workbooks.catalog import unit_name
+
+    result = []
+    for unit in units:
+        state = _publication(kb_dir, unit.unit_id, view_id)
+        actual = _manifest(kb_dir, state) if state else None
+        if scope and scope.read_only:
+            actual = _snapshot_source(kb_dir, scope, unit.unit_id)
+            if actual is None:
+                continue
+            state = UnitPublication.model_validate_json(
+                (actual[0] / "publication.json").read_text()
+            )
+        elif scope and state is None:
+            continue
+        target = read_record(
+            kb_dir,
+            "unit-revisions",
+            state.target_revision_id if state else unit.target_revision_id,
+            UnitRevision,
+        )
+        used = (
+            read_record(kb_dir, "unit-revisions", state.successful_revision_id, UnitRevision)
+            if state and state.successful_revision_id
+            else None
+        )
+        result.append(
+            {
+                **(state.model_dump(mode="json") if state else {"status": "pending"}),
+                **processing_details(kb_dir, state, actual[1] if actual else None),
+                "target_source_revision_id": target.source_revision_id,
+                "successful_source_revision_id": used.source_revision_id if used else None,
+                "unit_id": unit.unit_id,
+                "key": unit.key,
+                "doc_name": unit.doc_name,
+                "name": unit_name(
+                    kb_dir,
+                    unit,
+                    state.target_revision_id if state else unit.target_revision_id,
+                    unit.doc_name,
+                ),
+            }
+        )
+    return result
+
+
 def read_admitted_source(
     kb_dir: Path,
     identifier: str,
     *,
     source_revision_id: str | None = None,
+    unit_id: str | None = None,
     scope: KnowledgeScope | None = None,
     page_range: str | None = None,
     char_range: str | None = None,
@@ -256,8 +343,19 @@ def read_admitted_source(
         if source is None:
             return None
         units = list_source_units(root, source.source_id)
+        if unit_id is not None:
+            unit = next((item for item in units if item.unit_id == unit_id), None)
+            if unit is None:
+                raise ValueError("Processing unit does not belong to this source")
+        else:
+            eligible = tuple(
+                unit
+                for unit in units
+                if not (scope and scope.read_only) or _snapshot_source(root, scope, unit.unit_id)
+            )
+            unit = eligible[0] if eligible else None
         view_id = scope.view_id if scope else source_view_id(root, source)
-        state = _publication(root, units[0].unit_id, view_id) if units else None
+        state = _publication(root, unit.unit_id, view_id) if unit else None
         if scope and state is None and source_view_id(root, source) != view_id:
             return None
         target_id = (
@@ -276,7 +374,7 @@ def read_admitted_source(
         # The current source body belongs to its last successful input, even if a
         # newer input failed. Explicit history never falls back to different bytes.
         if scope and scope.read_only:
-            actual = _snapshot_source(root, scope, units[0].unit_id) if units else None
+            actual = _snapshot_source(root, scope, unit.unit_id) if unit else None
             if actual is None or actual[1].unit_revision_id is None:
                 return None
             used = read_record(root, "unit-revisions", actual[1].unit_revision_id, UnitRevision)
@@ -337,7 +435,7 @@ def read_admitted_source(
                 selection = read_source_map(
                     actual[0] / "wiki",
                     actual[1].source_map,
-                    units[0].doc_name,
+                    unit.doc_name if unit else source.doc_name,
                     page_range,
                     chars=char_range,
                     blocks=block_range,
@@ -364,7 +462,7 @@ def read_admitted_source(
                 root,
                 state.target_revision_id,
                 target.source_revision_id,
-                source.doc_name,
+                unit.doc_name if unit else source.doc_name,
                 pages=page_range,
                 chars=char_range,
                 blocks=block_range,
@@ -394,6 +492,13 @@ def read_admitted_source(
         )
         from openkb.office.readback import read_office_artifacts
         from openkb.source_changes import source_validity
+        from openkb.workbooks.catalog import inventory_failure
+
+        inventory_error = (
+            inventory_failure(root, source_revision_id or target_id)
+            if not (scope and scope.read_only)
+            else None
+        )
 
         office = read_office_artifacts(
             root,
@@ -440,7 +545,9 @@ def read_admitted_source(
             "target_source_revision_id": target_id,
             "knowledge_revision_id": actual[1].knowledge_revision_id if actual else None,
             "name": source.name,
-            "doc_name": source.doc_name,
+            "doc_name": unit.doc_name if unit else source.doc_name,
+            "unit_id": unit.unit_id if unit else None,
+            "available_units": unit_inventory(root, units, view_id, scope=scope),
             "type": target.source_format,
             "format": "markdown",
             "content": content,
@@ -454,8 +561,8 @@ def read_admitted_source(
             )
             .relative_to(root)
             .as_posix(),
-            "status": state.status if state else "admitted",
-            "message": state.message if state else None,
+            "status": "failed" if inventory_error else state.status if state else "admitted",
+            "message": inventory_error or (state.message if state else None),
             "error_type": state.error_type if state else None,
             **selection,
         }

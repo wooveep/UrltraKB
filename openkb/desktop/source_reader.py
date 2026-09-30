@@ -166,6 +166,17 @@ class SourceReader(QDialog):
             controls.addWidget(self.characters, 1)
             controls.addWidget(select)
             layout.addLayout(controls)
+        if source.get("sheet"):
+            row = QHBoxLayout()
+            self.cells = QLineEdit()
+            self.cells.setAccessibleName("工作表单元格范围")
+            self.cells.setPlaceholderText("A1:B3,D7 · 留空读取全文")
+            select_cells = QPushButton("读取单元格")
+            select_cells.clicked.connect(self.select_cells)
+            self.cells.returnPressed.connect(self.select_cells)
+            row.addWidget(self.cells, 1)
+            row.addWidget(select_cells)
+            layout.addLayout(row)
         self.reader = MarkdownView()
 
         def follow(url):
@@ -227,6 +238,13 @@ class SourceReader(QDialog):
             }[encoding["basis"]]
             self.coverage.setText(
                 self.coverage.text() + f"\n原件编码：{encoding['name']}（{basis}）"
+            )
+        if self.source.get("sheet"):
+            sheet = self.source["sheet"]
+            self.coverage.setText(
+                self.coverage.text()
+                + f"\n工作表：{sheet['name']}（{sheet['state']}）"
+                + (f" · 单元格：{source['cell_range']}" if source.get("cell_range") else "")
             )
         cells = [item["csv"] for item in source.get("origin_locators", []) if item.get("csv")]
         if source.get("resource_policy"):
@@ -314,6 +332,14 @@ class SourceReader(QDialog):
                 ),
             }
         )
+
+    def select_cells(self):
+        from openkb.workbooks.selection import select_cells
+
+        try:
+            self.show_content(select_cells(self.source, self.cells.text().strip() or None))
+        except ValueError as exc:
+            self.coverage.setText(str(exc))
 
     def closeEvent(self, event):
         self.reader.stop_rendering()

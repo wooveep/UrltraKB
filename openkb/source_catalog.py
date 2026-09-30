@@ -30,9 +30,25 @@ from openkb.state import HashRegistry
 R = TypeVar("R", bound=Record)
 
 
+def occupied_document_names(kb_dir: Path) -> set[str]:
+    """Sources and worksheet units share the same knowledge-file namespace."""
+    from openkb.ingest_records import ImportUnit
+
+    legacy = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
+    return (
+        {source.doc_name for source in list_sources(kb_dir)}
+        | {
+            read_record(kb_dir, "units", path.stem, ImportUnit).doc_name
+            for path in (kb_dir / ".openkb/catalog/units").glob("*.json")
+        }
+        | {meta.get("doc_name") or Path(meta.get("name", "")).stem for meta in legacy.values()}
+    )
+
+
 def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
     TypeAdapter(RecordId).validate_python(identity)
     if collection not in {
+        "workbooks",
         "sources",
         "source-revisions",
         "discovery-intents",
@@ -58,6 +74,7 @@ def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
 def read_record(kb_dir: Path, collection: str, identity: str, model: type[R]) -> R:
     record = model.model_validate_json(record_path(kb_dir, collection, identity).read_text("utf-8"))
     field = {
+        "workbooks": "source_revision_id",
         "sources": "source_id",
         "source-revisions": "source_revision_id",
         "discovery-intents": "intent_id",
@@ -166,10 +183,7 @@ def admit_source_revision(
         requested_name = doc_name
         doc_name = known.doc_name if known else doc_name or _sanitize_stem(prepared.source.stem)
         if not known and requested_name is None:
-            legacy = HashRegistry(root / ".openkb/hashes.json").all_entries()
-            occupied = {source.doc_name for source in sources} | {
-                meta.get("doc_name") or Path(meta.get("name", "")).stem for meta in legacy.values()
-            }
+            occupied = occupied_document_names(root)
             if doc_name in occupied:
                 doc_name += f"-{source_id[:8]}"
         source = Source(

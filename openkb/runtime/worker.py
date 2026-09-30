@@ -105,7 +105,24 @@ def _execute(
         ConfirmEmptySource,
         RefreshKnowledge,
         ResumeVersionReview,
+        RetryWorksheet,
     )
+
+    if isinstance(request, RetryWorksheet):
+        from openkb.application.workbook_actions import retry_worksheet
+        from openkb.ingest_result import describe_ingest
+
+        result = retry_worksheet(
+            root, request.source_id, request.unit_id, context=context, scope=scope
+        )
+        return UnitResult(
+            "completed" if result.status == "added" else result.status,
+            resources=result.resources,
+            error=result.message,
+            changes=describe_ingest(result),
+            unfinished=result.unfinished,
+            revision=result.input_version,
+        )
 
     if isinstance(request, (AcceptRefreshProposal, ConfirmEmptySource, RefreshKnowledge)):
         import asyncio
@@ -286,9 +303,16 @@ def _execute(
 
         recompiled = asyncio.run(
             recompile_document(
-                root, request.file_hash, context=context, version=request.version, scope=scope
+                root,
+                request.file_hash,
+                context=context,
+                version=request.version,
+                scope=scope,
+                unit_id=request.unit_id,
             )
         )
+        from openkb.ingest_result import describe_units
+
         return UnitResult(
             {"compiled": "completed", "conflict": "failed"}.get(
                 recompiled.status, recompiled.status
@@ -297,7 +321,7 @@ def _execute(
             error=f"{recompiled.message} ({recompiled.error_type})"
             if recompiled.error_type
             else recompiled.message,
-            changes=recompiled.changes,
+            changes=recompiled.changes + describe_units(recompiled.units),
             unfinished=recompiled.unfinished,
             revision=recompiled.version,
             quality=recompiled.quality,
@@ -370,7 +394,8 @@ def _execute(
                 f"Source: {result.source_id}",
                 f"Source revision: {result.source_revision_id}",
                 *(
-                    f"Unit {unit.unit_id}: {unit.status}; "
+                    f"Unit {unit.name or unit.unit_id} ({unit.unit_id}): {unit.status}; "
+                    f"target: {unit.target_revision_id}; "
                     f"actual input: {unit.successful_source_revision_id or 'none'}"
                     for unit in result.units
                 ),

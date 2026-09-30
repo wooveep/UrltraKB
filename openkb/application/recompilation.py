@@ -15,6 +15,7 @@ from openkb.application.removal import _resolve_doc_identifier
 from openkb.config import (
     LlmCredentialBundle,
 )
+from openkb.ingest_result import ImportUnitOutcome
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import (
     async_kb_lock,
@@ -39,6 +40,7 @@ class RecompileTarget:
     doc_name: str
     kind: str
     execution_mode: str | None = None
+    unit_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,10 +57,11 @@ def select_recompilation(
     all_docs: bool = False,
     confirmation: bool = False,
     scope: KnowledgeScope | None = None,
+    unit_id: str | None = None,
 ) -> RecompileSelection:
     selected_scope = scope
     scope = resolve_scope(kb_dir, scope)
-    if bool(identifier) == all_docs:
+    if bool(identifier) == all_docs or (unit_id is not None and all_docs):
         return RecompileSelection("invalid")
     with kb_read_lock(kb_dir / ".openkb"):
         from openkb.application.sources import source_inventory
@@ -102,6 +105,32 @@ def select_recompilation(
             or identifier
             in {item["source_id"], item["name"], item["doc_name"], item["legacy_hash"]}
         )
+        if unit_id is not None:
+            from dataclasses import replace
+
+            by_id = {item["source_id"]: item for item in admitted}
+            selected_targets = []
+            for target in targets:
+                unit = next(
+                    (
+                        item
+                        for item in by_id.get(target.file_hash, {}).get("units", [])
+                        if item["unit_id"] == unit_id
+                    ),
+                    None,
+                )
+                if unit:
+                    selected_targets.append(
+                        replace(
+                            target,
+                            name=unit["name"],
+                            doc_name=unit["doc_name"],
+                            kind=unit.get("length_class") or "unknown",
+                            execution_mode=unit.get("execution_mode"),
+                            unit_id=unit_id,
+                        )
+                    )
+            targets = tuple(selected_targets)
         if not targets:
             return RecompileSelection("empty" if all_docs else "not_found")
         if not all_docs and len(targets) > 1:
@@ -162,7 +191,7 @@ def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool
 
 @dataclass(frozen=True)
 class RecompileResult:
-    status: Literal["compiled", "skipped", "failed", "conflict", "blocked", "stopped"]
+    status: Literal["compiled", "skipped", "failed", "conflict", "blocked", "stopped", "partial"]
     name: str = ""
     kind: str = "short"
     message: str | None = None
@@ -174,6 +203,7 @@ class RecompileResult:
     version: str | None = None
     quality: tuple[str, ...] = ()
     execution_mode: str | None = None
+    units: tuple[ImportUnitOutcome, ...] = ()
 
 
 async def recompile_document(
@@ -186,6 +216,7 @@ async def recompile_document(
     max_concurrency: int | None = None,
     version: str | None = None,
     scope: KnowledgeScope | None = None,
+    unit_id: str | None = None,
 ) -> RecompileResult:
     """Reload the exact document under its lease; never convert or index again.
 
@@ -283,26 +314,33 @@ async def recompile_document(
         result = await recompile_source(
             kb_dir,
             admitted.source_id,
+            unit_id=unit_id,
             context=context,
             bundle=bundle,
             model=model,
             max_concurrency=max_concurrency,
             scope=scope,
         )
-        status: Literal["compiled", "skipped", "failed", "blocked", "stopped"] = "blocked"
+        status: Literal["compiled", "skipped", "failed", "blocked", "stopped", "partial"] = (
+            "blocked"
+        )
         if result.status == "added":
             status = "compiled"
         elif result.status == "skipped":
             status = "skipped"
         elif result.status == "failed":
             status = "failed"
+        elif result.status == "partial":
+            status = "partial"
         elif result.status == "stopped":
             status = "stopped"
         summary = scope.wiki_dir / "summaries" / f"{admitted.doc_name}.md"
         kind = (result.units[0].length_class if result.units else None) or "unknown"
         return RecompileResult(
             status,
-            admitted.doc_name,
+            (result.units[0].name or admitted.doc_name)
+            if unit_id and result.units
+            else admitted.doc_name,
             kind,
             message=result.message,
             error_type=result.units[0].error_type if result.units else None,
@@ -314,4 +352,5 @@ async def recompile_document(
             version=_version(kb_dir, scope=requested_scope) if version is not None else None,
             quality=result.quality,
             execution_mode=result.units[0].execution_mode if result.units else None,
+            units=result.units,
         )

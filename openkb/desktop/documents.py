@@ -232,7 +232,12 @@ class DocumentsDialog(ManagementPanel):
                 return
             from openkb.desktop.source_reader import show_source
 
-            show_source(self.window, self.kb, value)
+            if any(unit.get("key") != "body" for unit in value.get("available_units", [])):
+                from openkb.desktop.worksheets import WorksheetsDialog
+
+                WorksheetsDialog(self.window, self.kb, value).show()
+            else:
+                show_source(self.window, self.kb, value)
 
         self.window.io.submit(
             lambda: read_document_source(self.kb, identifier, scope=self.scope),
@@ -290,6 +295,8 @@ class DocumentsDialog(ManagementPanel):
                     if doc.get("pages") is not None
                     else "未记录"
                 )
+                if any(unit.get("key") != "body" for unit in doc.get("units", [])):
+                    measured = f"1 个来源 / {len(doc['units'])} 个工作表"
                 if doc.get("block_count") is not None:
                     measured += f" / {doc['block_count']} 内容块"
                 self.table.setItem(row, 6, QTableWidgetItem(measured))

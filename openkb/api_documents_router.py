@@ -107,6 +107,8 @@ async def document_source_endpoint(
             kb_dir,
             request.hash,
             source_revision_id=request.source_revision_id,
+            unit_id=request.unit_id,
+            cells=request.cells,
             pages=request.pages,
             chars=request.chars,
             blocks=request.blocks,
@@ -122,3 +124,27 @@ async def document_source_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail="Document source not found.")
     return DocumentSourceResponse(**result)
+
+
+class RetryWorksheetRequest(ViewRequest):
+    kb: str
+    source_id: str
+    unit_id: str
+
+
+@documents_router.post("/api/v1/document/retry-worksheet")
+async def retry_worksheet_endpoint(
+    request: RetryWorksheetRequest, _: None = Depends(require_bearer_token)
+):
+    from openkb.application.workbook_actions import retry_worksheet
+
+    kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
+    try:
+        return asdict(
+            await run_in_threadpool(
+                retry_worksheet, kb_dir, request.source_id, request.unit_id, scope=scope
+            )
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

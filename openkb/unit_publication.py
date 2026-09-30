@@ -62,13 +62,18 @@ def read_unit_publication(kb_dir: Path, unit_id: str, view_id: str = "legacy") -
 
 
 def plan_import_units(
-    kb_dir: Path, admission: Admission, fingerprint: str
+    kb_dir: Path,
+    admission: Admission,
+    fingerprint: str,
+    *,
+    key: str = "body",
+    doc_name: str | None = None,
 ) -> tuple[ImportUnit, UnitRevision]:
     """A native document has one stable body; a processing change creates a target."""
     root = kb_dir.resolve()
     with kb_ingest_lock(root / ".openkb"):
         units = list_source_units(root, admission.source.source_id)
-        known = next((unit for unit in units if unit.key == "body"), None)
+        known = next((unit for unit in units if unit.key == key), None)
         if known:
             previous = read_record(root, "unit-revisions", known.target_revision_id, UnitRevision)
             if (
@@ -78,6 +83,11 @@ def plan_import_units(
             ):
                 return known, previous
         unit_id = known.unit_id if known else uuid.uuid4().hex
+        if not known and key != "body" and doc_name:
+            from openkb.source_catalog import occupied_document_names
+
+            if doc_name in occupied_document_names(root):
+                doc_name += f"-{unit_id}"
         revision = UnitRevision(
             unit_revision_id=uuid.uuid4().hex,
             unit_id=unit_id,
@@ -89,7 +99,8 @@ def plan_import_units(
         unit = ImportUnit(
             unit_id=unit_id,
             source_id=admission.source.source_id,
-            doc_name=admission.source.doc_name,
+            key=key,
+            doc_name=known.doc_name if known else doc_name or admission.source.doc_name,
             target_revision_id=revision.unit_revision_id,
             generation=(known.generation + 1 if known else 1),
         )

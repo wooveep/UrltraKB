@@ -152,7 +152,10 @@ def retain_normalization(
     scope=None,
     bundle=None,
     resource_policy=None,
+    unit=None,
+    sheet=None,
 ) -> tuple[Path, NormalizedInput]:
+    doc_name = unit.doc_name if unit else admission.source.doc_name
     identity = normalization_id(admission.revision.source_revision_id, fingerprint)
     record = record_path(kb_dir, "normalizations", identity)
     if record.exists():
@@ -166,17 +169,22 @@ def retain_normalization(
     directory = kb_dir / ".openkb/normalized" / identity
     contained_paths(kb_dir, [directory])
     with mutation_scope(kb_dir, [directory, record], operation="retain-normalization"):
-        converted = convert_document(
-            prepared.source,
-            kb_dir,
-            staging_dir=directory,
-            prepared=prepared,
-            doc_name=admission.source.doc_name,
-            decoding=admission.revision.text_decoding,
-            resource_policy=resource_policy,
-            check_stop=check_stop,
-            office_identity=json.loads(fingerprint).get("office"),
-        )
+        if sheet is not None:
+            from openkb.workbooks.normalization import convert_sheet
+
+            converted = convert_sheet(prepared, sheet, doc_name, directory)
+        else:
+            converted = convert_document(
+                prepared.source,
+                kb_dir,
+                staging_dir=directory,
+                prepared=prepared,
+                doc_name=doc_name,
+                decoding=admission.revision.text_decoding,
+                resource_policy=resource_policy,
+                check_stop=check_stop,
+                office_identity=json.loads(fingerprint).get("office"),
+            )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")
         if converted.processing and converted.source_path:
@@ -186,20 +194,19 @@ def retain_normalization(
                 kb_dir,
                 converted.processing,
                 converted.source_path,
-                admission.source.doc_name,
+                doc_name,
                 scope=scope,
                 bundle=bundle,
             )
             converted.is_long_doc = converted.processing.execution_mode == "segmented"
-        if (
-            converted.is_long_doc
-            and f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS
+        if converted.is_long_doc and (
+            sheet is not None or f".{admission.revision.source_format}" in TEXT_SOURCE_EXTENSIONS
         ):
             from openkb.block_package import freeze_block_package
 
             if converted.source_path is None:
                 raise ValueError("Normalized text is missing")
-            freeze_block_package(converted.source_path, admission.source.doc_name)
+            freeze_block_package(converted.source_path, doc_name)
         if converted.is_long_doc and converted.pdf_path and converted.office_path:
             from openkb.office.slide_package import freeze_slide_package
 

@@ -597,6 +597,7 @@ async def _stream_recompile(
             async for event in iter_recompile(
                 kb_dir,
                 request.doc_name,
+                unit_id=request.unit_id,
                 all_docs=request.all_docs,
                 dry_run=request.dry_run,
                 scope=await resolve_api_scope(kb_dir, request.view_id),

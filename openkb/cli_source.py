@@ -7,6 +7,8 @@ import click
 
 @click.command("source")
 @click.argument("source_id")
+@click.option("--unit", "unit_id", help="Worksheet processing unit ID from list.")
+@click.option("--cells", help="Disjoint worksheet cell ranges, e.g. A1:B3,D7.")
 @click.option("--pages", help="Physical pages, e.g. 1,3-5; omit to read the complete source.")
 @click.option("--chars", help="Unicode character range START:END (0-based, end exclusive).")
 @click.option("--blocks", help="Content blocks, e.g. 1,3-5 (not physical pages).")
@@ -16,7 +18,9 @@ import click
 @click.option("--source-revision", help="Read this frozen source revision.")
 @click.option("--knowledge-revision", help="Read a historical knowledge revision in --view.")
 @click.pass_context
-def source(ctx, source_id, pages, chars, blocks, part, source_revision, knowledge_revision):
+def source(
+    ctx, source_id, pages, chars, blocks, part, source_revision, knowledge_revision, unit_id, cells
+):
     """Read SOURCE_ID (from list) with revision and coverage information."""
     from openkb.application.views import view_scope
     from openkb.cli import _selected_scope
@@ -38,6 +42,8 @@ def source(ctx, source_id, pages, chars, blocks, part, source_revision, knowledg
             blocks=blocks,
             part=part,
             source_revision_id=source_revision,
+            unit_id=unit_id,
+            cells=cells,
             scope=scope,
         )
         if result is None:
@@ -45,3 +51,22 @@ def source(ctx, source_id, pages, chars, blocks, part, source_revision, knowledg
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@click.command("retry-worksheet")
+@click.argument("source_id")
+@click.option("--unit", "unit_id", required=True, help="Retry this worksheet unit ID.")
+@click.pass_context
+def retry_worksheet(ctx, source_id, unit_id):
+    from dataclasses import asdict
+
+    from openkb.application.workbook_actions import retry_worksheet as retry
+    from openkb.cli import _selected_scope
+    from openkb.cli_views import _root
+
+    root = _root(ctx)
+    try:
+        result = retry(root, source_id, unit_id, scope=_selected_scope(ctx, root))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(asdict(result), ensure_ascii=False, indent=2))

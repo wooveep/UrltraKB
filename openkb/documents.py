@@ -63,6 +63,8 @@ def read_document_source(
     *,
     scope: KnowledgeScope | None = None,
     source_revision_id: str | None = None,
+    unit_id: str | None = None,
+    cells: str | None = None,
     pages: str | None = None,
     chars: str | None = None,
     blocks: str | None = None,
@@ -79,10 +81,15 @@ def read_document_source(
     from openkb.source_pages import validate_source_ranges
 
     validate_source_ranges(pages, chars, blocks)
+    if cells is not None and any(value is not None for value in (pages, chars, blocks, part)):
+        raise PageRangeError(
+            "Select cells separately from pages, characters, blocks or slide parts"
+        )
     admitted = read_admitted_source(
         kb_dir,
         file_hash,
         source_revision_id=source_revision_id,
+        unit_id=unit_id,
         scope=scope,
         page_range=pages,
         char_range=chars,
@@ -90,8 +97,11 @@ def read_document_source(
     )
     if admitted is not None:
         from openkb.source_pages import select_page_part
+        from openkb.workbooks.selection import select_cells
 
-        return select_page_part(admitted, part)
+        return select_cells(select_page_part(admitted, part), cells)
+    if cells is not None or unit_id is not None:
+        raise PageRangeError("Legacy source has no verified worksheet units")
     if part is not None:
         raise PageRangeError("Legacy source has no verified body/notes partition")
     if chars is not None or blocks is not None:

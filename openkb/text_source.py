@@ -12,6 +12,7 @@ from openkb.content_blocks import BLOCK_POLICY, ContentBlock, validate_blocks
 from openkb.source_pages import PageRangeError
 from openkb.source_records import Digest, EncodingDecision, Record, RelativePath
 from openkb.text_measurement import MEASUREMENT_FINGERPRINT, measure_markdown
+from openkb.workbooks.records import SheetCellLocation, SheetSnapshot
 
 NORMALIZATION_POLICY = "markdown-unicode-preserved-v1:markdown-it-py-4.2.0-commonmark-images"
 
@@ -47,15 +48,26 @@ class SourceResource(Record):
 class TextOrigin(Record):
     normalized_span: tuple[int, int]
     original_span: tuple[int, int]
-    coordinate: Literal["unicode_codepoint"] = "unicode_codepoint"
+    coordinate: Literal["unicode_codepoint", "sheet_cell"] = "unicode_codepoint"
     kind: Literal[
-        "identity", "image_reference", "bom", "generated", "csv_cell", "csv_separator", "html"
+        "identity",
+        "image_reference",
+        "bom",
+        "generated",
+        "csv_cell",
+        "csv_separator",
+        "html",
+        "sheet_cell",
     ] = "identity"
+    sheet_cell: SheetCellLocation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     csv: CsvCell | None = Field(default=None, exclude_if=lambda value: value is None)
     html: HtmlLocation | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class FrozenText(Record):
+    sheet: SheetSnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
     unit_kind: Literal["text", "block"] = "text"
     text: str
     original_characters: int = Field(ge=0)
@@ -101,6 +113,10 @@ class FrozenText(Record):
                 raise ValueError("Identity text mapping changed length")
             if origin.kind == "generated" and a != b:
                 raise ValueError("Generated formatting cannot own original text")
+            if (origin.kind == "sheet_cell") != (origin.sheet_cell is not None):
+                raise ValueError("Worksheet cell origins require their physical cell metadata")
+            if (origin.coordinate == "sheet_cell") != (origin.sheet_cell is not None):
+                raise ValueError("Worksheet origins must declare cell coordinates")
             if (origin.kind == "csv_cell") != (origin.csv is not None):
                 raise ValueError("CSV cells must retain their string value and row/column")
             if origin.csv and not 1 <= origin.csv.physical_lines[0] <= origin.csv.physical_lines[1]:
@@ -262,6 +278,17 @@ def clip_text_origins(locators: list[dict], start: int, end: int) -> list[dict]:
             # a huge complete value in every block or narrow character read.
             selected["csv"] = {key: value for key, value in origin["csv"].items() if key != "value"}
             selected["csv"]["value_complete"] = False
+        if origin.get("sheet_cell") and [left, right] != list(span):
+            location = origin["sheet_cell"]
+            selected["sheet_cell"] = {
+                **location,
+                "cell": {
+                    key: value
+                    for key, value in location["cell"].items()
+                    if key not in {"value", "display", "cached", "formula"}
+                },
+                "value_complete": False,
+            }
         origins.append(selected)
     return origins
 
@@ -270,6 +297,7 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
     frozen = FrozenText.model_validate_json(json.dumps(raw))
     start, end = character_range(frozen.text, chars)
     return {
+        **({"sheet": frozen.sheet.model_dump(mode="json")} if frozen.sheet else {}),
         "unit_kind": frozen.unit_kind,
         "block_count": len(frozen.blocks) if frozen.blocks else None,
         "content": frozen.text[start:end],

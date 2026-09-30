@@ -38,7 +38,7 @@ class UnitResult:
     def __post_init__(self) -> None:
         if self.usage is not None:
             TokenUsage.from_dict(self.usage)
-        if self.status not in {"completed", "skipped", "failed", "stopped", "blocked"}:
+        if self.status not in {"completed", "skipped", "failed", "stopped", "blocked", "partial"}:
             raise ValueError("Invalid unit status")
         if self.output_state not in {"none", "available", "unavailable"}:
             raise ValueError("Invalid output availability")

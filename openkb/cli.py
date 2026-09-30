@@ -926,8 +926,9 @@ def delete_kb_cmd(name, yes):
     help="Overwrite wiki/AGENTS.md with the bundled schema (backs up "
     "the old one to AGENTS.md.bak) if it differs.",
 )
+@click.option("--unit", "unit_id", help="Recompile one worksheet unit ID.")
 @click.pass_context
-def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
+def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
     """Re-run the current compile pipeline on already-indexed documents.
 
     Recompiling re-runs the same ``compile_short_doc`` / ``compile_long_doc``
@@ -950,7 +951,9 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
     scope = _selected_scope(ctx, kb_dir)
-    selection = select_recompilation(kb_dir, doc_name, all_docs=all_docs, scope=scope)
+    selection = select_recompilation(
+        kb_dir, doc_name, all_docs=all_docs, scope=scope, unit_id=unit_id
+    )
     targets = selection.targets
     if selection.status != "ready":
         if selection.status == "invalid":
@@ -1001,12 +1004,17 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
-    recompiled = skipped = blocked = 0
+    recompiled = skipped = blocked = partial = 0
     for i, target in enumerate(targets, 1):
         click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
         result = asyncio.run(
             recompile_document(
-                kb_dir, target.file_hash, model=model, max_concurrency=concurrency, scope=scope
+                kb_dir,
+                target.file_hash,
+                model=model,
+                max_concurrency=concurrency,
+                scope=scope,
+                unit_id=target.unit_id,
             )
         )
         if result.status == "compiled":
@@ -1015,12 +1023,22 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema):
         else:
             if result.status == "blocked":
                 blocked += 1
+            elif result.status == "partial":
+                partial += 1
             else:
                 skipped += 1
-            label = {"failed": "ERROR", "blocked": "BLOCKED"}.get(result.status, "SKIP")
+            label = {"failed": "ERROR", "blocked": "BLOCKED", "partial": "PARTIAL"}.get(
+                result.status, "SKIP"
+            )
             detail = f" ({result.error_type})" if result.error_type else ""
             click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
-    click.echo(f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}.")
+        from openkb.ingest_result import describe_units
+
+        for line in describe_units(result.units):
+            click.echo(f"  {line}")
+    click.echo(
+        f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}, partial {partial}."
+    )
     append_log(
         resolve_scope(kb_dir, scope).wiki_dir,
         "recompile",
@@ -1358,6 +1376,13 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
                 f"    Processing: {meta.get('length_class') or 'unknown'} / "
                 f"{meta.get('execution_mode') or 'unknown'}"
             )
+            for unit in meta.get("units", []):
+                click.echo(
+                    f"    Unit {unit.get('name') or unit['unit_id']} ({unit['unit_id']}): "
+                    f"{unit['status']}; {unit.get('length_class') or 'unknown'} / "
+                    f"{unit.get('execution_mode') or 'unknown'}; actual: "
+                    f"{unit.get('successful_source_revision_id') or 'none'}"
+                )
             target = meta.get("target_processing")
             if target and target != meta.get("processing"):
                 click.echo(
@@ -2281,7 +2306,7 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
-from openkb.cli_source import source
+from openkb.cli_source import source, retry_worksheet
 from openkb.cli_settings import settings
 from openkb.cli_versions import versions
 from openkb.cli_views import views
@@ -2289,6 +2314,7 @@ from openkb.cli_views import views
 cli.add_command(proposals)
 cli.add_command(refresh)
 cli.add_command(source)
+cli.add_command(retry_worksheet)
 cli.add_command(settings)
 cli.add_command(views)
 cli.add_command(versions)

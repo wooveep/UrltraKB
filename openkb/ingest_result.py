@@ -21,6 +21,9 @@ class ImportUnitOutcome:
     execution_mode: str | None = None
     processing: dict | None = None
     target_processing: dict | None = None
+    key: str = "body"
+    name: str | None = None
+    doc_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +51,17 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     ]
     if result.message:
         lines.append(result.message)
-    for unit in result.units:
+    return tuple(lines) + describe_units(result.units)
+
+
+def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
+    lines = []
+    for unit in units:
+        lines.append(
+            f"Unit: {unit.name or unit.doc_name or unit.key}; {unit.unit_id}; {unit.status}; "
+            f"target: {unit.target_revision_id}; actual source: "
+            f"{unit.successful_source_revision_id or 'none'}"
+        )
         if unit.length_class:
             lines.append(f"Processing: {unit.length_class} / {unit.execution_mode}")
         if unit.processing:

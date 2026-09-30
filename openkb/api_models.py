@@ -165,6 +165,7 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    unit_count: int | None = None
     block_count: int | None = None
     tokens: int | None = None
     characters: int | None = None
@@ -257,9 +258,11 @@ class RecompileDocItem(BaseModel):
     status: str
     elapsed: float | None = None
     message: str | None = None
+    units: list[dict] = []
 
 
 class RecompileRequest(ViewRequest):
+    unit_id: str | None = None
     kb: str = Field(..., min_length=1)
     doc_name: str | None = None
     all_docs: bool = False
@@ -280,6 +283,7 @@ class RecompileResponse(BaseModel):
     recompiled: int
     skipped: int
     blocked: int = 0
+    partial: int = 0
     docs: list[RecompileDocItem] = []
     targets: list[RecompileTargetItem] | None = None
     candidates: list[dict[str, str]] | None = None
@@ -346,6 +350,8 @@ class PageResponse(BaseModel):
 
 
 class DocumentSourceRequest(ViewRequest):
+    unit_id: str | None = None
+    cells: str | None = None
     part: Literal["body", "notes"] | None = None
     blocks: str | None = None
     chars: str | None = None
@@ -359,6 +365,10 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    unit_id: str | None = None
+    sheet: dict | None = None
+    cell_range: str | None = None
+    available_units: list[dict] = Field(default_factory=list)
     part: Literal["body", "notes"] | None = None
     internal_pdf_path: str | None = None
     office: dict | None = None

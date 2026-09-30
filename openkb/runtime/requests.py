@@ -124,6 +124,7 @@ class ImportUrl(ViewSelection):
 class RecompileDocument(ViewSelection):
     file_hash: str
     version: str
+    unit_id: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -247,8 +248,20 @@ class AcceptRefreshProposal(AcceptProposal):
     pass
 
 
+@dataclass(frozen=True)
+class RetryWorksheet(ViewSelection):
+    source_id: str
+    unit_id: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if any(not isinstance(value, str) or not value for value in (self.source_id, self.unit_id)):
+            raise ValueError("Worksheet retry requires source and unit identities")
+
+
 UnitRequest = (
-    AcceptProposal
+    RetryWorksheet
+    | AcceptProposal
     | ResumeVersionReview
     | RefreshKnowledge
     | ConfirmEmptySource
@@ -267,6 +280,7 @@ UnitRequest = (
     | GenerateGraph
 )
 REQUEST_TYPES = (
+    RetryWorksheet,
     AcceptProposal,
     ResumeVersionReview,
     RefreshKnowledge,

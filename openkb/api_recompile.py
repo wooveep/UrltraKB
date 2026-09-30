@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from pathlib import Path
 
 from openkb.application.recompilation import recompile_document, select_recompilation
@@ -16,6 +17,7 @@ async def iter_recompile(
     kb_dir: Path,
     doc_name: str | None = None,
     *,
+    unit_id: str | None = None,
     all_docs=False,
     dry_run=False,
     refresh_schema=False,
@@ -23,7 +25,7 @@ async def iter_recompile(
     scope: KnowledgeScope | None = None,
 ):
     selection = await asyncio.to_thread(
-        select_recompilation, kb_dir, doc_name, all_docs=all_docs, scope=scope
+        select_recompilation, kb_dir, doc_name, all_docs=all_docs, scope=scope, unit_id=unit_id
     )
     targets = selection.targets
     if selection.status != "ready":
@@ -70,10 +72,15 @@ async def iter_recompile(
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
     docs = []
-    recompiled = skipped = blocked = 0
+    recompiled = skipped = blocked = partial = 0
     for target in targets:
         result = await recompile_document(
-            kb_dir, target.file_hash, bundle=bundle, model=model, scope=scope
+            kb_dir,
+            target.file_hash,
+            bundle=bundle,
+            model=model,
+            scope=scope,
+            unit_id=target.unit_id,
         )
         doc = {
             "name": result.name or None,
@@ -82,6 +89,7 @@ async def iter_recompile(
             "status": {"compiled": "ok", "failed": "error"}.get(result.status, result.status),
             "elapsed": round(result.elapsed, 1) if result.elapsed is not None else None,
             "message": result.message,
+            "units": [asdict(unit) for unit in result.units],
         }
         if result.error_type and not result.message:
             doc["message"] = f"Compilation failed ({result.error_type})"
@@ -91,6 +99,8 @@ async def iter_recompile(
             recompiled += 1
         elif result.status == "blocked":
             blocked += 1
+        elif result.status == "partial":
+            partial += 1
         else:
             # Historical REST totals fold ordinary failures into skipped.
             skipped += 1
@@ -108,5 +118,6 @@ async def iter_recompile(
         "recompiled": recompiled,
         "skipped": skipped,
         "blocked": blocked,
+        "partial": partial,
         "docs": docs,
     }
