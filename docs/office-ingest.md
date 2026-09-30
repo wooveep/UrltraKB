@@ -1,6 +1,6 @@
 # Frozen Office sources
 
-DOCX import retains the original bytes and creates an internal PDF with the
+DOCX and binary DOC import retain the original bytes and create an internal PDF with the
 complete private TDF LibreOffice distribution. The existing PDF extraction,
 classification, PageIndex and publication paths then process that PDF. Source
 readback exposes both artifacts, physical pages and the conversion record.
@@ -24,6 +24,10 @@ exclude deleted and hidden text without accepting revisions or overwriting the
 original. The PDF filter is explicit: PDF 1.7, lossless images, no downsampling,
 static forms, no hybrid original stream, no notes or transitions, and retained
 Writer blank pages. Unsupported detected input filters fail the Office unit.
+Binary DOC must be detected by a Word binary filter; renaming OOXML or text to
+`.doc` cannot bypass that check. Password requests and damaged-container failures
+retain the original with an explicit diagnostic. Embedded-file recovery is a
+separate capability and is not implied by successful body conversion.
 
 `office_timeout_seconds` is an integer from 1 through 3600, default 120, with
 normal KB/global inheritance. Native startup probes also have finite deadlines.

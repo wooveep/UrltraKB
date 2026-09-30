@@ -13,8 +13,26 @@ from com.sun.star.task import XInteractionHandler
 
 
 class AbortInteraction(unohelper.Base, XInteractionHandler):
+    def __init__(self):
+        self.requests = []
+
     def handle(self, request):
-        for continuation in request.getContinuations():
+        continuations = request.getContinuations()
+        if any(
+            item.queryInterface(uno.getTypeByName("com.sun.star.task.XInteractionPassword"))
+            for item in continuations
+        ):
+            reason = "password required (encrypted input)"
+        else:
+            try:
+                details = request.getRequest()
+                reason = getattr(details, "typeName", type(details).__name__)
+            except Exception:
+                # This pinned UNO bridge cannot decode some request exceptions.
+                # Their abort continuation remains usable; never approve them.
+                reason = "unreadable interaction request"
+        self.requests.append(reason)
+        for continuation in continuations:
             if hasattr(continuation, "abort"):
                 continuation.abort()
                 return
@@ -77,6 +95,11 @@ def writer_fonts(document):
 
 
 def convert(request, directory):
+    source = Path(request["input"])
+    with source.open("rb") as stream:
+        header = stream.read(8)
+    if header == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" and source.stat().st_size < 512:
+        raise ValueError("Damaged Office compound-file header is incomplete")
     pipe = "openkb_" + uuid.uuid4().hex
     process = subprocess.Popen(
         [
@@ -111,11 +134,18 @@ def convert(request, directory):
         )
         options = properties(request["load_options"])
         interaction = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
-        interaction.Name, interaction.Value = "InteractionHandler", AbortInteraction()
+        handler = AbortInteraction()
+        interaction.Name, interaction.Value = "InteractionHandler", handler
         document = desktop.loadComponentFromURL(
             Path(request["input"]).as_uri(), "_blank", 0, (*options, interaction)
         )
-        if document is None or not document.supportsService("com.sun.star.text.TextDocument"):
+        if handler.requests:
+            raise ValueError(
+                "Office input requires unsupported interaction: " + ", ".join(handler.requests)
+            )
+        if document is None:
+            raise ValueError("Office could not load the damaged or unsupported input")
+        if not document.supportsService("com.sun.star.text.TextDocument"):
             raise ValueError("Office input did not load as a Writer document")
         settings = document.createInstance("com.sun.star.text.DocumentSettings")
         if not settings.getPropertySetInfo().hasPropertyByName("PrintHiddenText"):
@@ -127,8 +157,15 @@ def convert(request, directory):
             raise ValueError("Writer did not apply the required final-visible revision display")
         requested_fonts = writer_fonts(document)
         detected = {value.Name: value.Value for value in document.getArgs()}
-        if detected.get("FilterName") not in {"Office Open XML Text", "MS Word 2007 XML"}:
-            raise ValueError("DOCX was not detected as a supported Word OOXML input")
+        extension = Path(request["input"]).suffix.lower()
+        filters = {
+            ".docx": {"Office Open XML Text", "MS Word 2007 XML"},
+            ".doc": {"MS Word 97", "MS WinWord 6.0", "MS WinWord 5"},
+        }
+        if detected.get("FilterName") not in filters.get(extension, set()):
+            raise ValueError(
+                f"Office detected filter {detected.get('FilterName')!r} does not match {extension}"
+            )
         export = properties({"FilterName": ("string", "writer_pdf_Export")})
         data = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
         data.Name = "FilterData"
