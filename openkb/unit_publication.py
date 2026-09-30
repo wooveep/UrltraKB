@@ -68,6 +68,7 @@ def plan_import_units(
     *,
     key: str = "body",
     doc_name: str | None = None,
+    name: str | None = None,
 ) -> tuple[ImportUnit, UnitRevision]:
     """A native document has one stable body; a processing change creates a target."""
     root = kb_dir.resolve()
@@ -103,6 +104,7 @@ def plan_import_units(
             doc_name=known.doc_name if known else doc_name or admission.source.doc_name,
             target_revision_id=revision.unit_revision_id,
             generation=(known.generation + 1 if known else 1),
+            name=name if name is not None else known.name if known else None,
         )
         records = {
             record_path(root, "units", unit_id): unit,
@@ -148,7 +150,7 @@ def begin_unit_attempt(
             previous.status == "awaiting_confirmation"
             or previous.status in {"interrupted", "blocked"}
             and not retry_confirmed
-            or previous.status == "completed"
+            or previous.status in {"completed", "empty", "retired"}
             and not recompile
         )
     ):

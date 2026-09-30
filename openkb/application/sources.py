@@ -157,7 +157,15 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     continue
             annotation_id = source.annotation_id
             family_id = source.family_id
-            if scope and (actual or states):
+            if (
+                scope
+                and (actual or states)
+                and not (
+                    len(units) > 1
+                    and not scope.read_only
+                    and source_view_id(root, source) == view_id
+                )
+            ):
                 input_id = actual[1].unit_revision_id if actual else states[0].target_revision_id
                 if input_id is None:
                     raise ValueError("Published source is missing its input revision")
@@ -270,11 +278,14 @@ def source_status(states):
         return "admitted"
     if len(statuses) == 1:
         return next(iter(statuses))
-    return "partial" if "completed" in statuses else "failed" if "failed" in statuses else "blocked"
+    finished = {"completed", "empty", "retired"}
+    if statuses <= finished:
+        return "completed"
+    return "partial" if statuses & finished else "failed" if "failed" in statuses else "blocked"
 
 
 def unit_inventory(kb_dir, units, view_id, *, scope=None):
-    from openkb.workbooks.catalog import unit_name
+    from openkb.workbooks.catalog import unit_name, unit_sheet
 
     result = []
     for unit in units:
@@ -308,6 +319,13 @@ def unit_inventory(kb_dir, units, view_id, *, scope=None):
                 "successful_source_revision_id": used.source_revision_id if used else None,
                 "unit_id": unit.unit_id,
                 "key": unit.key,
+                "content_state": (
+                    sheet.content_state
+                    if (sheet := unit_sheet(kb_dir, unit, target.source_revision_id))
+                    else "retired"
+                    if state and state.status == "retired"
+                    else None
+                ),
                 "doc_name": unit.doc_name,
                 "name": unit_name(
                     kb_dir,
@@ -395,6 +413,14 @@ def read_admitted_source(
                     raise ValueError("Successful source revision belongs to another document")
             else:
                 actual = _historical_manifest(root, state, source_revision_id)
+        if (
+            state
+            and state.status == "empty"
+            and not (scope and scope.read_only)
+            and (source_revision_id is None or source_revision_id == target_id)
+        ):
+            actual = None
+            target = read_source_revision(root, target_id)
         if scope and actual is None:
             assigned = any(
                 annotation.source_id == source.source_id
@@ -530,7 +556,11 @@ def read_admitted_source(
                 view_id,
                 target.source_revision_id,
                 historical=bool(source_revision_id or (scope and scope.read_only)),
-                unit_revision_id=actual[1].unit_revision_id if actual else None,
+                unit_revision_id=actual[1].unit_revision_id
+                if actual
+                else state.target_revision_id
+                if state and state.status in {"empty", "retired"}
+                else None,
             ),
             "source_id": source.source_id,
             "view_id": view_id,

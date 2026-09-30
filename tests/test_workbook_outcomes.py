@@ -37,6 +37,7 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
     assert read["source_revision_id"] == first.source_revision_id
     assert read["target_source_revision_id"] == failed.source_revision_id
     assert source_inventory(kb_dir)[0]["status"] == "failed"
+    assert all(unit["status"] == "completed" for unit in source_inventory(kb_dir)[0]["units"])
     explicit = read_document_source(
         kb_dir,
         first.source_id,

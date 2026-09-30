@@ -146,7 +146,17 @@ def _read_sheet(reader, path, basis):
 
     tree = fromstring(reader.archive.read(path), forbid_dtd=True)
     has_objects = any(
-        element.tag.rsplit("}", 1)[-1] in {"drawing", "legacyDrawing", "oleObjects"}
+        element.tag.rsplit("}", 1)[-1]
+        in {
+            "drawing",
+            "legacyDrawing",
+            "drawingHF",
+            "legacyDrawingHF",
+            "oleObjects",
+            "picture",
+            "controls",
+            "extLst",
+        }
         for element in tree.iter()
     )
     return SheetSnapshot(

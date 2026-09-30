@@ -60,11 +60,14 @@ def exclude_source_inputs(
     kind: Literal["empty", "withdrawn"],
     *,
     view_id: str | None = None,
+    unit_ids: set[str] | None = None,
 ) -> Source:
     """An exclusion belongs to an exact input; later imports cannot resurrect it."""
     from openkb.unit_publication import list_source_units
 
     units = {unit.unit_id for unit in list_source_units(kb_dir, source.source_id)}
+    if unit_ids is not None:
+        units &= unit_ids
     excluded = dict(source.excluded_inputs)
     for path in (kb_dir / ".openkb/catalog/unit-revisions").glob("*.json"):
         revision = read_record(kb_dir, "unit-revisions", path.stem, UnitRevision)
@@ -89,12 +92,19 @@ def exclude_source_inputs(
 
 
 def source_change_heads(
-    kb_dir: Path, source: Source, kind: Literal["updated", "withdrawn", "empty"]
+    kb_dir: Path,
+    source: Source,
+    kind: Literal["updated", "withdrawn", "empty"],
+    *,
+    unit_ids: set[str] | None = None,
+    view_id: str | None = None,
 ) -> dict[Path, KnowledgeHead]:
     """No writes or model calls: caller commits these alongside the changed Source."""
     records = {}
     for path in sorted((kb_dir / ".openkb/knowledge").glob("*/head.json")):
         head = read_head(kb_dir, path.parent.name)
+        if view_id is not None and head.view_id != view_id:
+            continue
         if kind != "withdrawn" and head.view_id != source_view(kb_dir, source):
             continue
         if not head.knowledge_revision_id:
@@ -109,11 +119,13 @@ def source_change_heads(
             value for values in manifest.page_dependencies.values() for value in values
         }:
             unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
+            if unit_ids is not None and unit.unit_id not in unit_ids:
+                continue
             frozen = read_source_revision(kb_dir, unit.source_revision_id)
             if frozen.source_id == source.source_id and not (
                 kind == "updated" and identity in source.excluded_inputs
             ):
-                affected[identity] = frozen.source_revision_id
+                affected[identity] = (frozen.source_revision_id, unit.unit_id)
         if not affected:
             continue
         pending = dict(head.needs_refresh)
@@ -125,11 +137,18 @@ def source_change_heads(
             stale = set(dependencies) & affected.keys()
             if not stale:
                 continue
-            retained = tuple(r for r in pending.get(page, ()) if r.source_id != source.source_id)
+            retained = tuple(
+                r
+                for r in pending.get(page, ())
+                if r.source_id != source.source_id
+                or unit_ids is not None
+                and r.unit_id not in unit_ids
+            )
             pending[page] = retained + tuple(
                 RefreshReason(
                     source_id=source.source_id,
-                    source_revision_id=affected[identity],
+                    source_revision_id=affected[identity][0],
+                    unit_id=affected[identity][1],
                     target_revision_id=source.target_revision_id,
                     source_generation=source.target_generation,
                     kind=kind,

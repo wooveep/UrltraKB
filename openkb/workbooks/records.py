@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from openkb.source_records import Digest, Record, RecordId
 
-WORKBOOK_POLICY = "sparse-worksheet-openpyxl-3.1.5-v2"
+WORKBOOK_POLICY = "sparse-worksheet-openpyxl-3.1.5-v3"
 XLS_POLICY = "sparse-worksheet-xlrd-2.0.2-biff-observations-v1"
 
 
@@ -57,6 +57,18 @@ class SheetSnapshot(Record):
     has_objects: bool = False
     error: str | None = None
     diagnostics: tuple[str, ...] = ()
+    identity_basis: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    identity_from_revision_id: RecordId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @property
+    def content_state(self) -> str:
+        if self.error:
+            return "parse_failed"
+        if self.cells:
+            return "content"
+        return "objects_only" if self.has_objects else "empty"
 
     @model_validator(mode="after")
     def validate_cells(self) -> "SheetSnapshot":
@@ -96,7 +108,7 @@ class WorkbookSnapshot(Record):
             raise ValueError("Workbook inventory contains no worksheets")
         for values in (
             [sheet.key for sheet in self.sheets],
-            [sheet.name for sheet in self.sheets],
+            [sheet.name.casefold() for sheet in self.sheets],
             [sheet.ordinal for sheet in self.sheets],
         ):
             if len(set(values)) != len(values):

@@ -1,6 +1,6 @@
 # Workbook sources and worksheet units
 
-An XLSX is one retained Source. Each worksheet has its own processing target,
+An XLSX or XLS is one retained Source. Each worksheet has its own processing target,
 frozen Markdown, token classification, optional content-block index, publication
 and actual successful revision. One failed worksheet leaves the others published.
 Importing the same revision retries unfinished units and skips committed ones.
@@ -36,8 +36,21 @@ segmented indexing/offline recompile, pinned-history reads and version-wait resu
 A spawned runtime worker uses a local model-boundary HTTP fixture to verify partial
 task status and retry. Qt offscreen checks cover table rendering and cell selection.
 
-Rename/reorder reconciliation, confirmed-empty and deleted-sheet retirement are
-covered by the subsequent worksheet lifecycle implementation (#93).
+Worksheet identities survive reorder and supported rename reconciliation. Names
+anchor a complete inventory; OOXML IDs are hints only when the other matches
+show those IDs were not reassigned. A sole unmatched rename with unchanged cell
+and layout evidence also preserves its identity. Ambiguous replacements receive
+fresh identities. Every mapping records its basis and previous revision.
+
+Confirmed empty sheets and sheets absent from a reliable inventory retire their
+contribution to the current applicable version. Retirement and per-unit refresh
+reasons commit together; history remains readable. Objects without extracted cells,
+per-sheet parser failures and a failed whole-workbook inventory cannot prove
+emptiness. They retain previous successful evidence within the same view and show
+the new failed target; a different applicable version never inherits that success.
+Removal previews enumerate owned sheets. Retrying skips already completed or
+retired targets. The desktop sheet table distinguishes empty, deleted, objects-only
+and parse-failed outcomes.
 
 ## Binary XLS
 
@@ -54,8 +67,7 @@ fixture. Non-cell sheet kinds are explicit failed units, never a valid empty tab
 
 `ragged_rows=True` avoids extending every row to the furthest column; stored
 format-only cells are excluded from body content. Physical distant values remain.
-XLS lacks an OOXML sheet ID: initial name-derived keys are reconciled against
-retained identities by the common lifecycle in #93. They are not content hashes
+XLS lacks an OOXML sheet ID: reader hints are reconciled against retained identities by the common lifecycle. They are not content hashes
 or ordinal-only identities.
 
 The pinned [upstream license](https://github.com/python-excel/xlrd/blob/2.0.2/LICENSE)

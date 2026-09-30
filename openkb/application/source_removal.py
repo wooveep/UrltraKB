@@ -78,6 +78,11 @@ def preview_source_removal(kb_dir: Path, identifier: str, scope: KnowledgeScope 
         source_json=view.wiki_dir / "sources" / f"{source.doc_name}.json",
         images_dir=view.wiki_dir / "sources/images" / source.doc_name,
     )
+    for unit in list_source_units(kb_dir, source.source_id):
+        if unit.key != "body":
+            plan.actions.append(
+                RemoveAction("WITHDRAW", f"Worksheet {unit.name or unit.doc_name} ({unit.unit_id})")
+            )
     if not references.complete:
         plan.actions.append(
             RemoveAction("RETAIN", "Reference inventory incomplete; physical cleanup deferred")

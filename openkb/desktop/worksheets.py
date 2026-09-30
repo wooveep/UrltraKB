@@ -60,7 +60,13 @@ class WorksheetsDialog(QDialog):
         for row, unit in enumerate(units):
             values = (
                 unit["name"],
-                unit["status"],
+                {"empty": "已确认空表", "retired": "已删除工作表"}.get(
+                    unit["status"],
+                    {
+                        "objects_only": "只有对象，未提取单元格",
+                        "parse_failed": "工作表解析失败",
+                    }.get(unit.get("content_state"), unit["status"]),
+                ),
                 f"{unit.get('length_class') or '未知'} / {unit.get('execution_mode') or '未记录'}",
                 unit.get("target_source_revision_id"),
                 unit.get("successful_source_revision_id"),

@@ -89,6 +89,8 @@ async def recompile_source(
     frozen = read_source_revision(kb_dir, revision.source_revision_id)
     intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
     admission = Admission(source, frozen, intent)
+    if previous and previous.status in {"empty", "retired"}:
+        return result_from_publication(kb_dir, admission, previous, status="skipped")
     actual = _manifest(kb_dir, previous) if previous else None
     source_map = None
     processing = None

@@ -82,7 +82,48 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
         )
         if selected_unit is None:
             raise ValueError("Worksheet does not belong to this source")
+        if not any(sheet.key == selected_unit.key for sheet in workbook.sheets):
+            if not options["assessment"].missing_fields:
+                from openkb.workbooks.lifecycle import retire_missing_sheets
+
+                context = options.get("context")
+                return aggregate_units(
+                    retire_missing_sheets(
+                        kb_dir,
+                        admission,
+                        workbook,
+                        fingerprint,
+                        view_id=options["scope"].view_id,
+                        unit_id=selected_unit.unit_id,
+                        retry_confirmed=options.get("retry_confirmed", False),
+                        check_stop=context.check_stop if context else lambda: None,
+                    )
+                )
+            from openkb.application.ingestion import result_from_publication
+            from openkb.unit_publication import read_unit_publication
+
+            state = read_unit_publication(kb_dir, selected_unit.unit_id, options["scope"].view_id)
+            return result_from_publication(
+                kb_dir,
+                admission,
+                state,
+                status="skipped" if state.status == "retired" else "blocked",
+            )
     results = []
+    if selected_unit is None and not options["assessment"].missing_fields:
+        from openkb.workbooks.lifecycle import retire_missing_sheets
+
+        context = options.get("context")
+        results.extend(
+            retire_missing_sheets(
+                kb_dir,
+                admission,
+                workbook,
+                fingerprint,
+                view_id=options["scope"].view_id,
+                check_stop=context.check_stop if context else lambda: None,
+            )
+        )
     for sheet in workbook.sheets:
         if selected_unit and sheet.key != selected_unit.key:
             continue

@@ -14,6 +14,8 @@ from openkb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
 def convert_sheet(prepared, sheet, doc_name, directory):
     if sheet.error:
         raise ValueError(f"Worksheet {sheet.name}: {sheet.error}")
+    if sheet.content_state == "objects_only":
+        raise ValueError(f"Worksheet {sheet.name}: objects only; no extracted cell content")
     text = ""
     origins = []
 

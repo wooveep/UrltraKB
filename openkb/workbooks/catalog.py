@@ -19,13 +19,17 @@ def retain_workbook(kb_dir, admission, prepared):
 
     binary = admission.revision.source_format == "xls"
     policy = XLS_POLICY if binary else WORKBOOK_POLICY
+    from openkb.workbooks.identity import previous_workbook, reconcile_sheets
 
     try:
         saved = WorkbookSnapshot(
             source_revision_id=identity,
             digest=prepared.digest,
             policy=policy,
-            sheets=(read_xls if binary else read_xlsx)(prepared.path),
+            sheets=reconcile_sheets(
+                (read_xls if binary else read_xlsx)(prepared.path),
+                previous_workbook(kb_dir, admission),
+            ),
         )
     except Exception as exc:
         saved = WorkbookSnapshot(
@@ -64,4 +68,4 @@ def unit_sheet(kb_dir, unit, source_revision_id):
 def unit_name(kb_dir, unit, unit_revision_id, fallback):
     revision = read_record(kb_dir, "unit-revisions", unit_revision_id, UnitRevision)
     sheet = unit_sheet(kb_dir, unit, revision.source_revision_id)
-    return sheet.name if sheet else fallback
+    return sheet.name if sheet else unit.name or fallback

@@ -409,7 +409,7 @@ def resume_version_review(
 def complete_version_review(
     kb_dir: Path, review: VersionReview, admission: Admission, state: UnitPublication
 ) -> None:
-    if state.status not in {"completed", "awaiting_confirmation"}:
+    if state.status not in {"completed", "empty", "retired", "awaiting_confirmation"}:
         return
     path = record_path(kb_dir, "version-reviews", review.review_id)
     with mutation_scope(kb_dir, [path], operation="complete-version-review"):

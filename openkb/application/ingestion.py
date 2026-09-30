@@ -260,6 +260,7 @@ def process_import_unit(
         admission,
         fingerprint,
         key=sheet.key if sheet else "body",
+        name=sheet.name if sheet else None,
         doc_name=admission.source.doc_name
         + "-sheet-"
         + hashlib.sha256(sheet.key.encode()).hexdigest()[:12]
@@ -278,7 +279,10 @@ def process_import_unit(
         if review:
             complete_version_review(kb_dir, review, admission, state)
         return result_from_publication(
-            kb_dir, admission, state, status="skipped" if state.status == "completed" else "blocked"
+            kb_dir,
+            admission,
+            state,
+            status="skipped" if state.status in {"completed", "empty", "retired"} else "blocked",
         )
     config = resolve_effective_config(kb_dir)[0]
     model = config.get("model", DEFAULT_CONFIG["model"])
@@ -302,6 +306,20 @@ def process_import_unit(
         if assessment.missing_fields:
             state = save_version_wait(kb_dir, admission, normalized, state, assessment)
             return result_from_publication(kb_dir, admission, state, status="blocked")
+        if sheet and sheet.content_state == "empty":
+            from openkb.workbooks.lifecycle import retire_sheet
+
+            state = retire_sheet(kb_dir, admission, unit, state, "empty", check_stop=check_stop)
+            if review:
+                try:
+                    complete_version_review(kb_dir, review, admission, state)
+                except RecoveryRequired:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "Worksheet retired but version review completion was not recorded"
+                    )
+            return result_from_publication(kb_dir, admission, state, status="added")
         with prepare_compile_view(kb_dir, scope.view_id) as view:
             working = view.scope.wiki_dir.parent
             check_stop()

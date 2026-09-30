@@ -15,6 +15,7 @@ class ImportUnit(Record):
     doc_name: DocName
     target_revision_id: RecordId
     generation: int = Field(default=1, ge=1)
+    name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class UnitRevision(Record):
@@ -42,6 +43,8 @@ class UnitPublication(Record):
         "interrupted",
         "stopped",
         "blocked",
+        "empty",
+        "retired",
     ]
     successful_revision_id: RecordId | None = None
     knowledge_revision_id: RecordId | None = None
@@ -57,6 +60,7 @@ class RefreshReason(Record):
     target_revision_id: RecordId
     source_generation: int = Field(ge=1)
     kind: Literal["updated", "withdrawn", "empty"]
+    unit_id: RecordId | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class KnowledgeHead(Record):
