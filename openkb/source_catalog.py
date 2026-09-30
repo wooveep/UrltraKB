@@ -236,7 +236,8 @@ def admit_source_revision(
             root_import_id=execution.root_import_id if execution else uuid.uuid4().hex,
             kb_generation=generation,
             status="completed"
-            if original_kind == "legacy_snapshot" or revision.source_format not in {"docx"}
+            if original_kind == "legacy_snapshot"
+            or revision.source_format not in {"docx", "pptx", "xlsx"}
             else "pending",
             depth=execution.depth if execution else 0,
             ancestry=execution.ancestry if execution else (),

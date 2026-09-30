@@ -1,5 +1,7 @@
 """Execution bookkeeping only; recovered files become independent ordinary Sources."""
 
+from typing import Literal
+
 from pydantic import Field
 
 from openkb.source_records import Digest, FrozenArtifact, PendingJob, Record, RecordId
@@ -44,6 +46,16 @@ class DiscoveryCheckpoint(Record):
     digest: Digest | None = None
     import_intent_id: RecordId | None = None
     diagnostic: str | None = None
+    outcome: Literal[
+        "unknown",
+        "recovered",
+        "private_object",
+        "preview",
+        "external_reference",
+        "corrupt_object",
+        "requires_container_rebuild",
+        "cycle",
+    ] = "unknown"
 
 
 class JobAttempt(Record):

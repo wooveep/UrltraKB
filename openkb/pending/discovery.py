@@ -1,57 +1,30 @@
-"""Bounded package recovery with one atomic cursor, payload and import checkpoint."""
+"""Bounded discovery: one transaction per actual object and its ordinary import intent."""
 
 import hashlib
-import io
-import time
 from pathlib import PurePosixPath
-from zipfile import BadZipFile, ZipFile
-
-from defusedxml.ElementTree import fromstring
 
 from openkb.locks import LockCancelled, atomic_write_bytes
 from openkb.mutation import mutation_scope
+from openkb.pending.budget import BudgetWait, DiscoveryMeter
+from openkb.pending.formats import recognize
+from openkb.pending.ooxml import OOXMLObjects
 from openkb.pending.records import DiscoveryCheckpoint, ImportIntent
 from openkb.pending.store import group_for, job_records, read_job, save_job
-from openkb.source_catalog import read_source_revision, record_path, write_record
+from openkb.source_catalog import read_record, read_source_revision, record_path, write_record
 from openkb.state import HashRegistry
 
 
-class BudgetWait(ValueError):
-    pass
-
-
-def _docx_payload(data, remaining, consume):
-    """Verify a complete OOXML word-processing package, including ZIP checksums."""
-    try:
-        with ZipFile(io.BytesIO(data)) as package:
-            names = package.namelist()
-            if len(names) != len(set(names)):
-                raise ValueError("Ambiguous duplicate package parts")
-            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
-                return None, 0
-            if sum(part.file_size for part in package.infolist()) > remaining:
-                raise BudgetWait("Decompression budget exhausted")
-            total = 0
-            for part in package.infolist():
-                with package.open(part) as stream:
-                    while chunk := stream.read(65536):
-                        consume(len(chunk))
-                        total += len(chunk)
-                        if total > remaining:
-                            raise BudgetWait("Decompression budget exhausted")
-            types = fromstring(package.read("[Content_Types].xml"), forbid_dtd=True)
-            if not any(
-                entry.get("ContentType")
-                == (
-                    "application/vnd.openxmlformats-officedocument."
-                    "wordprocessingml.document.main+xml"
-                )
-                for entry in types
-            ):
-                return None, total
-            return "docx", total
-    except BadZipFile:
-        return None, 0
+def save_budget(kb_dir, intent, meter, error=None):
+    if error:
+        intent = intent.model_copy(update={"status": "budget_wait", "message": str(error)})
+    records = job_records(kb_dir, "discovery", intent)
+    records[record_path(kb_dir, "execution-groups", intent.root_import_id)] = meter.updated_group()
+    with mutation_scope(
+        kb_dir, list(records), operation="discovery-budget-wait" if error else "discovery-scan"
+    ):
+        for path, record in records.items():
+            write_record(path, record)
+    return intent
 
 
 def discover(kb_dir, intent, check_stop):
@@ -63,112 +36,63 @@ def discover(kb_dir, intent, check_stop):
         or HashRegistry.hash_file(original) != revision.digest
     ):
         raise ValueError("Discovery original failed its frozen digest check")
-    if revision.source_format != "docx":
+    if revision.source_format not in {"docx", "pptx", "xlsx"}:
         return save_job(kb_dir, "discovery", intent.model_copy(update={"status": "completed"}))
-    with ZipFile(original) as package:
-        all_names = package.namelist()
-        if len(all_names) != len(set(all_names)):
-            raise ValueError("Ambiguous duplicate container parts")
-        objects = sorted(
-            name
-            for name in all_names
-            if name.startswith("word/embeddings/") and not name.endswith("/")
-        )
+    if intent.policy not in {"docx-embedded-package-v1", "ooxml-embedded-package-v1"}:
+        raise ValueError("Unknown saved discovery policy; explicit reprocessing is required")
+    legacy = intent.policy == "docx-embedded-package-v1"
+    with OOXMLObjects(original) as package:
+        meter = DiscoveryMeter(group_for(kb_dir, intent), check_stop)
+        try:
+            objects = package.scan(meter, legacy=legacy)
+        except BudgetWait as exc:
+            return save_budget(kb_dir, intent, meter, exc)
+        save_budget(kb_dir, intent, meter)
         for position in range(intent.cursor, len(objects)):
             check_stop()
-            started = time.monotonic()
             group = group_for(kb_dir, intent)
             budget = group.budget
-            name = objects[position]
-            info = package.getinfo(name)
-            decompressed = 0
-            data = bytearray()
-            diagnostic = None
-
-            def consume(count):
-                nonlocal decompressed
-                decompressed += count
-                check_stop()
-                if group.decompressed_bytes + decompressed > budget.max_decompressed_bytes:
-                    raise BudgetWait("Decompression budget exhausted")
-                if (
-                    group.discovery_seconds + time.monotonic() - started
-                    >= budget.max_discovery_seconds
-                ):
-                    raise BudgetWait("Discovery time budget exhausted")
-
+            meter = DiscoveryMeter(group, check_stop)
+            candidate = objects[position]
+            name = candidate.key
+            payload, extension = b"", None
+            diagnostic, outcome = candidate.diagnostic, candidate.outcome
             try:
+                meter.check()
                 if group.cancelled:
                     return save_job(
                         kb_dir, "discovery", intent.model_copy(update={"status": "cancelled"})
                     )
-                if intent.depth + 1 > budget.max_depth:
-                    raise BudgetWait("Discovery depth budget exhausted")
-                if group.sources >= budget.max_sources:
-                    raise BudgetWait("Source count budget exhausted")
-                if (
-                    info.file_size > budget.max_object_bytes
-                    or group.object_bytes + info.file_size > budget.max_total_bytes
-                ):
-                    raise BudgetWait("Object byte budget exhausted")
-                if group.decompressed_bytes + info.file_size > budget.max_decompressed_bytes:
-                    raise BudgetWait("Decompression budget exhausted")
-                if group.discovery_seconds >= budget.max_discovery_seconds:
-                    raise BudgetWait("Discovery time budget exhausted")
-                with package.open(info) as stream:
-                    while chunk := stream.read(65536):
-                        consume(len(chunk))
-                        data.extend(chunk)
-                        if (
-                            len(data) > budget.max_object_bytes
-                            or group.decompressed_bytes + len(data) > budget.max_decompressed_bytes
-                        ):
-                            raise BudgetWait("Decompression budget exhausted")
-                        if (
-                            group.discovery_seconds + time.monotonic() - started
-                            >= budget.max_discovery_seconds
-                        ):
-                            raise BudgetWait("Discovery time budget exhausted")
-                payload = bytes(data)
-                extension, _ = _docx_payload(
-                    payload,
-                    budget.max_decompressed_bytes - group.decompressed_bytes - len(payload),
-                    consume,
-                )
-                elapsed = time.monotonic() - started
-                if group.discovery_seconds + elapsed >= budget.max_discovery_seconds:
-                    raise BudgetWait("Discovery time budget exhausted")
+                if not diagnostic:
+                    if intent.depth + 1 > budget.max_depth:
+                        raise BudgetWait("Discovery depth budget exhausted")
+                    if group.sources >= budget.max_sources:
+                        raise BudgetWait("Source count budget exhausted")
+                    if (
+                        candidate.size > budget.max_object_bytes
+                        or group.object_bytes + candidate.size > budget.max_total_bytes
+                    ):
+                        raise BudgetWait("Object byte budget exhausted")
+                    payload = package.read(candidate, meter)
+                    payload, extension, outcome, diagnostic = recognize(payload, name, meter)
+                    if legacy and extension != "docx":
+                        extension, outcome, diagnostic = (
+                            None,
+                            "private_object",
+                            "Not supported by the retained DOCX discovery policy",
+                        )
+                    meter.check()
             except BudgetWait as exc:
-                intent = intent.model_copy(update={"status": "budget_wait", "message": str(exc)})
-                records = job_records(kb_dir, "discovery", intent)
-                records[record_path(kb_dir, "execution-groups", group.root_import_id)] = (
-                    group.model_copy(
-                        update={
-                            "decompressed_bytes": group.decompressed_bytes + decompressed,
-                            "discovery_seconds": group.discovery_seconds
-                            + time.monotonic()
-                            - started,
-                        }
-                    )
-                )
-                with mutation_scope(kb_dir, list(records), operation="discovery-budget-wait"):
-                    for path, record in records.items():
-                        write_record(path, record)
-                return intent
+                return save_budget(kb_dir, intent, meter, exc)
             except LockCancelled:
                 raise
             except Exception as exc:
-                payload, extension = bytes(data), None
-                elapsed = time.monotonic() - started
+                extension, outcome = None, "corrupt_object"
                 diagnostic = f"Object could not be recovered: {type(exc).__name__}: {exc}"
             digest = hashlib.sha256(payload).hexdigest()
-            diagnostic = diagnostic or (
-                None
-                if extension
-                else "Unsupported or incomplete package; no ordinary import created"
-            )
             if digest in (*intent.ancestry, revision.digest):
                 diagnostic = "Repeated content on this execution path; recursive cycle stopped"
+                outcome = "cycle"
             identity = hashlib.sha256(
                 f"{revision.source_revision_id}\0{name}\0{intent.policy}\0{digest}".encode()
             ).hexdigest()[:32]
@@ -186,16 +110,20 @@ def discover(kb_dir, intent, check_stop):
                 digest=digest if artifact else None,
                 import_intent_id=identity if artifact else None,
                 diagnostic=diagnostic,
+                outcome=outcome,
             )
             next_intent = intent.model_copy(update={"cursor": position + 1})
-            updated_group = group.model_copy(
-                update={
-                    "sources": group.sources + int(artifact is not None),
-                    "object_bytes": group.object_bytes + (len(payload) if artifact else 0),
-                    "decompressed_bytes": group.decompressed_bytes + decompressed,
-                    "discovery_seconds": group.discovery_seconds + elapsed,
-                }
-            )
+            checkpoint_path = record_path(kb_dir, "discovery-checkpoints", identity)
+            if checkpoint_path.exists():
+                if (
+                    read_record(kb_dir, "discovery-checkpoints", identity, DiscoveryCheckpoint)
+                    != checkpoint
+                ):
+                    raise ValueError("Existing discovery checkpoint belongs to different work")
+                # A saved result is authoritative even if a retained cursor predates it.
+                intent = save_job(kb_dir, "discovery", next_intent)
+                continue
+            updated_group = meter.updated_group(len(payload), artifact is not None)
             records = {
                 record_path(kb_dir, "discovery-checkpoints", identity): checkpoint,
                 record_path(kb_dir, "discovery-intents", intent.intent_id): next_intent,

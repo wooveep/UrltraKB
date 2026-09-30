@@ -1,5 +1,11 @@
 # Synthetic Office fixtures
 
+The `package-text.docx`, `.pptx`, and `.xlsx` files are the small external
+`embedded-simple-2007` fixtures recorded in `package-fixtures.json`, under the
+adjacent `oletools-fixture-LICENSE.md`. Each holds one standard Ole10Native
+Package containing a short benign ASCII sentence. All other fixtures described
+below are authored test data.
+
 `writer.doc` is a real Word 97 binary file, generated with the pinned private
 LibreOffice 26.2.6.3 build from the small `writer_document` DOCX fixture in
 `tests/test_office_import.py`. It contains three physical pages (page 2 blank),

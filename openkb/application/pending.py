@@ -6,7 +6,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.lifecycle import read_lifecycle
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, mutation_scope
-from openkb.pending.records import ExecutionBudget, ExecutionGroup
+from openkb.pending.records import DiscoveryCheckpoint, ExecutionBudget, ExecutionGroup
 from openkb.pending.store import claim, group_for, jobs, read_job, reconcile_job, save_job, start
 from openkb.source_catalog import read_record, record_path, write_record
 
@@ -33,6 +33,12 @@ def pending_status(kb_dir: Path) -> dict:
         }
         return {
             "jobs": rows,
+            "checkpoints": [
+                read_record(
+                    root, "discovery-checkpoints", path.stem, DiscoveryCheckpoint
+                ).model_dump(mode="json")
+                for path in sorted((root / ".openkb/catalog/discovery-checkpoints").glob("*.json"))
+            ],
             "groups": [group.model_dump(mode="json") for group in groups.values()],
             "runnable": sum(
                 job.status in {"pending", "dispatched"}

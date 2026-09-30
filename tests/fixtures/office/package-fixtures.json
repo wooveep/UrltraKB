@@ -1,0 +1,17 @@
+[
+  {
+    "file": "package-text.docx",
+    "sha256": "00a2f70b731e340d6173ec7af5c1b2cc141ae3692235fd2e4832444d4da6c4c6",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.docx"
+  },
+  {
+    "file": "package-text.pptx",
+    "sha256": "e646344a33f298f3ced363b538c1ce387db9e0812a58e6756a31ff03a04262a8",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.pptx"
+  },
+  {
+    "file": "package-text.xlsx",
+    "sha256": "25d9f1f46aff4e460f6ebf2ab44bded0a8f93ad4e5321cf747966e8c4b917995",
+    "source": "https://github.com/decalage2/oletools/blob/ec10260989dbc48b9109e3d05d22beee19cf2333/tests/test-data/oleobj/embedded-simple-2007.xlsx"
+  }
+]

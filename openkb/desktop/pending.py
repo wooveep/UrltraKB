@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
 )
 
@@ -28,6 +29,7 @@ class PendingDialog(ManagementPanel):
         self.window, self.kb = window, kb
         self._closed, self._busy = False, False
         self.groups = {}
+        self.checkpoints = []
         self.setWindowTitle("待处理工作")
         self.resize(1050, 720)
         layout = QVBoxLayout(self)
@@ -41,6 +43,11 @@ class PendingDialog(ManagementPanel):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.select)
         layout.addWidget(self.table, 1)
+        self.diagnostics = QTextEdit()
+        self.diagnostics.setReadOnly(True)
+        self.diagnostics.setMaximumHeight(130)
+        self.diagnostics.setAccessibleName("文件恢复检查点与诊断")
+        layout.addWidget(self.diagnostics)
         form = QFormLayout()
         self.fields = {}
         for key, label in (
@@ -97,8 +104,14 @@ class PendingDialog(ManagementPanel):
         self.operate(lambda: pending_status(self.kb), self.render)
 
     def render(self, inventory):
+        self.checkpoints = inventory.get("checkpoints", [])
         self.groups = {group["root_import_id"]: group for group in inventory["groups"]}
-        rows = [job for job in inventory["jobs"] if job["status"] != "completed"]
+        inspected = {item["discovery_intent_id"] for item in self.checkpoints}
+        rows = [
+            job
+            for job in inventory["jobs"]
+            if job["status"] != "completed" or job["id"] in inspected
+        ]
         self.table.setRowCount(len(rows))
         for row, job in enumerate(rows):
             for column, value in enumerate(
@@ -116,6 +129,7 @@ class PendingDialog(ManagementPanel):
                         "stopped": "已停止",
                         "cancelled": "执行组已取消",
                         "stale": "已失效",
+                        "completed": "已完成",
                     }.get(job["status"], job["status"]),
                     {
                         "Source count budget exhausted": "来源数已达到本组上限",
@@ -147,6 +161,24 @@ class PendingDialog(ManagementPanel):
     def select(self):
         job = self.selected()
         if job:
+            labels = {
+                "recovered": "已恢复完整文件",
+                "private_object": "私有对象",
+                "preview": "预览图",
+                "external_reference": "外链（未下载）",
+                "corrupt_object": "损坏对象",
+                "requires_container_rebuild": "需要重建标准容器",
+                "cycle": "循环已停止",
+                "unknown": "旧检查点",
+            }
+            self.diagnostics.setPlainText(
+                "\n".join(
+                    f"{labels[item['outcome']]} · {item['object_key']}\n"
+                    f"{item.get('diagnostic') or ''}"
+                    for item in self.checkpoints
+                    if item["discovery_intent_id"] == job["id"]
+                )
+            )
             group = self.groups[job["root_import_id"]]
             for key, entry in self.fields.items():
                 entry.setText(str(group["budget"][key]))
