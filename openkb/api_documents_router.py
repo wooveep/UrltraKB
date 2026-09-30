@@ -132,6 +132,31 @@ class RetryWorksheetRequest(ViewRequest):
     unit_id: str
 
 
+class RetrySourceRequest(ViewRequest):
+    kb: str
+    source_id: str
+
+
+@documents_router.post("/api/v1/document/retry")
+async def retry_source_endpoint(
+    request: RetrySourceRequest, _: None = Depends(require_bearer_token)
+):
+    from openkb.application.source_retry import retry_source
+
+    root = await asyncio.to_thread(_resolve_kb, request.kb)
+    try:
+        return asdict(
+            await run_in_threadpool(
+                retry_source,
+                root,
+                request.source_id,
+                scope=await resolve_api_scope(root, request.view_id),
+            )
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @documents_router.post("/api/v1/document/retry-worksheet")
 async def retry_worksheet_endpoint(
     request: RetryWorksheetRequest, _: None = Depends(require_bearer_token)

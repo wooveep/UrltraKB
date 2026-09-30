@@ -24,6 +24,10 @@ class ImportUnitOutcome:
     key: str = "body"
     name: str | None = None
     doc_name: str | None = None
+    pages: int | None = None
+    tokens: int | None = None
+    characters: int | None = None
+    block_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,10 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     ]
     if result.message:
         lines.append(result.message)
+    if result.quality:
+        lines.append("Quality: " + ", ".join(result.quality))
+    if result.unfinished:
+        lines.append("Unfinished: " + ", ".join(result.unfinished))
     return tuple(lines) + describe_units(result.units)
 
 
@@ -64,11 +72,23 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
             f"target: {unit.target_revision_id}; actual source: "
             f"{unit.successful_source_revision_id or 'none'}"
         )
+        lines.append(
+            f"Successful unit: {unit.successful_revision_id or 'none'}; "
+            f"knowledge: {unit.knowledge_revision_id or 'none'}; view: {unit.view_id}"
+        )
+        if unit.message or unit.error_type:
+            lines.append(f"Diagnostic: {unit.error_type or ''}; {unit.message or ''}")
+        if unit.proposal_id:
+            lines.append(f"Pending proposal: {unit.proposal_id}")
+        if unit.block_count is not None:
+            lines.append(f"Content blocks: {unit.block_count}")
         if unit.length_class:
             lines.append(f"Processing: {unit.length_class} / {unit.execution_mode}")
         if unit.processing:
             if unit.processing["measurement_unit"] == "token":
                 lines.append(f"Text: {unit.processing['measurement_value']} tokens (cl100k_base)")
+            elif unit.processing["measurement_unit"] == "physical_page":
+                lines.append(f"Physical pages: {unit.processing['measurement_value']}")
             lines.append(
                 f"Capacity: {unit.processing['capacity_status']}; "
                 f"{unit.processing['capacity_reason'] or ''}"
@@ -77,6 +97,7 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
             target = unit.target_processing
             lines.append(
                 f"Target processing: {target['length_class']} / {target['execution_mode']}; "
+                f"{target['measurement_value']} {target['measurement_unit']}; "
                 f"capacity: {target['capacity_status']}; {target['capacity_reason']}"
             )
     return tuple(lines)

@@ -178,7 +178,13 @@ def capture_workbench(window, theme, root, wait):
                         )
                     )
                 QApplication.processEvents()
-                assert window.size().width() == width and window.size().height() == height
+                assert window.size().width() == width and window.size().height() == height, (
+                    name,
+                    width,
+                    height,
+                    window.size(),
+                    window.minimumSizeHint(),
+                )
                 assert window.shell.title.isVisible()
                 assert window.grab().save(str(root / f"{number}-{suffix}-{width}.png"))
 

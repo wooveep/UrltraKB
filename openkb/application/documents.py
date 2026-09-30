@@ -367,6 +367,8 @@ class AddFileResult:
     units: tuple[ImportUnitOutcome, ...] = ()
     discovery_pending: int | None = None
     imports_pending: int | None = None
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 def _add_for_api(
@@ -412,6 +414,8 @@ def _add_for_api(
         units=result.units,
         discovery_pending=result.discovery_pending,
         imports_pending=result.imports_pending,
+        quality=result.quality,
+        unfinished=result.unfinished,
     )
 
 

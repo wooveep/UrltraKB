@@ -231,6 +231,7 @@ class TaskManager:
             task = self._tasks[task_id]
             if task.view.state in TERMINAL:
                 return
+            from openkb.catalog_schema import UnsupportedCatalogWriter
             from openkb.lifecycle import KnowledgeBaseRemoved
             from openkb.pending.control import request_stop
             from openkb.runtime.requests import RunPendingJob
@@ -244,7 +245,7 @@ class TaskManager:
                             request.dispatch_id,
                             task.identities[index].generation,
                         )
-                    except KnowledgeBaseRemoved:
+                    except (KnowledgeBaseRemoved, UnsupportedCatalogWriter):
                         pass  # Never write to a replacement KB; still stop the old worker.
             self._update(task, stop_requested=True)
             if task_id not in self._active and task.view.state not in TERMINAL:

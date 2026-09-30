@@ -42,7 +42,7 @@ def test_native_inventory_attributes_editable_pageindex_to_its_source(monkeypatc
 
     inputs = Inputs(ROOT, {"version": metadata.version("openkb"), "commit": "fixture"})
     component, path = inputs.owner(ROOT / "vendor/PageIndex/pageindex/client.py")
-    assert component == "python/pageindex@0.3.0.dev3+urltrakb.3"
+    assert component == "python/pageindex@0.3.0.dev3+urltrakb.4"
     assert path == "vendor/PageIndex/pageindex/client.py"
     assert inputs.components[component]["upstream_commit"] == (
         "9ad54122bbd519cec8913198e2d63cff92781c1e"

@@ -274,6 +274,19 @@ class RunPendingJob:
 
 
 @dataclass(frozen=True)
+class RetrySource(ViewSelection):
+    source_id: str
+
+    def __post_init__(self):
+        super().__post_init__()
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import RecordId
+
+        TypeAdapter(RecordId).validate_python(self.source_id)
+
+
+@dataclass(frozen=True)
 class ReprocessSource(ViewSelection):
     source_id: str
     version: str
@@ -285,7 +298,8 @@ class ReprocessSource(ViewSelection):
 
 
 UnitRequest = (
-    ReprocessSource
+    RetrySource
+    | ReprocessSource
     | RunPendingJob
     | RetryWorksheet
     | AcceptProposal
@@ -307,6 +321,7 @@ UnitRequest = (
     | GenerateGraph
 )
 REQUEST_TYPES = (
+    RetrySource,
     ReprocessSource,
     RunPendingJob,
     RetryWorksheet,

@@ -106,6 +106,7 @@ def _execute(
         RefreshKnowledge,
         ReprocessSource,
         ResumeVersionReview,
+        RetrySource,
         RetryWorksheet,
         RunPendingJob,
     )
@@ -124,8 +125,9 @@ def _execute(
             changes=(f"Pending job: {request.job_id}; {status}",),
         )
 
-    if isinstance(request, (RetryWorksheet, ReprocessSource)):
+    if isinstance(request, (RetrySource, RetryWorksheet, ReprocessSource)):
         from openkb.application.reprocessing import ReprocessingConflict, reprocess_source
+        from openkb.application.source_retry import retry_source
         from openkb.application.workbook_actions import retry_worksheet
         from openkb.ingest_result import describe_ingest
 
@@ -136,6 +138,8 @@ def _execute(
                     root, request.source_id, version=request.version, context=context, scope=scope
                 )
                 if isinstance(request, ReprocessSource)
+                else retry_source(root, request.source_id, context=context, scope=scope)
+                if isinstance(request, RetrySource)
                 else retry_worksheet(
                     root, request.source_id, request.unit_id, context=context, scope=scope
                 )
@@ -147,6 +151,7 @@ def _execute(
             resources=result.resources,
             error=result.message,
             changes=describe_ingest(result),
+            quality=result.quality,
             unfinished=result.unfinished,
             revision=result.input_version,
         )
@@ -387,6 +392,7 @@ def _execute(
         )
     if isinstance(request, (ImportFile, ImportUrl)):
         from openkb.application.documents import import_document
+        from openkb.ingest_result import describe_ingest
 
         if isinstance(request, ImportUrl):
             from openkb.application.urls import import_url
@@ -417,18 +423,7 @@ def _execute(
             quality=result.quality,
             unfinished=result.unfinished,
             revision=result.input_version,
-            changes=(
-                f"Source: {result.source_id}",
-                f"Source revision: {result.source_revision_id}",
-                *(
-                    f"Unit {unit.name or unit.unit_id} ({unit.unit_id}): {unit.status}; "
-                    f"target: {unit.target_revision_id}; "
-                    f"actual input: {unit.successful_source_revision_id or 'none'}"
-                    for unit in result.units
-                ),
-            )
-            if result.source_id
-            else (),
+            changes=describe_ingest(result),
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio

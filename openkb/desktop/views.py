@@ -6,9 +6,15 @@ from openkb.desktop.form_controls import FocusComboBox
 class ViewPicker(FocusComboBox):
     def __init__(self, window):
         super().__init__()
+        from PySide6.QtWidgets import QComboBox, QSizePolicy
+
         self.window = window
         self.setAccessibleName("知识视图")
+        self.setMinimumWidth(100)
         self.setMaximumWidth(260)
+        self.setMinimumContentsLength(8)
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.activated.connect(self.select_view)
         self.set_views(())
 

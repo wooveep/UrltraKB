@@ -25,19 +25,66 @@ def _url_worker(*args):
         run_unit(*args)
 
 
-def _crash_with_fixed_input(*args):
+def _with_observed_input(args, model_action):
+    """Observe real preparation and inject process failure only at the model boundary."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from openkb.application.documents import prepared_input
     from openkb.runtime.worker import run_unit
 
-    def crash(source, kb, **options):
-        prepared = options["prepared"]
+    retained = []
+
+    @contextmanager
+    def observe(path):
+        with prepared_input(path) as ready:
+            retained.append(ready)
+            yield ready
+
+    def completion(**kwargs):
+        model_action(retained[-1])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "description": "Fixture",
+                                "content": "Retained input",
+                                "create": [],
+                                "update": [],
+                                "related": [],
+                            }
+                        )
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def acompletion(**kwargs):
+        return completion(**kwargs)
+
+    os.environ["OPENAI_API_KEY"] = "fixture-key"
+    with (
+        patch("openkb.application.documents.prepared_input", side_effect=observe),
+        patch("litellm.completion", side_effect=completion),
+        patch("litellm.acompletion", side_effect=acompletion),
+    ):
+        run_unit(*args)
+
+
+def _crash_with_fixed_input(*args):
+    def crash(prepared):
+        kb = Path(args[1].kb_dir)
         (kb / "crash-evidence.json").write_text(
             json.dumps([str(prepared.path), *[str(i.path) for i in prepared.images.values()]]),
             encoding="utf-8",
         )
         os._exit(86)
 
-    with patch("openkb.application.documents._add_single_file_locked", side_effect=crash):
-        run_unit(*args)
+    _with_observed_input(args, crash)
 
 
 def _doomed_url_parent(kb, history, evidence):
@@ -156,11 +203,9 @@ assert not store.group.exists()
 
 
 def _holding_worker(*args):
-    from openkb.runtime.worker import run_unit
-
-    def hold(source, kb, **options):
-        frozen = options["prepared"].path
-        root = kb.parent
+    def hold(prepared):
+        frozen = prepared.path
+        root = Path(args[1].kb_dir).parent
         (root / "worker-ready.json").write_text(
             json.dumps({"copy": str(frozen), "group": str(args[-1].parents[2])}),
             encoding="utf-8",
@@ -171,10 +216,8 @@ def _holding_worker(*args):
                 raise TimeoutError("Worker release did not arrive")
             time.sleep(0.01)
         (root / "worker-read.txt").write_text(frozen.read_text("utf-8"), encoding="utf-8")
-        return "skipped"
 
-    with patch("openkb.application.documents._add_single_file_locked", side_effect=hold):
-        run_unit(*args)
+    _with_observed_input(args, hold)
 
 
 def _doomed_active_parent(kb, history, source):

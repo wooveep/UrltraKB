@@ -15,7 +15,7 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
 
     from openkb.application.execution import ExecutionContext
     from openkb.locks import kb_ingest_lock_held
-    from openkb.state import HashRegistry
+    from openkb.source_catalog import list_sources
 
     context = ExecutionContext()
     private = []
@@ -53,8 +53,10 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
     assert result.resources and all(Path(path).exists() for path in result.resources)
     assert duplicate.status == "skipped"
     assert all(not path.exists() for path in private)
-    entry = next(iter(HashRegistry(kb_dir / ".openkb/hashes.json").all_entries().values()))
-    assert entry["origin"] == "url" and entry["path"] == url
+    sources = list_sources(kb_dir)
+    assert len(sources) == 1
+    assert sources[0].identity == url and sources[0].source_id == result.source_id
+    assert duplicate.source_revision_id == result.source_revision_id
 
 
 def test_failed_fetch_does_not_fix_snapshot_or_publish_raw(kb_dir):

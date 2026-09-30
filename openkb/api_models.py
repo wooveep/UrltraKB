@@ -141,6 +141,8 @@ class AddFileItem(BaseModel):
     units: tuple[ImportUnitOutcome, ...] = ()
     discovery_pending: int | None = None
     imports_pending: int | None = None
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 class AddResponse(BaseModel):

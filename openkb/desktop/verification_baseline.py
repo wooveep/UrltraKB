@@ -31,8 +31,8 @@ def verify_baseline(window, kb, root, wait):
     window.shell.navigate("资料")
     panel = window.workspaces.panels["资料"][0]
     wait(lambda: panel.table.rowCount() == 2)
-    assert panel.table.item(0, 2).text() == "Markdown 全文编译"
-    assert panel.table.item(1, 2).text() == "PageIndex 长文索引"
+    assert panel.table.item(0, 2).text() == "分类未知 · 方式未记录"
+    assert panel.table.item(1, 2).text() == "分类未知 · 方式未记录"
     hint = window.findChild(QLabel, "documentWorkflow").text()
     assert "Markdown" in hint and "PageIndex" in hint
     for row, expected in ((0, "原始 Markdown 正文"), (1, "保留的第二页")):
@@ -74,6 +74,12 @@ def verify_baseline(window, kb, root, wait):
         "model",
         "language",
         "pageindex_threshold",
+        "pdf_short_max_pages",
+        "model_capacity",
+        "download_remote_assets",
+        "office_runtime_path",
+        "office_timeout_seconds",
+        "extraction_budget",
         "entity_types",
         "openai_api_base",
         "api_key",

@@ -85,6 +85,9 @@ class DocumentsDialog(ManagementPanel):
         self.reprocess_button = QPushButton("预览重新处理")
         self.reprocess_button.clicked.connect(self.reprocess)
         recompilation.addWidget(self.reprocess_button)
+        self.retry_button = QPushButton("重试所选资料未完成项")
+        self.retry_button.clicked.connect(self.retry_source)
+        recompilation.addWidget(self.retry_button)
         self.proposals_button = QPushButton("查看待接受差异")
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
@@ -120,6 +123,22 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def retry_source(self):
+        from openkb.runtime.requests import RetrySource
+
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) != 1 or self._task:
+            self.status.setText("请选择一份资料重试未完成项。")
+            return
+        source_id = self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        if len(source_id) != 32:
+            self.status.setText("旧资料请先预览重新处理；不会自动转换旧正文。")
+            return
+        self._task = self.window.manager.submit(
+            self.kb, [RetrySource(source_id, view_id=self.view_id)]
+        )
+        self.status.setText("已提交重试；沿用保存的输入与处理策略，跳过已完成项。")
 
     def reprocess(self):
         from openkb.desktop.reprocessing import ReprocessingDialog

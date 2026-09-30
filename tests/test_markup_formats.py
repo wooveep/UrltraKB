@@ -2,14 +2,14 @@
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback", "test_block_readback")
+pytest_plugins = ("test_pdf_readback", "block_fixtures")
 
 
 @pytest.fixture(autouse=True)
-def isolated_global_settings(tmp_path, monkeypatch):
+def isolated_global_settings(tmp_path_factory, monkeypatch):
     from openkb import config
 
-    directory = tmp_path / "settings"
+    directory = tmp_path_factory.mktemp("global-settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", directory)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", directory / "global.yaml")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_LOCK_PATH", directory / ".lock")

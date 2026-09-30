@@ -107,6 +107,7 @@ class WorkbenchShell(QWidget):
         heading.setSpacing(3)
         heading.addWidget(self.title)
         self.subtitle = QLabel(PAGE_HINTS["概览"])
+        self.subtitle.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.subtitle.setObjectName("muted")
         heading.addWidget(self.subtitle)
         top.addLayout(heading)

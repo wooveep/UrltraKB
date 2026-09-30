@@ -108,9 +108,13 @@ def repair_knowledge_base(kb_dir: Path) -> RepairResult:
     """
     root = kb_dir.expanduser().resolve()
     with kb_repair_lock(root / ".openkb"):
+        from openkb.catalog_schema import UnsupportedCatalogWriter, validate_catalog_writer
+
+        validate_catalog_writer(root)
         messages: list[str] = []
         try:
             messages = recover_pending_journals(root, repairing=True)
+            validate_catalog_writer(root)
             from openkb.application.knowledge_bases import initialization_rolled_back
 
             if initialization_rolled_back(root):
@@ -146,6 +150,8 @@ def repair_knowledge_base(kb_dir: Path) -> RepairResult:
                 atomic_write_json(repair_marker(root), {"error_type": "InvalidFrontmatter"})
                 return RepairResult(False, tuple(messages), tuple(issues))
             report = run_structural_lint(root)
+        except UnsupportedCatalogWriter:
+            raise
         except RecoveryRequired:
             return RepairResult(
                 False,

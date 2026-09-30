@@ -2306,7 +2306,7 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
 from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
-from openkb.cli_source import source, retry_worksheet, reprocess
+from openkb.cli_source import source, retry_worksheet, reprocess, retry_source
 from openkb.cli_pending import pending, process as process_pending_command
 from openkb.cli_settings import settings
 from openkb.cli_versions import versions
@@ -2317,6 +2317,7 @@ cli.add_command(refresh)
 cli.add_command(source)
 cli.add_command(retry_worksheet)
 cli.add_command(reprocess)
+cli.add_command(retry_source)
 cli.add_command(pending)
 cli.add_command(process_pending_command)
 cli.add_command(settings)

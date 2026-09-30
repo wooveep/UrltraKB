@@ -26,6 +26,8 @@ from openkb.agent.compiler import (
 from openkb.cli import _resolve_doc_identifier, cli
 from openkb.state import HashRegistry
 
+pytest_plugins = ("test_pdf_readback",)
+
 # ---------------------------------------------------------------------------
 # _remove_source_from_frontmatter
 # ---------------------------------------------------------------------------
@@ -726,74 +728,27 @@ def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_add_persists_doc_name_for_later_remove(tmp_path):
-    """End-to-end: `openkb add` writes a registry entry with `doc_name`,
-    and a subsequent `openkb remove` actually prunes that entry.
-    """
-    from openkb.converter import ConvertResult
+def test_add_persists_doc_name_for_later_remove(kb_dir, pdf_model):
+    """New-source names remain removable while their durable identity records survive."""
+    from openkb.application.sources import source_inventory
+    from openkb.source_catalog import list_sources, read_source
 
-    # Minimal KB scaffolding (mirrors conftest.kb_dir but localised so we
-    # can fully control the add pipeline via mocks below).
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources" / "images").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "explorations").mkdir(parents=True)
-    (tmp_path / "wiki" / "reports").mkdir(parents=True)
-    (tmp_path / "wiki" / "index.md").write_text(
-        "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "wiki" / "log.md").write_text("# Log\n", encoding="utf-8")
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    (openkb_dir / "hashes.json").write_text("{}")
-
-    doc = tmp_path / "paper.md"
+    doc = kb_dir / "raw/paper.md"
     doc.write_text("# Hello", encoding="utf-8")
-    raw_path = tmp_path / "raw" / "paper.md"
-    raw_path.write_text("# Hello", encoding="utf-8")
-    source_path = tmp_path / "wiki" / "sources" / "paper.md"
-    source_path.write_text("# Hello converted", encoding="utf-8")
-    summary_path = tmp_path / "wiki" / "summaries" / "paper.md"
-    summary_path.write_text(
-        "---\nsources: [raw/paper.md]\nbrief: x\n---\n# Paper\n",
-        encoding="utf-8",
-    )
-
-    mock_result = ConvertResult(
-        raw_path=raw_path,
-        source_path=source_path,
-        is_long_doc=False,
-        file_hash="deadbeef" * 8,  # 64 hex chars
-    )
-
     runner = CliRunner()
-    # Mock convert_document + asyncio.run to skip the LLM-driven compile.
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.application.documents.convert_document", return_value=mock_result),
-        patch("openkb.cli.asyncio.run"),
-    ):
-        add_res = runner.invoke(cli, ["add", str(doc)])
-    assert add_res.exit_code == 0, add_res.output
-
-    # The registry write contract: doc_name must be present.
-    hashes = json.loads((openkb_dir / "hashes.json").read_text())
-    assert len(hashes) == 1
-    ((_, meta),) = hashes.items()
-    assert meta["name"] == "paper.md"
-    assert meta["doc_name"] == "paper"
-    assert meta["type"] == "md"
-
-    # And the remove command must actually drop that entry — not silently no-op.
-    rm_res = runner.invoke(
-        cli,
-        ["--kb-dir", str(tmp_path), "remove", "paper.md", "--keep-raw", "--yes"],
+    added = runner.invoke(cli, ["--kb-dir", str(kb_dir), "add", str(doc)])
+    assert added.exit_code == 0, added.output
+    sources = list_sources(kb_dir)
+    assert len(sources) == 1
+    source = sources[0]
+    assert source.name == "paper.md" and source.doc_name == "paper"
+    removed = runner.invoke(
+        cli, ["--kb-dir", str(kb_dir), "remove", "paper.md", "--keep-raw", "--yes"]
     )
-    assert rm_res.exit_code == 0, rm_res.output
-    assert json.loads((openkb_dir / "hashes.json").read_text()) == {}
+    assert removed.exit_code == 0, removed.output
+    assert read_source(kb_dir, source.source_id).removed
+    assert not source_inventory(kb_dir)
+    assert doc.read_text() == "# Hello"
 
 
 # ---------------------------------------------------------------------------

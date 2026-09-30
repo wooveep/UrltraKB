@@ -3,15 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
-from urllib.parse import unquote
 
 from openkb.application.execution import ExecutionContext
-from openkb.application.file_state import contained_paths
 from openkb.application.recompilation import _version
+from openkb.application.retained_inputs import artifact_availability, frozen_source_input
 from openkb.application.sources import source_view_id
 from openkb.config import resolve_effective_config
 from openkb.ingest_records import UnitRevision
-from openkb.inputs import OFFICE_SOURCE_EXTENSIONS, PreparedImage, PreparedInput
+from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
 from openkb.knowledge_scope import KnowledgeScope, live_scope, resolve_scope
 from openkb.lifecycle import read_lifecycle
 from openkb.locks import kb_ingest_lock, kb_read_lock
@@ -25,35 +24,12 @@ from openkb.source_catalog import (
     read_source,
     read_source_revision,
 )
-from openkb.state import HashRegistry
 from openkb.unit_publication import list_source_units, read_unit_publication
 from openkb.view_records import VersionAnnotation
 
 
 class ReprocessingConflict(ValueError):
     """The previously reviewed processing plan no longer matches the current source."""
-
-
-def _availability(kb_dir, relative, digest):
-    if relative is None:
-        return {
-            "path": None,
-            "available": False,
-            "digest": None,
-            "reason": "Not retained at admission",
-        }
-    path = kb_dir / relative
-    contained_paths(kb_dir, [path])
-    try:
-        available = path.is_file() and HashRegistry.hash_file(path) == digest
-    except OSError:
-        available = False
-    return {
-        "path": relative,
-        "available": available,
-        "digest": digest,
-        "reason": None if available else "Frozen input is missing or its digest changed",
-    }
 
 
 def runtime_availability(kb_dir, source_format):
@@ -112,11 +88,11 @@ def preview_reprocessing(
             blockers.append(
                 "Legacy normalized snapshot is not a retained original; reprocessing is unavailable"
             )
-        original = _availability(root, revision.original, revision.digest)
+        original = artifact_availability(root, revision.original, revision.digest)
         assets = [
             {
                 "reference": asset.original_reference,
-                **_availability(root, asset.artifact, asset.digest),
+                **artifact_availability(root, asset.artifact, asset.digest),
             }
             for asset in revision.assets
         ]
@@ -248,29 +224,6 @@ def _preview_decoding(kb_dir, revision, available):
     return revision
 
 
-def _frozen_input(kb_dir, source, revision):
-    path = kb_dir / revision.original
-    if not _availability(kb_dir, revision.original, revision.digest)["available"] or any(
-        asset.digest and not _availability(kb_dir, asset.artifact, asset.digest)["available"]
-        for asset in revision.assets
-    ):
-        raise ValueError("Retained original or assets are missing or changed")
-    return PreparedInput(
-        Path(f"{source.doc_name}.{revision.source_format}"),
-        path,
-        revision.digest,
-        {
-            asset.original_reference: PreparedImage(
-                Path(unquote(asset.original_reference)),
-                kb_dir / asset.artifact if asset.artifact else None,
-                asset.digest,
-            )
-            for asset in revision.assets
-        },
-        path,
-    )
-
-
 def reprocess_source(
     kb_dir: Path,
     source_id: str,
@@ -315,7 +268,7 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
             raise ReprocessingConflict("Source view changed; preview again before reprocessing")
         return import_prepared_source(
             root,
-            _frozen_input(root, existing, frozen),
+            frozen_source_input(root, existing, frozen),
             admission=admission,
             bundle=credentials,
             context=context,
@@ -337,7 +290,7 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
             return reprocess_legacy(root, preview, context, credentials)
         source = read_source(root, preview["source_id"])
         revision = read_source_revision(root, source.target_revision_id)
-        prepared = _frozen_input(root, source, revision)
+        prepared = frozen_source_input(root, source, revision)
         from openkb.application.ingestion import import_prepared_source
 
         admission = admit_source_revision(

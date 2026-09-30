@@ -205,10 +205,16 @@ def start_watch(
     def changed(paths):
         from openkb.inputs import IMAGE_SOURCE_EXTENSIONS, local_image_inputs
 
-        affected = set(paths)
         root = raw_dir.resolve()
+        resources = {Path(path).resolve() for path in paths}
+        paths = [
+            path
+            for path in paths
+            if Path(path).is_relative_to(raw_dir)
+            and not any(part.startswith(".") for part in Path(path).relative_to(raw_dir).parts)
+        ]
+        affected = set(paths)
         if root == raw_dir:
-            resources = {Path(path).resolve() for path in paths}
             for source in root.rglob("*"):
                 if (
                     source.suffix.lower() not in IMAGE_SOURCE_EXTENSIONS
@@ -224,7 +230,8 @@ def start_watch(
                 except (OSError, ValueError):
                     # The source's own event/import reports malformed or unstable input.
                     continue
-        callback(sorted(affected))
+        if affected:
+            callback(sorted(affected))
 
     handler = DebouncedHandler(changed, debounce_seconds=debounce)
     observer = Observer()

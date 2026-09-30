@@ -33,7 +33,7 @@ def aggregate_units(results):
 
 
 def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=None, **options):
-    from openkb.application.ingestion import process_import_unit
+    from openkb.application.ingestion import pending_counts, process_import_unit
     from openkb.ingest_records import UnitRevision
     from openkb.source_catalog import read_record
     from openkb.unit_publication import list_source_units
@@ -64,6 +64,7 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
             source_id=admission.source.source_id,
             source_revision_id=admission.revision.source_revision_id,
             unfinished=("sheet_inventory",),
+            **pending_counts(kb_dir, admission),
             message=f"Workbook inventory: {exc}",
         )
     if not workbook.sheets:
@@ -74,6 +75,7 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
             source_id=admission.source.source_id,
             source_revision_id=admission.revision.source_revision_id,
             unfinished=("sheet_inventory",),
+            **pending_counts(kb_dir, admission),
             message="Workbook has no worksheets",
         )
     basis = json.loads(fingerprint)

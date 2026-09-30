@@ -600,7 +600,15 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
     assert calls == [(paper_path, kb_dir), (notes_path, kb_dir)]
     payload = response.json()
     for item in payload["files"]:
-        for key in ("source_id", "source_revision_id", "units", "discovery_pending"):
+        for key in (
+            "source_id",
+            "source_revision_id",
+            "units",
+            "discovery_pending",
+            "imports_pending",
+            "quality",
+            "unfinished",
+        ):
             item.pop(key)
     assert payload == {
         "kb": kb,
@@ -626,6 +634,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
         "source_count": 2,
         "unit_counts": {},
         "discovery_pending_count": 0,
+        "imports_pending_count": 0,
     }
 
 

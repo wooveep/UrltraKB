@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback", "test_block_readback")
+pytest_plugins = ("test_pdf_readback", "block_fixtures")
 
 
 def test_txt_freezes_encoding_and_original_unicode_positions(kb_dir, tmp_path, pdf_model):

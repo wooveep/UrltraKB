@@ -285,6 +285,7 @@ def source_status(states):
 
 
 def unit_inventory(kb_dir, units, view_id, *, scope=None):
+    from openkb.source_metrics import unit_metrics
     from openkb.workbooks.catalog import unit_name, unit_sheet
 
     result = []
@@ -315,6 +316,7 @@ def unit_inventory(kb_dir, units, view_id, *, scope=None):
             {
                 **(state.model_dump(mode="json") if state else {"status": "pending"}),
                 **processing_details(kb_dir, state, actual[1] if actual else None),
+                **unit_metrics(kb_dir, state, actual, unit.doc_name),
                 "target_source_revision_id": target.source_revision_id,
                 "successful_source_revision_id": used.source_revision_id if used else None,
                 "unit_id": unit.unit_id,

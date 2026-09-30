@@ -50,6 +50,7 @@ def result_from_publication(
 
     actual_source = None
     manifest = None
+    published = None
     if state.successful_revision_id:
         actual = read_record(kb_dir, "unit-revisions", state.successful_revision_id, UnitRevision)
         actual_source = actual.source_revision_id
@@ -78,6 +79,8 @@ def result_from_publication(
     )
     if office:
         resources.append(str(kb_dir / office["internal_pdf_path"]))
+    from openkb.source_metrics import unit_metrics
+
     outcome = ImportUnitOutcome(
         state.unit_id,
         state.status,
@@ -94,15 +97,8 @@ def result_from_publication(
         doc_name=unit.doc_name,
         name=unit_name(kb_dir, unit, state.target_revision_id, admission.source.name),
         **processing_details(kb_dir, state, manifest),
+        **unit_metrics(kb_dir, state, published, unit.doc_name),
     )
-    from openkb.pending.store import jobs
-
-    pending_jobs = [
-        (kind, job)
-        for kind, job in jobs(kb_dir)
-        if job.root_import_id == admission.discovery_intent.root_import_id
-        and job.status not in {"completed", "cancelled", "stale"}
-    ]
     return IngestResult(
         admission.source.identity,
         status,
@@ -115,10 +111,25 @@ def result_from_publication(
         source_id=admission.source.source_id,
         source_revision_id=admission.revision.source_revision_id,
         units=(outcome,),
-        discovery_pending=sum(kind == "discovery" for kind, _ in pending_jobs),
-        imports_pending=sum(kind == "import" for kind, _ in pending_jobs),
+        **pending_counts(kb_dir, admission),
         message=state.message,
     )
+
+
+def pending_counts(kb_dir, admission):
+    """Count persisted work even when body inventory or version clarification fails."""
+    from openkb.pending.store import jobs
+
+    pending_jobs = [
+        (kind, job)
+        for kind, job in jobs(kb_dir)
+        if job.root_import_id == admission.discovery_intent.root_import_id
+        and job.status not in {"completed", "cancelled", "stale"}
+    ]
+    return {
+        "discovery_pending": sum(kind == "discovery" for kind, _ in pending_jobs),
+        "imports_pending": sum(kind == "import" for kind, _ in pending_jobs),
+    }
 
 
 def import_prepared_source(
@@ -169,6 +180,7 @@ def import_prepared_source(
             source_revision_id=admission.revision.source_revision_id,
             unfinished=("version_metadata",),
             message="Version clarification was cancelled; no work resumed.",
+            **pending_counts(kb_dir, admission),
         )
     assessment = assess_version(
         kb_dir, admission, metadata, scope=scope, candidates=review.candidates if review else None

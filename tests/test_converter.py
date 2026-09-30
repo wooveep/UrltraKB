@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from openkb.converter import convert_document, get_pdf_page_count
@@ -141,39 +140,27 @@ class TestConvertDocumentPdfLong:
 
 
 class TestConvertDocumentMarkItDown:
-    def test_docx_conversion_enables_keep_data_uris(self, kb_dir, tmp_path):
+    def test_docx_conversion_uses_frozen_bytes_and_private_office_pdf(self, kb_dir, tmp_path):
+        import pymupdf
+
         src = tmp_path / "report.docx"
-        src.write_bytes(b"fake docx")
+        src.write_bytes(b"frozen docx")
 
-        mock_result = MagicMock()
-        mock_result.text_content = "![](data:image/png;base64,abc123)"
+        def office(root, prepared, output, **kwargs):
+            src.write_bytes(b"changed during conversion")
+            assert prepared.read_bytes() == b"frozen docx"
+            with pymupdf.open() as pdf:
+                pdf.new_page().insert_text((72, 72), "Visible Office text")
+                pdf.save(output)
+            return None
 
-        with (
-            patch("markitdown.MarkItDown") as mock_markitdown,
-            patch(
-                "openkb.converter.extract_base64_images",
-                return_value="converted markdown",
-            ) as mock_extract,
-        ):
-
-            def convert(path, *, keep_data_uris):
-                src.write_bytes(b"changed during conversion")
-                assert Path(path).read_bytes() == b"fake docx"
-                assert keep_data_uris is True
-                return mock_result
-
-            mock_markitdown.return_value.convert.side_effect = convert
-
+        with patch("openkb.office.convert.convert_office", side_effect=office):
             result = convert_document(src, kb_dir)
-
-        mock_markitdown.assert_called_once_with()
-        mock_extract.assert_called_once()
-        assert result.skipped is False
-        assert result.is_long_doc is False
-        assert result.source_path is not None
-        assert result.source_path.read_text(encoding="utf-8") == "converted markdown"
-        assert result.raw_path.read_bytes() == b"fake docx"
+        assert not result.skipped and not result.is_long_doc
+        assert "Visible Office text" in result.source_path.read_text(encoding="utf-8")
+        assert result.raw_path.read_bytes() == b"frozen docx"
         assert result.file_hash == HashRegistry.hash_file(result.raw_path)
+        assert result.processing.measurement_value == 1
 
 
 # ---------------------------------------------------------------------------

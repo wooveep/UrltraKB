@@ -4,6 +4,7 @@ import json
 
 from pydantic import TypeAdapter
 
+from openkb.catalog_schema import validate_catalog_writer
 from openkb.file_state import contained_paths
 from openkb.lifecycle import current_generation, expected_generation, read_lifecycle
 from openkb.locks import atomic_write_json
@@ -22,6 +23,7 @@ def _path(kb_dir, group_id=None, job_id=None, dispatch_id=None):
 
 def request_stop(kb_dir, job_id, dispatch_id, generation):
     with expected_generation(kb_dir, generation), read_lifecycle(kb_dir):
+        validate_catalog_writer(kb_dir)
         atomic_write_json(
             _path(kb_dir, job_id=job_id, dispatch_id=dispatch_id),
             {
@@ -34,6 +36,7 @@ def request_stop(kb_dir, job_id, dispatch_id, generation):
 
 def request_group_cancel(kb_dir, group):
     with expected_generation(kb_dir, group.kb_generation), read_lifecycle(kb_dir):
+        validate_catalog_writer(kb_dir)
         atomic_write_json(
             _path(kb_dir, group_id=group.root_import_id),
             {

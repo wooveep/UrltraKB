@@ -97,3 +97,22 @@ def reprocess(ctx, source_id, execute):
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+@click.command("retry-source")
+@click.argument("source_id")
+@click.pass_context
+def retry_source(ctx, source_id):
+    """Resume unfinished units from the retained input of SOURCE_ID."""
+    from dataclasses import asdict
+
+    from openkb.application.source_retry import retry_source as retry
+    from openkb.cli import _selected_scope
+    from openkb.cli_views import _root
+
+    root = _root(ctx)
+    try:
+        result = retry(root, source_id, scope=_selected_scope(ctx, root))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(asdict(result), ensure_ascii=False, indent=2))
