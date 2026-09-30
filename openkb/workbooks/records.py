@@ -6,7 +6,8 @@ from pydantic import Field, model_validator
 
 from openkb.source_records import Digest, Record, RecordId
 
-WORKBOOK_POLICY = "sparse-worksheet-openpyxl-3.1.5-v1"
+WORKBOOK_POLICY = "sparse-worksheet-openpyxl-3.1.5-v2"
+XLS_POLICY = "sparse-worksheet-xlrd-2.0.2-biff-observations-v1"
 
 
 class SheetCell(Record):

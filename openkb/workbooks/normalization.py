@@ -8,7 +8,7 @@ from openkb.mutation import _copy_file_atomic
 from openkb.processing_policy import classify_markdown_tokens
 from openkb.text_measurement import measure_markdown
 from openkb.text_source import FrozenText, TextOrigin
-from openkb.workbooks.records import WORKBOOK_POLICY
+from openkb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
 
 
 def convert_sheet(prepared, sheet, doc_name, directory):
@@ -56,7 +56,9 @@ def convert_sheet(prepared, sheet, doc_name, directory):
         origins=tuple(origins),
         assets={},
         tokens=measure_markdown(text),
-        normalization_policy=WORKBOOK_POLICY,
+        normalization_policy=XLS_POLICY
+        if prepared.source.suffix.lower() == ".xls"
+        else WORKBOOK_POLICY,
         diagnostics=tuple(diagnostics),
         sheet=sheet.model_copy(update={"cells": ()}),
     )

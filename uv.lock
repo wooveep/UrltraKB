@@ -1981,6 +1981,7 @@ dependencies = [
     { name = "tiktoken" },
     { name = "trafilatura" },
     { name = "watchdog" },
+    { name = "xlrd" },
 ]
 
 [package.optional-dependencies]
@@ -2041,6 +2042,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = "==6.0.12.20260518" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = "==0.47.0" },
     { name = "watchdog", specifier = "==6.0.0" },
+    { name = "xlrd", specifier = "==2.0.2" },
 ]
 provides-extras = ["api", "desktop", "dev"]
 

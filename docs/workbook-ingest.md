@@ -38,3 +38,27 @@ task status and retry. Qt offscreen checks cover table rendering and cell select
 
 Rename/reorder reconciliation, confirmed-empty and deleted-sheet retirement are
 covered by the subsequent worksheet lifecycle implementation (#93).
+
+## Binary XLS
+
+XLS uses the same worksheet publication/read/retry paths. xlrd is a direct,
+exactly pinned dependency at 2.0.2 (already present in the conversion dependency
+closure). Its [versioned upstream documentation](https://github.com/python-excel/xlrd/blob/2.0.2/README.rst)
+explicitly distinguishes cached formula results from expressions. We retain
+BIFF formula-record presence through an isolated `Book` subclass, mark those
+expressions `unavailable`, and expose numeric/string/boolean/error/date caches
+with their actual types. No formula decompiler, macro engine, global monkeypatch
+or Office process runs during XLS ingestion. The pinned loader follows xlrd's
+BIFF2–8 branches; a real BIFF8 file is the independently authored acceptance
+fixture. Non-cell sheet kinds are explicit failed units, never a valid empty table.
+
+`ragged_rows=True` avoids extending every row to the furthest column; stored
+format-only cells are excluded from body content. Physical distant values remain.
+XLS lacks an OOXML sheet ID: initial name-derived keys are reconciled against
+retained identities by the common lifecycle in #93. They are not content hashes
+or ordinal-only identities.
+
+The pinned [upstream license](https://github.com/python-excel/xlrd/blob/2.0.2/LICENSE)
+is retained as `openkb/workbooks/xlrd-LICENSE.txt`. This product includes software
+developed by David Giffin <david@giffin.org>. The subclass/loader adapter is based
+on Stephen John Machin's BSD-licensed xlrd loader; xlrd owns CFB and BIFF parsing.

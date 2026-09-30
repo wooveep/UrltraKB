@@ -4,7 +4,6 @@ import json
 from dataclasses import replace
 
 from openkb.ingest_result import IngestResult
-from openkb.workbooks.records import WORKBOOK_POLICY
 
 
 def aggregate_units(results):
@@ -88,7 +87,7 @@ def import_workbook_units(kb_dir, prepared, *, admission, fingerprint, unit_id=N
         if selected_unit and sheet.key != selected_unit.key:
             continue
         selected = json.dumps(
-            {**basis, "sheet": {"key": sheet.key, "policy": WORKBOOK_POLICY}}, sort_keys=True
+            {**basis, "sheet": {"key": sheet.key, "policy": workbook.policy}}, sort_keys=True
         )
         if selected_unit:
             target = read_record(

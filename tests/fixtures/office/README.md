@@ -22,3 +22,16 @@ fixture relies on an installed desktop Office or network resources.
 
 `slides.ppt` 是相同三页合成内容通过固定 LibreOffice 26.2.6.3 的 `MS PowerPoint 97`
 过滤器独立保存的二进制文件；第 2 页隐藏且含图片，第 3 页只有演讲备注。
+
+`typed-sheets.xls` is independently authored BIFF8/CFB test data saved with the
+private LibreOffice 26.2.6.3 `MS Excel 97` filter. Alpha contains A1 text `0012`,
+B2 numeric 42 with zero-padding format, D2 date 2025-01-02, E2 formula `=B2+1`
+(cached 43), F2 `="cached text"`, G2 `=TRUE()` and IV65530 text `XLS_TAIL_VALUE`.
+Row 2 and column B are hidden. Beta contains `XLS_BETA`; hidden Gamma has C5
+`XLS_GAMMA`. Calculation happened only while authoring this fixed fixture; the
+importer never invokes Calc or calculates formulas. No real user content.
+
+`negative-sheets.xls` is the same authored BIFF8 fixture with B2's RK numeric
+record changed to -42, preserving the `00000` mask. Its cached E2 result remains
+43 deliberately: stored caches are evidence, not a promise of recalculation.
+It verifies that signs do not consume a zero-padding digit.

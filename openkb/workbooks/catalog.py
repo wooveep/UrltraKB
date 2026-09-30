@@ -3,7 +3,7 @@
 from openkb.ingest_records import UnitRevision
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_record, record_path, write_record
-from openkb.workbooks.records import WorkbookSnapshot
+from openkb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY, WorkbookSnapshot
 
 
 def retain_workbook(kb_dir, admission, prepared):
@@ -14,11 +14,18 @@ def retain_workbook(kb_dir, admission, prepared):
         if saved.digest != admission.revision.digest:
             raise ValueError("Workbook inventory belongs to another original")
         return saved
+    from openkb.workbooks.xls import read_xls
     from openkb.workbooks.xlsx import read_xlsx
+
+    binary = admission.revision.source_format == "xls"
+    policy = XLS_POLICY if binary else WORKBOOK_POLICY
 
     try:
         saved = WorkbookSnapshot(
-            source_revision_id=identity, digest=prepared.digest, sheets=read_xlsx(prepared.path)
+            source_revision_id=identity,
+            digest=prepared.digest,
+            policy=policy,
+            sheets=(read_xls if binary else read_xlsx)(prepared.path),
         )
     except Exception as exc:
         saved = WorkbookSnapshot(
@@ -26,6 +33,7 @@ def retain_workbook(kb_dir, admission, prepared):
             digest=prepared.digest,
             sheets=(),
             error=f"Workbook inventory: {type(exc).__name__}: {exc}",
+            policy=policy,
         )
     from openkb.catalog_schema import CatalogSchema, catalog_schema_path
 

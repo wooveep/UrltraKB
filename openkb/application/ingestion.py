@@ -190,7 +190,7 @@ def import_prepared_source(
         )
     )
 
-    if admission.revision.source_format in {"xlsx"}:
+    if admission.revision.source_format in {"xlsx", "xls"}:
         from openkb.application.workbook_ingestion import import_workbook_units
 
         return import_workbook_units(

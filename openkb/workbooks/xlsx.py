@@ -10,6 +10,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from openkb.workbooks.records import SheetCell, SheetSnapshot
+from openkb.workbooks.values import display_value
 
 
 def scalar(value):
@@ -123,11 +124,7 @@ def _read_sheet(reader, path, basis):
             actual = formula
         else:
             actual = scalar(cell.value)
-        display = str(actual) if actual is not None else ""
-        import re
-
-        if type(actual) is int and re.fullmatch(r"0+", cell.number_format):
-            display = str(actual).zfill(len(cell.number_format))
+        display = display_value(actual, cell.number_format)
         cells.append(
             SheetCell(
                 coordinate=cell.coordinate,
