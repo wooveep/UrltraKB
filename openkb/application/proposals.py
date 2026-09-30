@@ -221,15 +221,10 @@ def accept_proposal(
         )
         publication = record_path(root, "publications", state.publication_id)
         attempt = record_path(root, "attempts", state.attempt_id)
-        intent_path = record_path(root, "discovery-intents", intent.intent_id)
-        intent = intent.model_copy(update={"cancelled": False})
         admission = Admission(source, frozen, intent)
-        with mutation_scope(
-            root, [publication, attempt, intent_path], operation="begin-proposal-acceptance"
-        ):
+        with mutation_scope(root, [publication, attempt], operation="begin-proposal-acceptance"):
             write_record(publication, state)
             write_record(attempt, state)
-            write_record(intent_path, intent)
         view = CompileView(
             KnowledgeScope(root, directory / "wiki", proposal.view_id),
             head,

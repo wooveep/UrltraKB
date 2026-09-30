@@ -38,6 +38,7 @@ class IngestResult:
     source_revision_id: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
     discovery_pending: int | None = None
+    imports_pending: int | None = None
     message: str | None = None
 
 
@@ -48,6 +49,7 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     lines = [
         f"Source: {result.source_id}; revision: {result.source_revision_id}; {result.status}",
         f"Body units: {len(result.units)}; discovery pending: {result.discovery_pending}",
+        f"File imports pending: {result.imports_pending}; continue with process-pending",
     ]
     if result.message:
         lines.append(result.message)

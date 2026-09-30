@@ -231,6 +231,21 @@ class TaskManager:
             task = self._tasks[task_id]
             if task.view.state in TERMINAL:
                 return
+            from openkb.lifecycle import KnowledgeBaseRemoved
+            from openkb.pending.control import request_stop
+            from openkb.runtime.requests import RunPendingJob
+
+            for index, request in enumerate(task.requests):
+                if isinstance(request, RunPendingJob) and index >= len(task.view.results):
+                    try:
+                        request_stop(
+                            Path(task.view.kb_dir),
+                            request.job_id,
+                            request.dispatch_id,
+                            task.identities[index].generation,
+                        )
+                    except KnowledgeBaseRemoved:
+                        pass  # Never write to a replacement KB; still stop the old worker.
             self._update(task, stop_requested=True)
             if task_id not in self._active and task.view.state not in TERMINAL:
                 self._update(task, state="stopped", stage="stopped")
@@ -514,6 +529,18 @@ class TaskManager:
                 for _ in range(len(self._pending)):
                     if len(self._active) >= self.max_workers:
                         break
+                    from openkb.runtime.requests import RunPendingJob
+
+                    # Explicit user work takes the next slot before queued derived jobs.
+                    self._pending = deque(
+                        sorted(
+                            self._pending,
+                            key=lambda identity: bool(
+                                self._tasks[identity].requests
+                                and isinstance(self._tasks[identity].requests[0], RunPendingJob)
+                            ),
+                        )
+                    )
                     task_id = self._pending.popleft()
                     task = self._tasks[task_id]
                     if task.view.state in TERMINAL:

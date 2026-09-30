@@ -167,24 +167,13 @@ def begin_unit_attempt(
         knowledge_revision_id=previous.knowledge_revision_id if previous else None,
     )
     attempt = record_path(kb_dir, "attempts", state.attempt_id)
-    intent_path = (
-        record_path(kb_dir, "discovery-intents", discovery_intent.intent_id)
-        if discovery_intent and discovery_intent.cancelled
-        else None
-    )
     with mutation_scope(
         kb_dir,
-        [
-            path,
-            attempt,
-            *([intent_path] if intent_path else []),
-        ],
+        [path, attempt],
         operation="begin-unit-attempt",
     ):
         write_record(path, state)
         write_record(attempt, state)
-        if intent_path and discovery_intent:
-            write_record(intent_path, discovery_intent.model_copy(update={"cancelled": False}))
     return state, True
 
 
@@ -284,18 +273,9 @@ def record_unit_failure(
         and current.attempt_id == state.attempt_id
     ):
         paths.append(record_path(kb_dir, "publications", state.publication_id))
-    intent_path = (
-        record_path(kb_dir, "discovery-intents", discovery_intent.intent_id)
-        if discovery_intent and isinstance(error, LockCancelled)
-        else None
-    )
-    with mutation_scope(
-        kb_dir, [*paths, *([intent_path] if intent_path else [])], operation="record-unit-failure"
-    ):
+    with mutation_scope(kb_dir, paths, operation="record-unit-failure"):
         for path in paths:
             write_record(path, failed)
-        if intent_path and discovery_intent:
-            write_record(intent_path, discovery_intent.model_copy(update={"cancelled": True}))
     return failed
 
 

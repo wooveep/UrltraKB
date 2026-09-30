@@ -259,8 +259,23 @@ class RetryWorksheet(ViewSelection):
             raise ValueError("Worksheet retry requires source and unit identities")
 
 
+@dataclass(frozen=True)
+class RunPendingJob:
+    job_id: str
+    dispatch_id: str
+
+    def __post_init__(self):
+        from pydantic import TypeAdapter
+
+        from openkb.source_records import RecordId
+
+        for value in (self.job_id, self.dispatch_id):
+            TypeAdapter(RecordId).validate_python(value)
+
+
 UnitRequest = (
-    RetryWorksheet
+    RunPendingJob
+    | RetryWorksheet
     | AcceptProposal
     | ResumeVersionReview
     | RefreshKnowledge
@@ -280,6 +295,7 @@ UnitRequest = (
     | GenerateGraph
 )
 REQUEST_TYPES = (
+    RunPendingJob,
     RetryWorksheet,
     AcceptProposal,
     ResumeVersionReview,

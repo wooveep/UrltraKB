@@ -366,6 +366,7 @@ class AddFileResult:
     source_revision_id: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
     discovery_pending: int | None = None
+    imports_pending: int | None = None
 
 
 def _add_for_api(
@@ -410,6 +411,7 @@ def _add_for_api(
         source_revision_id=result.source_revision_id,
         units=result.units,
         discovery_pending=result.discovery_pending,
+        imports_pending=result.imports_pending,
     )
 
 

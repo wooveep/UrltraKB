@@ -95,6 +95,14 @@ def result_from_publication(
         name=unit_name(kb_dir, unit, state.target_revision_id, admission.source.name),
         **processing_details(kb_dir, state, manifest),
     )
+    from openkb.pending.store import jobs
+
+    pending_jobs = [
+        (kind, job)
+        for kind, job in jobs(kb_dir)
+        if job.root_import_id == admission.discovery_intent.root_import_id
+        and job.status not in {"completed", "cancelled", "stale"}
+    ]
     return IngestResult(
         admission.source.identity,
         status,
@@ -107,7 +115,8 @@ def result_from_publication(
         source_id=admission.source.source_id,
         source_revision_id=admission.revision.source_revision_id,
         units=(outcome,),
-        discovery_pending=int(admission.discovery_intent.status == "pending"),
+        discovery_pending=sum(kind == "discovery" for kind, _ in pending_jobs),
+        imports_pending=sum(kind == "import" for kind, _ in pending_jobs),
         message=state.message,
     )
 

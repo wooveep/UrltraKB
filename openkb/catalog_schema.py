@@ -11,6 +11,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "unit-publications-v1",
         "worksheet-units-v1",
         "worksheet-lifecycle-v1",
+        "durable-import-dispatch-v1",
         "knowledge-views-v1",
         "version-review-v1",
         "query-views-v1",

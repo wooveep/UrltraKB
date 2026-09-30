@@ -86,6 +86,9 @@ class DocumentsDialog(ManagementPanel):
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
         self.versions_button = QPushButton("查看版本待补")
+        self.pending_button = QPushButton("查看待处理工作")
+        self.pending_button.clicked.connect(self.pending_work)
+        recompilation.addWidget(self.pending_button)
         self.versions_button.clicked.connect(lambda: self.review_versions())
         recompilation.addWidget(self.versions_button)
         self.correct_versions_button = QPushButton("补充所选资料版本")
@@ -114,6 +117,11 @@ class DocumentsDialog(ManagementPanel):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
         self.reload()
+
+    def pending_work(self):
+        from openkb.desktop.pending import PendingDialog
+
+        PendingDialog(self.window, self.kb).show()
 
     def refresh_knowledge(self):
         from openkb.desktop.refresh import RefreshDialog

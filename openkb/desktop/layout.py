@@ -1,8 +1,9 @@
 """Assemble the native shell and retain an observable shutdown workspace."""
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
+from openkb.desktop.brand import NAME, application_icon
 from openkb.desktop.shell import WorkbenchShell
 from openkb.desktop.workspaces import Workspaces
 
@@ -46,3 +47,17 @@ def observe_shutdown(window):
     for control in window.shutdown_controls:
         control.setEnabled(False)
     window._show_window()
+
+
+def build_tray(window):
+    icon = application_icon()
+    window.setWindowIcon(icon)
+    window.tray = QSystemTrayIcon(icon, window)
+    window.tray.setToolTip(NAME)
+    menu = QMenu(window)
+    menu.addAction(f"显示 {NAME}", window._show_window)
+    menu.addAction("退出", window.request_quit)
+    window.tray.setContextMenu(menu)
+    window.tray.activated.connect(lambda reason: window._show_window())
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        window.tray.show()

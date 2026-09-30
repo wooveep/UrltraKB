@@ -11,6 +11,7 @@ from typing import Any, Iterator
 
 import yaml
 
+from openkb.config_validation import validate_runtime_config as validate_runtime_config
 from openkb.llm_runtime import (
     get_extra_headers as get_extra_headers,
 )
@@ -52,6 +53,7 @@ DEFAULT_ENTITY_TYPES: tuple[str, ...] = (
 )
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "extraction_budget": {},
     "download_remote_assets": False,
     "office_runtime_path": None,
     "office_timeout_seconds": 120,
@@ -451,47 +453,6 @@ def save_config(config_path: Path, config: dict) -> None:
     _atomic_yaml_dump(config_path, config)
 
 
-def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = False) -> None:
-    """Validate fields used directly by a local execution before it can start.
-
-    Keep unknown provider options intact and leave the existing tolerant
-    resolvers in charge of optional overrides. Errors name fields, never
-    credential-bearing values from user configuration.
-    """
-    runtime = config.get("office_runtime_path")
-    if runtime is not None and (not isinstance(runtime, str) or not Path(runtime).is_absolute()):
-        raise ValueError("Configuration field 'office_runtime_path' must be an absolute path")
-    timeout = config.get("office_timeout_seconds")
-    if timeout is not None and (type(timeout) is not int or not 1 <= timeout <= 3600):
-        raise ValueError("Configuration field 'office_timeout_seconds' must be between 1 and 3600")
-    if (
-        config.get("download_remote_assets") is not None
-        and type(config["download_remote_assets"]) is not bool
-    ):
-        raise ValueError("Configuration field 'download_remote_assets' must be a boolean")
-    for key in ("model", "language"):
-        value = config.get(key)
-        if allow_inherited and value is None:
-            continue
-        if not isinstance(value, str):
-            raise ValueError(f"Configuration field '{key}' must be a string")
-    for key in ("pageindex_threshold", "pdf_short_max_pages"):
-        value = config.get(key)
-        if value is None and (allow_inherited or key not in config):
-            continue
-        if type(value) is not int:
-            raise ValueError(f"Configuration field '{key}' must be an integer")
-        if key == "pdf_short_max_pages" and value < 0:
-            raise ValueError("Configuration field 'pdf_short_max_pages' must be nonnegative")
-    if config.get("model_capacity") is not None:
-        from openkb.processing_policy import ModelCapacity
-
-        try:
-            ModelCapacity.model_validate(config["model_capacity"])
-        except ValueError:
-            raise ValueError("Configuration field 'model_capacity' is invalid") from None
-
-
 def load_global_config() -> dict[str, Any]:
     """Load the global config from ~/.config/openkb/global.yaml."""
     with _with_global_config_lock():
@@ -506,6 +467,7 @@ def load_global_config() -> dict[str, Any]:
 # one list-valued member — the layering rule (a non-null value wins over the
 # layer below) is type-agnostic, so a KB list overrides the global list wholesale.
 GLOBAL_SCALAR_KEYS: tuple[str, ...] = (
+    "extraction_budget",
     "office_runtime_path",
     "office_timeout_seconds",
     "download_remote_assets",

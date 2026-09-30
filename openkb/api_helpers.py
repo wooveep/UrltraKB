@@ -231,6 +231,7 @@ def _summarize_add_results(kb: str, results: list[AddFileItem]) -> AddResponse:
         source_count=len(results),
         unit_counts=dict(Counter(unit.status for item in results for unit in item.units)),
         discovery_pending_count=sum(item.discovery_pending or 0 for item in results),
+        imports_pending_count=sum(item.imports_pending or 0 for item in results),
     )
 
 

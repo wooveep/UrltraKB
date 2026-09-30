@@ -154,6 +154,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
     from openkb.execution_capacity import capacity_policy
 
     return KbConfigResponse(
+        extraction_budget=effective.get("extraction_budget") or {},
         office_runtime_path=effective["office_runtime_path"],
         office_timeout_seconds=effective["office_timeout_seconds"],
         download_remote_assets=effective["download_remote_assets"],
@@ -173,6 +174,7 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         has_api_key=bundle.api_key is not None,
         sources=sources,
         global_values=GlobalConfigValues(
+            extraction_budget=global_config.get("extraction_budget"),
             office_runtime_path=global_config.get("office_runtime_path"),
             office_timeout_seconds=global_config.get("office_timeout_seconds"),
             download_remote_assets=global_config.get("download_remote_assets"),
@@ -282,6 +284,7 @@ def _read_global_config() -> GlobalConfigResponse:
     from openkb.execution_capacity import capacity_policy
 
     return GlobalConfigResponse(
+        extraction_budget=gc.get("extraction_budget") or {},
         office_runtime_path=gc.get("office_runtime_path"),
         office_timeout_seconds=gc.get("office_timeout_seconds", 120),
         download_remote_assets=gc.get("download_remote_assets", False),

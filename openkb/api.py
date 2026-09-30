@@ -94,6 +94,7 @@ from openkb.api_models import (
 )
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
+from openkb.api_pending import pending_router
 from openkb.api_recompile import iter_recompile
 from openkb.api_views import make_views_router, resolve_api_scope
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
@@ -173,6 +174,7 @@ def create_app() -> FastAPI:
     app.include_router(kbs_router)
     app.include_router(pages_router)
     app.include_router(documents_router)
+    app.include_router(pending_router)
     app.include_router(make_views_router())
     from openkb.api_versions import versions_router
 

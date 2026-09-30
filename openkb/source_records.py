@@ -95,11 +95,34 @@ class SourceRevision(Record):
         return self
 
 
-class DiscoveryIntent(Record):
+class PendingJob(Record):
+    root_import_id: RecordId
+    kb_generation: str
+    status: Literal[
+        "pending",
+        "dispatched",
+        "started",
+        "completed",
+        "partial",
+        "failed",
+        "blocked",
+        "budget_wait",
+        "interrupted",
+        "stopped",
+        "cancelled",
+        "stale",
+    ] = "pending"
+    cancelled: bool = False
+    dispatch_id: RecordId | None = None
+    attempt_id: RecordId | None = None
+    message: str | None = None
+    depth: int = Field(default=0, ge=0)
+    ancestry: tuple[Digest, ...] = ()
+
+
+class DiscoveryIntent(PendingJob):
     intent_id: RecordId
     source_revision_id: RecordId
     original: FrozenArtifact
-    root_import_id: RecordId
-    kb_generation: str
-    status: Literal["pending", "completed"] = "pending"
-    cancelled: bool = False
+    cursor: int = Field(default=0, ge=0)
+    policy: str = "docx-embedded-package-v1"

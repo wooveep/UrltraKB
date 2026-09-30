@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, StrictBool, field_validator
 
+from openkb.pending.records import ExecutionBudget
 from openkb.processing_policy import ModelCapacity, PdfLimit
 
 
@@ -24,6 +25,7 @@ class _KbConfigWritable(BaseModel):
     """
 
     model: str | None = None
+    extraction_budget: ExecutionBudget | None = None
     office_runtime_path: str | None = None
     office_timeout_seconds: int | None = Field(default=None, ge=1, le=3600, strict=True)
     download_remote_assets: StrictBool | None = None
@@ -62,6 +64,7 @@ class GlobalConfigValues(BaseModel):
     """Raw global-layer values (null where global.yaml is silent)."""
 
     model: str | None = None
+    extraction_budget: ExecutionBudget | None = None
     office_runtime_path: str | None = None
     office_timeout_seconds: int | None = None
     download_remote_assets: StrictBool | None = None
@@ -73,6 +76,7 @@ class GlobalConfigValues(BaseModel):
 
 
 class GlobalConfigResponse(BaseModel):
+    extraction_budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
     office_runtime_path: str | None = None
     office_timeout_seconds: int = 120
     download_remote_assets: bool = False
@@ -115,6 +119,7 @@ class GlobalConfigPatchRequest(BaseModel):
 
 
 class KbConfigResponse(BaseModel):
+    extraction_budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
     office_runtime_path: str | None = None
     office_timeout_seconds: int = 120
     download_remote_assets: bool = False

@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QSystemTrayIcon,
     QTableWidgetItem,
@@ -23,7 +22,7 @@ from openkb.application.knowledge_bases import get_kb_list, get_kb_status, initi
 from openkb.application.pages import Page, read_page
 from openkb.application.reading import read_page_context
 from openkb.config import GLOBAL_CONFIG_DIR
-from openkb.desktop.brand import NAME, application_icon
+from openkb.desktop.brand import NAME
 from openkb.desktop.editor import DraftDialog, PageDraft
 from openkb.desktop.io import LocalIO
 from openkb.desktop.reader import MarkdownView
@@ -98,6 +97,9 @@ class Workbench(QMainWindow):
         self.io = LocalIO(self)
         self.manager = TaskManager(history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks")
         self.watch_registry = NativeWatchRegistry(self.manager)
+        from openkb.desktop.pending_dispatcher import PendingDispatcher
+
+        self.pending_dispatcher = PendingDispatcher(self)
         from openkb.desktop.layout import build_workbench
 
         build_workbench(self)
@@ -205,17 +207,9 @@ class Workbench(QMainWindow):
         self.workspaces.toggle_history()
 
     def _build_tray(self):
-        icon = application_icon()
-        self.setWindowIcon(icon)
-        self.tray = QSystemTrayIcon(icon, self)
-        self.tray.setToolTip(NAME)
-        menu = QMenu(self)
-        menu.addAction(f"显示 {NAME}", self._show_window)
-        menu.addAction("退出", self.request_quit)
-        self.tray.setContextMenu(menu)
-        self.tray.activated.connect(lambda reason: self._show_window())
-        if QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray.show()
+        from openkb.desktop.layout import build_tray
+
+        build_tray(self)
 
     def _show_window(self):
         self.showNormal()
@@ -296,6 +290,7 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         self.kb, self.page = root, None
+        self.pending_dispatcher.watch(root)
         self.view_id = None
         self.view_picker.set_views(())
         self.page_context.clear()

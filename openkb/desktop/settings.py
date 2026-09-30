@@ -38,6 +38,7 @@ _FIELDS = {
     "pdf_short_max_pages": "短 PDF 页数上限（含）",
     "pageindex_threshold": "兼容旧 PDF 阈值（≤0 强制分段）",
     "model_capacity": "模型容量（JSON，可清除以自动判断）",
+    "extraction_budget": "自动文件恢复预算（JSON，仅影响新执行组）",
     "download_remote_assets": "下载 HTML 远程图片（true/false）",
     "office_runtime_path": "私有 Office 目录（清除后使用随包目录）",
     "office_timeout_seconds": "Office 转换超时（秒，1–3600）",
@@ -71,7 +72,7 @@ class SettingField(QWidget):
             current = "已设置（输入可更换）" if value else "未设置"
         elif isinstance(value, list):
             current = ", ".join(value)
-        elif self.key == "model_capacity" and value is not None:
+        elif self.key in {"model_capacity", "extraction_budget"} and value is not None:
             current = value.model_dump_json(exclude_none=True, exclude={"schema_version"})
         else:
             current = str(value) if value is not None else "未设置"
@@ -97,6 +98,10 @@ class SettingField(QWidget):
             from openkb.processing_policy import ModelCapacity
 
             return ModelCapacity.model_validate_json(text).model_dump(mode="json")
+        if self.key == "extraction_budget":
+            from openkb.pending.records import ExecutionBudget
+
+            return ExecutionBudget.model_validate_json(text).model_dump(mode="json")
         if self.key == "entity_types":
             return [part.strip() for part in text.replace("，", ",").split(",") if part.strip()]
         if self.key == "download_remote_assets":

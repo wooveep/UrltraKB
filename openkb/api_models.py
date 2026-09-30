@@ -140,6 +140,7 @@ class AddFileItem(BaseModel):
     source_revision_id: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
     discovery_pending: int | None = None
+    imports_pending: int | None = None
 
 
 class AddResponse(BaseModel):
@@ -153,6 +154,7 @@ class AddResponse(BaseModel):
     source_count: int = 0
     unit_counts: dict[str, int] = Field(default_factory=dict)
     discovery_pending_count: int = 0
+    imports_pending_count: int = 0
 
 
 class KbRequest(ViewRequest):

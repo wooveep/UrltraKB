@@ -61,6 +61,10 @@ def list_artifact_references(
                         retain(asset.artifact)
             for path in (root / ".openkb/catalog/discovery-intents").glob("*.json"):
                 retain(read_record(root, "discovery-intents", path.stem, DiscoveryIntent).original)
+            from openkb.pending.records import ImportIntent
+
+            for path in (root / ".openkb/catalog/import-intents").glob("*.json"):
+                retain(read_record(root, "import-intents", path.stem, ImportIntent).payload)
             for path in (root / ".openkb/knowledge").glob("*/revisions/*/manifest.json"):
                 contained_paths(root, [path])
                 manifest = KnowledgeRevision.model_validate_json(path.read_text("utf-8"))

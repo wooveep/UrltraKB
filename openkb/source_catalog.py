@@ -49,6 +49,10 @@ def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
     TypeAdapter(RecordId).validate_python(identity)
     if collection not in {
         "workbooks",
+        "execution-groups",
+        "import-intents",
+        "discovery-checkpoints",
+        "pending-attempts",
         "sources",
         "source-revisions",
         "discovery-intents",
@@ -75,6 +79,10 @@ def read_record(kb_dir: Path, collection: str, identity: str, model: type[R]) ->
     record = model.model_validate_json(record_path(kb_dir, collection, identity).read_text("utf-8"))
     field = {
         "workbooks": "source_revision_id",
+        "execution-groups": "root_import_id",
+        "import-intents": "intent_id",
+        "discovery-checkpoints": "checkpoint_id",
+        "pending-attempts": "attempt_id",
         "sources": "source_id",
         "source-revisions": "source_revision_id",
         "discovery-intents": "intent_id",
@@ -139,6 +147,7 @@ def admit_source_revision(
     doc_name: str | None = None,
     name: str | None = None,
     original_kind: Literal["original", "legacy_snapshot"] = "original",
+    execution=None,
 ) -> Admission:
     """Commit original, related assets, target revision and discovery as one unit."""
     root = kb_dir.resolve()
@@ -224,9 +233,13 @@ def admit_source_revision(
             intent_id=intent_id,
             source_revision_id=revision_id,
             original=original,
-            root_import_id=uuid.uuid4().hex,
+            root_import_id=execution.root_import_id if execution else uuid.uuid4().hex,
             kb_generation=generation,
-            status="completed" if original_kind == "legacy_snapshot" else "pending",
+            status="completed"
+            if original_kind == "legacy_snapshot" or revision.source_format not in {"docx"}
+            else "pending",
+            depth=execution.depth if execution else 0,
+            ancestry=execution.ancestry if execution else (),
         )
         records = {
             catalog_schema_path(root): CatalogSchema(),
@@ -234,6 +247,29 @@ def admit_source_revision(
             record_path(root, "source-revisions", revision_id): revision,
             record_path(root, "discovery-intents", intent_id): intent,
         }
+        from openkb.pending.records import ExecutionBudget, ExecutionGroup
+
+        group_path = record_path(root, "execution-groups", intent.root_import_id)
+        if execution:
+            group = read_record(root, "execution-groups", intent.root_import_id, ExecutionGroup)
+            if (
+                group.cancelled
+                or execution.kb_generation != generation
+                or group.kb_generation != generation
+            ):
+                raise ValueError(
+                    "Execution group was cancelled or belongs to an old knowledge base"
+                )
+        else:
+            from openkb.config import resolve_effective_config
+
+            effective, origins = resolve_effective_config(root)
+            records[group_path] = ExecutionGroup(
+                root_import_id=intent.root_import_id,
+                kb_generation=generation,
+                budget=ExecutionBudget.model_validate(effective.get("extraction_budget") or {}),
+                budget_origin=origins["extraction_budget"],
+            )
         from openkb.source_changes import source_change_heads
 
         records.update(source_change_heads(root, source, "updated"))

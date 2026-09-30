@@ -106,7 +106,22 @@ def _execute(
         RefreshKnowledge,
         ResumeVersionReview,
         RetryWorksheet,
+        RunPendingJob,
     )
+
+    if isinstance(request, RunPendingJob):
+        from openkb.application.pending import run_pending_job
+
+        context.install_process_settings = True
+        outcome = run_pending_job(root, request.job_id, request.dispatch_id, context=context)
+        status = outcome["status"]
+        return UnitResult(
+            status
+            if status in {"completed", "skipped", "partial", "failed", "stopped"}
+            else "blocked",
+            error=outcome.get("message"),
+            changes=(f"Pending job: {request.job_id}; {status}",),
+        )
 
     if isinstance(request, RetryWorksheet):
         from openkb.application.workbook_actions import retry_worksheet

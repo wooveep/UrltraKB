@@ -2307,6 +2307,7 @@ from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
 from openkb.cli_source import source, retry_worksheet
+from openkb.cli_pending import pending, process as process_pending_command
 from openkb.cli_settings import settings
 from openkb.cli_versions import versions
 from openkb.cli_views import views
@@ -2315,6 +2316,8 @@ cli.add_command(proposals)
 cli.add_command(refresh)
 cli.add_command(source)
 cli.add_command(retry_worksheet)
+cli.add_command(pending)
+cli.add_command(process_pending_command)
 cli.add_command(settings)
 cli.add_command(views)
 cli.add_command(versions)

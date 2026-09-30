@@ -437,14 +437,12 @@ def cancel_version_review(
             return review
         if review.status not in {"blocked", "ready"}:
             raise ValueError("Only a pending clarification can be cancelled")
-        admission = _admission(kb_dir, review)
+        _admission(kb_dir, review)
         review = review.model_copy(
             update={"status": "cancelled", "reason": "Version clarification cancelled"}
         )
-        intent = admission.discovery_intent.model_copy(update={"cancelled": True})
         records: dict[Path, Record] = {
             record_path(kb_dir, "version-reviews", review_id): review,
-            record_path(kb_dir, "discovery-intents", intent.intent_id): intent,
         }
         for unit in list_source_units(kb_dir, review.source_id):
             state = read_unit_publication(kb_dir, unit.unit_id, review.view_id)

@@ -196,6 +196,7 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
             "source_revision_id": result.source_revision_id,
             "units": [asdict(unit) for unit in result.units],
             "discovery_pending": result.discovery_pending,
+            "imports_pending": result.imports_pending,
         },
     )
     _inc(state, status)
