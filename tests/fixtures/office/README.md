@@ -19,3 +19,6 @@ small rectangle image, and a blank slide containing only speaker notes. No
 fixture relies on an installed desktop Office or network resources.
 
 `slides.pptx` 的第 2 页图片下还有 `AFTER_IMAGE_MARKER`，用于核验索引与来源正文的字符定位一致。
+
+`slides.ppt` 是相同三页合成内容通过固定 LibreOffice 26.2.6.3 的 `MS PowerPoint 97`
+过滤器独立保存的二进制文件；第 2 页隐藏且含图片，第 3 页只有演讲备注。

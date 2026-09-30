@@ -105,8 +105,10 @@ def export_pdf(document, path, export_filter, options):
 
 def presentation(request, document, directory):
     detected = {value.Name: value.Value for value in document.getArgs()}
-    if detected.get("FilterName") != "Impress MS PowerPoint 2007 XML":
-        raise ValueError("PPTX did not match the required PowerPoint input filter")
+    extension = Path(request["input"]).suffix.lower()
+    filters = {".pptx": "Impress MS PowerPoint 2007 XML", ".ppt": "MS PowerPoint 97"}
+    if detected.get("FilterName") != filters[extension]:
+        raise ValueError(f"{extension} did not match the required PowerPoint input filter")
     pages = document.getDrawPages()
     if not pages.getCount():
         raise ValueError("Presentation contains no slides")
@@ -202,7 +204,7 @@ def convert(request, directory):
             )
         if document is None:
             raise ValueError("Office could not load the damaged or unsupported input")
-        if Path(request["input"]).suffix.lower() == ".pptx":
+        if Path(request["input"]).suffix.lower() in {".pptx", ".ppt"}:
             if not document.supportsService("com.sun.star.presentation.PresentationDocument"):
                 raise ValueError("PowerPoint input did not load as a presentation")
             return presentation(request, document, directory)

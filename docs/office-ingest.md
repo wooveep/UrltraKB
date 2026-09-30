@@ -110,3 +110,7 @@ installation, concurrent tasks, existing user Office, and forced-stop cleanup.
 
 幻灯片正文锚点使用转换时冻结的逐页纯文本 Unicode 坐标，备注使用独立坐标域。
 富文本展示的图片链接不参与正文字符坐标；索引、来源回读及缓存迁移共用冻结的两域文本。
+
+旧 `.ppt` 使用同一隔离运行时的 `MS PowerPoint 97` 输入过滤器，完整导出隐藏幻灯片，
+保持正文／备注分域及物理页映射。文件格式与过滤器不符或损坏时保留原件与既有知识，
+报告转换失败。PPT/PPTX 中内嵌完整文件的恢复由附件发现流程负责。
