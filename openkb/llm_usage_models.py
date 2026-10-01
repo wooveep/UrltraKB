@@ -4,12 +4,36 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openkb.source_records import RecordId as Identity
+
 Count = Annotated[int, Field(ge=0)]
-Identity = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
 
 
 class _UsageModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class UsageExecution(_UsageModel):
+    schema_version: Literal[1] = 1
+    execution_id: Identity
+    operation: str = Field(min_length=1)
+    state: Literal["started", "completed", "interrupted"]
+    task_id: Identity | None = None
+    pending_intent_id: Identity | None = None
+    pending_attempt_id: Identity | None = None
+    source_ids: list[Identity] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if (self.pending_intent_id is None) != (self.pending_attempt_id is None):
+            raise ValueError("Pending execution requires intent and attempt identities")
+        if len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError("Execution source identities must be unique")
+        return self
+
+
+class SourceUsageHistory(_UsageModel):
+    history_status: Literal["recorded", "partially_recorded", "unrecorded"]
 
 
 class StageUsage(_UsageModel):

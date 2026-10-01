@@ -82,8 +82,6 @@ def import_file(kb_dir, job, context):
             retry_confirmed=True,
             text_assessment=assessment,
         )
-        from dataclasses import asdict
-
         snapshot = PendingImportResult(
             attempt_id=job.attempt_id,
             source_id=admission.source.source_id,
@@ -91,7 +89,7 @@ def import_file(kb_dir, job, context):
             quality_known=result.status in {"added", "partial"} or bool(compilation.quality),
             quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
             unfinished=tuple(dict.fromkeys((*result.unfinished, *compilation.unfinished))),
-            units=tuple(asdict(unit) for unit in result.units),
+            units=result.units,
             model_usage=result.model_usage,
         )
         return save_job(

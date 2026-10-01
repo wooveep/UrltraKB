@@ -69,8 +69,8 @@ def test_office_extraction_rejection_identifies_conversion_and_preserves_origina
             pdf.save(output)
         return output.with_suffix(".office.json")
 
-    monkeypatch.setattr("openkb.office.runtime.processing_identity", lambda _: {"fixture": True})
     monkeypatch.setattr("openkb.office.convert.convert_office", convert)
+    monkeypatch.setattr("openkb.office.runtime.processing_identity", lambda _: {"fixture": True})
     monkeypatch.setattr("openkb.office.slide_content.read_slides", lambda _: [])
     path = tmp_path / "conversion.docx"
     original = b"Frozen Office fixture"
@@ -134,3 +134,35 @@ def test_legacy_recompile_rejects_anomalous_retained_text_before_admission(kb_di
     assert not list_sources(kb_dir) and not block_model
     assert result.model_usage["current"]["requests"] == 0
     assert (kb_dir / "wiki/sources/old.md").read_text("utf-8") == original
+
+
+def test_runtime_recompile_preserves_the_text_rejection_result(kb_dir, block_model, monkeypatch):
+    from openkb.application.execution import ExecutionContext
+    from openkb.application.recompilation import RecompileResult
+    from openkb.llm_usage import usage_receipt
+    from openkb.runtime.records import UnitIdentity
+    from openkb.runtime.requests import RecompileDocument
+    from openkb.runtime.worker import _execute
+
+    async def rejected(*args, **kwargs):
+        return RecompileResult(
+            "rejected",
+            message="Repeated CJK text",
+            error_type="ImportTextRejected",
+            quality=("import_text_rejected",),
+            unfinished=("text_preflight",),
+            model_usage=usage_receipt(kb_dir),
+        )
+
+    monkeypatch.setattr("openkb.application.recompilation.recompile_document", rejected)
+    result = _execute(
+        RecompileDocument("old-hash", "confirmed-version"),
+        UnitIdentity("a" * 32, "1", str(kb_dir), "b" * 64),
+        ExecutionContext(),
+    )
+    assert result.status == "failed"
+    assert "ImportTextRejected" in result.error
+    assert result.quality == ("import_text_rejected",)
+    assert result.unfinished == ("text_preflight",)
+    assert result.model_usage["current"]["requests"] == 0
+    assert not list_sources(kb_dir) and not block_model

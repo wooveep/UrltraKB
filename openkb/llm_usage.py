@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from openkb.llm_usage_models import Identity, SourceUsageHistory
 from openkb.locks import atomic_record_lock, atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -23,16 +24,16 @@ def _now() -> str:
 
 
 class UsageRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1] = 1
-    request_attempt_id: str
-    execution_id: str
-    source_id: str | None = None
-    source_revision_id: str | None = None
-    unit_id: str | None = None
-    unit_revision_id: str | None = None
-    attempt_id: str | None = None
-    root_import_id: str | None = None
+    request_attempt_id: Identity
+    execution_id: Identity
+    source_id: Identity | None = None
+    source_revision_id: Identity | None = None
+    unit_id: Identity | None = None
+    unit_revision_id: Identity | None = None
+    attempt_id: Identity | None = None
+    root_import_id: Identity | None = None
     model: str
     stage: str
     started_at: str
@@ -74,6 +75,9 @@ def usage_context(**fields: Any) -> Iterator[None]:
     try:
         if scope and fields.get("source_id"):
             mark_source(scope.kb_dir, fields["source_id"])
+            from openkb.llm_usage_execution import bind_source_execution
+
+            bind_source_execution(fields["source_id"])
         yield
     finally:
         if token is not None:
@@ -270,18 +274,23 @@ def mark_source(kb_dir: Path, source_id: str) -> None:
     with atomic_record_lock(kb_dir / ".openkb/usage/ledger.lock"):
         if not path.exists():
             atomic_write_json(
-                path, {"history_status": "partially_recorded" if historical else "recorded"}
+                path,
+                SourceUsageHistory(
+                    history_status="partially_recorded" if historical else "recorded"
+                ).model_dump(mode="json"),
             )
 
 
 def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=None) -> dict:
-    import json
-
     scope = _SCOPE.get()
     executions = [scope.execution_id] if scope and scope.kb_dir == kb_dir.resolve() else []
     current = aggregate_usage(kb_dir, execution_ids=executions, request_ids=request_ids)
     path = kb_dir / ".openkb/usage/sources" / f"{source_id}.json"
-    historical = json.loads(path.read_text())["history_status"] if path.exists() else "unrecorded"
+    historical = (
+        SourceUsageHistory.model_validate_json(path.read_text("utf-8")).history_status
+        if path.exists()
+        else "unrecorded"
+    )
     return {
         "execution_ids": executions,
         "source_ids": [source_id] if source_id else [],

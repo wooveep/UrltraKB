@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator
 
+from openkb.ingest_result import ImportUnitOutcome
 from openkb.source_records import Digest, FrozenArtifact, PendingJob, Record, RecordId
 
 
@@ -45,8 +46,17 @@ class PendingImportResult(Record):
     quality_known: bool
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
-    units: tuple[dict, ...] = ()
+    units: tuple[ImportUnitOutcome, ...] = ()
     model_usage: dict | None = None
+
+    @field_validator("units")
+    @classmethod
+    def check_unit_usage(cls, values):
+        from openkb.llm_usage_models import validate_receipt
+
+        for unit in values:
+            validate_receipt(unit.model_usage)
+        return values
 
     @field_validator("model_usage")
     @classmethod

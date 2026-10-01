@@ -28,6 +28,75 @@ def test_import_reports_consumption_and_dedup_keeps_its_history(kb_dir, tmp_path
     assert again.model_usage["cumulative"]["input_total"] == 2
 
 
+def test_zero_request_task_retains_source_history_after_restart(kb_dir, tmp_path, block_model):
+    from openkb.application.execution import ExecutionContext
+    from openkb.llm_usage_execution import task_usage_receipt
+    from openkb.runtime.records import TaskView, UnitResult
+    from openkb.runtime.tasks import TaskManager
+
+    path = tmp_path / "history.md"
+    path.write_text("hello source history", encoding="utf-8")
+    first = import_document(kb_dir, path)
+    context = ExecutionContext(usage_task_id="c" * 32)
+    duplicate = import_document(kb_dir, path, context=context)
+    assert duplicate.model_usage["current"]["requests"] == 0
+    recovered_usage = task_usage_receipt(kb_dir, context.usage_task_id)
+    assert recovered_usage["cumulative"] == first.model_usage["cumulative"]
+    assert recovered_usage["source_ids"] == [first.source_id]
+    view = TaskView(
+        context.usage_task_id,
+        str(kb_dir),
+        "ImportFile",
+        "completed",
+        "completed",
+        1,
+        (UnitResult("skipped", model_usage=duplicate.model_usage),),
+        False,
+        True,
+        model_usage=duplicate.model_usage,
+    )
+    history = tmp_path / "history"
+    history.mkdir()
+    (history / (view.id + ".json")).write_text(
+        json.dumps({"view": view.summary(), "identities": []})
+    )
+    manager = TaskManager(history_dir=history)
+    try:
+        recovered = manager.get(view.id)
+        assert recovered.model_usage["current"]["requests"] == 0
+        assert recovered.model_usage["cumulative"] == first.model_usage["cumulative"]
+        assert len(block_model) == first.model_usage["current"]["requests"]
+    finally:
+        manager.shutdown(stop=True)
+        assert manager.join(10)
+
+
+def test_rejected_reprocessing_keeps_the_existing_sources_usage(
+    kb_dir, tmp_path, block_model, monkeypatch
+):
+    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    from openkb.source_catalog import read_source
+
+    path = tmp_path / "historical.md"
+    path.write_text(("参" * 30 + "损坏\n") * 4, encoding="utf-8")
+    # Simulate a source admitted before text preflight existed.
+    with monkeypatch.context() as historical_policy:
+        historical_policy.setattr(
+            "openkb.import_text.assess_import_text", lambda *args, **kwargs: ()
+        )
+        first = import_document(kb_dir, path)
+    assert first.status == "added", first.message
+    before = read_source(kb_dir, first.source_id)
+    preview = preview_reprocessing(kb_dir, first.source_id)
+    result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
+    assert result.status == "rejected", result.message
+    assert result.model_usage["current"]["requests"] == 0
+    assert result.model_usage["source_ids"] == [first.source_id]
+    assert result.model_usage["cumulative"] == first.model_usage["cumulative"]
+    assert len(block_model) == first.model_usage["current"]["requests"]
+    assert read_source(kb_dir, first.source_id) == before
+
+
 def test_unknown_cache_and_duplicate_completion_preserve_known_totals(kb_dir):
     from openkb.llm_usage import aggregate_usage, begin_request, finish_request
     from openkb.llm_usage_execution import import_usage_execution
@@ -61,6 +130,27 @@ def test_failed_source_binding_restores_the_execution_context(kb_dir):
                 pytest.fail("Invalid native identity must fail before entering")
         assert active_scope() == scope
     assert active_scope() is None
+
+
+@pytest.mark.parametrize("record_kind", ["execution", "source_history"])
+def test_usage_persistence_rejects_invalid_record_shapes(kb_dir, record_kind):
+    from openkb.llm_usage import usage_receipt
+    from openkb.llm_usage_execution import import_usage_execution, task_usage_receipt
+    from openkb.locks import atomic_write_json
+
+    if record_kind == "execution":
+        with import_usage_execution(kb_dir, "fixture", task_id="a" * 32) as scope:
+            identity = scope.execution_id
+        path = kb_dir / ".openkb/usage/executions" / f"{identity}.json"
+        record = json.loads(path.read_text())
+        atomic_write_json(path, record | {"task_id": ["a" * 32]})
+        with pytest.raises(ValueError):
+            task_usage_receipt(kb_dir, "a" * 32)
+    else:
+        path = kb_dir / ".openkb/usage/sources" / ("f" * 32 + ".json")
+        atomic_write_json(path, {"history_status": "assumed_complete"})
+        with pytest.raises(ValueError):
+            usage_receipt(kb_dir, source_id="f" * 32)
 
 
 @pytest.mark.parametrize("outcome", ["failure", "cancel", "truncated", "bad_json", "rollback"])

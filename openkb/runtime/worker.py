@@ -84,6 +84,15 @@ class WorkerChannel:
             self.truncated = True
 
 
+def _import_status(status: str) -> str:
+    return {
+        "added": "completed",
+        "compiled": "completed",
+        "conflict": "failed",
+        "rejected": "failed",
+    }.get(status, status)
+
+
 def _execute(
     request: UnitRequest, identity: UnitIdentity, context: Any, prepared_dir: Path | None = None
 ) -> UnitResult:
@@ -152,11 +161,7 @@ def _execute(
         except ReprocessingConflict as exc:
             return UnitResult("blocked", error=str(exc), unfinished=("reprocessing_preview",))
         return UnitResult(
-            "completed"
-            if result.status == "added"
-            else "failed"
-            if result.status == "rejected"
-            else result.status,
+            _import_status(result.status),
             resources=result.resources,
             error=result.message,
             changes=describe_ingest(result),
@@ -203,11 +208,7 @@ def _execute(
 
         resumed = resume_version_review(root, request.review_id, context=context, scope=scope)
         return UnitResult(
-            "completed"
-            if resumed.status == "added"
-            else "failed"
-            if resumed.status == "rejected"
-            else resumed.status,
+            _import_status(resumed.status),
             resources=resumed.resources,
             error=resumed.message,
             quality=resumed.quality,
@@ -361,9 +362,7 @@ def _execute(
         from openkb.ingest_result import describe_units
 
         return UnitResult(
-            {"compiled": "completed", "conflict": "failed"}.get(
-                recompiled.status, recompiled.status
-            ),
+            _import_status(recompiled.status),
             resources=recompiled.resources,
             error=f"{recompiled.message} ({recompiled.error_type})"
             if recompiled.error_type
@@ -432,11 +431,7 @@ def _execute(
                 download_remote_assets=request.download_remote_assets,
             )
         return UnitResult(
-            "completed"
-            if result.status == "added"
-            else "failed"
-            if result.status == "rejected"
-            else result.status,
+            _import_status(result.status),
             resources=result.resources,
             error=result.message
             or ("Document import failed" if result.status == "failed" else None),

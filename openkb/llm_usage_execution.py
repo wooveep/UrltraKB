@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import re
 import uuid
 from contextlib import contextmanager
@@ -19,7 +18,20 @@ from openkb.llm_usage import (
     usage_context,
     usage_receipt,
 )
+from openkb.llm_usage_models import UsageExecution
 from openkb.locks import atomic_record_lock, atomic_write_json
+
+
+def _read_execution(path: Path) -> UsageExecution:
+    record = UsageExecution.model_validate_json(path.read_text("utf-8"))
+    if record.execution_id != path.stem:
+        raise ValueError("Usage execution does not match its record identity")
+    return record
+
+
+def _write_execution(path: Path, record: UsageExecution, **updates) -> None:
+    updated = UsageExecution.model_validate(record.model_dump() | updates)
+    atomic_write_json(path, updated.model_dump(mode="json"))
 
 
 @contextmanager
@@ -32,16 +44,11 @@ def import_usage_execution(
         yield existing
         return
     scope = UsageScope(root, execution_id or uuid.uuid4().hex, on_event=on_event)
-    path = root / ".openkb/usage/executions" / f"{scope.execution_id}.json"
-    atomic_write_json(
-        path,
-        {
-            "execution_id": scope.execution_id,
-            "operation": operation,
-            "state": "started",
-            "task_id": task_id,
-        },
+    record = UsageExecution(
+        execution_id=scope.execution_id, operation=operation, state="started", task_id=task_id
     )
+    path = root / ".openkb/usage/executions" / f"{scope.execution_id}.json"
+    _write_execution(path, record)
     token = _SCOPE.set(scope)
     state = "completed"
     try:
@@ -52,8 +59,7 @@ def import_usage_execution(
     finally:
         try:
             with atomic_record_lock(root / ".openkb/usage/ledger.lock"):
-                record = json.loads(path.read_text("utf-8"))
-                atomic_write_json(path, record | {"state": state})
+                _write_execution(path, _read_execution(path), state=state)
         finally:
             _SCOPE.reset(token)
 
@@ -64,10 +70,23 @@ def bind_pending_execution(intent_id: str, attempt_id: str) -> None:
     if scope:
         path = scope.kb_dir / ".openkb/usage/executions" / f"{scope.execution_id}.json"
         with atomic_record_lock(scope.kb_dir / ".openkb/usage/ledger.lock"):
-            record = json.loads(path.read_text("utf-8"))
-            atomic_write_json(
-                path, record | {"pending_intent_id": intent_id, "pending_attempt_id": attempt_id}
+            _write_execution(
+                path,
+                _read_execution(path),
+                pending_intent_id=intent_id,
+                pending_attempt_id=attempt_id,
             )
+
+
+def bind_source_execution(source_id: str) -> None:
+    """Retain source association even when an execution sends no model requests."""
+    scope = _SCOPE.get()
+    if scope:
+        path = scope.kb_dir / ".openkb/usage/executions" / f"{scope.execution_id}.json"
+        with atomic_record_lock(scope.kb_dir / ".openkb/usage/ledger.lock"):
+            record = _read_execution(path)
+            if source_id not in record.source_ids:
+                _write_execution(path, record, source_ids=sorted((*record.source_ids, source_id)))
 
 
 def _native_source_id(identity):
@@ -91,7 +110,9 @@ def _project(root, result, before):
     )
     if source_id is None and previous and len(previous["source_ids"]) == 1:
         source_id = _native_source_id(previous["source_ids"][0])
-    receipt = usage_receipt(root, source_id=source_id, request_ids=ids)
+    source_id = source_id or scope.source_id
+    with usage_context(source_id=source_id):
+        receipt = usage_receipt(root, source_id=source_id, request_ids=ids)
     if isinstance(result, dict):
         return {**result, "model_usage": receipt}
     if hasattr(result, "model_usage"):
@@ -175,9 +196,9 @@ def task_usage_receipt(kb_dir: Path, task_id: str):
     return _execution_receipt(
         kb_dir,
         [
-            record["execution_id"]
+            record.execution_id
             for path in (kb_dir / ".openkb/usage/executions").glob("*.json")
-            if (record := json.loads(path.read_text("utf-8"))).get("task_id") == task_id
+            if (record := _read_execution(path)).task_id == task_id
         ],
     )
 
@@ -186,10 +207,10 @@ def pending_usage_receipt(kb_dir: Path, intent_id: str, attempt_id: str | None):
     return _execution_receipt(
         kb_dir,
         [
-            record["execution_id"]
+            record.execution_id
             for path in (kb_dir / ".openkb/usage/executions").glob("*.json")
-            if (record := json.loads(path.read_text("utf-8"))).get("pending_intent_id") == intent_id
-            and record.get("pending_attempt_id") == attempt_id
+            if (record := _read_execution(path)).pending_intent_id == intent_id
+            and record.pending_attempt_id == attempt_id
         ],
     )
 
@@ -200,7 +221,16 @@ def _execution_receipt(kb_dir: Path, ids):
     if not ids:
         return None
     current = aggregate_usage(kb_dir, execution_ids=ids)
-    sources = {r.source_id for r in read_requests(kb_dir) if r.execution_id in ids and r.source_id}
+    sources = {
+        source_id
+        for identity in ids
+        for source_id in _read_execution(
+            kb_dir / ".openkb/usage/executions" / f"{identity}.json"
+        ).source_ids
+    }
+    sources.update(
+        r.source_id for r in read_requests(kb_dir) if r.execution_id in ids and r.source_id
+    )
     receipts = [usage_receipt(kb_dir, source_id=source) for source in sorted(sources)]
     cumulative = merge_usage_receipts(kb_dir, receipts)
     return {

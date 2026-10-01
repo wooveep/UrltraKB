@@ -71,6 +71,9 @@ def test_cli_http_and_spawn_retry_share_source_revision_and_measurements(
         result = manager.wait(task, timeout=30)
         assert result.state == "completed", result
         assert result.results[0].status == "skipped"
+        assert result.model_usage["current"]["requests"] == 0
+        assert result.model_usage["cumulative"] == first.model_usage["cumulative"]
+        assert result.results[0].model_usage["cumulative"] == first.model_usage["cumulative"]
         assert first.units[0].target_revision_id in "\n".join(result.results[0].changes)
     finally:
         manager.shutdown(stop=True)

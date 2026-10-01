@@ -197,6 +197,7 @@ def retry_pending_job(kb_dir: Path, identity: str) -> None:
                     "dispatch_id": None,
                     "attempt_id": None,
                     "message": None,
+                    **({"result": None} if kind == "import" else {}),
                 }
             ),
         )
