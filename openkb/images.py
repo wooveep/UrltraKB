@@ -103,6 +103,9 @@ def convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> lis
     (never rendered from a note), and both ``get_wiki_page_content`` and
     ``read_wiki_image`` resolve them against the wiki root.
     """
+    from openkb.import_text import require_pdf_text
+
+    require_pdf_text(pdf_path)
     images_dir.mkdir(parents=True, exist_ok=True)
     pages: list[dict] = []
     img_counter = 0
@@ -168,6 +171,9 @@ def convert_pdf_with_images(
 
     Returns the full markdown string.
     """
+    from openkb.import_text import require_pdf_text
+
+    require_pdf_text(pdf_path)
     images_dir.mkdir(parents=True, exist_ok=True)
     parts: list[str] = []
     img_counter = 0

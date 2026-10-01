@@ -30,6 +30,13 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
     body = read_document_source(kb_dir, recovered.source_id)
     assert recovered.name == "Recovered.docx" and "First section hello" in body["content"]
     assert body["version_metadata"]["product"] != "Container"
+    inventory = pending_status(kb_dir)
+    receipt = next(job for job in inventory["jobs"] if job["kind"] == "import")["result"]
+    assert receipt["quality_known"] is True and receipt["quality"] == []
+    assert receipt["model_usage"]["current"]["requests"] > 0
+    assert inventory["groups"][0]["model_usage"]["requests"] == (
+        parent.model_usage["current"]["requests"] + receipt["model_usage"]["current"]["requests"]
+    )
     assert process_pending(kb_dir)["processed"] == 0
 
 
@@ -83,3 +90,42 @@ def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
     cancel_execution_group(kb_dir, group["root_import_id"])
     assert process_pending(kb_dir)["processed"] == 0
     assert pending_status(kb_dir)["groups"][0]["cancelled"]
+
+
+def test_pending_import_preserves_current_compile_warning_after_readback(
+    kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
+):
+    import json
+
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.pending import pending_status, process_pending
+
+    completion = litellm.completion
+
+    def broken_plan(**kwargs):
+        response = completion(**kwargs)
+        if "concepts" in str(kwargs["messages"]).lower():
+            response.choices[0].message.content = json.dumps({"concepts": "malformed"})
+        return response
+
+    async def abroken_plan(**kwargs):
+        return broken_plan(**kwargs)
+
+    monkeypatch.setattr(litellm, "completion", broken_plan)
+    monkeypatch.setattr(litellm, "acompletion", abroken_plan)
+    parent = import_document(kb_dir, embedded_docx)
+    process_pending(kb_dir)
+    imported = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
+    assert imported["status"] == "completed"
+    assert imported["result"]["quality_known"] is True
+    assert imported["result"]["quality"] == list(parent.quality)
+    assert imported["result"]["quality"]
+    assert imported["result"]["unfinished"]
+    before = imported["result"]
+    assert process_pending(kb_dir)["processed"] == 0
+    assert (
+        next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")["result"]
+        == before
+    )

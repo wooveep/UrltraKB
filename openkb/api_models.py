@@ -143,6 +143,7 @@ class AddFileItem(BaseModel):
     imports_pending: int | None = None
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    model_usage: dict | None = None
 
 
 class AddResponse(BaseModel):
@@ -157,6 +158,8 @@ class AddResponse(BaseModel):
     unit_counts: dict[str, int] = Field(default_factory=dict)
     discovery_pending_count: int = 0
     imports_pending_count: int = 0
+    rejected_count: int = 0
+    model_usage: dict | None = None
 
 
 class KbRequest(ViewRequest):

@@ -13,6 +13,7 @@ from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective
 from openkb.ingest_records import UnitRevision
 from openkb.ingest_result import IngestResult
 from openkb.knowledge_scope import KnowledgeScope, live_scope
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
 from openkb.source_catalog import Admission, read_record, read_source, read_source_revision
@@ -28,6 +29,7 @@ from openkb.unit_publication import (
 )
 
 
+@track_import_usage
 async def recompile_source(
     kb_dir: Path,
     source_id: str,
@@ -89,6 +91,29 @@ async def recompile_source(
     frozen = read_source_revision(kb_dir, revision.source_revision_id)
     intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
     admission = Admission(source, frozen, intent)
+    if frozen.original_kind == "original":
+        from openkb.application.retained_inputs import frozen_source_input
+        from openkb.import_text import (
+            ImportTextRejected,
+            preflight_import_text,
+            rejection_result,
+            validate_text_preflight,
+        )
+
+        prepared = frozen_source_input(kb_dir, source, frozen)
+        try:
+            validate_text_preflight(
+                prepared,
+                preflight_import_text(
+                    kb_dir, prepared, check_stop=context.check_stop if context else lambda: None
+                ),
+            )
+        except ImportTextRejected as exc:
+            return replace(
+                rejection_result(prepared, exc),
+                source_id=source.source_id,
+                source_revision_id=frozen.source_revision_id,
+            )
     if previous and previous.status in {"empty", "retired"}:
         return result_from_publication(kb_dir, admission, previous, status="skipped")
     actual = _manifest(kb_dir, previous) if previous else None
@@ -129,14 +154,40 @@ async def recompile_source(
             source_id=source_id,
             message="No saved normalization for this input",
         )
+    if normalized_source:
+        from openkb.import_text import ImportTextRejected, require_normalized_text
+
+        try:
+            require_normalized_text(directory / "wiki" / normalized_source)
+        except ImportTextRejected as exc:
+            return IngestResult(
+                source.identity,
+                "rejected",
+                (),
+                source_id=source_id,
+                source_revision_id=frozen.source_revision_id,
+                message=str(exc),
+                quality=("import_text_rejected",),
+                unfinished=("text_preflight",),
+            )
     state, runnable = begin_unit_attempt(
         kb_dir, unit, revision, recompile=True, discovery_intent=intent, view_id=scope.view_id
     )
     if not runnable:
         return result_from_publication(kb_dir, admission, state, status="blocked")
     check_stop = context.check_stop if context else lambda: None
+    from openkb.llm_usage import usage_context
+
     try:
         with (
+            usage_context(
+                source_id=source.source_id,
+                source_revision_id=frozen.source_revision_id,
+                unit_id=unit.unit_id,
+                unit_revision_id=revision.unit_revision_id,
+                attempt_id=state.job_id,
+                root_import_id=intent.root_import_id,
+            ),
             context.begin(kb_dir) if context else nullcontext(bundle) as credentials,
             collect_compile_report() as report,
             prepare_compile_view(kb_dir, scope.view_id) as view,
@@ -200,7 +251,7 @@ async def recompile_source(
         )
         return replace(
             result,
-            quality=tuple(report.quality),
+            quality=tuple(dict.fromkeys((*result.quality, *report.quality))),
             unfinished=result.unfinished + tuple(report.unfinished),
         )
     except RecoveryRequired:

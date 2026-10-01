@@ -166,7 +166,15 @@ def _sync_llm_semaphore():
             ceiling_sem.release()
 
 
-def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
+def _usage_call(model, stage):
+    from contextlib import nullcontext
+
+    from ..config import get_usage_observer
+    observer = get_usage_observer()
+    return observer.call(model, 'index.' + stage) if observer else nullcontext()
+
+
+def llm_completion(model, prompt, chat_history=None, return_finish_reason=False, *, usage_stage="structure"):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -175,7 +183,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         try:
             # Hold a concurrency slot only around the actual network call, not
             # retry backoff, so sync completions obey the same cap as async ones.
-            with _sync_llm_semaphore():
+            with _sync_llm_semaphore(), _usage_call(model, usage_stage) as usage:
                 response = litellm.completion(
                     model=model,
                     messages=messages,
@@ -183,6 +191,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                     # configure via config.set_llm_params(...) — never the litellm global.
                     **get_llm_params(),
                 )
+                if usage:
+                    usage.finish(response)
             content = response.choices[0].message.content
             if return_finish_reason:
                 finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
@@ -208,7 +218,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 
 
-async def llm_acompletion(model, prompt):
+async def llm_acompletion(model, prompt, *, usage_stage="structure"):
     if model:
         model = model.removeprefix("litellm/")
     max_retries = 10
@@ -218,11 +228,14 @@ async def llm_acompletion(model, prompt):
             # Hold a concurrency slot only around the actual network call — not
             # across retry backoff — so the cap counts real in-flight requests.
             async with _llm_semaphore():
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=messages,
-                    **get_llm_params(),  # per-call kwargs; never the litellm global
-                )
+                with _usage_call(model, usage_stage) as usage:
+                    response = await litellm.acompletion(
+                        model=model,
+                        messages=messages,
+                        **get_llm_params(),  # per-call kwargs; never the litellm global
+                    )
+                    if usage:
+                        usage.finish(response)
             return response.choices[0].message.content
         except Exception as e:
             logger.warning("Retrying async LLM completion (%d/%d)", i + 1, max_retries)
@@ -373,7 +386,7 @@ async def generate_node_summary(node, model=None):
 
     Directly return the description, do not include any other text.
     """
-    response = await llm_acompletion(model, prompt)
+    response = await llm_acompletion(model, prompt, usage_stage="summary")
     return response
 
 
@@ -402,7 +415,7 @@ def generate_doc_description(structure, model=None):
 
     Directly return the description, do not include any other text.
     """
-    response = llm_completion(model, prompt)
+    response = llm_completion(model, prompt, usage_stage="description")
     return response
 
 

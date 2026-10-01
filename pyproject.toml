@@ -32,7 +32,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 # returning empty Responses output (BerriAI/litellm#25429) and
 # auto-injects GitHub Copilot IDE-auth headers.
 dependencies = [
-    "pageindex==0.3.0.dev3+urltrakb.4",
+    "pageindex==0.3.0.dev3+urltrakb.5",
     "regex==2026.5.9",
     "charset-normalizer==3.4.7",
     "defusedxml==0.7.1",
@@ -127,6 +127,8 @@ exclude = ["/openkb/web", "/frontend"]
 "assets/fonts/SourceHanSansCN-Medium.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Medium.otf"
 "assets/fonts/SourceHanSansCN-OFL.txt" = "openkb/desktop/assets/fonts/SourceHanSansCN-OFL.txt"
 "assets/fonts/SourceHanSansCN-Regular.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Regular.otf"
+"assets/fonts/FrankRuhlHofshi-Bold.otf" = "openkb/desktop/assets/fonts/FrankRuhlHofshi-Bold.otf"
+"assets/fonts/OfficeSymbol-OFL.txt" = "openkb/desktop/assets/fonts/OfficeSymbol-OFL.txt"
 "assets/fonts/manifest.json" = "openkb/desktop/assets/fonts/manifest.json"
 "skills/openkb-deck-neon" = "openkb/_skills/openkb-deck-neon"
 "skills/openkb-deck-editorial" = "openkb/_skills/openkb-deck-editorial"

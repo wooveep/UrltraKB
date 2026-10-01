@@ -11,6 +11,7 @@ from typing import Any
 
 from openkb.agent.token_usage import TokenUsage
 from openkb.application.pages import Page
+from openkb.llm_usage_models import validate_receipt
 from openkb.locks import atomic_write_json
 from openkb.runtime.requests import UnitRequest
 
@@ -34,8 +35,13 @@ class UnitResult:
     changes: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
     usage: dict[str, int | None] | None = None
+    model_usage: dict | None = None
+    quality_known: bool | None = None
 
     def __post_init__(self) -> None:
+        validate_receipt(self.model_usage)
+        if self.quality_known is not None and type(self.quality_known) is not bool:
+            raise ValueError("Invalid compilation quality observation")
         if self.usage is not None:
             TokenUsage.from_dict(self.usage)
         if self.status not in {"completed", "skipped", "failed", "stopped", "blocked", "partial"}:
@@ -92,6 +98,8 @@ class UnitResult:
             changes=tuple(value.get("changes", ())),
             unfinished=tuple(value.get("unfinished", ())),
             usage=value.get("usage"),
+            model_usage=value.get("model_usage"),
+            quality_known=value.get("quality_known"),
         )
 
 
@@ -112,8 +120,10 @@ class TaskView:
     text_truncated: bool = False
     retry_of: str | None = None
     usage: dict[str, int | None] | None = None
+    model_usage: dict | None = None
 
     def __post_init__(self) -> None:
+        validate_receipt(self.model_usage)
         if self.usage is not None:
             TokenUsage.from_dict(self.usage)
         if not re.fullmatch(r"[0-9a-f]{32}", self.id):

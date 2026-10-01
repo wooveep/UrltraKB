@@ -21,6 +21,16 @@ def aggregate_units(results):
         status = "failed" if any(result.status == "failed" for result in results) else "blocked"
     if any(result.status == "stopped" for result in results):
         status = "stopped"
+    from pathlib import Path
+
+    from openkb.llm_usage import merge_usage_receipts
+
+    receipts = [result.model_usage for result in results if result.model_usage]
+    usage = (
+        merge_usage_receipts(Path(receipts[0]["ledger"]).parent.parent, receipts)
+        if receipts
+        else None
+    )
     return replace(
         results[0],
         status=status,
@@ -29,6 +39,7 @@ def aggregate_units(results):
         quality=tuple(dict.fromkeys(note for result in results for note in result.quality)),
         unfinished=tuple(dict.fromkeys(stage for result in results for stage in result.unfinished)),
         message="; ".join(result.message for result in results if result.message) or None,
+        model_usage=usage,
     )
 
 

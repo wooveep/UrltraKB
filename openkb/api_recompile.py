@@ -10,6 +10,7 @@ from openkb.application.recompilation import recompile_document, select_recompil
 from openkb.application.recompilation import refresh_schema as refresh_kb_schema
 from openkb.config import DEFAULT_CONFIG, resolve_credential_bundle, resolve_effective_config
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.llm_usage import merge_usage_receipts
 from openkb.log import append_log
 
 
@@ -90,6 +91,7 @@ async def iter_recompile(
             "elapsed": round(result.elapsed, 1) if result.elapsed is not None else None,
             "message": result.message,
             "units": [asdict(unit) for unit in result.units],
+            "model_usage": result.model_usage,
         }
         if result.error_type and not result.message:
             doc["message"] = f"Compilation failed ({result.error_type})"
@@ -120,4 +122,5 @@ async def iter_recompile(
         "blocked": blocked,
         "partial": partial,
         "docs": docs,
+        "model_usage": merge_usage_receipts(kb_dir, [doc["model_usage"] for doc in docs]),
     }

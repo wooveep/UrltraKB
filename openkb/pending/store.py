@@ -45,6 +45,7 @@ def job_records(kb_dir, kind, job):
             kind=kind,
             status=job.status,
             message=job.message,
+            result=job.result if kind == "import" else None,
         )
     return records
 
@@ -69,6 +70,12 @@ def import_source(kb_dir, job):
         or revision.digest != job.digest
     ):
         raise ValueError("Pending import business result belongs to another input")
+    if job.result and (
+        job.result.attempt_id != job.attempt_id
+        or job.result.source_id != job.source_id
+        or job.result.source_revision_id != job.source_revision_id
+    ):
+        raise ValueError("Pending import receipt belongs to another attempt or source revision")
     return source
 
 
@@ -184,7 +191,12 @@ def start(kb_dir, identity, dispatch_id):
         kb_dir,
         kind,
         job.model_copy(
-            update={"status": "started", "attempt_id": uuid.uuid4().hex, "message": None}
+            update={
+                "status": "started",
+                "attempt_id": uuid.uuid4().hex,
+                "message": None,
+                **({"result": None} if kind == "import" else {}),
+            }
         ),
         operation="start-pending-job",
     )

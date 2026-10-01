@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from openkb.source_records import Digest, FrozenArtifact, PendingJob, Record, RecordId
 
@@ -35,6 +35,25 @@ class ImportIntent(PendingJob):
     filename: str
     source_id: RecordId | None = None
     source_revision_id: RecordId | None = None
+    result: "PendingImportResult | None" = None
+
+
+class PendingImportResult(Record):
+    attempt_id: RecordId
+    source_id: RecordId
+    source_revision_id: RecordId
+    quality_known: bool
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
+    units: tuple[dict, ...] = ()
+    model_usage: dict | None = None
+
+    @field_validator("model_usage")
+    @classmethod
+    def check_usage(cls, value):
+        from openkb.llm_usage_models import validate_receipt
+
+        return validate_receipt(value)
 
 
 class DiscoveryCheckpoint(Record):
@@ -64,6 +83,7 @@ class JobAttempt(Record):
     kind: str
     status: str
     message: str | None = None
+    result: PendingImportResult | None = None
 
 
 class DerivedExecution(Record):

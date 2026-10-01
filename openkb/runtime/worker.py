@@ -94,6 +94,7 @@ def _execute(
     from openkb.runtime.requests import ViewSelection
 
     root = Path(identity.kb_dir)
+    context.usage_task_id = getattr(identity, "task_id", None)
     scope = (
         view_scope(root, request.view_id)
         if isinstance(request, ViewSelection) and request.view_id is not None
@@ -122,6 +123,10 @@ def _execute(
             if status in {"completed", "skipped", "partial", "failed", "stopped"}
             else "blocked",
             error=outcome.get("message"),
+            quality=tuple(outcome.get("quality", [])),
+            unfinished=tuple(outcome.get("unfinished", [])),
+            quality_known=outcome.get("quality_known"),
+            model_usage=outcome.get("model_usage"),
             changes=(f"Pending job: {request.job_id}; {status}",),
         )
 
@@ -147,11 +152,16 @@ def _execute(
         except ReprocessingConflict as exc:
             return UnitResult("blocked", error=str(exc), unfinished=("reprocessing_preview",))
         return UnitResult(
-            "completed" if result.status == "added" else result.status,
+            "completed"
+            if result.status == "added"
+            else "failed"
+            if result.status == "rejected"
+            else result.status,
             resources=result.resources,
             error=result.message,
             changes=describe_ingest(result),
             quality=result.quality,
+            model_usage=result.model_usage,
             unfinished=result.unfinished,
             revision=result.input_version,
         )
@@ -193,10 +203,15 @@ def _execute(
 
         resumed = resume_version_review(root, request.review_id, context=context, scope=scope)
         return UnitResult(
-            "completed" if resumed.status == "added" else resumed.status,
+            "completed"
+            if resumed.status == "added"
+            else "failed"
+            if resumed.status == "rejected"
+            else resumed.status,
             resources=resumed.resources,
             error=resumed.message,
             quality=resumed.quality,
+            model_usage=resumed.model_usage,
             changes=describe_ingest(resumed),
             unfinished=resumed.unfinished,
         )
@@ -357,6 +372,7 @@ def _execute(
             unfinished=recompiled.unfinished,
             revision=recompiled.version,
             quality=recompiled.quality,
+            model_usage=getattr(recompiled, "model_usage", None),
         )
     if isinstance(request, RemoveDocument):
         from openkb.application.removal import remove_document
@@ -416,11 +432,16 @@ def _execute(
                 download_remote_assets=request.download_remote_assets,
             )
         return UnitResult(
-            "completed" if result.status == "added" else result.status,
+            "completed"
+            if result.status == "added"
+            else "failed"
+            if result.status == "rejected"
+            else result.status,
             resources=result.resources,
             error=result.message
             or ("Document import failed" if result.status == "failed" else None),
             quality=result.quality,
+            model_usage=result.model_usage,
             unfinished=result.unfinished,
             revision=result.input_version,
             changes=describe_ingest(result),

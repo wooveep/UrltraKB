@@ -4,11 +4,37 @@ from pathlib import Path
 
 from openkb.application.execution import ExecutionContext
 from openkb.lifecycle import read_lifecycle
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, mutation_scope
 from openkb.pending.records import DiscoveryCheckpoint, ExecutionBudget, ExecutionGroup
 from openkb.pending.store import claim, group_for, jobs, read_job, reconcile_job, save_job, start
 from openkb.source_catalog import read_record, record_path, write_record
+
+
+def pending_result(kind, job, kb_dir):
+    snapshot = job.result if kind == "import" else None
+    from openkb.llm_usage_execution import pending_usage_receipt
+
+    return {
+        "id": job.intent_id,
+        "kind": kind,
+        "status": job.status,
+        "message": job.message,
+        "source_id": getattr(job, "source_id", None),
+        "source_revision_id": getattr(job, "source_revision_id", None),
+        "result": snapshot.model_dump(mode="json") if snapshot else None,
+        "quality_known": snapshot.quality_known if snapshot else False,
+        "quality": list(snapshot.quality) if snapshot else [],
+        "unfinished": list(snapshot.unfinished) if snapshot else [],
+        "model_usage": snapshot.model_usage
+        if snapshot
+        else pending_usage_receipt(
+            kb_dir,
+            job.intent_id,
+            job.attempt_id,
+        ),
+    }
 
 
 def pending_status(kb_dir: Path) -> dict:
@@ -17,7 +43,7 @@ def pending_status(kb_dir: Path) -> dict:
         entries = list(jobs(root))
         groups = {job.root_import_id: group_for(root, job) for _, job in entries}
         rows = [
-            {"id": job.intent_id, "kind": kind, **job.model_dump(mode="json")}
+            {**job.model_dump(mode="json"), **pending_result(kind, job, root)}
             for kind, job in entries
         ]
         active = {
@@ -39,7 +65,7 @@ def pending_status(kb_dir: Path) -> dict:
                 ).model_dump(mode="json")
                 for path in sorted((root / ".openkb/catalog/discovery-checkpoints").glob("*.json"))
             ],
-            "groups": [group.model_dump(mode="json") for group in groups.values()],
+            "groups": [_group_result(root, group) for group in groups.values()],
             "runnable": sum(
                 job.status in {"pending", "dispatched"}
                 and not job.cancelled
@@ -55,6 +81,16 @@ def pending_status(kb_dir: Path) -> dict:
         }
 
 
+def _group_result(root, group):
+    from openkb.llm_usage import aggregate_usage
+
+    return {
+        **group.model_dump(mode="json"),
+        "model_usage": aggregate_usage(root, root_import_id=group.root_import_id),
+        "usage_ledger": str(root / ".openkb/usage"),
+    }
+
+
 def claim_pending_job(kb_dir: Path):
     root = kb_dir.resolve()
     with kb_ingest_lock(root / ".openkb"):
@@ -65,6 +101,7 @@ def claim_pending_job(kb_dir: Path):
     return None
 
 
+@track_import_usage
 def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=None):
     root = kb_dir.resolve()
     context = context or ExecutionContext()
@@ -82,8 +119,11 @@ def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=No
             return {"id": identity, "status": before.status}
         selected = start(root, identity, dispatch_id)
         if selected is None:
-            return {"id": identity, "status": "skipped"}
+            return {**pending_result(kind, before, root), "status": "skipped"}
         kind, job = selected
+        from openkb.llm_usage_execution import bind_pending_execution
+
+        bind_pending_execution(job.intent_id, job.attempt_id)
         original_cancelled = context.cancelled
         context.cancelled = (
             lambda: original_cancelled() or group_cancelled(root, job) or job_stopped(root, job)
@@ -118,7 +158,7 @@ def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=No
                 raise
         finally:
             context.cancelled = original_cancelled
-        return {"id": job.intent_id, "kind": kind, "status": job.status, "message": job.message}
+        return pending_result(kind, job, root)
 
 
 def process_pending(kb_dir: Path, *, max_jobs: int = 10000, context=None) -> dict:

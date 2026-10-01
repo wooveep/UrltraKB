@@ -54,7 +54,15 @@ def test_cli_http_and_spawn_retry_share_source_revision_and_measurements(
         )
         body = client.post("/api/v1/document/source", json={"kb": "cross", "hash": first.source_id})
     assert api.status_code == body.status_code == 200
-    assert api.json()["units"] == cli_result["units"]
+    api_units = api.json()["units"]
+    for api_unit, cli_unit in zip(api_units, cli_result["units"], strict=True):
+        api_usage = api_unit.pop("model_usage")
+        cli_usage = cli_unit.pop("model_usage")
+        assert api_unit == cli_unit
+        assert api_usage["current"]["requests"] == cli_usage["current"]["requests"] == 0
+        assert api_usage["cumulative"] == cli_usage["cumulative"]
+        assert api_usage["cumulative"]["requests"] > 0
+        assert api_usage["execution_ids"] != cli_usage["execution_ids"]
     assert body.json()["content"] == expected["content"]
     assert api.json()["units"][0]["tokens"] == expected["tokens"]
     manager = TaskManager(history_dir=tmp_path / "tasks")

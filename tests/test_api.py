@@ -608,6 +608,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
             "imports_pending",
             "quality",
             "unfinished",
+            "model_usage",
         ):
             item.pop(key)
     assert payload == {
@@ -629,12 +630,14 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
         "added_count": 1,
         "skipped_count": 1,
         "failed_count": 0,
+        "rejected_count": 0,
         "blocked_count": 0,
         "partial_count": 0,
         "source_count": 2,
         "unit_counts": {},
         "discovery_pending_count": 0,
         "imports_pending_count": 0,
+        "model_usage": None,
     }
 
 

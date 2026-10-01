@@ -83,6 +83,14 @@ def normalization_fingerprint(
     from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
 
     office_policy: dict = {}
+    if source_revision and source_revision.source_format in {
+        *(extension[1:] for extension in TEXT_SOURCE_EXTENSIONS),
+        "xlsx",
+        "xls",
+    }:
+        from pageindex.index.block_policy import BLOCK_INDEX_POLICY
+
+        office_policy["block_index_policy"] = BLOCK_INDEX_POLICY
     if source_revision and source_revision.source_format in {"xlsx", "xls"}:
         from openkb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
 

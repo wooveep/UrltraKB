@@ -344,6 +344,18 @@ def kb_read_lock(openkb_dir: Path, **kwargs):
     return kb_lock(openkb_dir, exclusive=False, **kwargs)
 
 
+@contextlib.contextmanager
+def atomic_record_lock(path: Path) -> Iterator[None]:
+    """Serialize independent atomic records without joining KB rollback journals."""
+    lease = _Lease(path, True)
+    try:
+        while not lease.try_acquire():
+            time.sleep(0.01)
+        yield
+    finally:
+        lease.release()
+
+
 def kb_ingest_lock_held(openkb_dir: Path) -> bool:
     """Whether this thread AND asyncio task owns exclusive execution."""
     return file_write_lock_held(openkb_dir / "ingest.lock")

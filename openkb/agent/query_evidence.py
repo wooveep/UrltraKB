@@ -205,7 +205,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
 
 def evidence_answer(answer: str, selection: QuerySelection) -> str:
-    """Expose the actual immutable revisions even if a model omits its scope labels."""
+    """Label permitted immutable revisions; this list does not track actual citations."""
     details = [view.provenance for view in selection.views]
     details.extend(selection.missing)
     if not selection_current(selection):
@@ -216,4 +216,4 @@ def evidence_answer(answer: str, selection: QuerySelection) -> str:
         )
     if not details:
         details = ["No permitted knowledge evidence is available."]
-    return answer.rstrip() + "\n\n---\n" + "\n\n".join(details)
+    return answer.rstrip() + "\n\n---\n本次允许的证据范围\n\n" + "\n\n".join(details)

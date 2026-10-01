@@ -9,6 +9,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.ingest_records import UnitPublication
 from openkb.ingest_result import IngestResult
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import (
@@ -352,6 +353,7 @@ def supplement_version_reviews(
     return tuple(changed)
 
 
+@track_import_usage
 def resume_version_review(
     kb_dir: Path,
     review_id: str,
@@ -401,7 +403,7 @@ def resume_version_review(
             )
             return replace(
                 result,
-                quality=tuple(report.quality),
+                quality=tuple(dict.fromkeys((*result.quality, *report.quality))),
                 unfinished=result.unfinished + tuple(report.unfinished),
             )
 

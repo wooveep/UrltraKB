@@ -194,8 +194,82 @@ def test_generated_section_labels_must_resolve_to_real_original_anchors(
     result = import_document(kb_dir, path)
     assert result.status == ("added" if corrected else "failed"), result.message
     assert any("Correct ONLY" in prompt for prompt in block_model)
+    if not corrected:
+        assert sum("Correct ONLY" in prompt for prompt in block_model) == 1
+        assert "BlockContractError" in result.message
     saved = read_document_source(kb_dir, result.source_id, blocks="1")
     assert saved["content"] == "hello world"
+
+
+def test_unheaded_original_anchor_can_normalize_its_label_without_model_repair(
+    kb_dir, tmp_path, block_model, monkeypatch
+):
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+    from openkb.documents import read_document_source
+
+    original_completion = litellm.completion
+
+    def completion(**kwargs):
+        result = original_completion(**kwargs)
+        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
+            entries = json.loads(result.choices[0].message.content)
+            entries[0]["title_origin"] = "original"
+            result.choices[0].message.content = json.dumps(entries)
+        return result
+
+    async def acompletion(**kwargs):
+        return completion(**kwargs)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    apply_kb_config_patch(
+        kb_dir,
+        KbConfigPatchRequest(
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+        ),
+    )
+    path = tmp_path / "unheaded.md"
+    path.write_text("hello world", encoding="utf-8")
+    result = import_document(kb_dir, path)
+    assert result.status == "added", result.message
+    assert not any("Correct ONLY" in prompt for prompt in block_model)
+    saved = read_document_source(kb_dir, result.source_id, blocks="1")
+    assert saved["content"] == "hello world"
+
+
+def test_declared_heading_rejects_a_fabricated_original_title():
+    from pageindex.index.block_policy import BlockPolicy
+
+    text = "Real heading\nhello"
+    policy = BlockPolicy(
+        {
+            "unit_count": 1,
+            "source": {
+                "text": text,
+                "blocks": [
+                    {
+                        "ordinal": 1,
+                        "source_spans": [[0, len(text)]],
+                        "headings": [{"title": "Real heading", "source_span": [0, 12]}],
+                    }
+                ],
+            },
+        }
+    )
+    entry = {
+        "structure": "1",
+        "title": "Invented heading",
+        "title_origin": "original",
+        "physical_index": 1,
+        "anchor": {"unit": 1, "part": "body", "range": [13, 18], "excerpt": "hello"},
+    }
+    assert not policy.normalize_title_origin(entry)
+    assert not policy.valid(entry)
+    assert policy.validate_entry(entry) == "undeclared_original_title"
 
 
 def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(

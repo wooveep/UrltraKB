@@ -155,6 +155,7 @@ async def test_query_model_cannot_read_another_version(kb_dir, opposing_versions
     answer = await run_query("How does WinStack V2 configure TLS?", kb_dir, "openai/gpt-4o-mini")
     assert "TLS is required." not in answer
     assert second.source_revision_id in answer
+    assert "本次允许的证据范围" in answer
 
 
 def test_source_reader_reports_the_version_of_its_published_body(kb_dir, opposing_versions):

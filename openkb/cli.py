@@ -1033,8 +1033,9 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
             detail = f" ({result.error_type})" if result.error_type else ""
             click.echo(f"  [{label}] {result.name}: {result.message}{detail}")
         from openkb.ingest_result import describe_units
+        from openkb.llm_usage import describe_model_usage
 
-        for line in describe_units(result.units):
+        for line in describe_model_usage(result.model_usage) + describe_units(result.units):
             click.echo(f"  {line}")
     click.echo(
         f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}, partial {partial}."

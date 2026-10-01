@@ -103,4 +103,8 @@ def validate_runtime(root: Path) -> OfficeManifest:
     files, links = inventory(root)
     if files != manifest.files or links != manifest.links:
         raise ValueError("Office runtime file inventory changed or is incomplete")
+    if sys.platform == "linux":
+        from openkb.office.fontconfig import require_font_supply
+
+        require_font_supply(manifest)
     return manifest

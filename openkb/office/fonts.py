@@ -9,7 +9,19 @@ from openkb.office.inventory import digest
 
 def font_supply() -> dict:
     if sys.platform != "win32":
-        return {"policy": "private-fontconfig-distribution-only-v1"}
+        from openkb.office.fontconfig import FONT_FILES, FONT_SUBSTITUTION_POLICY
+
+        return {
+            "policy": FONT_SUBSTITUTION_POLICY,
+            "glyph_correction": {
+                "family": "Frank Ruhl Hofshi",
+                "weight": 700,
+                "codepoint": "U+002B",
+            },
+            "applies_to": "linux",
+            "font_files": "pinned-runtime-manifest",
+            "required_files": FONT_FILES,
+        }
     import winreg
 
     windows = Path(os.environ["SystemRoot"]) / "Fonts"

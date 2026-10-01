@@ -5,7 +5,6 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Callable
-from xml.sax.saxutils import escape
 
 import pymupdf
 
@@ -42,11 +41,11 @@ def convert_office(
         directory = Path(temporary)
         environment = office_environment(directory)
         if sys.platform == "linux":
+            from openkb.office.fontconfig import build_fontconfig
+
             fontconfig = directory / "fonts.conf"
             fontconfig.write_text(
-                '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">'
-                "<fontconfig><dir>" + escape(str(root.resolve() / "share/fonts")) + "</dir>"
-                "<cachedir>" + escape(str(directory / "font-cache")) + "</cachedir></fontconfig>",
+                build_fontconfig(root / "share/fonts", directory / "font-cache"),
                 encoding="utf-8",
             )
             environment.update(

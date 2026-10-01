@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
@@ -126,6 +126,7 @@ class PreparedInput:
     digest: str
     images: dict[str, PreparedImage]
     identity: Path
+    text_checks: dict = field(default_factory=dict, compare=False, repr=False)
 
     def is_current(self) -> bool:
         if self.source.resolve() != self.identity:

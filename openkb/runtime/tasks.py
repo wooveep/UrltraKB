@@ -93,6 +93,12 @@ class TaskManager:
                         break
                     results.append(result)
                 view = replace(view, results=tuple(results))
+                from openkb.llm_usage_execution import task_usage_receipt
+
+                view = replace(
+                    view,
+                    model_usage=task_usage_receipt(Path(view.kb_dir), view.id) or view.model_usage,
+                )
                 if view.state == "interrupted" and len(results) == view.total:
                     view = replace(
                         view,
@@ -400,18 +406,32 @@ class TaskManager:
             stage = data.get("stage", task.view.stage)
             text = task.view.text
             usage = task.view.usage
+            model_usage = task.view.model_usage
             if data.get("event") in {"answer_start", "tool_call"}:
                 text = ""
             if data.get("event") == "usage":
                 from openkb.agent.token_usage import TokenUsage
 
                 usage = TokenUsage.from_dict(data["data"]).to_dict()
+            if data.get("event") == "model_usage":
+                from openkb.llm_usage import merge_usage_receipts
+
+                model_usage = merge_usage_receipts(
+                    Path(task.view.kb_dir),
+                    [*(result.model_usage for result in task.view.results), data["data"]],
+                )
             if data.get("event") == "delta":
                 text += data["data"]["text"]
                 if len(text) > 1_000_000:
                     text, truncated = text[-1_000_000:], True
             self._update(
-                task, persist=False, stage=stage, text=text, text_truncated=truncated, usage=usage
+                task,
+                persist=False,
+                stage=stage,
+                text=text,
+                text_truncated=truncated,
+                usage=usage,
+                model_usage=model_usage,
             )
 
     def _finish(self, task: _Task, attempt: _Attempt) -> None:
@@ -440,12 +460,16 @@ class TaskManager:
         self._discard_inputs(task.view.id, attempt.identity.unit_id)
         receipt = read_receipt(self.receipt_dir, attempt.identity)
         if receipt is None or attempt.unconfirmed:
+            from openkb.llm_usage_execution import task_usage_receipt
+
             self._update(
                 task,
                 state="interrupted",
                 stage="unconfirmed",
                 error="Worker result could not be confirmed; remaining units were not started",
                 text=attempt.result.output if attempt.result else task.view.text,
+                model_usage=task_usage_receipt(Path(task.view.kb_dir), task.view.id)
+                or task.view.model_usage,
             )
             return
         result = receipt
@@ -465,11 +489,16 @@ class TaskManager:
                 for i, request in enumerate(task.requests)
             )
         results = (*task.view.results, result)
+        from openkb.llm_usage import merge_usage_receipts
+        from openkb.llm_usage_execution import task_usage_receipt
+
         self._update(
             task,
             results=results,
             error=result.error or task.view.error,
             text=result.output or task.view.text,
+            model_usage=task_usage_receipt(Path(task.view.kb_dir), task.view.id)
+            or merge_usage_receipts(Path(task.view.kb_dir), [item.model_usage for item in results]),
             text_truncated=task.view.text_truncated
             or (
                 attempt.terminal_sequence is not None

@@ -28,12 +28,13 @@ class ImportUnitOutcome:
     tokens: int | None = None
     characters: int | None = None
     block_count: int | None = None
+    model_usage: dict | None = None
 
 
 @dataclass(frozen=True)
 class IngestResult:
     source: str
-    status: Literal["added", "skipped", "failed", "blocked", "partial", "stopped"]
+    status: Literal["added", "skipped", "failed", "blocked", "partial", "stopped", "rejected"]
     resources: tuple[str, ...]
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
@@ -44,12 +45,17 @@ class IngestResult:
     discovery_pending: int | None = None
     imports_pending: int | None = None
     message: str | None = None
+    model_usage: dict | None = None
 
 
 def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     """Plain-text projection shared by CLI add and watch."""
     if not result.source_id:
-        return ()
+        from openkb.llm_usage import describe_model_usage
+
+        return ((result.message,) if result.message else ()) + describe_model_usage(
+            result.model_usage
+        )
     lines = [
         f"Source: {result.source_id}; revision: {result.source_revision_id}; {result.status}",
         f"Body units: {len(result.units)}; discovery pending: {result.discovery_pending}",
@@ -61,7 +67,9 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
         lines.append("Quality: " + ", ".join(result.quality))
     if result.unfinished:
         lines.append("Unfinished: " + ", ".join(result.unfinished))
-    return tuple(lines) + describe_units(result.units)
+    from openkb.llm_usage import describe_model_usage
+
+    return tuple(lines) + describe_model_usage(result.model_usage) + describe_units(result.units)
 
 
 def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
@@ -100,4 +108,7 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
                 f"{target['measurement_value']} {target['measurement_unit']}; "
                 f"capacity: {target['capacity_status']}; {target['capacity_reason']}"
             )
+        from openkb.llm_usage import describe_model_usage
+
+        lines.extend(describe_model_usage(unit.model_usage))
     return tuple(lines)

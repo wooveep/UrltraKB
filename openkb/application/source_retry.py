@@ -10,11 +10,13 @@ from openkb.compilation_report import collect_compile_report
 from openkb.ingest_records import UnitRevision
 from openkb.ingest_result import IngestResult
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import kb_ingest_lock
 from openkb.source_catalog import read_admission, read_record, read_source
 from openkb.unit_publication import list_source_units
 
 
+@track_import_usage
 def retry_source(
     kb_dir: Path,
     source_id: str,
@@ -66,6 +68,6 @@ def retry_source(
         )
         return replace(
             result,
-            quality=tuple(compilation.quality),
+            quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
             unfinished=result.unfinished + tuple(compilation.unfinished),
         )

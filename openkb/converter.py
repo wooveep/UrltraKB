@@ -214,6 +214,9 @@ def _convert_prepared_document(
     6. Register hash in the registry.
     """
     prepared, file_hash = ready.path, ready.digest
+    from openkb.import_text import preflight_import_text, validate_text_preflight
+
+    validate_text_preflight(ready, preflight_import_text(kb_dir, ready, check_stop=check_stop))
     source_identity = _portable_path(ready.identity, kb_dir.resolve())
     with kb_ingest_lock(kb_dir / ".openkb"):
         # ------------------------------------------------------------------

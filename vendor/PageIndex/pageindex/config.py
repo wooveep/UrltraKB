@@ -5,8 +5,9 @@ import os
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class IndexConfig(BaseModel):
@@ -35,6 +36,8 @@ class IndexConfig(BaseModel):
     # (get_llm_params(), overridable via set_llm_params()). Scoped via
     # llm_params_scope so it doesn't leak into other concurrent indexing calls.
     llm_params: dict | None = None
+    usage_observer: Any = Field(default=None, exclude=True)
+
 
     @field_validator("max_concurrency", mode="before")
     @classmethod
@@ -45,6 +48,22 @@ class IndexConfig(BaseModel):
         if v is not None:
             _validate_max_concurrency(v)
         return v
+
+
+_USAGE_OBSERVER: ContextVar[Any] = ContextVar("pageindex_usage_observer", default=None)
+
+
+def get_usage_observer():
+    return _USAGE_OBSERVER.get()
+
+
+@contextmanager
+def usage_observer_scope(observer):
+    token = _USAGE_OBSERVER.set(observer)
+    try:
+        yield
+    finally:
+        _USAGE_OBSERVER.reset(token)
 
 
 def _env_drop_params_default() -> bool:

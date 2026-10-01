@@ -23,6 +23,9 @@ def show_task_details(task, parent):
     ]
     if task.retry_of:
         lines.append(f"重试来源：{task.retry_of}（独立的新任务）")
+    from openkb.llm_usage import describe_model_usage
+
+    lines.extend(describe_model_usage(task.model_usage))
     for number, result in enumerate(task.results, 1):
         lines.extend(["", f"第 {number} 项：{result.status}"])
         if result.error:
@@ -30,6 +33,9 @@ def show_task_details(task, parent):
         lines.extend(result.changes)
         lines.extend(f"未完成：{stage}" for stage in result.unfinished)
         lines.extend(f"质量检查：{note}" for note in result.quality)
+        if result.quality_known is False:
+            lines.append("本次编译质量：未知（没有保存回执）")
+        lines.extend(describe_model_usage(result.model_usage))
         lines.extend(f"保留 / 已提交：{path}" for path in result.resources)
     text.setPlainText("\n".join(lines))
     layout.addWidget(text)

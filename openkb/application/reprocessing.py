@@ -13,6 +13,7 @@ from openkb.ingest_records import UnitRevision
 from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
 from openkb.knowledge_scope import KnowledgeScope, live_scope, resolve_scope
 from openkb.lifecycle import read_lifecycle
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.normalization import normalization_fingerprint, read_processing
 from openkb.pending.policies import CURRENT_POLICY, discovery_hosts
@@ -224,6 +225,7 @@ def _preview_decoding(kb_dir, revision, available):
     return revision
 
 
+@track_import_usage
 def reprocess_source(
     kb_dir: Path,
     source_id: str,
@@ -248,7 +250,7 @@ def reprocess_source(
         result = _execute_reprocessing(root, source_id, version, scope, context, credentials)
         return replace(
             result,
-            quality=tuple(compilation.quality),
+            quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
             unfinished=result.unfinished + tuple(compilation.unfinished),
         )
 
@@ -292,6 +294,18 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
         revision = read_source_revision(root, source.target_revision_id)
         prepared = frozen_source_input(root, source, revision)
         from openkb.application.ingestion import import_prepared_source
+        from openkb.import_text import (
+            ImportTextRejected,
+            preflight_import_text,
+            rejection_result,
+            validate_text_preflight,
+        )
+
+        assessment = preflight_import_text(root, prepared, check_stop=context.check_stop)
+        try:
+            validate_text_preflight(prepared, assessment)
+        except ImportTextRejected as exc:
+            return rejection_result(prepared, exc)
 
         admission = admit_source_revision(
             root,
@@ -302,6 +316,7 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
             reprocessing_request=version,
             reprocessing_policy=json.dumps(preview["current_policy"], sort_keys=True),
             check_stop=context.check_stop,
+            text_assessment=assessment,
         )
         return import_prepared_source(
             root,

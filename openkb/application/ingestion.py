@@ -13,6 +13,7 @@ from openkb.ingest_records import UnitPublication, UnitRevision
 from openkb.ingest_result import ImportUnitOutcome, IngestResult
 from openkb.inputs import TEXT_SOURCE_EXTENSIONS, PreparedInput
 from openkb.knowledge_scope import KnowledgeScope
+from openkb.llm_usage_execution import track_import_unit, track_import_usage
 from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, mutation_scope
 from openkb.source_catalog import (
@@ -132,6 +133,7 @@ def pending_counts(kb_dir, admission):
     }
 
 
+@track_import_usage
 def import_prepared_source(
     kb_dir: Path,
     prepared: PreparedInput,
@@ -147,11 +149,36 @@ def import_prepared_source(
     retry_confirmed: bool = False,
     download_remote_assets: bool | None = None,
     unit_id: str | None = None,
+    text_assessment=None,
 ) -> IngestResult:
     """Caller owns the real KB write lease and frozen input for the whole call."""
     check_stop = context.check_stop if context else lambda: None
+    from openkb.import_text import (
+        ImportTextRejected,
+        preflight_import_text,
+        rejection_result,
+        validate_text_preflight,
+    )
+
+    try:
+        text_assessment = text_assessment or preflight_import_text(
+            kb_dir, prepared, check_stop=check_stop
+        )
+        validate_text_preflight(prepared, text_assessment)
+    except ImportTextRejected as exc:
+        from dataclasses import replace
+
+        return replace(
+            rejection_result(prepared, exc),
+            source_id=admission.source.source_id if admission else None,
+            source_revision_id=admission.revision.source_revision_id if admission else None,
+        )
     admission = admission or admit_source_revision(
-        kb_dir, prepared, identity=origin_url, check_stop=check_stop
+        kb_dir,
+        prepared,
+        identity=origin_url,
+        check_stop=check_stop,
+        text_assessment=text_assessment,
     )
     if prepared.digest != admission.revision.digest:
         raise ValueError("Retained input no longer matches the source revision")
@@ -247,6 +274,8 @@ def import_prepared_source(
     )
 
 
+@track_import_usage
+@track_import_unit
 def process_import_unit(
     kb_dir,
     prepared,
@@ -352,7 +381,16 @@ def process_import_unit(
                         "Worksheet retired but version review completion was not recorded"
                     )
             return result_from_publication(kb_dir, admission, state, status="added")
-        with prepare_compile_view(kb_dir, scope.view_id) as view:
+        from openkb.llm_usage import usage_context
+
+        with (
+            usage_context(
+                unit_id=unit.unit_id,
+                unit_revision_id=revision.unit_revision_id,
+                attempt_id=state.job_id,
+            ),
+            prepare_compile_view(kb_dir, scope.view_id) as view,
+        ):
             working = view.scope.wiki_dir.parent
             check_stop()
             with mutation_scope(kb_dir, [working], operation="compile-import-unit"):

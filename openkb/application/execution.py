@@ -19,6 +19,7 @@ class ExecutionContext:
     on_event: Callable[[dict], None] = field(default=lambda event: None, repr=False)
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
+    usage_task_id: str | None = None
 
     def check_stop(self) -> None:
         if self.cancelled():

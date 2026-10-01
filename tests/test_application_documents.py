@@ -42,7 +42,14 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     )
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
-    assert [event["stage"] for event in events] == ["converting", "compiling", "committed"]
+    assert [event["stage"] for event in events if "stage" in event] == [
+        "converting",
+        "compiling",
+        "committed",
+    ]
+    usage_events = [event["data"] for event in events if event.get("event") == "model_usage"]
+    assert usage_events[-1]["current"]["total_known"] == 40
+    assert result.model_usage["current"]["requests"] == 2
 
 
 def test_import_uses_one_configuration_snapshot_across_model_calls(kb_dir, monkeypatch):

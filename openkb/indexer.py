@@ -143,6 +143,11 @@ def _build_index_config(
         "if_add_node_summary": True,
         "if_add_doc_description": True,
     }
+    from openkb.llm_usage import active_scope
+    from openkb.llm_usage_transport import IndexUsageObserver
+
+    if active_scope() is not None:
+        kwargs["usage_observer"] = IndexUsageObserver()
     headers, timeout, _ = resolve_per_request_overrides(config)
     from openkb.llm_runtime import audit_step_headers
 
@@ -217,6 +222,13 @@ def index_long_document(
             )
             break
         except Exception as exc:
+            from pageindex.index.block_policy import BlockContractError
+
+            cause: BaseException | None = exc
+            while cause is not None:
+                if isinstance(cause, BlockContractError):
+                    raise cause from None
+                cause = cause.__cause__
             logger.warning(
                 "PageIndex attempt %d/%d failed for %s: %s",
                 attempt,

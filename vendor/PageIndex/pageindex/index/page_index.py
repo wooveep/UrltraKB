@@ -8,7 +8,10 @@ from .toc_titles import reconcile_body_title
 from .utils import *
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
+
+from .block_policy import BlockContractError
 
 ################### check title in page #########################################################
 async def check_title_appearance(item, page_list, start_index=1, model=None, policy=None):    
@@ -43,7 +46,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
     response = extract_json(response)
     if 'answer' in response:
         answer = response['answer']
@@ -71,7 +74,7 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
     response = extract_json(response)
     if logger:
         logger.info(f"Response: {response}")
@@ -134,7 +137,7 @@ def toc_detector_single_page(content, model=None):
     Directly return the final JSON structure. Do not output anything else.
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
-    response = llm_completion(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt, usage_stage="verification")
     # print('response', response)
     json_content = extract_json(response)
     return json_content.get('toc_detected', 'no')
@@ -153,7 +156,7 @@ def check_if_toc_extraction_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Document:\n' + content + '\n Table of contents:\n' + toc
-    response = llm_completion(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt, usage_stage="verification")
     json_content = extract_json(response)
     return json_content.get('completed', 'no')
 
@@ -171,7 +174,7 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = prompt + '\n Raw Table of contents:\n' + content + '\n Cleaned Table of contents:\n' + toc
-    response = llm_completion(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt, usage_stage="verification")
     json_content = extract_json(response)
     return json_content.get('completed', 'no')
 
@@ -225,7 +228,7 @@ def detect_page_index(toc_content, model=None):
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = llm_completion(model=model, prompt=prompt)
+    response = llm_completion(model=model, prompt=prompt, usage_stage="verification")
     json_content = extract_json(response)
     return json_content.get('page_index_given_in_toc', 'no')
 
@@ -761,7 +764,7 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
-    response = await llm_acompletion(model=model, prompt=prompt)
+    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="correction")
     json_content = extract_json(response)
     physical_index = json_content.get('physical_index')
     if physical_index is None:
@@ -824,7 +827,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
 
         if policy:
             replacement = await policy.fix(toc_with_page_number[list_index],
-                max(start_index, prev_correct), next_correct, model, llm_acompletion, extract_json)
+                max(start_index, prev_correct), next_correct, model, partial(llm_acompletion, usage_stage="correction"), extract_json)
             return {'title': incorrect_item['title'], **(replacement or {}),
                     'list_index': list_index, 'is_valid': replacement is not None}
 
@@ -849,7 +852,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         if check_result['answer'] != 'yes':
             replacement = await reconcile_body_title(
                 toc_with_page_number[list_index], page_list, start_index,
-                prev_correct, next_correct, model, llm_acompletion,
+                prev_correct, next_correct, model, partial(llm_acompletion, usage_stage="correction"),
             )
             if replacement is not None:
                 return {'list_index': list_index, 'is_valid': True, **replacement}
@@ -920,10 +923,17 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
     while current_incorrect:
         print(f"Fixing {len(current_incorrect)} incorrect results")
+        before = copy.deepcopy(current_toc) if getattr(policy, 'unit_kind', None) == 'block' else None
         
         current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger, **({"policy": policy} if policy else {}))
                 
         fix_attempt += 1
+        if before is not None and current_incorrect and before == current_toc:
+            reasons = [policy.validate_entry(current_toc[item['list_index']], start_index, len(page_list))
+                       for item in current_incorrect]
+            if logger:
+                logger.info({'block_correction_stop': 'no_progress', 'reasons': reasons})
+            raise BlockContractError(f"Unverified content-block anchors: correction made no progress: {reasons}")
         if fix_attempt >= max_attempts:
             if logger:
                 logger.info("Maximum fix attempts reached")
@@ -961,6 +971,8 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, 
     indexed_sample_list = []
     for idx in sample_indices:
         item = list_result[idx]
+        if getattr(policy, 'unit_kind', None) == 'block':
+            policy.normalize_title_origin(item, start_index, len(page_list))
         # Skip items with None physical_index (these were invalidated by validate_and_truncate_physical_indices)
         if policy or item.get('physical_index') is not None:
             item_with_index = item.copy()
@@ -1040,6 +1052,8 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     if (policy or accuracy > 0.6) and len(incorrect_results) > 0:
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
         if policy and incorrect_results:
+            if getattr(policy, 'unit_kind', None) == 'block':
+                raise BlockContractError("Block correction attempts exhausted")
             raise ValueError("Unverified content-block anchors after correction")
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))

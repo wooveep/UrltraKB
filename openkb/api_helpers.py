@@ -220,6 +220,10 @@ async def _write_upload(
 def _summarize_add_results(kb: str, results: list[AddFileItem]) -> AddResponse:
     from collections import Counter
 
+    from openkb.llm_usage import merge_usage_receipts
+
+    receipts = [item.model_usage for item in results if item.model_usage]
+    root = Path(receipts[0]["ledger"]).parent.parent if receipts else None
     return AddResponse(
         kb=kb,
         files=results,
@@ -232,6 +236,8 @@ def _summarize_add_results(kb: str, results: list[AddFileItem]) -> AddResponse:
         unit_counts=dict(Counter(unit.status for item in results for unit in item.units)),
         discovery_pending_count=sum(item.discovery_pending or 0 for item in results),
         imports_pending_count=sum(item.imports_pending or 0 for item in results),
+        rejected_count=sum(item.status == "rejected" for item in results),
+        model_usage=merge_usage_receipts(root, receipts) if root else None,
     )
 
 

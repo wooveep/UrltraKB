@@ -1,5 +1,6 @@
 # pageindex/index/pipeline.py
 from __future__ import annotations
+
 from ..parser.protocol import ContentNode, ParsedDocument
 
 
@@ -72,10 +73,15 @@ def _run_async(coro):
 def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     """Main entry point: ParsedDocument -> tree structure dict.
     Routes to the appropriate strategy and runs enhancement."""
-    from .utils import (write_node_id, add_node_text, remove_structure_text,
-                        generate_summaries_for_structure, generate_doc_description,
-                        create_clean_structure_for_description)
-    from ..config import IndexConfig, max_concurrency_scope, llm_params_scope
+    from ..config import IndexConfig, llm_params_scope, max_concurrency_scope, usage_observer_scope
+    from .utils import (
+        add_node_text,
+        create_clean_structure_for_description,
+        generate_doc_description,
+        generate_summaries_for_structure,
+        remove_structure_text,
+        write_node_id,
+    )
 
     if opt is None:
         opt = IndexConfig(model=model) if model else IndexConfig()
@@ -84,7 +90,8 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     # thread/async context), so concurrent indexing of other documents isn't
     # affected and a one-off value never sticks as the process default.
     with max_concurrency_scope(getattr(opt, "max_concurrency", None)), \
-         llm_params_scope(getattr(opt, "llm_params", None)):
+         llm_params_scope(getattr(opt, "llm_params", None)), \
+         usage_observer_scope(getattr(opt, "usage_observer", None)):
         nodes = parsed.nodes
         policy = None
         if (parsed.metadata or {}).get("unit_kind") == "block":

@@ -29,6 +29,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "multi-format-sources-v1",
         "explicit-reprocessing-v1",
         "embedded-discovery-v3",
+        "pending-import-receipts-v1",
     }
 )
 

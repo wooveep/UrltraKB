@@ -70,5 +70,15 @@
     "version": "1.062",
     "sha256": "1b49d9304012bf8db9e5dd4104183d5c122c445d0570a2259125f71977595b90",
     "license": "SourceCodePro-It-OFL.txt"
+  },
+  {
+    "file": "FrankRuhlHofshi-Bold.otf",
+    "family": "Frank Ruhl Hofshi",
+    "style": "Bold",
+    "weight": 700,
+    "version": "5.001+openkb.plus1",
+    "sha256": "11c2d7c3dee34f6195ca89ed359d90c7e56385bb5cd41934e1f56eb586db1f8b",
+    "license": "OfficeSymbol-OFL.txt",
+    "source": "scripts/prepare_office_symbol_font.py (pinned LibreOffice 26.2.6.3 runtime inputs)"
   }
 ]

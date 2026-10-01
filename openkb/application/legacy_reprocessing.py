@@ -191,6 +191,18 @@ def reprocess_legacy(kb_dir, preview, context, credentials):
             from openkb.application.reprocessing import ReprocessingConflict
 
             raise ReprocessingConflict("Legacy assets changed after preview; preview again")
+        from openkb.import_text import (
+            ImportTextRejected,
+            preflight_import_text,
+            rejection_result,
+            validate_text_preflight,
+        )
+
+        assessment = preflight_import_text(kb_dir, prepared, check_stop=context.check_stop)
+        try:
+            validate_text_preflight(prepared, assessment)
+        except ImportTextRejected as exc:
+            return rejection_result(prepared, exc)
         source = admit_legacy_snapshot(kb_dir, identity, meta)
         frozen = read_source_revision(kb_dir, source.target_revision_id)
         intent = read_record(
@@ -211,6 +223,7 @@ def reprocess_legacy(kb_dir, preview, context, credentials):
             reprocessing_request=preview["version"],
             reprocessing_policy=json.dumps(preview["current_policy"], sort_keys=True),
             check_stop=context.check_stop,
+            text_assessment=assessment,
         )
         return import_prepared_source(
             kb_dir,

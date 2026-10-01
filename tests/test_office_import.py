@@ -113,6 +113,39 @@ def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
     assert pdf.status == "added", pdf.message
 
 
+def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
+    kb_dir, writer_document, office_runtime, tmp_path
+):
+    import pymupdf
+
+    from openkb.office.convert import convert_office
+
+    with zipfile.ZipFile(writer_document) as package:
+        parts = {name: package.read(name) for name in package.namelist()}
+    parts["word/document.xml"] = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:body><w:p><w:r><w:rPr><w:rFonts w:ascii="思源宋体 CN" '
+        'w:eastAsia="思源宋体 CN"/><w:b/></w:rPr>'
+        "<w:t>80+ 40+ 100+ 20- 2× 50% 中文</w:t></w:r></w:p></w:body></w:document>"
+    ).encode()
+    with zipfile.ZipFile(writer_document, "w") as package:
+        for name, body in parts.items():
+            package.writestr(name, body)
+    pdf_path = tmp_path / "symbols.pdf"
+    convert_office(kb_dir, writer_document, pdf_path, check_stop=lambda: None)
+    with pymupdf.open(pdf_path) as pdf:
+        assert pdf.page_count == 1
+        assert "80+ 40+ 100+ 20- 2× 50% 中文" in pdf[0].get_text()
+        fonts = {
+            span["font"]
+            for block in pdf[0].get_text("dict")["blocks"]
+            for line in block.get("lines", [])
+            for span in line["spans"]
+            if "+" in span["text"]
+        }
+        assert fonts == {"FrankRuhlHofshi-Bold"}
+
+
 @pytest.mark.parametrize("limit", [10, 1])
 def test_docx_freezes_final_visible_pages_and_exact_office_provenance(
     kb_dir, writer_document, office_runtime, pdf_model, limit
@@ -367,6 +400,7 @@ def test_stopping_office_reaps_its_tree_and_keeps_original(
     from openkb.documents import read_document_source
     from openkb.locks import LockCancelled
 
+    original = writer_document.read_bytes()
     if stop == "timeout":
         apply_kb_config_patch(
             kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"office_timeout_seconds": 1})
@@ -380,6 +414,11 @@ def test_stopping_office_reaps_its_tree_and_keeps_original(
     pids = json.loads(hanging_office.pids.read_text())
     assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
     documents = source_inventory(kb_dir)
+    if stop == "cancel":
+        # Text preflight is before admission. Cancellation still reaps owned
+        # Office processes and leaves the user's original bytes intact.
+        assert documents == [] and writer_document.read_bytes() == original
+        return
     saved = read_document_source(kb_dir, documents[0]["source_id"])
     assert saved["knowledge_revision_id"] is None
     assert (kb_dir / saved["original_path"]).read_bytes() == writer_document.read_bytes()

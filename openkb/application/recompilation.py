@@ -17,6 +17,7 @@ from openkb.config import (
 )
 from openkb.ingest_result import ImportUnitOutcome
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import (
     async_kb_lock,
     atomic_write_text,
@@ -191,7 +192,9 @@ def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool
 
 @dataclass(frozen=True)
 class RecompileResult:
-    status: Literal["compiled", "skipped", "failed", "conflict", "blocked", "stopped", "partial"]
+    status: Literal[
+        "compiled", "skipped", "failed", "rejected", "conflict", "blocked", "stopped", "partial"
+    ]
     name: str = ""
     kind: str = "short"
     message: str | None = None
@@ -204,8 +207,10 @@ class RecompileResult:
     quality: tuple[str, ...] = ()
     execution_mode: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
+    model_usage: dict | None = None
 
 
+@track_import_usage
 async def recompile_document(
     kb_dir: Path,
     file_hash: str,
@@ -321,15 +326,17 @@ async def recompile_document(
             max_concurrency=max_concurrency,
             scope=scope,
         )
-        status: Literal["compiled", "skipped", "failed", "blocked", "stopped", "partial"] = (
-            "blocked"
-        )
+        status: Literal[
+            "compiled", "skipped", "failed", "rejected", "blocked", "stopped", "partial"
+        ] = "blocked"
         if result.status == "added":
             status = "compiled"
         elif result.status == "skipped":
             status = "skipped"
         elif result.status == "failed":
             status = "failed"
+        elif result.status == "rejected":
+            status = "rejected"
         elif result.status == "partial":
             status = "partial"
         elif result.status == "stopped":
@@ -353,4 +360,5 @@ async def recompile_document(
             quality=result.quality,
             execution_mode=result.units[0].execution_mode if result.units else None,
             units=result.units,
+            model_usage=result.model_usage,
         )

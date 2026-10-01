@@ -76,6 +76,9 @@ def test_business_commit_wins_when_job_completion_record_is_lost(
     monkeypatch.setattr(MutationSnapshot, "mark_committed", lose_completion)
     result = process_pending(kb_dir)
     assert lost and all(outcome["status"] == "completed" for outcome in result["outcomes"])
+    recovered = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
+    assert recovered["result"] is None and recovered["quality_known"] is False
+    assert recovered["model_usage"]["current"]["requests"] > 0
     assert process_pending(kb_dir)["processed"] == 0
 
 

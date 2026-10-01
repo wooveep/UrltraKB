@@ -21,6 +21,7 @@ from openkb.ingest_result import IngestResult as DocumentResult
 from openkb.inputs import InputChanged, PreparedInput, prepared_input, validate_source_root
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lifecycle import read_lifecycle
+from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, publish_staged_tree
@@ -116,7 +117,7 @@ def add_single_file(
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
-) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped"]:
+) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped", "rejected"]:
     """Compatibility projection of the shared import use case's status."""
     result = import_document(
         kb_dir,
@@ -369,6 +370,7 @@ class AddFileResult:
     imports_pending: int | None = None
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    model_usage: dict | None = None
 
 
 def _add_for_api(
@@ -416,9 +418,11 @@ def _add_for_api(
         imports_pending=result.imports_pending,
         quality=result.quality,
         unfinished=result.unfinished,
+        model_usage=result.model_usage,
     )
 
 
+@track_import_usage
 def import_document(
     kb_dir: Path,
     source: Path,
@@ -518,7 +522,7 @@ def import_document(
                     )
                     return replace(
                         result,
-                        quality=tuple(compilation.quality),
+                        quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
                         unfinished=result.unfinished + tuple(compilation.unfinished),
                     )
                 outcome = _add_single_file_locked(

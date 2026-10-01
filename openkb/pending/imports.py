@@ -5,7 +5,7 @@ import hashlib
 from openkb.application.ingestion import import_prepared_source
 from openkb.compilation_report import collect_compile_report
 from openkb.inputs import prepared_input
-from openkb.pending.records import DerivedExecution, DiscoveryCheckpoint
+from openkb.pending.records import DerivedExecution, DiscoveryCheckpoint, PendingImportResult
 from openkb.pending.store import save_job
 from openkb.source_catalog import admit_source_revision, read_record, read_source_revision
 from openkb.source_records import DiscoveryIntent
@@ -41,14 +41,19 @@ def import_file(kb_dir, job, context):
     with (
         prepared_input(path) as prepared,
         context.begin(kb_dir) as credentials,
-        collect_compile_report(),
+        collect_compile_report() as compilation,
     ):
+        from openkb.import_text import preflight_import_text, validate_text_preflight
+
+        assessment = preflight_import_text(kb_dir, prepared, check_stop=context.check_stop)
+        validate_text_preflight(prepared, assessment)
         admission = admit_source_revision(
             kb_dir,
             prepared,
             identity="recovered:" + job.intent_id,
             name=job.filename,
             check_stop=context.check_stop,
+            text_assessment=assessment,
             execution=DerivedExecution(
                 root_import_id=job.root_import_id,
                 kb_generation=job.kb_generation,
@@ -75,6 +80,19 @@ def import_file(kb_dir, job, context):
             bundle=credentials,
             on_event=context.on_event,
             retry_confirmed=True,
+            text_assessment=assessment,
+        )
+        from dataclasses import asdict
+
+        snapshot = PendingImportResult(
+            attempt_id=job.attempt_id,
+            source_id=admission.source.source_id,
+            source_revision_id=admission.revision.source_revision_id,
+            quality_known=result.status in {"added", "partial"} or bool(compilation.quality),
+            quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
+            unfinished=tuple(dict.fromkeys((*result.unfinished, *compilation.unfinished))),
+            units=tuple(asdict(unit) for unit in result.units),
+            model_usage=result.model_usage,
         )
         return save_job(
             kb_dir,
@@ -85,6 +103,7 @@ def import_file(kb_dir, job, context):
                     if result.status in {"added", "skipped"}
                     else result.status,
                     "message": result.message,
+                    "result": snapshot,
                 }
             ),
         )

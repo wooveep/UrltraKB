@@ -436,7 +436,12 @@ def _llm_call(
     spinner.start()
     t0 = time.time()
 
-    response = litellm.completion(model=model, messages=messages, **kwargs)
+    from openkb.llm_usage_transport import observe_model_call
+
+    with observe_model_call(model, "compile." + step_name) as usage:
+        response = litellm.completion(model=model, messages=messages, **kwargs)
+        if usage:
+            usage.finish(response)
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
@@ -485,7 +490,12 @@ async def _llm_call_async(
 
     t0 = time.time()
 
-    response = await litellm.acompletion(model=model, messages=messages, **kwargs)
+    from openkb.llm_usage_transport import observe_model_call
+
+    with observe_model_call(model, "compile." + step_name) as usage:
+        response = await litellm.acompletion(model=model, messages=messages, **kwargs)
+        if usage:
+            usage.finish(response)
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 

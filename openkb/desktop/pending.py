@@ -110,7 +110,7 @@ class PendingDialog(ManagementPanel):
         rows = [
             job
             for job in inventory["jobs"]
-            if job["status"] != "completed" or job["id"] in inspected
+            if job["kind"] == "import" or job["status"] != "completed" or job["id"] in inspected
         ]
         self.table.setRowCount(len(rows))
         for row, job in enumerate(rows):
@@ -129,7 +129,9 @@ class PendingDialog(ManagementPanel):
                         "stopped": "已停止",
                         "cancelled": "执行组已取消",
                         "stale": "已失效",
-                        "completed": "已完成",
+                        "completed": "已完成，有编译缺项"
+                        if job.get("quality") or job.get("unfinished")
+                        else "已完成",
                     }.get(job["status"], job["status"]),
                     {
                         "Source count budget exhausted": "来源数已达到本组上限",
@@ -179,7 +181,33 @@ class PendingDialog(ManagementPanel):
                     if item["discovery_intent_id"] == job["id"]
                 )
             )
+            if job["kind"] == "import":
+                from openkb.llm_usage import describe_model_usage
+
+                lines = [
+                    f"任务：{job['id']}",
+                    f"文件：{job['filename']}",
+                    f"来源：{job.get('source_id') or '尚未接入'}",
+                    f"来源修订：{job.get('source_revision_id') or '无'}",
+                    "本次编译质量：" + ("已记录" if job.get("quality_known") else "未知"),
+                ]
+                lines.extend("质量告警：" + note for note in job.get("quality", []))
+                lines.extend("未完成：" + stage for stage in job.get("unfinished", []))
+                for unit in (job.get("result") or {}).get("units", []):
+                    lines.append(
+                        f"单元：{unit.get('name') or unit.get('key')}；{unit['unit_id']}；"
+                        f"目标修订：{unit['target_revision_id']}"
+                    )
+                    lines.extend(describe_model_usage(unit.get("model_usage")))
+                lines.extend(describe_model_usage(job.get("model_usage")))
+                self.diagnostics.setPlainText("\n".join(lines))
             group = self.groups[job["root_import_id"]]
+            usage = group["model_usage"]
+            self.diagnostics.appendPlainText(
+                f"\n主文与附件累计（请求集合）：已知输入 {usage['input_total']}，"
+                f"已知输出 {usage['output_total']} tokens；请求 {usage['requests']}，"
+                f"用量未知 {usage['unknown_requests']}；账本：{group['usage_ledger']}"
+            )
             for key, entry in self.fields.items():
                 entry.setText(str(group["budget"][key]))
             self.budget_status.setText(
