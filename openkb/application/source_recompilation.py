@@ -179,6 +179,15 @@ async def recompile_source(
     from openkb.llm_usage import usage_context
 
     try:
+        from openkb.conversion_artifacts import read_conversion_artifacts
+        from openkb.office.records import OfficeConversion
+        from openkb.office.slide_content import require_slide_navigation
+
+        conversion = read_conversion_artifacts(
+            kb_dir, revision.unit_revision_id, frozen.source_revision_id
+        )
+        if conversion.get("office"):
+            require_slide_navigation(OfficeConversion.model_validate(conversion["office"]).slides)
         with (
             usage_context(
                 source_id=source.source_id,

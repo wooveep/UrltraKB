@@ -29,6 +29,10 @@ class PagePartsPolicy:
             raise PagePartsContractError("Invalid physical slide navigation range")
         return any(text.strip() for parts in self.parts[first - 1:last] for text in parts.values())
 
+    def require_navigation_text(self, first=1, last=None):
+        if not self.has_navigation_text(first, last):
+            raise PagePartsContractError("No content is available for text navigation (body/notes are empty)")
+
     def _textless_entry(self, item, first, last):
         number, anchor = item.get("physical_index"), item.get("anchor")
         if (type(number) is not int or not first <= number <= last or not 1 <= number <= len(self.parts)
@@ -50,8 +54,7 @@ class PagePartsPolicy:
         return 0 <= left <= right <= len(text) and text[left:right] == anchor.get("excerpt")
 
     def prepare_navigation(self, items, first, last):
-        if not self.has_navigation_text(first, last):
-            raise PagePartsContractError("No content is available for text navigation (body/notes are empty)")
+        self.require_navigation_text(first, last)
         structures = [item.get("structure") for item in items]
         if any(structures.count(value) > 1 for value in structures):
             raise ValueError("Slide sections must have distinct IDs in original order")

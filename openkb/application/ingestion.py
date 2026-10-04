@@ -378,6 +378,10 @@ def process_import_unit(
             unit=unit,
             sheet=sheet,
         )
+        if normalized.office_path:
+            from openkb.office.slide_content import read_slides, require_slide_navigation
+
+            require_slide_navigation(read_slides(directory / normalized.office_path))
         if assessment.missing_fields:
             state = save_version_wait(kb_dir, admission, normalized, state, assessment)
             return result_from_publication(kb_dir, admission, state, status="blocked")

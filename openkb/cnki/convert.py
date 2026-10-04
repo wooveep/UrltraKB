@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from openkb.cnki.engine import detect_format, inspect_pdf
-from openkb.cnki.records import CNKIConversion
+from openkb.cnki.records import CNKIConversion, CNKIWorkerResult
 from openkb.cnki.runtime import identity_key, processing_identity, require_runtime
 from openkb.locks import atomic_write_bytes, atomic_write_text
 from openkb.state import HashRegistry
@@ -29,7 +29,7 @@ def convert_cnki(
     if timeout <= 0:
         raise ValueError("CNKI conversion timeout must be positive")
     with source.open("rb") as stream:
-        detect_format(stream.read(8))
+        kind = detect_format(stream.read(8))
     identity = processing_identity()
     require_runtime(identity)
     if expected_identity is not None and expected_identity != identity:
@@ -58,10 +58,10 @@ def convert_cnki(
                     message = diagnostics.read(4096).decode("utf-8", errors="replace")
                     if response.is_file():
                         try:
-                            message = (
-                                json.loads(response.read_text("utf-8")).get("error") or message
-                            )
-                        except (OSError, ValueError, AttributeError):
+                            failure = json.loads(response.read_text("utf-8"))
+                            if isinstance(failure, dict) and isinstance(failure.get("error"), str):
+                                message = failure["error"] or message
+                        except (OSError, ValueError):
                             pass
                     raise ValueError(f"CNKI conversion failed: {message.strip()}")
             finally:
@@ -74,15 +74,17 @@ def convert_cnki(
                         process.wait()
         if not pdf.is_file() or not response.is_file():
             raise ValueError("CNKI conversion did not return its PDF and receipt")
-        result = json.loads(response.read_text("utf-8"))
-        pages = inspect_pdf(pdf, declared_pages=result.get("declared_pages"))
-        if HashRegistry.hash_file(source) != digest or pages != result["pages"]:
+        result = CNKIWorkerResult.model_validate_json(response.read_text("utf-8"))
+        if result.internal_format != kind:
+            raise ValueError("CNKI conversion receipt does not match the original format")
+        pages = inspect_pdf(pdf, declared_pages=result.declared_pages)
+        if HashRegistry.hash_file(source) != digest or pages != result.pages:
             raise ValueError("CNKI original or conversion changed during the attempt")
         record = CNKIConversion(
             input_digest=digest,
             processing_identity=identity,
             pdf_digest=HashRegistry.hash_file(pdf),
-            **result,
+            **result.model_dump(),
         )
         check_stop()
         record_path = output.with_suffix(".cnki.json")

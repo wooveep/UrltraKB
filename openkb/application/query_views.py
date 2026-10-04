@@ -318,11 +318,10 @@ def resolve_query_views(
         scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
         views = list_views(root)
+        version_labels = {v for view in views for v in view.applicable_versions}
         if scope:
             views = tuple(view for view in views if view.view_id == scope.view_id)
-        requested = _requested_versions(
-            question, {v for view in views for v in view.applicable_versions}
-        )
+        requested = _requested_versions(question, version_labels)
         compare = bool(
             re.search(r"\b(?:compare|versus|vs)\b|比较|对比|差异", question, re.IGNORECASE)
         )

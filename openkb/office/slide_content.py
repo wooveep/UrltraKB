@@ -39,3 +39,17 @@ def attach_slides(pages: list[dict], slides: list[Slide]) -> list[dict]:
 
 def read_slides(provenance: Path) -> list[Slide]:
     return OfficeConversion.model_validate_json(provenance.read_text("utf-8")).slides
+
+
+def require_slide_navigation(slides: list[Slide]) -> None:
+    """Apply the same frozen body/notes boundary before full or segmented compilation."""
+    if not slides:
+        return
+    from pageindex.index.page_parts_policy import PagePartsPolicy
+
+    PagePartsPolicy(
+        {
+            "unit_count": len(slides),
+            "page_parts": [{"body": slide.body, "notes": slide.notes} for slide in slides],
+        }
+    ).require_navigation_text()

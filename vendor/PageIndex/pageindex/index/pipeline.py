@@ -100,9 +100,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
         elif (parsed.metadata or {}).get("notes_policy"):
             from .page_parts_policy import PagePartsPolicy
             policy = PagePartsPolicy(parsed.metadata)
-            if not policy.has_navigation_text():
-                from .page_parts_policy import PagePartsContractError
-                raise PagePartsContractError("No content is available for text navigation (body/notes are empty)")
+            policy.require_navigation_text()
         strategy = "content_based" if policy else detect_strategy(nodes)
 
         if strategy == "level_based":

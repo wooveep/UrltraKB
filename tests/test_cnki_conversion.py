@@ -151,6 +151,47 @@ def test_parallel_conversion_uses_private_directories_and_identical_pdfs(tmp_pat
     assert receipts[0] != receipts[1] and all(path.is_file() for path in receipts)
 
 
+@pytest.mark.parametrize(
+    "receipt, message",
+    [
+        ({}, "validation"),
+        ([], "validation"),
+        ({"internal_format": "PDF", "pages": True}, "validation"),
+        ({"internal_format": "PDF", "pages": "1"}, "validation"),
+        ({"internal_format": "PDF", "pages": 1, "unexpected": True}, "validation"),
+        ({"internal_format": "KDH", "pages": 1}, "does not match"),
+    ],
+)
+def test_invalid_worker_receipt_never_publishes_artifacts(
+    tmp_path, pdf_bytes, monkeypatch, receipt, message
+):
+    import json
+    import subprocess
+    import sys
+
+    from openkb.cnki.convert import convert_cnki
+
+    source, output = tmp_path / "source.caj", tmp_path / "internal.pdf"
+    source.write_bytes(pdf_bytes)
+    popen = subprocess.Popen
+    attempts = []
+    code = (
+        "import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2]); "
+        "open(sys.argv[3], 'w').write(sys.argv[4])"
+    )
+
+    def worker(command, **kwargs):
+        attempts.append(Path(kwargs["cwd"]))
+        return popen([sys.executable, "-c", code, *command[-3:], json.dumps(receipt)], **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", worker)
+    with pytest.raises(ValueError, match=message):
+        convert_cnki(source, output)
+    assert all(not path.exists() for path in attempts)
+    assert not output.exists() and not output.with_suffix(".cnki.json").exists()
+    assert source.read_bytes() == pdf_bytes
+
+
 def test_password_pdf_and_wrong_caj_page_count_fail(tmp_path, pdf_bytes):
     import struct
 

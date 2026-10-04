@@ -206,6 +206,30 @@ def test_explicit_product_scope_still_checks_versions_and_history(kb_dir, monkey
     assert "later" not in " ".join(selected.views[0].files)
 
 
+@pytest.mark.parametrize(
+    "question", ["WinStack version preview requirements?", "WinStack 版本 preview 的要求？"]
+)
+def test_explicit_scope_keeps_known_version_labels_from_other_products(
+    kb_dir, monkeypatch, question
+):
+    from openkb.application.query_views import resolve_query_views
+    from openkb.application.views import view_scope
+
+    first = _import_rule(kb_dir, monkeypatch, "chosen", "stable", "Stable instruction.")
+    live = view_scope(kb_dir, first.units[0].view_id)
+    pinned = resolve_query_views(kb_dir, "WinStack version stable", scope=live).views[0]
+    history = view_scope(kb_dir, live.view_id, historical_revision=pinned.knowledge_revision_id)
+    _import_rule(
+        kb_dir, monkeypatch, "other", "preview", "Preview instruction.", product="Other product"
+    )
+    for scope in (live, history):
+        selection = resolve_query_views(kb_dir, question, scope=scope)
+        assert selection.views == ()
+        assert "preview" in " ".join(selection.missing)
+        selected = resolve_query_views(kb_dir, "WinStack version stable", scope=scope)
+        assert [view.view_id for view in selected.views] == [live.view_id]
+
+
 @pytest.fixture
 def ambiguous_products(kb_dir, monkeypatch):
     for i, product in enumerate(("CNware-WinStack", "CNware WinStack")):
