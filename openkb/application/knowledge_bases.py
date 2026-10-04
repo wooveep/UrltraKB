@@ -340,7 +340,7 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
             if scope is None or scope.view_id == view.view_id
         }
         wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
-        subdirs = ["sources", "summaries", "concepts", "reports"]
+        subdirs = ["sources", "summaries", "concepts", "entities", "reports"]
         directories = {}
         for subdir in subdirs:
             path = wiki_dir / subdir
@@ -349,9 +349,11 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
         raw_dir = kb_dir / "raw"
         raw_count = len([f for f in raw_dir.iterdir() if f.is_file()]) if raw_dir.exists() else 0
 
-        summaries = (
-            list((wiki_dir / "summaries").glob("*.md")) if (wiki_dir / "summaries").exists() else []
-        )
+        from openkb.schema import PAGE_CONTENT_DIRS
+
+        compiled = [
+            path for section in PAGE_CONTENT_DIRS for path in (wiki_dir / section).glob("*.md")
+        ]
         reports = (
             list((wiki_dir / "reports").glob("*.md")) if (wiki_dir / "reports").exists() else []
         )
@@ -360,6 +362,6 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
             "needs_refresh": {view: reasons for view, reasons in pending.items() if reasons},
             "raw_count": raw_count,
             "total_indexed": get_kb_list(kb_dir, scope=scope)["document_count"],
-            "last_compile": _newest_mtime_iso(summaries),
+            "last_compile": _newest_mtime_iso(compiled),
             "last_lint": _newest_mtime_iso(reports),
         }

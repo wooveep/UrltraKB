@@ -6,7 +6,6 @@ import asyncio
 import datetime
 import hashlib
 import json
-from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
@@ -44,6 +43,12 @@ class LintResult:
     error_type: str | None = None
 
 
+def describe_repairs(files_changed: int | None, ghosts: int | None) -> str:
+    if files_changed:
+        return f"Fixed {ghosts} wikilink(s) across {files_changed} file(s)."
+    return "Nothing to fix — all wikilinks resolve."
+
+
 def _wiki_version(scope: KnowledgeScope) -> str:
     versions = file_versions(scope.kb_dir, [scope.wiki_dir])
     return hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()
@@ -64,15 +69,15 @@ async def check_knowledge(
     context: ExecutionContext | None = None,
     bundle: LlmCredentialBundle | None = None,
     on_event: Callable[[dict], None] | None = None,
-    prepare_model: Callable[[], None] | None = None,
     scope: KnowledgeScope | None = None,
 ) -> LintResult:
+    context = context or ExecutionContext(on_event=on_event or (lambda event: None))
     root = kb_dir.resolve()
     scope = resolve_scope(root, scope, writable=True)
     wiki = scope.wiki_dir
-    cancelled = context.cancelled if context else None
-    on_wait = context.waiting if context else None
-    emit = context.on_event if context else on_event or (lambda event: None)
+    cancelled = context.cancelled
+    on_wait = context.waiting
+    emit = context.on_event
     async with async_kb_lock(
         root / ".openkb", exclusive=True, cancelled=cancelled, on_wait=on_wait
     ):
@@ -92,13 +97,12 @@ async def check_knowledge(
         result = LintResult("completed")
         stage = "link_repair" if options.fix else "structural_lint"
         pending = ["link_repair"] if options.fix else []
-        if prepare_model and options.semantic:
-            pending.append("configuration")
         pending.append("structural_lint")
         if options.semantic:
             pending.append("semantic_lint")
         pending.append("report")
-        with context.begin(root) if context else nullcontext(bundle) as active_bundle:
+        with context.begin(root) as captured_bundle:
+            active_bundle = bundle if bundle is not None else captured_bundle
             try:
                 if options.fix:
                     emit({"stage": stage})
@@ -113,11 +117,6 @@ async def check_knowledge(
                     emit({"stage": "links_repaired", "files": files, "ghosts": ghosts})
                 if not hashes and options.semantic:
                     return replace(result, status="skipped")
-                # Legacy CLI model globals are initialized after its independent
-                # fix commit. Desktop configuration comes from context.begin.
-                if prepare_model and options.semantic:
-                    prepare_model()
-                    pending.remove("configuration")
                 stage = "structural_lint"
                 emit({"stage": stage})
                 result = replace(result, structural_report=run_structural_lint(root, scope=scope))
@@ -142,11 +141,7 @@ async def check_knowledge(
                             scope=scope,
                         )
                     except Exception as exc:
-                        knowledge = (
-                            f"Knowledge lint failed ({type(exc).__name__})"
-                            if context
-                            else f"Knowledge lint failed: {exc}"
-                        )
+                        knowledge = f"Knowledge lint failed ({type(exc).__name__})"
                         issues.append("semantic_lint_failed")
                     if issues:
                         result = replace(

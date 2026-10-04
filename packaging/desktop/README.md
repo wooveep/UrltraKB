@@ -76,6 +76,15 @@ user-selected KB directories and configured user profile, not this directory.
 The acceptance runner requires a **new** output directory and isolates its
 generated KBs/settings there. It leaves evidence for inspection:
 
+Linux builds share byte-identical entry points with hard links, retaining all
+four launch names without four copies of the embedded Python payload. Use an
+archive/copy tool that preserves hard links (`tar`, `cp -a`, or `rsync -H`);
+an ordinary file copy remains functional but uses more disk space. Runtime
+packaging preserves this sharing. The build excludes LiteLLM's proxy admin web
+assets and MathJax's duplicate development/module trees. Dynamic MathJax bundles,
+the complete NewCM font package, native renderers, document converters, model
+clients, fonts and original license files remain included.
+
 ```sh
 packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-check
 packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-corpus \

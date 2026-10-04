@@ -2,43 +2,21 @@
 
 from pathlib import Path
 
-from openkb.application.maintenance import LintOptions, check_knowledge
+from openkb.application.maintenance import LintOptions, check_knowledge, describe_repairs
 from openkb.knowledge_scope import KnowledgeScope
-
-
-def fix_summary(files_changed: int | None, ghosts: int | None) -> str:
-    if files_changed:
-        return f"Fixed {ghosts} wikilink(s) across {files_changed} file(s)."
-    return "Nothing to fix — all wikilinks resolve."
-
-
-def echo_lint_event(event: dict) -> None:
-    import click
-
-    stage = event.get("stage")
-    if stage == "structural_lint":
-        click.echo("Running structural lint...")
-    elif stage == "semantic_lint":
-        click.echo("Running knowledge lint...")
-    elif stage in {"structural_report", "semantic_report"}:
-        click.echo(event["report"])
 
 
 async def run_lint_report(
     kb_dir: Path,
     *,
     fix: bool = False,
-    echo: bool = False,
     bundle=None,
-    prepare_model=None,
     scope: KnowledgeScope | None = None,
 ) -> dict:
     result = await check_knowledge(
         kb_dir,
         LintOptions(fix=fix),
         bundle=bundle,
-        on_event=echo_lint_event if echo else None,
-        prepare_model=prepare_model,
         scope=scope,
     )
     if result.status in {"failed", "blocked", "conflict"}:
@@ -50,11 +28,7 @@ async def run_lint_report(
         else "Lint report written."
     )
     if fix:
-        message = f"{fix_summary(result.files_changed, result.ghosts_removed)} {message}"
-    if echo:
-        import click
-
-        click.echo(message if skipped else f"\nReport written to {result.report_path}")
+        message = f"{describe_repairs(result.files_changed, result.ghosts_removed)} {message}"
     return {
         "skipped": skipped,
         "reason": "no_documents_indexed" if skipped else None,

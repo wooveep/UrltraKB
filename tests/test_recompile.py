@@ -193,7 +193,8 @@ def test_recompile_dry_run_classifies_cloud_as_long(kb_dir):
 def test_is_long_doc_and_display_type_cover_cloud():
     """pageindex_cloud is treated as a long doc and displayed like a pageindex
     doc in `openkb list` (no raw internal type string leaking)."""
-    from openkb.cli import _display_type, _is_long_doc
+    from openkb.application.knowledge_bases import display_document_type as _display_type
+    from openkb.application.recompilation import is_long_doc as _is_long_doc
 
     assert _is_long_doc({"type": "pageindex_cloud"}) is True
     assert _is_long_doc({"type": "long_pdf"}) is True

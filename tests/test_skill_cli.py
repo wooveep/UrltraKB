@@ -284,7 +284,7 @@ def test_skill_validate_fails_on_invalid_frontmatter(tmp_path):
     assert "[FAIL]" in result.output
 
 
-def test_skill_new_keeps_existing_skill_when_key_setup_fails(tmp_path):
+def test_skill_new_keeps_existing_skill_when_configuration_capture_fails(tmp_path):
     """If LLM key setup raises (e.g. no API key), the old skill output
     must be preserved — don't rmtree before key setup is verified."""
     kb = _make_kb(tmp_path)
@@ -295,7 +295,10 @@ def test_skill_new_keeps_existing_skill_when_key_setup_fails(tmp_path):
     runner = CliRunner()
     with (
         patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.cli._setup_llm_key", side_effect=RuntimeError("no API key configured")),
+        patch(
+            "openkb.application.execution.capture_config",
+            side_effect=RuntimeError("invalid config"),
+        ),
     ):
         result = runner.invoke(cli, ["skill", "new", "demo", "x", "-y"])
 

@@ -440,9 +440,6 @@ async def run_query(
     scope = resolve_scope(kb_dir, scope)
     import sys
 
-    from agents import RawResponsesStreamEvent, RunItemStreamEvent
-    from openai.types.responses import ResponseTextDeltaEvent
-
     from openkb.config import resolve_effective_config
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
@@ -451,122 +448,39 @@ async def run_query(
     wiki_root = str(scope.wiki_dir)
 
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
-    agent = restrict_query_agent(agent, selection)
-
     if not stream:
+        from openkb.agent.answer_text import visible_answer
+
+        agent = restrict_query_agent(agent, selection)
         result = (
             await Runner.run(agent, question, max_turns=MAX_TURNS, run_config=run_config)
             if run_config
             else await Runner.run(agent, question, max_turns=MAX_TURNS)
         )
-        return evidence_answer(result.final_output or "", selection)
+        return evidence_answer(visible_answer(result.final_output or ""), selection)
 
     import os
+    from contextlib import aclosing
 
-    use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR", "")
+    from openkb.terminal_answers import AnswerRenderer
 
-    from openkb.agent.chat import (
-        _build_style,
-        _fmt,
-        _format_tool_line,
-        _make_markdown,
-        _make_rich_console,
-    )
-
-    style = _build_style(use_color)
-
-    from rich.live import Live
-
-    if use_color and not raw:
-        console = _make_rich_console()
-    else:
-        console = None  # type: ignore[assignment]
-
-    def _start_live() -> Live | None:
-        if console is None:
-            return None
-        lv = Live(console=console, vertical_overflow="visible")
-        lv.start()
-        return lv
-
-    live: Live | None = None
-    last_was_text = False
-    need_blank_before_text = False
-    result = (
-        Runner.run_streamed(agent, question, max_turns=MAX_TURNS, run_config=run_config)
-        if run_config
-        else Runner.run_streamed(agent, question, max_turns=MAX_TURNS)
-    )
-    collected: list[str] = []
-    segment: list[str] = []
-    stream_events = settled_stream(result)
-    try:
-        live = _start_live()
-        async for event in stream_events:
-            if isinstance(event, RawResponsesStreamEvent):
-                if isinstance(event.data, ResponseTextDeltaEvent):
-                    text = event.data.delta
-                    if text:
-                        if need_blank_before_text:
-                            if console is not None:
-                                print()
-                                segment = []
-                                live = _start_live()
-                            else:
-                                sys.stdout.write("\n")
-                            need_blank_before_text = False
-                        collected.append(text)
-                        segment.append(text)
-                        last_was_text = True
-                        if live:
-                            if "\n" in text:
-                                joined = "".join(segment)
-                                visible = joined[: joined.rfind("\n") + 1]
-                                if visible:
-                                    live.update(_make_markdown(visible))
-                        else:
-                            sys.stdout.write(text)
-                            sys.stdout.flush()
-            elif isinstance(event, RunItemStreamEvent):
-                item = event.item
-                if item.type == "tool_call_item":
-                    if last_was_text:
-                        if live:
-                            if segment:
-                                live.update(_make_markdown("".join(segment)))
-                            live.stop()
-                            live = None
-                        else:
-                            sys.stdout.write("\n")
-                            sys.stdout.flush()
-                        last_was_text = False
-                    raw_item = item.raw_item
-                    name = getattr(raw_item, "name", "?")
-                    args = getattr(raw_item, "arguments", "") or ""
-                    if live:
-                        live.stop()
-                        live = None
-                    _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
-                    need_blank_before_text = True
-                elif item.type == "tool_call_output_item":
-                    pass
-    finally:
-        await stream_events.aclose()
-        if live:
-            if segment:
-                live.update(_make_markdown("".join(segment)))
-            live.stop()
-        print()
-    answer = "".join(collected) if collected else result.final_output or ""
-    decorated = evidence_answer(answer, selection)
-    print(decorated[len(answer) :])
-    return decorated
+    events = iter_agent_response_events(agent, question, run_config=run_config, selection=selection)
+    with AnswerRenderer(
+        use_color=sys.stdout.isatty() and not os.environ.get("NO_COLOR"), raw=raw
+    ) as render:
+        async with aclosing(events):
+            async for event in events:
+                if event["event"] == "final":
+                    render.finish(event["data"]["answer"])
+                    return event["data"]["answer"]
+                render(event)
+    return ""
 
 
 def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None") -> Any:
     """Build an Agents-SDK `RunConfig` from a credential bundle.
 
-    When *bundle* is `None` (CLI path), returns `None` so the runner falls
+    When *bundle* is `None`, returns `None` so low-level callers fall
     back to the default provider (process-wide `litellm.api_key` / env vars).
     When a bundle is supplied, a dedicated `LitellmModel` instance is created
     with the per-KB `api_key` and `base_url` so concurrent requests on the

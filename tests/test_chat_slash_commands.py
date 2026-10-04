@@ -126,9 +126,10 @@ async def test_slash_add_single_file(tmp_path):
     doc = tmp_path / "test.md"
     doc.write_text("# Hello")
     p, _collected = _collect_fmt()
-    with p, patch("openkb.cli.add_single_file") as mock_add:
+    with p, patch("openkb.application.documents.add_single_file") as mock_add:
         await _run_add(str(doc), kb_dir, _STYLE)
-        mock_add.assert_called_once_with(doc, kb_dir, scope=legacy_scope(kb_dir))
+        assert mock_add.call_args.args == (doc, kb_dir)
+        assert mock_add.call_args.kwargs["scope"] == legacy_scope(kb_dir)
 
 
 @pytest.mark.asyncio
@@ -140,9 +141,13 @@ async def test_slash_add_directory_with_progress(tmp_path):
     (docs_dir / "b.txt").write_text("B")
     (docs_dir / "skip.xyz").write_text("skip")
     p, collected = _collect_fmt()
-    with p, patch("openkb.cli.add_single_file") as mock_add:
+    with p, patch("openkb.application.documents.add_single_file") as mock_add:
         await _run_add(str(docs_dir), kb_dir, _STYLE)
         assert mock_add.call_count == 2
+        assert (
+            mock_add.call_args_list[0].kwargs["context"]
+            is mock_add.call_args_list[1].kwargs["context"]
+        )
     output = "".join(collected)
     assert "Found 2 supported file(s)" in output
     assert "[1/2]" in output
@@ -153,7 +158,11 @@ async def test_slash_add_directory_with_progress(tmp_path):
 async def test_slash_lint(tmp_path):
     kb_dir = _setup_kb(tmp_path)
     session = _make_session(kb_dir)
-    with patch("openkb.cli.run_lint", new_callable=AsyncMock, return_value=tmp_path / "report.md"):
+    with patch(
+        "openkb.terminal_maintenance.run_lint",
+        new_callable=AsyncMock,
+        return_value=tmp_path / "report.md",
+    ):
         result = await _handle_slash("/lint", kb_dir, session, _STYLE)
     assert result is None
 
@@ -222,7 +231,7 @@ async def test_slash_clear(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slash_save_exports_completed_history_with_existing_name_policy(tmp_path):
+async def test_slash_save_preserves_previous_completed_history(tmp_path):
     kb_dir = _setup_kb(tmp_path)
     session = _make_session(kb_dir)
     session.record_turn("Question", "Completed answer", [])
@@ -232,8 +241,9 @@ async def test_slash_save_exports_completed_history_with_existing_name_policy(tm
         session.record_turn("Next question", "Next completed answer", [])
         await _handle_slash("/save named-copy", kb_dir, session, _STYLE)
     paths = list((kb_dir / "wiki/explorations").glob("named-copy-*.md"))
-    assert len(paths) == 1
-    assert "Next completed answer" in paths[0].read_text()
+    assert len(paths) == 2
+    assert all("Completed answer" in path.read_text() for path in paths)
+    assert sum("Next completed answer" in path.read_text() for path in paths) == 1
 
 
 @pytest.mark.asyncio

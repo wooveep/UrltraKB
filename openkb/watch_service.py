@@ -32,7 +32,6 @@ from typing import Any
 from watchdog.observers import Observer
 
 from openkb.application.documents import _add_for_api
-from openkb.config import LlmCredentialBundle, resolve_credential_bundle
 from openkb.inputs import SUPPORTED_EXTENSIONS
 from openkb.lifecycle import (
     KnowledgeBaseIncomplete,
@@ -65,7 +64,6 @@ class WatcherState:
     counters: dict[str, int] = field(
         default_factory=lambda: {"added": 0, "skipped": 0, "failed": 0}
     )
-    bundle: LlmCredentialBundle | None = None
     generation: str | None = None
     receiving: bool = True
     _seq: int = 0
@@ -166,9 +164,7 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
         with kb_ingest_lock(state.kb_dir / ".openkb"):
             if state.raw_dir.resolve() != state.kb_dir / "raw":
                 raise ValueError("Watched input moved outside the knowledge-base raw directory")
-            result = _add_for_api(
-                path, state.kb_dir, bundle=state.bundle, source_root=state.kb_dir / "raw"
-            )
+            result = _add_for_api(path, state.kb_dir, source_root=state.kb_dir / "raw")
     except Exception as exc:  # worker must never die
         _record_event(
             state,
@@ -240,7 +236,7 @@ class WatchRegistry:
         return None
 
     def start(self, kb: str, kb_dir: Path, debounce: float = 2.0) -> WatcherState:
-        """Start one subscription, retaining the REST credential timing and drain policy."""
+        """Start one subscription; each imported file captures its execution settings."""
         with self._lock:
             if existing := self._live(kb):
                 return existing
@@ -271,7 +267,6 @@ class WatchRegistry:
         generation = current_generation(root)
         if not (root / ".openkb/config.yaml").is_file():
             raise ValueError("Open a knowledge base before watching")
-        bundle = resolve_credential_bundle(root)
         # No registry mutex is held while waiting for another KB operation.
         with (
             expected_generation(root, generation),
@@ -291,7 +286,6 @@ class WatchRegistry:
                     kb_dir=root,
                     raw_dir=raw_dir,
                     debounce=debounce,
-                    bundle=bundle,
                     started_at=time.time(),
                     events=deque(maxlen=self._max_events),
                 )

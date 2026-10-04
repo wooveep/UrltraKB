@@ -225,17 +225,17 @@ async def recompile_document(
 ) -> RecompileResult:
     """Reload the exact document under its lease; never convert or index again.
 
-    Desktop passes an execution context. Legacy adapters keep their own model
-    and credential resolution, including REST request overrides.
+    Every entrypoint captures settings under the lease. A batch reuses its context.
     """
     requested_scope = scope
+    context = context or ExecutionContext()
     scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
         kb_dir / ".openkb",
         exclusive=True,
-        cancelled=context.cancelled if context else None,
-        on_wait=context.waiting if context else None,
+        cancelled=context.cancelled,
+        on_wait=context.waiting,
     ):
         if version is not None and _version(kb_dir, scope=requested_scope) != version:
             return RecompileResult(

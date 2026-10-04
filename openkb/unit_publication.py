@@ -23,7 +23,7 @@ from openkb.ingest_records import (
 )
 from openkb.knowledge_scope import KnowledgeScope, live_scope
 from openkb.lifecycle import current_generation
-from openkb.locks import LockCancelled, kb_ingest_lock, kb_read_lock
+from openkb.locks import LockCancelled, durable_unlink, kb_ingest_lock, kb_read_lock
 from openkb.mutation import RecoveryRequired, _copy_file_atomic, mutation_scope
 from openkb.processing_policy import ProcessingDecision, ReprocessingRequired
 from openkb.source_catalog import (
@@ -484,7 +484,7 @@ def commit_unit_revision(
         write_record(directory / "publication.json", completed)
         copy_tree(view.scope.wiki_dir, live)
         for name in view.base_pages.keys() - generated.keys():
-            (live / name).unlink(missing_ok=True)
+            durable_unlink(live / name, missing_ok=True)
         write_record(head_path, head)
         write_record(state_path, completed)
         write_record(attempt_path, completed)

@@ -14,6 +14,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from desktop_contents import runtime_asset
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "openkb/rendering"
 NODE_VERSION = "24.20.0"
@@ -84,6 +86,13 @@ def main() -> None:
         cwd=assets,
         check=True,
     )
+    # Remove only the duplicate development/module forms of MathJax. Runtime
+    # bundles and the entire NewCM font package remain intact.
+    for path in sorted((assets / "node_modules/@mathjax/src").rglob("*"), reverse=True):
+        if path.is_file() and not runtime_asset(path.relative_to(assets).as_posix()):
+            path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
     fonts = assets / "fonts"
     fonts.mkdir(exist_ok=True)
     base = "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/"

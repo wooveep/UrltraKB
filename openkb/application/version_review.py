@@ -107,12 +107,17 @@ def review_source_version(
             kb_dir, "discovery-intents", revision.discovery_intent_id, DiscoveryIntent
         )
         admission = Admission(source, revision, intent)
-        unit = next(
-            (item for item in list_source_units(kb_dir, source_id) if item.key == "body"), None
-        )
-        if unit is None:
-            raise ValueError("Source has no retained normalized input")
-        identity = retain_published_normalization(kb_dir, admission, unit, annotation.view_id)
+        if revision.source_format in {"xls", "xlsx"}:
+            from openkb.workbooks.progress import retain_workbook_normalization
+
+            identity = retain_workbook_normalization(kb_dir, admission, annotation.view_id)
+        else:
+            unit = next(
+                (item for item in list_source_units(kb_dir, source_id) if item.key == "body"), None
+            )
+            if unit is None:
+                raise ValueError("Source has no retained normalized input")
+            identity = retain_published_normalization(kb_dir, admission, unit, annotation.view_id)
         missing = tuple(
             name
             for name in ("product", "applicable_versions")
@@ -412,6 +417,17 @@ def complete_version_review(
     kb_dir: Path, review: VersionReview, admission: Admission, state: UnitPublication
 ) -> None:
     if state.status not in {"completed", "empty", "retired", "awaiting_confirmation"}:
+        return
+    from openkb.workbooks.progress import workbook_progress
+
+    progress = workbook_progress(kb_dir, admission.source, state.view_id)
+    if progress is not None and (
+        not progress.complete
+        or any(
+            publication.status not in {"completed", "empty", "retired", "awaiting_confirmation"}
+            for publication in progress.publications
+        )
+    ):
         return
     path = record_path(kb_dir, "version-reviews", review.review_id)
     with mutation_scope(kb_dir, [path], operation="complete-version-review"):

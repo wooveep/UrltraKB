@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import shutil
-from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -206,19 +205,19 @@ async def generate_artifact(
 ) -> GenerationResult:
     """Hold the complete read/generate/write lease and retain successful stages.
 
-    Old adapters keep their own credential resolution. The desktop begins its
-    immutable context only after recovery and consent checks. Ordinary model
-    failures commit files already produced; interruption before commit rolls
+    Every adapter begins its immutable context after recovery and consent
+    checks. Ordinary model failures commit files already produced; interruption before commit rolls
     back this generation while preserving the independently committed archive.
     """
     query_scope = scope
+    context = context or ExecutionContext()
     scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(
         kb_dir / ".openkb",
         exclusive=True,
-        cancelled=context.cancelled if context else None,
-        on_wait=context.waiting if context else None,
+        cancelled=context.cancelled,
+        on_wait=context.waiting,
     ):
         error = preflight_generation(kb_dir, options.name, scope=query_scope)
         if error:
@@ -244,7 +243,8 @@ async def generate_artifact(
                 "conflict", message="Artifact already exists; rename or confirm replacement"
             )
         before = file_versions(kb_dir, roots)
-        with context.begin(kb_dir) if context else nullcontext(bundle) as credentials:
+        with context.begin(kb_dir) as captured_credentials:
+            credentials = bundle if bundle is not None else captured_credentials
             from openkb.skill.generator import Generator
 
             if model is None:
@@ -270,8 +270,7 @@ async def generate_artifact(
                 )
                 failure: Exception | None = None
                 quality_diff_failed = False
-                if context:
-                    context.on_event({"stage": "generating"})
+                context.on_event({"stage": "generating"})
                 with (
                     mutation_scope(kb_dir, roots, operation="generate-artifact"),
                     preserve_artifact_history(kb_dir, target=target) as history,
@@ -333,9 +332,7 @@ async def generate_artifact(
                     )
                     if failure
                     else (),
-                    (f"Generation failed ({type(failure).__name__})" if context else str(failure))
-                    if failure
-                    else None,
+                    f"Generation failed ({type(failure).__name__})" if failure else None,
                     type(failure).__name__ if failure else None,
                     artifact_path=artifact_path,
                 )
@@ -350,5 +347,5 @@ async def generate_artifact(
                     changes=archive_changes,
                     unfinished=("generation",),
                     error_type=type(exc).__name__,
-                    message=f"Generation failed ({type(exc).__name__})" if context else str(exc),
+                    message=f"Generation failed ({type(exc).__name__})",
                 )

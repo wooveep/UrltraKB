@@ -161,6 +161,20 @@ def import_prepared_source(
     )
 
     try:
+        if (
+            text_assessment is None
+            and admission is not None
+            and admission.revision.source_format in {"xls", "xlsx"}
+            and record_path(kb_dir, "workbooks", admission.revision.source_revision_id).exists()
+        ):
+            from openkb.workbooks.progress import read_workbook
+
+            text_assessment = preflight_import_text(
+                kb_dir,
+                prepared,
+                check_stop=check_stop,
+                workbook=read_workbook(kb_dir, admission.revision),
+            )
         text_assessment = text_assessment or preflight_import_text(
             kb_dir, prepared, check_stop=check_stop
         )

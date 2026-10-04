@@ -10,10 +10,13 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from openkb.inputs import OFFICE_SOURCE_EXTENSIONS, TEXT_SOURCE_EXTENSIONS, PreparedInput
 from openkb.state import HashRegistry
+
+if TYPE_CHECKING:
+    from openkb.workbooks.records import WorkbookSnapshot
 
 TEXT_CHECK_POLICY = "extracted-text-v1:cjk-runs12:3runs:60chars:ratio45"
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
@@ -120,12 +123,18 @@ def require_normalized_text(path: Path) -> None:
 
 
 def preflight_import_text(
-    kb_dir: Path, prepared: PreparedInput, *, check_stop: Callable[[], None] = lambda: None
+    kb_dir: Path,
+    prepared: PreparedInput,
+    *,
+    check_stop: Callable[[], None] = lambda: None,
+    workbook: WorkbookSnapshot | None = None,
 ) -> ImportTextAssessment:
     """Extract frozen bytes in temporary space; write no raw/wiki/catalog artifacts."""
     check_stop()
     if HashRegistry.hash_file(prepared.path) != prepared.digest:
         raise ValueError("Text preflight input failed its frozen digest check")
+    if workbook is not None and workbook.digest != prepared.digest:
+        raise ValueError("Text preflight workbook belongs to another original")
     extension = prepared.source.suffix.lower()
     cache_key = TEXT_CHECK_POLICY
     if extension in OFFICE_SOURCE_EXTENSIONS:
@@ -173,7 +182,13 @@ def preflight_import_text(
                 from openkb.workbooks.xls import read_xls
                 from openkb.workbooks.xlsx import read_xlsx
 
-                sheets = (read_xlsx if extension == ".xlsx" else read_xls)(prepared.path)
+                if workbook is not None and workbook.error:
+                    raise ValueError(workbook.error)
+                sheets = (
+                    workbook.sheets
+                    if workbook is not None
+                    else (read_xlsx if extension == ".xlsx" else read_xls)(prepared.path)
+                )
                 parts = [
                     (f"worksheet[{sheet.name}]", "\n".join(cell.display for cell in sheet.cells))
                     for sheet in sheets

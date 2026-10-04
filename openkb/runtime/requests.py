@@ -138,11 +138,12 @@ class RecompileDocument(ViewSelection):
 
 
 @dataclass(frozen=True)
-class DeleteConversation:
+class DeleteConversation(ViewSelection):
     session_id: str
     version: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.session_id, str) or not self.session_id or not self.version:
             raise ValueError("Conversation deletion requires a confirmed completed history")
 

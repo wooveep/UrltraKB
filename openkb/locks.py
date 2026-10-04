@@ -494,6 +494,17 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     atomic_write_bytes(path, content.encode(encoding))
 
 
+def durable_unlink(path: Path, *, missing_ok: bool = False) -> None:
+    """Remove a file and flush its directory before a durable commit can follow."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        if not missing_ok:
+            raise
+    else:
+        _fsync_directory(path.parent)
+
+
 def atomic_write_json(
     path: Path,
     data: object,

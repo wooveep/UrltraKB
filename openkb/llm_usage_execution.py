@@ -10,6 +10,7 @@ from dataclasses import replace
 from functools import wraps
 from pathlib import Path
 
+from openkb.lifecycle import async_read_lifecycle, read_lifecycle
 from openkb.llm_usage import (
     _SCOPE,
     UsageScope,
@@ -36,32 +37,41 @@ def _write_execution(path: Path, record: UsageExecution, **updates) -> None:
 
 @contextmanager
 def import_usage_execution(
-    kb_dir: Path, operation: str, *, execution_id: str | None = None, task_id=None, on_event=None
+    kb_dir: Path,
+    operation: str,
+    *,
+    execution_id: str | None = None,
+    task_id=None,
+    on_event=None,
+    cancelled=None,
+    on_wait=None,
 ):
     root = kb_dir.resolve()
-    existing = _SCOPE.get()
-    if existing and existing.kb_dir == root:
-        yield existing
-        return
-    scope = UsageScope(root, execution_id or uuid.uuid4().hex, on_event=on_event)
-    record = UsageExecution(
-        execution_id=scope.execution_id, operation=operation, state="started", task_id=task_id
-    )
-    path = root / ".openkb/usage/executions" / f"{scope.execution_id}.json"
-    _write_execution(path, record)
-    token = _SCOPE.set(scope)
-    state = "completed"
-    try:
-        yield scope
-    except BaseException:
-        state = "interrupted"
-        raise
-    finally:
+    # Receipts survive business rollback, but share the import's directory lifetime.
+    with read_lifecycle(root, cancelled=cancelled, on_wait=on_wait):
+        existing = _SCOPE.get()
+        if existing and existing.kb_dir == root:
+            yield existing
+            return
+        scope = UsageScope(root, execution_id or uuid.uuid4().hex, on_event=on_event)
+        record = UsageExecution(
+            execution_id=scope.execution_id, operation=operation, state="started", task_id=task_id
+        )
+        path = root / ".openkb/usage/executions" / f"{scope.execution_id}.json"
+        _write_execution(path, record)
+        token = _SCOPE.set(scope)
+        state = "completed"
         try:
-            with atomic_record_lock(root / ".openkb/usage/ledger.lock"):
-                _write_execution(path, _read_execution(path), state=state)
+            yield scope
+        except BaseException:
+            state = "interrupted"
+            raise
         finally:
-            _SCOPE.reset(token)
+            try:
+                with atomic_record_lock(root / ".openkb/usage/ledger.lock"):
+                    _write_execution(path, _read_execution(path), state=state)
+            finally:
+                _SCOPE.reset(token)
 
 
 def bind_pending_execution(intent_id: str, attempt_id: str) -> None:
@@ -156,18 +166,25 @@ def track_import_usage(function):
             root, source_id, context, on_event = enter(args, kwargs)
             if not (root / ".openkb/config.yaml").is_file():
                 return await function(*args, **kwargs)
-            with (
-                import_usage_execution(
-                    root,
-                    function.__name__,
-                    task_id=getattr(context, "usage_task_id", None),
-                    on_event=on_event or getattr(context, "on_event", None),
-                ) as scope,
-                usage_context(source_id=source_id),
+            async with async_read_lifecycle(
+                root,
+                cancelled=getattr(context, "cancelled", None),
+                on_wait=getattr(context, "waiting", None),
             ):
-                before = aggregate_usage(root, execution_ids=[scope.execution_id])["request_ids"]
-                result = await function(*args, **kwargs)
-                return _project(root, result, before)
+                with (
+                    import_usage_execution(
+                        root,
+                        function.__name__,
+                        task_id=getattr(context, "usage_task_id", None),
+                        on_event=on_event or getattr(context, "on_event", None),
+                    ) as scope,
+                    usage_context(source_id=source_id),
+                ):
+                    before = aggregate_usage(root, execution_ids=[scope.execution_id])[
+                        "request_ids"
+                    ]
+                    result = await function(*args, **kwargs)
+                    return _project(root, result, before)
 
         return async_run
 
@@ -182,6 +199,8 @@ def track_import_usage(function):
                 function.__name__,
                 task_id=getattr(context, "usage_task_id", None),
                 on_event=on_event or getattr(context, "on_event", None),
+                cancelled=getattr(context, "cancelled", None),
+                on_wait=getattr(context, "waiting", None),
             ) as scope,
             usage_context(source_id=source_id),
         ):

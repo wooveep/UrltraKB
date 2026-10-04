@@ -99,7 +99,7 @@ class ChatSessionLoadRequest(ViewRequest):
     session_id: str = Field(..., min_length=1)
 
 
-class ChatSessionDeleteRequest(BaseModel):
+class ChatSessionDeleteRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
 
@@ -302,6 +302,8 @@ class DeckRequest(ViewRequest):
     name: str = Field(..., min_length=1)
     intent: str = Field(..., min_length=1)
     stream: bool = True
+    replace: bool = False
+    version: str | None = None
 
 
 class DeckResponse(BaseModel):
@@ -319,6 +321,8 @@ class SkillRequest(ViewRequest):
     name: str = Field(..., min_length=1)
     intent: str = Field(..., min_length=1)
     stream: bool = True
+    replace: bool = False
+    version: str | None = None
 
 
 class SkillResponse(BaseModel):

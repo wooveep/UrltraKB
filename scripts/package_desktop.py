@@ -102,6 +102,7 @@ def _program_copy(program, inventory, destination, identity):
     required = {
         name + suffix for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
     }
+    shared_executables = {}
     if len(set(names)) != len(names) or not required <= set(names):
         raise ValueError("Missing or duplicate UrltraKB entry points")
     for row in rows:
@@ -132,6 +133,13 @@ def _program_copy(program, inventory, destination, identity):
             if original.readlink().as_posix() != row.get("link"):
                 raise ValueError(f"Program link changed: {name}")
             target.symlink_to(original.readlink())
+        elif not suffix and name in required:
+            key = row["sha256"], row["size"], original.stat().st_mode
+            if key in shared_executables:
+                target.hardlink_to(shared_executables[key])
+            else:
+                shutil.copy2(original, target)
+                shared_executables[key] = target
         else:
             shutil.copy2(original, target)
     for row in rows:

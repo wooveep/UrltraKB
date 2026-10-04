@@ -234,20 +234,28 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
                 from openkb.ingest_records import UnitRevision
                 from openkb.source_catalog import read_record
                 from openkb.source_changes import source_view
+                from openkb.workbooks.progress import workbook_progress
 
                 actual = {
                     read_record(kb_dir, "unit-revisions", identity, UnitRevision).source_revision_id
                     for identity in inputs.values()
                 }
                 sources = list_sources(kb_dir)
-                pending_sources = [
-                    s.name
-                    for s in sources
-                    if source_view(kb_dir, s) == scope.view_id
-                    and not s.removed
-                    and not s.contribution_empty
-                    and s.target_revision_id not in actual
-                ]
+                pending_sources = []
+                for source in sources:
+                    if (
+                        source_view(kb_dir, source) != scope.view_id
+                        or source.removed
+                        or source.contribution_empty
+                    ):
+                        continue
+                    progress = workbook_progress(kb_dir, source, scope.view_id)
+                    if progress is not None and not progress.finished:
+                        pending_sources.append(source.name)
+                    elif source.target_revision_id not in actual and not (
+                        progress is not None and progress.empty
+                    ):
+                        pending_sources.append(source.name)
                 if pending_sources:
                     return RefreshResult(
                         "blocked",

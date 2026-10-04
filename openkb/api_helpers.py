@@ -9,7 +9,7 @@ import os
 import threading
 from contextlib import aclosing
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncGenerator, AsyncIterator, Callable
 
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
@@ -18,13 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
-from openkb.agent.chat_session import ChatSession, load_session
-from openkb.agent.query import (
-    build_query_agent,
-    build_run_config_from_bundle,
-    iter_agent_response_events,
-)
+from openkb.agent.chat_session import ChatSession
 from openkb.api_models import (
     AddFileItem,
     AddResponse,
@@ -40,19 +34,16 @@ from openkb.api_uploads import cleanup_uploads as _cleanup_uploads
 from openkb.api_uploads import reserve_upload
 from openkb.api_views import resolve_api_scope
 from openkb.api_watch_events import _stream_watch_events as _stream_watch_events
-from openkb.application.answers import save_exploration
 from openkb.application.documents import _add_for_api
+from openkb.application.execution import ExecutionContext
 from openkb.application.knowledge_bases import initialize_kb
 from openkb.application.removal import run_remove_for_api
 from openkb.application.uploads import published_input
 from openkb.config import (
-    DEFAULT_CONFIG,
     register_kb_alias,
-    resolve_effective_config,
     resolve_kb_alias,
 )
-from openkb.knowledge_scope import KnowledgeScope, resolve_scope
-from openkb.log import append_log
+from openkb.knowledge_scope import KnowledgeScope
 from openkb.view_records import SourceMetadata
 
 security = HTTPBearer(auto_error=False)
@@ -158,12 +149,6 @@ def _init_kb_for_api(
     )
     register_kb_alias(kb_name, kb_dir)
     return result
-
-
-def _save_query_answer(
-    kb_dir: Path, question: str, answer: str, *, scope: KnowledgeScope | None = None
-) -> Path | None:
-    return save_exploration(kb_dir, question, answer, scope=scope)
 
 
 def _parse_stream_form(value: str | bool | None) -> bool:
@@ -291,6 +276,7 @@ async def _run_add_uploads(
     download_remote_assets: bool | None = None,
 ) -> AddResponse:
     results = []
+    context = ExecutionContext()
     try:
         for saved_path, original_name in saved_uploads:
             results.append(
@@ -299,6 +285,7 @@ async def _run_add_uploads(
                     saved_path,
                     original_name,
                     bundle=bundle,
+                    context=context,
                     scope=scope,
                     metadata=metadata,
                     download_remote_assets=download_remote_assets,
@@ -320,6 +307,7 @@ async def _stream_add_uploads(
     download_remote_assets: bool | None = None,
 ) -> AsyncIterator[str]:
     results: list[AddFileItem] = []
+    context = ExecutionContext()
     try:
         yield _sse(
             "start",
@@ -339,6 +327,7 @@ async def _stream_add_uploads(
                     saved_path,
                     original_name,
                     bundle=bundle,
+                    context=context,
                     scope=scope,
                     metadata=metadata,
                     download_remote_assets=download_remote_assets,
@@ -384,12 +373,17 @@ async def _add_saved_file(
     original_name: str,
     *,
     bundle=None,
+    context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
     on_published: Callable[[Path], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> AddFileItem:
+    context = context or ExecutionContext()
+    if cancelled is not None:
+        context.cancelled = cancelled
+
     def consume():
         try:
             with published_input(kb_dir, saved_path, cancelled=cancelled) as owned:
@@ -399,6 +393,7 @@ async def _add_saved_file(
                     owned.path,
                     kb_dir,
                     bundle=bundle,
+                    context=context,
                     scope=scope,
                     metadata=metadata,
                     download_remote_assets=download_remote_assets,
@@ -416,117 +411,82 @@ async def _add_saved_file(
         return await run_in_threadpool(consume)
 
 
-def _load_or_create_session(
-    kb_dir: Path, session_id: str | None, *, scope: KnowledgeScope | None = None
-) -> ChatSession:
-    scope = resolve_scope(kb_dir, scope)
-    if session_id:
-        try:
-            session = load_session(kb_dir, session_id)
-            session.require_view(scope.view_id)
-            return session
-        except FileNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Chat session not found: {session_id}",
-            ) from exc
-
-    config = resolve_effective_config(kb_dir)[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-    language = config.get("language", "en")
-    return ChatSession.new(kb_dir, model, language, view_id=scope.view_id)
-
-
 def _sse(event: str, data: dict[str, Any]) -> str:
     payload = json.dumps(data, ensure_ascii=False)
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[str, None]:
+    from openkb.application.streams import answer_events
+
+    stream = answer_events(operation)
+    try:
+        async with aclosing(stream):
+            async for event in stream:
+                if await fastapi_request.is_disconnected():
+                    break
+                if event.get("event") == "result":
+                    result = event["data"]
+                    if result.status != "completed":
+                        yield _sse("error", {"message": result.error or result.status})
+                        continue
+                    data = {"answer": result.answer, "usage": result.usage}
+                    if result.session_id:
+                        data.update(session_id=result.session_id, turn_count=result.turn_count)
+                    else:
+                        data["saved_path"] = result.saved_path
+                    yield _sse("final", data)
+                elif "event" in event:
+                    yield _sse(event["event"], event.get("data", {}))
+    except Exception as exc:
+        yield _sse("error", {"message": str(exc)})
+    yield _sse("done", {})
+
+
 async def _stream_query(
     request: QueryRequest,
     kb_dir: Path,
-    model: str,
     fastapi_request: Request,
-    *,
-    bundle=None,
 ) -> AsyncIterator[str]:
-    query_scope = await resolve_api_scope(kb_dir, request.view_id)
-    scope = resolve_scope(kb_dir, query_scope)
+    from openkb.application.conversations import ask_question
+
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     yield _sse("start", {"endpoint": "query"})
-    run_config = build_run_config_from_bundle(model, bundle)
-    try:
-        from openkb.locks import async_kb_lock
-
-        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-            config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-            language = config.get("language", "en")
-            agent = build_query_agent(str(scope.wiki_dir), model, language=language, bundle=bundle)
-            final_answer = ""
-            from openkb.application.query_views import resolve_query_views
-
-            selection = resolve_query_views(kb_dir, request.question, scope=query_scope)
-            stream = iter_agent_response_events(
-                agent, request.question, run_config=run_config, selection=selection
-            )
-            async with aclosing(stream):
-                async for event in stream:
-                    data = event["data"]
-                    if event["event"] == "final":
-                        # Persist the fully-computed answer *before* checking for a
-                        # disconnect: the caller asked to save it, so a client that
-                        # drops at the last moment must not lose the write. Only the
-                        # client-facing SSE frame is skipped when disconnected.
-                        final_answer = data["answer"]
-                        saved_path = (
-                            _save_query_answer(kb_dir, request.question, final_answer, scope=scope)
-                            if request.save
-                            else None
-                        )
-                        append_log(scope.wiki_dir, "query", request.question, scope=scope)
-                        if await fastapi_request.is_disconnected():
-                            break
-                        yield _sse(
-                            "final",
-                            {
-                                "answer": final_answer,
-                                "saved_path": str(saved_path) if saved_path else None,
-                            },
-                        )
-                    else:
-                        if await fastapi_request.is_disconnected():
-                            break
-                        yield _sse(event["event"], data)
-    except Exception as exc:
-        yield _sse("error", {"message": f"Query failed: {exc}"})
-    yield _sse("done", {})
+    stream = _answer_stream(
+        lambda context: ask_question(
+            kb_dir, request.question, save=request.save, scope=scope, context=context
+        ),
+        fastapi_request,
+    )
+    async with aclosing(stream):
+        async for event in stream:
+            yield event
 
 
 async def _stream_chat(
     request: ChatRequest,
     kb_dir: Path,
-    session: ChatSession,
     fastapi_request: Request,
-    *,
-    bundle=None,
 ) -> AsyncIterator[str]:
+    from openkb.application.conversations import continue_conversation
+
     scope = await resolve_api_scope(kb_dir, request.view_id)
-    yield _sse("start", {"endpoint": "chat", "session_id": session.id})
-    run_config = build_run_config_from_bundle(session.model, bundle)
-    try:
-        agent = await asyncio.to_thread(
-            build_chat_session_agent, kb_dir, session, bundle=bundle, scope=scope
-        )
-        stream = iter_chat_turn_events(
-            agent, session, request.message, run_config=run_config, scope=scope
-        )
-        async with aclosing(stream):
-            async for event in stream:
-                if await fastapi_request.is_disconnected():
-                    break
-                yield _sse(event["event"], event["data"])
-    except Exception as exc:
-        yield _sse("error", {"message": f"Chat failed: {exc}"})
-    yield _sse("done", {})
+    new_id = None if request.session_id else ChatSession.new(kb_dir, "", "").id
+    yield _sse("start", {"endpoint": "chat", "session_id": request.session_id or new_id})
+    stream = _answer_stream(
+        lambda context: continue_conversation(
+            kb_dir,
+            request.message,
+            session_id=request.session_id,
+            new_session_id=new_id,
+            scope=scope,
+            context=context,
+        ),
+        fastapi_request,
+    )
+    async with aclosing(stream):
+        async for event in stream:
+            yield event
 
 
 async def _stream_remove(
@@ -665,14 +625,17 @@ async def _iter_deck(
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
     try:
         result = await generate_artifact(
             kb_dir,
-            GenerationOptions("deck", request.name, request.intent, overwrite="overlay"),
+            GenerationOptions(
+                "deck",
+                request.name,
+                request.intent,
+                overwrite="archive" if request.replace else "refuse",
+                version=request.version,
+            ),
             scope=scope,
-            model=model,
             bundle=bundle,
         )
     except Exception as exc:
@@ -681,7 +644,11 @@ async def _iter_deck(
     if result.status != "completed":
         yield {
             "event": "error",
-            "code": 400 if result.status == "invalid" and result.error_type is None else 500,
+            "code": 409
+            if result.status == "conflict"
+            else 400
+            if result.status == "invalid" and result.error_type is None
+            else 500,
             "message": f"Deck generation failed: {result.message}",
         }
         return
@@ -731,14 +698,17 @@ async def _iter_skill(
     if err:
         yield {"event": "error", "code": 400, "message": err}
         return
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
     try:
         result = await generate_artifact(
             kb_dir,
-            GenerationOptions("skill", request.name, request.intent, overwrite="overlay"),
+            GenerationOptions(
+                "skill",
+                request.name,
+                request.intent,
+                overwrite="archive" if request.replace else "refuse",
+                version=request.version,
+            ),
             scope=scope,
-            model=model,
             bundle=bundle,
         )
     except Exception as exc:
@@ -747,7 +717,11 @@ async def _iter_skill(
     if result.status != "completed":
         yield {
             "event": "error",
-            "code": 400 if result.status == "invalid" and result.error_type is None else 500,
+            "code": 409
+            if result.status == "conflict"
+            else 400
+            if result.status == "invalid" and result.error_type is None
+            else 500,
             "message": f"Skill generation failed: {result.message}",
         }
         return

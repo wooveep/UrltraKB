@@ -110,6 +110,7 @@ def add_single_file(
     *,
     stage: bool = True,
     bundle=None,
+    context: ExecutionContext | None = None,
     report=logger.info,
     on_event: Callable[[dict], None] | None = None,
     prepared: PreparedInput | None = None,
@@ -124,6 +125,7 @@ def add_single_file(
         file_path,
         stage=stage,
         bundle=bundle,
+        context=context,
         report=report,
         on_event=on_event,
         prepared=prepared,
@@ -175,8 +177,7 @@ def _add_single_file_locked(
 
     openkb_dir = kb_dir / ".openkb"
     config = resolve_effective_config(kb_dir)[0]
-    # The REST API passes a per-KB credential bundle so it never pollutes
-    # process-wide state; only the CLI path needs the legacy global setup.
+    # The shared operation activates a captured config and per-KB credentials.
     model: str = config.get("model", DEFAULT_CONFIG["model"])
 
     staging_dir = _staging_dir_for(kb_dir, file_path) if stage else None
@@ -378,6 +379,7 @@ def _add_for_api(
     kb_dir: Path,
     *,
     bundle=None,
+    context: ExecutionContext | None = None,
     source_root: Path | None = None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
@@ -392,6 +394,7 @@ def _add_for_api(
         kb_dir,
         file_path,
         bundle=bundle,
+        context=context,
         source_root=source_root,
         scope=scope,
         metadata=metadata,
@@ -452,16 +455,17 @@ def import_document(
     source = requested_source.resolve()
     if not (root / ".openkb/config.yaml").is_file():
         raise ValueError(f"Not a knowledge base: {root}")
-    from contextlib import ExitStack, nullcontext
+    from contextlib import ExitStack
 
-    if context:
-        context.on_event({"stage": "preparing", "source": str(source)})
-        context.check_stop()
+    context = context or ExecutionContext(on_event=on_event or (lambda event: None))
+
+    context.on_event({"stage": "preparing", "source": str(source)})
+    context.check_stop()
     with (
         read_lifecycle(
             root,
-            cancelled=context.cancelled if context else None,
-            on_wait=context.waiting if context else None,
+            cancelled=context.cancelled,
+            on_wait=context.waiting,
         ),
         ExitStack() as inputs,
     ):
@@ -470,7 +474,7 @@ def import_document(
                 prepared if prepared is not None else inputs.enter_context(prepared_input(source))
             )
         except (OSError, UnicodeError, InputChanged) as exc:
-            if isinstance(exc, InputChanged) and context is not None:
+            if isinstance(exc, InputChanged):
                 raise
             report(f"  [ERROR] Input preparation failed: {exc}")
             retained = (
@@ -479,15 +483,15 @@ def import_document(
             return DocumentResult(str(source), "failed", retained)
         with kb_ingest_lock(
             root / ".openkb",
-            cancelled=context.cancelled if context else None,
-            on_wait=context.waiting if context else None,
+            cancelled=context.cancelled,
+            on_wait=context.waiting,
         ):
             validate_source_root(requested_source, source_root)
             try:
                 if not ready.is_current():
                     ready = ready.refresh()
             except (OSError, UnicodeError, InputChanged) as exc:
-                if isinstance(exc, InputChanged) and context is not None:
+                if isinstance(exc, InputChanged):
                     raise
                 report(f"  [ERROR] Input preparation failed: {exc}")
                 retained = (
@@ -498,9 +502,10 @@ def import_document(
                 return DocumentResult(str(source), "failed", retained)
             validate_source_root(requested_source, source_root)
             with (
-                context.begin(root) if context else nullcontext(bundle) as credentials,
+                context.begin(root) as captured_credentials,
                 collect_compile_report() as compilation,
             ):
+                credentials = bundle if bundle is not None else captured_credentials
                 from openkb.inputs import FROZEN_SOURCE_EXTENSIONS
 
                 if ready.source.suffix.lower() in FROZEN_SOURCE_EXTENSIONS:
@@ -513,7 +518,7 @@ def import_document(
                         ready,
                         bundle=credentials,
                         context=context,
-                        on_event=on_event or (context.on_event if context else None),
+                        on_event=on_event or context.on_event,
                         origin_url=origin_url,
                         report=report,
                         metadata=metadata,
@@ -531,7 +536,7 @@ def import_document(
                     stage=stage,
                     bundle=credentials,
                     prepared=ready,
-                    on_event=on_event or (context.on_event if context else None),
+                    on_event=on_event or context.on_event,
                     origin_url=origin_url,
                     report=report,
                     scope=scope,

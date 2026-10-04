@@ -6,9 +6,9 @@ import asyncio
 from dataclasses import asdict
 from pathlib import Path
 
+from openkb.application.execution import ExecutionContext
 from openkb.application.recompilation import recompile_document, select_recompilation
 from openkb.application.recompilation import refresh_schema as refresh_kb_schema
-from openkb.config import DEFAULT_CONFIG, resolve_credential_bundle, resolve_effective_config
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.llm_usage import merge_usage_receipts
 from openkb.log import append_log
@@ -68,10 +68,7 @@ async def iter_recompile(
         return
     if refresh_schema:
         await asyncio.to_thread(refresh_kb_schema, kb_dir, scope=scope)
-    if bundle is None:
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
+    context = ExecutionContext()
     docs = []
     recompiled = skipped = blocked = partial = 0
     for target in targets:
@@ -79,7 +76,7 @@ async def iter_recompile(
             kb_dir,
             target.file_hash,
             bundle=bundle,
-            model=model,
+            context=context,
             scope=scope,
             unit_id=target.unit_id,
         )

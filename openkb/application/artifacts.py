@@ -7,6 +7,7 @@ import zipfile
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
@@ -86,6 +87,18 @@ def read_artifact(kb_dir: Path, relative: str) -> str:
         return path.read_text(encoding="utf-8")
 
 
+def write_artifact_archive(kb_dir: Path, relative: str, output: BinaryIO) -> None:
+    """Archive the same validated file set and directory layout for every entrypoint."""
+    kb_dir = kb_dir.resolve()
+    with kb_read_lock(kb_dir / ".openkb"):
+        source = _artifact_path(kb_dir, relative)
+        files = artifact_files(kb_dir, relative)
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file in files:
+                path = kb_dir / file
+                archive.write(path, path.relative_to(source.parent).as_posix())
+
+
 def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
     """Copy a file or a complete directory ZIP under a new, collision-free name."""
     kb_dir, destination = kb_dir.resolve(), destination.resolve()
@@ -108,7 +121,6 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
         raise NotADirectoryError(destination)
     with kb_read_lock(kb_dir / ".openkb"):
         source = _artifact_path(kb_dir, relative)
-        files = artifact_files(kb_dir, relative)
         filename = source.name + ".zip" if source.is_dir() else source.name
         number = 0
         while True:
@@ -124,10 +136,7 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
         try:
             with output:
                 if source.is_dir():
-                    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                        for file in files:
-                            path = kb_dir / file
-                            archive.write(path, path.relative_to(source.parent).as_posix())
+                    write_artifact_archive(kb_dir, relative, output)
                 else:
                     with source.open("rb") as input_file:
                         shutil.copyfileobj(input_file, output)

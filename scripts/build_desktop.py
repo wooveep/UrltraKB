@@ -8,6 +8,7 @@ import sys
 from importlib.metadata import version
 from pathlib import Path
 
+from desktop_contents import deduplicate_entrypoints
 from export_desktop_source import verify_source
 from local_pageindex import verify_local_pageindex
 
@@ -66,6 +67,9 @@ def main() -> None:
     )
     if verify_source(ROOT) != identity:
         raise ValueError("Source identity changed during the build")
+    if sys.platform == "linux":
+        saved = deduplicate_entrypoints(PACKAGING / "dist/UrltraKB")
+        print(f"Shared identical Linux entry points: {saved / 1024**2:.1f} MiB saved")
 
 
 if __name__ == "__main__":

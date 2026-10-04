@@ -259,19 +259,16 @@ class ConversationView:
 def read_conversation(
     kb_dir: Path, session_id: str, *, view_id: str | None = None
 ) -> ConversationView:
-    from openkb.locks import kb_read_lock
+    from openkb.application.sessions import load_conversation
 
-    with kb_read_lock(kb_dir / ".openkb"):
-        session = load_session(kb_dir, session_id)
-        if view_id is not None:
-            session.require_view(view_id)
-        return ConversationView(
-            session.id,
-            session.title,
-            session.model,
-            session.language,
-            tuple(zip(session.user_turns, session.assistant_texts)),
-            session._version or "",
-            tuple((item["after_turn"], item["message"]) for item in session.incomplete),
-            session.token_usage,
-        )
+    session = load_conversation(kb_dir, session_id, view_id=view_id)
+    return ConversationView(
+        session.id,
+        session.title,
+        session.model,
+        session.language,
+        tuple(zip(session.user_turns, session.assistant_texts)),
+        session._version or "",
+        tuple((item["after_turn"], item["message"]) for item in session.incomplete),
+        session.token_usage,
+    )

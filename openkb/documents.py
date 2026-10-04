@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from openkb.cli import _LONG_DOC_TYPES
+from openkb.application.recompilation import LONG_DOC_TYPES as _LONG_DOC_TYPES
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.source_pages import PageRangeError
 from openkb.state import HashRegistry

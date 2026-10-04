@@ -14,7 +14,7 @@ from openkb.agent.chat_session import ChatSession, _session_path, deletion_marke
 from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import contained_paths
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
-from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
+from openkb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock, session_lock
 from openkb.mutation import mutation_scope
 
 
@@ -25,12 +25,40 @@ class SessionResult:
     changes: tuple[str, ...] = ()
 
 
+def list_conversations(kb_dir: Path, *, view_id: str | None = None) -> list[dict]:
+    """List the selected view's conversations, newest first; default to legacy."""
+    from openkb.agent.chat_session import list_sessions
+
+    with kb_read_lock(kb_dir / ".openkb"):
+        return [item for item in list_sessions(kb_dir) if item["view_id"] == (view_id or "legacy")]
+
+
+def resolve_conversation(kb_dir: Path, query: str, *, view_id: str | None = None) -> str | None:
+    sessions = list_conversations(kb_dir, view_id=view_id)
+    if query == "__latest__":
+        return sessions[0]["id"] if sessions else None
+    if any(item["id"] == query for item in sessions):
+        return query
+    matches = [item["id"] for item in sessions if item["id"].startswith(query)]
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous session prefix '{query}' matches: {', '.join(matches)}")
+    return matches[0] if matches else None
+
+
+def load_conversation(kb_dir: Path, session_id: str, *, view_id: str | None = None) -> ChatSession:
+    with kb_read_lock(kb_dir / ".openkb"):
+        session = load_session(kb_dir, session_id)
+        session.require_view(view_id or "legacy")
+        return session
+
+
 def delete_conversation(
     kb_dir: Path,
     session_id: str,
     *,
     version: str | None = None,
     context: ExecutionContext | None = None,
+    view_id: str | None = None,
 ) -> SessionResult:
     root = kb_dir.resolve()
     path = _session_path(root, session_id)
@@ -43,6 +71,7 @@ def delete_conversation(
         contained_paths(root, [path])
         if not path.exists():
             return SessionResult("missing")
+        load_session(root, session_id).require_view(view_id or "legacy")
         if version is not None and hashlib.sha256(path.read_bytes()).hexdigest() != version:
             return SessionResult("conflict")
         with context.begin(root) if context else nullcontext():
@@ -61,11 +90,11 @@ def export_conversation(
     session: ChatSession | str,
     name: str | None = None,
     *,
-    unique: bool = False,
+    unique: bool = True,
     context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
 ) -> SessionResult:
-    """Export completed history; desktop uses copies, CLI keeps its overwrite policy.
+    """Export completed history without replacing previous exports.
 
     A persisted conversation is reloaded under both leases. The CLI can also
     export a newly created in-memory session which has never been persisted.

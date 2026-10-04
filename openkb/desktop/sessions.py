@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from openkb.agent.chat_session import list_sessions
 from openkb.application.conversations import read_conversation
+from openkb.application.sessions import list_conversations
 from openkb.desktop.panels import ManagementPanel
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import DeleteConversation, ExportConversation
@@ -104,7 +104,7 @@ class SessionsDialog(ManagementPanel):
                 self.table.setItem(row, 2, QTableWidgetItem(session["updated_at"][:10]))
 
         self.window.io.submit(
-            lambda: [item for item in list_sessions(self.kb) if item["view_id"] == self.view_id],
+            lambda: list_conversations(self.kb, view_id=self.view_id),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
@@ -149,7 +149,7 @@ class SessionsDialog(ManagementPanel):
             question.setDefaultButton(QMessageBox.StandardButton.No)
             if question.exec() == QMessageBox.StandardButton.Yes:
                 self._task = self.window.manager.submit(
-                    self.kb, [DeleteConversation(identity, session.version)]
+                    self.kb, [DeleteConversation(identity, session.version, view_id=self.view_id)]
                 )
                 self.status.setText("已提交删除，可在任务面板查看结果或安全停止。")
 

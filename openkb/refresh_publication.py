@@ -13,6 +13,7 @@ from openkb.file_state import contained_paths
 from openkb.ingest_records import KnowledgeHead, KnowledgeRevision
 from openkb.knowledge_scope import live_scope
 from openkb.lifecycle import current_generation
+from openkb.locks import durable_unlink
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_source, write_record
 from openkb.source_records import Digest, Record, RecordId, RelativePath, ViewId
@@ -94,7 +95,7 @@ def commit_refresh(
         write_record(snapshot / "manifest.json", manifest)
         copy_tree(directory / "wiki", live)
         for name in proposal.expected_pages.keys() - proposal.candidate_pages.keys():
-            (live / name).unlink(missing_ok=True)
+            durable_unlink(live / name, missing_ok=True)
         # The lease prevents interleaving, and the final generation fence rejects stopped work.
         check_stop()
         if current_generation(kb_dir) != proposal.expected_kb_generation:

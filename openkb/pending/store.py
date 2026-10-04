@@ -93,6 +93,7 @@ def reconcile_job(kb_dir, kind, job):
         from openkb.ingest_records import UnitRevision
         from openkb.source_changes import source_view
         from openkb.unit_publication import list_source_units, read_unit_publication
+        from openkb.workbooks.progress import workbook_progress
 
         source = import_source(kb_dir, job)
         if source.target_revision_id != job.source_revision_id:
@@ -112,9 +113,14 @@ def reconcile_job(kb_dir, kind, job):
                 )
                 if revision.source_revision_id == job.source_revision_id:
                     states.append(publication.status)
+            progress = workbook_progress(kb_dir, source, source_view(kb_dir, source))
+            complete = len(states) == len(units)
+            if progress is not None:
+                complete = progress.complete
+                states = [publication.status for publication in progress.publications]
             if (
                 states
-                and len(states) == len(units)
+                and complete
                 and all(value in {"completed", "empty", "retired"} for value in states)
             ):
                 state = "completed"
@@ -123,7 +129,8 @@ def reconcile_job(kb_dir, kind, job):
             elif job.status == "started":
                 state = (
                     "blocked"
-                    if states
+                    if complete
+                    and states
                     and all(
                         value
                         in {"blocked", "awaiting_confirmation", "completed", "empty", "retired"}

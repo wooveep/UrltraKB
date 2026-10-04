@@ -30,7 +30,6 @@ from openkb.agent.query import (
     build_chat_agent,
     iter_agent_response_events,
 )
-from openkb.agent.streaming import settled_stream
 from openkb.config import LlmCredentialBundle
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.log import append_log
@@ -340,144 +339,33 @@ def _make_markdown(text: str) -> Any:
 
 
 async def _run_turn(
-    agent: Any,
     session: ChatSession,
     user_input: str,
     style: Style,
     *,
-    use_color: bool = True,
+    use_color: bool,
     raw: bool = False,
     scope: KnowledgeScope | None = None,
 ) -> None:
-    """Run one agent turn with streaming output and persist the new history."""
-    from openkb.locks import async_kb_lock, async_session_lock
+    from openkb.application.conversations import continue_conversation
+    from openkb.application.execution import ExecutionContext
+    from openkb.terminal_answers import AnswerRenderer
 
     root = session.path.parent.parent.parent
-    async with async_session_lock(root, session.id):
-        async with async_kb_lock(root / ".openkb", exclusive=True):
-            from openkb.agent.query_evidence import evidence_answer, restrict_query_agent
-            from openkb.application.query_views import resolve_query_views
-
-            selection = resolve_query_views(root, user_input, scope=scope)
-            agent = restrict_query_agent(agent, selection)
-            with model_output_scope(root):
-                if selection.views:
-                    answer, history = await _stream_tty_turn(
-                        agent, session, user_input, style, use_color=use_color, raw=raw
-                    )
-                else:
-                    answer = ""
-                    history = session.history + [{"role": "user", "content": user_input}]
-            decorated = evidence_answer(answer, selection)
-            print(decorated[len(answer) :])
-            answer = decorated
-            session.record_turn(user_input, answer, history)
-
-
-async def _stream_tty_turn(
-    agent: Any,
-    session: ChatSession,
-    user_input: str,
-    style: Style,
-    *,
-    use_color: bool = True,
-    raw: bool = False,
-) -> tuple[str, list[dict[str, Any]]]:
-    from agents import (
-        RawResponsesStreamEvent,
-        RunItemStreamEvent,
-        Runner,
-    )
-    from openai.types.responses import ResponseTextDeltaEvent
-
-    from openkb.agent.query_evidence import evidence_input
-
-    new_input = evidence_input(session.history + [{"role": "user", "content": user_input}])
-
-    result = Runner.run_streamed(agent, new_input, max_turns=MAX_TURNS)
-
-    print()
-    collected: list[str] = []
-    segment: list[str] = []
-    last_was_text = False
-    need_blank_before_text = False
-
-    if use_color and not raw:
-        from rich.live import Live
-
-        console = _make_rich_console()
-    else:
-        console = None  # type: ignore[assignment]
-
-    def _start_live() -> Any:
-        if console is None:
-            return None
-        lv = Live(console=console, vertical_overflow="visible")
-        lv.start()
-        return lv
-
-    live = _start_live()
-    stream = settled_stream(result)
-
-    try:
-        async for event in stream:
-            if isinstance(event, RawResponsesStreamEvent):
-                if isinstance(event.data, ResponseTextDeltaEvent):
-                    text = event.data.delta
-                    if text:
-                        if need_blank_before_text:
-                            if console is not None:
-                                print()
-                                segment = []
-                                live = _start_live()
-                            else:
-                                sys.stdout.write("\n")
-                            need_blank_before_text = False
-                        collected.append(text)
-                        segment.append(text)
-                        last_was_text = True
-                        if live:
-                            if "\n" in text:
-                                joined = "".join(segment)
-                                visible = joined[: joined.rfind("\n") + 1]
-                                if visible:
-                                    live.update(_make_markdown(visible))
-                        else:
-                            sys.stdout.write(text)
-                            sys.stdout.flush()
-            elif isinstance(event, RunItemStreamEvent):
-                item = event.item
-                if item.type == "tool_call_item":
-                    if last_was_text:
-                        if live:
-                            if segment:
-                                live.update(_make_markdown("".join(segment)))
-                            live.stop()
-                            live = None
-                        else:
-                            sys.stdout.write("\n")
-                            sys.stdout.flush()
-                        last_was_text = False
-                    raw_item = item.raw_item
-                    name = getattr(raw_item, "name", "?")
-                    args = getattr(raw_item, "arguments", "") or ""
-                    if live:
-                        live.stop()
-                        live = None
-                    _fmt(style, ("class:tool", _format_tool_line(name, args) + "\n"))
-                    need_blank_before_text = True
-    finally:
-        await stream.aclose()
-        if live:
-            if segment:
-                live.update(_make_markdown("".join(segment)))
-            live.stop()
-        print()
-
-    answer = "".join(collected).strip()
-    if not answer:
-        answer = (result.final_output or "").strip()
-    return answer, result.to_input_list()
+    with AnswerRenderer(use_color=use_color, raw=raw) as renderer:
+        result = await continue_conversation(
+            root,
+            user_input,
+            session_id=session.id if session._version is not None else None,
+            new_session_id=session.id if session._version is None else None,
+            context=ExecutionContext(on_event=renderer),
+            scope=scope,
+        )
+        if result.status == "completed":
+            renderer.finish(result.answer)
+    await asyncio.to_thread(session.reload)
+    if result.status != "completed":
+        raise RuntimeError(result.error or result.status)
 
 
 def _save_transcript(
@@ -497,7 +385,14 @@ async def _run_add(
 ) -> None:
     """Add a document or directory to the knowledge base from the chat REPL."""
     scope = resolve_scope(kb_dir, scope)
-    from openkb.cli import SUPPORTED_EXTENSIONS, add_single_file
+    from openkb.application.documents import add_single_file
+    from openkb.application.execution import ExecutionContext
+    from openkb.inputs import SUPPORTED_EXTENSIONS
+
+    context = ExecutionContext()
+
+    def report(line):
+        _fmt(style, ("class:slash.help", line + "\n"))
 
     target = Path(arg).expanduser()
     if not target.is_absolute():
@@ -521,12 +416,16 @@ async def _run_add(
         _fmt(style, ("class:slash.help", f"Found {total} supported file(s) in {arg}.\n"))
         for i, f in enumerate(files, 1):
             _fmt(style, ("class:slash.help", f"\n[{i}/{total}] "))
-            await asyncio.to_thread(add_single_file, f, kb_dir, scope=scope)
+            await asyncio.to_thread(
+                add_single_file, f, kb_dir, scope=scope, context=context, report=report
+            )
     else:
         if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
             _fmt(style, ("class:error", f"Unsupported file type: {target.suffix}\n"))
             return
-        await asyncio.to_thread(add_single_file, target, kb_dir, scope=scope)
+        await asyncio.to_thread(
+            add_single_file, target, kb_dir, scope=scope, context=context, report=report
+        )
 
 
 async def _handle_slash_skill(
@@ -580,18 +479,10 @@ async def _handle_slash_skill(
         )
         return
 
-    # Load model from KB config
-    from openkb.config import DEFAULT_CONFIG, resolve_effective_config
-
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-
     from openkb.application.generators import GenerationOptions, generate_artifact
 
     _fmt(style, ("class:slash.help", f"Compiling skill '{name}'...\n"))
-    gen = await generate_artifact(
-        kb_dir, GenerationOptions("skill", name, intent), model=model, scope=scope
-    )
+    gen = await generate_artifact(kb_dir, GenerationOptions("skill", name, intent), scope=scope)
     if gen.status != "completed":
         _fmt(style, ("class:error", f"[ERROR] {gen.message}\n"))
         return
@@ -707,12 +598,6 @@ async def _handle_slash_deck(
         )
         return
 
-    # Load model from KB config
-    from openkb.config import DEFAULT_CONFIG, resolve_effective_config
-
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-
     from openkb.application.generators import GenerationOptions, generate_artifact
     from openkb.deck.creator import DEFAULT_DECK_SKILL
 
@@ -724,7 +609,6 @@ async def _handle_slash_deck(
     gen = await generate_artifact(
         kb_dir,
         GenerationOptions("deck", name, intent, critique=critique, skill_name=skill_name),
-        model=model,
         scope=scope,
     )
     if gen.status != "completed":
@@ -805,23 +689,23 @@ async def _handle_slash(
         return None
 
     if head == "/status":
-        from openkb.cli import print_status
         from openkb.locks import async_kb_lock
+        from openkb.terminal_maintenance import print_status
 
         async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
             print_status(kb_dir, scope=scope)
         return None
 
     if head == "/list":
-        from openkb.cli import print_list
         from openkb.locks import async_kb_lock
+        from openkb.terminal_maintenance import print_list
 
         async with async_kb_lock(kb_dir / ".openkb", exclusive=False):
             print_list(kb_dir, scope=scope)
         return None
 
     if head == "/lint":
-        from openkb.cli import run_lint
+        from openkb.terminal_maintenance import run_lint
 
         await run_lint(kb_dir, scope=scope)
         return None
@@ -901,9 +785,9 @@ def build_chat_session_agent(
     query.py) so the query module's ``build_chat_agent`` signature stays
     unchanged for the CLI; the API uses this session-aware variant instead.
     """
-    scope = resolve_scope(kb_dir, scope)
     from openkb.config import resolve_effective_config
 
+    scope = resolve_scope(kb_dir, scope)
     session.require_view(scope.view_id)
     config = resolve_effective_config(kb_dir)[0]
     language = session.language or config.get("language", "en")
@@ -1047,15 +931,9 @@ async def run_chat(
     """Run the chat REPL against ``session`` until the user exits."""
     query_scope = scope
     scope = resolve_scope(kb_dir, scope)
-    from openkb.config import resolve_effective_config
-
     session.require_view(scope.view_id)
     use_color = _use_color(force_off=no_color)
     style = _build_style(use_color)
-
-    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    language = session.language or config.get("language", "en")
-    agent = build_chat_agent(kb_dir, session.model, language=language, scope=scope)
 
     _print_header(session, kb_dir, style)
     if session.turn_count > 0:
@@ -1097,27 +975,13 @@ async def run_chat(
                 session = ChatSession.new(
                     kb_dir, session.model, session.language, view_id=scope.view_id
                 )
-                agent = build_chat_agent(kb_dir, session.model, language=language, scope=scope)
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue
 
-        from openkb.locks import async_kb_lock, async_session_lock
-
         try:
-            async with async_session_lock(kb_dir, session.id):
-                async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-                    session.reload()
-                    session.require_view(scope.view_id)
-                    append_log(scope.wiki_dir, "query", user_input, scope=scope)
-                    await _run_turn(
-                        agent,
-                        session,
-                        user_input,
-                        style,
-                        use_color=use_color,
-                        raw=raw,
-                        scope=query_scope,
-                    )
+            await _run_turn(
+                session, user_input, style, use_color=use_color, raw=raw, scope=query_scope
+            )
         except KeyboardInterrupt:
             _fmt(style, ("class:error", "\n[aborted]\n"))
         except Exception as exc:

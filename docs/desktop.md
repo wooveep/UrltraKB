@@ -2,7 +2,9 @@
 
 The desktop opens local knowledge bases in their existing format. It uses Qt
 Widgets for its interface and local static rendering for mathematics and Mermaid.
-The CLI and independent REST API continue to work with the same data.
+The CLI and independent REST API use the same application operations and data.
+The desktop defines the common business behavior; terminal output, HTTP responses
+and desktop task presentation adapt the results to each interface.
 
 For this branch's baseline, selected desktop changes and verification results,
 see [dev-1.2.0](dev-1.2.0.md). Historical package acceptance below belongs to its
@@ -166,6 +168,11 @@ bundle; a browser preview opens the chosen HTML file. Internal generation worksp
 directories are excluded from this result library.
 An existing Skill or deck name requires a new name or explicit consent to archive
 and replace its output. Graph generation retains its established fixed path.
+CLI generation uses `--yes` for replacement. REST `/api/v1/skill` and
+`/api/v1/deck` default to refusing replacement (HTTP 409, or an SSE error with
+code 409); send `replace: true` to archive and replace. An optional `version`
+binds the request to a previously reviewed target. Skill ZIP downloads use the
+same validated file set and top-level artifact directory as desktop exports.
 
 Opening an HTML deck or graph in the default external browser is an explicit
 preview action. The workbench itself does not embed a browser. Advanced Skill
@@ -176,9 +183,9 @@ evaluation, validation, history and rollback remain available in the CLI.
 Global and KB settings expose the model, language, long-PDF page threshold,
 entity types and API credentials. Advanced provider options remain available in
 the configuration file. Secret fields distinguish keeping, replacing and
-clearing a value. Desktop credentials prefer the KB, then the environment from
-which the application launched, then global settings. The CLI retains its
-environment-first behavior. Desktop setup uses API keys; subscription login
+clearing a value. Shared business operations in all three entrypoints prefer KB
+credentials, then the launch environment, then global settings. Desktop setup
+uses API keys; subscription login
 continues to be a CLI capability.
 
 A queued task uses settings resolved when business execution first begins,

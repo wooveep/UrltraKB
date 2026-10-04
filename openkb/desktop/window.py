@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
 )
 
-from openkb.agent.chat_session import list_sessions
 from openkb.application.catalog import knowledge_bases
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status, initialize_kb, open_kb
 from openkb.application.pages import Page, read_page
 from openkb.application.reading import read_page_context
+from openkb.application.sessions import list_conversations
 from openkb.config import GLOBAL_CONFIG_DIR
 from openkb.desktop.brand import NAME
 from openkb.desktop.editor import DraftDialog, PageDraft
@@ -334,7 +334,7 @@ class Workbench(QMainWindow):
 
             return (
                 list_knowledge(root, scope=scope),
-                [item for item in list_sessions(root) if item["view_id"] == (view_id or "legacy")],
+                list_conversations(root, view_id=view_id),
                 get_kb_list(root, scope=scope),
                 get_kb_status(root, scope=scope),
                 list_views(root),

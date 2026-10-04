@@ -252,7 +252,13 @@ def _execute(
         from openkb.application.sessions import delete_conversation, export_conversation
 
         session_result = (
-            delete_conversation(root, request.session_id, version=request.version, context=context)
+            delete_conversation(
+                root,
+                request.session_id,
+                version=request.version,
+                view_id=request.view_id,
+                context=context,
+            )
             if isinstance(request, DeleteConversation)
             else export_conversation(
                 root, request.session_id, unique=True, context=context, scope=scope

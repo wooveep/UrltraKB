@@ -102,7 +102,10 @@ class TestAddCommand:
             patch("openkb.cli._find_kb_dir", return_value=kb_dir),
         ):
             runner.invoke(cli, ["add", str(doc)])
-            mock_add.assert_called_once_with(doc, kb_dir, scope=None, metadata=None)
+            assert mock_add.call_count == 1
+            assert mock_add.call_args.args == (doc, kb_dir)
+            assert mock_add.call_args.kwargs["scope"] is None
+            assert mock_add.call_args.kwargs["metadata"] is None
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
         from openkb.cli import add_single_file

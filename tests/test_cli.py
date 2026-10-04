@@ -9,15 +9,15 @@ from openkb.cli import cli
 from openkb.schema import AGENTS_MD
 
 
-def test_lint_fix_keeps_repairs_when_later_model_setup_fails(kb_dir):
+def test_lint_fix_preserves_input_when_configuration_is_invalid(kb_dir):
     (kb_dir / ".openkb/hashes.json").write_text('{"document": {}}')
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("# Topic\n[[concepts/missing]]")
     (kb_dir / ".env").write_bytes(b"\xff")
     result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "lint", "--fix"])
     assert result.exit_code != 0
-    assert "[[concepts/missing]]" not in page.read_text()
-    assert "Fixed 1 wikilink(s) across 1 file(s)." in result.output
+    assert "[[concepts/missing]]" in page.read_text()
+    assert "Fixed" not in result.output
 
 
 def test_version_flag_reports_installed_version():
@@ -315,52 +315,26 @@ def test_init_model_prompt_accepts_input(tmp_path):
 
 
 class TestQueryStreamGate:
-    """Regression tests for issue #34.
+    """TTY progress is a presentation choice over the same query operation."""
 
-    `openkb query` should auto-disable streaming when stdout isn't a TTY
-    (pipes, redirects, captured subprocess streams, MCP stdio transport),
-    so non-interactive callers get the clean final answer instead of an
-    interleave of tool-call telemetry and answer tokens.
-    """
+    @pytest.mark.parametrize("tty", [False, True])
+    def test_query_only_renders_progress_to_tty(self, kb_dir, tty):
+        from openkb.application.conversations import AnswerResult
 
-    @staticmethod
-    def _capture_run_query(captured):
-        async def fake(*_args, **kwargs):
-            captured.update(kwargs)
-            return "the answer"
+        async def fake(*args, context, **kwargs):
+            context.on_event({"event": "delta", "data": {"text": "the answer"}})
+            context.on_event({"event": "tool_call", "data": {"name": "search_wiki"}})
+            return AnswerResult("completed", "the answer")
 
-        return fake
-
-    def test_query_disables_stream_when_stdout_is_not_tty(self, kb_dir):
-        captured: dict = {}
         with (
-            patch("openkb.cli._stream_to_tty", return_value=False),
-            patch("openkb.agent.query.run_query", side_effect=self._capture_run_query(captured)),
-            patch("openkb.cli._setup_llm_key"),
-            patch("openkb.cli.append_log"),
+            patch("openkb.cli._stream_to_tty", return_value=tty),
+            patch("openkb.application.conversations.ask_question", side_effect=fake),
         ):
             result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "query", "what is X?"])
 
         assert result.exit_code == 0, result.output
-        assert captured["stream"] is False
-        # Non-stream branch must still print the answer
-        assert "the answer" in result.output
-
-    def test_query_enables_stream_when_stdout_is_tty(self, kb_dir):
-        captured: dict = {}
-        with (
-            patch("openkb.cli._stream_to_tty", return_value=True),
-            patch("openkb.agent.query.run_query", side_effect=self._capture_run_query(captured)),
-            patch("openkb.cli._setup_llm_key"),
-            patch("openkb.cli.append_log"),
-        ):
-            result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "query", "what is X?"])
-
-        assert result.exit_code == 0, result.output
-        assert captured["stream"] is True
-        # Stream branch should NOT echo the answer again — run_query already
-        # wrote tokens to stdout as they arrived.
-        assert "the answer" not in result.output
+        assert result.output.count("the answer") == 1
+        assert ("search_wiki" in result.output) is tty
 
 
 class TestQuerySaveGhostStrip:
@@ -385,12 +359,12 @@ class TestQuerySaveGhostStrip:
             "and use [[concepts/multi-head-attention]] as a key building block."
         )
 
-        async def fake_run_query(*_args, **_kwargs):
-            return answer
+        async def fake_events(*_args, **_kwargs):
+            yield {"event": "final", "data": {"answer": answer, "history": []}}
 
         with (
             patch("openkb.cli._stream_to_tty", return_value=False),
-            patch("openkb.agent.query.run_query", side_effect=fake_run_query),
+            patch("openkb.agent.query.iter_agent_response_events", side_effect=fake_events),
             patch("openkb.cli._setup_llm_key"),
             patch("openkb.cli.append_log"),
         ):
@@ -412,57 +386,29 @@ class TestQuerySaveGhostStrip:
 
 
 class TestQueryUsesGlobalModel:
-    """`openkb query` must resolve its model via
-    ``resolve_effective_config(kb_dir)`` — not a bare per-KB
-    ``load_config(openkb_dir / "config.yaml")`` — so a ``global.yaml``
-    scalar default (set once, shared by every KB) takes effect when the
-    KB's own ``config.yaml`` is silent on ``model``.
-
-    Exercised through the real CLI call site (``cli.query``), not the
-    resolver in isolation: the KB fixture's config.yaml never sets
-    ``model``, so the value reaching ``run_query`` can only be the global
-    override if ``query()`` actually calls ``resolve_effective_config``.
-    If that site were reverted to ``load_config(openkb_dir /
-    "config.yaml")``, the spy would never fire and ``run_query`` would see
-    ``DEFAULT_CONFIG["model"]`` instead — failing this test.
-    """
+    """The CLI uses the same captured model defaults as the desktop use case."""
 
     def test_query_resolves_model_from_global_config(self, kb_dir, monkeypatch, tmp_path):
-        import openkb.cli as cli_mod
         from openkb.config import save_global_config
 
         gdir = tmp_path / "global-config"
-        gdir.mkdir()
         monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", gdir)
         monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
         save_global_config({"model": "global-only-model"})
+        captured = {}
 
-        real_resolve = cli_mod.resolve_effective_config
-        resolve_calls: list = []
-
-        def _spy_resolve(kb_dir_arg):
-            resolve_calls.append(kb_dir_arg)
-            return real_resolve(kb_dir_arg)
-
-        captured: dict = {}
-
-        async def fake_run_query(_question, _kb_dir_arg, model, **kwargs):
+        def fake_agent(wiki_dir, model, *args, **kwargs):
             captured["model"] = model
-            return "the answer"
+            return object()
 
-        monkeypatch.setattr(cli_mod, "resolve_effective_config", _spy_resolve)
-        with (
-            patch("openkb.cli._stream_to_tty", return_value=False),
-            patch("openkb.agent.query.run_query", side_effect=fake_run_query),
-            patch("openkb.cli._setup_llm_key"),
-            patch("openkb.cli.append_log"),
-        ):
-            result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "query", "what is X?"])
+        async def fake_events(*args, **kwargs):
+            yield {"event": "final", "data": {"answer": "the answer", "history": []}}
+
+        monkeypatch.setattr("openkb.agent.query.build_query_agent", fake_agent)
+        monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
+        result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "query", "what is X?"])
 
         assert result.exit_code == 0, result.output
-        # The resolver seam was invoked by cli.query with this exact KB dir.
-        assert resolve_calls == [kb_dir]
-        # ...and the global-only model it produced actually reached run_query.
         assert captured["model"] == "global-only-model"
 
 

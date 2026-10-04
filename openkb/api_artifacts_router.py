@@ -1,13 +1,17 @@
 """Read and download generated skills and decks."""
 
 import asyncio
+import io
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import Response
 
 from openkb.api_helpers import _resolve_kb, require_bearer_token
 from openkb.api_models import DeckListResponse, SkillListResponse
+from openkb.application.artifacts import list_artifacts, read_artifact, write_artifact_archive
+from openkb.application.generators import validate_name
 
 artifacts_router = APIRouter()
 
@@ -17,15 +21,9 @@ async def deck_list_endpoint(
     kb: str = Query(...),
     _: None = Depends(require_bearer_token),
 ) -> DeckListResponse:
-    from openkb.deck import decks_root
-
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    root = decks_root(kb_dir)
-    decks = (
-        sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.endswith("-workspace"))
-        if root.is_dir()
-        else []
-    )
+    artifacts = await asyncio.to_thread(list_artifacts, kb_dir)
+    decks = [Path(item.path).name for item in artifacts if item.kind == "幻灯片"]
     return DeckListResponse(decks=[{"name": n} for n in decks])
 
 
@@ -35,20 +33,16 @@ async def deck_download_endpoint(
     kb: str = Query(...),
     _: None = Depends(require_bearer_token),
 ) -> Any:
-    from openkb.cli import _validate_skill_name
-    from openkb.deck import deck_dir, decks_root
-
-    if _validate_skill_name(name):
+    if validate_name(name):
         raise HTTPException(status_code=400, detail="Invalid deck name.")
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    root = decks_root(kb_dir).resolve()
-    target = deck_dir(kb_dir, name).resolve()
-    if not target.is_relative_to(root):
-        raise HTTPException(status_code=400, detail="Invalid deck name.")
-    index = target / "index.html"
-    if not index.is_file():
-        raise HTTPException(status_code=404, detail=f"Deck not found: {name}")
-    return FileResponse(index, media_type="text/html")
+    try:
+        content = await asyncio.to_thread(read_artifact, kb_dir, f"output/decks/{name}/index.html")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Deck not found: {name}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content, media_type="text/html")
 
 
 @artifacts_router.get("/api/v1/skill", response_model=SkillListResponse)
@@ -56,15 +50,9 @@ async def skill_list_endpoint(
     kb: str = Query(...),
     _: None = Depends(require_bearer_token),
 ) -> SkillListResponse:
-    from openkb.skill import skills_root
-
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    root = skills_root(kb_dir)
-    skills = (
-        sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.endswith("-workspace"))
-        if root.is_dir()
-        else []
-    )
+    artifacts = await asyncio.to_thread(list_artifacts, kb_dir)
+    skills = [Path(item.path).name for item in artifacts if item.kind == "Skill"]
     return SkillListResponse(skills=[{"name": n} for n in skills])
 
 
@@ -74,25 +62,14 @@ async def skill_archive_endpoint(
     kb: str = Query(...),
     _: None = Depends(require_bearer_token),
 ) -> Any:
-    import io
-    import zipfile
-
-    from openkb.cli import _validate_skill_name
-    from openkb.skill import skill_dir, skills_root
-
-    if _validate_skill_name(name):
+    if validate_name(name):
         raise HTTPException(status_code=400, detail="Invalid skill name.")
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    root = skills_root(kb_dir).resolve()
-    target = skill_dir(kb_dir, name).resolve()
-    if not target.is_relative_to(root):
-        raise HTTPException(status_code=400, detail="Invalid skill name.")
-    if not target.is_dir():
-        raise HTTPException(status_code=404, detail=f"Skill not found: {name}")
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in target.rglob("*"):
-            if f.is_file():
-                zf.write(f, f.relative_to(target))
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="application/zip")
+    try:
+        await asyncio.to_thread(write_artifact_archive, kb_dir, f"output/skills/{name}", buf)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {name}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(buf.getvalue(), media_type="application/zip")

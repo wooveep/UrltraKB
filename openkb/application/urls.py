@@ -32,6 +32,7 @@ def import_url(
     prepared_dir: Path | None = None,
     scope: KnowledgeScope | None = None,
     metadata: SourceMetadata | None = None,
+    download_remote_assets: bool | None = None,
 ) -> DocumentResult:
     from openkb.url_ingest import fetch_url_to_raw
 
@@ -91,7 +92,13 @@ def import_url(
         if source is None:
             return DocumentResult(url, "failed", (), tuple(quality), ("acquisition",))
         result = import_document(
-            kb_dir, source, context=context, origin_url=url, scope=scope, metadata=metadata
+            kb_dir,
+            source,
+            context=context,
+            origin_url=url,
+            scope=scope,
+            metadata=metadata,
+            download_remote_assets=download_remote_assets,
         )
         return replace(
             result,

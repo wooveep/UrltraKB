@@ -26,9 +26,6 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
-from openkb.agent.chat_session import delete_session, list_sessions, load_session
-from openkb.agent.query import build_run_config_from_bundle, run_query
 from openkb.api_config import apply_kb_config_patch, read_kb_config
 from openkb.api_config_router import config_router
 from openkb.api_documents_router import documents_router
@@ -38,12 +35,10 @@ from openkb.api_helpers import (
     _init_kb_for_api,
     _iter_deck,
     _iter_skill,
-    _load_or_create_session,
     _parse_stream_form,
     _reserve_add_uploads,
     _resolve_kb,
     _run_add_uploads,
-    _save_query_answer,
     _stream_add_uploads,
     _stream_chat,
     _stream_deck,
@@ -100,14 +95,9 @@ from openkb.api_views import make_views_router, resolve_api_scope
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.application.removal import run_remove_for_api
 from openkb.config import (
-    DEFAULT_CONFIG,
-    resolve_credential_bundle,
-    resolve_effective_config,
     resolve_init_kb_dir,
     validate_kb_name,
 )
-from openkb.knowledge_scope import resolve_scope
-from openkb.log import append_log
 from openkb.view_records import SourceMetadata
 from openkb.watch_service import WatchRegistry
 
@@ -269,7 +259,6 @@ def create_app() -> FastAPI:
             source_metadata = SourceMetadata.model_validate_json(metadata) if metadata else None
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Invalid source metadata") from exc
-        bundle = await asyncio.to_thread(resolve_credential_bundle, resolved_kb_dir)
         if not files:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -287,7 +276,6 @@ def create_app() -> FastAPI:
                     kb,
                     resolved_kb_dir,
                     saved_uploads,
-                    bundle=bundle,
                     scope=selected,
                     metadata=source_metadata,
                     download_remote_assets=download_remote_assets,
@@ -299,7 +287,6 @@ def create_app() -> FastAPI:
             kb,
             resolved_kb_dir,
             saved_uploads,
-            bundle=bundle,
             scope=selected,
             metadata=source_metadata,
             download_remote_assets=download_remote_assets,
@@ -312,47 +299,20 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        query_scope = await resolve_api_scope(kb_dir, request.view_id)
-        scope = resolve_scope(kb_dir, query_scope)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
-        config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-        model = config.get("model", DEFAULT_CONFIG["model"])
-        run_config = build_run_config_from_bundle(model, bundle)
-
+        selected = await resolve_api_scope(kb_dir, request.view_id)
         if request.stream:
             return StreamingResponse(
-                _stream_query(request, kb_dir, model, fastapi_request, bundle=bundle),
-                media_type="text/event-stream",
+                _stream_query(request, kb_dir, fastapi_request), media_type="text/event-stream"
             )
+        from openkb.application.conversations import ask_question
 
         try:
-            from openkb.locks import async_kb_lock
-
-            async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
-                answer = await run_query(
-                    request.question,
-                    kb_dir,
-                    model,
-                    stream=False,
-                    run_config=run_config,
-                    bundle=bundle,
-                    scope=query_scope,
-                )
-                append_log(scope.wiki_dir, "query", request.question, scope=scope)
-                saved_path = (
-                    _save_query_answer(kb_dir, request.question, answer, scope=scope)
-                    if request.save
-                    else None
-                )
+            result = await ask_question(kb_dir, request.question, save=request.save, scope=selected)
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Query failed: {exc}",
-            ) from exc
-        return QueryResponse(
-            answer=answer,
-            saved_path=str(saved_path) if saved_path else None,
-        )
+            raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
+        if result.status != "completed":
+            raise HTTPException(status_code=500, detail=result.error or result.status)
+        return QueryResponse(answer=result.answer, saved_path=result.saved_path)
 
     @app.post("/api/v1/chat", response_model=ChatResponse)
     async def chat_endpoint(
@@ -361,42 +321,38 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        query_scope = await resolve_api_scope(kb_dir, request.view_id)
-        scope = resolve_scope(kb_dir, query_scope)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
-        try:
-            session = await asyncio.to_thread(
-                _load_or_create_session, kb_dir, request.session_id, scope=scope
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        run_config = build_run_config_from_bundle(session.model, bundle)
+        selected = await resolve_api_scope(kb_dir, request.view_id)
+        from openkb.application.conversations import continue_conversation
+        from openkb.application.sessions import load_conversation
 
+        # Fail before opening an SSE response for a missing or mismatched session.
+        if request.session_id:
+            try:
+                await asyncio.to_thread(
+                    load_conversation, kb_dir, request.session_id, view_id=request.view_id
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         if request.stream:
             return StreamingResponse(
-                _stream_chat(request, kb_dir, session, fastapi_request, bundle=bundle),
-                media_type="text/event-stream",
+                _stream_chat(request, kb_dir, fastapi_request), media_type="text/event-stream"
             )
-
         try:
-            answer = ""
-            agent = await asyncio.to_thread(
-                build_chat_session_agent, kb_dir, session, bundle=bundle, scope=scope
+            result = await continue_conversation(
+                kb_dir, request.message, session_id=request.session_id, scope=selected
             )
-            async for event in iter_chat_turn_events(
-                agent, session, request.message, run_config=run_config, scope=query_scope
-            ):
-                if event["event"] == "final":
-                    answer = event["data"]["answer"]
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Chat failed: {exc}",
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
+        if result.status != "completed":
+            raise HTTPException(status_code=500, detail=result.error or result.status)
         return ChatResponse(
-            session_id=session.id,
-            answer=answer,
-            turn_count=session.turn_count,
+            session_id=result.session_id, answer=result.answer, turn_count=result.turn_count
         )
 
     @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)
@@ -405,19 +361,15 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionListResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from openkb.application.sessions import list_conversations
+
         try:
-            sessions = list_sessions(kb_dir)
+            sessions = await asyncio.to_thread(list_conversations, kb_dir, view_id=request.view_id)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"List sessions failed: {exc}",
             ) from exc
-        if request.view_id is not None:
-            sessions = [
-                session
-                for session in sessions
-                if session.get("view_id", "legacy") == request.view_id
-            ]
         return ChatSessionListResponse(kb=request.kb, sessions=sessions)
 
     @app.post("/api/v1/chat/sessions/load", response_model=ChatSessionLoadResponse)
@@ -426,23 +378,24 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionLoadResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from openkb.application.sessions import load_conversation
+
         try:
-            session = load_session(kb_dir, request.session_id)
+            session = await asyncio.to_thread(
+                load_conversation, kb_dir, request.session_id, view_id=request.view_id
+            )
         except FileNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chat session not found: {request.session_id}",
             ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Load session failed: {exc}",
             ) from exc
-        if request.view_id is not None:
-            try:
-                session.require_view(request.view_id)
-            except ValueError as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return ChatSessionLoadResponse(
             session_id=session.id,
             title=session.title,
@@ -458,8 +411,18 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionDeleteResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from openkb.application.sessions import delete_conversation
+
         try:
-            deleted = await run_in_threadpool(delete_session, kb_dir, request.session_id)
+            result = await run_in_threadpool(
+                delete_conversation,
+                kb_dir,
+                request.session_id,
+                view_id=request.view_id or "legacy",
+            )
+            deleted = result.status == "deleted"
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -514,7 +477,6 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> LintResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         try:
             # Only fix=True mutations need serialization; read-only lint
             # (fix=False) is a report and may run concurrently.
@@ -524,7 +486,6 @@ def create_app() -> FastAPI:
                         **await run_lint_report(
                             kb_dir,
                             fix=True,
-                            bundle=bundle,
                             scope=await resolve_api_scope(kb_dir, request.view_id),
                         )
                     )
@@ -532,7 +493,6 @@ def create_app() -> FastAPI:
                 **await run_lint_report(
                     kb_dir,
                     fix=False,
-                    bundle=bundle,
                     scope=await resolve_api_scope(kb_dir, request.view_id),
                 )
             )
@@ -584,11 +544,10 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
-                _stream_recompile(request, kb_dir, lock, fastapi_request, bundle=bundle),
+                _stream_recompile(request, kb_dir, lock, fastapi_request),
                 media_type="text/event-stream",
             )
         # Aggregate the async generator into a single JSON response. Terminal
@@ -607,7 +566,6 @@ def create_app() -> FastAPI:
                 dry_run=request.dry_run,
                 scope=await resolve_api_scope(kb_dir, request.view_id),
                 refresh_schema=request.refresh_schema,
-                bundle=bundle,
             ):
                 name = event.get("event")
                 if name == "plan":
@@ -697,18 +655,17 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
-                _stream_deck(request, kb_dir, lock, fastapi_request, bundle=bundle),
+                _stream_deck(request, kb_dir, lock, fastapi_request),
                 media_type="text/event-stream",
             )
         error_code: int | None = None
         error_message: str | None = None
         result: dict = {}
         async with _kb_mutation_lock(request.kb):
-            async for event in _iter_deck(request, kb_dir, bundle=bundle):
+            async for event in _iter_deck(request, kb_dir):
                 name = event.get("event")
                 if name == "error":
                     error_code = event.get("code", 500)
@@ -726,18 +683,17 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        bundle = await asyncio.to_thread(resolve_credential_bundle, kb_dir)
         if request.stream:
             lock = _kb_mutation_lock(request.kb)
             return StreamingResponse(
-                _stream_skill(request, kb_dir, lock, fastapi_request, bundle=bundle),
+                _stream_skill(request, kb_dir, lock, fastapi_request),
                 media_type="text/event-stream",
             )
         error_code: int | None = None
         error_message: str | None = None
         result: dict = {}
         async with _kb_mutation_lock(request.kb):
-            async for event in _iter_skill(request, kb_dir, bundle=bundle):
+            async for event in _iter_skill(request, kb_dir):
                 name = event.get("event")
                 if name == "error":
                     error_code = event.get("code", 500)

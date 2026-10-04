@@ -34,7 +34,10 @@ for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic")
     datas.append((str(repo / "skills" / skill), "openkb/_skills/" + skill))
 hidden = ["openkb.cli", "openkb.api", "tiktoken_ext.openai_public"]
 for package in ("litellm", "magika", "pageindex", "trafilatura", "markitdown"):
-    datas += collect_data_files(package)
+    # The desktop uses LiteLLM's model clients, never its proxy administration UI.
+    datas += collect_data_files(
+        package, excludes=["proxy/_experimental/**"] if package == "litellm" else None,
+    )
     hidden += collect_submodules(package, on_error="warn once")
 datas += collect_data_files("agents")
 

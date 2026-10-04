@@ -87,13 +87,11 @@ def test_query_non_stream_returns_json(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_run_query(question, kb, model, stream=False, **kwargs):
+    async def fake_events(agent, question, **kwargs):
         assert question == "What is OpenKB?"
-        assert kb == kb_dir
-        assert stream is False
-        return "A knowledge base."
+        yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
 
-    monkeypatch.setattr("openkb.api.run_query", fake_run_query)
+    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
 
     response = client.post(
         "/api/v1/query",
@@ -115,8 +113,8 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
         yield {"event": "delta", "data": {"text": " base."}}
         yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
 
-    monkeypatch.setattr("openkb.api_helpers.build_query_agent", lambda *args, **kwargs: object())
-    monkeypatch.setattr("openkb.api_helpers.iter_agent_response_events", fake_events)
+    monkeypatch.setattr("openkb.agent.query.build_query_agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
 
     response = client.post(
         "/api/v1/query",
@@ -132,8 +130,7 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
 
 
 def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
-    """The non-streaming /query path builds its run config with the global.yaml
-    model when the KB config is silent — proving api.py:281 uses the resolver."""
+    """The shared query execution uses the global model when the KB is silent."""
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
     from openkb.config import save_global_config
@@ -142,11 +139,15 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
 
     captured = {}
 
-    async def _fake_run_query(question, kb, model, *args, **kwargs):
+    def fake_agent(wiki_dir, model, *args, **kwargs):
         captured["model"] = model
-        return "ok"
+        return object()
 
-    monkeypatch.setattr("openkb.api.run_query", _fake_run_query)
+    async def fake_events(*args, **kwargs):
+        yield {"event": "final", "data": {"answer": "ok", "history": []}}
+
+    monkeypatch.setattr("openkb.agent.query.build_query_agent", fake_agent)
+    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
@@ -172,7 +173,7 @@ def test_chat_non_stream_creates_and_persists_session(monkeypatch, kb_dir):
         }
 
     monkeypatch.setattr(
-        "openkb.api_helpers.build_chat_session_agent",
+        "openkb.agent.chat.build_chat_session_agent",
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_agent_events)
@@ -200,24 +201,22 @@ def test_chat_stream_resumes_session(monkeypatch, kb_dir):
     session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
     session.record_turn("Hi", "Hello", [{"role": "assistant", "content": "Hello"}])
 
-    async def fake_chat_events(agent, loaded_session, message, **kwargs):
-        assert loaded_session.id == session.id
-        assert message == "Again"
+    async def fake_chat_events(agent, history, **kwargs):
+        assert history[-1] == {"role": "user", "content": "Again"}
         yield {"event": "delta", "data": {"text": "Again"}}
         yield {
             "event": "final",
             "data": {
                 "answer": "Again",
-                "session_id": loaded_session.id,
-                "turn_count": 2,
+                "history": history + [{"role": "assistant", "content": "Again"}],
             },
         }
 
     monkeypatch.setattr(
-        "openkb.api_helpers.build_chat_session_agent",
+        "openkb.agent.chat.build_chat_session_agent",
         lambda *args, **kwargs: object(),
     )
-    monkeypatch.setattr("openkb.api_helpers.iter_chat_turn_events", fake_chat_events)
+    monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
 
     response = client.post(
         "/api/v1/chat",
@@ -235,15 +234,15 @@ def test_chat_stream_forwards_artifact_event(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_chat_events(agent, session, message, **kwargs):
+    async def fake_chat_events(agent, history, **kwargs):
         yield {
             "event": "artifact",
             "data": {"kind": "file", "path": "output/x.html", "name": "x.html"},
         }
-        yield {"event": "final", "data": {"answer": "done", "session_id": "s1", "turn_count": 1}}
+        yield {"event": "final", "data": {"answer": "done", "history": history}}
 
-    monkeypatch.setattr("openkb.api_helpers.build_chat_session_agent", lambda *a, **k: object())
-    monkeypatch.setattr("openkb.api_helpers.iter_chat_turn_events", fake_chat_events)
+    monkeypatch.setattr("openkb.agent.chat.build_chat_session_agent", lambda *a, **k: object())
+    monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
 
     response = client.post(
         "/api/v1/chat", json={"kb": kb, "message": "hi", "stream": True}, headers=_auth()
@@ -901,6 +900,7 @@ def test_status_endpoint_returns_structured_counts(monkeypatch, kb_dir):
         "sources": 1,
         "summaries": 1,
         "concepts": 1,
+        "entities": 0,
         "reports": 1,
     }
     assert payload["raw_count"] == 1
@@ -1692,13 +1692,16 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
 
     captured = {}
 
-    async def fake_run_query(question, kbd, model, stream=False, **kwargs):
-        bundle = kwargs.get("bundle")
+    def fake_agent(wiki_dir, model, language, bundle):
         captured["bundle_key"] = bundle.api_key if bundle else None
         captured["env_key"] = os.environ.get("LLM_API_KEY")
-        return "answer"
+        return object()
 
-    monkeypatch.setattr("openkb.api.run_query", fake_run_query)
+    async def fake_events(*args, **kwargs):
+        yield {"event": "final", "data": {"answer": "answer", "history": []}}
+
+    monkeypatch.setattr("openkb.agent.query.build_query_agent", fake_agent)
+    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
 
     client = TestClient(create_app())
     r = client.post(

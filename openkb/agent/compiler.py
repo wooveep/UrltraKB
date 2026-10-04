@@ -435,17 +435,20 @@ def _llm_call(
     spinner = _Spinner(step_name)
     spinner.start()
     t0 = time.time()
+    suffix = ""
 
-    from openkb.llm_usage_transport import observe_model_call
+    try:
+        from openkb.llm_usage_transport import observe_model_call
 
-    with observe_model_call(model, "compile." + step_name) as usage:
-        response = litellm.completion(model=model, messages=messages, **kwargs)
-        if usage:
-            usage.finish(response)
-    content = response.choices[0].message.content or ""
-    truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
-
-    spinner.stop(_format_usage(time.time() - t0, response.usage))
+        with observe_model_call(model, "compile." + step_name) as usage:
+            response = litellm.completion(model=model, messages=messages, **kwargs)
+            if usage:
+                usage.finish(response)
+        content = response.choices[0].message.content or ""
+        truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
+        suffix = _format_usage(time.time() - t0, response.usage)
+    finally:
+        spinner.stop(suffix)
     logger.debug(
         "LLM response [%s]:\n%s", step_name, content[:500] + ("..." if len(content) > 500 else "")
     )

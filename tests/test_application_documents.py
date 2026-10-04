@@ -43,6 +43,7 @@ def test_import_document_compiles_and_deduplicates(kb_dir, tmp_path, monkeypatch
     assert get_kb_list(kb_dir)["document_count"] == 1
     assert import_document(kb_dir, source).status == "skipped"
     assert [event["stage"] for event in events if "stage" in event] == [
+        "preparing",
         "converting",
         "compiling",
         "committed",

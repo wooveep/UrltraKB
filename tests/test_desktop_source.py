@@ -211,6 +211,7 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
         with tarfile.open(output / runtime.name) as archive:
             archive.extractall(extracted, filter="data")
         assert (extracted / "UrltraKB/UrltraKB").stat().st_mode & 0o111
+        assert (extracted / "UrltraKB/UrltraKB").samefile(extracted / "UrltraKB/UrltraKBCLI")
         assert (extracted / "UrltraKB/_internal/library.so").read_bytes() == b"shared runtime"
     release = read_distribution(extracted / "UrltraKB/distribution", identity)
     assert {f.kind for f in release.files} == {"licenses", "notice"}

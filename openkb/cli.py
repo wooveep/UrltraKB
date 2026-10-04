@@ -44,13 +44,11 @@ litellm.suppress_debug_info = True
 from dotenv import load_dotenv
 
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
-from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY
 from openkb.config import (
     DEFAULT_CONFIG,
     resolve_effective_config,
     load_global_config,
     register_kb,
-    resolve_concurrency,
     set_extra_headers,
     resolve_parallel_tool_calls,
     set_parallel_tool_calls,
@@ -60,8 +58,6 @@ from openkb.config import (
 from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.log import append_log
 from openkb.application import documents as document_use_cases
-from openkb.application.knowledge_bases import display_document_type as _display_type
-from openkb.schema import PAGE_CONTENT_DIRS
 from openkb.application.knowledge_bases import initialize_kb
 
 # Suppress warnings after all imports — markitdown overrides filters at import time
@@ -310,18 +306,18 @@ def add_single_file(
     *,
     stage: bool = True,
     bundle=None,
+    context=None,
     scope: KnowledgeScope | None = None,
     origin_url: str | None = None,
     metadata=None,
     download_remote_assets: bool | None = None,
 ):
-    if bundle is None:
-        _setup_llm_key(kb_dir)
     return document_use_cases.add_single_file(
         file_path,
         kb_dir,
         stage=stage,
         bundle=bundle,
+        context=context,
         report=click.echo,
         scope=scope,
         origin_url=origin_url,
@@ -573,9 +569,9 @@ def add(ctx, path, product, versions, family, document_revision, download_remote
 
     PATH may be a local file, a local directory (which is walked
     recursively for supported extensions), or an http(s) URL. URLs are
-    fetched into ``raw/`` first: PDF responses (by Content-Type and
-    magic-byte sniff) are saved as ``.pdf``; HTML responses are run
-    through trafilatura's main-content extractor and saved as ``.md``.
+    downloaded privately: PDF responses (by Content-Type and magic-byte
+    sniff) stay PDF; HTML responses are converted to Markdown. The shared
+    import operation retains a frozen source for provenance and retry.
     """
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
     if kb_dir is None:
@@ -586,7 +582,8 @@ def add(ctx, path, product, versions, family, document_revision, download_remote
         click.echo("Provide a PATH (file, directory or URL).")
         return
 
-    from openkb.url_ingest import looks_like_url, fetch_url_to_raw, _unique_path
+    from openkb.url_ingest import looks_like_url
+    from openkb.application.execution import ExecutionContext
     from openkb.view_records import SourceMetadata
 
     supplied = {
@@ -600,35 +597,22 @@ def add(ctx, path, product, versions, family, document_revision, download_remote
         if value
     }
     metadata = SourceMetadata.model_validate(supplied) if supplied else None
-    options = {"scope": _selected_scope(ctx, kb_dir), "metadata": metadata}
+    options = {
+        "scope": _selected_scope(ctx, kb_dir),
+        "metadata": metadata,
+        "context": ExecutionContext(),
+    }
     if download_remote_assets is not None:
         options["download_remote_assets"] = download_remote_assets
 
     if looks_like_url(path):
-        from tempfile import TemporaryDirectory
+        from openkb.application.urls import import_url
+        from openkb.ingest_result import describe_ingest
 
-        from openkb.application.uploads import published_input
-
-        # Acquisition owns private bytes outside the KB lease. Publish only a
-        # complete input, then retain ownership through compile/skip cleanup.
-        with TemporaryDirectory(prefix="openkb-url-") as temporary:
-            fetched = fetch_url_to_raw(path, Path(temporary), announce_saved=False)
-            if fetched is None:
-                return
-            with kb_ingest_lock(kb_dir / ".openkb"):
-                name = _unique_path(kb_dir / "raw" / fetched.name).name
-                with published_input(kb_dir, fetched, filename=name) as published:
-                    if published.path.suffix.lower() == ".pdf":
-                        size = published.path.stat().st_size / (1024 * 1024)
-                        description = f"{size:.1f} MB PDF"
-                    else:
-                        length = len(published.path.read_text(encoding="utf-8"))
-                        description = f"{length // 1024 or 1} KB clean markdown"
-                    click.echo(f"  Saved: raw/{published.path.name} ({description})")
-                    outcome = add_single_file(published.path, kb_dir, origin_url=path, **options)
-                    if outcome == "skipped":
-                        published.discard_if_unregistered()
-            return
+        result = import_url(kb_dir, path, **options)
+        for line in describe_ingest(result):
+            click.echo(line)
+        return
 
     target = Path(path)
     if not target.exists():
@@ -671,6 +655,11 @@ def _stream_to_tty() -> bool:
 
 
 from openkb.application.answers import save_exploration as save_exploration
+from openkb.terminal_maintenance import (
+    print_list as print_list,
+    print_status as print_status,
+    run_lint as run_lint,
+)
 
 
 @cli.command()
@@ -684,7 +673,6 @@ from openkb.application.answers import save_exploration as save_exploration
     help="Show raw markdown source instead of rendered output (keeps tool-call colors).",
 )
 @click.pass_context
-@_with_kb_lock(exclusive=True)
 def query(ctx, question, save, raw):
     """Query the knowledge base with QUESTION."""
     kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
@@ -692,30 +680,38 @@ def query(ctx, question, save, raw):
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
 
-    from openkb.agent.query import run_query
-
-    config = resolve_effective_config(kb_dir)[0]
-    _setup_llm_key(kb_dir)
-    model: str = config.get("model", DEFAULT_CONFIG["model"])
+    from openkb.application.conversations import ask_question
+    from openkb.application.execution import ExecutionContext
+    from openkb.terminal_answers import AnswerRenderer
 
     stream = _stream_to_tty()
     scope = _selected_scope(ctx, kb_dir)
     try:
-        answer = asyncio.run(
-            run_query(question, kb_dir, model, stream=stream, raw=raw, scope=scope)
-        )
-        if not stream and answer:
-            click.echo(answer)
+        with AnswerRenderer(
+            enabled=stream, use_color=stream and not os.environ.get("NO_COLOR"), raw=raw
+        ) as renderer:
+            result = asyncio.run(
+                ask_question(
+                    kb_dir,
+                    question,
+                    save=save,
+                    scope=scope,
+                    context=ExecutionContext(on_event=renderer),
+                )
+            )
+            if result.status == "completed":
+                renderer.finish(result.answer)
+        if result.status != "completed":
+            click.echo(f"[ERROR] {result.error or result.status}")
+            return
+        if not stream and result.answer:
+            click.echo(result.answer)
     except Exception as exc:
         click.echo(f"[ERROR] Query failed: {exc}")
         return
 
-    scope = resolve_scope(kb_dir, scope)
-    append_log(scope.wiki_dir, "query", question, scope=scope)
-
-    if save and answer:
-        explore_path = save_exploration(kb_dir, question, answer, unique=False, scope=scope)
-        click.echo(f"\nSaved to {explore_path}")
+    if result.saved_path:
+        click.echo(f"\nSaved to {result.saved_path}")
 
 
 # Transitional private exports for existing CLI integrations. Business lives in application.
@@ -1000,10 +996,9 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
         from openkb.application.recompilation import refresh_schema as refresh_view_schema
 
         refresh_view_schema(kb_dir, scope=document_scope)
-    _setup_llm_key(kb_dir)
-    config = resolve_effective_config(kb_dir)[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-    concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
+    from openkb.application.execution import ExecutionContext
+
+    context = ExecutionContext()
     recompiled = skipped = blocked = partial = 0
     for i, target in enumerate(targets, 1):
         click.echo(f"[{i}/{len(targets)}] Recompiling {target.kind} doc {target.doc_name}...")
@@ -1011,8 +1006,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
             recompile_document(
                 kb_dir,
                 target.file_hash,
-                model=model,
-                max_concurrency=concurrency,
+                context=context,
                 scope=scope,
                 unit_id=target.unit_id,
             )
@@ -1101,15 +1095,19 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
 
     from openkb.agent.chat_session import (
         ChatSession,
-        delete_session,
-        list_sessions,
-        load_session,
         relative_time,
-        resolve_session_id,
+    )
+    from openkb.application.sessions import (
+        delete_conversation,
+        list_conversations,
+        load_conversation,
+        resolve_conversation,
     )
 
+    view_id = resolve_scope(kb_dir, _selected_scope(ctx, kb_dir)).view_id
+
     if list_sessions_flag:
-        sessions = list_sessions(kb_dir)
+        sessions = list_conversations(kb_dir, view_id=view_id)
         if not sessions:
             click.echo("No chat sessions yet.")
             return
@@ -1124,25 +1122,24 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
 
     if delete_id is not None:
         try:
-            resolved = resolve_session_id(kb_dir, delete_id)
+            resolved = resolve_conversation(kb_dir, delete_id, view_id=view_id)
         except ValueError as exc:
             click.echo(f"[ERROR] {exc}")
             return
         if not resolved:
             click.echo(f"No matching session: {delete_id}")
             return
-        if delete_session(kb_dir, resolved):
+        if delete_conversation(kb_dir, resolved, view_id=view_id).status == "deleted":
             click.echo(f"Deleted session {resolved}")
         else:
             click.echo(f"Could not delete session: {resolved}")
         return
 
     config = resolve_effective_config(kb_dir)[0]
-    _setup_llm_key(kb_dir)
 
     if resume is not None:
         try:
-            resolved = resolve_session_id(kb_dir, resume)
+            resolved = resolve_conversation(kb_dir, resume, view_id=view_id)
         except ValueError as exc:
             click.echo(f"[ERROR] {exc}")
             return
@@ -1152,7 +1149,7 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
             else:
                 click.echo(f"No matching session: {resume}")
             return
-        session = load_session(kb_dir, resolved)
+        session = load_conversation(kb_dir, resolved, view_id=view_id)
     else:
         model: str = config.get("model", DEFAULT_CONFIG["model"])
         language: str = config.get("language", "en")
@@ -1237,7 +1234,6 @@ def watch(ctx):
                     continue
                 try:
                     with expected_generation(kb_dir, generation):
-                        _setup_llm_key(kb_dir)
                         result = document_use_cases.import_document(
                             kb_dir, fp, source_root=raw_dir, report=click.echo
                         )
@@ -1253,36 +1249,6 @@ def watch(ctx):
 
     click.echo(f"Watching {raw_dir} for new documents. Press Ctrl+C to stop.")
     watch_directory(raw_dir, on_new_files, cancelled=cancelled)
-
-
-async def run_lint(
-    kb_dir: Path, *, fix: bool = False, scope: KnowledgeScope | None = None
-) -> Path | None:
-    """CLI/chat projection; shared maintenance owns complete checks and commits."""
-    scope = resolve_scope(kb_dir, scope)
-    from openkb.api_lint import echo_lint_event, fix_summary
-    from openkb.application.maintenance import LintOptions, check_knowledge
-
-    def event(value):
-        if value.get("stage") == "links_repaired":
-            click.echo(fix_summary(value["files"], value["ghosts"]))
-        else:
-            echo_lint_event(value)
-
-    result = await check_knowledge(
-        kb_dir,
-        LintOptions(fix=fix, unique_report=False),
-        on_event=event,
-        prepare_model=lambda: _setup_llm_key(kb_dir),
-        scope=scope,
-    )
-    if result.status == "skipped":
-        click.echo("Nothing to lint — no documents indexed yet. Run `openkb add` first.")
-        return None
-    if result.status != "completed" or result.report_path is None:
-        raise RuntimeError(f"Lint failed ({result.error_type or result.status})")
-    click.echo(f"\nReport written to {result.report_path}")
-    return Path(result.report_path)
 
 
 @cli.command()
@@ -1342,95 +1308,6 @@ def visualize(ctx, open_browser):
             )
 
 
-def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
-    """Print all documents in the knowledge base. Usable from CLI and chat REPL."""
-    from openkb.application.knowledge_bases import get_kb_list
-
-    documents = get_kb_list(kb_dir, scope=scope)["documents"]
-    if not documents:
-        click.echo("No documents indexed yet.")
-        return
-
-    # Display documents table with count in header
-    doc_count = len(documents)
-    click.echo(f"Documents ({doc_count}):")
-    click.echo(f"  {'Name':<40} {'Type':<12} {'Pages':<8}")
-    click.echo(f"  {'-' * 40} {'-' * 12} {'-' * 8}")
-    for meta in documents:
-        name = meta.get("name", "unknown")
-        raw_type = meta.get("type", "unknown")
-        display = _display_type(raw_type)
-        pages = meta.get("pages", "")
-        pages_str = str(pages) if pages else ""
-        click.echo(f"  {name:<40} {display:<12} {pages_str:<8}")
-        if meta.get("tokens") is not None:
-            click.echo(
-                f"    Text: {meta.get('characters')} characters; {meta['tokens']} tokens (cl100k_base)"
-            )
-        if meta.get("block_count") is not None:
-            click.echo(f"    Content blocks: {meta['block_count']}")
-        if meta.get("source_id"):
-            click.echo(f"    View: {meta.get('view_id', 'legacy')}")
-            click.echo(f"    Source: {meta['source_id']}; revision: {meta['source_revision_id']}")
-            click.echo(f"    {meta['status']}: {meta.get('message') or ''}")
-            click.echo(
-                f"    Processing: {meta.get('length_class') or 'unknown'} / "
-                f"{meta.get('execution_mode') or 'unknown'}"
-            )
-            for unit in meta.get("units", []):
-                click.echo(
-                    f"    Unit {unit.get('name') or unit['unit_id']} ({unit['unit_id']}): "
-                    f"{unit['status']}; {unit.get('length_class') or 'unknown'} / "
-                    f"{unit.get('execution_mode') or 'unknown'}; actual: "
-                    f"{unit.get('successful_source_revision_id') or 'none'}"
-                )
-            target = meta.get("target_processing")
-            if target and target != meta.get("processing"):
-                click.echo(
-                    f"    Target processing: {target['length_class']} / {target['execution_mode']}; "
-                    f"capacity: {target['capacity_status']}"
-                )
-            click.echo(
-                f"    Validity: {meta.get('validity', 'current')}; generation: {meta.get('source_generation', '?')}"
-            )
-
-    # Display summaries
-    summaries_dir = resolve_scope(kb_dir, scope).wiki_dir / "summaries"
-    if summaries_dir.exists():
-        summaries = sorted(p.stem for p in summaries_dir.glob("*.md"))
-        if summaries:
-            click.echo(f"\nSummaries ({len(summaries)}):")
-            for s in summaries:
-                click.echo(f"  - {s}")
-
-    # Display concepts
-    concepts_dir = resolve_scope(kb_dir, scope).wiki_dir / "concepts"
-    if concepts_dir.exists():
-        concepts = sorted(p.stem for p in concepts_dir.glob("*.md"))
-        if concepts:
-            click.echo(f"\nConcepts ({len(concepts)}):")
-            for c in concepts:
-                click.echo(f"  - {c}")
-
-    # Display entities
-    entities_dir = resolve_scope(kb_dir, scope).wiki_dir / "entities"
-    if entities_dir.exists():
-        entities = sorted(p.stem for p in entities_dir.glob("*.md"))
-        if entities:
-            click.echo(f"\nEntities ({len(entities)}):")
-            for e in entities:
-                click.echo(f"  - {e}")
-
-    # Display reports
-    reports_dir = resolve_scope(kb_dir, scope).wiki_dir / "reports"
-    if reports_dir.exists():
-        reports = sorted(p.name for p in reports_dir.glob("*.md"))
-        if reports:
-            click.echo(f"\nReports ({len(reports)}):")
-            for r in reports:
-                click.echo(f"  - {r}")
-
-
 @cli.command(name="list")
 @click.pass_context
 @_with_kb_lock(exclusive=False)
@@ -1441,73 +1318,6 @@ def list_cmd(ctx):
         click.echo("No knowledge base found. Run `openkb init` first.")
         return
     print_list(kb_dir, scope=_selected_scope(ctx, kb_dir))
-
-
-def print_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
-    """Print knowledge base status. Usable from CLI and chat REPL."""
-    wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
-    subdirs = ["sources", "summaries", "concepts", "entities", "reports"]
-
-    # Print the active KB path as the first line. Agents and scripts
-    # parse this to locate the wiki without assuming cwd == KB root.
-    click.echo(f"Knowledge base: {kb_dir}")
-    from openkb.application.knowledge_bases import get_kb_status
-
-    for view_id, reasons in get_kb_status(kb_dir, scope=scope)["needs_refresh"].items():
-        click.echo(f"  Needs refresh: {view_id} ({len(reasons)} pages)")
-    click.echo("")
-    click.echo("Knowledge Base Status:")
-    click.echo(f"  {'Directory':<20} {'Files':<10}")
-    click.echo(f"  {'-' * 20} {'-' * 10}")
-
-    for subdir in subdirs:
-        path = wiki_dir / subdir
-        if path.exists():
-            count = len(list(path.glob("*.md")))
-        else:
-            count = 0
-        click.echo(f"  {subdir:<20} {count:<10}")
-
-    # Raw files
-    raw_dir = kb_dir / "raw"
-    if raw_dir.exists():
-        raw_count = len([f for f in raw_dir.iterdir() if f.is_file()])
-        click.echo(f"  {'raw':<20} {raw_count:<10}")
-
-    # Hash registry summary
-    openkb_dir = kb_dir / ".openkb"
-    hashes_file = openkb_dir / "hashes.json"
-    if hashes_file.exists():
-        from openkb.application.knowledge_bases import get_kb_list
-
-        count = get_kb_list(kb_dir, scope=scope)["document_count"]
-        click.echo(f"\n  Total indexed: {count} document(s)")
-
-    # Last compile time: newest compiled page across summaries/, concepts/,
-    # and entities/ (an entity-only compile must still bump the shown time).
-    compiled_pages = [
-        p
-        for sub in PAGE_CONTENT_DIRS
-        for p in (wiki_dir / sub).glob("*.md")
-        if (wiki_dir / sub).exists()
-    ]
-    if compiled_pages:
-        newest_page = max(compiled_pages, key=lambda p: p.stat().st_mtime)
-        import datetime
-
-        mtime = datetime.datetime.fromtimestamp(newest_page.stat().st_mtime)
-        click.echo(f"  Last compile:  {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
-
-    # Last lint time: newest file in wiki/reports/
-    reports_dir = wiki_dir / "reports"
-    if reports_dir.exists():
-        reports = list(reports_dir.glob("*.md"))
-        if reports:
-            newest_report = max(reports, key=lambda p: p.stat().st_mtime)
-            import datetime
-
-            mtime = datetime.datetime.fromtimestamp(newest_report.stat().st_mtime)
-            click.echo(f"  Last lint:     {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 @cli.command()
@@ -1725,17 +1535,6 @@ def skill_new(ctx, name, intent, yes_flag):
         click.echo(f"[ERROR] {err}", err=True)
         ctx.exit(1)
 
-    # Verify LLM key + load config BEFORE touching existing output. Any
-    # failure here (missing API key, malformed config) must leave the old
-    # skill directory intact — we can't replace it if we can't proceed.
-    try:
-        _setup_llm_key(kb_dir)
-    except RuntimeError as exc:
-        click.echo(f"[ERROR] {exc}", err=True)
-        ctx.exit(1)
-    config = resolve_effective_config(kb_dir)[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-
     from openkb.application.generators import (
         GenerationOptions,
         generate_artifact,
@@ -1758,7 +1557,6 @@ def skill_new(ctx, name, intent, yes_flag):
         generate_artifact(
             kb_dir,
             GenerationOptions("skill", name, intent, overwrite="archive", version=preview.version),
-            model=model,
             scope=scope,
         )
     )
@@ -2188,17 +1986,6 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
         click.echo(f"[ERROR] {err}", err=True)
         ctx.exit(1)
 
-    # Verify LLM key + load config BEFORE touching existing output. Any
-    # failure here (missing API key, malformed config) must leave the old
-    # deck directory intact — we can't replace it if we can't proceed.
-    try:
-        _setup_llm_key(kb_dir)
-    except RuntimeError as exc:
-        click.echo(f"[ERROR] {exc}", err=True)
-        ctx.exit(1)
-    config = resolve_effective_config(kb_dir)[0]
-    model = config.get("model", DEFAULT_CONFIG["model"])
-
     from openkb.application.generators import (
         GenerationOptions,
         generate_artifact,
@@ -2238,7 +2025,6 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
                 critique=critique_flag,
                 skill_name=skill_name,
             ),
-            model=model,
             scope=scope,
         )
     )
@@ -2295,16 +2081,8 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
     return dest
 
 
-# ---------------------------------------------------------------------------
-# REST API helpers (structured init/list/status/lint + add wrapper)
-#
-# These return plain dicts (or AddFileResult) so openkb.api can serialize them
-# directly as JSON. They deliberately reuse the locked CLI code paths so the
-# API and CLI never diverge in behavior.
-# ---------------------------------------------------------------------------
+# Additional command groups keep input/output adaptation separate from use cases.
 
-
-from openkb.api_lint import fix_summary
 from openkb.cli_proposals import proposals
 from openkb.cli_refresh import refresh
 from openkb.cli_source import source, retry_worksheet, reprocess, retry_source
@@ -2324,20 +2102,3 @@ cli.add_command(process_pending_command)
 cli.add_command(settings)
 cli.add_command(views)
 cli.add_command(versions)
-
-_fix_summary = fix_summary
-
-
-async def run_lint_report(
-    kb_dir: Path, *, fix: bool = False, echo: bool = False, bundle=None
-) -> dict:
-    """Compatibility export for callers of the former CLI business helper."""
-    from openkb.api_lint import run_lint_report as report
-
-    return await report(
-        kb_dir,
-        fix=fix,
-        echo=echo,
-        bundle=bundle,
-        prepare_model=(lambda: _setup_llm_key(kb_dir)) if bundle is None else None,
-    )
