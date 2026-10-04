@@ -144,7 +144,9 @@ def discover(kb_dir, intent, check_stop):
                     kb_generation=intent.kb_generation,
                     payload=artifact,
                     digest=digest,
-                    filename=PurePosixPath(name).stem + "." + extension,
+                    filename=PurePosixPath(name).name
+                    if extension in {"caj", "kdh"}
+                    else PurePosixPath(name).stem + "." + extension,
                     depth=intent.depth + 1,
                     ancestry=(*intent.ancestry, revision.digest),
                 )

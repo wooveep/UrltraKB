@@ -21,6 +21,8 @@ datas = collect_data_files(
     ],
 )
 datas += [(str(assets), "openkb/rendering/assets")]
+# Conversion provenance hashes these exact helpers in both source and frozen runs.
+datas += [(str(repo / "openkb/cnki" / name), "openkb/cnki") for name in ("engine.py", "worker.py")]
 # The manifest is the runtime whitelist; reference fonts stay in the source tree.
 fonts = json.loads((repo / "assets/fonts/manifest.json").read_text("utf-8"))
 font_files = {"manifest.json", "README.md"} | {f[k] for f in fonts for k in ("file", "license")}
@@ -30,9 +32,10 @@ datas += [
 ]
 datas += [(str(packaging / "build/token-cache"), "openkb/token-cache")]
 datas += copy_metadata("openkb", recursive=True)
+datas += copy_metadata("pymupdf")
 for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):
     datas.append((str(repo / "skills" / skill), "openkb/_skills/" + skill))
-hidden = ["openkb.cli", "openkb.api", "tiktoken_ext.openai_public"]
+hidden = ["openkb.cli", "openkb.api", "openkb.cnki.worker", "tiktoken_ext.openai_public"]
 for package in ("litellm", "magika", "pageindex", "trafilatura", "markitdown"):
     # The desktop uses LiteLLM's model clients, never its proxy administration UI.
     datas += collect_data_files(

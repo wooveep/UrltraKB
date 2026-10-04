@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
+from pageindex.index.page_parts_policy import PAGE_PARTS_INDEX_POLICY
+
 from openkb.locks import atomic_write_text
 from openkb.office.records import Slide
 from openkb.office.slide_content import NOTES_POLICY, attach_slides, read_slides
@@ -48,7 +50,7 @@ def materialize_slide_package(path: Path):
 
 
 class FrozenSlideParser:
-    policy = NOTES_POLICY
+    policy = f"{NOTES_POLICY}:{PAGE_PARTS_INDEX_POLICY}"
 
     def supported_extensions(self):
         return [".okpi"]

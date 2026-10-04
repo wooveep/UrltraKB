@@ -12,6 +12,7 @@ from functools import partial
 
 
 from .block_policy import BlockContractError
+from .page_parts_policy import PagePartsContractError, PagePartsPolicy
 
 ################### check title in page #########################################################
 async def check_title_appearance(item, page_list, start_index=1, model=None, policy=None):    
@@ -873,6 +874,8 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
     invalid_results = []
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
+            if isinstance(result, PagePartsContractError):
+                raise result
             print(f"Processing item {item} generated an exception: {result}")
             # A failed request is still unresolved; do not silently drop it.
             invalid_results.append(dict(item))
@@ -1028,13 +1031,17 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
             
     toc_with_page_number = [item for item in toc_with_page_number if policy or item.get('physical_index') is not None] 
+    if isinstance(policy, PagePartsPolicy):
+        toc_with_page_number = policy.prepare_navigation(toc_with_page_number, start_index,
+                                                         start_index + len(page_list) - 1)
     
-    toc_with_page_number = validate_and_truncate_physical_indices(
-        toc_with_page_number, 
-        len(page_list), 
-        start_index=start_index, 
-        logger=logger
-    )
+    if not isinstance(policy, PagePartsPolicy):
+        toc_with_page_number = validate_and_truncate_physical_indices(
+            toc_with_page_number,
+            len(page_list),
+            start_index=start_index,
+            logger=logger
+        )
     
     accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model, **({"policy": policy} if policy else {}))
         
@@ -1070,6 +1077,8 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None, policy=None):
+    if isinstance(policy, PagePartsPolicy) and not policy.has_navigation_text(node['start_index'], node['end_index']):
+        return node
     node_page_list = page_list[node['start_index']-1:node['end_index']]
     token_num = sum([page[1] for page in node_page_list])
     
@@ -1081,12 +1090,20 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
         
         # Filter out items with None physical_index before post_processing
         valid_node_toc_items = [item for item in node_toc_tree if item.get('physical_index') is not None]
-        if policy and len(valid_node_toc_items) == 1 and valid_node_toc_items[0]['physical_index'] == node['start_index']:
+        if isinstance(policy, PagePartsPolicy):
+            if len(valid_node_toc_items) <= 1:
+                return node
+            same_root = node['title'].strip() == valid_node_toc_items[0]['title'].strip()
+            children = valid_node_toc_items[1:] if same_root else valid_node_toc_items
+            first = children[0]['physical_index'] if same_root else node['start_index']
+            node['nodes'] = post_processing(children, node['end_index'], policy=policy,
+                                           start_physical_index=first)
+        elif policy and len(valid_node_toc_items) == 1 and valid_node_toc_items[0]['physical_index'] == node['start_index']:
             # A generated label may vary on an unchanged single section. No
             # smaller range was found; keep this leaf instead of recursing forever.
             return node
         
-        if valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
+        elif valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
             node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], **({"policy": policy} if policy else {}))
             node['end_index'] = valid_node_toc_items[1]['start_index'] if len(valid_node_toc_items) > 1 else node['end_index']
         else:
@@ -1103,6 +1120,8 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
         # current boundaries instead.
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for child_node, result in zip(node['nodes'], results):
+            if isinstance(result, PagePartsContractError):
+                raise result
             if isinstance(result, Exception) and logger:
                 logger.error(f"Failed to expand node '{child_node.get('title')}': {result}")
 
@@ -1144,6 +1163,8 @@ async def tree_parser(page_list, opt, doc=None, logger=None, policy=None):
     # must not abort indexing the whole document.
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for node, result in zip(toc_tree, results):
+        if isinstance(result, PagePartsContractError):
+            raise result
         if isinstance(result, Exception) and logger:
             logger.error(f"Failed to expand node '{node.get('title')}': {result}")
 

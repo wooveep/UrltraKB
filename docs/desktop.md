@@ -63,10 +63,17 @@ actual application screenshots and reproducible source acceptance commands.
 ## Import and maintain knowledge
 
 Import files, folders, or URLs from **资料** (Documents). Supported document inputs
-include PDF, Markdown, Word, PowerPoint, Excel, HTML, text and CSV. Each task
+include PDF, Markdown, Word, PowerPoint, Excel, HTML, text, CSV, CAJ and KDH. Each task
 shows its KB, current stage and individual outcomes. An already indexed input
 may be skipped. A batch can retain completed documents while reporting failed
 or unprocessed ones.
+
+Local CAJ/KDH files retain their original name and bytes. Supported CAJ, KDH
+and embedded PDF content becomes an internal PDF for the ordinary import
+pipeline. HN, C8, TEB and unknown content are reported as unsupported. Source
+details show conversion diagnostics and offer the internal PDF preview. A
+converter policy change requires explicit reprocessing; retries and historical
+reads reuse validated retained artifacts.
 
 The document list supports removal and recompilation. Review the preview before
 confirming changes. Recompilation can rewrite knowledge pages; open editor drafts

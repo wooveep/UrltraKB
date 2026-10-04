@@ -10,6 +10,11 @@ PageIndex is built from the tracked `vendor/PageIndex` directory. The root
 script and PyInstaller spec reject PageIndex loaded from another directory.
 Source exports include its source, MIT license and upstream provenance. The
 build inventory attributes these files to the local PageIndex component.
+CNKI conversion uses the pinned PyMuPDF/MuPDF native runtime already needed for
+PDF input. The freeze includes the converter worker, its hashable source helpers,
+native libraries and PyMuPDF license metadata. No external CNKI reader or system
+`mutool` is required. Converter provenance, the compatibility patch and platform
+wheel hashes are in `openkb/cnki/assets/`; `uv.lock` pins the runtime dependency.
 For Python wheel delivery, build and supply both packages:
 
 ```sh

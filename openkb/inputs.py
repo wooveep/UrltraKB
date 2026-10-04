@@ -6,7 +6,7 @@ import hashlib
 import json
 import shutil
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,11 +17,13 @@ from openkb.state import HashRegistry
 TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv", ".xml", ".html", ".htm"}
 IMAGE_SOURCE_EXTENSIONS = {".md", ".markdown", ".html", ".htm"}
 OFFICE_SOURCE_EXTENSIONS = {".docx", ".doc", ".pptx", ".ppt"}
+CNKI_SOURCE_EXTENSIONS = {".caj", ".kdh"}
 WORKBOOK_SOURCE_EXTENSIONS = {".xlsx", ".xls"}
 FROZEN_SOURCE_EXTENSIONS = {
     ".pdf",
     *TEXT_SOURCE_EXTENSIONS,
     *OFFICE_SOURCE_EXTENSIONS,
+    *CNKI_SOURCE_EXTENSIONS,
     *WORKBOOK_SOURCE_EXTENSIONS,
 }
 
@@ -127,6 +129,8 @@ class PreparedInput:
     images: dict[str, PreparedImage]
     identity: Path
     text_checks: dict = field(default_factory=dict, compare=False, repr=False)
+    conversions: dict = field(default_factory=dict, compare=False, repr=False)
+    conversion_tasks: ExitStack = field(default_factory=ExitStack, compare=False, repr=False)
 
     def is_current(self) -> bool:
         if self.source.resolve() != self.identity:
@@ -181,11 +185,16 @@ def prepared_input(source: Path) -> Iterator[PreparedInput]:
     with tempfile.TemporaryDirectory(
         prefix="openkb-input-", dir=_preparation_root.get()
     ) as directory:
-        yield _prepare(source, Path(directory))
+        ready = _prepare(source, Path(directory))
+        try:
+            yield ready
+        finally:
+            ready.conversion_tasks.close()
 
 
 # Supported document extensions shared by import adapters
 SUPPORTED_EXTENSIONS = {
+    *CNKI_SOURCE_EXTENSIONS,
     ".pdf",
     ".md",
     ".markdown",

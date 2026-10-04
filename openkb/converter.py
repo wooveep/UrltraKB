@@ -38,6 +38,7 @@ class ConvertResult:
     processing: ProcessingDecision | None = None
     pdf_path: Path | None = None
     office_path: Path | None = None
+    cnki_path: Path | None = None
 
 
 def _registry_path(path: Path, kb_dir: Path) -> str:
@@ -161,6 +162,7 @@ def convert_document(
     resource_policy=None,
     check_stop: Callable[[], None] = lambda: None,
     office_identity=None,
+    cnki_identity=None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from openkb.inputs import prepared_input
@@ -176,6 +178,7 @@ def convert_document(
             resource_policy=resource_policy,
             check_stop=check_stop,
             office_identity=office_identity,
+            cnki_identity=cnki_identity,
         )
     with prepared_input(src) as ready:
         return _convert_prepared_document(
@@ -188,6 +191,7 @@ def convert_document(
             resource_policy=resource_policy,
             check_stop=check_stop,
             office_identity=office_identity,
+            cnki_identity=cnki_identity,
         )
 
 
@@ -202,6 +206,7 @@ def _convert_prepared_document(
     resource_policy=None,
     check_stop: Callable[[], None] = lambda: None,
     office_identity=None,
+    cnki_identity=None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -216,7 +221,10 @@ def _convert_prepared_document(
     prepared, file_hash = ready.path, ready.digest
     from openkb.import_text import preflight_import_text, validate_text_preflight
 
-    validate_text_preflight(ready, preflight_import_text(kb_dir, ready, check_stop=check_stop))
+    validate_text_preflight(
+        ready,
+        preflight_import_text(kb_dir, ready, check_stop=check_stop, cnki_identity=cnki_identity),
+    )
     source_identity = _portable_path(ready.identity, kb_dir.resolve())
     with kb_ingest_lock(kb_dir / ".openkb"):
         # ------------------------------------------------------------------
@@ -264,10 +272,10 @@ def _convert_prepared_document(
         # ------------------------------------------------------------------
         # 3. PDF long-doc detection
         # ------------------------------------------------------------------
-        from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
+        from openkb.inputs import CNKI_SOURCE_EXTENSIONS, OFFICE_SOURCE_EXTENSIONS
 
         pdf_input = prepared if src.suffix.lower() == ".pdf" else None
-        internal_pdf = office_path = None
+        internal_pdf = office_path = cnki_path = None
         if src.suffix.lower() in OFFICE_SOURCE_EXTENSIONS:
             from openkb.office.convert import convert_office
 
@@ -279,6 +287,18 @@ def _convert_prepared_document(
                 check_stop=check_stop,
                 expected_identity=office_identity,
             )
+            pdf_input = internal_pdf
+        elif src.suffix.lower() in CNKI_SOURCE_EXTENSIONS:
+            from openkb.cnki.convert import prepare_cnki
+            from openkb.locks import atomic_write_bytes
+
+            pdf, record = prepare_cnki(
+                kb_dir, ready, check_stop=check_stop, expected_identity=cnki_identity
+            )
+            internal_pdf = raw_dir / f"{doc_name}.pdf"
+            cnki_path = internal_pdf.with_suffix(".cnki.json")
+            atomic_write_bytes(internal_pdf, pdf.read_bytes())
+            atomic_write_bytes(cnki_path, record.read_bytes())
             pdf_input = internal_pdf
         if pdf_input is not None:
             page_count = get_pdf_page_count(pdf_input)
@@ -298,6 +318,7 @@ def _convert_prepared_document(
                     processing=processing,
                     pdf_path=internal_pdf,
                     office_path=office_path,
+                    cnki_path=cnki_path,
                 )
 
         # ------------------------------------------------------------------
@@ -376,5 +397,6 @@ def _convert_prepared_document(
             processing=processing,
             pdf_path=internal_pdf,
             office_path=office_path,
+            cnki_path=cnki_path,
             is_long_doc=processing is not None and processing.execution_mode == "segmented",
         )

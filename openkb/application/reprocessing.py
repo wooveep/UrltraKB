@@ -10,7 +10,7 @@ from openkb.application.retained_inputs import artifact_availability, frozen_sou
 from openkb.application.sources import source_view_id
 from openkb.config import resolve_effective_config
 from openkb.ingest_records import UnitRevision
-from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
+from openkb.inputs import CNKI_SOURCE_EXTENSIONS, OFFICE_SOURCE_EXTENSIONS
 from openkb.knowledge_scope import KnowledgeScope, live_scope, resolve_scope
 from openkb.lifecycle import read_lifecycle
 from openkb.llm_usage_execution import track_import_usage
@@ -35,11 +35,18 @@ class ReprocessingConflict(ValueError):
 
 def runtime_availability(kb_dir, source_format):
     runtime = {
-        "required": f".{source_format}" in OFFICE_SOURCE_EXTENSIONS,
+        "required": f".{source_format}" in OFFICE_SOURCE_EXTENSIONS | CNKI_SOURCE_EXTENSIONS,
         "available": True,
         "reason": None,
     }
-    if runtime["required"]:
+    if f".{source_format}" in CNKI_SOURCE_EXTENSIONS:
+        from openkb.cnki.runtime import processing_identity, require_runtime
+
+        try:
+            require_runtime(processing_identity())
+        except ValueError as exc:
+            runtime.update(available=False, reason=str(exc))
+    elif runtime["required"]:
         from openkb.office.runtime import runtime_path, validate_runtime
 
         try:
@@ -301,7 +308,12 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
             validate_text_preflight,
         )
 
-        assessment = preflight_import_text(root, prepared, check_stop=context.check_stop)
+        assessment = preflight_import_text(
+            root,
+            prepared,
+            check_stop=context.check_stop,
+            cnki_identity=preview["current_policy"].get("cnki"),
+        )
         try:
             validate_text_preflight(prepared, assessment)
         except ImportTextRejected as exc:

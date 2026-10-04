@@ -4,6 +4,12 @@ import copy
 import json
 import re
 
+PAGE_PARTS_INDEX_POLICY = "physical-slide-navigation-v2"
+
+
+class PagePartsContractError(ValueError):
+    """Frozen slide content cannot support the requested text navigation."""
+
 
 class PagePartsPolicy:
     unit_kind = "page"
@@ -16,6 +22,57 @@ class PagePartsPolicy:
                        or any(not isinstance(text, str) for text in unit.values())
                        for unit in self.parts)):
             raise ValueError("Physical slide policy requires complete body/notes parts")
+
+    def has_navigation_text(self, first=1, last=None):
+        last = len(self.parts) if last is None else last
+        if type(first) is not int or type(last) is not int or not 1 <= first <= last <= len(self.parts):
+            raise PagePartsContractError("Invalid physical slide navigation range")
+        return any(text.strip() for parts in self.parts[first - 1:last] for text in parts.values())
+
+    def _textless_entry(self, item, first, last):
+        number, anchor = item.get("physical_index"), item.get("anchor")
+        if (type(number) is not int or not first <= number <= last or not 1 <= number <= len(self.parts)
+                or not isinstance(anchor, dict) or type(anchor.get("unit")) is not int
+                or anchor["unit"] != number or anchor.get("part") not in {"body", "notes"}
+                or item.get("title_origin") != "generated" or not isinstance(item.get("title"), str)
+                or not item["title"].strip() or not isinstance(item.get("structure"), str)
+                or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", item["structure"])):
+            return False
+        parts = self.parts[number - 1]
+        if any(text.strip() for text in parts.values()):
+            return False
+        span = anchor.get("range")
+        if (not isinstance(span, list) or len(span) != 2
+                or any(type(value) is not int for value in span)):
+            return False
+        left, right = span
+        text = parts[anchor["part"]]
+        return 0 <= left <= right <= len(text) and text[left:right] == anchor.get("excerpt")
+
+    def prepare_navigation(self, items, first, last):
+        if not self.has_navigation_text(first, last):
+            raise PagePartsContractError("No content is available for text navigation (body/notes are empty)")
+        structures = [item.get("structure") for item in items]
+        if any(structures.count(value) > 1 for value in structures):
+            raise ValueError("Slide sections must have distinct IDs in original order")
+        # The existing flat-tree builder promotes surviving children when their
+        # removed parent is absent. Neither original pages nor anchors are edited.
+        retained = [item for item in items if not self._textless_entry(item, first, last)]
+        if retained:
+            return retained
+        for number in range(first, last + 1):
+            for part, text in self.parts[number - 1].items():
+                if text.strip():
+                    left = len(text) - len(text.lstrip())
+                    right = min(len(text), left + 80)
+                    return [{"structure": "0", "title": "Presentation", "title_origin": "generated",
+                             "physical_index": number, "anchor": {"unit": number, "part": part,
+                             "range": [left, right], "excerpt": text[left:right]}}]
+
+    def cover_range(self, items, first, last):
+        if items:
+            items[0]["start_index"] = first
+        return items
 
     def render(self, ordinal):
         return json.dumps({"unit": ordinal, "parts": self.parts[ordinal - 1]}, ensure_ascii=False)
@@ -34,6 +91,8 @@ Do not anchor on generated page or notes labels. Return a JSON list of
 anchor:{unit:integer, part:"body"|"notes", range:[start,end], excerpt:"exact original"}}.
 physical_index must equal anchor.unit. Keep original order, body before notes on
 each slide. A single root covering the whole presentation is valid. No other output.
+When BOTH body and notes have no non-whitespace text, do not generate an independent
+text navigation entry. The physical slide and its images are still retained.
 """ + "\nPrevious structure:\n" + json.dumps(previous or [], ensure_ascii=False) + "\nSlides:\n" + part
 
     def valid(self, item, start_index=1, count=None):
@@ -91,6 +150,8 @@ each slide. A single root covering the whole presentation is valid. No other out
         return items
 
     async def fix(self, item, first, last, model, complete, extract):
+        if self._textless_entry(item, first, last):
+            raise PagePartsContractError("Textless slide entry requires navigation preprocessing")
         prompt = self.prompt("\n".join(self.render(i) for i in range(first, last + 1)))
         prompt += "\nCorrect ONLY this entry's anchor/title; return one list entry:\n" + json.dumps(item)
         result = extract(await complete(model=model, prompt=prompt))

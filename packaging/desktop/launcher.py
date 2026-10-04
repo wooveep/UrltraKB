@@ -12,6 +12,10 @@ if __name__ == "__main__":
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+    if sys.argv[1:2] == ["--cnki-worker"]:
+        from openkb.cnki.worker import main
+
+        raise SystemExit(main(sys.argv[2:]))
     program = Path(sys.executable).stem.lower().removeprefix("urltrakb")
     if program in {"cli", "api"}:
         from openkb.runtime.assets import configure_sdk_resources

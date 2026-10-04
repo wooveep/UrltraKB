@@ -383,6 +383,7 @@ class DocumentSourceResponse(BaseModel):
     part: Literal["body", "notes"] | None = None
     internal_pdf_path: str | None = None
     office: dict | None = None
+    cnki: dict | None = None
     resource_policy: dict | None = None
     resources: list[dict] = Field(default_factory=list)
     encoding: dict | None = None

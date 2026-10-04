@@ -71,15 +71,15 @@ def result_from_publication(
         resources.extend(
             str(path) for path in [wiki / "summaries" / f"{unit.doc_name}.md"] if path.is_file()
         )
-    from openkb.office.readback import read_office_artifacts
+    from openkb.conversion_artifacts import read_conversion_artifacts
 
-    office = read_office_artifacts(
+    conversion = read_conversion_artifacts(
         kb_dir,
         state.successful_revision_id or state.target_revision_id,
         actual_source or admission.revision.source_revision_id,
     )
-    if office:
-        resources.append(str(kb_dir / office["internal_pdf_path"]))
+    if conversion:
+        resources.append(str(kb_dir / conversion["internal_pdf_path"]))
     from openkb.source_metrics import unit_metrics
 
     outcome = ImportUnitOutcome(

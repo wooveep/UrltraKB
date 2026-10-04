@@ -33,6 +33,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 # auto-injects GitHub Copilot IDE-auth headers.
 dependencies = [
     "pageindex==0.3.0.dev3+urltrakb.5",
+    "pymupdf==1.27.2.3",
     "regex==2026.5.9",
     "charset-normalizer==3.4.7",
     "defusedxml==0.7.1",

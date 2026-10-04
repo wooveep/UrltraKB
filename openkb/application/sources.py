@@ -518,7 +518,7 @@ def read_admitted_source(
             if annotation and annotation.source_revision_id == target.source_revision_id
             else {}
         )
-        from openkb.office.readback import read_office_artifacts
+        from openkb.conversion_artifacts import read_conversion_artifacts
         from openkb.source_changes import source_validity
         from openkb.workbooks.catalog import inventory_failure
 
@@ -528,7 +528,7 @@ def read_admitted_source(
             else None
         )
 
-        office = read_office_artifacts(
+        conversion = read_conversion_artifacts(
             root,
             actual[1].unit_revision_id if actual else state.target_revision_id if state else None,
             target.source_revision_id,
@@ -550,7 +550,7 @@ def read_admitted_source(
         )
         return {
             **input_diagnostics,
-            **office,
+            **conversion,
             "hash": source.source_id,
             "validity": source_validity(
                 root,

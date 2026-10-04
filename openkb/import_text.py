@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable
 
-from openkb.inputs import OFFICE_SOURCE_EXTENSIONS, TEXT_SOURCE_EXTENSIONS, PreparedInput
+from openkb.inputs import (
+    CNKI_SOURCE_EXTENSIONS,
+    OFFICE_SOURCE_EXTENSIONS,
+    TEXT_SOURCE_EXTENSIONS,
+    PreparedInput,
+)
 from openkb.state import HashRegistry
 
 if TYPE_CHECKING:
@@ -128,6 +133,7 @@ def preflight_import_text(
     *,
     check_stop: Callable[[], None] = lambda: None,
     workbook: WorkbookSnapshot | None = None,
+    cnki_identity: dict | None = None,
 ) -> ImportTextAssessment:
     """Extract frozen bytes in temporary space; write no raw/wiki/catalog artifacts."""
     check_stop()
@@ -143,6 +149,13 @@ def preflight_import_text(
         from openkb.office.runtime import processing_identity
 
         cache_key += json.dumps(processing_identity(kb_dir), sort_keys=True)
+    elif extension in CNKI_SOURCE_EXTENSIONS:
+        import json
+
+        from openkb.cnki.runtime import processing_identity as cnki_processing_identity
+
+        cache_key += ":expected:" if cnki_identity is not None else ":retained-or-current:"
+        cache_key += json.dumps(cnki_identity or cnki_processing_identity(), sort_keys=True)
     if cache_key in prepared.text_checks:
         return prepared.text_checks[cache_key]
     extraction = "extracted text"
@@ -152,6 +165,14 @@ def preflight_import_text(
             if extension == ".pdf":
                 extraction = "PDF text layer"
                 parts = pdf_text_parts(prepared.path)
+            elif extension in CNKI_SOURCE_EXTENSIONS:
+                from openkb.cnki.convert import prepare_cnki
+
+                extraction = "CNKI internal PDF text layer"
+                pdf, _ = prepare_cnki(
+                    kb_dir, prepared, check_stop=check_stop, expected_identity=cnki_identity
+                )
+                parts = pdf_text_parts(pdf)
             elif extension in OFFICE_SOURCE_EXTENSIONS:
                 from openkb.office.convert import convert_office
 

@@ -98,6 +98,7 @@ class SourceReader(QDialog):
                 )
             )
             layout.addWidget(internal_pdf)
+        if source.get("office"):
             office = source["office"]
             substitutions = ", ".join(
                 f"{item['requested']} → {item['actual']}" for item in office["font_substitutions"]
@@ -123,6 +124,14 @@ class SourceReader(QDialog):
                 )
                 font_status.setWordWrap(True)
                 layout.addWidget(font_status)
+        if source.get("cnki"):
+            cnki = source["cnki"]
+            conversion = QLabel(
+                f"{cnki['internal_format']} → PDF · {cnki['pages']} 页\n"
+                + "\n".join(cnki["diagnostics"])
+            )
+            conversion.setWordWrap(True)
+            layout.addWidget(conversion)
         self.coverage = QLabel()
         self.coverage.setWordWrap(True)
         layout.addWidget(self.coverage)

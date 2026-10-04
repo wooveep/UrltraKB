@@ -19,6 +19,11 @@ def recognize(data, filename, meter, *, wrappers=0):
     meter.check()
     if wrappers > 8:
         raise ValueError("Excessive nested Package wrappers")
+    extension = PurePosixPath(filename).suffix.lower().lstrip(".")
+    if extension in {"caj", "kdh"}:
+        # Preserve the candidate format and original bytes. The shared import
+        # owns signature dispatch, conversion, text preflight and failure state.
+        return data, extension, "recovered", None
     if data.startswith(b"PK"):
         with ZipFile(io.BytesIO(data)) as package:
             names = package.namelist()
@@ -66,7 +71,6 @@ def recognize(data, filename, meter, *, wrappers=0):
             else "Compound object has no supported standard document"
         )
         return data, None, kind, reason
-    extension = PurePosixPath(filename).suffix.lower().lstrip(".")
     if extension in {"md", "markdown", "txt", "csv", "xml", "html", "htm"}:
         from openkb.text_encoding import decode_text
 

@@ -130,6 +130,10 @@ async def run_skill(
     )
     if definition.name != skill_name:
         raise ValueError("Prepared skill does not match the requested skill")
+    if not selection.views and selection.missing:
+        from openkb.agent.query_evidence import selection_catalog
+
+        raise ValueError(selection_catalog(selection))
     od_meta, body, output_path = definition.metadata, definition.body, definition.output_path
     if output_path is not None:
         rel = output_path.relative_to(kb_dir.resolve()).as_posix()

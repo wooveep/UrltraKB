@@ -29,6 +29,7 @@ class NormalizedInput(Record):
     processing: ProcessingDecision | None = None
     pdf_path: RelativePath | None = Field(default=None, exclude_if=lambda value: value is None)
     office_path: RelativePath | None = Field(default=None, exclude_if=lambda value: value is None)
+    cnki_path: RelativePath | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def normalization_fingerprint(
@@ -102,9 +103,16 @@ def normalization_fingerprint(
 
         office_policy = {"office": processing_identity(kb_dir)}
         if source_revision.source_format in {"pptx", "ppt"}:
+            from pageindex.index.page_parts_policy import PAGE_PARTS_INDEX_POLICY
+
             from openkb.office.slide_content import NOTES_POLICY
 
             office_policy["notes_policy"] = NOTES_POLICY
+            office_policy["page_parts_index_policy"] = PAGE_PARTS_INDEX_POLICY
+    if source_revision and source_revision.source_format in {"caj", "kdh"}:
+        from openkb.cnki.runtime import processing_identity as cnki_processing_identity
+
+        office_policy["cnki"] = cnki_processing_identity()
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
@@ -154,11 +162,23 @@ def read_normalization(kb_dir: Path, identity: str) -> tuple[Path, NormalizedInp
         saved.source_path and saved.source_path not in saved.files
     ):
         raise ValueError("Retained normalization is missing its body")
-    if any(path and path not in saved.files for path in (saved.pdf_path, saved.office_path)):
-        raise ValueError("Retained normalization is missing its Office artifacts")
+    if any(
+        path and path not in saved.files
+        for path in (saved.pdf_path, saved.office_path, saved.cnki_path)
+    ):
+        raise ValueError("Retained normalization is missing its conversion artifacts")
     from openkb.office.validation import validate_office_input
 
-    validate_office_input(kb_dir, directory, saved)
+    try:
+        policy = json.loads(saved.fingerprint)
+    except ValueError:
+        policy = {}  # Older PDF normalizations retain a plain policy name.
+    if saved.cnki_path or (isinstance(policy, dict) and policy.get("cnki")):
+        from openkb.cnki.validation import validate_cnki_input
+
+        validate_cnki_input(kb_dir, directory, saved)
+    else:
+        validate_office_input(kb_dir, directory, saved)
     return directory, saved
 
 
@@ -207,7 +227,10 @@ def retain_normalization(
         )
     directory = kb_dir / ".openkb/normalized" / identity
     contained_paths(kb_dir, [directory])
-    with mutation_scope(kb_dir, [directory, record], operation="retain-normalization"):
+    with (
+        prepared.conversion_tasks,
+        mutation_scope(kb_dir, [directory, record], operation="retain-normalization"),
+    ):
         if sheet is not None:
             from openkb.workbooks.normalization import convert_sheet
 
@@ -223,6 +246,7 @@ def retain_normalization(
                 resource_policy=resource_policy,
                 check_stop=check_stop,
                 office_identity=json.loads(fingerprint).get("office"),
+                cnki_identity=json.loads(fingerprint).get("cnki"),
             )
         if converted.raw_path is None:
             raise ValueError("Conversion did not retain its input")
@@ -266,6 +290,9 @@ def retain_normalization(
             office_path=converted.office_path.relative_to(directory).as_posix()
             if converted.office_path
             else None,
+            cnki_path=converted.cnki_path.relative_to(directory).as_posix()
+            if converted.cnki_path
+            else None,
             files=wiki_versions(kb_dir, directory),
         )
         write_record(record, saved)
@@ -282,6 +309,7 @@ def restore_normalization(directory: Path, saved: NormalizedInput, working: Path
         processing=saved.processing,
         pdf_path=working / saved.pdf_path if saved.pdf_path else None,
         office_path=working / saved.office_path if saved.office_path else None,
+        cnki_path=working / saved.cnki_path if saved.cnki_path else None,
     )
 
 

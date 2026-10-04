@@ -19,7 +19,9 @@ async def _chat_chunks(delta, finish):
         )
 
 
-def _import_rule(kb_dir, monkeypatch, name, version, fact, family="installation"):
+def _import_rule(
+    kb_dir, monkeypatch, name, version, fact, family="installation", *, product="WinStack"
+):
     import pymupdf
 
     from openkb.application.documents import import_document
@@ -41,13 +43,210 @@ def _import_rule(kb_dir, monkeypatch, name, version, fact, family="installation"
         kb_dir,
         path,
         metadata=SourceMetadata(
-            product="WinStack",
+            product=product,
             applicable_versions=(version,),
             family=family,
         ),
     )
     assert result.status == "added"
     return result
+
+
+@pytest.mark.parametrize(
+    "product", ["CNware-WinStack", "CNware WinStack 虚拟化云平台", "CNWARE WINSTACK"]
+)
+def test_explicit_scope_keeps_selected_product_evidence(kb_dir, monkeypatch, product):
+    from openkb.application.query_views import read_query_page, resolve_query_views
+    from openkb.application.views import view_scope
+
+    chosen = _import_rule(kb_dir, monkeypatch, "chosen", "9.4.0", "K3s recovery.", product=product)
+    scope = view_scope(kb_dir, chosen.units[0].view_id)
+    before = resolve_query_views(kb_dir, "CNware WinStack V9.4.0 recovery?", scope=scope)
+    _import_rule(
+        kb_dir, monkeypatch, "other", "9.4.0", "Other instructions.", product="CNware WinStack"
+    )
+    after = resolve_query_views(kb_dir, "CNware WinStack V9.4.0 recovery?", scope=scope)
+    assert [view.view_id for view in before.views] == [scope.view_id]
+    assert [view.view_id for view in after.views] == [scope.view_id]
+    assert "K3s recovery." in read_query_page(after, "sources/chosen.md", view_id=scope.view_id)
+    assert chosen.source_revision_id in after.views[0].source_revision_ids
+    assert after.missing == ()
+
+
+def test_product_name_ambiguity_is_visible_and_cannot_fall_back(kb_dir, monkeypatch):
+    from openkb.agent.query_evidence import evidence_answer, selection_catalog
+    from openkb.application.query_views import resolve_query_views
+
+    products = ("CNware WinStack", "CNware-WinStack", "CNware WinStack 虚拟化云平台")
+    imported = [
+        _import_rule(kb_dir, monkeypatch, f"manual-{i}", "9.4.0", "Source rule.", product=product)
+        for i, product in enumerate(products)
+    ]
+    (kb_dir / "wiki/concepts/connection.md").write_text("Legacy rule.")
+    selection = resolve_query_views(kb_dir, "CNware WinStack 的安装、运维和最佳实践？")
+    assert selection.views == ()
+    assert selection.missing
+    for rendered in (selection_catalog(selection), evidence_answer("", selection)):
+        assert "ambiguous" in rendered.lower()
+        for product, source in zip(products, imported):
+            assert product in rendered
+            assert source.units[0].view_id in rendered
+        assert "9.4.0" in rendered
+        assert "--view" in rendered
+
+    explicit = resolve_query_views(kb_dir, "CNware WinStack 虚拟化云平台 V9.4.0 的安装？")
+    assert [view.view_id for view in explicit.views] == [imported[-1].units[0].view_id]
+
+
+def test_confirmed_product_identity_includes_all_three_original_sources(kb_dir, monkeypatch):
+    from openkb.application.query_views import read_query_page, resolve_query_views
+    from openkb.application.version_review import (
+        resume_version_review,
+        review_source_version,
+        supplement_version_reviews,
+    )
+    from openkb.view_records import SourceMetadata
+
+    records = [
+        _import_rule(kb_dir, monkeypatch, name, "9.4.0", fact, family=family, product=product)
+        for name, family, product, fact in (
+            ("installation", "installation", "CNware-WinStack", "Server and disk conditions."),
+            ("maintenance", "maintenance", "CNware WinStack Platform", "K3s restore conditions."),
+            ("practice", "practice", "CNware WinStack", "Practice rule."),
+        )
+    ]
+    assert resolve_query_views(kb_dir, "CNware WinStack V9.4.0").views == ()
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "description": "Confirmed source",
+                                "content": "Compiled knowledge.",
+                                "create": [],
+                                "update": [],
+                                "related": [],
+                            }
+                        )
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        ),
+    )
+    for record in records[:2]:
+        review = review_source_version(kb_dir, record.source_id)
+        supplement_version_reviews(
+            kb_dir, {review.review_id: SourceMetadata(product="CNware WinStack")}
+        )
+        assert resume_version_review(kb_dir, review.review_id).status == "added"
+    selection = resolve_query_views(kb_dir, "CNware WinStack V9.4.0")
+    assert len(selection.views) == 1 and not selection.missing
+    assert set(selection.views[0].source_revision_ids) == {
+        record.source_revision_id for record in records
+    }
+    for name, fact in (
+        ("installation", "Server and disk conditions."),
+        ("maintenance", "K3s restore conditions."),
+        ("practice", "Practice rule."),
+    ):
+        assert fact in read_query_page(
+            selection, f"sources/{name}.md", view_id=selection.views[0].view_id
+        )
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("WinStackX V2 configuration?", {"WinStackX"}),
+        ("WinStack Pro V2 configuration?", {"WinStack Pro"}),
+        ("Compare WinStackX and WinStack Pro V2", {"WinStackX", "WinStack Pro"}),
+        ("WinStack V2 configuration?", set()),
+    ],
+)
+def test_product_candidates_respect_word_boundaries_and_identity(
+    kb_dir, monkeypatch, question, expected
+):
+    from openkb.application.query_views import resolve_query_views
+
+    for i, product in enumerate(("WinStack", "WinStackX", "WinStack Pro")):
+        _import_rule(kb_dir, monkeypatch, f"manual-{i}", "2", "Source rule.", product=product)
+    selection = resolve_query_views(kb_dir, question)
+    assert {view.product for view in selection.views} == expected
+    assert bool(selection.missing) == (not expected)
+
+
+def test_explicit_product_scope_still_checks_versions_and_history(kb_dir, monkeypatch):
+    from openkb.application.query_views import read_query_page, resolve_query_views
+    from openkb.application.views import view_scope
+
+    first = _import_rule(
+        kb_dir, monkeypatch, "chosen", "9.4.0", "Original recovery.", product="CNware-WinStack"
+    )
+    live = view_scope(kb_dir, first.units[0].view_id)
+    pinned = resolve_query_views(kb_dir, "CNware WinStack V9.4.0", scope=live).views[0]
+    history = view_scope(kb_dir, live.view_id, historical_revision=pinned.knowledge_revision_id)
+    _import_rule(
+        kb_dir, monkeypatch, "later", "9.4.0", "New instruction.", product="CNware-WinStack"
+    )
+    _import_rule(
+        kb_dir, monkeypatch, "other", "9.3.1", "Other instruction.", product="CNware WinStack"
+    )
+    gap = resolve_query_views(kb_dir, "CNware WinStack V9.3.1", scope=live)
+    assert gap.views == ()
+    assert "9.3.1" in " ".join(gap.missing)
+    selected = resolve_query_views(kb_dir, "CNware WinStack V9.4.0", scope=history)
+    assert selected.views[0].knowledge_revision_id == pinned.knowledge_revision_id
+    assert "Original recovery." in read_query_page(
+        selected, "sources/chosen.md", view_id=live.view_id
+    )
+    assert "later" not in " ".join(selected.views[0].files)
+
+
+@pytest.fixture
+def ambiguous_products(kb_dir, monkeypatch):
+    for i, product in enumerate(("CNware-WinStack", "CNware WinStack")):
+        _import_rule(kb_dir, monkeypatch, f"manual-{i}", "9.4.0", "Source rule.", product=product)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entrypoint", ["question", "conversation", "query", "query-stream", "skill"]
+)
+async def test_ambiguous_product_query_reports_candidates_without_model_calls(
+    kb_dir, monkeypatch, ambiguous_products, entrypoint
+):
+    def unexpected(**kwargs):
+        pytest.fail("An ambiguous evidence scope must not call the model")
+
+    monkeypatch.setattr("litellm.completion", unexpected)
+    monkeypatch.setattr("litellm.acompletion", unexpected)
+    question = "CNware WinStack V9.4.0 recovery?"
+    if entrypoint in {"query", "query-stream"}:
+        from openkb.agent.query import run_query
+
+        answer = await run_query(question, kb_dir, "test", stream=entrypoint == "query-stream")
+    elif entrypoint == "skill":
+        from test_skill_runner import _install_skill
+
+        from openkb.agent.skill_runner import run_skill
+
+        _install_skill(kb_dir, "summarize")
+        with pytest.raises(ValueError, match="Ambiguous") as failure:
+            await run_skill(skill_name="summarize", intent=question, kb_dir=kb_dir, model="test")
+        answer = str(failure.value)
+    else:
+        from openkb.application.conversations import ask_question, continue_conversation
+
+        operation = ask_question if entrypoint == "question" else continue_conversation
+        result = await operation(kb_dir, question)
+        assert result.status == "completed", result.error
+        answer = result.answer
+    assert "ambiguous" in answer.lower()
+    assert "CNware-WinStack" in answer and "CNware WinStack" in answer
 
 
 @pytest.fixture

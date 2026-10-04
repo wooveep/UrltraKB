@@ -1,6 +1,7 @@
 """Resolve and pin permitted knowledge evidence before creating reading tools."""
 
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -248,6 +249,66 @@ def _requested_versions(question: str, labels: set[str]) -> set[str]:
     return requested
 
 
+def _resolve_product_candidates(
+    views: tuple[KnowledgeView, ...], question: str
+) -> tuple[set[str], tuple[str, ...]]:
+    """Discover names without treating spelling variants as confirmed identities."""
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[\s\-‐‑‒–—]+", " ", unicodedata.normalize("NFKC", value).casefold()).strip()
+
+    text = normalize(question)
+    names = {
+        view.product_id: normalize(view.product)
+        for view in views
+        if view.product_id and view.product
+    }
+    mentions: list[tuple[int, int, str]] = []
+    for name in set(names.values()):
+        pattern = re.escape(name)
+        if re.match(r"[a-z0-9_]", name):
+            pattern = r"(?<![a-z0-9_])" + pattern
+        if re.search(r"[a-z0-9_]$", name):
+            pattern += r"(?![a-z0-9_])"
+        mentions.extend((match.start(), match.end(), name) for match in re.finditer(pattern, text))
+    # A full longer name supersedes a short name at the same location, while
+    # separate mentions remain separate (including multi-product comparisons).
+    mentions = [
+        mention
+        for mention in mentions
+        if not any(
+            other[0] <= mention[0] and mention[1] <= other[1] and other != mention
+            for other in mentions
+        )
+    ]
+    selected: set[str] = set()
+    ambiguous: set[str] = set()
+    for _, _, name in mentions:
+        candidates = {
+            identity
+            for identity, candidate in names.items()
+            if candidate == name or candidate.startswith(name + " ")
+        }
+        selected.update(candidates)
+        if len(candidates) > 1:
+            ambiguous.update(candidates)
+    if not ambiguous:
+        return selected, ()
+    details = tuple(
+        f"Candidate product: {view.product}; product_id={view.product_id}; "
+        f"view={view.view_id}; "
+        f"applicable versions={', '.join(view.applicable_versions) or 'unknown'}."
+        for view in sorted(views, key=lambda view: (view.product or "", view.view_id))
+        if view.product_id in ambiguous
+    )
+    return selected, (
+        "Ambiguous product names; no evidence scope was selected.",
+        *details,
+        "Select a view explicitly (--view / scope.view_id), or confirm product metadata "
+        "through the source version review before querying across sources.",
+    )
+
+
 def resolve_query_views(
     kb_dir: Path, question: str = "", *, scope: KnowledgeScope | None = None
 ) -> QuerySelection:
@@ -257,26 +318,39 @@ def resolve_query_views(
         scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
         views = list_views(root)
+        if scope:
+            views = tuple(view for view in views if view.view_id == scope.view_id)
         requested = _requested_versions(
             question, {v for view in views for v in view.applicable_versions}
         )
         compare = bool(
             re.search(r"\b(?:compare|versus|vs)\b|比较|对比|差异", question, re.IGNORECASE)
         )
-        products = {
-            view.product
-            for view in views
-            if view.product and view.product.casefold() in question.casefold()
-        }
+        candidates = views
+        if scope is None:
+            from openkb.source_catalog import list_sources
+            from openkb.source_changes import source_view
+
+            current_views = {
+                source_view(root, source) for source in list_sources(root) if not source.removed
+            }
+            current_products = {view.product_id for view in views if view.view_id in current_views}
+            # Old views preserve exact prior applicability after a metadata
+            # correction. Infer names from currently confirmed product identities;
+            # explicit scopes still retain those older views and their boundaries.
+            candidates = tuple(view for view in views if view.product_id in current_products)
+        products, ambiguity = (
+            _resolve_product_candidates(candidates, question) if scope is None else (set(), ())
+        )
+        if ambiguity:
+            return QuerySelection(root, (), ambiguity)
         history = bool(re.search(r"historical|history|legacy|历史|旧库", question, re.IGNORECASE))
-        if scope:
-            views = tuple(view for view in views if view.view_id == scope.view_id)
         historical = (
             tuple(
                 view
                 for view in views
                 if (view.unknown_source_id or view.view_id == "legacy")
-                and (not products or view.product is None or view.product in products)
+                and (not products or view.product is None or view.product_id in products)
             )
             if requested and history
             else ()
@@ -284,7 +358,7 @@ def resolve_query_views(
         if not scope and any(view.view_id != "legacy" for view in views):
             views = tuple(view for view in views if view.view_id != "legacy")
         if products:
-            views = tuple(view for view in views if view.product in products)
+            views = tuple(view for view in views if view.product_id in products)
         if requested:
             views = tuple(
                 view
@@ -320,6 +394,8 @@ def resolve_query_views(
                 version in {_version_key(v) for v in view.applicable_versions} for view in selected
             )
         )
+        if scope is not None and not selected and not missing:
+            missing = (f"No permitted published evidence for selected view {scope.view_id}.",)
         selected += tuple(
             replace(pinned, reference_only=True)
             for view in historical

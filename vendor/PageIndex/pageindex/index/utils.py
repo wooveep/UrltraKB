@@ -473,7 +473,7 @@ def list_to_tree(data):
     return [clean_node(node) for node in root_nodes]
 
 
-def post_processing(structure, end_physical_index, policy=None):
+def post_processing(structure, end_physical_index, policy=None, start_physical_index=1):
     # First convert page_number to start_index in flat list
     for i, item in enumerate(structure):
         item['start_index'] = item.get('physical_index')
@@ -486,6 +486,8 @@ def post_processing(structure, end_physical_index, policy=None):
             item['end_index'] = end_physical_index
         if policy:
             item['end_index'] = max(item['start_index'], item['end_index'])
+    if hasattr(policy, 'cover_range'):
+        structure = policy.cover_range(structure, start_physical_index, end_physical_index)
     tree = list_to_tree(structure)
     if len(tree)!=0:
         return tree

@@ -223,10 +223,11 @@ def index_long_document(
             break
         except Exception as exc:
             from pageindex.index.block_policy import BlockContractError
+            from pageindex.index.page_parts_policy import PagePartsContractError
 
             cause: BaseException | None = exc
             while cause is not None:
-                if isinstance(cause, BlockContractError):
+                if isinstance(cause, (BlockContractError, PagePartsContractError)):
                     raise cause from None
                 cause = cause.__cause__
             logger.warning(

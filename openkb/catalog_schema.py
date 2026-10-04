@@ -30,6 +30,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "explicit-reprocessing-v1",
         "embedded-discovery-v3",
         "pending-import-receipts-v1",
+        "cnki-conversion-v1",
     }
 )
 

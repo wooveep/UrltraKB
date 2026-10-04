@@ -132,6 +132,20 @@ class TestNormalizePageContent:
 
 
 class TestIndexLongDocument:
+    def test_frozen_slide_contract_failure_is_not_retried(self, kb_dir, monkeypatch):
+        from pageindex.index.page_parts_policy import PagePartsContractError
+
+        collection = MagicMock()
+        wrapped = RuntimeError("Index build failed")
+        wrapped.__cause__ = PagePartsContractError("No content is available for text navigation")
+        collection.add.side_effect = wrapped
+        client = MagicMock()
+        client.collection.return_value = collection
+        monkeypatch.setattr("openkb.block_package.create_index_client", lambda **kwargs: client)
+        with pytest.raises(PagePartsContractError, match="No content"):
+            index_long_document(kb_dir / "retained.okpi", kb_dir)
+        assert collection.add.call_count == 1
+
     def _make_fake_collection(self, doc_id: str, sample_tree: dict):
         """Build a mock Collection that returns the sample_tree fixture data."""
         col = MagicMock()

@@ -1,0 +1,39 @@
+{
+  "converter_policy": "cnki-pdf-v1",
+  "upstream": {
+    "repository": "https://github.com/caj2pdf/caj2pdf",
+    "commit": "6c4bc32b15ce748d211f45d536f5d5511ef9f368",
+    "license": "GLWT-LICENSE.txt"
+  },
+  "pymupdf": {
+    "version": "1.27.2.3",
+    "mupdf_version": "1.27.2",
+    "source": {
+      "url": "https://files.pythonhosted.org/packages/22/32/708bedc9dde7b328d45abbc076091769d44f2f24ad151ad92d56a6ec142b/pymupdf-1.27.2.3.tar.gz",
+      "hash": "sha256:7a92faa25129e8bbec5e50eeb9214f187665428c31b05c4ef6e36c58c0b1c6d2",
+      "size": 85759618,
+      "upload-time": "2026-04-24T14:13:14.42Z"
+    },
+    "wheels": [
+      {
+        "url": "https://files.pythonhosted.org/packages/e4/a0/aa1ee2240f29481a04a827c313333b4ecd8a14d6ac3e15d3f41a30574781/pymupdf-1.27.2.3-cp310-abi3-manylinux_2_28_x86_64.whl",
+        "hash": "sha256:857842b4888827bd6155a1131341b2822a7ebe9a8c15a975fd7d490d7a64a30c",
+        "size": 24963198,
+        "upload-time": "2026-04-24T14:10:07.408Z"
+      },
+      {
+        "url": "https://files.pythonhosted.org/packages/44/47/5fb10fe73f96b31253a41647c362ea9e0380920bddf16028414a051247fc/pymupdf-1.27.2.3-cp310-abi3-win_amd64.whl",
+        "hash": "sha256:d20f68ef15195e073071dbc4ae7455257c7889af7584e39df490c0a92728526e",
+        "size": 19249102,
+        "upload-time": "2026-04-24T14:10:46.72Z"
+      },
+      {
+        "url": "https://files.pythonhosted.org/packages/53/a4/b9e91aac82293f9c954654c85581ee8212b5b05efadc534b581141241e6f/pymupdf-1.27.2.3-cp314-cp314t-manylinux_2_28_x86_64.whl",
+        "hash": "sha256:77691604c5d1d0233827139bbcdea61fd57879c84712b8e49b1f45520f7ab9c2",
+        "size": 25000393,
+        "upload-time": "2026-04-24T14:11:01.669Z"
+      }
+    ],
+    "licenses": "PyMuPDF / MuPDF: AGPL-3.0-or-later or commercial license; COPYING ships with the native distribution"
+  }
+}
