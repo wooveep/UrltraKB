@@ -1,0 +1,34 @@
+Query: {{ query }}
+
+Top candidates so far:
+{% if previous_top_candidate_ids %}
+{% for ref in previous_top_candidate_ids %}
+- {{ ref }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
+{% if input_frontier %}
+Current exploration path:
+{% for frontier_node in input_frontier %}
+- {{ frontier_node }}
+{% endfor %}
+{% endif %}
+
+The LAST BLOCK above is the CURRENT BLOCK. IDs in each block are local to that block. Return only ids from the CURRENT BLOCK.
+{% if selection_mode == "all" %}
+All ids in the CURRENT BLOCK are selectable.
+{% elif selection_mode == "all_except" %}
+All ids in the CURRENT BLOCK are selectable except:
+{% for alias in selection_aliases %}
+- {{ alias }}
+{% endfor %}
+{% else %}
+Selectable ids in the CURRENT BLOCK:
+{% for alias in selection_aliases %}
+- {{ alias }}
+{% endfor %}
+{% endif %}
+
+Pick up to {{ pick_limit }} candidates most relevant to the query, best first.

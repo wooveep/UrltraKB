@@ -33,6 +33,7 @@ _FILES = {
     "docs/desktop-evidence/workbench/tasks.png",
     "docs/desktop-evidence/workbench/settings.png",
     "docs/golden-principles.md",
+    "docs/vendor-sdk.md",
 }
 _GENERATED = {
     "openkb/rendering/assets",
@@ -62,9 +63,15 @@ def _source(name: str) -> bool:
     if name.startswith("assets/"):
         return name.startswith("assets/fonts/") and len(path.parts) == 3
     if name.startswith("vendor/"):
-        return name.startswith("vendor/PageIndex/") and not any(
-            part in {".git", ".venv", "dist", "build"} or part.endswith(".egg-info")
-            for part in path.parts
+        return (
+            name.startswith(
+                ("vendor/PageIndex/", "vendor/ChatIndex/", "vendor/ConDB/", "vendor/LiteLLM/")
+            )
+            and not name.startswith("vendor/LiteLLM/enterprise/")
+            and not any(
+                part in {".git", ".venv", "dist", "build"} or part.endswith(".egg-info")
+                for part in path.parts
+            )
         )
     return not name.startswith("openkb/web/") and (name in _FILES or path.parts[0] in _TREES)
 

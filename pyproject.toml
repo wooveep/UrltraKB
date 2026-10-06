@@ -7,7 +7,7 @@ name = "openkb"
 dynamic = ["version"]
 description = "UrltraKB: Open LLM Knowledge Base, powered by PageIndex"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "Kylin", email = "quanqi@pageindex.ai"},
@@ -33,6 +33,8 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 # auto-injects GitHub Copilot IDE-auth headers.
 dependencies = [
     "pageindex==0.3.0.dev3+urltrakb.5",
+    "ictree==0.1.0+urltrakb.1",
+    "pageindex-condb==1.0+urltrakb.1",
     "pymupdf==1.27.2.3",
     "regex==2026.5.9",
     "charset-normalizer==3.4.7",
@@ -46,7 +48,7 @@ dependencies = [
     "trafilatura==2.0.0",
     "click==8.4.0",
     "watchdog==6.0.0",
-    "litellm==1.87.2",
+    "litellm==1.87.2+urltrakb.1",
     "tiktoken==0.13.0",
     "markdown-it-py==4.2.0",
     "openai-agents==0.17.3",
@@ -94,6 +96,9 @@ source = "vcs"
 
 [tool.uv.sources]
 pageindex = { path = "vendor/PageIndex", editable = true }
+ictree = { path = "vendor/ChatIndex", editable = true }
+pageindex-condb = { path = "vendor/ConDB", editable = true }
+litellm = { path = "vendor/LiteLLM", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["openkb"]
@@ -104,13 +109,18 @@ exclude = ["/openkb/web"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
-    "/vendor/PageIndex",
+    "/vendor/PageIndex", "/vendor/ChatIndex", "/vendor/ConDB", "/vendor/LiteLLM",
+    "/docs/vendor-sdk.md",
     "/docs/desktop.md", "/docs/dev-1.2.0.md", "/docs/golden-principles.md",
     "/docs/desktop-evidence/dev-1.2.0",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
 ]
 exclude = ["/openkb/web", "/frontend"]
+
+# Preserve this already-vendored upstream file despite the workspace .claude ignore.
+[tool.hatch.build.targets.sdist.force-include]
+"vendor/PageIndex/.claude/commands/dedupe.md" = "vendor/PageIndex/.claude/commands/dedupe.md"
 
 # Bundle the built-in deck themes + html critic into the wheel so
 # `openkb deck new` / `--critique` / chat `/deck` work right after
@@ -138,7 +148,8 @@ exclude = ["/openkb/web", "/frontend"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-extend-exclude = ["vendor/PageIndex"]
+# Audited upstream snapshots keep their original style; OpenKB additions stay checked.
+extend-exclude = ["vendor/PageIndex", "vendor/ChatIndex", "vendor/ConDB", "vendor/LiteLLM"]
 
 [tool.ruff.lint]
 # Start conservative (pyflakes + pycodestyle errors + isort); ratchet up later.

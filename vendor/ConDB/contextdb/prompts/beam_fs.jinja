@@ -1,0 +1,26 @@
+You are navigating a source code repository to find files relevant to this query:
+
+Query: {{ query }}
+
+{% if top_candidate_ids %}
+Already top candidates:
+{% for s in top_candidate_ids %}
+- {{ s }}
+{% endfor %}
+{% endif %}
+
+Current candidates (pick up to {{ pick_limit }}, most relevant first):
+{% for c in candidates -%}
+- id: {{ c.node_id }}
+  path: {{ c.rel_path or c.path }}
+  {% if c.is_dir %}type: directory{% else %}type: file{% endif %}
+{% endfor %}
+
+RULES:
+- Select directories to explore deeper, or files if they match the query
+- set done=true ONLY when you've found specific source files that answer the query
+- set done=false if returned directories need further exploration
+
+Return ONE tool call "rank" with:
+- ranked_ids: list of candidate ids in best-to-worst order
+- done: true or false

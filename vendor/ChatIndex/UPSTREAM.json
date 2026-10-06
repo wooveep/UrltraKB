@@ -1,0 +1,76 @@
+{
+  "schema_version": 2,
+  "distribution": "ictree",
+  "module": "ctree",
+  "version": "0.1.0+urltrakb.1",
+  "repository": "https://github.com/VectifyAI/ChatIndex",
+  "commit": "7df2c9208db6f113f85a6c09295bec7f0f2114e7",
+  "license": "Apache-2.0",
+  "local_version": "0.1.0+urltrakb.1",
+  "retrieved": "2026-10-06",
+  "upstream_archive": {
+    "url": "https://api.github.com/repos/VectifyAI/ChatIndex/tarball/7df2c9208db6f113f85a6c09295bec7f0f2114e7",
+    "sha256": "07dd6b0f273f854b18e7eb21746ce2d57f3677c9dae73a1a80f5c35932c1edf3"
+  },
+  "upstream_files": {
+    "setup.py": "96e577cd133f53e1779de45f943871ce83d8d13d73aae6092fd4161b1f1d5363",
+    "requirements.txt": "c39a5c555985026a55ea312e9ccab0248530a9f71ab024b967dd500608b6e0f0",
+    "README.md": "76ef2eadcd462c3c05defd90d2dc7562796eb1af56d82f43d280bb8267fc2c88",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "ctree/visualize.py": "ee2bde042c1f24b9b0d52cb64b4d1b3c2911cc53983f5feb4f1eb951e2618939",
+    "ctree/utils.py": "818d1bd0d0e6b0bf09e80b4b8258af5d12d0db764ebeb55b7b04e789f5afef12",
+    "ctree/ctree.py": "9fe8a4a6b165dba71fd292d9ffdc3d2b34662aa2f884f7fee75516ac477713a3",
+    "ctree/__init__.py": "3f4d51f4711b3aa526fd733d32b986b7cf41cae8fee14961e211f98cc2d74a2f"
+  },
+  "included_roots": [
+    "ctree",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml"
+  ],
+  "excluded_roots": [
+    ".gitignore",
+    "data",
+    "demo.py",
+    "requirements.txt",
+    "retrieval",
+    "save",
+    "setup.py",
+    "utils.py"
+  ],
+  "local_changes": [
+    "Replace setup.py and requirements.txt with one exact-pinned poetry-core==2.4.1 build declaration; correct Apache-2.0 classification and placeholder metadata.",
+    "Version 0.1.0+urltrakb.1 and packaged source identity; exclude demo-only Anthropic dependency, retaining the imported ctree runtime dependency closure."
+  ],
+  "local_patch": {
+    "date": "2026-10-06",
+    "purpose": "Audited local SDK source and packaging baseline (#107)",
+    "modified": {
+      "ctree/__init__.py": "a7eeba35e4301d639e9a287f01ac710f3448b5984a8599d46ca6feadb4f597f8"
+    },
+    "added": {
+      "README.urltrakb.md": "31a11b8f705f335e4d65021f02014adf9b08987abc67040c132ddd14db5a7a5f",
+      "ctree/_urltrakb_source.json": "81795c1d3df32c6f6512212999d91c3532c7a946852532b175547695aef45ba4",
+      "pyproject.toml": "d5a888914b6e07b86214c11e8dc870b62cfdc2b7562bbd984832edbfe394a16f"
+    },
+    "deleted": [
+      "requirements.txt",
+      "setup.py"
+    ]
+  },
+  "included_files": [
+    "LICENSE",
+    "README.md",
+    "README.urltrakb.md",
+    "ctree/__init__.py",
+    "ctree/_urltrakb_source.json",
+    "ctree/ctree.py",
+    "ctree/utils.py",
+    "ctree/visualize.py",
+    "pyproject.toml"
+  ],
+  "excluded_files": [
+    "requirements.txt",
+    "setup.py"
+  ]
+}

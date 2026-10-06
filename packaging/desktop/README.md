@@ -5,26 +5,29 @@ points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
 bundled into the runtime archive.
 
-PageIndex is built from the tracked `vendor/PageIndex` directory. The root
-`uv.lock` resolves it as an editable local dependency, and both the desktop build
-script and PyInstaller spec reject PageIndex loaded from another directory.
-Source exports include its source, MIT license and upstream provenance. The
-build inventory attributes these files to the local PageIndex component.
+PageIndex, ChatIndex, ConDB and LiteLLM are built from tracked `vendor/` sources.
+The root `uv.lock` resolves them as editable local dependencies. Both the build
+script and PyInstaller spec verify their local versions, import paths and source
+hashes. Source exports retain licenses, provenance and required resources; the
+inventory attributes each collected file to its corresponding vendor component.
 CNKI conversion uses the pinned PyMuPDF/MuPDF native runtime already needed for
 PDF input. The freeze includes the converter worker, its hashable source helpers,
 native libraries and PyMuPDF license metadata. No external CNKI reader or system
 `mutool` is required. Converter provenance, the compatibility patch and platform
 wheel hashes are in `openkb/cnki/assets/`; `uv.lock` pins the runtime dependency.
-For Python wheel delivery, build and supply both packages:
+For Python wheel delivery, build and supply all five packages:
 
 ```sh
+uv build vendor/LiteLLM --wheel --out-dir dist
 uv build vendor/PageIndex --wheel --out-dir dist
+uv build vendor/ChatIndex --wheel --out-dir dist
+uv build vendor/ConDB --wheel --out-dir dist
 uv build --wheel --out-dir dist
 ```
 
-For pip-based source setup, install `./vendor/PageIndex` alongside this project.
-The local version `0.3.0.dev3+urltrakb.1` prevents accidental fallback to a registry
-release. See [the vendored dependency guide](../../vendor/PageIndex/README.urltrakb.md).
+For pip-based source setup, install all four local dependencies alongside this
+project. Local version suffixes prevent accidental fallback to registry releases.
+See [the vendored dependency guide](../../docs/vendor-sdk.md).
 
 Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected

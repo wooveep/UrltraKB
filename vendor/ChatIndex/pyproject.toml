@@ -1,0 +1,34 @@
+[build-system]
+requires = ["poetry-core==2.4.1"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "ictree"
+version = "0.1.0+urltrakb.1"
+description = "Incremental conversation trees"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = "Apache-2.0"
+authors = [{name = "Vectify AI"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "openai==2.44.0",
+    "python-dotenv==1.2.2",
+    "litellm==1.87.2+urltrakb.1",
+]
+
+[project.urls]
+Repository = "https://github.com/VectifyAI/ChatIndex"
+
+[tool.poetry]
+packages = [{include = "ctree"}]
+include = [
+    {path = "UPSTREAM.json", format = ["sdist"]},
+    {path = "README.urltrakb.md", format = ["sdist"]},
+]

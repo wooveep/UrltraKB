@@ -10,7 +10,7 @@ from pathlib import Path
 
 from desktop_contents import deduplicate_entrypoints
 from export_desktop_source import verify_source
-from local_pageindex import verify_local_pageindex
+from local_vendors import verify_local_vendors
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = ROOT / "packaging/desktop"
@@ -18,7 +18,7 @@ PACKAGING = ROOT / "packaging/desktop"
 
 def main() -> None:
     identity = verify_source(ROOT)
-    verify_local_pageindex(ROOT)
+    verify_local_vendors(ROOT)
     if version("openkb") != identity["version"]:
         raise ValueError("Install this exported source with its recorded version before freezing")
     cache = PACKAGING / "build/token-cache"

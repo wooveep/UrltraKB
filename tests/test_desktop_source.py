@@ -20,6 +20,12 @@ def _repository(tmp_path):
         "vendor/PageIndex/pyproject.toml": "[tool.poetry]\nname = 'pageindex'\n",
         "vendor/PageIndex/LICENSE": "upstream MIT license",
         "vendor/PageIndex/UPSTREAM.json": "{}\n",
+        "vendor/ChatIndex/ctree/__init__.py": "CHAT_TREE = True\n",
+        "vendor/ConDB/contextdb/prompts/beam.jinja": "{{ question }}",
+        "vendor/LiteLLM/litellm/model_prices_and_context_window_backup.json": "{}\n",
+        "vendor/LiteLLM/LICENSE": "upstream license",
+        "vendor/LiteLLM/enterprise/private.py": "excluded enterprise package",
+        "vendor/ConDB/dist/old.whl": "generated build artifact",
         "vendor/private/notes.txt": "not a vendored dependency",
         "openkb/web/index.html": "retired browser bundle",
         "pyproject.toml": "[project]\nname = 'openkb'\n",
@@ -62,6 +68,12 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
     assert (output / "openkb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
     assert (output / "vendor/PageIndex/pageindex/__init__.py").read_text() == "VENDORED = True\n"
     assert (output / "vendor/PageIndex/LICENSE").read_text() == "upstream MIT license"
+    assert (output / "vendor/ChatIndex/ctree/__init__.py").read_text() == "CHAT_TREE = True\n"
+    assert (output / "vendor/ConDB/contextdb/prompts/beam.jinja").read_text() == "{{ question }}"
+    assert (
+        output / "vendor/LiteLLM/litellm/model_prices_and_context_window_backup.json"
+    ).read_text() == "{}\n"
+    assert (output / "vendor/LiteLLM/LICENSE").read_text() == "upstream license"
     assert (
         output / "assets/fonts/SourceCodePro-Regular.ttf"
     ).read_text() == "committed font fixture"
@@ -73,6 +85,8 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
         "openkb/untracked.py",
         "assets/private.txt",
         "vendor/private/notes.txt",
+        "vendor/LiteLLM/enterprise",
+        "vendor/ConDB/dist",
     ):
         assert not (output / name).exists()
     assert json.loads((output / "openkb/_build_info.json").read_text("utf-8")) == identity

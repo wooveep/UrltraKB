@@ -1,0 +1,38 @@
+[build-system]
+requires = ["poetry-core==2.4.1"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "pageindex-condb"
+version = "1.0+urltrakb.1"
+description = "Reasoning-based context tree storage and retrieval"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = "Apache-2.0"
+authors = [{name = "Vectify AI"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "jinja2==3.1.6",
+    "litellm==1.87.2+urltrakb.1",
+    "python-dotenv==1.2.2",
+    "pyyaml==6.0.3",
+    "tiktoken==0.13.0",
+]
+
+[project.urls]
+Repository = "https://github.com/VectifyAI/ConDB"
+
+[tool.poetry]
+packages = [{include = "contextdb"}]
+include = [
+    {path = "UPSTREAM.json", format = ["sdist"]},
+    {path = "README.urltrakb.md", format = ["sdist"]},
+    {path = "contextdb/prompts/*.jinja", format = ["sdist", "wheel"]},
+    {path = "contextdb/config/**/*.yaml", format = ["sdist", "wheel"]},
+]

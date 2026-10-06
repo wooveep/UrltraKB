@@ -1,0 +1,42 @@
+[build-system]
+requires = ["uv_build==0.11.8"]
+build-backend = "uv_build"
+
+[project]
+name = "litellm"
+version = "1.87.2+urltrakb.1"
+description = "Library to interface with LLM API providers"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "BerriAI"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "fastuuid==0.14.0",
+    "httpx==0.28.1",
+    "openai==2.44.0",
+    "python-dotenv==1.2.2",
+    "tiktoken==0.13.0",
+    "importlib-metadata==8.9.0",
+    "tokenizers==0.23.1",
+    "click==8.4.0",
+    "jinja2==3.1.6",
+    "aiohttp==3.13.5",
+    "pydantic==2.13.4",
+    "jsonschema==4.26.0",
+]
+
+[project.urls]
+Repository = "https://github.com/BerriAI/litellm"
+
+[tool.uv.build-backend]
+module-root = ""
+source-include = ["UPSTREAM.json", "README.urltrakb.md"]
+source-exclude = ["litellm/proxy/enterprise", "**/__pycache__", "**/*.pyc"]

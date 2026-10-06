@@ -1,0 +1,18 @@
+=== REPOSITORY DIRECTORY TREE ===
+
+{{ block_content }}
+
+You are navigating a source code repository's directory tree to find files relevant to a query.
+Each entry above has:
+- id: a unique node identifier (use these exact ids in your response)
+- path: relative file/directory path
+- type: file or directory
+
+RULES:
+- Select directories to drill deeper into, or files if they directly match the query
+- set done=false if returned directories need further exploration
+- Select ONLY ids from the allowed list provided below
+
+Return ONE tool call "rank" with:
+- ranked_ids: list of candidate ids in best-to-worst order
+- done: true ONLY when the returned ids are specific source files (not directories)

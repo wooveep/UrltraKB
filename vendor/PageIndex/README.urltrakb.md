@@ -5,7 +5,7 @@
 上游 `.git` 已删除，所有文件由 UrltraKB 仓库管理；保留上游
 [MIT 许可证](LICENSE)和作者信息。
 
-当前本地版本为 `0.3.0.dev3+urltrakb.4`，仅提供本地索引和检索。
+当前本地版本为 `0.3.0.dev3+urltrakb.5`，仅提供本地索引和检索。
 已删除托管服务后端、旧版远程 SDK、云端客户端和相关示例；
 `PageIndexClient` 与 `LocalClient` 都使用本地后端。
 原来的服务密钥参数不再接受，环境中残留的 `PAGEINDEX_API_KEY` 不会启用
@@ -31,6 +31,10 @@ SQLite 仅增加可选元数据列，旧记录不推断覆盖完整性。PDF 内
 生成导航保存经原文验证的 body/notes 锚点，缓存恢复验证完整分域内容及图片。
 普通 PDF 不启用该定位策略；已知物理页数通过 `page_count` 返回。
 
+`.5` 已包含固定输入的恢复与幻灯片读回修正。本次四包纳管仅校正来源记录、
+固定依赖并添加包内身份资源，未修改 PageIndex 算法源码，因此保持 `.5`。
+包版本与内容策略兼容性分开判断，不能仅因安装版本变化要求重建旧索引。
+
 ## 安装和运行
 
 在 UrltraKB 根目录执行：
@@ -44,7 +48,7 @@ uv run openkb-desktop
 修改后的内容；长期运行的桌面或服务需重启。若使用 pip：
 
 ```sh
-pip install -e ./vendor/PageIndex -e ".[desktop,api,dev]"
+pip install -e ./vendor/PageIndex -e ./vendor/ChatIndex -e ./vendor/ConDB -e ./vendor/LiteLLM -e ".[desktop,api,dev]"
 ```
 
 桌面和 CLI 均使用本地导入：`openkb add <文件、目录或网址>`。
@@ -53,14 +57,17 @@ pip install -e ./vendor/PageIndex -e ".[desktop,api,dev]"
 
 ## 构建
 
-原生桌面构建验证 PageIndex 导入路径属于同一源码树，拒绝使用其他 checkout
+原生桌面构建验证四个 vendor 导入路径和来源摘要属于同一源码树，拒绝使用其他 checkout
 或 PyPI 版本。应用源码导出和 sdist 包含此目录。
 
 ```sh
+uv build vendor/LiteLLM --wheel --out-dir dist
 uv build vendor/PageIndex --wheel --out-dir dist
+uv build vendor/ChatIndex --wheel --out-dir dist
+uv build vendor/ConDB --wheel --out-dir dist
 uv build --wheel --out-dir dist
 ```
 
-分发时同时提供两者，以 `pip install --find-links /path/to/dist openkb` 安装。
+分发时同时提供五个 wheel，以 `pip install --find-links /path/to/dist openkb` 安装。
 构建后端固定为 `poetry-core==2.4.1`，本地版本后缀避免误装同名 PyPI 包。
 原生桌面完整构建方法见仓库的 `packaging/desktop/README.md`。

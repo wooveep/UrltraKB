@@ -20,6 +20,7 @@ from importlib import metadata
 from pathlib import Path
 
 from export_desktop_source import verify_source
+from local_vendors import VENDORS
 
 
 def digest(path: Path) -> str:
@@ -55,16 +56,18 @@ class Inputs:
             )
             for item in dist.files or ():
                 self.owners[Path(dist.locate_file(item)).resolve()] = (key, item.as_posix())
-        self.pageindex_source = source / "vendor/PageIndex"
-        provenance = json.loads((self.pageindex_source / "UPSTREAM.json").read_text("utf-8"))
-        self.pageindex = self.add(
-            "python/pageindex",
-            metadata.version("pageindex"),
-            declared_license="MIT",
-            source="vendor/PageIndex",
-            upstream_repository=provenance["repository"],
-            upstream_commit=provenance["commit"],
-        )
+        self.vendor_sources = {}
+        for folder, distribution, _, _, _ in VENDORS:
+            directory = source / "vendor" / folder
+            provenance = json.loads((directory / "UPSTREAM.json").read_text("utf-8"))
+            self.vendor_sources[directory.resolve()] = self.add(
+                "python/" + distribution,
+                metadata.version(distribution),
+                declared_license=provenance["license"],
+                source="vendor/" + folder,
+                upstream_repository=provenance["repository"],
+                upstream_commit=provenance["commit"],
+            )
         self.npm = json.loads((source / "openkb/rendering/package-lock.json").read_text("utf-8"))[
             "packages"
         ]
@@ -129,8 +132,9 @@ class Inputs:
 
     def owner(self, path: Path) -> tuple[str, str]:
         path = path.resolve(strict=True)
-        if path.is_relative_to(self.pageindex_source):
-            return self.pageindex, path.relative_to(self.source).as_posix()
+        for directory, component in self.vendor_sources.items():
+            if path.is_relative_to(directory):
+                return component, path.relative_to(self.source).as_posix()
         if path.is_relative_to(self.assets):
             relative = path.relative_to(self.assets).as_posix()
             for name in sorted(self.npm, key=len, reverse=True):

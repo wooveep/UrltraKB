@@ -73,7 +73,7 @@ pip install openkb
   ```bash
   git clone https://github.com/VectifyAI/OpenKB.git
   cd OpenKB
-  pip install -e ./vendor/PageIndex -e .
+  uv sync --frozen --extra dev
   ```
 
 </details>
@@ -127,9 +127,11 @@ shows that distinction and opens retained source text, while Conversations keeps
 the original Wiki-based multi-turn history. See the
 [branch scope and verification notes](docs/dev-1.2.0.md).
 
-PageIndex is maintained as ordinary source files in
-[`vendor/PageIndex`](vendor/PageIndex/README.urltrakb.md). `uv sync` installs that
-directory in editable mode; document indexing and desktop builds use those files.
+PageIndex, ChatIndex, ConDB and LiteLLM are maintained as project-owned source
+in `vendor/`. `uv sync --frozen` installs these local packages in editable mode.
+See the [local SDK guide](docs/vendor-sdk.md) for provenance, pip installation
+and wheel delivery. ChatIndex and ConDB are packaged foundations; their new
+retrieval and conversation-memory workflows are not enabled by this baseline.
 
 The desktop targets Windows 11 x86_64 and Debian 13.6 x86_64 with GNOME/X11. Open the `OpenKB` program from the complete portable program directory. Knowledge bases and settings remain in their user-selected locations when program files are replaced.
 
@@ -352,7 +354,7 @@ The skill is read-only. It won't run `openkb add`, `remove`, or `lint --fix` wit
 # REST API
 
 UrltraKB ships an independent FastAPI service for HTTP clients. From this checkout,
-install with `pip install -e ./vendor/PageIndex -e ".[api]"`, then start with
+install with `uv sync --frozen --extra api`, then start with
 `openkb-api` (or `python -m openkb.api`). The interactive API reference is at
 [`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve
 an application. Authentication, SSE, CORS and generated HTML artifact endpoints

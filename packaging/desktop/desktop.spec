@@ -8,9 +8,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 packaging = Path(SPECPATH)
 repo = packaging.parents[1]
 sys.path.insert(0, str(repo / "scripts"))
-from local_pageindex import verify_local_pageindex
+from local_vendors import verify_local_vendors
 
-verify_local_pageindex(repo)
+verify_local_vendors(repo)
 assets = repo / "openkb/rendering/assets"
 if not (assets / "manifest.json").is_file():
     raise RuntimeError("Run scripts/prepare_desktop_assets.py before freezing")
@@ -36,7 +36,7 @@ datas += copy_metadata("pymupdf")
 for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):
     datas.append((str(repo / "skills" / skill), "openkb/_skills/" + skill))
 hidden = ["openkb.cli", "openkb.api", "openkb.cnki.worker", "tiktoken_ext.openai_public"]
-for package in ("litellm", "magika", "pageindex", "trafilatura", "markitdown"):
+for package in ("litellm", "magika", "pageindex", "ctree", "contextdb", "trafilatura", "markitdown"):
     # The desktop uses LiteLLM's model clients, never its proxy administration UI.
     datas += collect_data_files(
         package, excludes=["proxy/_experimental/**"] if package == "litellm" else None,

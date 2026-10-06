@@ -1,0 +1,33 @@
+Query: {{ query }}
+
+Interpret the query semantically, not by exact words.
+- Prefer nodes whose text/summary provides direct evidence for the query constraints.
+- For compound questions, choose nodes that jointly cover all requested facts.
+
+Top candidates in previous block:
+{% if previous_top_candidate_ids %}
+{{ previous_top_candidate_ids }}
+{% else %}
+(none)
+{% endif %}
+
+{% if input_frontier %}
+Input frontier (context from previous block):
+{% for frontier_node in input_frontier %}
+- {{ frontier_node.node_id }}: {{ frontier_node.title }} ({{ frontier_node.path }})
+{% endfor %}
+{% endif %}
+
+The LAST BLOCK above is the CURRENT BLOCK.
+
+Allowed node ids in CURRENT BLOCK (you MUST select only from these ids):
+{% if allowed_node_ids %}
+{% for node_id in allowed_node_ids %}
+- {{ node_id }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
+Pick up to {{ pick_limit }} candidates from the ALLOWED NODE IDS above, best first.
+Set done=true only if top candidates already provide sufficient concrete evidence; otherwise done=false.
