@@ -6,7 +6,7 @@
   "repository": "https://github.com/VectifyAI/ChatIndex",
   "commit": "7df2c9208db6f113f85a6c09295bec7f0f2114e7",
   "license": "Apache-2.0",
-  "local_version": "0.1.0+urltrakb.1",
+  "local_version": "0.1.0+urltrakb.2",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/VectifyAI/ChatIndex/tarball/7df2c9208db6f113f85a6c09295bec7f0f2114e7",
@@ -44,14 +44,22 @@
   ],
   "local_patch": {
     "date": "2026-10-06",
-    "purpose": "Audited local SDK source and packaging baseline (#107)",
+    "purpose": "Audited local SDK source and packaging baseline (#107); role-filtered injected incremental builder, stable exchange transaction and separate versioned lossless checkpoint/retrieval exports",
     "modified": {
-      "ctree/__init__.py": "a7eeba35e4301d639e9a287f01ac710f3448b5984a8599d46ca6feadb4f597f8"
+      "ctree/utils.py": "44afe9747856e5b46676cbe79f64710c64deacc909e85b25f41763669e336e6a",
+      "ctree/ctree.py": "7f871cff571405480cc7ea98ec3f1a965727363c14217255a87d18a11f3b007a",
+      "ctree/__init__.py": "58a5a7ca979a61d90e10c3c22f82170bb3b9ae9f6ebf314be9418b29e975891b"
     },
     "added": {
-      "pyproject.toml": "371bdc7b88ee749e12dab408ca907c7233a458392ffe6b425fac4effce083b89",
-      "README.urltrakb.md": "31a11b8f705f335e4d65021f02014adf9b08987abc67040c132ddd14db5a7a5f",
-      "ctree/_urltrakb_source.json": "81795c1d3df32c6f6512212999d91c3532c7a946852532b175547695aef45ba4"
+      "pyproject.toml": "7ba3a807a9f34e20e7973c394886f86fcab0e2a308f6b3227a769a197da87976",
+      "README.urltrakb.md": "3f1b46d32cffdcd129795ddf624fdb675a185b4090c54c0520a76305f4b30cf1",
+      "ctree/_urltrakb_source.json": "073c8e2bef216675668e695df1b1c23ae83f72198bcd56653d8a0a02c79aba11",
+      "ctree/nodes.py": "47be440ae98caefe40b3cbfad68baf9083b371875c9f0d428668e04071b5861e",
+      "ctree/llm.py": "90c36aebbfdb2f1af725c8c2b4d35ded5ccb15be5f4c8108dc2abfce653a5434",
+      "ctree/prompts.py": "546d7c274706acf6806bcda45c2d69dd5fdacd19e14edf5e051f8552034a38e1",
+      "ctree/state.py": "450b982503ff49b1e809f992a96222f4ba9e6f22c1180b0ae89d8075f5a30630",
+      "ctree/builder.py": "7a3319ab56f69a7adafbeb88d693b07e8d732d54a35634ada11f797e841bd73b",
+      "ctree/export.py": "def50f671f7d7000d1d1dc822d4b385433e7647bb170dd1283cc60bb469c677a"
     },
     "deleted": [
       "requirements.txt",
@@ -64,7 +72,13 @@
     "README.urltrakb.md",
     "ctree/__init__.py",
     "ctree/_urltrakb_source.json",
+    "ctree/builder.py",
     "ctree/ctree.py",
+    "ctree/export.py",
+    "ctree/llm.py",
+    "ctree/nodes.py",
+    "ctree/prompts.py",
+    "ctree/state.py",
     "ctree/utils.py",
     "ctree/visualize.py",
     "pyproject.toml"

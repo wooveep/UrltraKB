@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "ictree"
-version = "0.1.0+urltrakb.1"
+version = "0.1.0+urltrakb.2"
 description = "Incremental conversation trees"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -18,8 +18,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "openai==2.44.0",
-    "python-dotenv==1.2.2",
     "litellm==1.87.2+urltrakb.2",
 ]
 

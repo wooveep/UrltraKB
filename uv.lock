@@ -816,20 +816,14 @@ wheels = [
 
 [[package]]
 name = "ictree"
-version = "0.1.0+urltrakb.1"
+version = "0.1.0+urltrakb.2"
 source = { editable = "vendor/ChatIndex" }
 dependencies = [
     { name = "litellm" },
-    { name = "openai" },
-    { name = "python-dotenv" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "litellm", specifier = "==1.87.2+urltrakb.2" },
-    { name = "openai", specifier = "==2.44.0" },
-    { name = "python-dotenv", specifier = "==1.2.2" },
-]
+requires-dist = [{ name = "litellm", specifier = "==1.87.2+urltrakb.2" }]
 
 [[package]]
 name = "idna"

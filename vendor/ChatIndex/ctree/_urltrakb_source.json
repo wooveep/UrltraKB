@@ -1,7 +1,7 @@
 {
   "distribution": "ictree",
   "module": "ctree",
-  "version": "0.1.0+urltrakb.1",
+  "version": "0.1.0+urltrakb.2",
   "repository": "https://github.com/VectifyAI/ChatIndex",
   "commit": "7df2c9208db6f113f85a6c09295bec7f0f2114e7",
   "license": "Apache-2.0"

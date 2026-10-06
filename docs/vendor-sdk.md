@@ -7,7 +7,7 @@
 | 目录 | 分发名 / 导入名 | 本地版本 | 上游提交 | 许可证 |
 | --- | --- | --- | --- | --- |
 | PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.6 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
-| ChatIndex | ictree / ctree | 0.1.0+urltrakb.1 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
+| ChatIndex | ictree / ctree | 0.1.0+urltrakb.2 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
 | ConDB | pageindex-condb / contextdb | 1.0+urltrakb.1 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
 | LiteLLM | litellm / litellm | 1.87.2+urltrakb.2 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
 

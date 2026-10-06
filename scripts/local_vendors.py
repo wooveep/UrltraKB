@@ -20,7 +20,7 @@ VENDORS = (
         "ChatIndex",
         "ictree",
         "ctree",
-        "0.1.0+urltrakb.1",
+        "0.1.0+urltrakb.2",
         "7df2c9208db6f113f85a6c09295bec7f0f2114e7",
     ),
     (
