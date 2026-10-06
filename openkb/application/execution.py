@@ -9,6 +9,7 @@ from typing import Callable, Iterator
 
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
+from openkb.llm_execution import CompletionExecutor, executor_from_snapshot
 from openkb.locks import LockCancelled
 
 
@@ -20,6 +21,7 @@ class ExecutionContext:
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
     usage_task_id: str | None = None
+    executor: CompletionExecutor | None = field(default=None, repr=False)
 
     def check_stop(self) -> None:
         if self.cancelled():
@@ -40,6 +42,8 @@ class ExecutionContext:
             raise ValueError("Execution context belongs to another knowledge base")
         if self.install_process_settings:
             self.snapshot.install_worker_environment()
-        with self.snapshot.activate():
+        if self.executor is None:
+            self.executor = executor_from_snapshot(self.snapshot, self.cancelled)
+        with self.snapshot.activate(), self.executor.activate():
             self.check_stop()
             yield LlmCredentialBundle(**self.snapshot.values()["credentials"])

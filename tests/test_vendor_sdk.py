@@ -39,6 +39,8 @@ def running_model_service(monkeypatch):
                 data = json.dumps(response).encode()
                 content_type = "application/json"
             self.send_response(status)
+            if 300 <= status < 400:
+                self.send_header("Location", "/actual")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()

@@ -97,3 +97,11 @@ OpenKB 原有 800 行约束不变。LiteLLM `.2` 已实现离线初始化、请�
 开发和 wheel 环境可运行 `tests/test_litellm_policy.py` 与 `tests/test_vendor_sdk.py`；前者在新进程禁止 socket 联网并放置诱饵 `.env`，后者通过实际回环 HTTP 验证 SDK 及 Agents。冻结发行必须包含四个包的数据、元数据、模型表及身份摘要；执行 `scripts/verify_vendor_install.py` 核对资源。Windows/macOS 订阅登录和实际冻结发行需对应平台人工验证。
 
 LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 28 项真实 SDK/传输测试（含无网导入、部分回执、取消与关闭、双端点、共享客户端请求绑定），独立环境 127 个包依赖兼容；四 SDK wheel/sdist 及根源码包通过来源、许可和文件摘要核对。mypy 与 ruff 通过，Standards / Spec 复核无遗留发现。
+
+## 任务模型执行政策
+
+编译通过 `openkb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。
+
+KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+
+账本区分逻辑调用、发送尝试、父调用与 operation/stage/prompt version，只保存模型/政策摘要，不保存请求正文或凭据。HTTPX 观察更新同一条发送记录；应用缓存命中与供应商缓存 token 分开。独立算法客户端将通过各自窄协议使用同一执行器。Agent、PageIndex 和 ChatIndex 的迁移分别验证，不代表技能及幻灯片生成等所有旧入口已迁移。

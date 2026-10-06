@@ -1186,7 +1186,7 @@ class TestCompileShortDoc:
             }
         )
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion(
                     [
@@ -1233,7 +1233,7 @@ class TestCompileShortDoc:
         source_path.write_text("Content", encoding="utf-8")
         (tmp_path / ".openkb").mkdir()
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion(["Plain summary text", "not valid json"])
             )
@@ -1292,7 +1292,7 @@ class TestCompileShortDocFallbacks:
         rewrite_response = ""
         concept_response = json.dumps({"brief": "C", "content": "# T\n\nBody."})
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion(
                     [
@@ -1352,7 +1352,7 @@ class TestCompileShortDocFallbacks:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
             mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_response]))
             # Must NOT raise out of compile_short_doc
@@ -1378,7 +1378,7 @@ class TestCompileShortDocFallbacks:
         # Plan call returns non-JSON garbage → triggers early return
         plan_response = "not valid json at all"
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([summary_response, plan_response])
             )
@@ -1411,7 +1411,7 @@ class TestCompileShortDocFallbacks:
             }
         )
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([summary_response, empty_plan_response])
             )
@@ -1439,7 +1439,7 @@ class TestCompileShortDocFallbacks:
         # Plan call returns a bare JSON scalar (an integer).
         scalar_plan_response = "42"
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([summary_response, scalar_plan_response])
             )
@@ -1523,7 +1523,7 @@ class TestCacheControl:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
             mock_litellm.acompletion = AsyncMock(side_effect=async_side_effect)
             await compile_short_doc("doc", src, tmp_path, "anthropic/claude-sonnet-4-5")
@@ -1596,7 +1596,7 @@ class TestCacheControl:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
             mock_litellm.acompletion = AsyncMock()
             await compile_long_doc(
@@ -1645,7 +1645,7 @@ class TestCompileLongDoc:
             }
         )
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([overview_response, concepts_list_response])
             )
@@ -1737,7 +1737,7 @@ class TestCompileConceptsPlan:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(side_effect=ordered_acompletion)
             await _compile_concepts(
@@ -1790,7 +1790,7 @@ class TestCompileConceptsPlan:
             {"create": [{"name": "attention", "title": "Attention"}], "update": [], "related": []}
         )
         array_page = json.dumps([{"brief": "b", "content": "# Attention\n\nRecovered body."}])
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([array_page]))
             await _compile_concepts(
@@ -1831,7 +1831,7 @@ class TestCompileConceptsPlan:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
             await _compile_concepts(
@@ -1867,7 +1867,7 @@ class TestCompileConceptsPlan:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
             await _compile_concepts(
@@ -1936,7 +1936,7 @@ class TestCompileConceptsPlan:
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
             await _compile_concepts(
@@ -1972,7 +1972,7 @@ class TestCompileConceptsPlan:
         system_msg = {"role": "system", "content": "You are a wiki agent."}
         doc_msg = {"role": "user", "content": "Document content."}
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(
                 side_effect=_mock_completion([empty_content_response])
@@ -2019,7 +2019,7 @@ class TestCompileConceptsPlan:
         doc_msg = {"role": "user", "content": "Document content."}
         summary = "Summary."
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock()
             await _compile_concepts(
@@ -2061,7 +2061,7 @@ class TestCompileConceptsPlan:
         doc_msg = {"role": "user", "content": "Document content."}
         summary = "Summary."
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock(
                 side_effect=_mock_acompletion([concept_page_response])
@@ -2122,7 +2122,7 @@ class TestBriefIntegration:
             }
         )
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([summary_resp, plan_resp])
             )
@@ -2656,7 +2656,7 @@ class TestLLMCallExtraHeaders:
         from openkb.config import set_extra_headers
 
         set_extra_headers({"Editor-Version": "vscode/1.95.0"})
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
             out = _llm_call("m", [{"role": "user", "content": "hi"}], "step")
         assert out == "ok"
@@ -2666,7 +2666,7 @@ class TestLLMCallExtraHeaders:
     def test_llm_call_no_extra_headers_by_default(self):
         from openkb.agent.compiler import _llm_call
 
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
             _llm_call("m", [{"role": "user", "content": "hi"}], "step")
         assert "extra_headers" not in mock_litellm.completion.call_args.kwargs
@@ -2676,7 +2676,7 @@ class TestLLMCallExtraHeaders:
         from openkb.config import set_extra_headers
 
         set_extra_headers({"Editor-Version": "from-config"})
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
             _llm_call(
                 "m",
@@ -2693,7 +2693,7 @@ class TestLLMCallExtraHeaders:
         from openkb.config import set_extra_headers
 
         set_extra_headers({"Copilot-Integration-Id": "vscode-chat"})
-        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+        with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion(["ok"]))
             out = await _llm_call_async("m", [{"role": "user", "content": "hi"}], "step")
         assert out == "ok"

@@ -27,6 +27,12 @@ class UsageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1] = 1
     request_attempt_id: Identity
+    logical_call_id: Identity | None = None
+    parent_call_id: Identity | None = None
+    operation: str | None = None
+    prompt_version: str | None = None
+    policy_fingerprint: str | None = None
+    application_cache_hit: bool = False
     execution_id: Identity
     source_id: Identity | None = None
     source_revision_id: Identity | None = None
@@ -104,6 +110,16 @@ def normalize_usage(value: Any) -> dict:
         cached = _count(_field(_field(value, "prompt_tokens_details"), "cached_tokens"))
     if cached is None:
         cached = _count(_field(value, "prompt_cache_hit_tokens"))
+    # Anthropic reports uncached input separately from cache creation/reads.
+    # OpenAI-compatible prompt_tokens already includes them: never add twice.
+    cache_read = _count(_field(value, "cache_read_input_tokens"))
+    cache_write = _count(_field(value, "cache_creation_input_tokens"))
+    if _field(value, "prompt_tokens") is None and (
+        cache_read is not None or cache_write is not None
+    ):
+        if input_total is not None:
+            input_total += (cache_read or 0) + (cache_write or 0)
+        cached = cache_read
     reasoning = _count(_field(_field(value, "output_tokens_details"), "reasoning_tokens"))
     if reasoning is None:
         reasoning = _count(_field(_field(value, "completion_tokens_details"), "reasoning_tokens"))
@@ -132,7 +148,9 @@ def _path(root: Path, identity: str) -> Path:
     return root / ".openkb/usage/requests" / f"{identity}.json"
 
 
-def begin_request(model: str, stage: str, *, scope: UsageScope | None = None) -> str | None:
+def begin_request(
+    model: str, stage: str, *, scope: UsageScope | None = None, **metadata
+) -> str | None:
     scope = scope or _SCOPE.get()
     if scope is None:
         return None
@@ -143,7 +161,12 @@ def begin_request(model: str, stage: str, *, scope: UsageScope | None = None) ->
         if name not in {"kb_dir", "on_event"}
     }
     record = UsageRequest(
-        **values, request_attempt_id=identity, model=model, stage=stage, started_at=_now()
+        **values,
+        **metadata,
+        request_attempt_id=identity,
+        model=model,
+        stage=stage,
+        started_at=_now(),
     )
     with atomic_record_lock(scope.kb_dir / ".openkb/usage/ledger.lock"):
         atomic_write_json(_path(scope.kb_dir, identity), record.model_dump(mode="json"))

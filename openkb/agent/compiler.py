@@ -33,12 +33,11 @@ from openkb import frontmatter
 from openkb.compilation_report import report_compile_issue
 from openkb.config import (
     DEFAULT_ENTITY_TYPES,
-    get_extra_headers,
-    get_timeout,
     resolve_entity_types,
 )
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
+from openkb.llm_execution import check_model_stop, raise_if_terminal
 from openkb.locks import atomic_write_text
 from openkb.schema import INDEX_SEED, get_agents_md
 from openkb.source_refs import scan_affected_pages as scan_affected_pages
@@ -366,6 +365,8 @@ class _Spinner:
 
 def _format_usage(elapsed: float, usage) -> str:
     """Format timing and token usage into a short summary string."""
+    if usage is None:
+        return f"{elapsed:.1f}s (usage unknown)"
     cached = getattr(usage, "prompt_tokens_details", None)
     cache_info = ""
     if cached and hasattr(cached, "cached_tokens") and cached.cached_tokens:
@@ -410,40 +411,25 @@ def _llm_call(
     **kwargs,
 ) -> str:
     """Single LLM call with animated progress and debug logging."""
-    messages = _prepare_messages(model, messages)
-    extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
-    from openkb.llm_runtime import audit_step_headers
+    from openkb.llm_execution import ModelRequest, compiler_executor
 
-    extra_headers = audit_step_headers(extra_headers, step_name)
-    if extra_headers:
-        kwargs.setdefault("extra_headers", extra_headers)
-    timeout = bundle.timeout if bundle is not None else get_timeout()
-    if timeout is not None:
-        kwargs.setdefault("timeout", timeout)
-    if bundle is not None:
-        kwargs.setdefault("api_key", bundle.api_key)
-        kwargs.setdefault("base_url", bundle.base_url)
-    logger.debug("LLM request [%s]:\n%s", step_name, _fmt_messages(messages))
-    if kwargs:
-        logger.debug(
-            "LLM kwargs [%s]: fields=%s, timeout=%s",
-            step_name,
-            sorted(kwargs),
-            kwargs.get("timeout"),
-        )
-
+    executor = compiler_executor(model, bundle, kwargs)
+    messages = _prepare_messages(executor.bindings.model("compile"), messages)
+    request = ModelRequest(
+        messages,
+        operation="compile",
+        stage=step_name,
+        prompt_version="compiler-v1",
+        generation_options=kwargs,
+    )
     spinner = _Spinner(step_name)
     spinner.start()
     t0 = time.time()
     suffix = ""
 
     try:
-        from openkb.llm_usage_transport import observe_model_call
-
-        with observe_model_call(model, "compile." + step_name) as usage:
-            response = litellm.completion(model=model, messages=messages, **kwargs)
-            if usage:
-                usage.finish(response)
+        result = executor.complete("compile", request)
+        response = result.response
         content = response.choices[0].message.content or ""
         truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
         suffix = _format_usage(time.time() - t0, response.usage)
@@ -469,36 +455,20 @@ async def _llm_call_async(
     **kwargs,
 ) -> str:
     """Async LLM call with timing output and debug logging."""
-    messages = _prepare_messages(model, messages)
-    extra_headers = bundle.extra_headers if bundle is not None else get_extra_headers()
-    from openkb.llm_runtime import audit_step_headers
+    from openkb.llm_execution import ModelRequest, compiler_executor
 
-    extra_headers = audit_step_headers(extra_headers, step_name)
-    if extra_headers:
-        kwargs.setdefault("extra_headers", extra_headers)
-    timeout = bundle.timeout if bundle is not None else get_timeout()
-    if timeout is not None:
-        kwargs.setdefault("timeout", timeout)
-    if bundle is not None:
-        kwargs.setdefault("api_key", bundle.api_key)
-        kwargs.setdefault("base_url", bundle.base_url)
-    logger.debug("LLM request [%s]:\n%s", step_name, _fmt_messages(messages))
-    if kwargs:
-        logger.debug(
-            "LLM kwargs [%s]: fields=%s, timeout=%s",
-            step_name,
-            sorted(kwargs),
-            kwargs.get("timeout"),
-        )
-
+    executor = compiler_executor(model, bundle, kwargs)
+    messages = _prepare_messages(executor.bindings.model("compile"), messages)
+    request = ModelRequest(
+        messages,
+        operation="compile",
+        stage=step_name,
+        prompt_version="compiler-v1",
+        generation_options=kwargs,
+    )
     t0 = time.time()
-
-    from openkb.llm_usage_transport import observe_model_call
-
-    with observe_model_call(model, "compile." + step_name) as usage:
-        response = await litellm.acompletion(model=model, messages=messages, **kwargs)
-        if usage:
-            usage.finish(response)
+    result = await executor.acomplete("compile", request)
+    response = result.response
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
 
@@ -530,6 +500,28 @@ async def _llm_call_page_async(
     )
 
 
+async def _generate_pages(coroutines):
+    """Keep ordinary page failures partial; stop siblings for terminal failures."""
+
+    async def generate(coroutine):
+        try:
+            return await coroutine
+        except BaseException as error:
+            raise_if_terminal(error)
+            if not isinstance(error, Exception):
+                raise
+            return error
+
+    tasks = [asyncio.create_task(generate(coroutine)) for coroutine in coroutines]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 async def _close_async_llm_clients() -> None:
     """Close LiteLLM's cached async (aiohttp) clients for the current loop.
 
@@ -541,6 +533,10 @@ async def _close_async_llm_clients() -> None:
     same loop that created them. Best-effort: never raises, so cleanup can't
     mask a real compilation error or break ingest.
     """
+    from openkb.llm_execution import active_executor
+
+    if active_executor() is not None:
+        return  # A task must not close clients belonging to another concurrent task.
     try:
         await litellm.close_litellm_async_clients()
     except Exception:
@@ -978,6 +974,7 @@ def _write_summary(
     wiki_dir: Path, doc_name: str, summary: str, doc_type: str = "short", description: str = ""
 ) -> None:
     """Write summary page with frontmatter."""
+    check_model_stop()
     parts = frontmatter.split(summary)
     if parts is not None:
         _, summary = parts
@@ -1013,6 +1010,7 @@ def _write_concept(
     wiki_dir: Path, name: str, content: str, source_file: str, is_update: bool, brief: str = ""
 ) -> None:
     """Write or update a concept page, managing the sources frontmatter."""
+    check_model_stop()
     concepts_dir = wiki_dir / "concepts"
     concepts_dir.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_concept_name(name)
@@ -1097,6 +1095,7 @@ def _write_entity(
     ``aliases`` (list, omitted when empty). On update the new source is prepended and the body replaced
     with the LLM rewrite; ``type`` is preserved from the new write.
     """
+    check_model_stop()
     entities_dir = wiki_dir / "entities"
     entities_dir.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_concept_name(name)
@@ -1250,6 +1249,7 @@ def _add_related_link(
     track which related slugs are real pages. The standalone ``See also:``
     paragraph it writes is symmetric with ``remove_doc_from_pages``' cleanup.
     """
+    check_model_stop()
     path = wiki_dir / page_dir / f"{slug}.md"
     if not path.exists():
         return False
@@ -1281,6 +1281,7 @@ def _backlink_summary_pages(
     inserting them under ``section`` (created if absent). Shared by the
     concept and entity summary-backlink wrappers below.
     """
+    check_model_stop()
     summary_path = wiki_dir / "summaries" / f"{doc_name}.md"
     if not summary_path.exists():
         return
@@ -1324,6 +1325,7 @@ def _backlink_pages(
 
 def _backlink_summary(wiki_dir: Path, doc_name: str, concept_slugs: list[str]) -> None:
     """Link the summary page back to every related concept (no LLM call)."""
+    check_model_stop()
     _backlink_summary_pages(
         wiki_dir,
         doc_name,
@@ -1340,6 +1342,7 @@ def _backlink_concepts(wiki_dir: Path, doc_name: str, concept_slugs: list[str]) 
 
 def _backlink_summary_entities(wiki_dir: Path, doc_name: str, entity_slugs: list[str]) -> None:
     """Link the summary page back to every related entity under '## Entities'."""
+    check_model_stop()
     _backlink_summary_pages(
         wiki_dir,
         doc_name,
@@ -1532,6 +1535,7 @@ def _update_index(
     ``doc_type`` is ``"short"`` or ``"pageindex"`` — shown in the entry so the
     query agent knows how to access detailed content.
     """
+    check_model_stop()
     if concept_briefs is None:
         concept_briefs = {}
 
@@ -1669,6 +1673,7 @@ async def _compile_concepts(
         ``plan.create`` slugs are unknown at this point, so the whitelist
         is just what physically exists.
         """
+        check_model_stop()
         fallback_targets = list_existing_wiki_targets(wiki_dir)
         fallback_targets.add(f"summaries/{doc_name}")
         cleaned, ghosts = strip_ghost_wikilinks(summary, fallback_targets)
@@ -2015,14 +2020,14 @@ async def _compile_concepts(
 
     results, entity_results = ([], [])
     if tasks or entity_tasks:
-        results, entity_results = await asyncio.gather(
-            asyncio.gather(*tasks, return_exceptions=True),
-            asyncio.gather(*entity_tasks, return_exceptions=True),
-        )
+        generated = await _generate_pages([*tasks, *entity_tasks])
+        results, entity_results = generated[: len(tasks)], generated[len(tasks) :]
 
     if tasks:
         failure_types: list[str] = []
         for r in results:
+            if isinstance(r, BaseException):
+                raise_if_terminal(r)
             if isinstance(r, Exception):
                 logger.warning("Concept generation failed: %s", r)
                 failure_types.append(type(r).__name__)
@@ -2049,6 +2054,8 @@ async def _compile_concepts(
     if entity_tasks:
         entity_failure_types: list[str] = []
         for r in entity_results:
+            if isinstance(r, BaseException):
+                raise_if_terminal(r)
             if isinstance(r, Exception):
                 logger.warning("Entity generation failed: %s", r)
                 entity_failure_types.append(type(r).__name__)
@@ -2140,6 +2147,7 @@ async def _compile_concepts(
                     summary_ghosts[:5],
                 )
         except Exception as exc:
+            raise_if_terminal(exc)
             logger.warning(
                 "summary-rewrite failed for %s: %s. Falling back to v1.",
                 doc_name,

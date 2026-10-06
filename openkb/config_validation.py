@@ -11,6 +11,9 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     resolvers in charge of optional overrides. Errors name fields, never
     credential-bearing values from user configuration.
     """
+    from openkb.llm_execution import validate_model_policy
+
+    validate_model_policy(config)
     if config.get("extraction_budget") is not None:
         from openkb.pending.records import ExecutionBudget
 
