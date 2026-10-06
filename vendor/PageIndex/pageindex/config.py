@@ -36,6 +36,8 @@ class IndexConfig(BaseModel):
     # (get_llm_params(), overridable via set_llm_params()). Scoped via
     # llm_params_scope so it doesn't leak into other concurrent indexing calls.
     llm_params: dict | None = None
+    llm_client: Any = Field(default=None, exclude=True)
+    require_llm_client: bool = Field(default=False, exclude=True)
     usage_observer: Any = Field(default=None, exclude=True)
 
 

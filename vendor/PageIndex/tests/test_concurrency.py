@@ -224,37 +224,28 @@ def test_llm_acompletion_passes_a_timeout_to_litellm(monkeypatch):
     assert "timeout" in seen and seen["timeout"] == get_llm_params()["timeout"]
 
 
-def test_llm_completion_degrades_to_empty_on_exhaustion(monkeypatch, caplog):
-    # A persistently-failing LLM call must NOT abort the whole index: it returns
-    # an empty result (logged at WARNING, not silent) so callers degrade
-    # (extract_json('') -> {} -> .get(default)) and the rest still indexes.
-    import logging
-
+def test_llm_completion_propagates_without_hidden_retries(monkeypatch):
+    calls = []
     def boom(**kwargs):
+        calls.append(kwargs)
         raise RuntimeError("provider down")
-
     monkeypatch.setattr("litellm.completion", boom)
-    monkeypatch.setattr("pageindex.index.utils.time.sleep", lambda *a: None)  # skip retry backoff
-
-    with caplog.at_level(logging.WARNING, logger="pageindex.index.utils"):
-        assert llm_completion("gpt-x", "hi") == ""
-        assert llm_completion("gpt-x", "hi", return_finish_reason=True) == ("", "error")
-    assert any("failed after" in r.message and "degrading" in r.message for r in caplog.records)
+    with pytest.raises(RuntimeError, match="provider down"):
+        llm_completion("gpt-x", "hi")
+    assert len(calls) == 1
+    assert calls[0]["num_retries"] == calls[0]["max_retries"] == 0
 
 
-def test_llm_acompletion_degrades_to_empty_on_exhaustion(monkeypatch):
-    # Async counterpart: exhausted retries return "" instead of raising, so the
-    # return_exceptions gathers see a plain empty result and callers degrade.
+def test_llm_acompletion_propagates_without_hidden_retries(monkeypatch):
+    calls = []
     async def boom(**kwargs):
+        calls.append(kwargs)
         raise RuntimeError("provider down")
-
-    async def _instant_sleep(*a):
-        return None
-
     monkeypatch.setattr("litellm.acompletion", boom)
-    monkeypatch.setattr("pageindex.index.utils.asyncio.sleep", _instant_sleep)  # skip retry backoff
-
-    assert asyncio.run(llm_acompletion("gpt-x", "hi")) == ""
+    with pytest.raises(RuntimeError, match="provider down"):
+        asyncio.run(llm_acompletion("gpt-x", "hi"))
+    assert len(calls) == 1
+    assert calls[0]["num_retries"] == calls[0]["max_retries"] == 0
 
 
 def test_llm_completion_holds_the_shared_semaphore(monkeypatch):

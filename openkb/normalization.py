@@ -119,7 +119,13 @@ def normalization_fingerprint(
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": "content-based-physical-v1",
-            "index_sdk": version("pageindex"),
+            # Runtime injection changed no successful tree content. Keep the
+            # established content identity so old paid trees remain reusable.
+            "index_sdk": (
+                "0.3.0.dev3+urltrakb.5"
+                if version("pageindex") == "0.3.0.dev3+urltrakb.6"
+                else version("pageindex")
+            ),
             "index_endpoint": hashlib.sha256(
                 (credentials.base_url or "provider-default").encode()
             ).hexdigest(),

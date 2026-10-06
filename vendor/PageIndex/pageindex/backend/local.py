@@ -1,5 +1,6 @@
 # pageindex/backend/local.py
 import hashlib
+from importlib.metadata import version
 import os
 import re
 import sqlite3
@@ -141,6 +142,9 @@ class LocalBackend:
                     "parser": parser_identity(parser), "model": self._model,
                     "source_digest": digest(managed_path),
                     "processing_fingerprint": file_hash,
+                    "sdk_version": version("pageindex"),
+                    "index_content_policy": "content-based-physical-v1",
+                    "storage_format": "pageindex.document.v1",
                 },
             })
         except sqlite3.IntegrityError:
@@ -154,12 +158,12 @@ class LocalBackend:
             if existing_id:
                 return existing_id
             raise
-        except Exception as e:
+        except BaseException:
             managed_path.unlink(missing_ok=True)
             doc_dir = col_dir / doc_id
             if doc_dir.exists():
                 shutil.rmtree(doc_dir)
-            raise IndexingError(f"Failed to index {file_path}: {e}") from e
+            raise
 
         return doc_id
 

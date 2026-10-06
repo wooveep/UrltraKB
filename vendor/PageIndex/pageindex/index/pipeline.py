@@ -73,6 +73,7 @@ def _run_async(coro):
 def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     """Main entry point: ParsedDocument -> tree structure dict.
     Routes to the appropriate strategy and runs enhancement."""
+    from ..llm import llm_client_scope
     from ..config import IndexConfig, llm_params_scope, max_concurrency_scope, usage_observer_scope
     from .utils import (
         add_node_text,
@@ -91,7 +92,8 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     # affected and a one-off value never sticks as the process default.
     with max_concurrency_scope(getattr(opt, "max_concurrency", None)), \
          llm_params_scope(getattr(opt, "llm_params", None)), \
-         usage_observer_scope(getattr(opt, "usage_observer", None)):
+         usage_observer_scope(getattr(opt, "usage_observer", None)), \
+         llm_client_scope(opt.llm_client, required=opt.require_llm_client):
         nodes = parsed.nodes
         policy = None
         if (parsed.metadata or {}).get("unit_kind") == "block":

@@ -48,7 +48,6 @@ class PageIndexClient:
         else:
             opt = IndexConfig(**overrides) if overrides else IndexConfig()
 
-        self._validate_llm_provider(opt.model)
 
         storage_path = Path(storage_path or ".pageindex").resolve()
         storage_path.mkdir(parents=True, exist_ok=True)

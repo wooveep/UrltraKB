@@ -187,7 +187,7 @@ def test_entirely_textless_slides_fail_before_any_model_request(tmp_path, pdf_mo
     monkeypatch.setattr("litellm.acompletion", unexpected)
     with pytest.raises(Exception, match="No content is available for text navigation") as failure:
         read_index(tmp_path, package)
-    assert isinstance(failure.value.__cause__, PagePartsContractError)
+    assert isinstance(failure.value, PagePartsContractError)
     assert package.read_bytes() == original
 
 

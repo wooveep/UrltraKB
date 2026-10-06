@@ -32,7 +32,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 # returning empty Responses output (BerriAI/litellm#25429) and
 # auto-injects GitHub Copilot IDE-auth headers.
 dependencies = [
-    "pageindex==0.3.0.dev3+urltrakb.5",
+    "pageindex==0.3.0.dev3+urltrakb.6",
     "ictree==0.1.0+urltrakb.1",
     "pageindex-condb==1.0+urltrakb.1",
     "pymupdf==1.27.2.3",

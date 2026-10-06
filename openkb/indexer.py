@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from pageindex import IndexConfig, LocalClient
+from pageindex.errors import IndexQualityError
 
 from openkb.config import (
     LlmCredentialBundle,
@@ -18,6 +19,7 @@ from openkb.config import (
     resolve_per_request_overrides,
 )
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
+from openkb.llm_execution import check_model_stop
 from openkb.locks import atomic_write_text
 from openkb.tree_renderer import render_summary_md
 
@@ -143,11 +145,8 @@ def _build_index_config(
         "if_add_node_summary": True,
         "if_add_doc_description": True,
     }
-    from openkb.llm_usage import active_scope
-    from openkb.llm_usage_transport import IndexUsageObserver
-
-    if active_scope() is not None:
-        kwargs["usage_observer"] = IndexUsageObserver()
+    from openkb.index_llm import PageIndexLLM
+    from openkb.llm_execution import compiler_executor
     headers, timeout, _ = resolve_per_request_overrides(config)
     from openkb.llm_runtime import audit_step_headers
 
@@ -166,6 +165,11 @@ def _build_index_config(
         # PageIndex scopes these per index; LiteLLM globals cannot override its
         # own timeout default. Forward the same resolved KB settings as compile.
         kwargs["llm_params"] = params
+    executor_options = {"extra_headers": headers, "timeout": timeout}
+    kwargs["llm_client"] = PageIndexLLM(
+        compiler_executor(config.get("model", "gpt-5.4"), bundle, executor_options)
+    )
+    kwargs["require_llm_client"] = True
     concurrency = resolve_concurrency(config)
     if concurrency is not None:
         if "max_concurrency" in IndexConfig.model_fields:
@@ -230,6 +234,8 @@ def index_long_document(
                 if isinstance(cause, (BlockContractError, PagePartsContractError)):
                     raise cause from None
                 cause = cause.__cause__
+            if not isinstance(exc, IndexQualityError):
+                raise
             logger.warning(
                 "PageIndex attempt %d/%d failed for %s: %s",
                 attempt,
@@ -250,6 +256,7 @@ def index_long_document(
     # no reaper reclaims.
     try:
         # Fetch complete document (metadata + structure + text)
+        check_model_stop()
         doc = col.get_document(doc_id, include_text=True)
         indexed_doc_name: str = doc.get("doc_name", pdf_path.stem)
         description: str = doc.get("doc_description", "")

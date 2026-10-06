@@ -5,7 +5,7 @@
 上游 `.git` 已删除，所有文件由 UrltraKB 仓库管理；保留上游
 [MIT 许可证](LICENSE)和作者信息。
 
-当前本地版本为 `0.3.0.dev3+urltrakb.5`，仅提供本地索引和检索。
+当前本地版本为 `0.3.0.dev3+urltrakb.6`，仅提供本地索引和检索。
 已删除托管服务后端、旧版远程 SDK、云端客户端和相关示例；
 `PageIndexClient` 与 `LocalClient` 都使用本地后端。
 原来的服务密钥参数不再接受，环境中残留的 `PAGEINDEX_API_KEY` 不会启用
@@ -71,3 +71,10 @@ uv build --wheel --out-dir dist
 分发时同时提供五个 wheel，以 `pip install --find-links /path/to/dist openkb` 安装。
 构建后端固定为 `poetry-core==2.4.1`，本地版本后缀避免误装同名 PyPI 包。
 原生桌面完整构建方法见仓库的 `packaging/desktop/README.md`。
+
+运行时注入补丁（#111）提供 IndexLLM 同步/异步窄协议及不序列化的
+IndexConfig.llm_client。OpenKB 工厂强制注入；独立客户端仍可显式使用
+默认 LiteLLM。读取与存储不校验模型凭据，网络重试归调用方执行器；
+必需结构步骤异常会取消并等待同批任务，不再转换为空结果。
+SDK 来源版本、pageindex.document.v1 格式和 content-based-physical-v1
+内容策略分别保存。成功树内容兼容 +urltrakb.5，不因接口升级付费重建。

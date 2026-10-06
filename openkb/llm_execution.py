@@ -48,6 +48,7 @@ _GENERATION = frozenset(
         "tool_choice",
         "reasoning_effort",
         "thinking",
+        "drop_params",
     }
 )
 
@@ -195,8 +196,9 @@ class ModelRequest:
                 raise ValueError(f"Invalid generation option: {name}")
         if "seed" in options and type(options["seed"]) is not int:
             raise ValueError("Invalid generation option: seed")
-        if "parallel_tool_calls" in options and type(options["parallel_tool_calls"]) is not bool:
-            raise ValueError("Invalid generation option: parallel_tool_calls")
+        for name in ("parallel_tool_calls", "drop_params"):
+            if name in options and type(options[name]) is not bool:
+                raise ValueError(f"Invalid generation option: {name}")
         if "response_format" in options:
             value = options["response_format"]
             if not isinstance(value, dict) or value.get("type") not in {

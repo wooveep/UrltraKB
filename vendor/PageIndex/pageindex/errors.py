@@ -34,3 +34,7 @@ class FileTypeError(PageIndexError, ValueError):
     instead of) a bare ValueError one.
     """
     pass
+
+
+class IndexQualityError(IndexingError):
+    """Verified structure quality failure; a bounded rebuild may help."""

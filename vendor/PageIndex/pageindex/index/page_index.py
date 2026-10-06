@@ -1,3 +1,4 @@
+from ..llm import gather_required
 import os
 import json
 import copy
@@ -111,14 +112,9 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
             tasks.append(check_title_appearance_in_start(item['title'], page_text, model=model, logger=logger))
             valid_items.append(item)
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await gather_required(*tasks)
     for item, result in zip(valid_items, results):
-        if isinstance(result, Exception):
-            if logger:
-                logger.error(f"Error checking start for {item['title']}: {result}")
-            item['appear_start'] = 'no'
-        else:
-            item['appear_start'] = result
+        item['appear_start'] = result
 
     return structure
 
@@ -870,16 +866,8 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         process_and_check_item(item)
         for item in incorrect_results
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await gather_required(*tasks)
     invalid_results = []
-    for item, result in zip(incorrect_results, results):
-        if isinstance(result, Exception):
-            if isinstance(result, PagePartsContractError):
-                raise result
-            print(f"Processing item {item} generated an exception: {result}")
-            # A failed request is still unresolved; do not silently drop it.
-            invalid_results.append(dict(item))
-    results = [result for result in results if not isinstance(result, Exception)]
 
     # Update the toc_with_page_number with the fixed indices and check for any invalid results
     for result in results:
@@ -982,22 +970,11 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, 
             item_with_index['list_index'] = idx  # Add the original index in list_result
             indexed_sample_list.append(item_with_index)
 
-    # Run checks concurrently. return_exceptions=True: a transient LLM failure
-    # on one sampled item must degrade that item to 'no' (same as an
-    # unavailable physical_index above), not abort verification for the
-    # whole document.
     tasks = [
         check_title_appearance(item, page_list, start_index, model, **({"policy": policy} if policy else {}))
         for item in indexed_sample_list
     ]
-    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-    results = []
-    for item, result in zip(indexed_sample_list, raw_results):
-        if isinstance(result, Exception):
-            results.append({'list_index': item.get('list_index'), 'answer': 'no',
-                            'title': item.get('title'), 'page_number': item.get('physical_index')})
-        else:
-            results.append(result)
+    results = await gather_required(*tasks)
 
     # Process results
     correct_count = 0
@@ -1058,10 +1035,13 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         return toc_with_page_number
     if (policy or accuracy > 0.6) and len(incorrect_results) > 0:
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
-        if policy and incorrect_results:
+        if incorrect_results:
             if getattr(policy, 'unit_kind', None) == 'block':
                 raise BlockContractError("Block correction attempts exhausted")
-            raise ValueError("Unverified content-block anchors after correction")
+            if isinstance(policy, PagePartsPolicy):
+                raise PagePartsContractError("Unverified slide anchors after correction")
+            from ..errors import IndexQualityError
+            raise IndexQualityError("Unverified physical-page anchors after correction")
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))
             for item in toc_with_page_number:
@@ -1073,7 +1053,8 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            from ..errors import IndexQualityError
+            raise IndexQualityError('Unverified table of contents')
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None, policy=None):
@@ -1115,15 +1096,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
             process_large_node_recursively(child_node, page_list, opt, logger=logger, **({"policy": policy} if policy else {}))
             for child_node in node['nodes']
         ]
-        # return_exceptions=True: one child subtree failing to expand further
-        # must not abort the whole document — it's left as a leaf at its
-        # current boundaries instead.
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for child_node, result in zip(node['nodes'], results):
-            if isinstance(result, PagePartsContractError):
-                raise result
-            if isinstance(result, Exception) and logger:
-                logger.error(f"Failed to expand node '{child_node.get('title')}': {result}")
+        await gather_required(*tasks)
 
     return node
 
@@ -1159,14 +1132,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None, policy=None):
         process_large_node_recursively(node, page_list, opt, logger=logger, **({"policy": policy} if policy else {}))
         for node in toc_tree
     ]
-    # return_exceptions=True: one top-level node failing to expand further
-    # must not abort indexing the whole document.
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for node, result in zip(toc_tree, results):
-        if isinstance(result, PagePartsContractError):
-            raise result
-        if isinstance(result, Exception) and logger:
-            logger.error(f"Failed to expand node '{node.get('title')}': {result}")
+    await gather_required(*tasks)
 
     return toc_tree
 

@@ -1,3 +1,4 @@
+from ..llm import gather_required
 import litellm
 import logging
 import os
@@ -175,84 +176,19 @@ def _usage_call(model, stage):
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False, *, usage_stage="structure"):
-    if model:
-        model = model.removeprefix("litellm/")
-    max_retries = 10
-    messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            # Hold a concurrency slot only around the actual network call, not
-            # retry backoff, so sync completions obey the same cap as async ones.
-            with _sync_llm_semaphore(), _usage_call(model, usage_stage) as usage:
-                response = litellm.completion(
-                    model=model,
-                    messages=messages,
-                    # Per-call litellm kwargs (default temperature=0, drop_params=True);
-                    # configure via config.set_llm_params(...) — never the litellm global.
-                    **get_llm_params(),
-                )
-                if usage:
-                    usage.finish(response)
-            content = response.choices[0].message.content
-            if return_finish_reason:
-                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
-                return content, finish_reason
-            return content
-        except Exception as e:
-            logger.warning("Retrying LLM completion (%d/%d)", i + 1, max_retries)
-            logger.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)
-            else:
-                # Degrade gracefully instead of aborting the whole index: a single
-                # persistently-failing call returns an empty result so callers can
-                # skip that step (extract_json('') -> {} -> .get(default)) and the
-                # rest of the document still gets indexed. Logged at WARNING so the
-                # failure is visible, not silent.
-                logger.warning(
-                    "LLM completion failed after %d retries; degrading to an empty "
-                    "result so the caller can skip this step. Last error: %s",
-                    max_retries, e,
-                )
-                return ("", "error") if return_finish_reason else ""
-
+    from ..llm import current_client
+    from ..default_llm import DefaultIndexLLM
+    messages = list(chat_history or []) + [{"role": "user", "content": prompt}]
+    client = current_client() or DefaultIndexLLM(model)
+    response = client.complete(messages, stage=usage_stage)
+    return (response.text, response.finish_reason) if return_finish_reason else response.text
 
 
 async def llm_acompletion(model, prompt, *, usage_stage="structure"):
-    if model:
-        model = model.removeprefix("litellm/")
-    max_retries = 10
+    from ..llm import current_client
+    from ..default_llm import DefaultIndexLLM
     messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            # Hold a concurrency slot only around the actual network call — not
-            # across retry backoff — so the cap counts real in-flight requests.
-            async with _llm_semaphore():
-                with _usage_call(model, usage_stage) as usage:
-                    response = await litellm.acompletion(
-                        model=model,
-                        messages=messages,
-                        **get_llm_params(),  # per-call kwargs; never the litellm global
-                    )
-                    if usage:
-                        usage.finish(response)
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.warning("Retrying async LLM completion (%d/%d)", i + 1, max_retries)
-            logger.error(f"Error: {e}")
-            if i < max_retries - 1:
-                await asyncio.sleep(1)
-            else:
-                # Degrade gracefully (see llm_completion): return an empty result
-                # so the caller skips this step and the rest of the document still
-                # indexes. The gather sites still keep return_exceptions=True to
-                # absorb any non-LLM error. WARNING so it's visible, not silent.
-                logger.warning(
-                    "Async LLM completion failed after %d retries; degrading to an "
-                    "empty result so the caller can skip this step. Last error: %s",
-                    max_retries, e,
-                )
-                return ""
+    return (await (current_client() or DefaultIndexLLM(model)).acomplete(messages, stage=usage_stage)).text
 
 
 def extract_json(content):
@@ -393,17 +329,14 @@ async def generate_node_summary(node, model=None):
 async def generate_summaries_for_structure(structure, model=None):
     nodes = structure_to_list(structure)
     tasks = [generate_node_summary(node, model=model) for node in nodes]
-    # return_exceptions=True: one node's summary failing (e.g. a transient LLM
-    # error) must not abort summarization for the whole document — fall back
-    # to the node's own raw text so retrieval still has something usable.
-    raw_summaries = await asyncio.gather(*tasks, return_exceptions=True)
-    summaries = [
-        node.get('text', '') if isinstance(s, Exception) else s
-        for node, s in zip(nodes, raw_summaries)
-    ]
-
+    summaries = await gather_required(*tasks)
     for node, summary in zip(nodes, summaries):
+        if not summary or not summary.strip():
+            node['summary_status'] = 'unavailable'
+            logger.warning("Optional summary unavailable for node %s", node.get('node_id'))
+            summary = node.get('text', '')
         node['summary'] = summary
+
     return structure
 
 
