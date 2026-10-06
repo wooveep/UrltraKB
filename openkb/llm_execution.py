@@ -13,7 +13,7 @@ import math
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterator
@@ -291,6 +291,17 @@ class CompletionExecutor:
             if self._calls >= self.policy.max_calls:
                 raise ModelBudgetExceeded("Model request budget exhausted")
             self._calls += 1
+
+    @asynccontextmanager
+    async def slot(self):
+        while not self._slots.acquire(blocking=False):
+            self.policy.check()
+            await asyncio.sleep(0.01)
+        try:
+            self.policy.check()
+            yield
+        finally:
+            self._slots.release()
 
     @contextmanager
     def activate(self) -> Iterator[CompletionExecutor]:

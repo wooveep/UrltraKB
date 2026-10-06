@@ -44,6 +44,12 @@ class ExecutionContext:
             self.snapshot.install_worker_environment()
         if self.executor is None:
             self.executor = executor_from_snapshot(self.snapshot, self.cancelled)
-        with self.snapshot.activate(), self.executor.activate():
+        from openkb.llm_usage_execution import import_usage_execution
+
+        with (
+            import_usage_execution(kb_dir, "model_task", task_id=self.usage_task_id),
+            self.snapshot.activate(),
+            self.executor.activate(),
+        ):
             self.check_stop()
             yield LlmCredentialBundle(**self.snapshot.values()["credentials"])

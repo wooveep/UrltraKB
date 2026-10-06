@@ -64,6 +64,7 @@ class ModelCall:
             state="completed" if response.is_success else "failed",
             scope=self.scope,
             observation="transport",
+            terminal=response.is_stream_consumed,
         )
 
 

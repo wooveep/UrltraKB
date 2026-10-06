@@ -122,11 +122,18 @@ def build_query_agent(
         model_settings = resolve_model_settings()
     model_settings["include_usage"] = True
 
+    from openkb.agent.managed_model import ManagedAgentModel
+    from openkb.llm_execution import active_executor
+
+    managed = ManagedAgentModel(executor) if (executor := active_executor()) else None
+    if managed:
+        model_settings["retry"] = managed.retry_settings()
+
     return Agent(
         name="wiki-query",
         instructions=instructions,
         tools=[read_file, get_page_content, get_image],
-        model=f"litellm/{model}",
+        model=managed or f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )
 
@@ -206,7 +213,9 @@ async def iter_agent_response_events(
                 if getattr(event.data, "type", "") == "response.created":
                     yield {"event": "answer_start", "data": {}}
                 if getattr(event.data, "type", "") == "response.completed":
-                    reported = getattr(event.data.response, "usage", None)
+                    reported = getattr(
+                        event.data.response, "openkb_usage", event.data.response.usage
+                    )
                     current = TokenUsage.from_provider(reported).to_dict()
                     usage = add_usage(usage, current)
                     yield {"event": "usage", "data": usage}
@@ -247,6 +256,9 @@ async def iter_agent_response_events(
     # Deltas also contain assistant narration before tool calls. The SDK's
     # terminal output identifies the actual answer, independently of that trace.
     final = result.final_output
+    from openkb.llm_execution import check_model_stop
+
+    check_model_stop()
     answer = visible_answer(final if isinstance(final, str) else "".join(collected))
     if selection is not None:
         decorated = evidence_answer(answer, selection)
@@ -492,14 +504,14 @@ def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None
     must NOT be added here -- doing so yields ``litellm/openai/...`` which
     litellm rejects as an unknown provider.
     """
-    if bundle is None:
+    from openkb.agent.managed_model import ManagedAgentModel
+    from openkb.llm_execution import active_executor, compiler_executor
+
+    executor = active_executor()
+    if bundle is None and executor is None:
         return None
     from agents import RunConfig
-    from agents.extensions.models.litellm_model import LitellmModel
+    from agents.model_settings import ModelSettings
 
-    litellm_model = LitellmModel(
-        model=model,
-        base_url=bundle.base_url,
-        api_key=bundle.api_key,
-    )
-    return RunConfig(model=litellm_model)
+    managed = ManagedAgentModel(executor or compiler_executor(model, bundle, {}))
+    return RunConfig(model=managed, model_settings=ModelSettings(retry=managed.retry_settings()))

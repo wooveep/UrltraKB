@@ -180,6 +180,7 @@ def finish_request(
     state: str = "completed",
     scope: UsageScope | None = None,
     observation: str | None = None,
+    terminal: bool = True,
 ) -> None:
     scope = scope or _SCOPE.get()
     if identity is None or scope is None:
@@ -193,7 +194,7 @@ def finish_request(
         for key, value in usage.items():
             if key != "usage_status" and value is not None and getattr(record, key) is None:
                 updates[key] = value
-        if record.ended_at is None:
+        if terminal and record.ended_at is None:
             updates.update(state=state, ended_at=_now())
         if observation is not None:
             updates["observation"] = observation

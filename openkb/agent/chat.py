@@ -901,6 +901,9 @@ async def iter_chat_turn_events(
                             trace.append({"kind": "text", "text": answer})
                         break
             if data is not None and "answer" in data:
+                from openkb.llm_execution import check_model_stop
+
+                check_model_stop()
                 session.record_turn(
                     user_input,
                     answer,

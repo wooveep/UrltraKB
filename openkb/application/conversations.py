@@ -90,6 +90,7 @@ async def ask_question(
                 async with aclosing(stream):
                     async for event in stream:
                         if event["event"] == "final":
+                            context.check_stop()
                             answer = event["data"]["answer"]
                             unfinished_stage = "save answer"
                             path = (
@@ -190,6 +191,7 @@ async def continue_conversation(
                     async with aclosing(stream):
                         async for event in stream:
                             if event["event"] == "final":
+                                context.check_stop()
                                 return AnswerResult(
                                     "completed",
                                     event["data"]["answer"],
