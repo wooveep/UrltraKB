@@ -23,7 +23,7 @@ def test_build_verifies_all_four_local_packages():
         ("ConDB/contextdb/prompts/beam.jinja", "pageindex-condb@1.0+urltrakb.1", "Apache-2.0"),
         (
             "LiteLLM/litellm/model_prices_and_context_window_backup.json",
-            "litellm@1.87.2+urltrakb.1",
+            "litellm@1.87.2+urltrakb.2",
             "MIT",
         ),
     ],

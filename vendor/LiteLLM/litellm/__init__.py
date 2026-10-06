@@ -13,11 +13,7 @@ warnings.filterwarnings(
 import threading
 import os
 
-# Load .env before any other litellm imports so env vars (e.g. LITELLM_UI_SESSION_DURATION) are available
-import dotenv as _dotenv
-
-if os.getenv("LITELLM_MODE", "DEV") == "DEV":
-    _dotenv.load_dotenv()
+# Applications own environment loading; importing the SDK must have no I/O side effects.
 
 from typing import (
     Callable,
@@ -215,7 +211,7 @@ email: Optional[str] = (
 token: Optional[str] = (
     None  # Not used anymore, will be removed in next MAJOR release - https://github.com/BerriAI/litellm/discussions/648
 )
-telemetry = True
+telemetry = False
 max_tokens: int = DEFAULT_MAX_TOKENS  # OpenAI Defaults
 drop_params = bool(os.getenv("LITELLM_DROP_PARAMS", False))
 modify_params = bool(os.getenv("LITELLM_MODIFY_PARAMS", False))
@@ -1289,7 +1285,10 @@ from .exceptions import (
     MockException,
 )
 from .budget_manager import BudgetManager
-from .proxy.proxy_cli import run_server
+def run_server(*args, **kwargs):
+    # Keep the optional CLI available without importing it during SDK initialization.
+    from .proxy.proxy_cli import run_server as _run_server
+    return _run_server(*args, **kwargs)
 from .router import Router
 from .assistants.main import *
 from .batches.main import *

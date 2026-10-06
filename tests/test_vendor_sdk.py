@@ -2,20 +2,22 @@
 
 import json
 import threading
+import time
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import pytest
 
 
-@pytest.fixture
-def model_service(monkeypatch):
+@contextmanager
+def running_model_service(monkeypatch):
     monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     import litellm
 
     monkeypatch.setattr(litellm, "telemetry", False)
     monkeypatch.setattr(litellm, "suppress_debug_info", True)
-    service = SimpleNamespace(requests=[], replies=[])
+    service = SimpleNamespace(requests=[], replies=[], records=[], delay=0)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -24,7 +26,9 @@ def model_service(monkeypatch):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             service.requests.append(request)
+            service.records.append((request, dict(self.headers), self.path))
             status, response = service.replies.pop(0)
+            time.sleep(service.delay)
             if isinstance(response, list):
                 data = (
                     "".join(f"data: {json.dumps(item)}\n\n" for item in response)
@@ -38,7 +42,10 @@ def model_service(monkeypatch):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Expected when a test cancels or times out its real HTTP request.
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
@@ -51,6 +58,12 @@ def model_service(monkeypatch):
         finally:
             server.shutdown()
             thread.join(5)
+
+
+@pytest.fixture
+def model_service(monkeypatch):
+    with running_model_service(monkeypatch) as service:
+        yield service
 
 
 def response(message=None, *, reason="stop", usage=True):

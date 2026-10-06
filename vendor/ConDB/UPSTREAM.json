@@ -92,9 +92,9 @@
     "date": "2026-10-06",
     "purpose": "Audited local SDK source and packaging baseline (#107)",
     "modified": {
-      "contextdb/__init__.py": "9b21a2f7ca87d0b3420abe8425d306c8c33e758f1dcdb030ed083b46fd5ab615",
+      "pyproject.toml": "74f049652cd86f4875f301dc8cbdc85e2108e92002f1dfb883451f523da58c42",
       "contextdb/llm.py": "17541ea1fc23f9dab207fef8ae1843c193b32ebbadc2ff10339f6dfb98e6e9ee",
-      "pyproject.toml": "d55ee6242fc7985c8c55758e48e97952f61f61e3dc7f561ddae7330b5263610f"
+      "contextdb/__init__.py": "9b21a2f7ca87d0b3420abe8425d306c8c33e758f1dcdb030ed083b46fd5ab615"
     },
     "added": {
       "README.urltrakb.md": "55ae4e6aa68d1aa3a3eb993f8383335637ee451ddc2a290d1e764edfdf32cd4e",

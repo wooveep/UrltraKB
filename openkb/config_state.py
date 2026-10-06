@@ -138,6 +138,8 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                     provider = "OPENAI"
                 environment[f"{provider}_API_KEY"] = bundle.api_key
                 environment.setdefault("OPENAI_API_KEY", bundle.api_key)
+            from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map_source_info
+
             return ConfigSnapshot(
                 kb_dir=str(kb_dir),
                 _payload=json.dumps(
@@ -147,6 +149,7 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                         "raw": raw,
                         "credentials": asdict(bundle),
                         "environment": environment,
+                        "model_table": get_model_cost_map_source_info(),
                     },
                     ensure_ascii=False,
                 ),

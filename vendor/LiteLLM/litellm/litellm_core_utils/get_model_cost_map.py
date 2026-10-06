@@ -1,13 +1,6 @@
-"""
-Pulls the cost + context window + provider route for known models from https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+"""Load the pinned model table offline; online refresh is an explicit maintenance operation."""
 
-This can be disabled by setting the LITELLM_LOCAL_MODEL_COST_MAP environment variable to True.
-
-```
-export LITELLM_LOCAL_MODEL_COST_MAP=True
-```
-"""
-
+import hashlib
 import json
 import os
 from importlib.resources import files
@@ -36,12 +29,12 @@ class GetModelCostMap:
     @staticmethod
     def load_local_model_cost_map() -> dict:
         """Load the local backup model cost map bundled with the package."""
-        content = json.loads(
-            files("litellm")
-            .joinpath("model_prices_and_context_window_backup.json")
-            .read_text(encoding="utf-8")
-        )
-        return content
+        package = files("litellm")
+        content = package.joinpath("model_prices_and_context_window_backup.json").read_bytes()
+        identity = json.loads(package.joinpath("_urltrakb_model_table.json").read_text())
+        if hashlib.sha256(content).hexdigest() != identity["sha256"]:
+            raise ValueError("Bundled model table fingerprint mismatch")
+        return json.loads(content)
 
     @classmethod
     def _get_backup_model_count(cls) -> int:
@@ -178,11 +171,15 @@ def get_model_cost_map_source_info() -> dict:
     - is_env_forced: True if LITELLM_LOCAL_MODEL_COST_MAP=True forced local usage
     - fallback_reason: human-readable reason if remote failed and local was used
     """
+    identity = json.loads(files("litellm").joinpath("_urltrakb_model_table.json").read_text())
     return {
         "source": _cost_map_source_info.source,
         "url": _cost_map_source_info.url,
         "is_env_forced": _cost_map_source_info.is_env_forced,
         "fallback_reason": _cost_map_source_info.fallback_reason,
+        "version": identity["version"] if _cost_map_source_info.source == "local" else None,
+        "sha256": identity["sha256"] if _cost_map_source_info.source == "local" else None,
+        "prices_are_live": False,
     }
 
 
@@ -241,13 +238,13 @@ def _expand_model_aliases(model_cost: dict) -> dict:
     return model_cost
 
 
-def get_model_cost_map(url: str) -> dict:
+def get_model_cost_map(url: str, *, allow_remote: bool = False) -> dict:
     """
     Public entry point — returns the model cost map dict.
 
-    1. If ``LITELLM_LOCAL_MODEL_COST_MAP`` is set, uses the local backup only.
-    2. Otherwise fetches from ``url``, validates integrity, and falls back
-       to the local backup on any failure.
+    The packaged table is the default, regardless of environment. An explicit
+    ``allow_remote=True`` maintenance call may fetch and validate ``url``;
+    ``LITELLM_LOCAL_MODEL_COST_MAP=True`` disables even that override.
 
     Only the backup model count is cached (a single int) for validation.
     The full backup dict is only parsed when it must be *returned* as a
@@ -255,10 +252,10 @@ def get_model_cost_map(url: str) -> dict:
     """
     # Note: can't use get_secret_bool here — this runs during litellm.__init__
     # before litellm._key_management_settings is set.
-    if os.getenv("LITELLM_LOCAL_MODEL_COST_MAP", "").lower() == "true":
+    if not allow_remote or os.getenv("LITELLM_LOCAL_MODEL_COST_MAP", "").lower() == "true":
         _cost_map_source_info.source = "local"
         _cost_map_source_info.url = None
-        _cost_map_source_info.is_env_forced = True
+        _cost_map_source_info.is_env_forced = os.getenv("LITELLM_LOCAL_MODEL_COST_MAP", "").lower() == "true"
         _cost_map_source_info.fallback_reason = None
         return _expand_model_aliases(GetModelCostMap.load_local_model_cost_map())
 

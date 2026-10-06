@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "jinja2==3.1.6",
-    "litellm==1.87.2+urltrakb.1",
+    "litellm==1.87.2+urltrakb.2",
     "python-dotenv==1.2.2",
     "pyyaml==6.0.3",
     "tiktoken==0.13.0",

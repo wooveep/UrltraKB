@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "openai==2.44.0",
     "python-dotenv==1.2.2",
-    "litellm==1.87.2+urltrakb.1",
+    "litellm==1.87.2+urltrakb.2",
 ]
 
 [project.urls]

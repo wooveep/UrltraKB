@@ -623,10 +623,12 @@ class ChunkProcessor:
         completion_output: str,
         messages: Optional[List] = None,
         reasoning_tokens: Optional[int] = None,
-    ) -> Usage:
+    ) -> Optional[Usage]:
         """
         Calculate usage for the given chunks.
         """
+        if not any(chunk.get("usage") is not None for chunk in chunks):
+            return None
         returned_usage = Usage()
         # # Update usage information if needed
 
@@ -654,20 +656,8 @@ class ChunkProcessor:
             calculated_usage_per_chunk["prompt_tokens_details"]
         )
 
-        try:
-            returned_usage.prompt_tokens = prompt_tokens or token_counter(
-                model=model, messages=messages
-            )
-        except (
-            Exception
-        ):  # don't allow this failing to block a complete streaming response from being returned
-            print_verbose("token_counter failed, assuming prompt tokens is 0")
-            returned_usage.prompt_tokens = 0
-        returned_usage.completion_tokens = completion_tokens or token_counter(
-            model=model,
-            text=completion_output,
-            count_response_tokens=True,  # count_response_tokens is a Flag to tell token counter this is a response, No need to add extra tokens we do for input messages
-        )
+        returned_usage.prompt_tokens = prompt_tokens
+        returned_usage.completion_tokens = completion_tokens
         returned_usage.total_tokens = (
             returned_usage.prompt_tokens + returned_usage.completion_tokens
         )
@@ -694,18 +684,6 @@ class ChunkProcessor:
             else:
                 returned_usage.completion_tokens_details = completion_tokens_details
 
-        if reasoning_tokens is not None:
-            if returned_usage.completion_tokens_details is None:
-                returned_usage.completion_tokens_details = (
-                    CompletionTokensDetailsWrapper(reasoning_tokens=reasoning_tokens)
-                )
-            elif (
-                returned_usage.completion_tokens_details is not None
-                and returned_usage.completion_tokens_details.reasoning_tokens is None
-            ):
-                returned_usage.completion_tokens_details.reasoning_tokens = (
-                    reasoning_tokens
-                )
         if prompt_tokens_details is not None:
             returned_usage.prompt_tokens_details = prompt_tokens_details
 
@@ -724,7 +702,10 @@ class ChunkProcessor:
         # Return a new usage object with the new values
 
         returned_usage = Usage(**returned_usage.model_dump())
-
+        receipts = [chunk.get("usage") for chunk in chunks if chunk.get("usage") is not None]
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            known = [receipt.get(field) for receipt in receipts if receipt.get(field) is not None]
+            setattr(returned_usage, field, known[-1] if known else None)
         return returned_usage
 
 

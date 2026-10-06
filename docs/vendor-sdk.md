@@ -9,7 +9,7 @@
 | PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.5 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
 | ChatIndex | ictree / ctree | 0.1.0+urltrakb.1 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
 | ConDB | pageindex-condb / contextdb | 1.0+urltrakb.1 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
-| LiteLLM | litellm / litellm | 1.87.2+urltrakb.1 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
+| LiteLLM | litellm / litellm | 1.87.2+urltrakb.2 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
 
 每个目录的 `UPSTREAM.json` 记录原文件 SHA-256、选定与排除范围、实际纳入文件、
 新增/修改/删除的本地补丁。包内 `_urltrakb_source.json` 同时进入 editable 和 wheel，
@@ -86,6 +86,14 @@ uv run pytest tests/test_vendor_sdk.py tests/test_vendor_packages.py tests/test_
 
 原始第三方源码通过摘要核对，
 不统一格式化；新增 OpenKB 脚本和测试遵守根 lint，vendor 的行为补丁通过实际接口测试。
-OpenKB 原有 800 行约束不变。导入初始化、请求治理与 usage 归一化尚由后续票处理。
+OpenKB 原有 800 行约束不变。LiteLLM `.2` 已实现离线初始化、请求隔离和缺失 usage 保真；统一执行政策由 OpenKB 执行器负责。
 全量运行出现 9 条上游警告（异步日志清理及 Pydantic 弃用），保留为后续运行时整合基线。
 这里只记录实际 SDK/源码/发行验证，不代表 Windows 或 Debian 完整桌面发行已验收。
+
+## LiteLLM 离线与冻结验证
+
+本地模型表附带 `_urltrakb_model_table.json`，加载时核对 SHA-256。未知模型不推测上下文容量，固定表价格不标为实时价格。默认无网络导入、dotenv、遥测或预置回调。请求显式传入凭据、端点、超时及 `num_retries=0,max_retries=0`；上层持有重试政策。
+
+开发和 wheel 环境可运行 `tests/test_litellm_policy.py` 与 `tests/test_vendor_sdk.py`；前者在新进程禁止 socket 联网并放置诱饵 `.env`，后者通过实际回环 HTTP 验证 SDK 及 Agents。冻结发行必须包含四个包的数据、元数据、模型表及身份摘要；执行 `scripts/verify_vendor_install.py` 核对资源。Windows/macOS 订阅登录和实际冻结发行需对应平台人工验证。
+
+LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 28 项真实 SDK/传输测试（含无网导入、部分回执、取消与关闭、双端点、共享客户端请求绑定），独立环境 127 个包依赖兼容；四 SDK wheel/sdist 及根源码包通过来源、许可和文件摘要核对。mypy 与 ruff 通过，Standards / Spec 复核无遗留发现。

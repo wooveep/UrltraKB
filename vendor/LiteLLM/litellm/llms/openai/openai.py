@@ -412,10 +412,13 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             return _new_client
 
         else:
-            self._set_dynamic_params_on_client(
-                client=client,
-                organization=organization,
-                max_retries=max_retries,
+            # A supplied client may be shared with another request. OpenAI copies options.
+            client = client.with_options(
+                api_key=api_key if api_key is not None else client.api_key,
+                base_url=api_base if api_base is not None else client.base_url,
+                organization=organization if organization is not None else client.organization,
+                max_retries=max_retries if max_retries is not None else client.max_retries,
+                timeout=timeout,
             )
             return client
 
@@ -1326,7 +1329,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         super().embedding()
         try:
             data = {"model": model, "input": input, **optional_params}
-            max_retries = max_retries or litellm.DEFAULT_MAX_RETRIES
+            max_retries = litellm.DEFAULT_MAX_RETRIES if max_retries is None else max_retries
             if not isinstance(max_retries, int):
                 raise OpenAIError(status_code=422, message="max retries must be an int")
             ## LOGGING

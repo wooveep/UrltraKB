@@ -1,7 +1,7 @@
 {
   "distribution": "litellm",
   "module": "litellm",
-  "version": "1.87.2+urltrakb.1",
+  "version": "1.87.2+urltrakb.2",
   "repository": "https://github.com/BerriAI/litellm",
   "commit": "1296275dc52d9f4e05696380735037fbb841fcc3",
   "license": "MIT"

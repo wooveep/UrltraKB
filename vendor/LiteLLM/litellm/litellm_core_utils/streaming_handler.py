@@ -111,6 +111,7 @@ class CustomStreamWrapper:
         self.custom_llm_provider = custom_llm_provider
         self.logging_obj: LiteLLMLoggingObject = logging_obj
         self.completion_stream = completion_stream
+        self._closed = False
         self.sent_first_chunk = False
         self.sent_last_chunk = False
         self._stream_created_time: float = time.time()
@@ -202,6 +203,7 @@ class CustomStreamWrapper:
         return self
 
     async def aclose(self):
+        self._closed = True
         if self.completion_stream is not None:
             stream_to_close = self.completion_stream
             self.completion_stream = None
@@ -1440,20 +1442,7 @@ class CustomStreamWrapper:
                         setattr(
                             model_response,
                             "usage",
-                            litellm.Usage(
-                                prompt_tokens=response_obj["usage"].get(
-                                    "prompt_tokens", None
-                                )
-                                or None,
-                                completion_tokens=response_obj["usage"].get(
-                                    "completion_tokens", None
-                                )
-                                or None,
-                                total_tokens=response_obj["usage"].get(
-                                    "total_tokens", None
-                                )
-                                or None,
-                            ),
+                            litellm.Usage.from_receipt(response_obj["usage"]),
                         )
                     elif isinstance(response_obj["usage"], Usage):
                         setattr(
@@ -1465,7 +1454,7 @@ class CustomStreamWrapper:
                         setattr(
                             model_response,
                             "usage",
-                            litellm.Usage(**response_obj["usage"].model_dump()),
+                            litellm.Usage.from_receipt(response_obj["usage"]),
                         )
 
             model_response.model = self.model
@@ -1827,6 +1816,8 @@ class CustomStreamWrapper:
         return model_response
 
     def __next__(self) -> "ModelResponseStream":  # noqa: PLR0915
+        if self._closed:
+            raise StopIteration
         cache_hit = False
         if (
             self.custom_llm_provider is not None
@@ -2019,6 +2010,8 @@ class CustomStreamWrapper:
         return self.completion_stream
 
     async def __anext__(self) -> "ModelResponseStream":  # noqa: PLR0915
+        if self._closed:
+            raise StopAsyncIteration
         cache_hit = False
         if (
             self.custom_llm_provider is not None
@@ -2228,6 +2221,9 @@ class CustomStreamWrapper:
                 self.sent_last_chunk = True
                 processed_chunk = self.finish_reason_handler()
                 return processed_chunk
+        except asyncio.CancelledError:
+            await self.aclose()
+            raise
         except httpx.TimeoutException as e:  # if httpx read timeout error occues
             traceback_exception = traceback.format_exc()
             ## ADD DEBUG INFORMATION - E.G. LITELLM REQUEST TIMEOUT
@@ -2371,24 +2367,17 @@ class CustomStreamWrapper:
         return chunk
 
 
-def calculate_total_usage(chunks: List[ModelResponse]) -> Usage:
+def calculate_total_usage(chunks: List[ModelResponse]) -> Optional[Usage]:
     """Assume most recent usage chunk has total usage uptil then."""
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    if not any(chunk.get("usage") is not None for chunk in chunks):
+        return None
+    receipt = {}
     for chunk in chunks:
-        if "usage" in chunk and chunk["usage"] is not None:
-            if "prompt_tokens" in chunk["usage"]:
-                prompt_tokens = chunk["usage"].get("prompt_tokens", 0) or 0
-            if "completion_tokens" in chunk["usage"]:
-                completion_tokens = chunk["usage"].get("completion_tokens", 0) or 0
-
-    returned_usage_chunk = Usage(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-    )
-
-    return returned_usage_chunk
+        usage = chunk.get("usage")
+        if usage is not None:
+            data = usage.model_dump() if hasattr(usage, "model_dump") else usage
+            receipt.update({key: value for key, value in data.items() if value is not None})
+    return Usage.from_receipt(receipt)
 
 
 def generic_chunk_has_all_required_fields(chunk: dict) -> bool:

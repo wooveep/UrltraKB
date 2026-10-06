@@ -34,7 +34,7 @@ VENDORS = (
         "LiteLLM",
         "litellm",
         "litellm",
-        "1.87.2+urltrakb.1",
+        "1.87.2+urltrakb.2",
         "1296275dc52d9f4e05696380735037fbb841fcc3",
     ),
 )

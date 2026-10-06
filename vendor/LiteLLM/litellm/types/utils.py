@@ -1533,6 +1533,16 @@ class ServerToolUse(BaseModel):
 
 
 class Usage(SafeAttributeModel, CompletionUsage):
+    @classmethod
+    def from_receipt(cls, receipt):
+        """Normalize a provider receipt without inventing missing counters."""
+        data = receipt.model_dump(exclude_unset=True) if isinstance(receipt, BaseModel) else receipt
+        usage = cls(**data)
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if data.get(field) is None:
+                setattr(usage, field, None)
+        return usage
+
     _cache_creation_input_tokens: int = PrivateAttr(
         0
     )  # hidden param for prompt caching. Might change, once openai introduces their equivalent.
@@ -1842,14 +1852,14 @@ class ModelResponseStream(ModelResponseBase):
 
         if "usage" in kwargs and kwargs["usage"] is not None:
             if isinstance(kwargs["usage"], dict):
-                kwargs["usage"] = Usage(**kwargs["usage"])
+                kwargs["usage"] = Usage.from_receipt(kwargs["usage"])
             elif isinstance(kwargs["usage"], BaseModel):
                 dump = (
                     kwargs["usage"].model_dump()
                     if hasattr(kwargs["usage"], "model_dump")
                     else kwargs["usage"].dict()
                 )
-                kwargs["usage"] = Usage(**dump)
+                kwargs["usage"] = Usage.from_receipt(dump)
 
         kwargs["id"] = id
         kwargs["created"] = created
@@ -1930,12 +1940,12 @@ class ModelResponse(ModelResponseBase):
         model = model
         if usage is not None:
             if isinstance(usage, dict):
-                usage = Usage(**usage)
+                usage = Usage.from_receipt(usage)
             elif isinstance(usage, BaseModel):
                 dump = (
                     usage.model_dump() if hasattr(usage, "model_dump") else usage.dict()
                 )
-                usage = Usage(**dump)
+                usage = Usage.from_receipt(dump)
             else:
                 usage = usage
         elif stream is None or stream is False:

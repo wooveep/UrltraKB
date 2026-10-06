@@ -6,7 +6,7 @@
   "repository": "https://github.com/BerriAI/litellm",
   "commit": "1296275dc52d9f4e05696380735037fbb841fcc3",
   "license": "MIT",
-  "local_version": "1.87.2+urltrakb.1",
+  "local_version": "1.87.2+urltrakb.2",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/BerriAI/litellm/tarball/1296275dc52d9f4e05696380735037fbb841fcc3",
@@ -2831,13 +2831,22 @@
   ],
   "local_patch": {
     "date": "2026-10-06",
-    "purpose": "Audited local SDK source and packaging baseline (#107)",
+    "purpose": "Offline initialization, verified model table, isolated request options, explicit zero retries, and honest missing usage; preserve provider conversion and SDK types.",
     "modified": {
-      "pyproject.toml": "cad3bfe926f3952c8f4158836db09408cf2fc929108efffa6d49f60d1fe87554"
+      "pyproject.toml": "f2b909cdd8f75bf949ed0b1be859250ca9626b3b94bb9cd6e1a2a9e88bb29ac5",
+      "litellm/utils.py": "c4769544245807da499be63217b7dcfc9ceec0d8fec67a0463290c57b1c3dacc",
+      "litellm/__init__.py": "b752fc4ed51c94d365313fe3b974e39885b04dabebfbbea68cacb0b1632d3b8c",
+      "litellm/types/utils.py": "3c65c3aedae38d3bce064d053fefdc66eac641cfe5fb2b1f45f2e5733e8178de",
+      "litellm/litellm_core_utils/streaming_handler.py": "b68e82a4c494d02fb1d338981519050f1bc6a086a012ad4d9ef0eab56c542b28",
+      "litellm/litellm_core_utils/streaming_chunk_builder_utils.py": "e3c5d1e338064a043ffad76edbc346b4ca8ddeaf2f71dc9de6b2d97d51419e0f",
+      "litellm/litellm_core_utils/get_model_cost_map.py": "1645f81655caf048f1c5d92d374f8eaf689ea583050a958cfe1e0387b33212aa",
+      "litellm/llms/openai/openai.py": "d7bb28b189b3fc92bf98ed83d1d46804d67bbd975e0f04f67b1690f834406ed2",
+      "litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py": "7bff24ab181738b69440910d64029bbcf9037c7aaf1dec05ef58a300cd651ee9"
     },
     "added": {
-      "README.urltrakb.md": "a13297d1e34c3ef17b38010c8c851eef182fe1ee485552c17e5ab76c94235eab",
-      "litellm/_urltrakb_source.json": "a9cee82fba23f5b7d9c301be25a0859bb792673f2f169b6772b44eb1dc734e2b"
+      "README.urltrakb.md": "df74c81f0e1410e93a67f6c3ff9b28ffdaeaf3af90be7f9977ced43386e95922",
+      "litellm/_urltrakb_source.json": "2e2981219e2e30748fdb692aad2ab6b2068eea4fec69fc12ec78f946e543ad31",
+      "litellm/_urltrakb_model_table.json": "abb899db37656a8b9ffaa0e009cb6aed12a2425ce907292603e5ad5e46bd65e6"
     },
     "deleted": []
   },
@@ -2861,6 +2870,7 @@
     "litellm/_redis.py",
     "litellm/_redis_credential_provider.py",
     "litellm/_service_logger.py",
+    "litellm/_urltrakb_model_table.json",
     "litellm/_urltrakb_source.json",
     "litellm/_uuid.py",
     "litellm/_version.py",

@@ -644,8 +644,11 @@ def convert_to_model_response_object(  # noqa: PLR0915
             model_response_object.choices = choice_list  # type: ignore
 
             if "usage" in response_object and response_object["usage"] is not None:
-                usage_object = litellm.Usage(**response_object["usage"])
+                usage_object = litellm.Usage.from_receipt(response_object["usage"])
                 setattr(model_response_object, "usage", usage_object)
+            else:
+                # An absent provider receipt is unknown, never a zero-token receipt.
+                setattr(model_response_object, "usage", None)
             if "created" in response_object:
                 model_response_object.created = _safe_convert_created_field(
                     response_object["created"]

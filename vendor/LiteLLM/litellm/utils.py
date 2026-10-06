@@ -1221,7 +1221,7 @@ def _get_wrapper_num_retries(
     num_retries = kwargs.get("num_retries", None)
     if num_retries is None:
         num_retries = litellm.num_retries
-    if kwargs.get("retry_policy", None):
+    if kwargs.get("retry_policy", None) and kwargs.get("num_retries") != 0:
         get_num_retries_from_retry_policy = getattr(
             sys.modules[__name__], "get_num_retries_from_retry_policy"
         )
@@ -1682,9 +1682,9 @@ def client(original_function):  # noqa: PLR0915
             call_type = original_function.__name__
             if call_type == CallTypes.completion.value:
                 num_retries = (
-                    kwargs.get("num_retries", None) or litellm.num_retries or None
+                    kwargs.get("num_retries") if kwargs.get("num_retries") is not None else litellm.num_retries
                 )
-                if kwargs.get("retry_policy", None):
+                if kwargs.get("retry_policy", None) and kwargs.get("num_retries") != 0:
                     get_num_retries_from_retry_policy = getattr(
                         sys.modules[__name__], "get_num_retries_from_retry_policy"
                     )
@@ -1698,9 +1698,6 @@ def client(original_function):  # noqa: PLR0915
                     kwargs["retry_policy"] = (
                         reset_retry_policy()
                     )  # prevent infinite loops
-                litellm.num_retries = (
-                    None  # set retries to None to prevent infinite loops
-                )
                 context_window_fallback_dict = kwargs.get(
                     "context_window_fallback_dict", {}
                 )
@@ -1731,9 +1728,9 @@ def client(original_function):  # noqa: PLR0915
                     return original_function(*args, **kwargs)
             elif call_type == CallTypes.responses.value:
                 num_retries = (
-                    kwargs.get("num_retries", None) or litellm.num_retries or None
+                    kwargs.get("num_retries") if kwargs.get("num_retries") is not None else litellm.num_retries
                 )
-                if kwargs.get("retry_policy", None):
+                if kwargs.get("retry_policy", None) and kwargs.get("num_retries") != 0:
                     get_num_retries_from_retry_policy = getattr(
                         sys.modules[__name__], "get_num_retries_from_retry_policy"
                     )
@@ -1747,9 +1744,6 @@ def client(original_function):  # noqa: PLR0915
                     kwargs["retry_policy"] = (
                         reset_retry_policy()
                     )  # prevent infinite loops
-                litellm.num_retries = (
-                    None  # set retries to None to prevent infinite loops
-                )
 
                 _is_litellm_router_call = "model_group" in (
                     kwargs.get("metadata") or {}
@@ -2042,9 +2036,6 @@ def client(original_function):  # noqa: PLR0915
                     num_retries and not _is_litellm_router_call
                 ):  # only enter this if call is not from litellm router/proxy. router has it's own logic for retrying
                     try:
-                        litellm.num_retries = (
-                            None  # set retries to None to prevent infinite loops
-                        )
                         kwargs["num_retries"] = num_retries
                         kwargs["original_function"] = original_function
                         if isinstance(
@@ -2076,9 +2067,6 @@ def client(original_function):  # noqa: PLR0915
                     num_retries and not _is_litellm_router_call
                 ):  # only enter this if call is not from litellm router/proxy. router has it's own logic for retrying
                     try:
-                        litellm.num_retries = (
-                            None  # set retries to None to prevent infinite loops
-                        )
                         kwargs["num_retries"] = num_retries
                         kwargs["original_function"] = original_function
                         if isinstance(
