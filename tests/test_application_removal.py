@@ -58,7 +58,10 @@ def test_wiki_failure_rolls_back_before_registry_commit(kb_dir):
 
 
 def seed_index(kb: Path) -> Path:
-    from pageindex.storage.sqlite import SQLiteStorage
+    from test_condb_pageindex import indexed_document
+
+    from openkb.condb_storage import ConDBPageIndexStorage
+    from openkb.index_location import IndexLocation
 
     seed(kb)
     registry = kb / ".openkb/hashes.json"
@@ -67,14 +70,14 @@ def seed_index(kb: Path) -> Path:
     registry.write_text(json.dumps(value))
     blob = kb / ".openkb/files/default/pi-paper.pdf"
     blob.parent.mkdir(parents=True)
-    blob.write_bytes(b"indexed original")
-    storage = SQLiteStorage(str(kb / ".openkb/pageindex.db"))
+    blob.write_bytes(b"retained input")
+    storage = ConDBPageIndexStorage(IndexLocation.package(kb / ".openkb"))
     try:
         storage.get_or_create_collection("default")
         storage.save_document(
             "default",
             "pi-paper",
-            {"doc_name": "paper", "doc_type": "pdf", "file_path": str(blob), "file_hash": "x"},
+            indexed_document(kb / ".openkb/files", name="paper", identity="pi-paper"),
         )
     finally:
         storage.close()
@@ -88,8 +91,8 @@ def test_local_index_cleanup_uses_no_model_and_changes_no_environment(kb_dir):
         result = remove_document(kb_dir, "hash-paper")
     assert result.status == "removed" and not blob.exists()
     assert dict(os.environ) == before
-    with sqlite3.connect(kb_dir / ".openkb/pageindex.db") as db:
-        assert db.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
+    with sqlite3.connect(kb_dir / ".openkb/context.sqlite") as db:
+        assert db.execute("SELECT count(*) FROM okb_documents").fetchone()[0] == 0
 
 
 def test_registry_failure_restores_index_and_raw_for_manual_retry(kb_dir):
@@ -98,11 +101,11 @@ def test_registry_failure_restores_index_and_raw_for_manual_retry(kb_dir):
         result = remove_document(kb_dir, "hash-paper")
     assert result.status == "partial"
     assert result.unfinished and result.retained
-    assert blob.read_bytes() == b"indexed original"
+    assert blob.read_bytes() == b"retained input"
     assert (kb_dir / "raw/paper.pdf").exists()
     assert not (kb_dir / "wiki/summaries/paper.md").exists()
-    with sqlite3.connect(kb_dir / ".openkb/pageindex.db") as db:
-        assert db.execute("SELECT count(*) FROM documents").fetchone()[0] == 1
+    with sqlite3.connect(kb_dir / ".openkb/context.sqlite") as db:
+        assert db.execute("SELECT count(*) FROM okb_documents").fetchone()[0] == 1
     assert remove_document(kb_dir, "hash-paper").status == "removed"
 
 
@@ -162,7 +165,7 @@ def test_api_removal_rejects_index_directory_pointing_outside_kb(kb_dir):
     blob.parent.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError):
         run_remove_for_api(kb_dir, "hash-paper")
-    assert (outside / blob.name).read_bytes() == b"indexed original"
+    assert (outside / blob.name).read_bytes() == b"retained input"
     assert (kb_dir / "wiki/summaries/paper.md").exists()
 
 

@@ -17,6 +17,9 @@ from openkb.cli import cli
 def _make_kb(tmp_path):
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / "wiki" / "concepts").mkdir(parents=True)
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "index.md").write_text("# index\n")
@@ -76,6 +79,9 @@ def test_skill_new_errors_with_empty_wiki(tmp_path):
     kb = tmp_path
     (kb / ".openkb").mkdir()
     (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(kb)
     # No wiki/ directory
     runner = CliRunner()
     with patch("openkb.cli._find_kb_dir", return_value=kb):
@@ -91,6 +97,9 @@ def test_skill_new_errors_with_freshly_init_wiki(tmp_path):
     kb = tmp_path
     (kb / ".openkb").mkdir()
     (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(kb)
     # Mirror openkb init's layout: empty concepts + summaries, just index.md
     (kb / "wiki" / "concepts").mkdir(parents=True)
     (kb / "wiki" / "summaries").mkdir(parents=True)

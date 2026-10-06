@@ -14,6 +14,9 @@ from openkb.agent.chat_session import ChatSession
 def _make_kb(tmp_path):
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / ".openkb" / "chats").mkdir()
     (tmp_path / "wiki" / "concepts").mkdir(parents=True)
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
@@ -72,6 +75,9 @@ async def test_slash_skill_new_rejects_empty_wiki(tmp_path):
     kb = tmp_path
     (kb / ".openkb").mkdir()
     (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(kb)
     (kb / ".openkb" / "chats").mkdir()
     # Empty wiki/ — exactly what `openkb init` creates
     (kb / "wiki" / "concepts").mkdir(parents=True)

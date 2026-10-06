@@ -175,6 +175,10 @@ def _validate(root: Path, generation: str) -> None:
 @contextmanager
 def read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None):
     root = kb_dir.resolve()
+    if not file_write_lock_held(_paths(root)[0]):
+        from openkb.kb_format import validate_existing_format
+
+        validate_existing_format(root)
     generation = _generation(root)
     lease = _Lease(_paths(root)[0], False)
     notified = False
@@ -202,6 +206,10 @@ def read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None)
 @asynccontextmanager
 async def async_read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None):
     root = kb_dir.resolve()
+    if not file_write_lock_held(_paths(root)[0]):
+        from openkb.kb_format import validate_existing_format
+
+        validate_existing_format(root)
     generation = _generation(root)
     lease = _Lease(_paths(root)[0], False)
     notified = False

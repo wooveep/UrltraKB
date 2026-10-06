@@ -5,7 +5,7 @@
 上游 `.git` 已删除，所有文件由 UrltraKB 仓库管理；保留上游
 [MIT 许可证](LICENSE)和作者信息。
 
-当前本地版本为 `0.3.0.dev3+urltrakb.6`，仅提供本地索引和检索。
+当前本地版本为 `0.3.0.dev3+urltrakb.7`，仅提供本地索引和检索。
 已删除托管服务后端、旧版远程 SDK、云端客户端和相关示例；
 `PageIndexClient` 与 `LocalClient` 都使用本地后端。
 原来的服务密钥参数不再接受，环境中残留的 `PAGEINDEX_API_KEY` 不会启用
@@ -78,3 +78,6 @@ IndexConfig.llm_client。OpenKB 工厂强制注入；独立客户端仍可显式
 必需结构步骤异常会取消并等待同批任务，不再转换为空结果。
 SDK 来源版本、pageindex.document.v1 格式和 content-based-physical-v1
 内容策略分别保存。成功树内容兼容 +urltrakb.5，不因接口升级付费重建。
+
+
+本地接口补丁 .7：LocalClient 可显式传 files_path 将管理输入根与数据库位置分离；read_only 客户端不会创建目录、增删文件或重建缺失内容缓存。close/上下文管理器将关闭注入存储，便于发布前 checkpoint。内容构建策略未变。

@@ -64,13 +64,14 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     from pathlib import Path
 
     from pageindex import IndexConfig
-    from pageindex.storage.sqlite import SQLiteStorage
 
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.block_package import create_index_client
+    from openkb.condb_storage import ConDBPageIndexStorage
     from openkb.documents import read_document_source
+    from openkb.index_location import IndexLocation
 
     apply_kb_config_patch(
         kb_dir,
@@ -86,7 +87,7 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     saved = read_document_source(kb_dir, result.source_id)
     package = kb_dir / saved["base_path"] / "portable.okbi"
     store = tmp_path / "index"
-    with SQLiteStorage(str(store / "pageindex.db")) as database:
+    with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
         client = create_index_client(
             storage_path=str(store),
             storage=database,
@@ -100,7 +101,7 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     package.unlink()
     source.unlink()
     (tmp_path / "kept.png").unlink()
-    with SQLiteStorage(str(moved / "pageindex.db")) as database:
+    with ConDBPageIndexStorage(IndexLocation.package(moved)) as database:
         client = create_index_client(storage_path=str(moved), storage=database, model="gpt-4o")
         collection = client.collection()
         before = collection.get_document(identity, include_text=True)
@@ -112,8 +113,12 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
         asset = next(iter(blocks[0]["assets"].values()))
         assert Path(asset["path"]).read_bytes() == b"fixed-picture-bytes"
         requests = len(block_model)
-        with sqlite3.connect(moved / "pageindex.db") as db:
-            db.execute("UPDATE documents SET pages = NULL WHERE doc_id = ?", (identity,))
+        with sqlite3.connect(moved / "context.sqlite") as db:
+            db.execute(
+                "UPDATE okb_documents SET payload = json_set(payload, '$.pages', NULL) "
+                "WHERE doc_id = ?",
+                (identity,),
+            )
         assert collection.get_document(identity, include_text=True) == before
         assert collection.get_block_content(identity, "1") == blocks
         assert len(block_model) == requests
@@ -394,13 +399,14 @@ def test_model_correction_cannot_choose_a_different_trusted_section_index(
     kb_dir, tmp_path, block_model, monkeypatch
 ):
     import litellm
-    from pageindex.storage.sqlite import SQLiteStorage
 
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.block_package import create_index_client
+    from openkb.condb_storage import ConDBPageIndexStorage
     from openkb.documents import read_document_source
+    from openkb.index_location import IndexLocation
 
     original_completion = litellm.completion
 
@@ -457,7 +463,7 @@ def test_model_correction_cannot_choose_a_different_trusted_section_index(
     assert result.status == "added", result.message
     saved = read_document_source(kb_dir, result.source_id)
     store = (kb_dir / saved["base_path"]).parent.parent / "index"
-    with SQLiteStorage(str(store / "pageindex.db")) as database:
+    with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
         collection = create_index_client(
             storage_path=str(store), storage=database, model="gpt-4o"
         ).collection()

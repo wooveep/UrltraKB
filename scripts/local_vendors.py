@@ -13,7 +13,7 @@ VENDORS = (
         "PageIndex",
         "pageindex",
         "pageindex",
-        "0.3.0.dev3+urltrakb.6",
+        "0.3.0.dev3+urltrakb.7",
         "9ad54122bbd519cec8913198e2d63cff92781c1e",
     ),
     (

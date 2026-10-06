@@ -33,6 +33,9 @@ class TestFindKbDir:
     def test_finds_openkb_dir(self, tmp_path, monkeypatch):
         (tmp_path / ".openkb").mkdir()
         (tmp_path / ".openkb/config.yaml").write_text("{}")
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(tmp_path)
         monkeypatch.chdir(tmp_path)
         result = _find_kb_dir()
         assert result is not None
@@ -61,6 +64,9 @@ class TestFindKbDir:
             (root / "wiki").mkdir()
         (damaged / ".openkb/needs-repair.json").write_text("{}")
         (other / ".openkb/config.yaml").write_text("{}")
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(other)
         monkeypatch.chdir(damaged)
         with patch("openkb.cli.load_global_config", return_value={"default_kb": str(other)}):
             result = CliRunner().invoke(cli, ["status"])
@@ -79,6 +85,9 @@ class TestAddCommand:
         openkb_dir = tmp_path / ".openkb"
         openkb_dir.mkdir()
         (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(openkb_dir.parent)
         (openkb_dir / "hashes.json").write_text(json.dumps({}))
         return tmp_path
 
@@ -136,6 +145,9 @@ class TestAddCommand:
         (kb_dir / ".openkb" / "config.yaml").write_text(
             "model: gpt-4o-mini\nconcurrency: 3\n", encoding="utf-8"
         )
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(kb_dir)
         doc = tmp_path / "notes.md"
         doc.write_text("# Notes\n\nBody", encoding="utf-8")
 
@@ -372,6 +384,9 @@ class TestAddMutationCoordinator:
         openkb_dir = tmp_path / ".openkb"
         openkb_dir.mkdir()
         (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n", encoding="utf-8")
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(openkb_dir.parent)
         (openkb_dir / "hashes.json").write_text("{}", encoding="utf-8")
         return tmp_path
 

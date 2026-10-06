@@ -31,6 +31,9 @@ def kb_dir(tmp_path):
     # .openkb state directory
     openkb_dir = tmp_path / ".openkb"
     openkb_dir.mkdir()
+    from openkb.kb_format import KB_FORMAT
+
+    (openkb_dir / "format.json").write_text(json.dumps(KB_FORMAT))
 
     config_yaml = """\
 version: "0.1.0"

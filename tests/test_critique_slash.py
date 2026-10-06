@@ -24,6 +24,9 @@ def _make_kb_with_config(tmp_path: Path) -> Path:
     (tmp_path / ".openkb" / "config.yaml").write_text(
         "model: openai/gpt-4o\nlanguage: en\n", encoding="utf-8"
     )
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     return tmp_path
 
 

@@ -487,6 +487,9 @@ def test_add_single_file_returns_added_on_success(tmp_path):
     # Build a minimal KB scaffold
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / ".openkb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
@@ -536,6 +539,9 @@ def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
 
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / ".openkb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
@@ -671,6 +677,9 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
 
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / ".openkb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
@@ -715,6 +724,9 @@ def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
 
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb/config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / ".openkb/hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     acquired = []

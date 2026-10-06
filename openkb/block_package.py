@@ -150,11 +150,6 @@ class FrozenBlockParser:
 
 
 def create_index_client(**kwargs):
-    from pageindex import LocalClient
+    from openkb.index_client import create_index_client as create
 
-    client = LocalClient(**kwargs)
-    client.register_parser(FrozenBlockParser())
-    from openkb.office.slide_package import FrozenSlideParser
-
-    client.register_parser(FrozenSlideParser())
-    return client
+    return create(**kwargs)

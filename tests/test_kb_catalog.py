@@ -13,6 +13,9 @@ def test_catalog_includes_root_children_and_same_named_registered_paths(tmp_path
     child, other, ghost = root / "notes", tmp_path / "elsewhere/notes", tmp_path / "missing"
     for path in (child, other):
         (path / ".openkb").mkdir(parents=True)
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(path)
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
@@ -63,6 +66,9 @@ def test_catalog_keeps_unfinished_deletion_at_its_original_path(tmp_path, monkey
     original, victim = tmp_path / "a/notes", tmp_path / "b/notes"
     for path in (original, victim):
         (path / ".openkb").mkdir(parents=True)
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(path)
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
@@ -98,6 +104,9 @@ def test_partial_delete_of_unregistered_root_child_remains_discoverable(tmp_path
 
     root = tmp_path / "kbs/notes"
     (root / ".openkb").mkdir(parents=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(root)
     (root / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setenv("OPENKB_KB_ROOT", str(root.parent))
@@ -134,6 +143,9 @@ def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
     root, other = tmp_path / "kbs/notes", tmp_path / "elsewhere/notes"
     for path in (root, other):
         (path / ".openkb").mkdir(parents=True)
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(path)
         (path / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setenv("OPENKB_KB_ROOT", str(root.parent))

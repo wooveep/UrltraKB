@@ -100,7 +100,7 @@ def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatc
     monkeypatch.setattr(
         metadata,
         "version",
-        lambda name: "0.3.0.dev3+urltrakb.6" if name == "pageindex" else original(name),
+        lambda name: "0.3.0.dev3+urltrakb.7" if name == "pageindex" else original(name),
     )
     assert normalization_fingerprint(kb_dir) == before
 

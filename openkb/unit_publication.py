@@ -415,7 +415,14 @@ def publish_unit_revision(
             copy_tree(view.scope.wiki_dir, directory / "wiki")
             copy_tree(live, directory / "base")
             if index_ref:
-                copy_tree(view.scope.wiki_dir.parent / "index", directory / "index")
+                from openkb.index_packages import copy_index_package
+
+                copy_index_package(
+                    view.scope.wiki_dir.parent / "index",
+                    directory / "index",
+                    owner_revision=manifest.knowledge_revision_id,
+                    document_id=manifest.index_ref,
+                )
             write_record(directory / "proposal.json", proposal)
             write_record(state_path, awaiting)
             write_record(attempt_path, awaiting)
@@ -479,7 +486,14 @@ def commit_unit_revision(
     ):
         copy_tree(view.scope.wiki_dir, directory / "wiki")
         if manifest.index_ref:
-            copy_tree(view.scope.wiki_dir.parent / "index", directory / "index")
+            from openkb.index_packages import copy_index_package
+
+            copy_index_package(
+                view.scope.wiki_dir.parent / "index",
+                directory / "index",
+                owner_revision=manifest.knowledge_revision_id,
+                document_id=manifest.index_ref,
+            )
         write_record(directory / "manifest.json", manifest)
         write_record(directory / "publication.json", completed)
         copy_tree(view.scope.wiki_dir, live)

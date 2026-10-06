@@ -13,6 +13,7 @@ from openkb.application.execution import ExecutionContext
 from openkb.application.file_state import changed_files as _changes
 from openkb.application.file_state import contained_paths as _contained
 from openkb.application.file_state import file_versions as _file_versions
+from openkb.index_location import IndexLocation
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_ingest_lock, kb_ingest_lock_held, kb_read_lock
 from openkb.log import append_log
@@ -30,13 +31,13 @@ def _cleanup_pageindex(
     managed files. Returns ``(did_cleanup, message)``.
 
     No-op (returns ``(False, "no PageIndex state")``) when no
-    ``pageindex.db`` exists — short-doc-only KBs never created any.
+    document index exists — short-doc-only KBs never created any.
 
     Falls back to matching by ``doc_name`` via ``list_documents()`` when
     the registry entry pre-dates PR #51's ``doc_id`` field. Ambiguous
     multi-match cases are skipped with a warning rather than guessed.
     """
-    if not (openkb_dir / "pageindex.db").exists():
+    if not IndexLocation.package(openkb_dir).database.exists():
         return False, "no PageIndex state"
 
     from openkb.application.local_index import remove_index_document
@@ -216,12 +217,14 @@ def _build_remove_plan(
 
     actions.append(RemoveAction("REGISTRY", f"remove hash entry  ({file_hash[:12]}…)"))
 
-    # Long PDFs leave state in PageIndex's local store (`.openkb/pageindex.db`
+    # Long PDFs leave state in PageIndex's local store (`context.sqlite`
     # row + `.openkb/files/<collection>/<doc_id>.pdf` + extracted images).
     # Only flag this when both the registry says long_pdf and PageIndex
     # state exists on disk — short-doc-only KBs never created any.
     pageindex_doc_id = meta.get("doc_id")
-    cleanup_pageindex = doc_type == "long_pdf" and (openkb_dir / "pageindex.db").exists()
+    cleanup_pageindex = (
+        doc_type == "long_pdf" and IndexLocation.package(openkb_dir).database.exists()
+    )
     if cleanup_pageindex:
         if pageindex_doc_id:
             actions.append(RemoveAction("PAGEINDEX", f"delete document ({pageindex_doc_id[:12]}…)"))
@@ -539,16 +542,7 @@ def _commit_paths(
     if plan.raw_path is not None:
         paths.append(plan.raw_path)
     if plan.cleanup_pageindex:
-        paths += [
-            root / name
-            for name in (
-                "pageindex.db",
-                "pageindex.db-wal",
-                "pageindex.db-shm",
-                "pageindex.db-journal",
-                "files",
-            )
-        ]
+        paths += IndexLocation.package(root).mutation_paths(include_inputs=True)
     return _contained(kb_dir, paths)
 
 

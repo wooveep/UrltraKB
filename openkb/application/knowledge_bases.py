@@ -38,6 +38,9 @@ def open_kb(kb_dir: Path) -> Path:
     root = kb_dir.expanduser().resolve()
     if not (root / ".openkb/config.yaml").is_file() or not (root / "wiki").is_dir():
         raise ValueError(f"Not a knowledge base: {root}")
+    from openkb.kb_format import require_current_kb
+
+    require_current_kb(root)
     with kb_ingest_lock(root / ".openkb"):
         from openkb.config import resolve_effective_config, validate_runtime_config
 
@@ -113,7 +116,7 @@ def _creation(kb_dir: Path, *, require_empty: bool) -> Iterator[None]:
             )
         ]
         files = [kb_dir / "wiki" / name for name in ("AGENTS.md", "index.md", "log.md")]
-        files += [state / "config.yaml", state / "hashes.json"]
+        files += [state / "config.yaml", state / "hashes.json", state / "format.json"]
         if not (kb_dir / ".env").exists():
             files.append(kb_dir / ".env")
         targets = [path for path in directories if not path.exists()] + files
@@ -194,6 +197,9 @@ def initialize_kb(
     with creation_lifecycle(kb_dir):
         openkb_dir = kb_dir / ".openkb"
         with _creation(kb_dir, require_empty=require_empty):
+            from openkb.kb_format import KB_FORMAT
+
+            atomic_write_json(openkb_dir / "format.json", KB_FORMAT)
             kb_dir.mkdir(parents=True, exist_ok=True)
             (kb_dir / "raw").mkdir(exist_ok=True)
             (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True, exist_ok=True)

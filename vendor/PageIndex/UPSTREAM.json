@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.6",
+  "local_version": "0.3.0.dev3+urltrakb.7",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -130,15 +130,15 @@
   ],
   "local_patch": {
     "date": "2026-10-06",
-    "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity",
+    "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
-      "pyproject.toml": "8d790ebf6004bc8a4123656964926a8ee8dd26553a36e0a60e926e749937bd97",
+      "pyproject.toml": "67df520c10fc71885a4628f1c2b23d818ddad5cd33b707a63ee957fb1ca7a82b",
       "pageindex/config.py": "15edb356c1e7a88725a720942249515ecca4121c2a4223efbf3f813f307dd7b5",
       "pageindex/errors.py": "21a519e8c8e6bb28c59ce6e8bb5675b21b63ac131edb1beb7abed93a95c1679f",
       "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
       "pageindex/__init__.py": "2f5ddea295637ea9668ab6e3c9d4a0f15d85ec8fdebc69f30b4f6be9831be034",
-      "pageindex/client.py": "ae752b41105cb707be3fe060df147b12012eb4495f469568eefc5299b1a70b84",
+      "pageindex/client.py": "408e2b167cdc2cef54942cfe793adfe5de54a883810196e5938ff77e6f743cf3",
       "pageindex/collection.py": "357127c3fb1f237496d7c2ec1627a114d59864a734fc631258a639a793b8d253",
       "tests/test_architecture.py": "f9ee3a6f339fc7034c6a09f5165082c10ccae27ecb2acc3a3b110b753654df85",
       "tests/test_client.py": "3f6529bb3a104413f3d5492feea7e36f02b4bf2dfeb62c0969cc5df779569bb4",
@@ -148,7 +148,7 @@
       "tests/test_review_fixes.py": "8885cbac97d50da7f24dbe7e767742e60ea681ab5ee679bd6f4403001cddaf7e",
       "tests/test_review_fixes_2.py": "881fc1627e461126f708ced652266b03be279816f1ec1ae60b7be8790939f1e8",
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
-      "pageindex/backend/local.py": "eafaff5a1a6a66f4141481739b9034806986016ee6ef8532ea0e816bf540bfd6",
+      "pageindex/backend/local.py": "18f4a7fd10e9c81d72aca3852bbff344f810054a18de5d01b64efae007dc1c1e",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
       "pageindex/index/page_index.py": "21b3bad940a7c45b7038045de767d7b5ae372940f2efa4e93660c8c8381ce77d",
       "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
@@ -160,8 +160,8 @@
       "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d"
     },
     "added": {
-      "README.urltrakb.md": "8145c35362769e97ddcb861f3356d1f0218bfbb6325fb2a304534d8c565df553",
-      "pageindex/_urltrakb_source.json": "f5dbc82d93ef07c484c496603f75dba83ffabdfec1b09264dcd8efe05d5d4afa",
+      "README.urltrakb.md": "29354a1a96c6c825bfa780eb84683f628e88a8ed67c6cd938b88fc7134cba1c5",
+      "pageindex/_urltrakb_source.json": "5ed0127453e7b18fb026358689f1e280fc5e48ab1cd7876829877e3458773928",
       "pageindex/llm.py": "1d13037af629b09c0e0b5fe705d3c0186cf3b7ad818573a9d776106d3c768165",
       "pageindex/default_llm.py": "f0f963bc91f8332999afb4cf5e0f28be626d09a76ca5ff171e323022586002ed",
       "tests/test_toc_body_titles.py": "df975d616d0c533e39ccdef34233a5d6057373bc83109546d3c354abeadb53ba",
@@ -187,7 +187,7 @@
   "schema_version": 2,
   "distribution": "pageindex",
   "module": "pageindex",
-  "version": "0.3.0.dev3+urltrakb.6",
+  "version": "0.3.0.dev3+urltrakb.7",
   "included_files": [
     ".claude/commands/dedupe.md",
     ".gitattributes",

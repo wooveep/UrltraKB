@@ -1,12 +1,12 @@
 # 本地 SDK 来源与发行基线
 
 四个 SDK 是仓库内普通源码依赖，开发、CLI、桌面和 API 共享同一份本地
-`litellm`。本阶段维持现有编译与问答行为；ChatIndex 和 ConDB 的运行时注入、
-知识数据库和会话记忆接入由后续任务交付。
+`litellm`。编译、Agent、PageIndex 和 ChatIndex 共用任务运行时；新文档索引使用
+ConDB。自动会话记忆和检索路由仍由后续任务接入。
 
 | 目录 | 分发名 / 导入名 | 本地版本 | 上游提交 | 许可证 |
 | --- | --- | --- | --- | --- |
-| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.6 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
+| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.7 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
 | ChatIndex | ictree / ctree | 0.1.0+urltrakb.2 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
 | ConDB | pageindex-condb / contextdb | 1.0+urltrakb.3 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
 | LiteLLM | litellm / litellm | 1.87.2+urltrakb.2 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
@@ -21,9 +21,9 @@ LiteLLM v1.87.2 的审核 sdist SHA-256 为
 完整保留 SDK 子树及其可达 Proxy 辅助模块；排除顶层 enterprise、Proxy extras、
 服务工作区和独立服务 CLI。ChatGPT 与 GitHub Copilot provider 源码保持原样。
 
-PageIndex 的 `.5` 代码保留不变，只校正此前仍标 `.4` 的来源说明并固定依赖。
-ConDB 的最小兼容补丁按原顺序保留全部 assistant 文本块，不再只保留最后一段。
-ChatIndex 的占位作者/项目元数据和 MIT 分类已修正。新增 SDK 源码补丁须提升相应
+PageIndex `.7` 增加运行时注入、托管输入根与封存读取；内容策略仍沿用 `.5`。
+ConDB `.3` 提供无损文档树、严格会话检索转换及可组合事务；ChatIndex `.2` 保留
+完整检查点，并按用户角色生成检索树。新增 SDK 源码补丁须提升相应
 本地版本；打包版本不等于内容策略版本，不能单凭版本变化要求付费重建旧索引。
 
 ## 安装
@@ -62,6 +62,8 @@ LITELLM_LOCAL_MODEL_COST_MAP=True /tmp/openkb-wheel-check/bin/python scripts/ver
 根 wheel 依赖四个独立 vendor wheel；根 sdist 和提交源码导出包含全部 vendor 源码、
 许可证、模板、配置、模型表和构建清单。开发/冻结构建校验当前 checkout 的导入路径及
 源码摘要；安装包校验实际分发版本、来源身份与资源，不把 site-packages 错判为源码树。
+
+以下为最初本地 SDK 引入时的验证基线；本轮整合结果另记于文末。
 
 | 验证边界 | 已执行证据 |
 | --- | --- |
@@ -111,3 +113,39 @@ The SDK retains responsibility for tool execution and replay safety. Every
 attempt uses the task budget and disables underlying retries from the first
 send. Raw streaming usage is preserved separately from SDK compatibility
 counts, and stream cleanup completes before application leases are released.
+
+## 新版知识库与文档索引
+
+新建知识库在 `.openkb/format.json` 声明 `openkb.context-kb` 版本 1。
+共享应用入口在写入和模型调用前拒绝没有标记的旧库及未知格式，不迁移旧数据。
+重新导入原始资料需要显式新建库；新版库内部的历史来源、知识修订和产物引用继续保留。
+
+所有 OpenKB 文档客户端由 `openkb/index_client.py` 构造，同时注入任务模型和
+`ConDBPageIndexStorage`。`IndexLocation` 描述数据库、托管输入根、格式、只读性与
+所属修订。工作库使用 `context.sqlite`，`okb_` 表完整保存构建文档、原始 metadata、
+pages 和扩展字段；源文件摘要与处理策略去重键分开保存，树与业务映射在同一事务提交。
+
+发布索引包前关闭连接、checkpoint 并核对 SQLite 完整性；复制主数据库与托管输入，
+通过既有文件系统 mutation 发布。包内 `index.json` 声明相对位置与修订归属，
+封存后客户端和 SQLite 都拒绝修改，读取不会重新调用模型或重建丢失缓存。
+搬移后按包的新位置解析输入；重编译沿用已保留的处理结果，重新处理才采用新策略。
+SQLite 提交和文件系统发布由各自事务保护，不把二者描述为一个跨系统原子事务。
+
+
+2026-10-06 整批整合验证（实施票 108–115）：
+
+- 当前共 2,193 项测试。全量运行后修复测试夹具和版本断言，再定向重跑所有失败模块；
+  固定 LibreOffice 26.2.6.3 运行时补跑全部 44 项原先缺少环境而跳过的 Office 测试。
+  最终全部当前测试均有通过记录，没有遗留自动验证失败或环境跳过。
+- 新入库/历史生命周期/只读/格式边界、块/幻灯片与来源/打包针对性复核 66 项通过；
+  另2项工作索引符号链接逃逸检查通过；ruff 和 mypy（320 个源码文件）通过。
+- 独立 wheel 环境安装 123 个锁定依赖，依赖检查通过；脱离 checkout 执行 160 项
+  真实 SDK、任务预算/取消、Agent、PageIndex、ChatIndex、ConDB 及文档生命周期测试通过。
+- 四 SDK 的 wheel/sdist 和根源码包核对资源、原许可证、版本和 2,927 个 vendor 源文件；
+  无网导入、诱饵配置隔离及固定模型表均在开发和 wheel 环境覆盖。
+- Standards 和 Spec 两路审查无遗留发现；已修复缺失定位种类绕过范围校验、托管输入
+  与文档身份错配、去重命中后的失败清理误删原有索引三项问题。
+
+仍需对应平台和人员执行的验证：私人订阅登录、真实供应商质量/成本基准、Windows/macOS
+桌面及正式冻结安装包验收；R04 的人工页质量验收仍由原票跟踪。此次自动化成功不代替这些门槛。
+上游 PyPDF2/Pydantic 弃用和 LiteLLM 异步日志清理警告仍可观察，未将其隐藏。

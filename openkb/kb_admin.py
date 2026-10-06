@@ -130,6 +130,10 @@ def delete_kb(kb_dir: Path, *, generation: str | None = None, cancelled=None, on
         ):
             raise ValueError("Refusing to delete a replaced directory; review the current target")
         exists = kb_dir.exists()
+        if exists and previous.status != "deleting" and config._is_kb_dir(kb_dir):
+            from openkb.kb_format import require_current_kb
+
+            require_current_kb(kb_dir)
         if exists:
             from openkb.catalog_schema import validate_catalog_writer
 

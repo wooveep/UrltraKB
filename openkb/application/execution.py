@@ -33,6 +33,9 @@ class ExecutionContext:
     @contextmanager
     def begin(self, kb_dir: Path) -> Iterator[LlmCredentialBundle]:
         self.check_stop()
+        from openkb.kb_format import require_current_kb
+
+        require_current_kb(kb_dir)
         if self.snapshot is None:
             self.snapshot = capture_config(kb_dir, cancelled=self.cancelled, on_wait=self.waiting)
             # The worker's control channel acknowledges this before any

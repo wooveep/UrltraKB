@@ -955,9 +955,7 @@ def test_legacy_long_pdf_preview_retains_the_cleanup_reference(kb_dir):
 
 
 def _seed_long_pdf_kb(kb_dir: Path, doc_id: str | None = "pi-doc-xyz") -> None:
-    """Seed a KB with a single long-PDF entry plus a stub pageindex.db
-    file so the remove command treats the doc as PageIndex-backed.
-    """
+    """Seed a current KB with a long-PDF registry entry and a complete ConDB index."""
     meta = {
         "name": "paper.pdf",
         "doc_name": "paper",
@@ -983,27 +981,24 @@ def _seed_long_pdf_kb(kb_dir: Path, doc_id: str | None = "pi-doc-xyz") -> None:
 
 
 def _set_index_rows(kb_dir, rows):
-    from pageindex.storage.sqlite import SQLiteStorage
+    from kb_fixtures import seed_document_index
 
-    store = SQLiteStorage(str(kb_dir / ".openkb/pageindex.db"))
-    try:
-        store.get_or_create_collection("default")
+    from openkb.condb_storage import ConDBPageIndexStorage
+    from openkb.index_location import IndexLocation
+
+    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".openkb")) as store:
         for doc in store.list_documents("default"):
             store.delete_document("default", doc["doc_id"])
-        for identity, name in rows:
-            store.save_document(
-                "default", identity, {"doc_name": name, "doc_type": "pdf", "file_hash": identity}
-            )
-    finally:
-        store.close()
+    for identity, name in rows:
+        seed_document_index(kb_dir, identity, name)
 
 
 def _index_ids(kb_dir):
-    import sqlite3
-    from contextlib import closing
+    from openkb.condb_storage import ConDBPageIndexStorage
+    from openkb.index_location import IndexLocation
 
-    with closing(sqlite3.connect(kb_dir / ".openkb/pageindex.db")) as db:
-        return {row[0] for row in db.execute("SELECT doc_id FROM documents")}
+    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".openkb")) as store:
+        return {row["doc_id"] for row in store.list_documents("default")}
 
 
 def test_cli_remove_calls_pageindex_delete_with_stored_doc_id(kb_dir):
@@ -1033,7 +1028,7 @@ def test_cli_remove_pageindex_fallback_skips_on_ambiguous_match(kb_dir):
     result = _invoke(kb_dir, ["remove", "paper.pdf", "--keep-raw", "--yes"])
     assert result.exit_code == 0, result.output
     assert _index_ids(kb_dir) == {"pi-a", "pi-b"}
-    assert "skipping" in result.output
+    assert "Multiple index documents" in result.output
     assert not (kb_dir / "wiki/summaries/paper.md").exists()
     assert "h_paper" in json.loads((kb_dir / ".openkb/hashes.json").read_text())
 
@@ -1154,7 +1149,7 @@ def test_cli_remove_deletes_renamed_raw_copy(kb_dir):
 
 def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
     """A pageindex_cloud doc removes only local artifacts; the cloud is
-    never contacted even when a pageindex.db happens to exist."""
+    never contacted even when a local document index exists."""
     from unittest.mock import patch
 
     from click.testing import CliRunner
@@ -1169,9 +1164,10 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
     openkb_dir = tmp_path / ".openkb"
     openkb_dir.mkdir()
     (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    # A stray pageindex.db to prove the cloud path is gated by type, not just
-    # by the DB's absence.
-    (openkb_dir / "pageindex.db").write_bytes(b"")
+    from kb_fixtures import mark_current_kb, seed_document_index
+
+    mark_current_kb(tmp_path)
+    seed_document_index(tmp_path, "local-document", "retained-local")
     (tmp_path / "wiki" / "index.md").write_text("# Index\n")
 
     # Cloud artifacts + registry entry

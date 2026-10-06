@@ -9,9 +9,11 @@ import pytest
 
 def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
     import litellm
+    from kb_fixtures import seed_document_index
 
     from openkb.application.recompilation import recompile_document
 
+    seed_document_index(kb_dir, "doc-1", "paper")
     (kb_dir / ".openkb/hashes.json").write_text(
         json.dumps({"long-hash": {"doc_name": "paper", "type": "long_pdf", "doc_id": "doc-1"}})
     )

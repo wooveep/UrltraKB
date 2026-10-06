@@ -70,7 +70,9 @@ def verify_recompilation(window, kb, wait_until):
         all_docs = finished_document(tasks, dialog)
         assert (all_docs.succeeded, all_docs.skipped, all_docs.failed) == (2, 1, 0), all_docs
         assert "Summary" in (kb / "wiki/summaries/native-long.md").read_text(encoding="utf-8")
-        assert not (kb / ".openkb/pageindex.db").exists()
+        from openkb.index_location import IndexLocation
+
+        assert not IndexLocation.package(kb / ".openkb").database.exists()
         assert "已有的来源正文" not in str(all_docs.summary())
     finally:
         confirmer.stop()

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pageindex import IndexConfig, LocalClient
+from pageindex import IndexConfig
 from pageindex.errors import IndexQualityError
 
 from openkb.config import (
@@ -18,6 +18,7 @@ from openkb.config import (
     resolve_effective_config,
     resolve_per_request_overrides,
 )
+from openkb.index_client import create_index_client as LocalClient
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.llm_execution import check_model_stop
 from openkb.locks import atomic_write_text
@@ -147,6 +148,7 @@ def _build_index_config(
     }
     from openkb.index_llm import PageIndexLLM
     from openkb.llm_execution import compiler_executor
+
     headers, timeout, _ = resolve_per_request_overrides(config)
     from openkb.llm_runtime import audit_step_headers
 
@@ -203,120 +205,117 @@ def index_long_document(
     model: str = config.get("model", "gpt-5.4")
     index_config = _build_index_config(config, bundle=resolve_credential_bundle(kb_dir))
 
-    client_factory = LocalClient
-    if pdf_path.suffix in {".okbi", ".okpi"}:
-        from openkb.block_package import create_index_client
-
-        client_factory = create_index_client
-    client = client_factory(
+    client = LocalClient(
         model=model,
         storage_path=str(openkb_dir),
         index_config=index_config,
     )
-    col = client.collection()
-
-    # Add PDF (retry up to 3 times — PageIndex TOC accuracy is stochastic)
-    max_retries = 3
-    doc_id = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            doc_id = col.add(str(pdf_path))
-            logger.info(
-                "PageIndex added %s → doc_id=%s (attempt %d)", pdf_path.name, doc_id, attempt
-            )
-            break
-        except Exception as exc:
-            from pageindex.index.block_policy import BlockContractError
-            from pageindex.index.page_parts_policy import PagePartsContractError
-
-            cause: BaseException | None = exc
-            while cause is not None:
-                if isinstance(cause, (BlockContractError, PagePartsContractError)):
-                    raise cause from None
-                cause = cause.__cause__
-            if not isinstance(exc, IndexQualityError):
-                raise
-            logger.warning(
-                "PageIndex attempt %d/%d failed for %s: %s",
-                attempt,
-                max_retries,
-                pdf_path.name,
-                exc,
-            )
-            if attempt == max_retries:
-                raise RuntimeError(
-                    f"Failed to index {pdf_path.name} after {max_retries} attempts: {exc}"
-                ) from exc
-
-    # The PageIndex blob for doc_id is now durably on disk. The add mutation no
-    # longer eagerly snapshots .openkb/files — it registers the new blob via
-    # snapshot.track_new() only on a successful return — so if any step below
-    # fails, delete the document we just added. Otherwise the blob leaks as an
-    # orphan that pageindex.db (rolled back by the snapshot) no longer refs and
-    # no reaper reclaims.
     try:
-        # Fetch complete document (metadata + structure + text)
-        check_model_stop()
-        doc = col.get_document(doc_id, include_text=True)
-        indexed_doc_name: str = doc.get("doc_name", pdf_path.stem)
-        description: str = doc.get("doc_description", "")
-        structure: list = doc.get("structure", [])
+        col = client.collection()
+        retained_ids = {item["doc_id"] for item in col.list_documents()}
 
-        # Debug: print doc keys and page_count to diagnose get_page_content range
-        logger.info("Doc keys: %s", list(doc.keys()))
-        logger.info("page_count from doc: %s", doc.get("page_count", "NOT PRESENT"))
+        # Add PDF (retry up to 3 times — PageIndex TOC accuracy is stochastic)
+        max_retries = 3
+        doc_id = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                doc_id = col.add(str(pdf_path))
+                logger.info(
+                    "PageIndex added %s → doc_id=%s (attempt %d)", pdf_path.name, doc_id, attempt
+                )
+                break
+            except Exception as exc:
+                from pageindex.index.block_policy import BlockContractError
+                from pageindex.index.page_parts_policy import PagePartsContractError
 
-        tree = {
-            "doc_name": indexed_doc_name,
-            "doc_description": description,
-            "structure": structure,
-        }
+                cause: BaseException | None = exc
+                while cause is not None:
+                    if isinstance(cause, (BlockContractError, PagePartsContractError)):
+                        raise cause from None
+                    cause = cause.__cause__
+                if not isinstance(exc, IndexQualityError):
+                    raise
+                logger.warning(
+                    "PageIndex attempt %d/%d failed for %s: %s",
+                    attempt,
+                    max_retries,
+                    pdf_path.name,
+                    exc,
+                )
+                if attempt == max_retries:
+                    raise RuntimeError(
+                        f"Failed to index {pdf_path.name} after {max_retries} attempts: {exc}"
+                    ) from exc
 
-        if (doc.get("metadata") or {}).get("unit_kind") == "block":
-            tree["unit_kind"] = "block"
-            summary = scope.wiki_dir / "summaries" / f"{source_name}.md"
-            atomic_write_text(
-                summary, render_summary_md(tree, source_name, doc_id, description=description)
+        # New managed inputs are registered with the outer mutation only on a
+        # successful return. Clean them on failure, preserving a deduplication
+        # hit that was already present before this operation acquired its lease.
+        try:
+            # Fetch complete document (metadata + structure + text)
+            check_model_stop()
+            doc = col.get_document(doc_id, include_text=True)
+            indexed_doc_name: str = doc.get("doc_name", pdf_path.stem)
+            description: str = doc.get("doc_description", "")
+            structure: list = doc.get("structure", [])
+
+            # Debug: print doc keys and page_count to diagnose get_page_content range
+            logger.info("Doc keys: %s", list(doc.keys()))
+            logger.info("page_count from doc: %s", doc.get("page_count", "NOT PRESENT"))
+
+            tree = {
+                "doc_name": indexed_doc_name,
+                "doc_description": description,
+                "structure": structure,
+            }
+
+            if (doc.get("metadata") or {}).get("unit_kind") == "block":
+                tree["unit_kind"] = "block"
+                summary = scope.wiki_dir / "summaries" / f"{source_name}.md"
+                atomic_write_text(
+                    summary, render_summary_md(tree, source_name, doc_id, description=description)
+                )
+                return IndexResult(doc_id=doc_id, description=description, tree=tree)
+
+            # Write wiki/sources/ — per-page content
+            sources_dir = scope.wiki_dir / "sources"
+            sources_dir.mkdir(parents=True, exist_ok=True)
+            images_dir = sources_dir / "images" / source_name
+
+            if pdf_path.suffix == ".okpi":
+                from openkb.office.slide_content import attach_slides
+                from openkb.office.slide_package import materialize_slide_package
+
+                with materialize_slide_package(pdf_path) as (snapshot, slides):
+                    all_pages = attach_slides(
+                        _normalize_page_content(
+                            _convert_pdf_to_pages(snapshot, source_name, images_dir)
+                        ),
+                        slides,
+                    )
+            else:
+                all_pages = _normalize_page_content(
+                    _convert_pdf_to_pages(pdf_path, source_name, images_dir)
+                )
+
+            if not all_pages:
+                raise RuntimeError(f"No page content extracted for {pdf_path.name}")
+
+            _write_long_doc_artifacts(
+                tree, all_pages, source_name, doc_id, kb_dir, description=description, scope=scope
             )
             return IndexResult(doc_id=doc_id, description=description, tree=tree)
-
-        # Write wiki/sources/ — per-page content
-        sources_dir = scope.wiki_dir / "sources"
-        sources_dir.mkdir(parents=True, exist_ok=True)
-        images_dir = sources_dir / "images" / source_name
-
-        if pdf_path.suffix == ".okpi":
-            from openkb.office.slide_content import attach_slides
-            from openkb.office.slide_package import materialize_slide_package
-
-            with materialize_slide_package(pdf_path) as (snapshot, slides):
-                all_pages = attach_slides(
-                    _normalize_page_content(
-                        _convert_pdf_to_pages(snapshot, source_name, images_dir)
-                    ),
-                    slides,
-                )
-        else:
-            all_pages = _normalize_page_content(
-                _convert_pdf_to_pages(pdf_path, source_name, images_dir)
-            )
-
-        if not all_pages:
-            raise RuntimeError(f"No page content extracted for {pdf_path.name}")
-
-        _write_long_doc_artifacts(
-            tree, all_pages, source_name, doc_id, kb_dir, description=description, scope=scope
-        )
-        return IndexResult(doc_id=doc_id, description=description, tree=tree)
-    except BaseException:
-        # Best-effort: remove the blob this add created. A failure here (e.g. a
-        # second interrupt) only means the blob may stay orphaned — the original
-        # error still propagates so the caller (mutation coordinator) rolls back
-        # everything else it snapshotted.
-        try:
-            col.delete_document(doc_id)
-        except Exception:
-            logger.warning(
-                "PageIndex cleanup of %s failed after error; blob may be orphaned", doc_id
-            )
-        raise
+        except BaseException:
+            # Best-effort: remove the blob this add created. A failure here (e.g. a
+            # second interrupt) only means the blob may stay orphaned — the original
+            # error still propagates so the caller (mutation coordinator) rolls back
+            # everything else it snapshotted.
+            if doc_id not in retained_ids:
+                try:
+                    col.delete_document(doc_id)
+                except Exception:
+                    logger.warning(
+                        "PageIndex cleanup of %s failed after error; blob may be orphaned", doc_id
+                    )
+            raise
+    finally:
+        client.close()

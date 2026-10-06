@@ -89,14 +89,11 @@ def admit_legacy_snapshot(kb_dir: Path, file_hash: str, meta: dict) -> Source:
             if images.exists():
                 copy_tree(images, directory / "wiki/sources/images" / doc_name)
             if segmented:
-                (directory / "index").mkdir(parents=True, exist_ok=True)
-                for name in ("pageindex.db", "files"):
-                    path = kb_dir / ".openkb" / name
-                    contained_paths(kb_dir, [path])
-                    if path.is_dir():
-                        copy_tree(path, directory / "index" / name)
-                    elif path.is_file():
-                        _copy_file_atomic(path, directory / "index" / name)
+                from openkb.index_packages import copy_index_package
+
+                copy_index_package(
+                    kb_dir / ".openkb", directory / "index", document_id=record.index_ref
+                )
             write_record(directory / "manifest.json", record)
     plan_import_units(kb_dir, admission, "legacy-normalization-v1")
     return admission.source

@@ -465,7 +465,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
     assert value["collection_complete"] is True
     assert result.units[0].model_usage["current"]["requests"] == len(sent)
     if segmented:
-        assert any(stage.startswith("index.") for stage in value["stages"])
+        assert any(stage.startswith("document_index.") for stage in value["stages"])
     assert "fixture-secret" not in "".join(
         p.read_text() for p in (kb_dir / ".openkb/usage").rglob("*.json")
     )

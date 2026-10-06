@@ -28,12 +28,14 @@ class PageIndexClient:
 
     def __init__(self, *, model: str = None, retrieve_model: str = None,
                  storage_path: str = None, storage=None,
-                 index_config: IndexConfig | dict = None):
-        self._init_local(model, retrieve_model, storage_path, storage, index_config)
+                 index_config: IndexConfig | dict = None, files_path: str = None,
+                 read_only: bool = False):
+        self._init_local(model, retrieve_model, storage_path, storage, index_config, files_path=files_path, read_only=read_only)
 
     def _init_local(self, model: str = None, retrieve_model: str = None,
                     storage_path: str = None, storage=None,
-                    index_config: IndexConfig | dict = None):
+                    index_config: IndexConfig | dict = None, *, files_path: str = None,
+                 read_only: bool = False):
         # Build IndexConfig: merge model/retrieve_model with index_config
         overrides = {}
         if model:
@@ -50,14 +52,21 @@ class PageIndexClient:
 
 
         storage_path = Path(storage_path or ".pageindex").resolve()
-        storage_path.mkdir(parents=True, exist_ok=True)
+        if read_only:
+            if storage is None:
+                raise ValueError("Read-only clients require explicit read-only storage")
+            if not storage_path.is_dir():
+                raise FileNotFoundError(storage_path)
+        else:
+            storage_path.mkdir(parents=True, exist_ok=True)
 
         from .storage.sqlite import SQLiteStorage
         from .backend.local import LocalBackend
         storage_engine = storage or SQLiteStorage(str(storage_path / "pageindex.db"))
         self._backend = LocalBackend(
             storage=storage_engine,
-            files_dir=str(storage_path / "files"),
+            files_dir=str(Path(files_path).resolve() if files_path else storage_path / "files"),
+            read_only=read_only,
             model=opt.model,
             retrieve_model=_normalize_retrieve_model(opt.retrieve_model or opt.model),
             index_config=opt,
@@ -115,6 +124,15 @@ class PageIndexClient:
         """Register a custom document parser."""
         self._backend.register_parser(parser)
 
+    def close(self):
+        self._backend._storage.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
 
 class LocalClient(PageIndexClient):
     """Local mode — indexes and queries documents on your machine.
@@ -142,5 +160,6 @@ class LocalClient(PageIndexClient):
 
     def __init__(self, model: str = None, retrieve_model: str = None,
                  storage_path: str = None, storage=None,
-                 index_config: IndexConfig | dict = None):
-        self._init_local(model, retrieve_model, storage_path, storage, index_config)
+                 index_config: IndexConfig | dict = None, *, files_path: str = None,
+                 read_only: bool = False):
+        self._init_local(model, retrieve_model, storage_path, storage, index_config, files_path=files_path, read_only=read_only)

@@ -22,6 +22,9 @@ def _setup_kb(tmp_path: Path) -> Path:
     openkb_dir = kb_dir / ".openkb"
     openkb_dir.mkdir()
     (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(openkb_dir.parent)
     (openkb_dir / "hashes.json").write_text(json.dumps({}))
     (kb_dir / "wiki" / "index.md").write_text(
         "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n"

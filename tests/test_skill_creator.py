@@ -29,6 +29,9 @@ def _make_kb(tmp_path):
     (tmp_path / "wiki" / "index.md").write_text("# index\n\nNo concepts yet.\n")
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     return tmp_path
 
 

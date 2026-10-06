@@ -79,12 +79,13 @@ def model_responses(monkeypatch, responses):
 
 def read_index(tmp_path, package, **options):
     from pageindex import IndexConfig
-    from pageindex.storage.sqlite import SQLiteStorage
 
     from openkb.block_package import create_index_client
+    from openkb.condb_storage import ConDBPageIndexStorage
+    from openkb.index_location import IndexLocation
 
     store = tmp_path / "index"
-    with SQLiteStorage(str(store / "pageindex.db")) as storage:
+    with ConDBPageIndexStorage(IndexLocation.package(store)) as storage:
         collection = create_index_client(
             storage_path=str(store),
             storage=storage,
@@ -224,16 +225,17 @@ def test_navigation_policy_separates_new_trees_and_keeps_old_cache_readable(
 ):
     from pageindex import IndexConfig
     from pageindex.index.page_parts_policy import PAGE_PARTS_INDEX_POLICY
-    from pageindex.storage.sqlite import SQLiteStorage
 
     from openkb.block_package import create_index_client
+    from openkb.condb_storage import ConDBPageIndexStorage
+    from openkb.index_location import IndexLocation
     from openkb.office.slide_package import FrozenSlideParser
 
     package = slide_package(tmp_path, ["", "Body"], ["", ""], cover_image=True)
     assert PAGE_PARTS_INDEX_POLICY in FrozenSlideParser.policy
     model_responses(monkeypatch, [[entry(2, "Root", "body", "Body")]] * 2)
     store = tmp_path / "index"
-    with SQLiteStorage(str(store / "pageindex.db")) as storage:
+    with ConDBPageIndexStorage(IndexLocation.package(store)) as storage:
         collection = create_index_client(
             storage_path=str(store),
             storage=storage,

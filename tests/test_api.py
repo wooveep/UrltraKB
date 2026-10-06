@@ -412,6 +412,9 @@ def test_init_endpoint_rejects_existing_kb(monkeypatch, tmp_path):
     root = tmp_path / "api-kbs"
     kb_dir = root / "existing-kb"
     (kb_dir / ".openkb").mkdir(parents=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(kb_dir)
     monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
@@ -1242,6 +1245,9 @@ def _seed_short(kb_dir: Path, *, slug: str = "notes", name: str = "notes.md") ->
 def _seed_long(
     kb_dir: Path, *, slug: str = "paper", name: str = "paper.pdf", doc_id: str = "doc-abc123"
 ) -> None:
+    from kb_fixtures import seed_document_index
+
+    seed_document_index(kb_dir, doc_id, slug)
     (kb_dir / ".openkb" / "hashes.json").write_text(
         json.dumps(
             {
@@ -1812,6 +1818,9 @@ def test_concurrent_different_kbs_do_not_block(monkeypatch, kb_dir, tmp_path_fac
     kb_dir_b = tmp_path_factory.mktemp("kb-b")
     for d in (kb_dir_a, kb_dir_b):
         (d / ".openkb").mkdir(parents=True, exist_ok=True)
+        from kb_fixtures import mark_current_kb
+
+        mark_current_kb(d)
         (d / "wiki").mkdir(parents=True, exist_ok=True)
 
     def resolve(kb):
@@ -2786,6 +2795,9 @@ def test_global_config_patch_rejects_newline_in_credential(monkeypatch, tmp_path
 def _make_kb(path: Path) -> None:
     """Create the minimal shape _is_kb_dir accepts: `.openkb` + `wiki` dirs."""
     (path / ".openkb").mkdir(parents=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(path)
     (path / "wiki").mkdir(parents=True)
 
 
@@ -3133,6 +3145,9 @@ def _isolate_global(monkeypatch, tmp_path: Path) -> Path:
 
 def _make_kb(root: Path) -> Path:
     (root / ".openkb").mkdir(parents=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(root)
     (root / "wiki").mkdir(parents=True)
     return root
 

@@ -60,6 +60,9 @@ def _seed_short(kb_dir: Path) -> None:
 
 def _seed_long(kb_dir: Path) -> None:
     """One long (PageIndex) doc with a summary file + doc_id on disk."""
+    from kb_fixtures import seed_document_index
+
+    seed_document_index(kb_dir, "doc-abc123", "paper-h_l")
     (kb_dir / ".openkb" / "hashes.json").write_text(
         json.dumps(
             {
@@ -142,6 +145,9 @@ def test_recompile_long_dispatches_compile_long_doc_with_doc_id(kb_dir):
 def _seed_cloud(kb_dir: Path) -> None:
     """A pageindex_cloud import: long-doc layout (summary + doc_id + .json
     source), and NO .md source (the trap the short path would fall into)."""
+    from kb_fixtures import seed_document_index
+
+    seed_document_index(kb_dir, "pi-cloud1", "cloud-h_c")
     (kb_dir / ".openkb" / "hashes.json").write_text(
         json.dumps(
             {

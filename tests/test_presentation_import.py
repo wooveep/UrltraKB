@@ -374,13 +374,14 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
     import sqlite3
 
     from pageindex import IndexConfig
-    from pageindex.storage.sqlite import SQLiteStorage
 
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.block_package import create_index_client
+    from openkb.condb_storage import ConDBPageIndexStorage
     from openkb.documents import read_document_source
+    from openkb.index_location import IndexLocation
 
     apply_kb_config_patch(
         kb_dir,
@@ -402,7 +403,7 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
     package = tmp_path / "slides.okpi"
     shutil.copyfile(retained, package)
     store = tmp_path / "standalone-index"
-    with SQLiteStorage(str(store / "pageindex.db")) as database:
+    with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
         client = create_index_client(
             storage_path=str(store),
             storage=database,
@@ -429,15 +430,15 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
     shutil.rmtree(store)
     source.unlink()
     package.unlink()
-    with SQLiteStorage(str(moved / "pageindex.db")) as database:
+    with ConDBPageIndexStorage(IndexLocation.package(moved)) as database:
         collection = create_index_client(
             storage_path=str(moved), storage=database, model="gpt-4o"
         ).collection()
         expected = collection.get_page_content(first, "1-3")
         assert Path(expected[1]["images"][0]["path"]).is_file()
         before = collection.get_document(first, include_text=True)
-        with sqlite3.connect(moved / "pageindex.db") as db:
-            db.execute("UPDATE documents SET pages=NULL")
+        with sqlite3.connect(moved / "context.sqlite") as db:
+            db.execute("UPDATE okb_documents SET payload = json_set(payload, '$.pages', NULL)")
         calls = len(presentation_model)
         assert collection.get_page_content(first, "1-3") == expected
         assert collection.get_document(first, include_text=True) == before

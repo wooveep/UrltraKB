@@ -5,6 +5,7 @@ from pathlib import Path
 from openkb.application.sources import _manifest
 from openkb.compilation_report import collect_compile_report
 from openkb.config import DEFAULT_CONFIG, resolve_concurrency, resolve_effective_config
+from openkb.index_packages import copy_index_package
 from openkb.ingest_records import ImportUnit, UnitRevision
 from openkb.knowledge_scope import KnowledgeScope
 from openkb.mutation import _copy_file_atomic
@@ -60,7 +61,7 @@ async def compile_refresh_inputs(
             if manifest.execution_mode == "segmented":
                 if not manifest.index_ref:
                     raise ValueError("Segmented input has no retained index")
-                copy_tree(directory / "index", scope.wiki_dir.parent / "index")
+                copy_index_package(directory / "index", scope.wiki_dir.parent / "index")
                 summary = scope.wiki_dir / "summaries" / f"{unit.doc_name}.md"
                 _copy_file_atomic(directory / "wiki/summaries" / summary.name, summary)
                 await compiler.compile_long_doc(

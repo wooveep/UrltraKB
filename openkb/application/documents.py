@@ -65,12 +65,10 @@ def _snapshot_add_paths(
     # long-doc add path registers just the new blob via snapshot.track_new()
     # once indexing has run.
     scope = resolve_scope(kb_dir, scope)
+    from openkb.index_location import IndexLocation
+
     paths = [
         kb_dir / ".openkb" / "hashes.json",
-        kb_dir / ".openkb" / "pageindex.db",
-        kb_dir / ".openkb" / "pageindex.db-wal",
-        kb_dir / ".openkb" / "pageindex.db-shm",
-        kb_dir / ".openkb" / "pageindex.db-journal",
         scope.wiki_dir / "summaries" / f"{doc_name}.md",
         scope.wiki_dir / "sources" / f"{doc_name}.json",
         scope.wiki_dir / "sources" / "images" / doc_name,
@@ -83,7 +81,7 @@ def _snapshot_add_paths(
         paths.append(final_raw)
     if final_source is not None:
         paths.append(final_source)
-    return paths
+    return paths + IndexLocation.package(kb_dir / ".openkb").mutation_paths()
 
 
 def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info) -> None:
@@ -220,7 +218,7 @@ def _add_single_file_locked(
                 raise RuntimeError(f"Converted long document has no raw artifact: {file_path.name}")
             report("  Long document detected — indexing with PageIndex...")
             # PageIndex content-dedups: if the same content is already indexed
-            # (e.g. hashes.json and pageindex.db diverged after a remove whose
+            # (e.g. hashes.json and context.sqlite diverged after a remove whose
             # PageIndex cleanup failed), col.add() returns the EXISTING doc_id
             # and writes no new blob. Capture the blob set *before* indexing so
             # we register only blobs THIS add actually created — otherwise

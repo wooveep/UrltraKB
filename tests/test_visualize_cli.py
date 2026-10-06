@@ -11,6 +11,9 @@ def _kb(tmp_path: Path) -> Path:
         (tmp_path / "wiki" / sub).mkdir(parents=True)
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n", encoding="utf-8")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     (tmp_path / "wiki" / "concepts" / "a.md").write_text(
         '---\ntype: "Concept"\ndescription: "d"\n---\n\nlinks [[concepts/b]]\n', encoding="utf-8"
     )
@@ -46,6 +49,9 @@ def test_visualize_empty_wiki(tmp_path):
         (tmp_path / "wiki" / sub).mkdir(parents=True)
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n", encoding="utf-8")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     with patch("openkb.cli._find_kb_dir", return_value=tmp_path), patch("webbrowser.open") as wb:
         result = CliRunner().invoke(cli, ["visualize"])
     assert result.exit_code == 0

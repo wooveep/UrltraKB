@@ -375,6 +375,9 @@ def test_resolve_litellm_settings_warns_on_non_string_key(caplog):
 
 def _kb(tmp_path: Path) -> Path:
     (tmp_path / ".openkb").mkdir(parents=True, exist_ok=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     return tmp_path
 
 
@@ -655,6 +658,9 @@ def test_resolve_kb_alias_resolves_known_kbs_by_basename(_isolated_global, tmp_p
 def _make_kb_dir(path: Path) -> Path:
     """Create the minimal KB shape (`.openkb` + `wiki`) recognized as a KB dir."""
     (path / ".openkb").mkdir(parents=True)
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(path)
     (path / "wiki").mkdir(parents=True)
     return path
 

@@ -28,7 +28,8 @@ _COLLECTION_NAME_RE = re.compile(r'[a-zA-Z0-9_-]{1,128}')
 
 class LocalBackend:
     def __init__(self, storage: StorageEngine, files_dir: str, model: str = None,
-                 retrieve_model: str = None, index_config=None):
+                 retrieve_model: str = None, index_config=None, read_only: bool = False):
+        self._read_only = read_only
         self._storage = storage
         self._files_dir = Path(files_dir)
         self._model = model
@@ -66,6 +67,8 @@ class LocalBackend:
         return self._storage.list_collections()
 
     def delete_collection(self, name: str) -> None:
+        if self._read_only:
+            raise PermissionError("Sealed document index is read-only")
         # Validate before touching the filesystem — an unvalidated name like
         # "../.." would make the rmtree below escape files_dir entirely.
         self._validate_collection_name(name)
@@ -85,6 +88,8 @@ class LocalBackend:
 
     # Document management
     def add_document(self, collection: str, file_path: str) -> str:
+        if self._read_only:
+            raise PermissionError("Sealed document index is read-only")
         file_path = os.path.realpath(file_path)
         if not os.path.isfile(file_path):
             # Missing path is a file-not-found error, not an unsupported-type one.
@@ -268,6 +273,8 @@ class LocalBackend:
                 if digest(source) != metadata.get("source_digest"):
                     raise ValueError("Managed block package digest changed")
             return materialize_pages(cached, base, metadata)
+        if self._read_only:
+            raise ValueError("Sealed document is missing its retained content cache")
         if metadata.get("parser_policy"):
             source = self._managed_input(collection, doc_id, doc)
             if digest(source) != metadata.get("source_digest"):
@@ -294,6 +301,8 @@ class LocalBackend:
         return self._storage.list_documents(collection)
 
     def delete_document(self, collection: str, doc_id: str) -> None:
+        if self._read_only:
+            raise PermissionError("Sealed document index is read-only")
         doc = self._require_document(collection, doc_id)
         if (doc.get("metadata") or {}).get("parser_policy"):
             self._managed_input(collection, doc_id, doc).unlink(missing_ok=True)

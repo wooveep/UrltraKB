@@ -141,7 +141,7 @@ class TestIndexLongDocument:
         collection.add.side_effect = wrapped
         client = MagicMock()
         client.collection.return_value = collection
-        monkeypatch.setattr("openkb.block_package.create_index_client", lambda **kwargs: client)
+        monkeypatch.setattr("openkb.indexer.LocalClient", lambda **kwargs: client)
         with pytest.raises(PagePartsContractError, match="No content"):
             index_long_document(kb_dir / "retained.okpi", kb_dir)
         assert collection.add.call_count == 1
