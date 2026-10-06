@@ -2,11 +2,11 @@
   "schema_version": 2,
   "distribution": "pageindex-condb",
   "module": "contextdb",
-  "version": "1.0+urltrakb.1",
+  "version": "1.0+urltrakb.2",
   "repository": "https://github.com/VectifyAI/ConDB",
   "commit": "62da030426b3eee96a77b464e7007cdf8530c42e",
   "license": "Apache-2.0",
-  "local_version": "1.0+urltrakb.1",
+  "local_version": "1.0+urltrakb.2",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/VectifyAI/ConDB/tarball/62da030426b3eee96a77b464e7007cdf8530c42e",
@@ -85,20 +85,27 @@
   ],
   "local_changes": [
     "Use poetry-core==2.4.1 and exact project-compatible dependencies, retaining prompt/config resources.",
-    "Correct module version to distribution 1.0+urltrakb.1 and add packaged source identity.",
+    "Correct module version to distribution 1.0+urltrakb.2 and add packaged source identity.",
     "contextdb/llm.py: join every assistant text block in order instead of dropping all but the last; verify tools/cache/usage/error behavior over real LiteLLM HTTP requests."
   ],
   "local_patch": {
     "date": "2026-10-06",
-    "purpose": "Audited local SDK source and packaging baseline (#107)",
+    "purpose": "Lossless document navigation and original payloads; injected native TreeDB, composable savepoint transactions, ordered paths, schema-validated sealed read-only access.",
     "modified": {
-      "pyproject.toml": "74f049652cd86f4875f301dc8cbdc85e2108e92002f1dfb883451f523da58c42",
+      "pyproject.toml": "2fb700708bd772ced6395f16dbf3cc4e521fd10646d7f8f657899d28417b97e9",
       "contextdb/llm.py": "17541ea1fc23f9dab207fef8ae1843c193b32ebbadc2ff10339f6dfb98e6e9ee",
-      "contextdb/__init__.py": "9b21a2f7ca87d0b3420abe8425d306c8c33e758f1dcdb030ed083b46fd5ab615"
+      "contextdb/__init__.py": "cc2639b6bc46a9f7a6a9bb2b3d85084056a7b1ae95c6a58d0817461751721121",
+      "contextdb/core/storage.py": "9fa5aac4e1a490468c34790f719c0a89610917f60b2e52ebf2b273be0636a6e2",
+      "contextdb/api/context_tree.py": "ad52e158fad9b063720efdd0afdacc8f6ba1760a14f8fc2a4749d78f0454f0c4",
+      "contextdb/api/condb.py": "c2beac5327bfcefaf5397edf31756e584d7231de01f7a930990d373129602115",
+      "contextdb/adapter/base.py": "576ce414d5a31dc923abb5ed995dacfd0a72292bbc58d287852c3d3e15564f9c"
     },
     "added": {
-      "README.urltrakb.md": "55ae4e6aa68d1aa3a3eb993f8383335637ee451ddc2a290d1e764edfdf32cd4e",
-      "contextdb/_urltrakb_source.json": "98398f16d76f6969b9aa78e2cd101755708b7058734a37452d4d03838e4742f8"
+      "README.urltrakb.md": "3d0e2efbd6785908a92341c80b3b5a476549bce588ad73564b8290e2a7767bf8",
+      "contextdb/_urltrakb_source.json": "5e3f3ec264fe4e30db99acd2db0fbf3904a352ce35a2536e3e29fd0d80abd65d",
+      "contextdb/core/json_values.py": "f5413d424a9d1a48f5f8bd41869309810aea881bae87ae8704eebd58850bfccd",
+      "contextdb/adapter/document.py": "e375063981b006cf7bd781d5da797e8cfb91010ff24b2968f22da23a91e521d1",
+      "contextdb/adapter/protocol.py": "bce0c553b317ed1930bb211fe087ee974fef039ae045a6da6d0e1945a1756564"
     },
     "deleted": [
       "requirements.txt"
@@ -112,7 +119,9 @@
     "contextdb/_urltrakb_source.json",
     "contextdb/adapter/__init__.py",
     "contextdb/adapter/base.py",
+    "contextdb/adapter/document.py",
     "contextdb/adapter/filesystem.py",
+    "contextdb/adapter/protocol.py",
     "contextdb/api/__init__.py",
     "contextdb/api/_shared.py",
     "contextdb/api/condb.py",
@@ -124,6 +133,7 @@
     "contextdb/config/retriever/beam.yaml",
     "contextdb/config/retriever/block.yaml",
     "contextdb/core/__init__.py",
+    "contextdb/core/json_values.py",
     "contextdb/core/storage.py",
     "contextdb/llm.py",
     "contextdb/logger.py",

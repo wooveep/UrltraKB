@@ -61,8 +61,9 @@ _ADAPTERS = {
 class ConDB:
     """Main entry point. Storage + query over hierarchical documents."""
 
-    def __init__(self, db_path: str = "contextdb.sqlite"):
-        self.storage = TreeDB(db_path)
+    def __init__(self, db_path: str = "contextdb.sqlite", *, storage: Optional[TreeDB] = None):
+        self._owns_storage = storage is None
+        self.storage = storage if storage is not None else TreeDB(db_path)
         self._llm: Optional[LLMProtocol] = None
         self._formatter = TreeFormatter(self.storage)
 
@@ -252,7 +253,8 @@ class ConDB:
     # ── Lifecycle ───────────────────────────────────────────────────
 
     def close(self):
-        self.storage.close()
+        if self._owns_storage:
+            self.storage.close()
 
     def __enter__(self):
         return self

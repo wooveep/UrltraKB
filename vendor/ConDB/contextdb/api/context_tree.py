@@ -13,7 +13,7 @@ from contextdb.api._shared import (
     namespace_entities,
     resolve_context_tree_query,
 )
-from contextdb.core.storage import StorageProtocol, TreeDB
+from contextdb.core.storage import TreeDB
 from contextdb.llm import LLMProtocol
 from contextdb.retriever import (
     BaseRetriever,
@@ -30,8 +30,9 @@ TreeBuilder = Callable[..., Union[dict[str, Any], Awaitable[dict[str, Any]]]]
 
 
 class ContextTree:
-    def __init__(self, db_path: str = "context.sqlite", storage: StorageProtocol = None, llm: LLMProtocol = None):
-        self.storage = storage or TreeDB(db_path)
+    def __init__(self, db_path: str = "context.sqlite", storage: TreeDB = None, llm: LLMProtocol = None):
+        self._owns_storage = storage is None
+        self.storage = storage if storage is not None else TreeDB(db_path)
         self.llm = llm
         self.formatter = TreeFormatter(self.storage)
         document_adapter = DocumentTreeAdapter()
@@ -250,7 +251,8 @@ class ContextTree:
         return self.formatter.format_json(tree_id, node_id, depth)
 
     def close(self):
-        self.storage.close()
+        if self._owns_storage:
+            self.storage.close()
 
     @staticmethod
     def _namespace_entities(

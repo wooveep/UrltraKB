@@ -1,84 +1,9 @@
-from abc import ABC, abstractmethod
 from typing import Any
 
-# Keys to skip when extracting attrs from node dicts
+from .protocol import BaseAdapter
+from .document import DocumentTreeAdapter, PageIndexAdapter
+
 _SKIP_KEYS = frozenset({"content", "text", "children", "nodes"})
-
-
-class BaseAdapter(ABC):
-    @abstractmethod
-    def convert(self, source_json: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-        pass
-
-
-class DocumentTreeAdapter(BaseAdapter):
-    """Adapter for pageindex-compatible hierarchical document trees."""
-
-    def convert(self, document_json: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-        entities = {}
-
-        def extract_node(node: dict[str, Any]) -> dict[str, Any]:
-            node_id = node.get("node_id")
-            entity_content = {
-                "type": "section",
-                "title": node.get("title"),
-                "summary": node.get("summary", ""),
-                "structure": node.get("structure", ""),
-            }
-            if node.get("text"):
-                entity_content["text"] = node["text"]
-            else:
-                entity_content["metadata"] = {
-                    "line_num": node.get("line_num"),
-                    "start_index": node.get("start_index"),
-                    "end_index": node.get("end_index"),
-                }
-            entities[node_id] = entity_content
-
-            children = None
-            if node.get("nodes"):
-                children = {n["node_id"]: extract_node(n) for n in node["nodes"]}
-
-            return {
-                "type": "object" if children else "leaf",
-                "attrs": {
-                    "title": node.get("title"),
-                    "summary": node.get("summary"),
-                    "structure": node.get("structure"),
-                    "page_start": node.get("start_index"),
-                    "page_end": node.get("end_index"),
-                    "line_num": node.get("line_num"),
-                },
-                "entity_id": node_id,
-                "children": children,
-            }
-
-        root_entity_id = "__root__"
-        entities[root_entity_id] = {
-            "type": "document",
-            "title": document_json.get("doc_name", "Document"),
-            "description": document_json.get("doc_description", ""),
-            "metadata": {
-                "doc_name": document_json.get("doc_name"),
-                "doc_description": document_json.get("doc_description"),
-            },
-        }
-
-        tree_structure = {
-            "type": "object",
-            "attrs": {
-                "doc_name": document_json.get("doc_name"),
-                "doc_description": document_json.get("doc_description"),
-            },
-            "entity_id": root_entity_id,
-            "children": {n["node_id"]: extract_node(n) for n in document_json.get("structure", [])},
-        }
-
-        return tree_structure, entities
-
-
-# Backward-compatible alias for the existing schema name.
-PageIndexAdapter = DocumentTreeAdapter
 
 
 class ChatIndexAdapter(BaseAdapter):
