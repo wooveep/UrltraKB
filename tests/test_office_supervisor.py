@@ -4,7 +4,62 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="macOS uses an inherited POSIX parent pipe")
+def test_parent_pipe_death_reaps_worker_group(tmp_path):
+    task = tmp_path / "task"
+    task.mkdir()
+    pids = tmp_path / "pids.json"
+    child = (
+        "import os,sys,subprocess,json,time; from pathlib import Path; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
+        f"Path({str(pids)!r}).write_text(json.dumps([os.getpid(),p.pid])); "
+        "time.sleep(60)"
+    )
+    parent_code = (
+        "import sys; from pathlib import Path; "
+        "from openkb.office.processes import run_supervised; "
+        "from openkb.office.policy import office_environment; "
+        "python=Path(sys.executable); sys.platform='darwin'; "
+        "task=Path(sys.argv[1]); "
+        "run_supervised(python.parent,python.name,None,task,"
+        "{'command':[str(python),'-c',sys.argv[2]],'timeout':60},"
+        "office_environment(task),lambda:None)"
+    )
+    with (tmp_path / "parent.log").open("wb") as log:
+        parent = subprocess.Popen(
+            [sys.executable, "-c", parent_code, str(task), child], stdout=log, stderr=log
+        )
+        owned = []
+        try:
+            deadline = time.monotonic() + 5
+            while not pids.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert pids.exists(), (tmp_path / "parent.log").read_text()
+            owned = json.loads(pids.read_text())
+            parent.kill()
+            parent.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while task.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert not task.exists(), "Supervisor did not observe its original parent's pipe EOF"
+            for pid in owned:
+                with pytest.raises(ProcessLookupError):
+                    os.kill(pid, 0)
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+            parent.wait(timeout=5)
+            for pid in owned:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
 
 
 def test_worker_starts_when_embedded_python_reports_a_directory(tmp_path):

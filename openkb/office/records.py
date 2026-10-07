@@ -18,8 +18,8 @@ class OfficeArtifact(Record):
 class OfficeManifest(Record):
     version: Literal["26.2.6.3"] = "26.2.6.3"
     build_id: Literal["8221e31b3ac356a1623c672912a3d2b492f7e3d1"]
-    platform: Literal["linux", "win32"]
-    architecture: Literal["x86_64"] = "x86_64"
+    platform: Literal["linux", "win32", "darwin"]
+    architecture: Literal["x86_64", "arm64"] = "x86_64"
     archive: OfficeArtifact
     source: OfficeArtifact
     python_version: Literal["3.12.14"]
@@ -35,6 +35,8 @@ class OfficeManifest(Record):
 
     @model_validator(mode="after")
     def validate_inventory(self):
+        if (self.platform == "darwin") != (self.architecture == "arm64"):
+            raise ValueError("Office platform and architecture do not match a supported runtime")
         if any(
             path and path not in self.files for path in (self.python, self.soffice, self.launcher)
         ):

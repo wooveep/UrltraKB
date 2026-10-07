@@ -29,8 +29,8 @@ def main():
 
     if target.system in {"Linux", "Windows"}:
         run("prepare_cfb_helper.py")
-    if target.name not in {"debian-amd64", "windows-x64"}:
-        # The committed Office adapter/lock supports only these two hosts.
+    if target.name not in {"debian-amd64", "windows-x64", "macos-arm64"}:
+        # Debian arm64 has no matching pinned upstream Office distribution.
         run("build_desktop.py")
         return
 

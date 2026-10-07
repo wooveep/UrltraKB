@@ -1,4 +1,4 @@
-"""Record the OS font supply where Office's Windows backend can also see it."""
+"""Record OS fonts visible to the native Windows and macOS Office backends."""
 
 import os
 import sys
@@ -8,6 +8,20 @@ from openkb.office.inventory import digest
 
 
 def font_supply() -> dict:
+    if sys.platform == "darwin":
+        fonts = {}
+        for directory in (
+            Path("/System/Library/Fonts"),
+            Path("/Library/Fonts"),
+            Path.home() / "Library/Fonts",
+        ):
+            for path in sorted(directory.rglob("*")):
+                if path.is_file() and path.suffix.lower() in {".otf", ".ttf", ".ttc", ".dfont"}:
+                    fonts[str(path)] = {"sha256": digest(path)}
+        return {
+            "policy": "private-office-fonts-plus-recorded-macos-fonts-v1",
+            "system_fonts": fonts,
+        }
     if sys.platform != "win32":
         from openkb.office.fontconfig import FONT_FILES, FONT_SUBSTITUTION_POLICY
 

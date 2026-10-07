@@ -229,7 +229,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     scripts = {name: inputs.record(path) for name, path, _ in toc[13]}
     collected = {}
     links = {}
-    directory_links = {}
+    directory_links = {name: item["link"] for name, item in office.items() if item.get("directory")}
     for name, path, kind in [*toc[15], *toc[18]]:
         name = Path(name).as_posix()
         if kind == "SYMLINK":

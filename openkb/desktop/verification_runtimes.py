@@ -1,8 +1,11 @@
 """Exercise bundled document helpers from the extracted, frozen installation."""
 
+import json
 import platform
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 from zipfile import ZipFile
 
 
@@ -22,11 +25,17 @@ def verify_document_runtimes(kb, root):
         )
         assert result.stdout.strip() == "openkb-cfb 1.0.0 cfb 0.15.0"
         checks.append("bundled CFB helper integrity and native execution")
-    if sys.platform not in {"linux", "win32"} or platform.machine().lower() not in {
-        "x86_64",
-        "amd64",
-    }:
+    supported_office = (
+        sys.platform in {"linux", "win32"} and platform.machine().lower() in {"x86_64", "amd64"}
+    ) or (sys.platform == "darwin" and platform.machine().lower() == "arm64")
+    if not supported_office:
         return checks
+
+    return checks + verify_office_conversions(kb, root)
+
+
+def verify_office_conversions(kb, root):
+    """Use the real shared converter, including slide ordinals and speaker notes."""
 
     import pymupdf
 
@@ -61,5 +70,25 @@ def verify_document_runtimes(kb, root):
     with pymupdf.open(pdf) as document:
         assert document.page_count == 1
         assert "Bundled Office acceptance." in document[0].get_text()
-    checks.append("bundled Office/Python/UNO converts DOCX to readable PDF")
+    checks = ["bundled Office/Python/UNO converts DOCX to readable PDF"]
+    fixtures = Path(__file__).parent / "assets/office-check"
+    for name in ("writer.doc", "slides.ppt", "slides.pptx"):
+        source = root / name
+        shutil.copyfile(fixtures / name, source)
+        pdf = root / (name + ".pdf")
+        with kb_ingest_lock(kb / ".openkb"):
+            receipt = convert_office(kb, source, pdf, check_stop=lambda: None)
+        with pymupdf.open(pdf) as document:
+            assert document.page_count == 3
+            marker = "First section hello" if name.endswith(".doc") else "Alpha visible slide"
+            assert marker in document[0].get_text()
+            if name.startswith("slides."):
+                assert "HIDDEN_SLIDE_BODY" in document[1].get_text()
+                details = json.loads(receipt.read_text("utf-8"))
+                assert [slide["hidden"] for slide in details["slides"]] == [False, True, False]
+                assert "rotate key every 90 days" in details["slides"][0]["notes"]
+                assert details["slides"][2]["notes"] == "Notes-only page evidence."
+        checks.append(
+            f"bundled Office converts {source.suffix.upper()} with physical pages and notes"
+        )
     return checks

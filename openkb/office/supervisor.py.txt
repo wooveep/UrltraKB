@@ -1,12 +1,13 @@
 """Standalone bundled-Python supervisor. Only standard library imports are allowed.
 
 It outlives an abruptly terminated application, owns a worker process group on
-Linux, and runs inside the private launcher's kill-on-close Job Object on Windows.
+Linux/macOS, and runs inside the private launcher's kill-on-close Job Object on Windows.
 """
 
 import ctypes
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -28,6 +29,10 @@ def main():
     request = json.loads(request_path.read_text(encoding="utf-8"))
     directory = request_path.parent
     linux = sys.platform == "linux"
+    posix = sys.platform != "win32"
+    parent_watch_fd = request.get("parent_watch_fd")
+    if parent_watch_fd is not None:
+        os.set_inheritable(parent_watch_fd, False)
     cancelled = False
 
     def cancel(signum, frame):
@@ -48,7 +53,7 @@ def main():
             str(Path(__file__).with_name("worker.py")),
             str(request_path),
         ],
-        start_new_session=linux,
+        start_new_session=posix,
     )
     deadline = time.monotonic() + request["timeout"]
     reason = None
@@ -58,13 +63,19 @@ def main():
                 reason = "Office conversion cancelled"
             elif time.monotonic() >= deadline:
                 reason = "Office conversion timed out"
-            elif linux and parent_identity(request["parent_pid"]) != request["parent_identity"]:
+            elif (
+                parent_watch_fd is None
+                and linux
+                and parent_identity(request["parent_pid"]) != request["parent_identity"]
+            ):
+                reason = "Office application exited"
+            elif parent_watch_fd is not None and select.select([parent_watch_fd], [], [], 0)[0]:
                 reason = "Office application exited"
             if reason:
                 break
             time.sleep(0.05)
     finally:
-        if linux:
+        if posix:
             for signum in (signal.SIGTERM, signal.SIGKILL):
                 try:
                     os.killpg(worker.pid, signum)

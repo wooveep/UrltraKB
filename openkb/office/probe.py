@@ -16,11 +16,12 @@ PYTHON_VERSION = "3.12.14"
 
 
 def host_conditions() -> dict[str, str]:
-    if sys.platform not in {"linux", "win32"} or platform.machine().lower() not in {
-        "x86_64",
-        "amd64",
-    }:
-        raise ValueError("Office runtime requires Linux or Windows x86_64")
+    machine = platform.machine().lower()
+    supported = (sys.platform in {"linux", "win32"} and machine in {"x86_64", "amd64"}) or (
+        sys.platform == "darwin" and machine == "arm64"
+    )
+    if not supported:
+        raise ValueError("Office runtime requires Linux/Windows x86_64 or macOS arm64")
     details = {
         "platform": sys.platform,
         "os": platform.platform(),

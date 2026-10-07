@@ -76,7 +76,12 @@ def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
             {"path": "_internal/coloredlogs-15.0.1.dist-info/METADATA", "typecode": "DATA"},
             {"path": "_internal/library.dylib", "typecode": "BINARY"},
             {"path": "_internal/openkb/_build_info.json", "typecode": "DATA"},
-        ]
+            {"path": "_internal/office/LibreOffice.app/Contents/MacOS/soffice"},
+        ],
+        "directory_links": {
+            "_internal/office/LibreOffice.app/Contents/Frameworks/"
+            "Python.framework/Versions/Current": "3.12"
+        },
     }
     # Exercise PyInstaller's real layout logic; copying an onedir tree into MacOS
     # makes codesign mistake Python .dist-info directories for unsigned bundles.
@@ -87,6 +92,7 @@ def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
     assert layout["Contents/Resources/coloredlogs-15.0.1.dist-info/METADATA"][1] == "DATA"
     assert layout["Contents/Frameworks/coloredlogs-15.0.1.dist-info"][1] == "SYMLINK"
     assert layout["Contents/Resources/openkb/_build_info.json"][1] == "DATA"
+    assert not any("LibreOffice.app" in name for name in layout)
     assert info_plist(identity)["LSMinimumSystemVersion"] == "14.0"
 
 

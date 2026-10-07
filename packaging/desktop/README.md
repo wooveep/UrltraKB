@@ -18,12 +18,11 @@ with desktop integration and `urltrakb`, `urltrakb-cli`, `urltrakb-api` launcher
 The macOS app requires Apple Silicon and macOS 14 or newer. It is ad-hoc signed,
 without Apple notarization; first launch may need approval in Privacy & Security.
 
-Windows x64 and Debian amd64 bundle the complete pinned LibreOffice runtime for
+Windows x64, Debian amd64 and macOS arm64 bundle the complete pinned LibreOffice runtime for
 DOC/DOCX/PPT/PPTX conversion, including its private Python/UNO and licenses. The
 build verifies the official runtime and source archives against the existing
-Office lock. Linux requires x86-64-v2 for this converter. The current Office
-adapter does not support macOS or ARM64; those packages retain PDF/text/workbook
-import and report Office conversion as unavailable. Linux and Windows also build
+Office lock. Linux requires x86-64-v2 for this converter. Debian arm64 retains
+PDF/text/workbook import and reports Office conversion as unavailable. Linux and Windows also build
 the locked CFB helper for embedded compound documents; macOS has no CFB helper.
 See [Office runtime details](../../docs/office-ingest.md).
 

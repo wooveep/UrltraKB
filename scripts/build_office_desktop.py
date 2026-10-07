@@ -6,6 +6,7 @@ It is inside _internal so all existing archive copying and path checks apply.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,20 @@ def main():
     with tempfile.TemporaryDirectory(prefix="office-native-", dir=staging) as directory:
         office = Path(directory) / "office"
         prepare(args.office_archive, args.office_source, office, launcher)
+        if sys.platform == "darwin":
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "tests/test_office_macos.py",
+                    "tests/test_office_supervisor.py",
+                ],
+                cwd=root,
+                env={**os.environ, "OPENKB_TEST_OFFICE_RUNTIME": str(office)},
+                check=True,
+            )
         build_desktop()
         shutil.move(office, root / "packaging/desktop/dist/UrltraKB/_internal/office")
 

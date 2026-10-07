@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -10,6 +12,10 @@ def bundle_toc(program: Path, inventory: dict) -> list[tuple[str, str, str]]:
     entries = []
     for row in inventory["files"]:
         name = row["path"]
+        if name.startswith("_internal/office/"):
+            # LibreOffice owns its app/framework layout and Mach-O install names.
+            # Copy its already signed, inventoried distribution after BUNDLE.
+            continue
         if not name.startswith("_internal/"):
             entries.append((name, str(program / name), "EXECUTABLE"))
         elif "link" in row:
@@ -20,6 +26,8 @@ def bundle_toc(program: Path, inventory: dict) -> list[tuple[str, str, str]]:
                 raise ValueError(f"Unsupported bundle input type: {kind}")
             entries.append((name.removeprefix("_internal/"), str(program / name), kind))
     for name, link in inventory.get("directory_links", {}).items():
+        if name.startswith("_internal/office/"):
+            continue
         entries.append((name.removeprefix("_internal/"), link, "SYMLINK"))
     for name in ("BUILD-NOTICE.txt", "LICENSE"):
         entries.append(("build-docs/" + name, str(program / name), "DATA"))
@@ -67,4 +75,16 @@ def stage_macos(program: Path, app: Path, identity: dict, inventory: dict) -> Pa
             Path(__file__).resolve().parents[1] / "openkb/desktop/assets/brand/openkb-app-icon.ico"
         ),
     )
+    office = program / "_internal/office"
+    if office.is_dir():
+        from openkb.office.runtime import validate_runtime
+
+        copied = app / "Contents/Resources/office"
+        shutil.copytree(office, copied, symlinks=True)
+        (app / "Contents/Frameworks/office").symlink_to(
+            "../Resources/office", target_is_directory=True
+        )
+        validate_runtime(copied)
+        # Seal the new resources without rewriting signatures inside Office.
+        subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
     return app / "Contents/MacOS"

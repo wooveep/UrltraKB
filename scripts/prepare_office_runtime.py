@@ -16,7 +16,7 @@ from pathlib import Path
 
 from openkb.locks import atomic_write_json
 from openkb.office.inventory import digest, inventory
-from openkb.office.probe import probe
+from openkb.office.probe import host_conditions, probe
 from openkb.office.records import OfficeArtifact, OfficeManifest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -30,8 +30,7 @@ def verify(path: Path, record: dict):
 def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = None):
     lock_path = REPOSITORY / "openkb/office/runtime-lock.json"
     lock = json.loads(lock_path.read_text())
-    if sys.platform not in {"linux", "win32"}:
-        raise ValueError("Only Linux and Windows Office builds are supported")
+    host_conditions()
     verify(archive, lock[sys.platform])
     verify(source, lock["source"])
     if output.exists():
@@ -51,6 +50,13 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
                 subprocess.run(["dpkg-deb", "-x", str(package), str(extracted)], check=True)
             runtime = extracted / "opt/libreoffice26.2"
             python, soffice = "program/python", "program/soffice"
+        elif sys.platform == "darwin":
+            from macos_office import extract
+
+            runtime = extracted / "office"
+            extract(archive.resolve(), stage, runtime)
+            python = "LibreOffice.app/Contents/Resources/python"
+            soffice = "LibreOffice.app/Contents/MacOS/soffice"
         else:
             subprocess.run(
                 [
@@ -81,7 +87,11 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
         license_dir.mkdir(parents=True)
         shutil.copy2(lock_path, runtime / "openkb-provenance/runtime-lock.json")
         shutil.copy2(fonts_path, runtime / "openkb-provenance/application-fonts.json")
-        font_dir = runtime / "share/fonts/truetype"
+        font_dir = runtime / (
+            "LibreOffice.app/Contents/Resources/fonts/truetype"
+            if sys.platform == "darwin"
+            else "share/fonts/truetype"
+        )
         font_dir.mkdir(parents=True, exist_ok=True)
         for font in json.loads(fonts_path.read_text()):
             original = fonts_path.parent / font["file"]
@@ -89,6 +99,10 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
                 raise ValueError(f"Application font hash mismatch: {original.name}")
             shutil.copy2(original, font_dir / original.name)
             shutil.copy2(fonts_path.parent / font["license"], license_dir / font["license"])
+        if sys.platform == "darwin":
+            from macos_office import sign
+
+            sign(runtime / "LibreOffice.app")
         private_launcher = None
         if sys.platform == "win32" and launcher:
             private_launcher = "openkb-provenance/office-launcher.exe"
@@ -98,6 +112,7 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
         manifest = OfficeManifest(
             build_id=lock["build_id"],
             platform=sys.platform,
+            architecture="arm64" if sys.platform == "darwin" else "x86_64",
             archive=OfficeArtifact(**lock[sys.platform]),
             source=OfficeArtifact(**lock["source"]),
             python_version=lock["python_version"],

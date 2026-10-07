@@ -22,7 +22,7 @@ Cache recovery and recompilation consume the same frozen package without Office.
 
 The locked release is LibreOffice **26.2.6.3**, build
 `8221e31b3ac356a1623c672912a3d2b492f7e3d1`, with its Python **3.12.14** and UNO bridge.
-Official Linux DEB bundle, Windows MSI and corresponding core source URLs, sizes
+Official Linux DEB bundle, Windows MSI, macOS arm64 DMG and corresponding core source URLs, sizes
 and SHA-256 values are in `openkb/office/runtime-lock.json`. Preparation verifies
 these archives and probes the actual executables. It extracts the complete Office
 tree, preserves upstream licenses and fonts, adds the eight unmodified fonts in
@@ -46,17 +46,23 @@ separate capability and is not implied by successful body conversion.
 normal KB/global inheritance. Native startup probes also have finite deadlines.
 Cancellation cleans up the owned process tree. On Linux an independent supervisor
 watches the application PID and its start identity, terminates the worker process
-group and reaps descendants. Windows uses a separately built Rust launcher with
+group and reaps descendants. On macOS the supervisor watches an inherited pipe
+whose only writer belongs to the application, and terminates the worker process
+group when that pipe closes, including after an abrupt application exit.
+Windows uses a separately built Rust launcher with
 a kill-on-close Job Object; it resets DLL search state in that child before
 starting the matching Python. Private task files sit inside the application's
 owned input directory so task recovery can collect them after an abrupt exit.
 
-Linux requires x86-64-v2 and successful private Office/Python/UNO native probes.
+The packaged runtime supports Linux/Windows x86_64 and macOS Apple Silicon.
+Linux requires x86-64-v2. Every platform requires successful private
+Office/Python/UNO native probes.
 Office unavailability blocks only Office import; PDF and text remain usable.
 The runtime's source and hashes, helper hashes, host, fonts, locale, timeout and
 typed load/export properties are part of processing identity. Linux uses a
 private Fontconfig directory. Windows also exposes registered OS fonts; their
-paths and hashes enter the identity. No source font is rewritten. The record
+paths and hashes enter the identity. macOS records fonts from the system,
+machine-wide and user Library font directories. No source font is rewritten. The record
 lists all observed PDF fonts and substitutions proven by matching unique text
 runs across spans, including Chinese and wrapped paragraphs. Tables, text frames,
 headers and footers contribute requested-font observations. Ambiguous or unmatched
@@ -80,6 +86,14 @@ inventory next; it records Office, its Python, application fonts, the launcher
 and generated provenance under their own components. Existing runtime packaging
 copies the complete checksummed sidecar with its executable modes and links.
 
+On macOS, preparation mounts the verified DMG read-only and preserves the complete
+`LibreOffice.app`, including its private Python framework. It adds application
+fonts and re-signs the Office resource seal before recording the runtime inventory.
+The final application keeps Office intact under `Contents/Resources/office`, with
+a link from `Contents/Frameworks/office`; PyInstaller does not relocate or rewrite
+its binaries. Packaging verifies the nested code signatures and rechecks the
+Office inventory before testing the extracted application.
+
 For development, `scripts/prepare_office_runtime.py --archive ... --source ...
 --output ...` prepares an independent runtime. Set the absolute
 `office_runtime_path` in KB or global settings; it is also available in desktop
@@ -102,6 +116,11 @@ blank pages, missing-font substitution, full/segmented compilation, API/CLI
 readback, retained recompile, failure preservation, corrupt PDF references,
 timeout, cancellation and application death during both probes and conversion.
 Only model calls are substituted in successful conversion tests.
+
+The macOS build runs native DOC/DOCX/PPT/PPTX conversion and parent-death cleanup
+tests before freezing. Extracted Windows x64, Debian amd64 and macOS arm64 packages
+also convert all four formats, checking physical pages, hidden slides and speaker
+notes using authored synthetic fixtures.
 
 Passing on a development host does not enable the final distribution. Issues
 #100–#102 retain the real-model and clean Windows 11/Debian 13.6 GNOME/X11 manual

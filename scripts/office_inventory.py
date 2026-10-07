@@ -44,7 +44,7 @@ def office_inventory(program: Path, inputs) -> dict[str, dict]:
         "openkb-office.json": digest(root / "openkb-office.json"),
     }.items():
         component = office
-        if name.startswith("program/python-core-"):
+        if name.startswith("program/python-core-") or "LibreOfficePython.framework/" in name:
             component = python
         elif name == manifest.launcher:
             component = launcher
@@ -58,4 +58,10 @@ def office_inventory(program: Path, inputs) -> dict[str, dict]:
         if (root / name).is_symlink():
             item["link"] = os.readlink(root / name)
         result["_internal/office/" + name] = item
+    for name in manifest.links:
+        if (root / name).is_dir():
+            result["_internal/office/" + name] = {
+                "directory": True,
+                "link": os.readlink(root / name),
+            }
     return result

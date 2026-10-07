@@ -93,6 +93,10 @@ def validate_runtime(root: Path) -> OfficeManifest:
     lock = json.loads(Path(__file__).with_name("runtime-lock.json").read_text())
     if manifest.platform != sys.platform:
         raise ValueError("Office runtime was prepared for a different platform")
+    machine = platform.machine().lower()
+    architecture = "x86_64" if machine == "amd64" else machine
+    if manifest.architecture != architecture:
+        raise ValueError("Office runtime was prepared for a different architecture")
     for name, actual in ((sys.platform, manifest.archive), ("source", manifest.source)):
         if actual.model_dump(exclude={"schema_version"}) != lock[name]:
             raise ValueError(
