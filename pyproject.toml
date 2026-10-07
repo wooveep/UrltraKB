@@ -115,6 +115,7 @@ include = [
     "/docs/desktop-evidence/dev-1.2.0",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
+    "/Makefile", "/.github/workflows/desktop-build.yml",
 ]
 exclude = ["/openkb/web", "/frontend"]
 

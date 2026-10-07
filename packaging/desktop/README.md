@@ -1,5 +1,53 @@
 # UrltraKB desktop builds and split delivery
 
+## Four-platform GitHub releases
+
+The `Desktop packages` workflow was ported from `dev-1.1.0` to `dev-1.2.0`.
+It builds the current branch's application and four local SDKs from committed
+sources and the existing dependency locks.
+
+| Output | Native build environment | Installation |
+| --- | --- | --- |
+| `UrltraKB-VERSION-debian-amd64.deb` | Debian 13, x86_64 | `sudo apt install ./FILE.deb` |
+| `UrltraKB-VERSION-debian-arm64.deb` | Debian 13, ARM64 | `sudo apt install ./FILE.deb` |
+| `UrltraKB-VERSION-windows-x64.zip` | Windows x86_64 | Extract; run `UrltraKB.exe` |
+| `UrltraKB-VERSION-macos-arm64.zip` | macOS ARM64 | Extract; move `UrltraKB.app` to Applications |
+
+Debian packages require glibc 2.41 or newer and install under `/opt/urltrakb`,
+with desktop integration and `urltrakb`, `urltrakb-cli`, `urltrakb-api` launchers.
+The macOS app requires Apple Silicon and macOS 14 or newer. It is ad-hoc signed,
+without Apple notarization; first launch may need approval in Privacy & Security.
+
+Pushes to `main`, `dev-1.2.0`, and `v*` tags trigger builds. Manual builds can
+select one platform or all four:
+
+```sh
+gh workflow run desktop-build.yml --repo wooveep/UrltraKB --ref dev-1.2.0
+gh workflow run desktop-build.yml --repo wooveep/UrltraKB --ref dev-1.2.0 -f target=macos-arm64
+make desktop
+make bundle
+make package  # Application wheel/sdist plus all four local SDK wheels
+```
+
+All stages export `COMMIT=HEAD` by default; commit changes before building.
+`BUILD_DIR` and `DIST_DIR` override `build/packages` and `dist`. Windows users
+can run `python scripts/make_packages.py desktop` and `bundle` without Make.
+
+Each installer is extracted and its CLI and native acceptance runner are
+executed before upload. Debian also installs, verifies and uninstalls in a clean
+container. Linux and macOS CI use Qt's `offscreen` platform; interactive desktop
+integration still needs testing on the destination machine.
+
+Branch builds are development artifacts retained in Actions for 14 days. An
+exact stable tag such as `v1.2.0` sets the package version to `1.2.0`. After all
+four builds pass, the release job validates every version, source commit and
+SHA256. It uploads four installers, four matching `-source.zip` archives, four
+`-build.json` inventories and `SHA256SUMS.txt`, then publishes the draft Release.
+Failed or incomplete builds cannot pass this publication check. The comprehensive
+third-party material audit below remains a separate process.
+
+## Source and license materials
+
 Build and package the actual UrltraKB desktop, CLI, REST and acceptance entry
 points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
@@ -29,7 +77,7 @@ For pip-based source setup, install all four local dependencies alongside this
 project. Local version suffixes prevent accidental fallback to registry releases.
 See [the vendored dependency guide](../../docs/vendor-sdk.md).
 
-Build separately on Windows 11 x86_64 and Debian 13.6 x86_64. Use CPython
+Build on one of the four native hosts listed above. Use CPython
 3.12.13, Rust 1.95.0, and the repository's frozen lock. First export the selected
 committed source to a new directory:
 
@@ -39,7 +87,7 @@ committed source to a new directory:
 
 This reads Git objects and excludes workspace changes, private notes and retired
 browser files. It writes `source-export.json` and `openkb/_build_info.json` with
-the commit and a development build version. In the exported directory, set
+the commit and its exact release tag or development version. In the exported directory, set
 `SETUPTOOLS_SCM_PRETEND_VERSION` to the printed version, then install the desktop,
 API and development extras explicitly:
 

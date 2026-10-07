@@ -30,6 +30,8 @@ def _repository(tmp_path):
         "openkb/web/index.html": "retired browser bundle",
         "pyproject.toml": "[project]\nname = 'openkb'\n",
         "LICENSE": "original license",
+        "Makefile": "help:\n\t@echo build\n",
+        ".github/workflows/desktop-build.yml": "name: Desktop packages\n",
         "CLAUDE.md": "private working notes",
         ".env": "PRIVATE_TEST_VALUE=do-not-export",
         "docs/internal/private.md": "private design history",
@@ -89,6 +91,8 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
         "vendor/ConDB/dist",
     ):
         assert not (output / name).exists()
+    assert (output / "Makefile").is_file()
+    assert (output / ".github/workflows/desktop-build.yml").is_file()
     assert json.loads((output / "openkb/_build_info.json").read_text("utf-8")) == identity
     assert verify_source(output) == identity
     assert (
@@ -117,6 +121,44 @@ def test_build_refuses_modified_export_or_additional_application_source(tmp_path
     (output / "openkb/injected.py").write_text("EXTRA = True\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Unexpected"):
         verify_source(output)
+
+
+@pytest.mark.parametrize("annotated", [False, True])
+def test_exact_release_tag_sets_export_and_embedded_version(tmp_path, annotated):
+    from scripts.export_desktop_source import export_source, verify_source
+
+    repo = _repository(tmp_path)
+    command = [
+        "git",
+        "-C",
+        str(repo),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+    ]
+    subprocess.run(
+        [*command, "tag", *(["-a", "-m", "Release"] if annotated else []), "v1.0.0"], check=True
+    )
+    output = tmp_path / "release"
+    identity = export_source(repo, output)
+    assert identity["version"] == "1.0.0"
+    assert verify_source(output) == identity
+    assert json.loads((output / "openkb/_build_info.json").read_text())["version"] == "1.0.0"
+    subprocess.run([*command, "commit", "--allow-empty", "-qm", "After release"], check=True)
+    development = export_source(repo, tmp_path / "next")
+    assert development["version"].startswith("0.1.dev")
+    assert verify_source(tmp_path / "next") == development
+
+
+def test_multiple_release_tags_cannot_silently_choose_a_version(tmp_path):
+    from scripts.export_desktop_source import export_source
+
+    repo = _repository(tmp_path)
+    for tag in ("v1.0.0", "v1.0.1"):
+        subprocess.run(["git", "-C", str(repo), "tag", tag], check=True)
+    with pytest.raises(ValueError, match="Multiple release versions"):
+        export_source(repo, tmp_path / "release")
 
 
 def test_export_does_not_overwrite_an_existing_directory(tmp_path):

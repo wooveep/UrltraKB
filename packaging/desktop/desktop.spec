@@ -62,7 +62,9 @@ executables = [
         pyz, analysis.scripts, [], exclude_binaries=True, name=name,
         debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
         console=name != "UrltraKB", disable_windowed_traceback=False,
-        icon=str(repo / "openkb/desktop/assets/brand/openkb-app-icon.ico"),
+        icon=str(repo / "openkb/desktop/assets/brand/openkb-app-icon.ico")
+        if sys.platform == "win32" else None,
+        target_arch="arm64" if sys.platform == "darwin" else None,
     )
     for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
 ]
