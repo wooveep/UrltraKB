@@ -65,11 +65,13 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
                 check=True,
                 timeout=300,
             )
-            candidates = list(extracted.rglob("program/soffice.exe"))
+            candidates = list(extracted.rglob("program/soffice.com"))
             if len(candidates) != 1:
                 raise ValueError("Administrative MSI extraction did not produce one Office tree")
             runtime = candidates[0].parent.parent
-            python, soffice = "program/python.exe", "program/soffice.exe"
+            # The GUI .exe displays command-line information in a dialog on
+            # Windows; the console .com returns it to the supervised process.
+            python, soffice = "program/python.exe", "program/soffice.com"
             if launcher is None:
                 raise ValueError(
                     "Windows Office requires the separately built owned-process launcher"
