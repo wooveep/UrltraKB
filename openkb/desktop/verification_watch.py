@@ -4,16 +4,14 @@
 def verify_watch(window, kb, wait_until, *, model=False):
     from openkb.desktop.watch import WatchDialog
     from openkb.locks import atomic_write_text, kb_ingest_lock
-    from openkb.state import HashRegistry
 
-    source = kb / "raw/监听启动.md"
-    with kb_ingest_lock(kb / ".openkb"):
-        atomic_write_text(source, "# 监听启动\n\n这份稳定资料来自启动补查。")
-        if not model:
-            registry = HashRegistry(kb / ".openkb/hashes.json")
-            registry.add(
-                registry.hash_file(source), {"name": source.name, "raw_path": "raw/监听启动.md"}
-            )
+    # Every raw Markdown source now goes through common source admission, even
+    # when a legacy content hash exists. Only the controlled-model run may add
+    # a document; the model-free smoke check exercises idle scan/stop controls.
+    if model:
+        source = kb / "raw/监听启动.md"
+        with kb_ingest_lock(kb / ".openkb"):
+            atomic_write_text(source, "# 监听启动\n\n这份稳定资料来自启动补查。")
     before = {task.id for task in window.manager.tasks()}
     window.open_knowledge_base(kb)
     wait_until(lambda: window.kb == kb and not window.io._callbacks)

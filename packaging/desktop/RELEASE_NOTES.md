@@ -26,6 +26,8 @@
 ## 运行要求与验证范围
 
 - Debian 13 或兼容系统（glibc 2.41+）；macOS 为 Apple Silicon、macOS 14+。
+- Windows x64 与 Debian amd64 内置锁定的 LibreOffice，支持 Word/PPT 转换；Linux Office 需要 x86-64-v2 CPU。
+- 当前 Office 转换器不支持 macOS／Debian arm64；这两个包可导入 PDF、文本和工作簿。macOS 也未包含 CFB 嵌入对象恢复工具。
 - macOS 使用 ad-hoc 签名，未经 Apple 公证；首次启动可能需要在“隐私与安全性”中允许。
 - 四个平台执行安装包提取及冻结程序自动验收；Debian 额外验证实际安装与卸载。
 - Linux/macOS 自动验收使用 Qt offscreen，不替代实机窗口、菜单和首次启动检查。

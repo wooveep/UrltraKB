@@ -35,6 +35,7 @@ DEBIAN_DEPENDS = (
     "libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, "
     "libxcb-sync1, libxcb-xfixes0, libxcb-xkb1, zlib1g"
 )
+OFFICE_DEPENDS = ", libcairo2, libcups2t64, libnss3, libsm6, libice6, libxinerama1, libxslt1.1"
 
 
 def write(path: Path, content: str, mode: int = 0o644) -> None:
@@ -69,12 +70,15 @@ def stage_debian(program: Path, root: Path, source: Path, identity: dict, arch: 
     # PEP 440's .dev must sort before the corresponding Debian release.
     version = identity["version"].replace(".dev", "~dev")
     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file()) // 1024 + 1
+    dependencies = DEBIAN_DEPENDS
+    if (installed / "_internal/office/openkb-office.json").is_file():
+        dependencies += OFFICE_DEPENDS
     write(
         root / "DEBIAN/control",
         f"Package: urltrakb\nVersion: {version}\nArchitecture: {arch}\n"
         "Maintainer: UrltraKB maintainers <noreply@github.com>\n"
         "Section: utils\nPriority: optional\n"
-        f"Installed-Size: {size}\nDepends: {DEBIAN_DEPENDS}\n"
+        f"Installed-Size: {size}\nDepends: {dependencies}\n"
         "Homepage: https://github.com/wooveep/UrltraKB\n"
         "Description: UrltraKB native knowledge-base workbench\n"
         " Includes desktop, CLI and REST entry points and their Python runtime.\n",

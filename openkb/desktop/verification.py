@@ -162,6 +162,9 @@ print("UrltraKB")  # fenced_code 中文知识
 
     try:
         environment, cwd = dict(os.environ), os.getcwd()
+        from openkb.desktop.verification_runtimes import verify_document_runtimes
+
+        checks.extend(verify_document_runtimes(first, root))
         if args.baseline:
             from openkb.desktop.verification_baseline import verify_baseline
 

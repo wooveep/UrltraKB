@@ -36,6 +36,7 @@ _FILES = {
     "docs/desktop-evidence/workbench/settings.png",
     "docs/golden-principles.md",
     "docs/vendor-sdk.md",
+    "docs/office-ingest.md",
 }
 _GENERATED = {
     "openkb/rendering/assets",
