@@ -1,6 +1,6 @@
 # ConDB 本地源码基线
 
-分发名 `pageindex-condb`，导入名 `contextdb`，本地版本 `1.0+urltrakb.3`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
+分发名 `pageindex-condb`，导入名 `contextdb`，本地版本 `1.0+urltrakb.4`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
 
 本地补丁加入无损文档转换、共享原生 TreeDB、保存点事务、稳定顺序和封存只读。文档及节点的原始对象完整保留，定位字段维持各自单位，不猜测为 PDF 页。存储/转换不调用模型。查询运行时及 OpenKB 检索/会话接入另行实施。
 
@@ -26,3 +26,5 @@
 主题的 analysis_roles 必须属于 content_roles，不能将含助手分析的主题标记为 user-only。
 旧 topics/subtopics、tree/conversation 和预览均拒绝，不猜测消息配对，也不调用模型迁移。
 旧 `contextdb.adapter.base.ChatIndexAdapter` import 保持可用，正式模块为 `contextdb.adapter.chatindex`。
+
+本地 `.4` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；数据库 schema 与交换格式不变。

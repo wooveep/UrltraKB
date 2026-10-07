@@ -16,7 +16,7 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 import litellm
 
@@ -33,6 +33,21 @@ ROLES = frozenset(
         "conversation_retrieval",
         "knowledge_retrieval",
         "answer",
+    }
+)
+# These SDKs use device login, workload credentials, or an unauthenticated
+# local daemon instead of the task's API-key bundle.
+_SDK_AUTH_PROVIDERS = frozenset(
+    {
+        "chatgpt",
+        "github_copilot",
+        "bedrock",
+        "bedrock_converse",
+        "vertex_ai",
+        "vertex_ai_beta",
+        "sagemaker",
+        "ollama",
+        "ollama_chat",
     }
 )
 _GENERATION = frozenset(
@@ -102,6 +117,35 @@ class RoleBindings:
 
     def credentials(self) -> LlmCredentialBundle:
         return LlmCredentialBundle(**json.loads(self._payload)["credentials"])
+
+    def validate_request_credentials(
+        self, role: str, headers: Mapping[str, str], *, selected_auth: str | None = None
+    ) -> None:
+        """Reject implicit API-key fallback at the actual model-send boundary."""
+        bundle = self.credentials()
+        model = self.model(role)
+        provider = model.split("/", 1)[0] if "/" in model else "openai"
+        sdk_auth = provider in _SDK_AUTH_PROVIDERS
+        # Azure also supports Entra/workload tokens. An API-key header here
+        # would instead come from an uncaptured SDK/environment fallback.
+        if provider in {"azure", "azure_ai"}:
+            sdk_auth = "api-key" not in headers
+        elif provider in {"ollama", "ollama_chat"}:
+            captured_headers = {key.lower(): value for key, value in bundle.extra_headers.items()}
+            sdk_auth = not headers.get("authorization") or headers.get("authorization") == (
+                captured_headers.get("authorization")
+            )
+        if selected_auth is not None:
+            sdk_auth = selected_auth == "sdk" and "api-key" not in headers
+        if not bundle.api_key and not sdk_auth:
+            raise litellm.AuthenticationError(
+                message=(
+                    "No API key was captured for this model task; "
+                    "configure credentials and start a new task"
+                ),
+                model=model,
+                llm_provider=provider,
+            )
 
     def public_identity(self) -> dict:
         values = json.loads(self._payload)
@@ -353,21 +397,29 @@ class CompletionExecutor:
 
     @contextmanager
     def attempt(self, role: str, request: ModelRequest, logical_id: str):
+        from litellm._urltrakb_auth import authentication_scope
+
         self.reserve()
         scope = active_scope() or self.scope
         if scope and self.scope and scope.kb_dir != self.scope.kb_dir:
             raise ValueError("Model execution belongs to another knowledge base")
-        with observe_model_call(
-            self.bindings.model(role),
-            request.operation + "." + request.stage,
-            scope=scope,
-            logical_call_id=logical_id,
-            parent_call_id=request.parent_call_id,
-            operation=request.operation,
-            prompt_version=request.prompt_version,
-            fingerprint=self.fingerprint,
-            before_send=self._before_send,
-        ) as observed:
+        with (
+            authentication_scope() as authentication,
+            observe_model_call(
+                self.bindings.model(role),
+                request.operation + "." + request.stage,
+                scope=scope,
+                logical_call_id=logical_id,
+                parent_call_id=request.parent_call_id,
+                operation=request.operation,
+                prompt_version=request.prompt_version,
+                fingerprint=self.fingerprint,
+                before_send=self._before_send,
+                validate_credentials=lambda headers: self.bindings.validate_request_credentials(
+                    role, headers, selected_auth=authentication.kind
+                ),
+            ) as observed,
+        ):
             yield observed
 
     def _before_send(self, count: int) -> None:

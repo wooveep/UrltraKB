@@ -336,6 +336,8 @@ class DatabricksBase:
         """
         from litellm._logging import verbose_logger
 
+        from litellm._urltrakb_auth import selected_authentication
+
         # Check for OAuth M2M credentials (recommended for production)
         client_id = os.getenv("DATABRICKS_CLIENT_ID")
         client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
@@ -344,6 +346,7 @@ class DatabricksBase:
         if api_base is None:
             api_base = os.getenv("DATABRICKS_API_BASE")
 
+        selected_authentication("api_key" if api_key is not None else "sdk")
         if client_id and client_secret and api_base:
             # Use OAuth M2M flow (preferred for production)
             verbose_logger.debug("Using OAuth M2M authentication for Databricks")

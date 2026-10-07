@@ -746,10 +746,13 @@ class BaseAzureLLM(BaseOpenAILLM):
     def _base_validate_azure_environment(
         headers: dict, litellm_params: Optional[GenericLiteLLMParams]
     ) -> dict:
+        from litellm._urltrakb_auth import selected_authentication
+
         litellm_params = litellm_params or GenericLiteLLMParams()
 
         # Check if api-key is already in headers; if so, use it
         if "api-key" in headers:
+            selected_authentication("api_key")
             return headers
 
         api_key = (
@@ -761,11 +764,13 @@ class BaseAzureLLM(BaseOpenAILLM):
         )
 
         if api_key:
+            selected_authentication("api_key")
             headers["api-key"] = api_key
             return headers
 
         ### Fallback to Azure AD token-based authentication if no API key is available
         ### Retrieves Azure AD token and adds it to the Authorization header
+        selected_authentication("sdk")
         azure_ad_token = get_azure_ad_token(litellm_params)
         if azure_ad_token:
             headers["Authorization"] = f"Bearer {azure_ad_token}"

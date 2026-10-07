@@ -1,4 +1,4 @@
-from ..llm import gather_required
+from ..llm import gather_required, run_sync
 import litellm
 import logging
 import os
@@ -118,19 +118,10 @@ def _sync_llm_semaphore():
     It uses the same process-wide ceiling so sync and async LLM calls share one
     real cap. A scoped override can only narrow that cap for the active context.
 
-    A *blocking* ceiling acquire is only safe OFF the event-loop thread. Several
-    sync LLM helpers (``check_toc`` → ``toc_detector_single_page``,
-    ``process_no_toc`` → ``generate_toc_init``, ``toc_transformer``, …) are
-    called synchronously from inside async coroutines (``meta_processor`` →
-    ``process_large_node_recursively``), i.e. ON the running loop. There, the
-    async ``_llm_semaphore`` holders own the ceiling permits and can only
-    release them by resuming on that same loop — so a blocking acquire here
-    would freeze the loop and *deadlock*: the permit it waits for can never be
-    freed. When we detect a running loop we therefore take a slot only if one is
-    immediately free (non-blocking) and otherwise proceed without it. That's
-    safe: a sync call monopolizes the loop thread while it runs, so it's already
-    serialized on this loop and can't multiply the in-flight count beyond one
-    extra per loop.
+    Blocking stages in async pipelines run through ``run_sync`` so their wait
+    cannot prevent async holders from releasing permits. A direct sync caller
+    on a running loop must use an immediately available slot or fail explicitly;
+    it may neither deadlock the loop nor exceed a saturated limit.
     """
     try:
         asyncio.get_running_loop()
@@ -140,9 +131,10 @@ def _sync_llm_semaphore():
 
     ceiling_sem = _process_ceiling_semaphore()
     # Blocking acquire() (off-loop) always returns True; acquire(False) (on-loop)
-    # may return False, meaning "no free permit — proceed without one" rather
-    # than block the loop into a deadlock.
+    # may return False; fail rather than block the loop into a deadlock.
     held_ceiling = ceiling_sem.acquire(False) if on_event_loop else ceiling_sem.acquire()
+    if not held_ceiling:
+        raise RuntimeError("Index concurrency exhausted; use llm_acompletion or run_sync on an event loop")
     # Only track a permit we actually hold (mirrors _llm_semaphore): guards
     # against releasing one we never acquired.
     scoped_sem = None
@@ -154,8 +146,9 @@ def _sync_llm_semaphore():
             if candidate is not None:
                 # Same rule for the scoped cap: never block the loop for it.
                 if on_event_loop:
-                    if candidate.acquire(False):
-                        scoped_sem = candidate
+                    if not candidate.acquire(False):
+                        raise RuntimeError("Index concurrency exhausted; use llm_acompletion or run_sync on an event loop")
+                    scoped_sem = candidate
                 else:
                     candidate.acquire()
                     scoped_sem = candidate
@@ -180,7 +173,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False,
     from ..default_llm import DefaultIndexLLM
     messages = list(chat_history or []) + [{"role": "user", "content": prompt}]
     client = current_client() or DefaultIndexLLM(model)
-    response = client.complete(messages, stage=usage_stage)
+    with _sync_llm_semaphore():
+        response = client.complete(messages, stage=usage_stage)
     return (response.text, response.finish_reason) if return_finish_reason else response.text
 
 
@@ -188,7 +182,8 @@ async def llm_acompletion(model, prompt, *, usage_stage="structure"):
     from ..llm import current_client
     from ..default_llm import DefaultIndexLLM
     messages = [{"role": "user", "content": prompt}]
-    return (await (current_client() or DefaultIndexLLM(model)).acomplete(messages, stage=usage_stage)).text
+    async with _llm_semaphore():
+        return (await (current_client() or DefaultIndexLLM(model)).acomplete(messages, stage=usage_stage)).text
 
 
 def extract_json(content):

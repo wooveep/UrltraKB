@@ -20,18 +20,17 @@ class DefaultIndexLLM:
                              if getattr(choice, "finish_reason", None) == "length" else "finished")
 
     def complete(self, messages, *, stage):
-        from .index.utils import _sync_llm_semaphore, _usage_call
-        with _sync_llm_semaphore(), _usage_call(self.model, stage) as usage:
+        from .index.utils import _usage_call
+        with _usage_call(self.model, stage) as usage:
             response = litellm.completion(**self._options(messages))
             if usage:
                 usage.finish(response)
         return self._result(response)
 
     async def acomplete(self, messages, *, stage):
-        from .index.utils import _llm_semaphore, _usage_call
-        async with _llm_semaphore():
-            with _usage_call(self.model, stage) as usage:
-                response = await litellm.acompletion(**self._options(messages))
-                if usage:
-                    usage.finish(response)
+        from .index.utils import _usage_call
+        with _usage_call(self.model, stage) as usage:
+            response = await litellm.acompletion(**self._options(messages))
+            if usage:
+                usage.finish(response)
         return self._result(response)

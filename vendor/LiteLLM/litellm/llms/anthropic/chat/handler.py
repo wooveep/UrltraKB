@@ -545,6 +545,7 @@ class ModelResponseIterator:
         self.streaming_response = streaming_response
         self.response_iterator = self.streaming_response
         self.content_blocks: List[ContentBlockDelta] = []
+        self.usage_receipt: Dict[str, Any] = {}
         self.tool_index = -1
         self.json_mode = json_mode
         self.speed = speed
@@ -613,13 +614,19 @@ class ModelResponseIterator:
         return False
 
     def _handle_usage(self, anthropic_usage_chunk: Union[dict, UsageDelta]) -> Usage:
+        # message_start carries input/cache usage; message_delta commonly only
+        # updates cumulative output usage. Merge the raw receipts before the
+        # OpenAI conversion supplies defaults for fields absent from an event.
+        self.usage_receipt.update(
+            {key: value for key, value in anthropic_usage_chunk.items() if value is not None}
+        )
         reasoning_content = (
             "".join(self.reasoning_content_chunks)
             if self.reasoning_content_chunks
             else None
         )
         return AnthropicConfig().calculate_usage(
-            usage_object=cast(dict, anthropic_usage_chunk),
+            usage_object=self.usage_receipt,
             reasoning_content=reasoning_content,
             speed=self.speed,
         )

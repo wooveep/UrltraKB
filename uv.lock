@@ -816,14 +816,14 @@ wheels = [
 
 [[package]]
 name = "ictree"
-version = "0.1.0+urltrakb.2"
+version = "0.1.0+urltrakb.3"
 source = { editable = "vendor/ChatIndex" }
 dependencies = [
     { name = "litellm" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "litellm", specifier = "==1.87.2+urltrakb.2" }]
+requires-dist = [{ name = "litellm", specifier = "==1.87.2+urltrakb.3" }]
 
 [[package]]
 name = "idna"
@@ -993,7 +993,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.87.2+urltrakb.2"
+version = "1.87.2+urltrakb.3"
 source = { editable = "vendor/LiteLLM" }
 dependencies = [
     { name = "aiohttp" },
@@ -1810,7 +1810,7 @@ wheels = [
 
 [[package]]
 name = "pageindex"
-version = "0.3.0.dev3+urltrakb.7"
+version = "0.3.0.dev3+urltrakb.8"
 source = { editable = "vendor/PageIndex" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
@@ -1828,7 +1828,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", extras = ["socks"], specifier = "==0.28.1" },
-    { name = "litellm", specifier = "==1.87.2+urltrakb.2" },
+    { name = "litellm", specifier = "==1.87.2+urltrakb.3" },
     { name = "openai", specifier = "==2.44.0" },
     { name = "openai-agents", specifier = "==0.17.3" },
     { name = "pydantic", specifier = "==2.13.4" },
@@ -1841,7 +1841,7 @@ requires-dist = [
 
 [[package]]
 name = "pageindex-condb"
-version = "1.0+urltrakb.3"
+version = "1.0+urltrakb.4"
 source = { editable = "vendor/ConDB" }
 dependencies = [
     { name = "jinja2" },
@@ -1854,7 +1854,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "jinja2", specifier = "==3.1.6" },
-    { name = "litellm", specifier = "==1.87.2+urltrakb.2" },
+    { name = "litellm", specifier = "==1.87.2+urltrakb.3" },
     { name = "python-dotenv", specifier = "==1.2.2" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "tiktoken", specifier = "==0.13.0" },

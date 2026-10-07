@@ -6,10 +6,10 @@ ConDB。自动会话记忆和检索路由仍由后续任务接入。
 
 | 目录 | 分发名 / 导入名 | 本地版本 | 上游提交 | 许可证 |
 | --- | --- | --- | --- | --- |
-| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.7 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
-| ChatIndex | ictree / ctree | 0.1.0+urltrakb.2 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
-| ConDB | pageindex-condb / contextdb | 1.0+urltrakb.3 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
-| LiteLLM | litellm / litellm | 1.87.2+urltrakb.2 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
+| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.8 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
+| ChatIndex | ictree / ctree | 0.1.0+urltrakb.3 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
+| ConDB | pageindex-condb / contextdb | 1.0+urltrakb.4 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
+| LiteLLM | litellm / litellm | 1.87.2+urltrakb.3 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
 
 每个目录的 `UPSTREAM.json` 记录原文件 SHA-256、选定与排除范围、实际纳入文件、
 新增/修改/删除的本地补丁。包内 `_urltrakb_source.json` 同时进入 editable 和 wheel，
@@ -24,7 +24,8 @@ LiteLLM v1.87.2 的审核 sdist SHA-256 为
 PageIndex `.7` 增加运行时注入、托管输入根与封存读取；内容策略仍沿用 `.5`。
 ConDB `.3` 提供无损文档树、严格会话检索转换及可组合事务；ChatIndex `.2` 保留
 完整检查点，并按用户角色生成检索树。新增 SDK 源码补丁须提升相应
-本地版本；打包版本不等于内容策略版本，不能单凭版本变化要求付费重建旧索引。
+本地版本；当前 PageIndex `.8` 恢复注入调用的并发门，LiteLLM `.3` 修复 Anthropic 流式用量合并，
+ChatIndex `.3` 与 ConDB `.4` 仅同步 LiteLLM 精确依赖。打包版本不等于内容策略版本，不能单凭版本变化要求付费重建旧索引。
 
 ## 安装
 
@@ -102,9 +103,9 @@ LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 2
 
 ## 任务模型执行政策
 
-编译通过 `openkb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。
+编译通过 `openkb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
 
-KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
 
 账本区分逻辑调用、发送尝试、父调用与 operation/stage/prompt version，只保存模型/政策摘要，不保存请求正文或凭据。HTTPX 观察更新同一条发送记录；应用缓存命中与供应商缓存 token 分开。独立算法客户端将通过各自窄协议使用同一执行器。Agent、PageIndex 和 ChatIndex 的迁移分别验证，不代表技能及幻灯片生成等所有旧入口已迁移。
 
@@ -149,3 +150,24 @@ SQLite 提交和文件系统发布由各自事务保护，不把二者描述为�
 仍需对应平台和人员执行的验证：私人订阅登录、真实供应商质量/成本基准、Windows/macOS
 桌面及正式冻结安装包验收；R04 的人工页质量验收仍由原票跟踪。此次自动化成功不代替这些门槛。
 上游 PyPDF2/Pydantic 弃用和 LiteLLM 异步日志清理警告仍可观察，未将其隐藏。
+
+2026-10-07 审查修复验证（实施票 108–115）：
+
+- Anthropic 原生流式事件按请求累积 usage，末帧只有输出计数时保留首帧的输入及缓存计数。
+- PageIndex 默认与注入客户端共用文档并发限制；同步索引阶段使用独立线程池，保留任务上下文，
+  取消时等待在途工作退出，避免绕过限制或与 SDK 默认线程池相互等待。
+- 缺失 API key 的任务在实际传输前拒绝之后加入的环境或 SDK 全局 key；认证校验不依赖正文分类。
+  Azure AI、Azure 和 Databricks 报告实际选择的认证方式，保留 SDK 工作负载身份及订阅认证。
+- 以基线 `e524309d4` 加本次修复的暂存源码快照验证，避免工作区其他未提交改动混入交付。
+  Ruff 通过，mypy 检查 320 个源码文件通过；两路复核结果为 Standards 0 项、Spec 0 项。
+- 快照全量回归 2,201 项通过；隔离目录缺少预置桌面渲染及 CFB 辅助程序的 20 项，
+  补齐固定运行资产后全部通过。合计 2,221 项自动测试均有通过记录，包含真实 LibreOffice 转换，
+  没有遗留自动验证失败或环境跳过。
+- 快照构建的独立 wheel 环境通过 133 项实际 SDK、认证、usage、并发、预算和取消回归；
+  123 个锁定依赖兼容。四 SDK 的 wheel/sdist、根源码包、原许可证及 2,928 个 vendor 源文件
+  通过逐字节核对；没有升级外部依赖。
+
+执行时整个工作区的联合回归为 2,243 通过、1 失败。失败项
+`test_pending_import_preserves_current_compile_warning_after_readback` 源于另一组未提交的
+编译计划校验改动：畸形计划已标记为失败，旧断言仍预期完成；本次修复的隔离快照中该测试通过。
+该组编译器改动未纳入本次修复提交。

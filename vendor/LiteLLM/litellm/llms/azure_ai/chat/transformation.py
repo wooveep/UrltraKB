@@ -66,7 +66,10 @@ class AzureAIStudioConfig(OpenAIConfig):
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
     ) -> dict:
+        from litellm._urltrakb_auth import selected_authentication
+
         if api_key:
+            selected_authentication("api_key")
             if api_base and self._should_use_api_key_header(api_base):
                 headers["api-key"] = api_key
             else:

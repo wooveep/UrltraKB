@@ -1,6 +1,6 @@
 # ChatIndex 本地源码基线
 
-分发名 `ictree`，导入名 `ctree`，本地版本 `0.1.0+urltrakb.1`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
+分发名 `ictree`，导入名 `ctree`，本地版本 `0.1.0+urltrakb.3`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
 
 本票只纳管源码、修正包身份和依赖，并验证现有调用行为。模型运行时注入、无副作用初始化、树格式改造和 ConDB 业务接入由后续任务完成。不要把本包已安装解释为 OpenKB 已使用新检索或会话记忆。
 
@@ -25,3 +25,5 @@ JSON（UTF-8、sort_keys、无空格）的 SHA256：轮次稳定 ID、ordinal �
 兼容 `add(messages, turn_id=...)` 要求明确唯一 user/assistant 和可选 system。
 独立 provider 使用 `ctree.llm.create_client(model=..., api_key=..., base_url=...)`；
 不读取 .env，不含 OpenAI SDK 直连或第二层重试，凭据/客户端不会进入检查点。
+
+本地 `.3` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；算法、检查点及检索交换格式不变。

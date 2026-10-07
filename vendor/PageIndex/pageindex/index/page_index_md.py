@@ -290,7 +290,7 @@ async def md_to_tree(md_path, if_thinning=False, min_token_threshold=None, if_ad
         if if_add_doc_description:
             print(f"Generating document description...")
             clean_structure = create_clean_structure_for_description(tree_structure)
-            doc_description = generate_doc_description(clean_structure, model=model)
+            doc_description = await run_sync(generate_doc_description, clean_structure, model=model)
             return {
                 'doc_name': os.path.splitext(os.path.basename(md_path))[0],
                 'doc_description': doc_description,

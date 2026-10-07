@@ -85,7 +85,8 @@ def test_openkb_factory_disables_the_legacy_observer():
     assert options.usage_observer is None
 
 
-def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatch):
+@pytest.mark.parametrize("sdk_version", ["0.3.0.dev3+urltrakb.7", "0.3.0.dev3+urltrakb.8"])
+def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatch, sdk_version):
     from importlib import metadata
 
     from openkb.normalization import normalization_fingerprint
@@ -100,7 +101,7 @@ def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatc
     monkeypatch.setattr(
         metadata,
         "version",
-        lambda name: "0.3.0.dev3+urltrakb.7" if name == "pageindex" else original(name),
+        lambda name: sdk_version if name == "pageindex" else original(name),
     )
     assert normalization_fingerprint(kb_dir) == before
 

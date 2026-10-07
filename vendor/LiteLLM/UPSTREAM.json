@@ -2,11 +2,11 @@
   "schema_version": 2,
   "distribution": "litellm",
   "module": "litellm",
-  "version": "1.87.2+urltrakb.1",
+  "version": "1.87.2+urltrakb.3",
   "repository": "https://github.com/BerriAI/litellm",
   "commit": "1296275dc52d9f4e05696380735037fbb841fcc3",
   "license": "MIT",
-  "local_version": "1.87.2+urltrakb.2",
+  "local_version": "1.87.2+urltrakb.3",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/BerriAI/litellm/tarball/1296275dc52d9f4e05696380735037fbb841fcc3",
@@ -2830,10 +2830,10 @@
     "Exclude top-level enterprise, proxy extras, service workspaces and standalone CLI entry points; retain the upstream MIT license."
   ],
   "local_patch": {
-    "date": "2026-10-06",
-    "purpose": "Offline initialization, verified model table, isolated request options, explicit zero retries, and honest missing usage; preserve provider conversion and SDK types.",
+    "date": "2026-10-07",
+    "purpose": "Offline initialization, verified model table, isolated request options, explicit zero retries, and honest missing usage; preserve provider conversion and SDK types. 本地 `.3` 在 Anthropic 原始流事件边界合并累计用量：message_start 的输入和缓存计数保留到仅带输出计数的 message_delta，避免最终回答及账本丢失输入用量。 Optional per-attempt SDK authentication selection receipt distinguishes Azure AI/Databricks workload credentials from API-key fallback without changing provider selection.",
     "modified": {
-      "pyproject.toml": "f2b909cdd8f75bf949ed0b1be859250ca9626b3b94bb9cd6e1a2a9e88bb29ac5",
+      "pyproject.toml": "10967258993e5e37f36928eabd35d779bf6f68cae41f995c5ede2c59044a73e3",
       "litellm/utils.py": "c4769544245807da499be63217b7dcfc9ceec0d8fec67a0463290c57b1c3dacc",
       "litellm/__init__.py": "b752fc4ed51c94d365313fe3b974e39885b04dabebfbbea68cacb0b1632d3b8c",
       "litellm/types/utils.py": "3c65c3aedae38d3bce064d053fefdc66eac641cfe5fb2b1f45f2e5733e8178de",
@@ -2841,12 +2841,17 @@
       "litellm/litellm_core_utils/streaming_chunk_builder_utils.py": "e3c5d1e338064a043ffad76edbc346b4ca8ddeaf2f71dc9de6b2d97d51419e0f",
       "litellm/litellm_core_utils/get_model_cost_map.py": "1645f81655caf048f1c5d92d374f8eaf689ea583050a958cfe1e0387b33212aa",
       "litellm/llms/openai/openai.py": "d7bb28b189b3fc92bf98ed83d1d46804d67bbd975e0f04f67b1690f834406ed2",
-      "litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py": "7bff24ab181738b69440910d64029bbcf9037c7aaf1dec05ef58a300cd651ee9"
+      "litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py": "7bff24ab181738b69440910d64029bbcf9037c7aaf1dec05ef58a300cd651ee9",
+      "litellm/llms/anthropic/chat/handler.py": "39e21848b13f02096251e211c952acb1a196409ee7199394c023f6e76ff3c0f8",
+      "litellm/llms/azure_ai/chat/transformation.py": "b26cc7e25b4066b4fc488e849506f2127725fb9401430ba670a8c41bae313cf1",
+      "litellm/llms/azure/common_utils.py": "0568e40a8f6dfe5ebf57504d4b241c81da542106fcf1de8e02bdd6b0e5b50e94",
+      "litellm/llms/databricks/common_utils.py": "2fbe3a05843442c34d987ecd11d9694dc4bcf000c03510248c7b15573aad919b"
     },
     "added": {
-      "README.urltrakb.md": "df74c81f0e1410e93a67f6c3ff9b28ffdaeaf3af90be7f9977ced43386e95922",
-      "litellm/_urltrakb_source.json": "2e2981219e2e30748fdb692aad2ab6b2068eea4fec69fc12ec78f946e543ad31",
-      "litellm/_urltrakb_model_table.json": "abb899db37656a8b9ffaa0e009cb6aed12a2425ce907292603e5ad5e46bd65e6"
+      "README.urltrakb.md": "faae5c483745b45ab4765cd43280b1ce029ee2bb6537ad4da9e00867f7ded261",
+      "litellm/_urltrakb_source.json": "e95eeaaa6457cab095d0703660a3662277fe75cf2009355b7c88fd89482fd023",
+      "litellm/_urltrakb_model_table.json": "abb899db37656a8b9ffaa0e009cb6aed12a2425ce907292603e5ad5e46bd65e6",
+      "litellm/_urltrakb_auth.py": "69e89d0313e0984c461ade9385975c8b4cceac123172e72922ccf8319432674c"
     },
     "deleted": []
   },
@@ -2870,6 +2875,7 @@
     "litellm/_redis.py",
     "litellm/_redis_credential_provider.py",
     "litellm/_service_logger.py",
+    "litellm/_urltrakb_auth.py",
     "litellm/_urltrakb_model_table.json",
     "litellm/_urltrakb_source.json",
     "litellm/_uuid.py",

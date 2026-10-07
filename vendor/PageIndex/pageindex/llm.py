@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
+from functools import partial
 from typing import Protocol
 
 # Successful trees remain compatible with the last content-policy release.
@@ -24,6 +26,9 @@ class IndexLLM(Protocol):
 
 
 _CLIENT: ContextVar[IndexLLM | None] = ContextVar("pageindex_llm_client", default=None)
+# Permit waiters must not consume the default executor used by async SDK calls
+# which can already hold those permits. Threads start lazily and join at exit.
+_SYNC_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="pageindex-sync")
 
 
 def current_client():
@@ -52,4 +57,26 @@ async def gather_required(*coroutines):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+async def run_sync(function, *args, **kwargs):
+    """Keep blocking stages off-loop and settle their work before cancellation."""
+    task = asyncio.get_running_loop().run_in_executor(
+        _SYNC_EXECUTOR, copy_context().run, partial(function, *args, **kwargs)
+    )
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Cancelling a worker await cannot stop its thread. Keep the client,
+        # policy and enclosing storage scope alive until that work has settled.
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if not task.cancelled():
+            task.exception()
         raise

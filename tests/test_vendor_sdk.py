@@ -17,7 +17,7 @@ def running_model_service(monkeypatch):
 
     monkeypatch.setattr(litellm, "telemetry", False)
     monkeypatch.setattr(litellm, "suppress_debug_info", True)
-    service = SimpleNamespace(requests=[], replies=[], records=[], delay=0)
+    service = SimpleNamespace(requests=[], replies=[], records=[], delay=0, intervals=[])
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -27,6 +27,8 @@ def running_model_service(monkeypatch):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             service.requests.append(request)
             service.records.append((request, dict(self.headers), self.path))
+            interval = [time.monotonic(), float("inf")]
+            service.intervals.append(interval)
             status, response = service.replies.pop(0)
             time.sleep(service.delay)
             if isinstance(response, list):
@@ -43,6 +45,8 @@ def running_model_service(monkeypatch):
                 self.send_header("Location", "/actual")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
+            # Stop measuring before the reply permits a following request.
+            interval[1] = time.monotonic()
             self.end_headers()
             try:
                 self.wfile.write(data)

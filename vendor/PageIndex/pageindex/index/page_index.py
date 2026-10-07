@@ -1001,11 +1001,11 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     print(f'start_index: {start_index}')
     
     if mode == 'process_toc_with_page_numbers':
-        toc_with_page_number = process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
+        toc_with_page_number = await run_sync(process_toc_with_page_numbers, toc_content, toc_page_list, page_list, toc_check_page_num=opt.toc_check_page_num, model=opt.model, logger=logger)
     elif mode == 'process_toc_no_page_numbers':
-        toc_with_page_number = process_toc_no_page_numbers(toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
+        toc_with_page_number = await run_sync(process_toc_no_page_numbers, toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
     else:
-        toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
+        toc_with_page_number = await run_sync(process_no_toc, page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
             
     toc_with_page_number = [item for item in toc_with_page_number if policy or item.get('physical_index') is not None] 
     if isinstance(policy, PagePartsPolicy):
@@ -1101,7 +1101,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
     return node
 
 async def tree_parser(page_list, opt, doc=None, logger=None, policy=None):
-    check_toc_result = check_toc(page_list, opt, **({"policy": policy} if policy else {}))
+    check_toc_result = await run_sync(check_toc, page_list, opt, **({"policy": policy} if policy else {}))
     logger.info(check_toc_result)
 
     if check_toc_result.get("toc_content") and check_toc_result["toc_content"].strip() and check_toc_result["page_index_given_in_toc"] == "yes":
@@ -1168,7 +1168,7 @@ def page_index_main(doc, opt=None):
             if opt.if_add_doc_description:
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
-                doc_description = generate_doc_description(clean_structure, model=opt.model)
+                doc_description = await run_sync(generate_doc_description, clean_structure, model=opt.model)
                 structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),

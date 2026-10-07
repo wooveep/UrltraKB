@@ -1,4 +1,4 @@
-__version__ = "1.0+urltrakb.3"
+__version__ = "1.0+urltrakb.4"
 
 from contextdb.api.condb import (
     ConDB,

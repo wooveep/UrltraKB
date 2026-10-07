@@ -2,11 +2,11 @@
   "schema_version": 2,
   "distribution": "ictree",
   "module": "ctree",
-  "version": "0.1.0+urltrakb.1",
+  "version": "0.1.0+urltrakb.3",
   "repository": "https://github.com/VectifyAI/ChatIndex",
   "commit": "7df2c9208db6f113f85a6c09295bec7f0f2114e7",
   "license": "Apache-2.0",
-  "local_version": "0.1.0+urltrakb.2",
+  "local_version": "0.1.0+urltrakb.3",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/VectifyAI/ChatIndex/tarball/7df2c9208db6f113f85a6c09295bec7f0f2114e7",
@@ -43,17 +43,17 @@
     "Version 0.1.0+urltrakb.1 and packaged source identity; exclude demo-only Anthropic dependency, retaining the imported ctree runtime dependency closure."
   ],
   "local_patch": {
-    "date": "2026-10-06",
-    "purpose": "Audited local SDK source and packaging baseline (#107); role-filtered injected incremental builder, stable exchange transaction and separate versioned lossless checkpoint/retrieval exports",
+    "date": "2026-10-07",
+    "purpose": "Audited local SDK source and packaging baseline (#107); role-filtered injected incremental builder, stable exchange transaction and separate versioned lossless checkpoint/retrieval exports 本地 `.3` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；算法、检查点及检索交换格式不变。",
     "modified": {
       "ctree/utils.py": "44afe9747856e5b46676cbe79f64710c64deacc909e85b25f41763669e336e6a",
       "ctree/ctree.py": "7f871cff571405480cc7ea98ec3f1a965727363c14217255a87d18a11f3b007a",
-      "ctree/__init__.py": "58a5a7ca979a61d90e10c3c22f82170bb3b9ae9f6ebf314be9418b29e975891b"
+      "ctree/__init__.py": "3d45ecc6420b038ab0f4dfadb3463d3472b3d1c52c6d084adc8c55e903ecb926"
     },
     "added": {
-      "pyproject.toml": "7ba3a807a9f34e20e7973c394886f86fcab0e2a308f6b3227a769a197da87976",
-      "README.urltrakb.md": "3f1b46d32cffdcd129795ddf624fdb675a185b4090c54c0520a76305f4b30cf1",
-      "ctree/_urltrakb_source.json": "073c8e2bef216675668e695df1b1c23ae83f72198bcd56653d8a0a02c79aba11",
+      "pyproject.toml": "f5c5495c8a467a3012d801143607fd6aa62e4064993cfc13585490df6f974cc8",
+      "README.urltrakb.md": "f8e8b9106d32dc206a9e1a8a288daaa3719b521a6a8da47e7d73a643ee8b1d8f",
+      "ctree/_urltrakb_source.json": "542a0172aed8652a13fb018c85fd6757adc4a5ccf1791bebd1c311bb44b51bb2",
       "ctree/nodes.py": "47be440ae98caefe40b3cbfad68baf9083b371875c9f0d428668e04071b5861e",
       "ctree/llm.py": "90c36aebbfdb2f1af725c8c2b4d35ded5ccb15be5f4c8108dc2abfce653a5434",
       "ctree/prompts.py": "546d7c274706acf6806bcda45c2d69dd5fdacd19e14edf5e051f8552034a38e1",

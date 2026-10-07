@@ -1,6 +1,6 @@
 # LiteLLM 本地源码基线
 
-分发名 `litellm`，导入名 `litellm`，本地版本 `1.87.2+urltrakb.2`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
+分发名 `litellm`，导入名 `litellm`，本地版本 `1.87.2+urltrakb.3`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
 
 本地 `.2` 增加离线初始化和请求隔离。统一执行器、树格式改造和 ConDB 业务接入单独实施。不要把本包已安装解释为 OpenKB 已使用新检索或会话记忆。
 
@@ -12,3 +12,7 @@
 本地 `.1` 未修改 SDK Python 源码；上游导入时初始化行为留给后续任务处理。
 
 本地 `.2`：默认使用带 SHA-256 校验的固定模型表，移除隐式 dotenv 和遥测，延迟导入可选代理 CLI；显式零重试优先、不修改全局重试状态，传入客户端使用请求副本；缺失 usage 不补零或估算。原模型表价格为固定参考，不代表实时价格。维护者只能通过显式 `get_model_cost_map(url, allow_remote=True)` 尝试联网更新。
+
+本地 `.3` 在 Anthropic 原始流事件边界合并累计用量：message_start 的输入和缓存计数保留到仅带输出计数的 message_delta，避免最终回答及账本丢失输入用量。
+
+Azure AI 与 Databricks 的原生认证选择分支可向任务内存回执报告 API key / SDK 认证模式；不记录凭据、不改变认证优先级，未启用观察时行为不变。

@@ -123,7 +123,12 @@ def normalization_fingerprint(
             # established content identity so old paid trees remain reusable.
             "index_sdk": (
                 "0.3.0.dev3+urltrakb.5"
-                if version("pageindex") in {"0.3.0.dev3+urltrakb.6", "0.3.0.dev3+urltrakb.7"}
+                if version("pageindex")
+                in {
+                    "0.3.0.dev3+urltrakb.6",
+                    "0.3.0.dev3+urltrakb.7",
+                    "0.3.0.dev3+urltrakb.8",
+                }
                 else version("pageindex")
             ),
             "index_endpoint": hashlib.sha256(

@@ -312,9 +312,10 @@ def test_sync_llm_completion_on_event_loop_does_not_deadlock(monkeypatch):
         await asyncio.sleep(0.05)  # let them acquire the permits
         # Sync call on the loop thread: pre-fix this blocks forever waiting for a
         # permit the holders own and can't release (loop is frozen).
-        result = llm_completion("m", "sync")
+        with pytest.raises(RuntimeError, match="Index concurrency exhausted"):
+            llm_completion("m", "sync")
         await asyncio.gather(*holders)
-        return result
+        return llm_completion("m", "sync")
 
     # Run in a thread with a join timeout so a regression FAILS instead of
     # hanging CI: a real deadlock freezes the loop, so asyncio.wait_for can't

@@ -12,7 +12,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Mapping
 
 from openkb.llm_usage import _SCOPE, UsageScope, active_scope, begin_request, finish_request
 
@@ -26,8 +26,17 @@ class ModelCall:
     sent_ids: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     before_send: Callable[[int], None] | None = None
+    validate_credentials: Callable[[Mapping[str, str]], None] | None = None
     send_error: BaseException | None = None
     raw_usage_available: bool | None = None
+
+    def check_credentials(self, headers):
+        if self.validate_credentials is not None:
+            try:
+                self.validate_credentials(headers)
+            except BaseException as exc:
+                self.send_error = exc
+                raise
 
     def sending(self):
         if self.before_send is not None:
@@ -115,6 +124,8 @@ def install_send_observer():
 
         def send(client, request, *args, **kwargs):
             call = _CALL.get()
+            if call is not None:
+                call.check_credentials(request.headers)
             if call is None or request.method != "POST" or not _model_request(request):
                 return sync_send(client, request, *args, **kwargs)
             identity = call.sending()
@@ -133,6 +144,8 @@ def install_send_observer():
 
         async def asend(client, request, *args, **kwargs):
             call = _CALL.get()
+            if call is not None:
+                call.check_credentials(request.headers)
             if call is None or request.method != "POST" or not _model_request(request):
                 return await async_send(client, request, *args, **kwargs)
             identity = call.sending()
@@ -158,6 +171,7 @@ def observe_model_call(
     *,
     scope=None,
     before_send=None,
+    validate_credentials=None,
     logical_call_id=None,
     parent_call_id=None,
     operation=None,
@@ -165,7 +179,7 @@ def observe_model_call(
     fingerprint=None,
 ):
     scope = scope or active_scope()
-    if scope is None and before_send is None:
+    if scope is None and before_send is None and validate_credentials is None:
         yield None
         return
     install_send_observer()
@@ -177,7 +191,15 @@ def observe_model_call(
         policy_fingerprint=fingerprint,
     )
     identity = begin_request(model, stage, scope=scope, **metadata) or uuid.uuid4().hex
-    call = ModelCall(scope, model, stage, identity, metadata=metadata, before_send=before_send)
+    call = ModelCall(
+        scope,
+        model,
+        stage,
+        identity,
+        metadata=metadata,
+        before_send=before_send,
+        validate_credentials=validate_credentials,
+    )
     token = _CALL.set(call)
     try:
         yield call
