@@ -3,10 +3,11 @@
 
 def verify_task_actions(window, kb, wait_until):
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb.application.pages import read_page
     from openkb.desktop.task_actions import RetryDialog, clear_selected_history
+    from openkb.desktop.verification_dialogs import message_box
     from openkb.locks import atomic_write_text, kb_ingest_lock
     from openkb.runtime.records import TERMINAL
     from openkb.runtime.requests import SavePage
@@ -47,8 +48,8 @@ def verify_task_actions(window, kb, wait_until):
     confirmer = QTimer()
 
     def confirm():
-        modal = QApplication.activeModalWidget()
-        if isinstance(modal, QMessageBox) and modal.windowTitle() == "清理任务摘要":
+        modal = message_box("清理所选 ")
+        if modal is not None:
             modal.button(QMessageBox.StandardButton.Yes).click()
 
     confirmer.timeout.connect(confirm)

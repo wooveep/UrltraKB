@@ -50,7 +50,7 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=False)
 
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     from openkb import config
     from openkb.application.knowledge_bases import initialize_kb
@@ -67,6 +67,7 @@ def main() -> int:
         str((args.workbench_restart or root) / "qt"),
     )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    from openkb.desktop.verification_dialogs import visible_dialogs
     from openkb.desktop.window import Workbench
 
     app = create_application()
@@ -127,16 +128,16 @@ print("UrltraKB")  # fenced_code 中文知识
     unexpected_dialogs: list[str] = []
 
     def observe_dialogs():
-        dialog = QApplication.activeModalWidget()
-        if not isinstance(dialog, QMessageBox):
-            return
-        if dialog.windowTitle() == "操作未完成":
-            unexpected_dialogs.append(dialog.text())
-            dialog.close()
-        elif "failure" in evidence and dialog.windowTitle() == "退出 UrltraKB":
-            for button in dialog.buttons():
-                if button.text() == "安全停止并退出":
-                    button.click()
+        for dialog in visible_dialogs():
+            if not isinstance(dialog, QMessageBox):
+                continue
+            if dialog.parentWidget() is window and dialog.icon() == QMessageBox.Icon.Warning:
+                unexpected_dialogs.append(dialog.text())
+                dialog.close()
+            elif "failure" in evidence and dialog.text().startswith("后台仍有任务。"):
+                for button in dialog.buttons():
+                    if button.text() == "安全停止并退出":
+                        button.click()
 
     observer = QTimer(window)
     observer.timeout.connect(observe_dialogs)
@@ -370,8 +371,12 @@ print("UrltraKB")  # fenced_code 中文知识
                 documents = management_page(window, other, "资料", DocumentsDialog, wait_until)
 
                 def enter_urls():
-                    dialog = QApplication.activeModalWidget()
-                    assert isinstance(dialog, QInputDialog)
+                    dialog = next(
+                        (d for d in visible_dialogs() if isinstance(d, QInputDialog)), None
+                    )
+                    if dialog is None:
+                        QTimer.singleShot(20, enter_urls)
+                        return
                     dialog.setTextValue("\n".join([args.url + "-missing", args.url, args.url]))
                     dialog.accept()
 
