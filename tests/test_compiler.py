@@ -1756,9 +1756,12 @@ class TestCompileConceptsPlan:
 
         assert _parse_page_json('{"content": "x"}') == {"content": "x"}
         assert _parse_page_json('[{"content": "x"}]') == {"content": "x"}  # unwrapped
-        assert _parse_page_json("[]") is None
-        assert _parse_page_json('[{"a": 1}, {"b": 2}]') is None
-        assert _parse_page_json('["a", "b"]') is None
+        with pytest.raises(ValueError, match="page_"):
+            _parse_page_json("[]")
+        with pytest.raises(ValueError, match="page_"):
+            _parse_page_json('[{"a": 1}, {"b": 2}]')
+        with pytest.raises(ValueError, match="page_"):
+            _parse_page_json('["a", "b"]')
 
     @pytest.mark.asyncio
     async def test_page_json_wrapped_in_single_array_is_recovered(self, tmp_path):
@@ -1874,8 +1877,10 @@ class TestCompileConceptsPlan:
         assert _page_fields('[{"description": "d", "content": "c"}]')[:2] == ("d", "c")
         # Wrong shape (multi-element / empty array) → empty content so the
         # caller's _require_nonempty_content skips the page.
-        assert _page_fields('[{"a": 1}, {"b": 2}]') == ("", "", None)
-        assert _page_fields("[]") == ("", "", None)
+        with pytest.raises(ValueError, match="page_"):
+            _page_fields('[{"a": 1}, {"b": 2}]')
+        with pytest.raises(ValueError, match="page_"):
+            _page_fields("[]")
         # Non-JSON prose → written verbatim as the markdown body.
         prose = "# Heading\n\nJust markdown, not JSON."
         assert _page_fields(prose) == ("", prose, None)

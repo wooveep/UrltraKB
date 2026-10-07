@@ -35,6 +35,7 @@ class AnswerResult:
     error: str | None = None
     unfinished: tuple[str, ...] = ()
     usage: dict[str, int | None] | None = None
+    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = None
 
 
 def _validate_question(kb_dir: Path, question: str, *, scope: KnowledgeScope | None = None) -> Path:
@@ -105,6 +106,7 @@ async def ask_question(
                                 answer,
                                 str(path) if path else None,
                                 usage=event["data"].get("usage"),
+                                answer_outcome=event["data"].get("answer_outcome"),
                                 resources=(str(path),) if path else (),
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
                                 if path
@@ -200,6 +202,7 @@ async def continue_conversation(
                                     resources=(*outputs.resources, str(session.path)),
                                     changes=(*outputs.changes, f"saved turn: {session.id}"),
                                     usage=event["data"].get("usage", usage),
+                                    answer_outcome=event["data"].get("answer_outcome"),
                                 )
                             if context.cancelled():
                                 break

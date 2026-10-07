@@ -540,12 +540,26 @@ def generate_toc_continue(toc_content, part, model=None, policy=None):
     Directly return the additional part of the final JSON structure. Do not output anything else."""
 
     prompt = policy.prompt(part, toc_content) if policy else prompt + '\nGiven text\n:' + part + '\nPrevious tree structure\n:' + json.dumps(toc_content, indent=2)
+    if policy and hasattr(policy, 'validate_chunk'):
+        from .page_parts_policy import PagePartsContractError
+        correction = ''
+        for attempt in range(2):
+            response, finish_reason = llm_completion(model=model, prompt=prompt + correction, return_finish_reason=True)
+            try:
+                if finish_reason != 'finished':
+                    raise ValueError(f'finish reason: {finish_reason}')
+                incoming = extract_json(response)
+                policy.validate_chunk(toc_content, incoming, part)
+                return incoming
+            except (ValueError, TypeError) as error:
+                if attempt:
+                    raise PagePartsContractError(f'slide_toc_continue: {error}') from error
+                correction = '\nCorrection required: ' + str(error) + '\nReturn ONLY new entries; do not repeat or change the previous structure.'
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
         return extract_json(response)
-    else:
-        raise Exception(f'finish reason: {finish_reason}')
-    
+    raise Exception(f'finish reason: {finish_reason}')
+
 ### add verify completeness
 def generate_toc_init(part, model=None, policy=None):
     print('start generate_toc_init')

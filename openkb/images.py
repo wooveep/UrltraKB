@@ -94,7 +94,9 @@ def extract_pdf_images(pdf_path: Path, doc_name: str, images_dir: Path) -> dict[
     return page_images
 
 
-def convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> list[dict]:
+def convert_pdf_to_pages(
+    pdf_path: Path, doc_name: str, images_dir: Path, *, allow_empty_text: bool = False
+) -> list[dict]:
     """Convert a PDF to per-page dicts with text content and images.
 
     Each dict has ``{"page": int, "content": str, "images": [{"path": str}]}``.
@@ -105,7 +107,7 @@ def convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> lis
     """
     from openkb.import_text import require_pdf_text
 
-    require_pdf_text(pdf_path)
+    require_pdf_text(pdf_path, allow_empty=allow_empty_text)
     images_dir.mkdir(parents=True, exist_ok=True)
     pages: list[dict] = []
     img_counter = 0
@@ -160,7 +162,12 @@ def convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> lis
 
 
 def convert_pdf_with_images(
-    pdf_path: Path, doc_name: str, images_dir: Path, *, page_records: list[dict] | None = None
+    pdf_path: Path,
+    doc_name: str,
+    images_dir: Path,
+    *,
+    page_records: list[dict] | None = None,
+    allow_empty_text: bool = False,
 ) -> str:
     """Convert a PDF to markdown with inline images using pymupdf dict-mode.
 
@@ -173,7 +180,7 @@ def convert_pdf_with_images(
     """
     from openkb.import_text import require_pdf_text
 
-    require_pdf_text(pdf_path)
+    require_pdf_text(pdf_path, allow_empty=allow_empty_text)
     images_dir.mkdir(parents=True, exist_ok=True)
     parts: list[str] = []
     img_counter = 0

@@ -312,7 +312,9 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
         if result.status != "completed":
             raise HTTPException(status_code=500, detail=result.error or result.status)
-        return QueryResponse(answer=result.answer, saved_path=result.saved_path)
+        return QueryResponse(
+            answer=result.answer, saved_path=result.saved_path, answer_outcome=result.answer_outcome
+        )
 
     @app.post("/api/v1/chat", response_model=ChatResponse)
     async def chat_endpoint(
@@ -352,7 +354,10 @@ def create_app() -> FastAPI:
         if result.status != "completed":
             raise HTTPException(status_code=500, detail=result.error or result.status)
         return ChatResponse(
-            session_id=result.session_id, answer=result.answer, turn_count=result.turn_count
+            session_id=result.session_id,
+            answer=result.answer,
+            turn_count=result.turn_count,
+            answer_outcome=result.answer_outcome,
         )
 
     @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)

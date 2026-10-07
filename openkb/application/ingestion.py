@@ -128,7 +128,7 @@ def pending_counts(kb_dir, admission):
         (kind, job)
         for kind, job in jobs(kb_dir)
         if job.root_import_id == admission.discovery_intent.root_import_id
-        and job.status not in {"completed", "cancelled", "stale"}
+        and job.status not in {"completed", "not_imported", "cancelled", "stale"}
     ]
     return {
         "discovery_pending": sum(kind == "discovery" for kind, _ in pending_jobs),

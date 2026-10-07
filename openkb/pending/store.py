@@ -81,6 +81,8 @@ def import_source(kb_dir, job):
 
 def reconcile_job(kb_dir, kind, job):
     """Business checkpoints win over lost receipts; unconfirmed started work never reruns."""
+    if job.status == "not_imported":
+        return job
     if job.status == "completed":
         if kind == "import":
             import_source(kb_dir, job)

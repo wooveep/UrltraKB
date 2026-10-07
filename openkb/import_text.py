@@ -1,7 +1,8 @@
 """Conservative extraction checks, before source admission or model work.
 
 These rules report observed text facts. They neither infer a document's cause of
-damage nor rewrite the text. Empty/scanned inputs retain their existing handling.
+damage nor rewrite the text. HTML needs a readable static body; original PDFs
+without usable text are rejected before source admission.
 """
 
 from __future__ import annotations
@@ -18,12 +19,15 @@ from openkb.inputs import (
     TEXT_SOURCE_EXTENSIONS,
     PreparedInput,
 )
+from openkb.pdf_recognition import PDF_RECOGNITION_POLICY, PdfRecognitionError, recognize_pdf
 from openkb.state import HashRegistry
 
 if TYPE_CHECKING:
     from openkb.workbooks.records import WorkbookSnapshot
 
-TEXT_CHECK_POLICY = "extracted-text-v1:cjk-runs12:3runs:60chars:ratio45"
+TEXT_CHECK_POLICY = (
+    "extracted-text-v1:cjk-runs12:3runs:60chars:ratio45:html-body-v1:" + PDF_RECOGNITION_POLICY
+)
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _RUN = re.compile(r"([\u3400-\u4dbf\u4e00-\u9fff])\1{11,}")
 
@@ -45,11 +49,18 @@ class ImportTextAssessment:
     findings: tuple[TextFinding, ...] = ()
     unavailable: str | None = None
     policy: str = TEXT_CHECK_POLICY
+    empty_html: bool = False
 
 
 class ImportTextRejected(ValueError):
     def __init__(self, assessment: ImportTextAssessment):
         self.assessment = assessment
+        if assessment.empty_html:
+            super().__init__("HTML not imported: no readable body")
+            return
+        if assessment.extraction == "PDF text layer":
+            super().__init__("PDF导入识别异常")
+            return
         facts = "; ".join(
             f"{fact.reason} at {fact.location}: {fact.repeated_characters}/"
             f"{fact.cjk_characters} CJK characters in {fact.runs} repeated runs "
@@ -83,17 +94,23 @@ def assess_text_parts(parts: Iterable[tuple[str, str]]) -> tuple[TextFinding, ..
     )
 
 
-def pdf_text_parts(path: Path) -> list[tuple[str, str]]:
-    import pymupdf
-
-    with pymupdf.open(path) as pdf:
-        return [(f"page[{index}]", page.get_text()) for index, page in enumerate(pdf, 1)]
+def pdf_text_parts(path: Path, *, allow_empty: bool = False) -> list[tuple[str, str]]:
+    return recognize_pdf(path, allow_empty=allow_empty)
 
 
-def require_pdf_text(path: Path, *, extraction: str = "PDF text layer") -> None:
-    assessment = ImportTextAssessment(
-        HashRegistry.hash_file(path), extraction, assess_text_parts(pdf_text_parts(path))
-    )
+def require_pdf_text(
+    path: Path, *, extraction: str = "PDF text layer", allow_empty: bool = False
+) -> None:
+    try:
+        assessment = ImportTextAssessment(
+            HashRegistry.hash_file(path),
+            extraction,
+            assess_text_parts(pdf_text_parts(path, allow_empty=allow_empty)),
+        )
+    except PdfRecognitionError as error:
+        raise ImportTextRejected(
+            ImportTextAssessment(HashRegistry.hash_file(path), extraction, unavailable=error.reason)
+        ) from error
     if assessment.findings:
         raise ImportTextRejected(assessment)
 
@@ -159,6 +176,7 @@ def preflight_import_text(
     if cache_key in prepared.text_checks:
         return prepared.text_checks[cache_key]
     extraction = "extracted text"
+    empty_html = False
     try:
         with tempfile.TemporaryDirectory(prefix="openkb-text-check-") as temporary:
             directory = Path(temporary)
@@ -179,7 +197,9 @@ def preflight_import_text(
                 extraction = "Office conversion/extraction result"
                 pdf = directory / "converted.pdf"
                 provenance = convert_office(kb_dir, prepared.path, pdf, check_stop=check_stop)
-                parts = pdf_text_parts(pdf)
+                # A derived slide PDF may be image-only while original notes
+                # carry navigation text. The Office contract checks both domains.
+                parts = pdf_text_parts(pdf, allow_empty=True)
                 from openkb.office.slide_content import read_slides
 
                 parts.extend(
@@ -199,6 +219,7 @@ def preflight_import_text(
                     else None,
                 )
                 parts = [("body", frozen.text)]
+                empty_html = extension in {".html", ".htm"} and not frozen.text.strip()
             elif extension in {".xlsx", ".xls"}:
                 from openkb.workbooks.xls import read_xls
                 from openkb.workbooks.xlsx import read_xlsx
@@ -233,12 +254,14 @@ def preflight_import_text(
         if isinstance(exc, (LockCancelled, RecoveryRequired)):
             raise
         assessment = ImportTextAssessment(
-            prepared.digest, extraction, unavailable=type(exc).__name__
+            prepared.digest,
+            extraction,
+            unavailable=exc.reason if isinstance(exc, PdfRecognitionError) else type(exc).__name__,
         )
         prepared.text_checks[cache_key] = assessment
         return assessment
     check_stop()
-    assessment = ImportTextAssessment(prepared.digest, extraction, findings)
+    assessment = ImportTextAssessment(prepared.digest, extraction, findings, empty_html=empty_html)
     prepared.text_checks[cache_key] = assessment
     return assessment
 
@@ -248,7 +271,12 @@ def validate_text_preflight(prepared: PreparedInput, assessment: ImportTextAsses
         raise ValueError("Text assessment does not match this frozen input and check policy")
     if HashRegistry.hash_file(prepared.path) != assessment.digest:
         raise ValueError("Text preflight input changed after extraction")
-    if assessment.findings:
+    if (
+        assessment.findings
+        or assessment.empty_html
+        or assessment.extraction == "PDF text layer"
+        and assessment.unavailable
+    ):
         raise ImportTextRejected(assessment)
 
 
@@ -257,10 +285,14 @@ def rejection_result(prepared: PreparedInput, exc: ImportTextRejected):
 
     return IngestResult(
         str(prepared.identity),
-        "rejected",
+        "skipped" if exc.assessment.empty_html else "rejected",
         (),
-        quality=("import_text_rejected",),
-        unfinished=("text_preflight",),
+        quality=("empty_html_not_imported",)
+        if exc.assessment.empty_html
+        else ("import_text_rejected", "pdf_recognition_anomaly")
+        if exc.assessment.extraction == "PDF text layer"
+        else ("import_text_rejected",),
+        unfinished=() if exc.assessment.empty_html else ("text_preflight",),
         input_version=prepared.digest,
         message=str(exc),
     )

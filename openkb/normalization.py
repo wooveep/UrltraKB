@@ -47,6 +47,7 @@ def normalization_fingerprint(
     from openkb.config import resolve_credential_bundle
     from openkb.execution_capacity import capacity_policy
     from openkb.knowledge_scope import resolve_scope
+    from openkb.pdf_recognition import PDF_RECOGNITION_POLICY
 
     config = resolve_effective_config(kb_dir)[0]
     credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
@@ -116,6 +117,7 @@ def normalization_fingerprint(
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
+            "pdf_recognition_policy": PDF_RECOGNITION_POLICY,
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": "content-based-physical-v1",

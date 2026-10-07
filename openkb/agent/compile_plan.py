@@ -31,6 +31,7 @@ def normalize_plan(
     existing: dict[str, set[str]],
     entity_types: frozenset[str],
     sanitize: Callable[[str], str],
+    require_evidence: bool = False,
 ) -> CompilePlan:
     """Accept explicit actions and unambiguous legacy/new array forms, never discard items."""
     normalized = isinstance(parsed, list)
@@ -75,7 +76,13 @@ def normalize_plan(
                 if action == "related":
                     name = item
                 else:
-                    if not isinstance(item, dict) or set(item) - {"name", "title", "type", "brief"}:
+                    if not isinstance(item, dict) or set(item) - {
+                        "name",
+                        "title",
+                        "type",
+                        "brief",
+                        "evidence_units",
+                    }:
                         raise ValueError(
                             f"{location} must be a page object with name/title/type/brief"
                         )
@@ -98,7 +105,23 @@ def normalize_plan(
                 title = item.get("title", name)
                 if not isinstance(title, str) or not title.strip():
                     raise ValueError(f"{location}.title must be a nonempty string")
-                value = {"name": slug, "title": title.strip()}
+                value: dict = {"name": slug, "title": title.strip()}
+                if require_evidence and "evidence_units" not in item:
+                    raise ValueError(f"{location} requires evidence_units from the original source")
+                if "evidence_units" in item:
+                    from openkb.agent.compile_evidence import MAX_EVIDENCE_UNITS
+
+                    units = item["evidence_units"]
+                    if (
+                        not isinstance(units, list)
+                        or not 1 <= len(units) <= MAX_EVIDENCE_UNITS
+                        or any(type(n) is not int or n < 1 for n in units)
+                        or len(set(units)) != len(units)
+                    ):
+                        raise ValueError(
+                            f"{location}.evidence_units requires 1-6 unique positive ordinals"
+                        )
+                    value["evidence_units"] = units
                 if "brief" in item:
                     if not isinstance(item["brief"], str):
                         raise ValueError(f"{location}.brief must be a string")

@@ -498,7 +498,7 @@ def test_converter_uses_global_threshold(_isolated_global, tmp_path, monkeypatch
 
     src = tmp_path / "doc.pdf"
     pdf = pymupdf.open()
-    pdf.new_page()
+    pdf.new_page().insert_text((30, 30), "Readable threshold fixture")
     pdf.save(str(src))
     pdf.close()
 

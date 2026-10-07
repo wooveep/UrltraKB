@@ -1,5 +1,10 @@
 """Recovered complete files enter the ordinary Source pipeline through durable jobs."""
 
+import json
+from collections import Counter
+
+import pytest
+
 pytest_plugins = ("pending_fixtures",)
 
 
@@ -92,43 +97,75 @@ def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
     assert pending_status(kb_dir)["groups"][0]["cancelled"]
 
 
-def test_pending_import_preserves_current_compile_warning_after_readback(
-    kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
+@pytest.mark.parametrize("mode", ["valid", "normalized", "repaired", "malformed"])
+def test_plan_contract_controls(
+    kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch, mode
 ):
-    import json
-
-    import litellm
-
     from openkb.application.documents import import_document
     from openkb.application.pending import pending_status, process_pending
 
-    completion = litellm.completion
+    calls = Counter()
 
-    def broken_plan(**kwargs):
-        response = completion(**kwargs)
-        if "concepts" in str(kwargs["messages"]).lower():
-            response.choices[0].message.content = json.dumps({"concepts": "malformed"})
-        return response
+    def response(model, messages, step, **kwargs):
+        calls[step] += 1
+        if step == "concepts-plan":
+            valid = {"concepts": {}, "entities": {}}
+            if mode == "malformed" or mode == "repaired" and calls[step] % 2:
+                plan = {"concepts": "malformed"}
+            elif mode == "normalized":
+                plan = {"concepts": [], "entities": []}
+            else:
+                plan = valid
+            return json.dumps(plan)
+        return json.dumps({"description": "Fixture", "content": "# Fixture\n\nSource facts."})
 
-    async def abroken_plan(**kwargs):
-        return broken_plan(**kwargs)
+    async def page(*args, **kwargs):
+        return response(*args, **kwargs)
 
-    monkeypatch.setattr(litellm, "completion", broken_plan)
-    monkeypatch.setattr(litellm, "acompletion", abroken_plan)
+    monkeypatch.setattr("openkb.agent.compiler._llm_call", response)
+    monkeypatch.setattr("openkb.agent.compiler._llm_call_page_async", page)
     parent = import_document(kb_dir, embedded_docx)
-    process_pending(kb_dir)
-    imported = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
-    assert imported["status"] == "completed", imported["message"]
-    assert imported["result"]["quality_known"] is True
-    assert imported["result"]["quality"] == list(parent.quality)
-    assert imported["result"]["quality"]
-    assert imported["result"]["unfinished"]
-    before = imported["result"]
-    assert process_pending(kb_dir)["processed"] == 0
+    drained = process_pending(kb_dir)
+    child = next(j for j in pending_status(kb_dir)["jobs"] if j["kind"] == "import")
+    receipt = child["result"]
+    after = process_pending(kb_dir)
+    reread = next(j for j in pending_status(kb_dir)["jobs"] if j["kind"] == "import")
+    record = {
+        "mode": mode,
+        "parent_status": parent.status,
+        "parent_quality": list(parent.quality),
+        "parent_unfinished": list(parent.unfinished),
+        "pending_status": child["status"],
+        "pending_quality_known": receipt["quality_known"],
+        "pending_quality": receipt["quality"],
+        "pending_unfinished": receipt["unfinished"],
+        "plan_calls": calls["concepts-plan"],
+        "receipt_unchanged_after_readback": reread["result"] == receipt,
+        "redrain_processed": after["processed"],
+        "initial_processed": drained["processed"],
+        "unit_statuses": [u["status"] for u in receipt["units"]],
+        "published_unit_count": sum(bool(u.get("knowledge_revision_id")) for u in receipt["units"]),
+        "model_boundary": "pdf_model and compiler stubs; no online generation",
+    }
+    expected_status = "failed" if mode == "malformed" else "completed"
+    expected_quality = {
+        "valid": [],
+        "normalized": ["compile_plan_normalized"],
+        "repaired": ["compile_plan_repaired"],
+        "malformed": ["malformed_plan_items"],
+    }[mode]
+    assert child["status"] == expected_status, record
+    assert parent.status == ("failed" if mode == "malformed" else "added"), record
+    assert receipt["quality"] == list(parent.quality) == expected_quality, record
     assert (
-        next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")["result"]
-        == before
-    )
+        receipt["unfinished"]
+        == list(parent.unfinished)
+        == (["concepts", "entities"] if mode == "malformed" else [])
+    ), record
+    assert receipt["quality_known"] is True, record
+    assert record["receipt_unchanged_after_readback"] and after["processed"] == 0, record
+    assert calls["concepts-plan"] == (4 if mode in {"repaired", "malformed"} else 2), record
+    assert record["published_unit_count"] == (0 if mode == "malformed" else 1), record
 
 
 def test_failed_import_receipt_stays_with_its_attempt_when_retried(

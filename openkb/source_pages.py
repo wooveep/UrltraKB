@@ -12,7 +12,7 @@ def select_page_part(source: dict, part: str | None) -> dict:
     if part is None:
         return source
     if part not in {"body", "notes"} or source.get("unit_kind") != "page":
-        raise PageRangeError("Body/notes selection requires a physical slide source")
+        raise PageRangeError("Invalid part: use null for PDF/full pages; body/notes require slides")
     units = []
     for page in source.get("units", []):
         parts = page.get("parts")
@@ -21,7 +21,7 @@ def select_page_part(source: dict, part: str | None) -> dict:
             or set(parts) != {"body", "notes"}
             or any(not isinstance(text, str) for text in parts.values())
         ):
-            raise PageRangeError("This source has no verified body/notes partition")
+            raise PageRangeError("This source has no verified body/notes partition; use part=null")
         units.append(
             {
                 **page,

@@ -89,13 +89,20 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
         reprocess_source(kb_dir, first.source_id, version="0" * 64)
 
 
-def test_failed_conversion_retry_requires_preview_if_policy_changed(kb_dir, tmp_path, pdf_model):
+def test_failed_conversion_retry_requires_preview_if_policy_changed(
+    kb_dir, tmp_path, pdf_model, physical_pdf, monkeypatch
+):
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
 
     path = tmp_path / "bad.pdf"
-    path.write_bytes(b"%PDF-1.4\nbroken")
+    path.write_bytes(physical_pdf.read_bytes())
+
+    def conversion_failure(*args, **kwargs):
+        raise ValueError("Fixture failed conversion after successful PDF text preflight")
+
+    monkeypatch.setattr("openkb.converter.convert_pdf_with_images", conversion_failure)
     first = import_document(kb_dir, path)
     assert first.status == "failed"
     apply_kb_config_patch(

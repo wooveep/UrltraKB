@@ -79,24 +79,23 @@ class TestConvertDocumentMarkdown:
 # ---------------------------------------------------------------------------
 
 
+def _readable_pdf(path, pages):
+    import pymupdf
+
+    with pymupdf.open() as pdf:
+        for ordinal in range(1, pages + 1):
+            pdf.new_page().insert_text((30, 30), f"Source page {ordinal}")
+        pdf.save(path)
+
+
 class TestConvertDocumentPdfShort:
     def test_short_pdf_converted_via_pymupdf(self, kb_dir, tmp_path):
         """PDF under threshold is converted with pymupdf (convert_pdf_with_images)."""
         src = tmp_path / "short.pdf"
-        src.write_bytes(b"%PDF-1.4 fake content")
-
-        with (
-            patch("openkb.converter.pymupdf.open") as mock_mu,
-            patch(
-                "openkb.converter.convert_pdf_with_images", return_value="# Short PDF\n\nConverted."
-            ) as mock_cpwi,
-        ):
-            fake_doc = MagicMock()
-            fake_doc.page_count = 5  # below default threshold of 20
-            fake_doc.__enter__ = MagicMock(return_value=fake_doc)
-            fake_doc.__exit__ = MagicMock(return_value=False)
-            mock_mu.return_value = fake_doc
-
+        _readable_pdf(src, 5)
+        with patch(
+            "openkb.converter.convert_pdf_with_images", return_value="# Short PDF\n\nConverted."
+        ) as mock_cpwi:
             result = convert_document(src, kb_dir)
 
         mock_cpwi.assert_called_once()
@@ -115,18 +114,8 @@ class TestConvertDocumentPdfLong:
     def test_long_pdf_returns_is_long_doc(self, kb_dir, tmp_path):
         """PDF >= threshold pages returns is_long_doc=True, source_path=None."""
         src = tmp_path / "long.pdf"
-        src.write_bytes(b"%PDF-1.4 fake long content")
-
-        with (
-            patch("openkb.converter.pymupdf.open") as mock_mu,
-        ):
-            fake_doc = MagicMock()
-            fake_doc.page_count = 200  # above threshold
-            fake_doc.__enter__ = MagicMock(return_value=fake_doc)
-            fake_doc.__exit__ = MagicMock(return_value=False)
-            mock_mu.return_value = fake_doc
-
-            result = convert_document(src, kb_dir)
+        _readable_pdf(src, 200)
+        result = convert_document(src, kb_dir)
 
         assert result.is_long_doc is True
         assert result.source_path is None

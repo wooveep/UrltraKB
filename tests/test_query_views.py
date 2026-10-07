@@ -392,14 +392,26 @@ def test_source_reader_reports_the_version_of_its_published_body(kb_dir, opposin
     assert source["source_revision_id"] == first.source_revision_id
 
 
-def test_unpublished_version_is_a_gap_and_does_not_hide_legacy(kb_dir):
+def test_unpublished_version_is_a_gap_and_does_not_hide_legacy(kb_dir, monkeypatch):
+    import pymupdf
+
     from openkb.application.documents import import_document
     from openkb.application.query_views import resolve_query_views
     from openkb.view_records import SourceMetadata
 
     (kb_dir / "wiki/concepts/legacy.md").write_text("Legacy connection notes.")
     path = kb_dir / "broken.pdf"
-    path.write_bytes(b"not a PDF")
+    # Admission succeeds, compilation fails: malformed PDFs now reject before admission.
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((30, 30), "Valid source with unavailable compilation")
+        pdf.save(path)
+
+    def unavailable(*args, **kwargs):
+        from openkb.compilation_report import CompilationIncomplete
+
+        raise CompilationIncomplete(("fixture_unavailable",), ("summary",))
+
+    monkeypatch.setattr("openkb.agent.compiler._llm_call", unavailable)
     result = import_document(
         kb_dir,
         path,

@@ -59,6 +59,10 @@ You are OpenKB's wiki compilation agent for a personal knowledge base.
 
 Write all content in {language} language.
 Use [[wikilinks]] to connect related pages (e.g. [[concepts/attention]]).
+Document filenames are navigation identifiers, not verified product/version facts.
+Never infer applicable versions from filenames or generated navigation titles.
+Exact fields, commands and defaults require original source evidence.
+Keep each rule's subject, configuration item, condition and source locator together.
 """
 
 _SUMMARY_USER = """\
@@ -419,7 +423,7 @@ def _llm_call(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-v1",
+        prompt_version="compiler-evidence-v2",
         generation_options=kwargs,
     )
     spinner = _Spinner(step_name)
@@ -463,7 +467,7 @@ async def _llm_call_async(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-v1",
+        prompt_version="compiler-evidence-v2",
         generation_options=kwargs,
     )
     t0 = time.time()
@@ -486,18 +490,45 @@ async def _llm_call_async(
 
 
 async def _llm_call_page_async(
-    model: str, messages: list[dict], step_name: str, *, bundle=None, **kwargs
+    model: str, messages: list[dict], step_name: str, *, bundle=None, evidence=None, **kwargs
 ) -> str:
-    """``_llm_call_async`` for a step that writes a wiki page from the response.
+    """Validate each page and repair only that response, at most once."""
+    from openkb.agent.page_response import PageResponseError
 
-    Hard-codes ``raise_on_truncation=True`` so a truncated response skips the
-    write instead of silently persisting a partial page (#148). Use this for
-    every page-generating call so the guarantee can't be forgotten at a new
-    call site.
-    """
-    return await _llm_call_async(
-        model, messages, step_name, raise_on_truncation=True, bundle=bundle, **kwargs
-    )
+    correction = []
+    for attempt in range(2):
+        try:
+            raw = await _llm_call_async(
+                model,
+                messages + correction,
+                step_name,
+                raise_on_truncation=True,
+                bundle=bundle,
+                **kwargs,
+            )
+            _, content, _ = _page_fields(raw)
+            if evidence is not None:
+                evidence.validate(content)
+            if attempt:
+                report_compile_issue("page_response_repaired")
+            return raw
+        except (PageResponseError, TruncatedResponseError) as error:
+            code = getattr(error, "code", "page_truncated_response")
+            if attempt:
+                report_compile_issue(code)
+                raise ValueError(f"{step_name}: {error}") from error
+            correction = [
+                {
+                    "role": "user",
+                    "content": (
+                        f"The page response failed validation ({code}): {error}. "
+                        "Return exactly one JSON object with string description and nonempty content. "
+                        "Do not append a second object or note. Keep supported source facts only. "
+                        "If truncated, shorten the page while retaining complete statements."
+                    ),
+                }
+            ]
+    raise AssertionError("Unreachable page retry state")
 
 
 async def _generate_pages(coroutines):
@@ -581,44 +612,16 @@ def _parse_json(text: str) -> list | dict:
     return result
 
 
-def _parse_page_json(text: str) -> dict | None:
-    """Parse an LLM page response into a single JSON object.
+def _parse_page_json(text: str) -> dict:
+    from openkb.agent.page_response import parse_page
 
-    Unwraps a single-element ``[{...}]`` array (some models wrap the object in
-    a list). Returns ``None`` when the response is valid JSON of the wrong
-    shape (empty/multi-element array, list of scalars) so callers skip the page
-    rather than persisting the raw JSON text as its body. Propagates the
-    json/ValueError from ``_parse_json`` when the text isn't JSON at all, which
-    callers catch to fall back to treating ``raw`` as a prose-markdown body.
-    """
-    parsed = _parse_json(text)
-    if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
-        parsed = parsed[0]
-    return parsed if isinstance(parsed, dict) else None
+    return parse_page(text)
 
 
 def _page_fields(raw: str) -> tuple[str, str, dict | None]:
-    """Map a page LLM response to ``(brief, content, obj)``.
+    from openkb.agent.page_response import page_fields
 
-    - JSON object (or a single-element ``[{...}]`` array): brief/content come
-      from it and ``obj`` is the dict (entity callers read ``type`` from it).
-    - Valid JSON of the wrong shape (multi/empty array, scalar): ``("", "",
-      None)`` — the empty content makes ``_require_nonempty_content`` skip the
-      page rather than persisting the raw JSON text as its body.
-    - Not JSON at all: ``("", raw, None)`` — ``raw`` is written as a
-      prose-markdown body (the legitimate fallback for models that emit
-      markdown instead of JSON).
-
-    Shared by all four page-generation closures so a new edge case is handled
-    in one place instead of four near-identical blocks.
-    """
-    try:
-        obj = _parse_page_json(raw)
-    except (json.JSONDecodeError, ValueError):
-        return "", raw, None
-    if obj is None:
-        return "", "", None
-    return obj.get("description", ""), (obj.get("content") or ""), obj
+    return page_fields(raw)
 
 
 def _filter_concept_items(items: list, label: str) -> list[dict]:
@@ -650,10 +653,10 @@ def _filter_concept_items(items: list, label: str) -> list[dict]:
     return valid
 
 
-def _require_nonempty_content(content, name: str) -> None:
+def _require_nonempty_content(content, name: str, kind: str = "concept") -> None:
     """Raise if a concept body is missing or whitespace-only."""
     if not isinstance(content, str) or not content.strip():
-        raise ValueError(f"LLM returned empty content for concept {name!r}")
+        raise ValueError(f"LLM returned empty content for {kind} {name!r}")
 
 
 def _filter_related_slugs(items: list) -> list[str]:
@@ -1680,7 +1683,12 @@ async def _compile_concepts(
             )
         _write_summary(wiki_dir, doc_name, cleaned, description=doc_brief)
 
+    from openkb.agent.compile_evidence import EVIDENCE_PLAN_INSTRUCTION, LongDocumentEvidence
     from openkb.agent.compile_plan import request_compile_plan
+
+    originals = LongDocumentEvidence(wiki_dir, doc_name) if doc_type == "pageindex" else None
+    if originals is not None:
+        plan_messages.append({"role": "user", "content": EVIDENCE_PLAN_INSTRUCTION})
 
     plan = request_compile_plan(
         lambda correction: _llm_call(
@@ -1697,6 +1705,7 @@ async def _compile_concepts(
         },
         entity_types=valid_types,
         sanitize=_sanitize_concept_name,
+        require_evidence=originals is not None and originals.raw is not None,
     )
     create_items, update_items, related_items = (
         plan.concepts.create,
@@ -1764,6 +1773,7 @@ async def _compile_concepts(
     async def _gen_create(concept: dict) -> tuple[str, str, bool, str]:
         name = concept["name"]
         title = concept.get("title", name)
+        evidence = originals.select(concept) if originals is not None else None
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1772,6 +1782,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _CONCEPT_PAGE_USER.format(
@@ -1784,6 +1795,7 @@ async def _compile_concepts(
                 f"concept: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1799,6 +1811,11 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
+        evidence = (
+            originals.select(concept, previous_content=existing_content)
+            if originals is not None
+            else None
+        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1807,6 +1824,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _CONCEPT_UPDATE_USER.format(
@@ -1819,6 +1837,7 @@ async def _compile_concepts(
                 f"update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1828,6 +1847,7 @@ async def _compile_concepts(
         name = ent["name"]
         title = ent.get("title", name)
         etype = ent.get("type", "other")
+        evidence = originals.select(ent) if originals is not None else None
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1836,6 +1856,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _ENTITY_PAGE_USER.format(
@@ -1848,10 +1869,11 @@ async def _compile_concepts(
                 f"entity: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
-        _require_nonempty_content(content, name)
+        _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
     async def _gen_entity_update(ent: dict) -> tuple[str, str, str, str]:
@@ -1865,6 +1887,11 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
+        evidence = (
+            originals.select(ent, previous_content=existing_content)
+            if originals is not None
+            else None
+        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1873,6 +1900,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _ENTITY_UPDATE_USER.format(
@@ -1886,10 +1914,11 @@ async def _compile_concepts(
                 f"entity-update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
-        _require_nonempty_content(content, name)
+        _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
     tasks = []
@@ -2180,6 +2209,9 @@ async def compile_short_doc(
     # message creates a cache breakpoint that covers (system + doc) for
     # every downstream call (summary, concepts-plan, every concept page).
     system_msg, doc_msg = short_document_messages(doc_name, content, schema_md, language)
+    from openkb.agent.compile_evidence import version_context
+
+    system_msg["content"] += version_context(kb_dir, resolve_scope(kb_dir, scope))
 
     # --- Step 1: Generate summary (v1, held in memory) ---
     # The summary is NOT written to disk yet — it's used as cache context
@@ -2267,12 +2299,15 @@ async def compile_long_doc(
 
     # Base context A. cache_control marker on the doc message creates a
     # cache breakpoint covering (system + doc) for every concept call.
+    from openkb.agent.compile_evidence import version_context
+
     system_msg = {
         "role": "system",
         "content": _SYSTEM_TEMPLATE.format(
             schema_md=schema_md,
             language=language,
-        ),
+        )
+        + version_context(kb_dir, resolve_scope(kb_dir, scope)),
     }
     doc_msg = {
         "role": "user",

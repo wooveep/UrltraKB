@@ -186,7 +186,7 @@ class TestAddCommand:
             doc_name=name,
         )
 
-    def test_long_doc_rollback_removes_only_the_new_blob(self, tmp_path):
+    def test_long_doc_rollback_removes_only_the_new_blob(self, tmp_path, physical_pdf):
         """A failed long-doc add must roll back the blob IT created under
         .openkb/files, while a pre-existing blob (another document) survives —
         the targeted track_new must not touch blobs this add didn't create."""
@@ -208,7 +208,7 @@ class TestAddCommand:
             return IndexResult(doc_id=new_id, description="", tree={"structure": []})
 
         doc = tmp_path / "paper.pdf"
-        doc.write_bytes(b"%PDF-1.4 fake")
+        doc.write_bytes(physical_pdf.read_bytes())
         conv = self._long_doc_conv(kb_dir, "paper", "cafebabe00" * 8)
 
         with (
@@ -225,7 +225,7 @@ class TestAddCommand:
         assert not (files / new_id).exists()  # new images subtree rolled back
         assert other.read_bytes() == b"another-doc-keep-me"  # pre-existing survives
 
-    def test_long_doc_dedup_hit_does_not_delete_existing_blob(self, tmp_path):
+    def test_long_doc_dedup_hit_does_not_delete_existing_blob(self, tmp_path, physical_pdf):
         """PageIndex content-dedup can return an EXISTING doc_id and write no new
         blob (diverged hashes.json/pageindex.db). A failed add must NOT delete
         that pre-existing blob on rollback (regression: track_new globbing the
@@ -245,7 +245,7 @@ class TestAddCommand:
             return IndexResult(doc_id=existing_id, description="", tree={"structure": []})
 
         doc = tmp_path / "dup.pdf"
-        doc.write_bytes(b"%PDF-1.4 dup")
+        doc.write_bytes(physical_pdf.read_bytes())
         conv = self._long_doc_conv(kb_dir, "dup", "feedface00" * 8)
 
         with (

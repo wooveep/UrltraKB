@@ -143,7 +143,7 @@ def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=No
             # Read the last committed cursor/source before recording the execution result.
             _, job = read_job(root, identity)
             job = reconcile_job(root, kind, job)
-            if job.status not in {"completed", "cancelled"}:
+            if job.status not in {"completed", "not_imported", "cancelled"}:
                 job = save_job(
                     root,
                     kind,
@@ -252,7 +252,10 @@ def cancel_execution_group(kb_dir: Path, identity: str) -> None:
             }
             for kind, job in jobs(root):
                 job = reconcile_job(root, kind, job)
-                if job.root_import_id == identity and job.status != "completed":
+                if job.root_import_id == identity and job.status not in {
+                    "completed",
+                    "not_imported",
+                }:
                     collection = "discovery-intents" if kind == "discovery" else "import-intents"
                     records[record_path(root, collection, job.intent_id)] = job.model_copy(
                         update={"status": "cancelled", "cancelled": True}

@@ -128,7 +128,9 @@ def _execute(
         outcome = run_pending_job(root, request.job_id, request.dispatch_id, context=context)
         status = outcome["status"]
         return UnitResult(
-            status
+            "skipped"
+            if status == "not_imported"
+            else status
             if status in {"completed", "skipped", "partial", "failed", "stopped"}
             else "blocked",
             error=outcome.get("message"),
@@ -481,6 +483,7 @@ def _execute(
             session_id=answer.session_id,
             turn_count=answer.turn_count,
             output=answer.answer,
+            answer_outcome=answer.answer_outcome,
             usage=answer.usage,
             output_state="available",
         )

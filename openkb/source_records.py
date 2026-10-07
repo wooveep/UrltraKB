@@ -117,6 +117,7 @@ class PendingJob(Record):
         "dispatched",
         "started",
         "completed",
+        "not_imported",
         "partial",
         "failed",
         "blocked",

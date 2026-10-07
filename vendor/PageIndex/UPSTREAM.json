@@ -126,7 +126,8 @@
     "CSV locations (#85): generated column labels, padding and separators cannot anchor original sections; prefaces skip generated ranges.",
     "Physical slides (#89): portable PDF/notes snapshot; shared PDF content-based tree with explicit generated navigation anchors in body or notes; full/range cache recovery verifies both domains and physical ordinals.",
     "Reconcile the recorded patch hashes with the existing .5 snapshot; retain all current parser, frozen-input and slide readback fixes unchanged.",
-    "Add packaged source identity for editable and wheel checks; package-only changes do not alter the content policy or request index rebuilding."
+    "Add packaged source identity for editable and wheel checks; package-only changes do not alter the content policy or request index rebuilding.",
+    "Physical slide navigation v3: enforce incremental continuation before append, verify new IDs and original anchors, and allow one bounded correction of the current chunk. Earlier entries remain immutable and retain their existing verification phase."
   ],
   "local_patch": {
     "date": "2026-10-07",
@@ -150,7 +151,7 @@
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
       "pageindex/backend/local.py": "18f4a7fd10e9c81d72aca3852bbff344f810054a18de5d01b64efae007dc1c1e",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
-      "pageindex/index/page_index.py": "8581e2054023bd83fb9d131b22c81216294514fdfb373d9b02b4937952e938f5",
+      "pageindex/index/page_index.py": "8598a5ba963bed8e86524be00be96ddb33ba1629b36f01ebc6caddedf6a05170",
       "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
       "pageindex/index/utils.py": "e9cb759e9588d08efeb2618421ca654c195914fd113afc6e7995c96cc45985d9",
       "pageindex/index/page_index_md.py": "ba4a3cfbfb3f8cb55d6d10b56a24a853fd89f920cac69f0d1317cf3240194ccb",
@@ -168,7 +169,7 @@
       "pageindex/backend/input_package.py": "a5f5c59573b81c81559aaa6206642d88e3a40662381ff8d56c25cb47dbbd7de8",
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
-      "pageindex/index/page_parts_policy.py": "8f5ed1f4dce376bb0c57ef0c2ffd6417cf44c8a4d031063b6756aad34024d2b3"
+      "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed"
     },
     "deleted": [
       "cookbook/README.md",

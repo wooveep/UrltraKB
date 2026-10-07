@@ -357,7 +357,11 @@ def _convert_prepared_document(
             # Use pymupdf dict-mode for PDFs: text + images inline at correct positions
             page_records: list[dict] = []
             markdown = convert_pdf_with_images(
-                pdf_input, doc_name, images_dir, page_records=page_records
+                pdf_input,
+                doc_name,
+                images_dir,
+                page_records=page_records,
+                **({"allow_empty_text": True} if office_path else {}),
             )
             if office_path:
                 from openkb.office.slide_content import attach_slides, read_slides

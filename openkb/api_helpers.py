@@ -430,7 +430,11 @@ async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[
                     if result.status != "completed":
                         yield _sse("error", {"message": result.error or result.status})
                         continue
-                    data = {"answer": result.answer, "usage": result.usage}
+                    data = {
+                        "answer": result.answer,
+                        "usage": result.usage,
+                        "answer_outcome": result.answer_outcome,
+                    }
                     if result.session_id:
                         data.update(session_id=result.session_id, turn_count=result.turn_count)
                     else:

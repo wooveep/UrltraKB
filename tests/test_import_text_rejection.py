@@ -40,7 +40,7 @@ def test_pdf_is_rejected_before_segmented_indexing(kb_dir, tmp_path, block_model
         pdf.save(path)
     result = import_document(kb_dir, path)
     assert result.status == "rejected"
-    assert "page[1]" in result.message
+    assert result.message == "PDF导入识别异常"
     assert not list_sources(kb_dir) and not block_model
 
 

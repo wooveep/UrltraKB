@@ -4,7 +4,7 @@ import copy
 import json
 import re
 
-PAGE_PARTS_INDEX_POLICY = "physical-slide-navigation-v2"
+PAGE_PARTS_INDEX_POLICY = "physical-slide-navigation-v3"
 
 
 class PagePartsContractError(ValueError):
@@ -96,7 +96,39 @@ physical_index must equal anchor.unit. Keep original order, body before notes on
 each slide. A single root covering the whole presentation is valid. No other output.
 When BOTH body and notes have no non-whitespace text, do not generate an independent
 text navigation entry. The physical slide and its images are still retained.
-""" + "\nPrevious structure:\n" + json.dumps(previous or [], ensure_ascii=False) + "\nSlides:\n" + part
+""" + ("\nReturn ONLY new entries for this chunk. Previous structure is immutable context: "
+       "never repeat, revise or renumber its entries. Continue unique structure IDs. "
+       "Return [] if no additional section begins here.\n" if previous is not None else "") + "\nPrevious structure:\n" + json.dumps(previous or [], ensure_ascii=False) + "\nSlides:\n" + part
+
+    def validate_chunk(self, previous, incoming, part):
+        """Validate the incremental boundary before mutating the accumulated tree."""
+        if not isinstance(incoming, list) or any(not isinstance(item, dict) for item in incoming):
+            raise PagePartsContractError("slide_toc_chunk: response must be an array of entries")
+        old_ids = {item.get("structure") for item in previous}
+        ids = [item.get("structure") for item in incoming]
+        if any(not isinstance(value, str) for value in ids):
+            raise PagePartsContractError("slide_toc_chunk: missing string structure ID")
+        conflicts = old_ids.intersection(ids)
+        if conflicts or len(set(ids)) != len(ids):
+            raise PagePartsContractError(f"slide_toc_chunk: duplicate/conflicting IDs {sorted(conflicts or set(ids))}")
+        ordinals = {int(number) for number in re.findall(r"<physical_index_(\d+)>", part)}
+        if any(item.get("physical_index") not in ordinals for item in incoming):
+            raise PagePartsContractError("slide_toc_chunk: anchor is outside the current chunk")
+        try:
+            # Textless placeholders are removed later, but still require valid coordinates.
+            retained = [item for item in incoming
+                        if not self._textless_entry(item, 1, len(self.parts))]
+            self.validate_order(retained)
+            # Earlier anchors have their own verification/correction phase. Do
+            # not ask a continuation to change immutable previous entries.
+            ordered = [item for item in previous + incoming
+                       if not self._textless_entry(item, 1, len(self.parts))]
+            positions = [(item["physical_index"], item["anchor"]["part"] == "notes",
+                          item["anchor"]["range"][0]) for item in ordered]
+            if positions != sorted(positions):
+                raise ValueError("New entries must follow the previous original positions")
+        except (ValueError, KeyError, TypeError) as error:
+            raise PagePartsContractError(f"slide_toc_chunk: {error}") from error
 
     def valid(self, item, start_index=1, count=None):
         if (item.get("title_origin") != "generated" or not isinstance(item.get("title"), str)

@@ -43,10 +43,23 @@ def import_file(kb_dir, job, context):
         context.begin(kb_dir) as credentials,
         collect_compile_report() as compilation,
     ):
-        from openkb.import_text import preflight_import_text, validate_text_preflight
+        from openkb.import_text import (
+            ImportTextRejected,
+            preflight_import_text,
+            validate_text_preflight,
+        )
 
         assessment = preflight_import_text(kb_dir, prepared, check_stop=context.check_stop)
-        validate_text_preflight(prepared, assessment)
+        try:
+            validate_text_preflight(prepared, assessment)
+        except ImportTextRejected as exc:
+            if not exc.assessment.empty_html or job.source_id is not None:
+                raise
+            return save_job(
+                kb_dir,
+                "import",
+                job.model_copy(update={"status": "not_imported", "message": str(exc)}),
+            )
         admission = admit_source_revision(
             kb_dir,
             prepared,

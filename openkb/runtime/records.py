@@ -37,8 +37,11 @@ class UnitResult:
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
     quality_known: bool | None = None
+    answer_outcome: str | None = None
 
     def __post_init__(self) -> None:
+        if self.answer_outcome not in {None, "answered", "scope_unresolved", "evidence_rejected"}:
+            raise ValueError("Invalid answer outcome")
         validate_receipt(self.model_usage)
         if self.quality_known is not None and type(self.quality_known) is not bool:
             raise ValueError("Invalid compilation quality observation")
@@ -100,6 +103,7 @@ class UnitResult:
             usage=value.get("usage"),
             model_usage=value.get("model_usage"),
             quality_known=value.get("quality_known"),
+            answer_outcome=value.get("answer_outcome"),
         )
 
 

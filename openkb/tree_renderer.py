@@ -33,6 +33,20 @@ def _render_nodes_summary(nodes: list[dict], depth: int) -> str:
 
         label = "blocks" if node.get("unit_kind") == "block" else "pages"
         lines.append(f"{heading_prefix} {title} ({label} {start}–{end})\n")
+        origin = node.get("title_origin", "unknown")
+        lines.append(
+            f"Navigation title origin: {origin}. "
+            + (
+                "Generated label, not an original section heading. "
+                if origin == "generated"
+                else ""
+            )
+            + (
+                "Range denotes physical pages, not section numbers.\n"
+                if label == "pages"
+                else "Range denotes content blocks, not section numbers.\n"
+            )
+        )
         if summary:
             lines.append(f"Summary: {summary}\n")
         if children:

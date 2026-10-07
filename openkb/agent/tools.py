@@ -119,7 +119,8 @@ def get_wiki_page_content(
     from openkb.source_pages import read_page_selection, select_page_part
 
     result = read_page_selection(_json.loads(target.read_text(encoding="utf-8")), pages)
-    result = select_page_part(result, part)
+    # Legacy callers used an empty string for the unpartitioned page.
+    result = select_page_part(result, part or None)
     if not result["page_range"]:
         return f"No content found for pages {pages} in {doc_name}."
     return result["content"] + "\n\n"

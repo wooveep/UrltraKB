@@ -40,6 +40,9 @@ class QueryRequest(ViewRequest):
 class QueryResponse(BaseModel):
     answer: str
     saved_path: str | None = None
+    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ChatRequest(ViewRequest):
@@ -53,6 +56,9 @@ class ChatResponse(BaseModel):
     session_id: str
     answer: str
     turn_count: int
+    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ChatSessionItem(BaseModel):

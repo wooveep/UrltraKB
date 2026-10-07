@@ -129,6 +129,7 @@ class PendingDialog(ManagementPanel):
                         "stopped": "已停止",
                         "cancelled": "执行组已取消",
                         "stale": "已失效",
+                        "not_imported": "不导入",
                         "completed": "已完成，有编译缺项"
                         if job.get("quality") or job.get("unfinished")
                         else "已完成",
@@ -139,6 +140,7 @@ class PendingDialog(ManagementPanel):
                         "Decompression budget exhausted": "解压字节数已达到本组上限",
                         "Discovery depth budget exhausted": "已达到文件发现层数上限",
                         "Discovery time budget exhausted": "已达到文件发现耗时上限",
+                        "HTML not imported: no readable body": "无静态正文，不导入为文档",
                     }.get(job["message"], job["message"] or ""),
                     job["id"],
                 )
@@ -184,12 +186,20 @@ class PendingDialog(ManagementPanel):
             if job["kind"] == "import":
                 from openkb.llm_usage import describe_model_usage
 
+                not_imported = job["status"] == "not_imported"
                 lines = [
                     f"任务：{job['id']}",
                     f"文件：{job['filename']}",
-                    f"来源：{job.get('source_id') or '尚未接入'}",
+                    f"来源：{job.get('source_id') or ('不导入' if not_imported else '尚未接入')}",
                     f"来源修订：{job.get('source_revision_id') or '无'}",
-                    "本次编译质量：" + ("已记录" if job.get("quality_known") else "未知"),
+                    "本次编译质量："
+                    + (
+                        "未编译"
+                        if not_imported
+                        else "已记录"
+                        if job.get("quality_known")
+                        else "未知"
+                    ),
                 ]
                 lines.extend("质量告警：" + note for note in job.get("quality", []))
                 lines.extend("未完成：" + stage for stage in job.get("unfinished", []))
@@ -211,7 +221,7 @@ class PendingDialog(ManagementPanel):
             for key, entry in self.fields.items():
                 entry.setText(str(group["budget"][key]))
             self.budget_status.setText(
-                f"本组已接入 {group['sources']} 份来源；已恢复 {group['object_bytes']} 字节；"
+                f"本组已使用 {group['sources']} 份来源预算；已恢复 {group['object_bytes']} 字节；"
                 f"发现耗时 {group['discovery_seconds']:.2f} 秒。"
                 f"预算来源：{group['budget_origin']}。"
             )

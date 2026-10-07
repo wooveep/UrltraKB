@@ -39,11 +39,11 @@ def fixed_model(monkeypatch):
     monkeypatch.setattr("litellm.completion", completion)
 
 
-def test_equal_bytes_keep_distinct_sources(kb_dir, tmp_path):
+def test_equal_bytes_keep_distinct_sources(kb_dir, tmp_path, pdf_source):
     from openkb.source_catalog import admit_source_revision, list_sources, read_source_revision
 
     first, second = tmp_path / "first.pdf", tmp_path / "second.pdf"
-    first.write_bytes(b"same frozen original")
+    first.write_bytes(pdf_source.read_bytes())
     second.write_bytes(first.read_bytes())
     with prepared_input(first) as ready:
         a = admit_source_revision(kb_dir, ready)
@@ -55,15 +55,13 @@ def test_equal_bytes_keep_distinct_sources(kb_dir, tmp_path):
     assert (
         read_source_revision(kb_dir, a.revision.source_revision_id).original == b.revision.original
     )
-    assert (kb_dir / a.revision.original).read_bytes() == b"same frozen original"
+    assert (kb_dir / a.revision.original).read_bytes() == pdf_source.read_bytes()
 
 
-def test_repeating_admission_reuses_the_frozen_target(kb_dir):
+def test_repeating_admission_reuses_the_frozen_target(kb_dir, pdf_source):
     from openkb.source_catalog import admit_source_revision
 
-    original = kb_dir / "notes.pdf"
-    original.write_bytes(b"frozen original")
-    with prepared_input(original) as ready:
+    with prepared_input(pdf_source) as ready:
         first = admit_source_revision(kb_dir, ready)
         replay = admit_source_revision(kb_dir, ready)
     assert replay == first

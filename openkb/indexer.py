@@ -92,10 +92,12 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
     return pages
 
 
-def _convert_pdf_to_pages(pdf_path: Path, doc_name: str, images_dir: Path) -> list[dict[str, Any]]:
+def _convert_pdf_to_pages(
+    pdf_path: Path, doc_name: str, images_dir: Path, *, allow_empty_text: bool = False
+) -> list[dict[str, Any]]:
     from openkb.images import convert_pdf_to_pages
 
-    return convert_pdf_to_pages(pdf_path, doc_name, images_dir)
+    return convert_pdf_to_pages(pdf_path, doc_name, images_dir, allow_empty_text=allow_empty_text)
 
 
 def _write_long_doc_artifacts(
@@ -288,7 +290,9 @@ def index_long_document(
                 with materialize_slide_package(pdf_path) as (snapshot, slides):
                     all_pages = attach_slides(
                         _normalize_page_content(
-                            _convert_pdf_to_pages(snapshot, source_name, images_dir)
+                            _convert_pdf_to_pages(
+                                snapshot, source_name, images_dir, allow_empty_text=True
+                            )
                         ),
                         slides,
                     )

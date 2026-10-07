@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 
@@ -79,16 +79,18 @@ def build_query_agent(
         return read_wiki_file(path, wiki_root)
 
     @function_tool
-    def get_page_content(doc_name: str, pages: str, part: str = "") -> str:
+    def get_page_content(
+        doc_name: str, pages: str, part: Literal["body", "notes"] | None = None
+    ) -> str:
         """Get text content of specific pages from a PageIndex (long) document.
         Only use for documents with doc_type: pageindex. For short documents,
         use read_file instead.
         Args:
             doc_name: Document name (e.g. 'attention-is-all-you-need').
             pages: Page specification (e.g. '3-5,7,10-12').
-            part: For slides, body or notes; empty includes both.
+            part: Use null for PDF/full pages; only partitioned slides accept body or notes.
         """
-        return get_wiki_page_content(doc_name, pages, wiki_root, part or None)
+        return get_wiki_page_content(doc_name, pages, wiki_root, part)
 
     @function_tool
     def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
@@ -190,6 +192,7 @@ async def iter_agent_response_events(
                 "data": {
                     "answer": answer,
                     "history": [*history, {"role": "assistant", "content": answer}],
+                    "answer_outcome": "scope_unresolved",
                 },
             }
             return
@@ -260,9 +263,18 @@ async def iter_agent_response_events(
 
     check_model_stop()
     answer = visible_answer(final if isinstance(final, str) else "".join(collected))
+    answer_outcome = "answered"
     if selection is not None:
+        from openkb.agent.answer_evidence import unsupported_version_claims
+
+        if unsupported_version_claims(answer, selection):
+            answer_outcome = "evidence_rejected"
         decorated = evidence_answer(answer, selection)
-        remaining = decorated[len(answer) :] if "".join(collected).strip() else decorated
+        remaining = (
+            decorated[len(answer) :]
+            if decorated.startswith(answer) and "".join(collected).strip()
+            else decorated
+        )
         yield {"event": "delta", "data": {"text": remaining}}
         answer = decorated
     yield {
@@ -271,6 +283,7 @@ async def iter_agent_response_events(
             "answer": answer,
             "history": result.to_input_list(),
             "usage": usage,
+            "answer_outcome": answer_outcome,
         },
     }
 
