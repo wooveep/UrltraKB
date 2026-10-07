@@ -72,6 +72,5 @@ async def compile_refresh_inputs(
                     unit.doc_name, normalized, kb_dir, model, **options
                 )
             check_stop()
-        if report.unfinished:
-            raise ValueError("Refresh incomplete: " + ", ".join(report.unfinished))
+        report.require_complete()
     return tuple(sorted(originals))

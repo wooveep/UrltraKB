@@ -225,6 +225,12 @@ A "generator" reads from the compiled wiki and produces something usable: an ans
 
 `openkb query "..."` answers a single question with a grounded, cited answer from your wiki. `openkb chat` is interactive, an ongoing multi-turn session over the same wiki (`--resume`, `--list`, `--delete` to manage sessions). → Walked through with real saved output in **[`examples/commands/`](examples/commands/)** (query) and **[`examples/chat/`](examples/chat/)** (chat).
 
+Version evidence is read from PDF covers and native DOCX, XLSX, and PPTX title fields. Filename-derived versions remain hints until confirmed; a version mentioned for another product is not adopted. Use `openkb versions reevaluate SOURCE_ID` to refresh an existing source's evidence from its retained original, inspect `openkb versions show REVIEW_ID`, then use `versions supplement REVIEW_ID --metadata '{"applicable_versions":["9.4.0"]}'` where confirmation is needed and `versions resume REVIEW_ID` to compile it. Reassessment preserves published knowledge and user-confirmed metadata.
+
+Use `openkb versions products` to inspect product IDs and `openkb versions aliases PRODUCT_ID --alias "Short name" --alias "Alternate full name"` to confirm equivalent names. Existing sources move through the version review workflow; historical views retain their original identities. Unconfirmed product-name fragments request clarification instead of expanding a query to other products with the same version.
+
+Compilation validates and, if necessary, repairs a malformed concept/entity plan once before publication. An incomplete worksheet is recorded as failed and can be resumed with `openkb retry-worksheet SOURCE_ID --unit UNIT_ID`; successful sibling sheets and previous successful knowledge remain available. A previously misclassified completed worksheet requires explicit `openkb recompile SOURCE_ID --unit UNIT_ID`. These operations require a supported knowledge-base format; older formats that the current application rejects must be retained as historical data and their originals imported into a new knowledge base.
+
 Inside a chat, type `/` to access slash commands (Tab to complete).
 
 <details>

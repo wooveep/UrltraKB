@@ -1,7 +1,6 @@
 """Resolve and pin permitted knowledge evidence before creating reading tools."""
 
 import re
-import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_record, read_source_revision, record_path, write_record
 from openkb.state import HashRegistry
 from openkb.unit_publication import read_head, wiki_versions
+from openkb.version_labels import version_key as _version_key
 from openkb.view_records import DocumentFamily, FamilyDefault, KnowledgeView
 
 
@@ -220,10 +220,6 @@ def _pin_view(
     )
 
 
-def _version_key(value: str) -> str:
-    return re.sub(r"^v(?=\d)", "", value.rstrip("."), flags=re.IGNORECASE).casefold()
-
-
 def _requested_versions(question: str, labels: set[str]) -> set[str]:
     values = re.findall(
         r"(?:\bv(?=\d)|\bversions?\s*[:：]?\s*|版本\s*[:：]?\s*)"
@@ -250,63 +246,12 @@ def _requested_versions(question: str, labels: set[str]) -> set[str]:
 
 
 def _resolve_product_candidates(
-    views: tuple[KnowledgeView, ...], question: str
+    views: tuple[KnowledgeView, ...], question: str, products=()
 ) -> tuple[set[str], tuple[str, ...]]:
-    """Discover names without treating spelling variants as confirmed identities."""
+    from openkb.product_identity import resolve_product_question
 
-    def normalize(value: str) -> str:
-        return re.sub(r"[\s\-‐‑‒–—]+", " ", unicodedata.normalize("NFKC", value).casefold()).strip()
-
-    text = normalize(question)
-    names = {
-        view.product_id: normalize(view.product)
-        for view in views
-        if view.product_id and view.product
-    }
-    mentions: list[tuple[int, int, str]] = []
-    for name in set(names.values()):
-        pattern = re.escape(name)
-        if re.match(r"[a-z0-9_]", name):
-            pattern = r"(?<![a-z0-9_])" + pattern
-        if re.search(r"[a-z0-9_]$", name):
-            pattern += r"(?![a-z0-9_])"
-        mentions.extend((match.start(), match.end(), name) for match in re.finditer(pattern, text))
-    # A full longer name supersedes a short name at the same location, while
-    # separate mentions remain separate (including multi-product comparisons).
-    mentions = [
-        mention
-        for mention in mentions
-        if not any(
-            other[0] <= mention[0] and mention[1] <= other[1] and other != mention
-            for other in mentions
-        )
-    ]
-    selected: set[str] = set()
-    ambiguous: set[str] = set()
-    for _, _, name in mentions:
-        candidates = {
-            identity
-            for identity, candidate in names.items()
-            if candidate == name or candidate.startswith(name + " ")
-        }
-        selected.update(candidates)
-        if len(candidates) > 1:
-            ambiguous.update(candidates)
-    if not ambiguous:
-        return selected, ()
-    details = tuple(
-        f"Candidate product: {view.product}; product_id={view.product_id}; "
-        f"view={view.view_id}; "
-        f"applicable versions={', '.join(view.applicable_versions) or 'unknown'}."
-        for view in sorted(views, key=lambda view: (view.product or "", view.view_id))
-        if view.product_id in ambiguous
-    )
-    return selected, (
-        "Ambiguous product names; no evidence scope was selected.",
-        *details,
-        "Select a view explicitly (--view / scope.view_id), or confirm product metadata "
-        "through the source version review before querying across sources.",
-    )
+    result = resolve_product_question(views, question, products)
+    return set(result.product_ids), result.notes
 
 
 def resolve_query_views(
@@ -338,8 +283,12 @@ def resolve_query_views(
             # correction. Infer names from currently confirmed product identities;
             # explicit scopes still retain those older views and their boundaries.
             candidates = tuple(view for view in views if view.product_id in current_products)
+        from openkb.application.products import list_products
+
         products, ambiguity = (
-            _resolve_product_candidates(candidates, question) if scope is None else (set(), ())
+            _resolve_product_candidates(candidates, question, list_products(root))
+            if scope is None
+            else (set(), ())
         )
         if ambiguity:
             return QuerySelection(root, (), ambiguity)

@@ -238,6 +238,8 @@ async def recompile_source(
                         unit.doc_name, normalized, kb_dir, model, **options
                     )
                 check_stop()
+            report.require_complete()
+            state = state.model_copy(update={"quality": tuple(report.quality), "unfinished": ()})
             published = publish_unit_revision(
                 kb_dir,
                 admission,
@@ -262,7 +264,7 @@ async def recompile_source(
         return replace(
             result,
             quality=tuple(dict.fromkeys((*result.quality, *report.quality))),
-            unfinished=result.unfinished + tuple(report.unfinished),
+            unfinished=tuple(dict.fromkeys((*result.unfinished, *report.unfinished))),
         )
     except RecoveryRequired:
         raise

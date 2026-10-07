@@ -284,11 +284,12 @@ def opposing_versions(kb_dir, monkeypatch):
 @pytest.mark.parametrize("label", ["V2", "R3"])
 def test_explicit_version_accepts_the_saved_applicability_label(kb_dir, monkeypatch, label):
     from openkb.application.query_views import resolve_query_views
+    from openkb.version_labels import canonical_version
 
     _import_rule(kb_dir, monkeypatch, "base", "9", "TLS is required.")
     _import_rule(kb_dir, monkeypatch, "custom", label, "TLS is forbidden.")
     selection = resolve_query_views(kb_dir, f"WinStack version {label}")
-    assert [view.applicable_versions for view in selection.views] == [(label,)]
+    assert [view.applicable_versions for view in selection.views] == [(canonical_version(label),)]
     assert selection.missing == ()
 
 

@@ -95,6 +95,8 @@ def result_from_publication(
         state.message,
         state.job_id,
         key=unit.key,
+        quality=state.quality,
+        unfinished=state.unfinished,
         doc_name=unit.doc_name,
         name=unit_name(kb_dir, unit, state.target_revision_id, admission.source.name),
         **processing_details(kb_dir, state, manifest),
@@ -104,7 +106,8 @@ def result_from_publication(
         admission.source.identity,
         status,
         tuple(resources),
-        unfinished=() if status in {"added", "skipped"} else (state.stage,),
+        quality=state.quality,
+        unfinished=state.unfinished or (() if status in {"added", "skipped"} else (state.stage,)),
         input_version=input_version(
             admission.revision.digest,
             {asset.original_reference: asset.digest for asset in admission.revision.assets},
@@ -487,7 +490,12 @@ def process_import_unit(
                 stage = "compilation"
                 if on_event:
                     on_event({"stage": "compiling", "source": admission.source.name})
-                _run_compile_with_retry(compile_document, "Compiling wiki", report=report)
+                compilation = _run_compile_with_retry(
+                    compile_document, "Compiling wiki", report=report
+                )
+                state = state.model_copy(
+                    update={"quality": tuple(compilation.quality), "unfinished": ()}
+                )
                 check_stop()
             stage = "publication"
             pdf_input = converted.pdf_path or (

@@ -163,7 +163,7 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
         (json.dumps({"entities": {"create": "not-a-list"}}), "malformed_plan_items"),
     ],
 )
-def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
+def test_degraded_compile_preserves_prior_summary_and_reports_failure(
     kb_dir, monkeypatch, plan, code
 ):
     import litellm
@@ -172,7 +172,8 @@ def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
 
     (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
     (kb_dir / "wiki/sources/note.md").write_text("Source")
-    responses = iter([json.dumps({"description": "Note", "content": "# Saved note"}), plan])
+    (kb_dir / "wiki/summaries/note.md").write_text("# Prior note")
+    responses = iter([json.dumps({"description": "Note", "content": "# Saved note"}), plan, plan])
     monkeypatch.setattr(
         litellm,
         "completion",
@@ -182,8 +183,7 @@ def test_degraded_compile_preserves_summary_and_reports_unfinished_stages(
         ),
     )
     result = asyncio.run(recompile_document(kb_dir, "h"))
-    assert result.status == "compiled"
+    assert result.status == "failed"
     assert code in result.quality
     assert result.unfinished == ("concepts", "entities")
-    assert str(kb_dir / "wiki/summaries/note.md") in result.resources
-    assert "# Saved note" in (kb_dir / "wiki/summaries/note.md").read_text()
+    assert (kb_dir / "wiki/summaries/note.md").read_text() == "# Prior note"

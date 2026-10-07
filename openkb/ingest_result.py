@@ -29,6 +29,8 @@ class ImportUnitOutcome:
     characters: int | None = None
     block_count: int | None = None
     model_usage: dict | None = None
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

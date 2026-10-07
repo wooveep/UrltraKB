@@ -84,13 +84,16 @@ def _snapshot_add_paths(
     return paths + IndexLocation.package(kb_dir / ".openkb").mutation_paths()
 
 
-def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info) -> None:
+def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info):
+    from openkb.compilation_report import CompilationIncomplete, compilation_attempt
+
     report(f"  {label}...")
     for attempt in range(2):
         try:
-            asyncio.run(coro_factory())
-            return
-        except RecoveryRequired:
+            with compilation_attempt() as compilation:
+                asyncio.run(coro_factory())
+            return compilation
+        except (RecoveryRequired, CompilationIncomplete):
             raise
         except Exception as exc:
             if attempt == 0:
@@ -526,7 +529,9 @@ def import_document(
                     return replace(
                         result,
                         quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
-                        unfinished=result.unfinished + tuple(compilation.unfinished),
+                        unfinished=tuple(
+                            dict.fromkeys((*result.unfinished, *compilation.unfinished))
+                        ),
                     )
                 outcome = _add_single_file_locked(
                     source,

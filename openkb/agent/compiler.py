@@ -1645,24 +1645,18 @@ async def _compile_concepts(
     # (system + doc + summary) for the plan call and every concept call.
     summary_msg = {"role": "assistant", "content": _cached_text(summary)}
 
-    plan_raw = _llm_call(
-        model,
-        [
-            system_msg,
-            doc_msg,
-            summary_msg,
-            {
-                "role": "user",
-                "content": _CONCEPTS_PLAN_USER.format(
-                    concept_briefs=concept_briefs,
-                    entity_briefs=entity_briefs,
-                ).replace("__ENTITY_TYPES__", types_str),
-            },
-        ],
-        "concepts-plan",
-        response_format=_JSON_RESPONSE_FORMAT,
-        bundle=bundle,
-    )
+    plan_messages = [
+        system_msg,
+        doc_msg,
+        summary_msg,
+        {
+            "role": "user",
+            "content": _CONCEPTS_PLAN_USER.format(
+                concept_briefs=concept_briefs,
+                entity_briefs=entity_briefs,
+            ).replace("__ENTITY_TYPES__", types_str),
+        },
+    ]
 
     def _write_v1_summary_stripped() -> None:
         """Fallback writer for the v1 summary on early-return paths.
@@ -1686,121 +1680,34 @@ async def _compile_concepts(
             )
         _write_summary(wiki_dir, doc_name, cleaned, description=doc_brief)
 
-    try:
-        parsed = _parse_json(plan_raw)
-    except (json.JSONDecodeError, ValueError) as exc:
-        report_compile_issue("concept_plan_unparseable", "concepts", "entities")
-        preview = plan_raw[:500] + ("..." if len(plan_raw) > 500 else "")
-        logger.warning(
-            "Failed to parse concepts plan: %s. Raw output (first 500 chars): %r",
-            exc,
-            preview,
-        )
-        logger.debug("Concepts plan raw output (full, %d chars): %s", len(plan_raw), plan_raw)
-        sys.stdout.write(
-            f"    [WARN] concepts plan unparseable for {doc_name} — "
-            f"no concept pages generated. See log (stderr) for details.\n"
-        )
-        sys.stdout.flush()
-        if rewrite_summary:
-            _write_v1_summary_stripped()
-        _update_index(wiki_dir, doc_name, [], doc_brief=doc_brief, doc_type=doc_type)
-        return
+    from openkb.agent.compile_plan import request_compile_plan
 
-    # Fallback: if LLM returns a flat list, treat all items as "create".
-    # The new plan contract nests concepts under a "concepts" key alongside
-    # an "entities" key; the legacy flat shape (create/update/related at top
-    # level) is still honored by falling back to ``parsed`` itself.
-    if not isinstance(parsed, (list, dict)):
-        report_compile_issue("concept_plan_unparseable", "concepts", "entities")
-        # A JSON scalar (int/str/None/bool) is valid JSON but not a usable
-        # plan. ``_parse_json`` normally rejects scalars, but guard here too
-        # so ``parsed.get(...)`` can never raise AttributeError and abort the
-        # compile — treat it as an empty/unparseable plan.
-        logger.warning(
-            "Concepts plan parsed to a %s scalar, not an object/array — "
-            "treating as empty plan for %s.",
-            type(parsed).__name__,
-            doc_name,
-        )
-        if rewrite_summary:
-            _write_v1_summary_stripped()
-        _update_index(wiki_dir, doc_name, [], doc_brief=doc_brief, doc_type=doc_type)
-        return
-
-    if isinstance(parsed, list):
-        plan = {"create": _filter_concept_items(parsed, "list"), "update": [], "related": []}
-        entities_plan = {"create": [], "update": [], "related": []}
-    else:
-        if "concepts" in parsed and not isinstance(parsed["concepts"], dict):
-            report_compile_issue("malformed_plan_items", "concepts", "entities")
-        concepts_group = (
-            parsed.get("concepts") if isinstance(parsed.get("concepts"), dict) else parsed
-        )
-        plan = {
-            "create": _filter_concept_items(concepts_group.get("create", []), "create"),
-            "update": _filter_concept_items(concepts_group.get("update", []), "update"),
-            "related": _filter_related_slugs(concepts_group.get("related", [])),
-        }
-        entities_plan = _parse_entities_plan(parsed, valid_types)
-
-    create_items = plan["create"]
-    update_items = plan["update"]
-    related_items = plan["related"]
-    entity_create = entities_plan["create"]
-    entity_update = entities_plan["update"]
-    entity_related = entities_plan["related"]
-
-    # "related" must reference pages that ALREADY exist on disk (the plan
-    # prompt asks for existing slugs). The LLM sometimes lists non-existent
-    # slugs here; keeping them would whitelist [[concepts/...]] /
-    # [[entities/...]] links as valid AND back-link them into the summary, yet
-    # no page is ever created (related items are linked, never generated) —
-    # producing a flood of dangling wikilinks. Drop the non-existent ones so
-    # body references to them are stripped as ghosts instead.
-    related_items = [
-        s
-        for s in related_items
-        if (wiki_dir / "concepts" / f"{_sanitize_concept_name(s)}.md").exists()
-    ]
-    entity_related = [
-        s
-        for s in entity_related
-        if (wiki_dir / "entities" / f"{_sanitize_concept_name(s)}.md").exists()
-    ]
-
-    # Distinguish "filters dropped everything" from "LLM emitted an empty plan".
-    # Count entity items too, so a plan that emitted only entities — all of
-    # which were dropped as malformed — still surfaces the warning.
-    def _raw_group_count(group: object) -> int:
-        if not isinstance(group, dict):
-            return 0
-        return sum(
-            len(group.get(k, [])) if isinstance(group.get(k), list) else 0
-            for k in ("create", "update", "related")
-        )
-
-    if isinstance(parsed, list):
-        original_total = len(parsed)
-    else:
-        original_total = _raw_group_count(concepts_group) + _raw_group_count(parsed.get("entities"))
-    post_filter_total = (
-        len(create_items)
-        + len(update_items)
-        + len(related_items)
-        + len(entity_create)
-        + len(entity_update)
-        + len(entity_related)
+    plan = request_compile_plan(
+        lambda correction: _llm_call(
+            model,
+            plan_messages + ([{"role": "user", "content": correction}] if correction else []),
+            "concepts-plan",
+            response_format=_JSON_RESPONSE_FORMAT,
+            bundle=bundle,
+        ),
+        _parse_json,
+        existing={
+            kind: {path.stem for path in (wiki_dir / kind).glob("*.md")}
+            for kind in ("concepts", "entities")
+        },
+        entity_types=valid_types,
+        sanitize=_sanitize_concept_name,
     )
-    if original_total > 0 and post_filter_total == 0:
-        sys.stdout.write(
-            f"    [WARN] plan for {doc_name} had {original_total} "
-            f"item(s), all dropped as malformed — see log (stderr).\n"
-        )
-        sys.stdout.flush()
-
-    if original_total > post_filter_total:
-        report_compile_issue("malformed_plan_items", "concepts", "entities")
+    create_items, update_items, related_items = (
+        plan.concepts.create,
+        plan.concepts.update,
+        plan.concepts.related,
+    )
+    entity_create, entity_update, entity_related = (
+        plan.entities.create,
+        plan.entities.update,
+        plan.entities.related,
+    )
 
     if (
         not create_items
@@ -2158,7 +2065,7 @@ async def _compile_concepts(
         if candidate:
             final_summary = candidate
         else:
-            report_compile_issue("summary_rewrite_fallback", "summary_rewrite")
+            report_compile_issue("summary_rewrite_fallback")
             # Rewrite produced no content (empty response or exception).
             # Strip the v1 summary against the same whitelist so the
             # fallback doesn't reintroduce ghost links.

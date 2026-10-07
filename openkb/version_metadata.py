@@ -27,8 +27,9 @@ def assess_version(
     *,
     scope: KnowledgeScope | None = None,
     candidates: tuple[VersionCandidate, ...] | None = None,
+    reevaluate: bool = False,
 ) -> VersionAssessment:
-    from openkb.version_evidence import pdf_title_candidates
+    from openkb.version_evidence import source_title_candidates
 
     previous = source_annotation(kb_dir, admission)
     same_input = previous and previous.source_revision_id == admission.revision.source_revision_id
@@ -42,25 +43,30 @@ def assess_version(
             and original.assets == admission.revision.assets
             and original.original_kind == admission.revision.original_kind == "original"
         )
-    values = (previous.metadata if same_input and previous else SourceMetadata()).model_dump()
+    retained = previous if same_input and not reevaluate else None
+    values = (retained.metadata if retained else SourceMetadata()).model_dump()
     if previous and not same_input:
         values.update(product=previous.metadata.product, family=previous.metadata.family)
     if candidates is None:
         try:
             candidates = (
                 previous.candidates
-                if previous and same_input
-                else pdf_title_candidates(kb_dir / admission.revision.original)
-                if admission.revision.source_format == "pdf"
-                else ()
+                if previous and same_input and not reevaluate
+                else source_title_candidates(
+                    kb_dir / admission.revision.original,
+                    admission.revision.source_format,
+                    admission.source.name,
+                )
             )
         except (OSError, ValueError, RuntimeError):
             # Conversion owns malformed-input diagnostics and its durable failure.
             candidates = ()
-    evidence = dict(previous.evidence) if previous and same_input else {}
+    evidence = dict(retained.evidence) if retained else {}
     conflicts = set()
     for name in ("product", "applicable_versions", "family", "document_revision"):
-        found = [item for item in candidates if item.field == name]
+        found = [
+            item for item in candidates if item.field == name and item.confidence == "verified"
+        ]
         choices = {item.values for item in found}
         if len(choices) == 1:
             value = next(iter(choices))
@@ -88,11 +94,20 @@ def assess_version(
             evidence[name] = "user"
             conflicts.discard(name)
     selected = SourceMetadata.model_validate(values)
-    possible_products = {selected.product}
+    from openkb.application.products import list_products
+    from openkb.product_identity import confirmed_product
+
+    products = list_products(kb_dir)
+
+    def product_identity(name):
+        product = confirmed_product(products, name) if name else None
+        return product.product_id if product else name
+
+    possible_products = {product_identity(selected.product)}
     possible_families = {selected.family}
     for candidate in candidates:
         if candidate.field == "product" and not selected.product:
-            possible_products.update(candidate.values)
+            possible_products.update(product_identity(name) for name in candidate.values)
         if candidate.field == "family" and not selected.family:
             possible_families.update(candidate.values)
     related = []
@@ -108,10 +123,10 @@ def assess_version(
             continue
         if (
             source.source_id == admission.source.source_id
-            and annotation.metadata.product in possible_products
+            and product_identity(annotation.metadata.product) in possible_products
             or annotation.metadata.family is not None
             and annotation.metadata.family in possible_families
-            and annotation.metadata.product in possible_products
+            and product_identity(annotation.metadata.product) in possible_products
         ):
             related.append(annotation.annotation_id)
     missing = (

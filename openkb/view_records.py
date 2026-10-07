@@ -32,6 +32,7 @@ class SourceMetadata(Record):
 class Product(Record):
     product_id: RecordId
     name: Label
+    aliases: tuple[Label, ...] = Field(default=(), exclude_if=lambda value: not value)
 
 
 class DocumentFamily(Record):
@@ -67,6 +68,8 @@ class VersionCandidate(Record):
     values: tuple[Label, ...] = Field(min_length=1)
     location: Label
     excerpt: Label
+    confidence: Literal["verified", "hint"] = "verified"
+    policy: Label = "legacy-title-v1"
 
 
 class VersionAnnotation(Record):

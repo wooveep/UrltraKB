@@ -10,6 +10,7 @@ from openkb.mutation import mutation_scope
 from openkb.schema import AGENTS_MD, INDEX_SEED
 from openkb.source_catalog import Admission, read_record, record_path, write_record
 from openkb.source_records import Record
+from openkb.version_labels import canonical_versions
 from openkb.view_records import (
     DocumentFamily,
     KnowledgeView,
@@ -112,16 +113,31 @@ def bind_source_view(
                 }
             )
         records: dict[Path, Record] = {}
+        confirmed = confirmed.model_copy(
+            update={"applicable_versions": canonical_versions(confirmed.applicable_versions)}
+        )
         product = None
         if confirmed.product:
-            products = (
-                read_record(root, "products", path.stem, Product)
-                for path in (root / ".openkb/catalog/products").glob("*.json")
-            )
-            product = next((item for item in products if item.name == confirmed.product), None)
+            from openkb.application.products import list_products
+            from openkb.product_identity import confirmed_product
+
+            product = confirmed_product(list_products(root), confirmed.product)
             if product is None:
                 product = Product(product_id=uuid.uuid4().hex, name=confirmed.product)
                 records[record_path(root, "products", product.product_id)] = product
+            elif product.name != confirmed.product:
+                evidence = (
+                    dict(evidence)
+                    if evidence is not None
+                    else {
+                        key: "user"
+                        for key, value in confirmed.model_dump().items()
+                        if value and key != "schema_version"
+                    }
+                )
+                evidence["product_alias"] = "Confirmed alias: " + confirmed.product
+                evidence.setdefault("product", "user")
+                confirmed = confirmed.model_copy(update={"product": product.name})
         family = None
         if confirmed.family:
             families = (
@@ -158,7 +174,8 @@ def bind_source_view(
             ):
                 raise ValueError("Unknown applicability cannot be shared by unrelated sources")
             if selected.view_id != "legacy" and (
-                selected.product != confirmed.product or selected.applicable_versions != versions
+                selected.product != confirmed.product
+                or canonical_versions(selected.applicable_versions) != versions
             ):
                 raise ValueError("Selected view does not match the source applicability")
         else:
@@ -173,7 +190,7 @@ def bind_source_view(
                             known
                             and item.unknown_source_id is None
                             and item.product_id == product.product_id
-                            and item.applicable_versions == versions
+                            and canonical_versions(item.applicable_versions) == versions
                         )
                         if product is not None and known
                         else item.unknown_source_id == admission.source.source_id

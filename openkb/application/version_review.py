@@ -409,7 +409,7 @@ def resume_version_review(
             return replace(
                 result,
                 quality=tuple(dict.fromkeys((*result.quality, *report.quality))),
-                unfinished=result.unfinished + tuple(report.unfinished),
+                unfinished=tuple(dict.fromkeys((*result.unfinished, *report.unfinished))),
             )
 
 

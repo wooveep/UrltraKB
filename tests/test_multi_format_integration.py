@@ -315,7 +315,7 @@ def test_add_api_keeps_compiler_quality(kb_dir, tmp_path, pdf_model, monkeypatch
     source = tmp_path / "quality.md"
     source.write_text("Content with quality signals", encoding="utf-8")
     ordinary = import_document(kb_dir, source)
-    assert ordinary.status == "added"
+    assert ordinary.status == "failed"
     assert ordinary.quality and ordinary.unfinished
     register_kb_alias("quality", kb_dir)
     with TestClient(create_app()) as client:
@@ -326,6 +326,7 @@ def test_add_api_keeps_compiler_quality(kb_dir, tmp_path, pdf_model, monkeypatch
         )
     assert response.status_code == 200, response.text
     item = response.json()["files"][0]
+    assert item["status"] == "failed"
     assert item.get("quality") == list(ordinary.quality)
     assert item.get("unfinished") == list(ordinary.unfinished)
 

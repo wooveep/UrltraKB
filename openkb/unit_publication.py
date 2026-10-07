@@ -257,6 +257,8 @@ def record_unit_failure(
     discovery_intent: DiscoveryIntent | None = None,
 ) -> UnitPublication:
     """Called after rollback; preserve the exact previous successful revision."""
+    from openkb.compilation_report import CompilationIncomplete
+
     failed = state.model_copy(
         update={
             "status": "stopped"
@@ -267,6 +269,10 @@ def record_unit_failure(
             "stage": stage,
             "error_type": type(error).__name__,
             "message": f"{stage}: {failure_reason(error)} ({type(error).__name__})",
+            "quality": error.quality if isinstance(error, CompilationIncomplete) else state.quality,
+            "unfinished": error.unfinished
+            if isinstance(error, CompilationIncomplete)
+            else state.unfinished,
         }
     )
     current = read_unit_publication(kb_dir, state.unit_id, state.view_id)

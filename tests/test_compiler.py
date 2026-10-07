@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openkb.agent.compile_plan import CompilePlanError
 from openkb.agent.compiler import (
     _ENTITY_TYPE_LIST,
     _add_related_link,
@@ -1237,11 +1238,12 @@ class TestCompileShortDoc:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion(["Plain summary text", "not valid json"])
             )
-            # Should not raise
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+            # Exhausted plan repair is a publication-blocking error.
+            with pytest.raises(CompilePlanError):
+                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
 
-        # Summary should still be written
-        assert (wiki / "summaries" / "doc.md").exists()
+        # Invalid plans cannot register a completed document.
+        assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
 
 
 class TestCompileShortDocFallbacks:
@@ -1365,7 +1367,7 @@ class TestCompileShortDocFallbacks:
         assert "[[concepts/transformer]]" in text
 
     @pytest.mark.asyncio
-    async def test_plan_parse_failure_strips_v1_summary_ghosts(self, tmp_path):
+    async def test_plan_parse_failure_blocks_summary_publication(self, tmp_path):
         wiki, source_path = self._setup_kb(tmp_path)
 
         v1_summary_content = "# Summary\n\nReferences [[concepts/nonexistent]] heavily."
@@ -1382,15 +1384,11 @@ class TestCompileShortDocFallbacks:
             mock_litellm.completion = MagicMock(
                 side_effect=_mock_completion([summary_response, plan_response])
             )
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+            with pytest.raises(CompilePlanError):
+                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
 
-        summary_path = wiki / "summaries" / "doc.md"
-        assert summary_path.exists()
-        text = summary_path.read_text()
-        # Ghost link should be stripped to plain text on fallback path
-        assert "[[concepts/nonexistent]]" not in text
-        assert "nonexistent" in text  # display text preserved
-        assert "References" in text
+        assert not (wiki / "summaries" / "doc.md").exists()
+        assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
 
     @pytest.mark.asyncio
     async def test_empty_plan_strips_v1_summary_ghosts(self, tmp_path):
@@ -1424,33 +1422,14 @@ class TestCompileShortDocFallbacks:
         assert "imaginary" in text  # plain text preserved
 
     @pytest.mark.asyncio
-    async def test_scalar_plan_handled_gracefully(self, tmp_path):
-        """#10: a JSON scalar plan (valid JSON, not object/array) must not
-        crash with AttributeError; it takes the graceful empty-plan path —
-        v1 summary written, index updated, no concept/entity pages."""
+    async def test_scalar_plan_blocks_publication(self, tmp_path):
         wiki, source_path = self._setup_kb(tmp_path)
-
-        summary_response = json.dumps(
-            {
-                "brief": "B",
-                "content": "# Summary\n\nPlain body, no links.",
-            }
-        )
-        # Plan call returns a bare JSON scalar (an integer).
-        scalar_plan_response = "42"
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([summary_response, scalar_plan_response])
-            )
-            # Must not raise (AttributeError) and must complete.
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
-
-        # Summary still written, index updated with the document.
-        assert (wiki / "summaries" / "doc.md").exists()
-        index_text = (wiki / "index.md").read_text()
-        assert "[[summaries/doc]]" in index_text
-        # No concept pages produced from the unusable plan.
+        summary = json.dumps({"content": "# Summary\n\nPlain body"})
+        with patch("openkb.llm_execution.litellm") as llm:
+            llm.completion = MagicMock(side_effect=_mock_completion([summary, "42", "42"]))
+            with pytest.raises(CompilePlanError):
+                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+        assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
         assert not list((wiki / "concepts").glob("*.md"))
 
 
@@ -1918,7 +1897,7 @@ class TestCompileConceptsPlan:
                 "related": [],
                 "entities": {
                     "create": [],
-                    "update": [{"name": "google", "title": "Google", "type": "org"}],
+                    "update": [{"name": "google", "title": "Google", "type": "organization"}],
                     "related": [],
                 },
             }
@@ -2386,7 +2365,7 @@ class TestCompileEntitiesEndToEnd:
     async def test_related_to_nonexistent_concept_does_not_create_dangling_links(
         self, tmp_path, monkeypatch
     ):
-        """A plan 'related' slug whose page does NOT exist must be dropped, not
+        """A plan 'related' slug whose page does NOT exist must be repaired, not
         whitelisted+back-linked — otherwise every page gets a dangling
         [[concepts/<ghost>]] link to a page that is never created."""
         wiki = tmp_path / "wiki"
@@ -2395,14 +2374,18 @@ class TestCompileEntitiesEndToEnd:
             "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
         )
 
+        plan_calls = 0
+
         def fake_llm(model, messages, label, **kw):
+            nonlocal plan_calls
             if label == "concepts-plan":
+                plan_calls += 1
                 return json.dumps(
                     {
                         "concepts": {
                             "create": [{"name": "real-concept", "title": "Real"}],
                             "update": [],
-                            "related": ["ghost-concept"],
+                            "related": ["ghost-concept"] if plan_calls == 1 else [],
                         },
                         "entities": {"create": [], "update": [], "related": []},
                     }
@@ -2435,6 +2418,7 @@ class TestCompileEntitiesEndToEnd:
             rewrite_summary=True,
         )
 
+        assert plan_calls == 2
         # ghost-concept never existed and was only "related" → never created
         assert not (wiki / "concepts" / "ghost-concept.md").exists()
         # ...and no page should link to it (stripped as a ghost, since not whitelisted)

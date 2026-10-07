@@ -69,5 +69,5 @@ def retry_source(
         return replace(
             result,
             quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),
-            unfinished=result.unfinished + tuple(compilation.unfinished),
+            unfinished=tuple(dict.fromkeys((*result.unfinished, *compilation.unfinished))),
         )

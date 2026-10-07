@@ -30,6 +30,33 @@ def versions():
     """Inspect, supplement, cancel and resume version clarifications."""
 
 
+@versions.command("products")
+@click.pass_context
+def products(ctx):
+    """List product identities and their confirmed aliases."""
+    from openkb.application.products import list_products
+
+    root, _ = _selection(ctx)
+    for product in list_products(root):
+        click.echo(product.model_dump_json())
+
+
+@versions.command("aliases")
+@click.argument("product_id")
+@click.option("--alias", "aliases", multiple=True, required=True)
+@click.pass_context
+def aliases(ctx, product_id, aliases):
+    """Confirm aliases for PRODUCT_ID; existing source corrections still need review/resume."""
+    from openkb.application.products import confirm_product_aliases
+
+    root, _ = _selection(ctx)
+    try:
+        product = confirm_product_aliases(root, product_id, aliases)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(product.model_dump_json())
+
+
 @versions.command("defaults")
 @click.pass_context
 def defaults(ctx):
@@ -94,6 +121,21 @@ def list_pending(ctx):
                 f"{', '.join(related.metadata.applicable_versions) or 'unknown version'}; "
                 f"{related.metadata.family or 'unknown purpose'}"
             )
+
+
+@versions.command("reevaluate")
+@click.argument("source_id")
+@click.pass_context
+def reevaluate(ctx, source_id):
+    """Re-read version evidence from the retained original; resume remains explicit."""
+    from openkb.application.version_evidence import reevaluate_source_version
+
+    root, scope = _selection(ctx)
+    try:
+        review = reevaluate_source_version(root, source_id, scope=scope)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(review.model_dump_json(indent=2))
 
 
 @versions.command("show")

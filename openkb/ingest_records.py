@@ -52,6 +52,8 @@ class UnitPublication(Record):
     stage: str = "admitted"
     error_type: str | None = None
     message: str | None = None
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 class RefreshReason(Record):

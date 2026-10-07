@@ -61,6 +61,7 @@ def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
         "publications",
         "attempts",
         "products",
+        "product-confirmations",
         "families",
         "family-defaults",
         "annotations",
