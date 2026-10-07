@@ -93,6 +93,10 @@ The final application keeps Office intact under `Contents/Resources/office`, wit
 a link from `Contents/Frameworks/office`; PyInstaller does not relocate or rewrite
 its binaries. Packaging verifies the nested code signatures and rechecks the
 Office inventory before testing the extracted application.
+Frozen applications locate Office through PyInstaller's runtime directory, which
+accounts for both the macOS `Contents/Frameworks` layout and the ordinary
+`_internal` layout. Moving an application package does not require a configured
+external Office path.
 
 For development, `scripts/prepare_office_runtime.py --archive ... --source ...
 --output ...` prepares an independent runtime. Set the absolute
