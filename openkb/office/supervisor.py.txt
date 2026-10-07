@@ -42,7 +42,12 @@ def main():
             raise OSError("Cannot supervise Office descendants")
     worker = subprocess.Popen(
         request.get("command")
-        or [sys.executable, "-B", str(Path(__file__).with_name("worker.py")), str(request_path)],
+        or [
+            request["worker_python"],
+            "-B",
+            str(Path(__file__).with_name("worker.py")),
+            str(request_path),
+        ],
         start_new_session=linux,
     )
     deadline = time.monotonic() + request["timeout"]

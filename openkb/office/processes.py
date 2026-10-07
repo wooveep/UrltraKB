@@ -28,7 +28,12 @@ def run_supervised(
         parent_identity = (
             Path(f"/proc/{os.getpid()}/stat").read_text().rsplit(")", 1)[1].split()[19]
         )
-    request = {**request, "parent_pid": os.getpid(), "parent_identity": parent_identity}
+    request = {
+        **request,
+        "worker_python": str((root / python).resolve()),
+        "parent_pid": os.getpid(),
+        "parent_identity": parent_identity,
+    }
     request_path = directory / "request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
     command = [str(root / python), "-B", str(directory / "supervisor.py"), str(request_path)]
