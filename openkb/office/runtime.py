@@ -22,7 +22,8 @@ def runtime_path(kb_dir: Path) -> Path:
     if explicit:
         return Path(explicit)
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "_internal/office"
+        # PyInstaller relocates macOS bundle data to Contents/Frameworks.
+        return Path(getattr(sys, "_MEIPASS")) / "office"
     return Path(__file__).parent / "assets/runtime"
 
 
