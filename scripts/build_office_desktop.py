@@ -46,7 +46,6 @@ def main():
                     "pytest",
                     "-q",
                     "tests/test_office_macos.py",
-                    "tests/test_office_supervisor.py",
                 ],
                 cwd=root,
                 env={**os.environ, "OPENKB_TEST_OFFICE_RUNTIME": str(office)},

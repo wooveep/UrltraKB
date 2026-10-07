@@ -81,6 +81,14 @@ def main():
                     os.killpg(worker.pid, signum)
                 except ProcessLookupError:
                     break
+                except PermissionError:
+                    # Darwin's killpg excludes zombies and returns EPERM when
+                    # they are the group's only members. Reap our leader before
+                    # accepting this state; a live worker's permission error is
+                    # still a failure.
+                    if sys.platform != "darwin" or worker.poll() is None:
+                        raise
+                    break
                 time.sleep(0.15)
         elif worker.poll() is None:
             worker.terminate()

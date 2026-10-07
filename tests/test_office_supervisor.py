@@ -47,8 +47,15 @@ def test_parent_pipe_death_reaps_worker_group(tmp_path):
             deadline = time.monotonic() + 5
             while task.exists() and time.monotonic() < deadline:
                 time.sleep(0.02)
-            assert not task.exists(), "Supervisor did not observe its original parent's pipe EOF"
+            assert not task.exists(), (task / "process.log").read_text()
             for pid in owned:
+                # macOS launchd, rather than the supervisor, reaps grandchildren.
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.02)
                 with pytest.raises(ProcessLookupError):
                     os.kill(pid, 0)
         finally:
