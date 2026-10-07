@@ -6,8 +6,10 @@ It is inside _internal so all existing archive copying and path checks apply.
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from build_desktop import main as build_desktop
@@ -28,13 +30,15 @@ def main():
         project = root / "openkb/office/launcher"
         subprocess.run(["cargo", "build", "--locked", "--release"], cwd=project, check=True)
         launcher = project / "target/release/openkb-office-launcher.exe"
-    build_desktop()
-    prepare(
-        args.office_archive,
-        args.office_source,
-        root / "packaging/desktop/dist/UrltraKB/_internal/office",
-        launcher,
-    )
+    staging = root / "packaging/desktop/build"
+    staging.mkdir(parents=True, exist_ok=True)
+    # Verify native Office dependencies before the expensive application freeze.
+    # PyInstaller owns dist/UrltraKB, so stage the sidecar outside it until then.
+    with tempfile.TemporaryDirectory(prefix="office-native-", dir=staging) as directory:
+        office = Path(directory) / "office"
+        prepare(args.office_archive, args.office_source, office, launcher)
+        build_desktop()
+        shutil.move(office, root / "packaging/desktop/dist/UrltraKB/_internal/office")
 
 
 if __name__ == "__main__":

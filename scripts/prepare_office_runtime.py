@@ -79,11 +79,13 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
         license_dir.mkdir(parents=True)
         shutil.copy2(lock_path, runtime / "openkb-provenance/runtime-lock.json")
         shutil.copy2(fonts_path, runtime / "openkb-provenance/application-fonts.json")
+        font_dir = runtime / "share/fonts/truetype"
+        font_dir.mkdir(parents=True, exist_ok=True)
         for font in json.loads(fonts_path.read_text()):
             original = fonts_path.parent / font["file"]
             if digest(original) != font["sha256"]:
                 raise ValueError(f"Application font hash mismatch: {original.name}")
-            shutil.copy2(original, runtime / "share/fonts/truetype" / original.name)
+            shutil.copy2(original, font_dir / original.name)
             shutil.copy2(fonts_path.parent / font["license"], license_dir / font["license"])
         private_launcher = None
         if sys.platform == "win32" and launcher:
