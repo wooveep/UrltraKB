@@ -1,0 +1,40 @@
+name: Office runtime diagnosis
+
+on:
+  push:
+    branches: [codex/office-shutdown-release]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-office:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.11.13'
+          enable-cache: false
+      - name: Install pinned native toolchains
+        run: |
+          uv python install 3.12.13
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Install locked application dependencies
+        run: uv sync --frozen --python 3.12.13 --extra dev --extra desktop --extra api
+      - name: Check shutdown and real Word/PowerPoint conversion
+        run: |
+          .venv/Scripts/python.exe -m pytest -q tests/test_office_shutdown.py tests/test_office_supervisor.py
+          .venv/Scripts/python.exe scripts/build_native_desktop.py --cache-dir C:/office-check-inputs --office-only

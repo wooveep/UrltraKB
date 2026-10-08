@@ -34,8 +34,22 @@ def test_frozen_application_finds_office_after_bundle_relocation(
     assert (runtime_path(kb_dir) / "openkb-office.json").read_text() == "runtime inventory"
 
 
-def test_private_runtime_converts_word_and_powerpoint(kb_dir, office_runtime, tmp_path):
+def test_private_runtime_converts_word_and_powerpoint(
+    kb_dir, office_runtime, tmp_path, monkeypatch
+):
     from openkb.desktop.verification_runtimes import verify_office_conversions
+    from openkb.office import convert
+
+    run = convert.run_supervised
+
+    def capture_failure(root, python, launcher, directory, *args, **kwargs):
+        try:
+            return run(root, python, launcher, directory, *args, **kwargs)
+        except Exception:
+            print((directory / "process.log").read_text(errors="replace"))
+            raise
+
+    monkeypatch.setattr(convert, "run_supervised", capture_failure)
 
     assert len(verify_office_conversions(kb_dir, tmp_path)) == 4
 

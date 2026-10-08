@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--office-archive", required=True, type=Path)
     parser.add_argument("--office-source", required=True, type=Path)
+    parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     lock = json.loads((root / "openkb/office/runtime-lock.json").read_text())
@@ -38,19 +39,21 @@ def main():
     with tempfile.TemporaryDirectory(prefix="office-native-", dir=staging) as directory:
         office = Path(directory) / "office"
         prepare(args.office_archive, args.office_source, office, launcher)
-        if sys.platform == "darwin":
+        if sys.platform in {"darwin", "win32"} or args.verify_only:
             subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "pytest",
                     "-q",
-                    "tests/test_office_macos.py",
+                    "tests/test_office_macos.py::test_private_runtime_converts_word_and_powerpoint",
                 ],
                 cwd=root,
                 env={**os.environ, "OPENKB_TEST_OFFICE_RUNTIME": str(office)},
                 check=True,
             )
+        if args.verify_only:
+            return
         build_desktop()
         shutil.move(office, root / "packaging/desktop/dist/UrltraKB/_internal/office")
 

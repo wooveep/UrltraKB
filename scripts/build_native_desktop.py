@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", type=Path, required=True)
+    parser.add_argument("--office-only", action="store_true", help="Verify Office without freezing")
     args = parser.parse_args()
     target = desktop_target()
 
@@ -27,9 +28,11 @@ def main():
             check=True,
         )
 
-    if target.system in {"Linux", "Windows"}:
+    if not args.office_only and target.system in {"Linux", "Windows"}:
         run("prepare_cfb_helper.py")
     if target.name not in {"debian-amd64", "windows-x64", "macos-arm64"}:
+        if args.office_only:
+            parser.error("This native target has no pinned Office runtime")
         # Debian arm64 has no matching pinned upstream Office distribution.
         run("build_desktop.py")
         return
@@ -50,6 +53,7 @@ def main():
         artifacts[0],
         "--office-source",
         artifacts[1],
+        *(["--verify-only"] if args.office_only else []),
     )
 
 

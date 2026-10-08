@@ -4,11 +4,13 @@ import json
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 from pathlib import Path
 
 import uno
 import unohelper
+from com.sun.star.lang import DisposedException
 from com.sun.star.task import XInteractionHandler
 
 
@@ -101,6 +103,21 @@ def export_pdf(document, path, export_filter, options):
     data.Name = "FilterData"
     data.Value = uno.Any("[]com.sun.star.beans.PropertyValue", properties(options))
     document.storeToURL(path.as_uri(), (*export, data))
+
+
+def close_office(document, desktop):
+    # Closing the last Impress frame can dispose the bridge before the next
+    # shutdown call returns. The supervisor still owns process-tree cleanup.
+    if document is not None:
+        try:
+            document.close(True)
+        except DisposedException:
+            pass
+    if desktop is not None:
+        try:
+            desktop.terminate()
+        except DisposedException:
+            pass
 
 
 def presentation(request, document, directory):
@@ -238,10 +255,7 @@ def convert(request, directory):
             "diagnostics": ["Writer final visible text; comments and tracked deletions excluded."],
         }
     finally:
-        if document is not None:
-            document.close(True)
-        if desktop is not None:
-            desktop.terminate()
+        close_office(document, desktop)
         # Supervisor reaps even a vetoed/blocked termination and the shell launcher.
 
 
@@ -252,6 +266,7 @@ def main():
         (path.parent / "result.json").write_text(json.dumps(result), encoding="utf-8")
         return 0
     except Exception as exc:
+        traceback.print_exc()  # Retain the failing UNO operation in process.log.
         (path.parent / "failure.json").write_text(
             json.dumps({"error": f"{type(exc).__name__}: {exc}"}), encoding="utf-8"
         )

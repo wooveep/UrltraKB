@@ -112,8 +112,15 @@ def main() -> None:
             "packaging/desktop/build-requirements.txt",
         )
         run(python, "-m", "pytest", "tests/test_desktop_verification_dialogs.py", "-q")
-        if target.name == "macos-arm64":
-            run(python, "-m", "pytest", "tests/test_office_supervisor.py", "-q")
+        if target.name in {"macos-arm64", "windows-x64"}:
+            run(
+                python,
+                "-m",
+                "pytest",
+                "tests/test_office_supervisor.py",
+                "tests/test_office_shutdown.py",
+                "-q",
+            )
         run(
             python,
             "scripts/prepare_desktop_assets.py",
