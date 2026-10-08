@@ -121,10 +121,13 @@ readback, retained recompile, failure preservation, corrupt PDF references,
 timeout, cancellation and application death during both probes and conversion.
 Only model calls are substituted in successful conversion tests.
 
-The macOS build runs native DOC/DOCX/PPT/PPTX conversion and parent-death cleanup
-tests before freezing. Extracted Windows x64, Debian amd64 and macOS arm64 packages
-also convert all four formats, checking physical pages, hidden slides and speaker
-notes using authored synthetic fixtures.
+The macOS and Windows builds run native DOC/DOCX/PPT/PPTX conversion tests before
+freezing. macOS also checks parent-death cleanup. Extracted Windows x64, Debian
+amd64 and macOS arm64 packages convert all four formats, checking physical pages,
+hidden slides and speaker notes using authored synthetic fixtures.
+An already-disposed UNO bridge during normal document close or desktop termination
+does not discard a completed export. Loading and export errors still fail conversion,
+and the supervisor remains responsible for process-tree cleanup.
 
 Passing on a development host does not enable the final distribution. Issues
 #100–#102 retain the real-model and clean Windows 11/Debian 13.6 GNOME/X11 manual
