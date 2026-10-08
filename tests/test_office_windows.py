@@ -3,11 +3,22 @@
 import json
 import os
 import runpy
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
+
+def test_office_environment_preserves_system_drive_without_model_credentials(tmp_path, monkeypatch):
+    from openkb.office.policy import office_environment
+
+    monkeypatch.setenv("SystemDrive", "C:")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
+    environment = office_environment(tmp_path)
+    assert environment["SystemDrive"] == "C:"
+    assert "OPENAI_API_KEY" not in environment
 
 
 def test_windows_office_launcher_does_not_create_console(tmp_path, monkeypatch):
@@ -148,3 +159,29 @@ def test_private_windows_python_and_descendants_have_no_console_window(tmp_path)
         lambda: None,
     )
     assert "headless Office descendants" in output
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires native Windows Office")
+def test_private_windows_office_starts_under_deep_storage_paths(tmp_path, monkeypatch):
+    import pymupdf
+
+    from openkb.office import runtime
+    from openkb.office.convert import convert_office
+
+    value = os.environ.get("OPENKB_TEST_OFFICE_RUNTIME")
+    if not value:
+        pytest.skip("Real Office integration needs a prepared OPENKB_TEST_OFFICE_RUNTIME")
+    monkeypatch.setattr(runtime, "runtime_path", lambda _: Path(value).resolve())
+    directory = tmp_path
+    while len(str(directory)) < 180:
+        directory /= "retained"
+    directory.mkdir(parents=True)
+    source = directory / "content.docx"
+    original = Path(__file__).parent / "fixtures/office/package-text.docx"
+    shutil.copy2(original, source)
+    pdf = directory / "content.pdf"
+    convert_office(tmp_path, source, pdf, check_stop=lambda: None)
+    with pymupdf.open(pdf) as document:
+        assert document.page_count > 0
+    assert source.read_bytes() == original.read_bytes()
+    runtime.validate_runtime(Path(value).resolve())

@@ -3,12 +3,12 @@
 import json
 import platform
 import sys
-import tempfile
 from pathlib import Path
 from typing import Callable
 
 from openkb.office.policy import office_environment
 from openkb.office.processes import run_supervised
+from openkb.office.workspace import office_directory
 
 VERSION = "26.2.6.3"
 BUILD_ID = "8221e31b3ac356a1623c672912a3d2b492f7e3d1"
@@ -53,8 +53,7 @@ def probe(
     task_root: Path | None = None,
 ) -> dict[str, str]:
     details = host_conditions()
-    with tempfile.TemporaryDirectory(prefix="openkb-office-probe-", dir=task_root) as temporary:
-        directory = Path(temporary)
+    with office_directory(task_root, prefix="openkb-office-probe-") as directory:
 
         def run(arguments: list[str]) -> str:
             task = directory / str(len(list(directory.iterdir())))

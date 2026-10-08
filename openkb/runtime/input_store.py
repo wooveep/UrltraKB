@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import stat
+import sys
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,6 +29,25 @@ def _lease(path: Path) -> portalocker.Lock:
 
 def _local(path: Path) -> bool:
     return not path.is_symlink() and path.resolve() == path
+
+
+def _retry_readonly(operation, path, error_info):
+    """Office's Windows profile can contain read-only shell folders and files."""
+    error = error_info[1]
+    if (
+        sys.platform != "win32"
+        or not isinstance(error, PermissionError)
+        or operation not in {os.unlink, os.rmdir}
+    ):
+        raise error
+    attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    if (
+        not attributes & stat.FILE_ATTRIBUTE_READONLY
+        or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise error
+    os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+    operation(path)
 
 
 def _reap_locked(group: Path) -> bool:
@@ -57,9 +79,9 @@ def _reap_locked(group: Path) -> bool:
         except portalocker.exceptions.LockException:
             return False  # A live parent or worker still owns this input.
     if data.exists():
-        shutil.rmtree(data)
+        shutil.rmtree(data, onerror=_retry_readonly)
     # Windows requires all lease handles closed before removal.
-    shutil.rmtree(group)
+    shutil.rmtree(group, onerror=_retry_readonly)
     return True
 
 

@@ -71,8 +71,14 @@ starting the matching Python. The launcher, supervisor and conversion worker use
 Windows' `CREATE_NO_WINDOW` process flag so probes and conversions do not open
 command-prompt windows. Child stdout and stderr are forwarded explicitly to keep
 probe results and failure diagnostics available without a visible console.
-Private task files sit inside the application's
-owned input directory so task recovery can collect them after an abrupt exit.
+Linux and macOS task files sit inside the application's owned input directory.
+Windows uses leased workspaces in the user's temporary directory: placing Office's
+deep extension registries below a retained artifact can exceed Windows path limits
+and crash Office before UNO starts. Live leases protect workspaces from cleanup;
+the next Office operation collects abandoned workspaces after an abrupt exit.
+Cleanup also handles read-only shell folders created inside the owned workspace.
+The isolated environment preserves `SystemDrive` so Windows resolves system cache
+paths instead of creating a literal `%SystemDrive%` folder in the runtime.
 
 The packaged runtime supports Linux/Windows x86_64 and macOS Apple Silicon.
 Linux requires x86-64-v2. Every platform requires successful private
@@ -143,7 +149,9 @@ Only model calls are substituted in successful conversion tests.
 
 The macOS and Windows builds run native DOC/DOCX/PPT/PPTX conversion tests before
 freezing. Windows also checks that the private Python wrapper and its descendants
-have no visible console. macOS also checks parent-death cleanup. Extracted Windows
+allocate no console window, and that conversion succeeds from deep storage paths.
+Workspace tests cover live ownership and cleanup after an owner crashes.
+macOS also checks parent-death cleanup. Extracted Windows
 x64, Debian amd64 and macOS arm64 packages convert all four formats, checking physical pages,
 hidden slides and speaker notes using authored synthetic fixtures.
 An already-disposed UNO bridge during normal document close or desktop termination
