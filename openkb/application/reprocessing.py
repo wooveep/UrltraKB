@@ -170,13 +170,20 @@ def preview_reprocessing(
             if review_path.exists()
             else None
         )
-        if review and review.status in {"blocked", "ready", "cancelled"}:
-            blockers.append("Resolve the version clarification before reprocessing this source")
         annotation = (
             read_record(root, "annotations", source.annotation_id, VersionAnnotation)
             if source.annotation_id
             else None
         )
+        correction_applied = (
+            review is not None
+            and review.status == "ready"
+            and review.correction_id is not None
+            and annotation is not None
+            and annotation.metadata == review.metadata
+        )
+        if review and review.status in {"blocked", "ready", "cancelled"} and not correction_applied:
+            blockers.append("Resolve the version clarification before reprocessing this source")
         intent = admission.discovery_intent
         config, origins = resolve_effective_config(root)
         value = {

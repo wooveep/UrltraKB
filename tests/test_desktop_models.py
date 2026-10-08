@@ -72,6 +72,7 @@ def model_service():
 
 
 def configure(kb, url, name):
+    atomic_write_text(kb / "wiki/sources/model-fixture.md", "An available source.")
     atomic_write_text(
         kb / ".openkb/config.yaml",
         yaml.safe_dump(
@@ -105,7 +106,10 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         batch = manager.submit(kb_dir, [AskQuestion("First"), AskQuestion("Second")])
         assert arrived.wait(30), manager.get(batch)
         independent = manager.submit(other, [AskQuestion("Independent")])
-        assert manager.wait(independent, timeout=30).results[0].output.startswith("unit-b\n\n---\n")
+        assert (
+            manager.wait(independent, timeout=30).results[0].answer_outcome
+            == "insufficient_evidence"
+        )
         # An external editor changes settings after actual first execution.
         # Later batch units keep the acknowledged context; a new task gets it.
         configure(kb_dir, url, "unit-new")
@@ -113,11 +117,8 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         release.set()
         finished = manager.wait(batch, timeout=45)
         assert finished.state == "completed", finished
-        assert [result.output.split("\n\n---\n")[0] for result in finished.results] == [
-            "unit-a",
-            "unit-a",
-        ]
-        assert manager.wait(queued, timeout=45).results[0].output.startswith("unit-new\n\n---\n")
+        assert all(result.answer_outcome == "insufficient_evidence" for result in finished.results)
+        assert manager.wait(queued, timeout=45).results[0].answer_outcome == "insufficient_evidence"
         seen = [requests.get_nowait() for _ in range(requests.qsize())]
         assert sorted(seen) == sorted(
             [

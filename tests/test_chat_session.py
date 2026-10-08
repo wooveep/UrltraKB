@@ -222,6 +222,7 @@ def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
 
 @pytest.mark.asyncio
 async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb_dir, monkeypatch):
+    (kb_dir / "wiki/sources/fixture.md").write_text("Available original.")
     import asyncio
 
     from agents import RawResponsesStreamEvent, Runner
@@ -260,7 +261,8 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
     from agents import Agent
 
     stream = iter_chat_turn_events(Agent(name="test"), session, "Question")
-    assert (await anext(stream))["event"] == "delta"
+    first = await anext(stream)
+    assert first["event"] == "answer_progress" and "Partial" not in str(first)
     await stream.aclose()
     assert settled.is_set()
     assert not session.path.exists()
@@ -268,6 +270,7 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
 
 @pytest.mark.asyncio
 async def test_cancelling_consumer_keeps_lease_until_real_sdk_work_settles(kb_dir, monkeypatch):
+    (kb_dir / "wiki/sources/fixture.md").write_text("Available original.")
     import asyncio
 
     from agents import Agent, RunContextWrapper, Runner

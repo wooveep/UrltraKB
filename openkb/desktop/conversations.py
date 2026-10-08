@@ -39,6 +39,7 @@ class Chat:
     usage: dict | None = None
     pending_usage: dict | None = None
     view_id: str = "legacy"
+    answer_outcome: str | None = None
 
 
 class Conversations:
@@ -200,6 +201,9 @@ class Conversations:
                 chat.completed_count = len(session.turns)
                 chat.usage = session.usage
                 chat.pending_usage = None
+                chat.answer_outcome = (
+                    session.answer_outcomes[-1] if session.answer_outcomes else None
+                )
             if self.active is chat:
                 self.render(restore_draft=False)
 
@@ -327,6 +331,7 @@ class Conversations:
             self.saved[chat.root, chat.identity] = chat
             if task.state == "completed":
                 chat.turns.append((chat.question, visible_answer(task.results[-1].output)))
+                chat.answer_outcome = task.results[-1].answer_outcome
             chat.question = chat.status = ""
             if self.recent.get((chat.root, chat.view_id)) is chat:
                 self._remember(chat)
@@ -343,6 +348,9 @@ class Conversations:
         if self.active is chat:
             self.render(restore_draft=False)
 
+        if self.active is chat and task.results and task.results[-1].scope_candidates:
+            self.window.view_picker.set_candidates(task.results[-1].scope_candidates)
+
     def render(self, *, restore_draft=True):
         w, chat = self.window, self.active
         w._chat_task = chat.task if chat else None
@@ -356,7 +364,14 @@ class Conversations:
                 if chat.running
                 else "正在读取对话…"
                 if chat.loading
-                else chat.read_error or chat.failure
+                else chat.read_error
+                or chat.failure
+                or {
+                    "partial": "已回答有依据的部分，其余事项暂留缺口。",
+                    "insufficient_evidence": "本次未获得足够的已核实证据。",
+                    "scope_unresolved": "请选择本次要使用的资料范围后重新提问。",
+                    "evidence_rejected": "生成的结论未通过证据检查。",
+                }.get(chat.answer_outcome, "")
             )
             if chat
             else ""

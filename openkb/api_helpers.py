@@ -434,6 +434,7 @@ async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[
                         "answer": result.answer,
                         "usage": result.usage,
                         "answer_outcome": result.answer_outcome,
+                        "scope_candidates": result.scope_candidates,
                     }
                     if result.session_id:
                         data.update(session_id=result.session_id, turn_count=result.turn_count)
@@ -454,7 +455,7 @@ async def _stream_query(
 ) -> AsyncIterator[str]:
     from openkb.application.conversations import ask_question
 
-    scope = await resolve_api_scope(kb_dir, request.view_id)
+    scope = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
     yield _sse("start", {"endpoint": "query"})
     stream = _answer_stream(
         lambda context: ask_question(
@@ -474,7 +475,7 @@ async def _stream_chat(
 ) -> AsyncIterator[str]:
     from openkb.application.conversations import continue_conversation
 
-    scope = await resolve_api_scope(kb_dir, request.view_id)
+    scope = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
     new_id = None if request.session_id else ChatSession.new(kb_dir, "", "").id
     yield _sse("start", {"endpoint": "chat", "session_id": request.session_id or new_id})
     stream = _answer_stream(

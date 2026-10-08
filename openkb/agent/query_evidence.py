@@ -1,17 +1,19 @@
 """Attach independent, pinned read tools to query, chat and skill agents."""
 
 import json
+from dataclasses import replace
+from functools import wraps
 from typing import Literal
 
 from agents import ToolOutputImage, ToolOutputText, function_tool
 
 from openkb.agent.answer_evidence import ANSWER_EVIDENCE_RULES
+from openkb.agent.evidence_session import EvidenceSession
 from openkb.agent.tools import get_wiki_page_content, read_wiki_image
 from openkb.application.query_views import (
     QuerySelection,
     QueryView,
     read_query_page,
-    selection_current,
 )
 from openkb.state import HashRegistry
 
@@ -88,12 +90,42 @@ def _available(view: QueryView, path: str) -> bool:
     )
 
 
-def restrict_query_agent(agent, selection: QuerySelection):
+def restrict_query_agent(
+    agent, selection: QuerySelection, *, session: EvidenceSession | None = None
+):
     """Replace every wiki reader; preserving artifact writers grants no extra knowledge reads."""
-    originals: dict[tuple[str, str], str] = {}
+    session = session or EvidenceSession(selection)
+
+    def bounded(fn):
+        @wraps(fn)
+        def invoke(*args, **kwargs):
+            session.consume_tool()
+            return session.budget.tool_output(fn(*args, **kwargs))
+
+        return invoke
+
+    def render_selection(view, path, locator, selected, offset=0):
+        from openkb.agent.evidence_payload import project_evidence
+
+        projected = project_evidence(selected, offset=offset)
+        locator += f" offset={offset}" if offset else ""
+        revision = view.source_revisions_by_path.get(path)
+        read = session.register_read(
+            view, path, locator, projected["content"], spans=projected.get("source_spans", ())
+        )
+        projected["read_id"] = read.read_id
+        if revision:
+            view = replace(view, source_revision_ids=(revision,))
+        return (
+            view.provenance
+            + "\n\n"
+            + json.dumps(projected, ensure_ascii=False)
+            + f"\nEvidence locator: {locator}"
+        )
 
     @function_tool
-    def read_file(path: str, view_id: str = "") -> str:
+    @bounded
+    def read_file(path: str, view_id: str = "", offset: int = 0) -> str:
         """Read a permitted Markdown page in one named evidence view.
 
         Read index.md without a view_id to see all allowed views and their pages.
@@ -104,12 +136,56 @@ def restrict_query_agent(agent, selection: QuerySelection):
         view = _selected(selection, view_id)
         if path == "index.md":
             return selection_catalog(QuerySelection(selection.kb_dir, (view,)))
+        if not path.endswith(".md"):
+            return (
+                "Use get_page_content/get_block_content/get_text_content/get_cell_content "
+                "for original data."
+            )
         content = read_query_page(selection, path, view_id=view.view_id)
+        if not _available(view, path):
+            return content
+        if len(content) > 12000 or offset:
+            from openkb.agent.evidence_payload import project_evidence
+
+            # Generated navigation is paginated too; it is never original evidence.
+            body = (view.scope.wiki_dir / path).read_text("utf-8")
+            projected = project_evidence({"content": body}, offset=offset, budget=12000)
+            if path.startswith("sources/"):
+                locator = path + (f" offset={offset}" if offset else "")
+                read = session.register_read(
+                    view,
+                    path,
+                    locator,
+                    projected["content"],
+                    spans=projected.get("source_spans", ()),
+                )
+                projected["read_id"] = read.read_id
+            return view.provenance + "\n\n" + json.dumps(projected, ensure_ascii=False)
         if path.startswith("sources/") and _available(view, path):
-            originals[view.view_id, path] = content
+            body = (view.scope.wiki_dir / path).read_text("utf-8")
+            read = session.register_read(view, path, path, body, spans=((0, len(body)),))
+            content += f"\nRead ID: {read.read_id}\nEvidence locator: {path}"
         return content
 
     @function_tool
+    @bounded
+    def search_originals(terms: list[str], view_id: str = "", doc_name: str = "") -> str:
+        """Find original pages/blocks by 1-6 literal subject/configuration terms.
+
+        Choose narrow terms from the question's subject and requested facts.
+        Read matching originals next;
+        a search miss never proves a field, API, procedure or image is absent.
+        """
+        from openkb.agent.evidence_search import search_originals as search
+
+        if view_id:
+            _selected(selection, view_id)
+        return json.dumps(
+            search(selection, terms, view_id=view_id, doc_name=doc_name), ensure_ascii=False
+        )
+
+    @function_tool
+    @bounded
     def get_page_content(
         doc_name: str,
         pages: str,
@@ -129,6 +205,16 @@ def restrict_query_agent(agent, selection: QuerySelection):
             + "\n\n"
             + get_wiki_page_content(doc_name, pages, str(view.scope.wiki_dir), part)
         )
+        if len(content) > 48000:
+            return json.dumps(
+                {
+                    "coverage": "budget_exceeded",
+                    "content": "",
+                    "diagnostics": [
+                        "Requested pages exceed the reading budget; select fewer physical pages."
+                    ],
+                }
+            )
         locator = f"sources/{doc_name}.json pages={pages} part={part}"
         from openkb.source_pages import read_page_selection, select_page_part
 
@@ -139,7 +225,8 @@ def restrict_query_agent(agent, selection: QuerySelection):
             ),
             part,
         )
-        originals[view.view_id, locator] = selected["content"]
+        read = session.register_read(view, f"sources/{doc_name}.json", locator, selected["content"])
+        content += f"\nRead ID: {read.read_id}"
         paths = list(
             dict.fromkeys(
                 image["path"] for unit in selected["units"] for image in unit.get("images", [])
@@ -152,9 +239,19 @@ def restrict_query_agent(agent, selection: QuerySelection):
             if _available(view, path) and (view.scope.wiki_dir / path).stat().st_size <= 5_000_000:
                 result = read_wiki_image(path, str(view.scope.wiki_dir))
                 if result["type"] == "image":
+                    visual = session.register_read(
+                        view,
+                        path,
+                        locator + " image=" + path,
+                        "",
+                        kind="image",
+                        image_url=result["image_url"],
+                    )
                     outputs.extend(
                         [
-                            ToolOutputText(text=f"Original page image: {path}"),
+                            ToolOutputText(
+                                text=f"Original page image: {path}; Read ID: {visual.read_id}"
+                            ),
                             ToolOutputImage(image_url=result["image_url"]),
                         ]
                     )
@@ -165,7 +262,8 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return [ToolOutputText(text=content), *outputs] if outputs else content
 
     @function_tool
-    def get_text_content(doc_name: str, chars: str, view_id: str = "") -> str:
+    @bounded
+    def get_text_content(doc_name: str, chars: str, view_id: str = "", offset: int = 0) -> str:
         """Read a frozen Unicode codepoint range START:END (0-based, end exclusive).
 
         Returns exact original-file locators separately from normalized text coordinates.
@@ -183,16 +281,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
             json.loads((view.scope.wiki_dir / path).read_text("utf-8")), chars
         )
         locator = f"{path} chars={chars}"
-        originals[view.view_id, locator] = selected["content"]
-        return (
-            view.provenance
-            + "\n\n"
-            + json.dumps(selected, ensure_ascii=False)
-            + f"\nEvidence locator: {locator}"
-        )
+        return render_selection(view, path, locator, selected, offset)
 
     @function_tool
-    def get_block_content(doc_name: str, blocks: str, view_id: str = "") -> str:
+    @bounded
+    def get_block_content(doc_name: str, blocks: str, view_id: str = "", offset: int = 0) -> str:
         """Read frozen blocks, original ranges and display context in one allowed view.
 
         blocks uses one-based ordinals (e.g. 1,3-5). These are not physical pages.
@@ -209,31 +302,67 @@ def restrict_query_agent(agent, selection: QuerySelection):
             json.loads((view.scope.wiki_dir / path).read_text("utf-8")), blocks
         )
         locator = f"{path} blocks={blocks}"
-        originals[view.view_id, locator] = selected["content"]
-        return (
-            view.provenance
-            + "\n\n"
-            + json.dumps(selected, ensure_ascii=False)
-            + f"\nEvidence locator: {locator}"
-        )
+        return render_selection(view, path, locator, selected, offset)
 
     @function_tool
-    def get_image(image_path: str, view_id: str = "") -> ToolOutputImage | ToolOutputText:
+    @bounded
+    def get_cell_content(doc_name: str, cells: str, view_id: str = "", offset: int = 0) -> str:
+        """Read finite original worksheet ranges in comma-separated A1 notation.
+
+        Prefer this for sheet questions. Preserve formulas, cache status, merges
+        and hidden cells. For any paginated read repeat the SAME selection with
+        offset=continuation; coverage describes only this response.
+        """
+        from openkb.text_source import read_text_selection
+        from openkb.workbooks.selection import select_cells
+
+        view = _selected(selection, view_id)
+        path = f"sources/{doc_name}.content.json"
+        if not _available(view, path):
+            return "No permitted worksheet in this evidence view."
+        # select_cells uses absolute normalized coordinates: never pass sliced text.
+        full = read_text_selection(json.loads((view.scope.wiki_dir / path).read_text("utf-8")))
+        selected = select_cells(full, cells)
+        cursor, segments = 0, []
+        for origin in selected["origin_locators"]:
+            a, b = origin["normalized_span"]
+            prefix = origin["sheet_cell"]["cell"]["coordinate"] + ": "
+            segments.append((cursor + len(prefix), cursor + len(prefix) + b - a, a, b))
+            cursor += len(prefix) + b - a + 2
+        selected["_content_segments"] = segments
+        return render_selection(view, path, f"{path} cells={cells}", selected, offset)
+
+    @function_tool
+    @bounded
+    def get_image(
+        image_path: str, view_id: str = ""
+    ) -> list[ToolOutputText | ToolOutputImage] | ToolOutputText:
         """View a retained image belonging to one permitted evidence view."""
         view = _selected(selection, view_id)
         path = image_path if _available(view, image_path) else f"sources/{image_path}"
         if not _available(view, path):
             return ToolOutputText(text="No permitted image in this evidence view.")
         result = read_wiki_image(path, str(view.scope.wiki_dir))
-        return (
-            ToolOutputImage(image_url=result["image_url"])
-            if result["type"] == "image"
-            else ToolOutputText(text=result["text"])
-        )
+        if result["type"] == "image":
+            read = session.register_read(
+                view, path, path, "", kind="image", image_url=result["image_url"]
+            )
+            return [
+                ToolOutputText(text=f"Original image: {path}; Read ID: {read.read_id}"),
+                ToolOutputImage(image_url=result["image_url"]),
+            ]
+        return ToolOutputText(text=result["text"])
 
     @function_tool
+    @bounded
     def record_source_fact(
-        subject: str, setting: str, condition: str, quote: str, locator: str, view_id: str = ""
+        subject: str,
+        setting: str,
+        condition: str,
+        quote: str,
+        locator: str,
+        view_id: str = "",
+        slot_id: str = "",
     ) -> str:
         """Record one rule before combining sources. Keep subject/setting/condition separate.
 
@@ -244,36 +373,14 @@ def restrict_query_agent(agent, selection: QuerySelection):
         Recording a quote verifies its origin, not the interpretation of the rule.
         """
         view = _selected(selection, view_id)
-        from openkb.agent.answer_evidence import original_quote
-
-        locator = locator.removeprefix("Evidence locator:").strip()
-        original = originals.get((view.view_id, locator), "")
-        matched_quote = original_quote(quote, original)
-        if matched_quote is None:
-            return (
-                "Unverified source fact: quote/locator does not match an original read. "
-                "Read the source again."
-            )
-        quote = matched_quote
-        if (
-            not subject.strip()
-            or not setting.strip()
-            or any(value not in quote for value in (subject, setting, condition))
-        ):
-            return (
-                "Unverified source fact: subject, setting and condition must come from "
-                "the same exact quote. Do not transfer conditions between rules."
-            )
-        return json.dumps(
-            {
-                "subject": subject,
-                "setting": setting,
-                "condition": condition,
-                "quote": quote,
-                "locator": locator,
-                "view_id": view.view_id,
-            },
-            ensure_ascii=False,
+        return session.record_fact(
+            view.view_id,
+            subject=subject,
+            setting=setting,
+            condition=condition,
+            quote=quote,
+            locator=locator,
+            slot_id=slot_id,
         )
 
     readers = {
@@ -282,12 +389,18 @@ def restrict_query_agent(agent, selection: QuerySelection):
         "get_page_content",
         "get_block_content",
         "get_text_content",
+        "get_cell_content",
+        "search_originals",
         "get_image",
         "read_wiki_file",
         "list_wiki_dir",
         "query_wiki",
     }
-    extra_tools = [tool for tool in agent.tools if getattr(tool, "name", None) not in readers]
+    extra_tools = [
+        session.writes.guard(tool)
+        for tool in agent.tools
+        if getattr(tool, "name", None) not in readers
+    ]
     instructions = (
         "\n\n# Permitted version evidence\n"
         "Use only the read tools' permitted evidence for factual knowledge claims. "
@@ -306,9 +419,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
     return agent.clone(
         tools=[
             read_file,
+            search_originals,
             get_page_content,
             get_text_content,
             get_block_content,
+            get_cell_content,
             get_image,
             record_source_fact,
             *extra_tools,
@@ -318,25 +433,6 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
 
 def evidence_answer(answer: str, selection: QuerySelection) -> str:
-    """Label permitted immutable revisions; this list does not track actual citations."""
-    from openkb.agent.answer_evidence import unsupported_version_claims, version_rejection
+    from openkb.agent.answer_finalization import decide_answer
 
-    violations = unsupported_version_claims(answer, selection)
-    if violations:
-        answer = version_rejection(violations)
-    if not selection.views and not answer.strip():
-        answer = (
-            "尚未确定可用的产品或版本证据范围，本次未生成知识答案。"
-            "请使用资料中的产品名称、选择知识视图，或确认产品别名。"
-        )
-    details = [view.provenance for view in selection.views]
-    details.extend(selection.missing)
-    if not selection_current(selection):
-        details.insert(
-            0,
-            "Evidence changed during this answer. Treat these revisions as historical; "
-            "ask again for current verification.",
-        )
-    if not details:
-        details = ["No permitted knowledge evidence is available."]
-    return answer.rstrip() + "\n\n---\n本次允许的证据范围\n\n" + "\n\n".join(details)
+    return decide_answer(answer, selection).answer

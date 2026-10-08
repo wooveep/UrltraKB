@@ -121,7 +121,17 @@ def bind_source_view(
             from openkb.application.products import list_products
             from openkb.product_identity import confirmed_product
 
-            product = confirmed_product(list_products(root), confirmed.product)
+            product = (
+                read_record(root, "products", confirmed.product_id, Product)
+                if confirmed.product_id
+                else confirmed_product(list_products(root), confirmed.product)
+            )
+            if product and product.retired_into:
+                raise ValueError(
+                    "Selected product identity is retired; select its current identity"
+                )
+            if product and confirmed.product_id and confirmed.product != product.name:
+                raise ValueError("Explicit product identity and canonical name must agree")
             if product is None:
                 product = Product(product_id=uuid.uuid4().hex, name=confirmed.product)
                 records[record_path(root, "products", product.product_id)] = product

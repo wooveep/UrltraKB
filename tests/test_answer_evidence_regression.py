@@ -120,6 +120,45 @@ async def test_rule_cannot_borrow_condition_from_another_subject(kb_dir):
     assert good["subject"] == "Compute nodes" and good["condition"] == "after joining the cluster"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "doc_name,subject,setting,condition,other_subject,other_setting,other_condition",
+    [
+        ("warehouse", "Chamber", "cooling", "after inspection", "Conveyor", "pause", "at closing"),
+        ("workshop", "Lathe", "standby", "during maintenance", "Crane", "lift", "after approval"),
+        ("catalog", "展柜", "照明", "开放期间", "库房", "除湿", "闭馆以后"),
+    ],
+)
+async def test_rule_binding_is_independent_of_document_and_domain_labels(
+    kb_dir, doc_name, subject, setting, condition, other_subject, other_setting, other_condition
+):
+    rule = f"{subject} uses {setting} {condition}."
+    body = f"{rule} {other_subject} uses {other_setting} {other_condition}."
+    (kb_dir / f"wiki/sources/{doc_name}.json").write_text(
+        json.dumps([{"page": 1, "content": body}])
+    )
+    agent = agent_for(kb_dir)
+    await invoke(agent, "get_page_content", doc_name=doc_name, pages="1", part=None)
+    arguments = dict(
+        subject=subject,
+        setting=setting,
+        quote=body,
+        locator=f"sources/{doc_name}.json pages=1 part=None",
+    )
+    # Every literal exists, but it belongs to a different rule in the same read.
+    wrong = await invoke(agent, "record_source_fact", **arguments, condition=other_condition)
+    assert "Do not transfer conditions" in wrong
+    correct = json.loads(
+        await invoke(agent, "record_source_fact", **arguments, condition=condition)
+    )
+    assert (correct["subject"], correct["setting"], correct["condition"]) == (
+        subject,
+        setting,
+        condition,
+    )
+    assert correct["status"] == "provenance_checked"
+
+
 def test_filename_version_does_not_authorize_a_version_claim(kb_dir):
     from openkb.agent.query_evidence import evidence_answer
 
@@ -156,6 +195,39 @@ def test_encoded_quote_recovery_requires_a_verbatim_original_match():
     assert original_quote("NTP\\nserver", "NTP\nserver") == "NTP\nserver"
     assert original_quote("NTP server", "NTP\nserver") is None
     assert original_quote("a\\nb", "a\\nb") == "a\\nb"
+
+
+def test_version_disclaimer_does_not_mask_following_positive_clause(kb_dir):
+    from openkb.agent.answer_evidence import unsupported_version_claims
+
+    assert unsupported_version_claims(
+        "适用版本未确认；但本功能适用于 Platform V9.3.1。", selection(kb_dir)
+    ) == ("9.3.1",)
+
+
+def test_filename_reference_with_unconfirmed_applicability_is_not_a_claim(kb_dir):
+    from openkb.agent.answer_evidence import unsupported_version_claims
+
+    assert (
+        unsupported_version_claims(
+            "资料文件名为 Platform V9.3.1，版本适用性未获确认。", selection(kb_dir)
+        )
+        == ()
+    )
+
+
+def test_verified_version_of_one_product_cannot_authorize_another(kb_dir):
+    from dataclasses import replace
+
+    from openkb.agent.answer_evidence import unsupported_version_claims
+
+    first = selection(kb_dir, ("9.4.0",)).views[0]
+    scoped = QuerySelection(
+        kb_dir,
+        (replace(first, product="Alpha"), replace(first, product="Beta", applicable_versions=())),
+    )
+    assert unsupported_version_claims("Beta V9.4.0 支持迁移。", scoped) == ("9.4.0",)
+    assert unsupported_version_claims("Alpha V9.4.0 支持迁移。", scoped) == ()
 
 
 def test_answer_outcome_survives_runtime_receipt_readback():

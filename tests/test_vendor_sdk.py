@@ -187,12 +187,13 @@ def streamed_response(message, reason="stop"):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_query_returns_provider_answer(model_service, kb_dir):
+async def test_ordinary_query_rejects_unread_provider_answer(model_service, kb_dir):
     from openkb.agent.query import build_run_config_from_bundle, run_query
     from openkb.config import LlmCredentialBundle
     from openkb.locks import atomic_write_text
 
     atomic_write_text(kb_dir / "wiki" / "index.md", "# Index\n\nBaseline knowledge.")
+    atomic_write_text(kb_dir / "wiki/sources/baseline.md", "Baseline knowledge.")
     model_service.replies.append(
         (200, response({"role": "assistant", "content": "Baseline answer."}))
     )
@@ -206,7 +207,8 @@ async def test_ordinary_query_returns_provider_answer(model_service, kb_dir):
         bundle=bundle,
         run_config=config,
     )
-    assert answer.startswith("Baseline answer.")
+    assert "没有读取到可核实的原文" in answer
+    assert "Baseline answer." not in answer
     assert len(model_service.requests) == 1
     assert "Explain baseline knowledge." in json.dumps(model_service.requests[0]["messages"])
 

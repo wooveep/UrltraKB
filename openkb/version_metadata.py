@@ -103,7 +103,11 @@ def assess_version(
         product = confirmed_product(products, name) if name else None
         return product.product_id if product else name
 
-    possible_products = {product_identity(selected.product)}
+    if selected.product_id:
+        product = next((p for p in products if p.product_id == selected.product_id), None)
+        if product is None or product.retired_into or selected.product != product.name:
+            raise ValueError("Explicit product identity must name an active canonical product")
+    possible_products = {selected.product_id or product_identity(selected.product)}
     possible_families = {selected.family}
     for candidate in candidates:
         if candidate.field == "product" and not selected.product:
@@ -121,12 +125,20 @@ def assess_version(
             same_input and source.source_id == admission.source.source_id
         ):
             continue
+        annotated_view = (
+            read_record(kb_dir, "views", annotation.view_id, KnowledgeView)
+            if annotation.view_id != "legacy"
+            else None
+        )
+        annotated_product = (
+            annotated_view.product_id if annotated_view else None
+        ) or annotation.metadata.product
         if (
             source.source_id == admission.source.source_id
-            and product_identity(annotation.metadata.product) in possible_products
+            and annotated_product in possible_products
             or annotation.metadata.family is not None
             and annotation.metadata.family in possible_families
-            and product_identity(annotation.metadata.product) in possible_products
+            and annotated_product in possible_products
         ):
             related.append(annotation.annotation_id)
     missing = (

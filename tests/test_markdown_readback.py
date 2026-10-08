@@ -165,6 +165,10 @@ def test_query_reads_frozen_text_coordinates(kb_dir, tmp_path, pdf_model, monkey
     imported = import_document(kb_dir, path)
 
     async def model(**kwargs):
+        from evidence_model import provider_review
+
+        if reviewed := provider_review(kwargs):
+            return reviewed
         outputs = [item["content"] for item in kwargs["messages"] if item["role"] == "tool"]
         message = (
             {"content": outputs[-1]}

@@ -22,6 +22,7 @@ from openkb.locks import kb_read_lock
 async def test_chat_keeps_completed_tool_files_without_inventing_a_turn(
     kb_dir, monkeypatch, ending, dispatch
 ):
+    (kb_dir / "wiki/sources/write-fixture.md").write_text("Readable original.")
     session = ChatSession.new(kb_dir, "openai/test", "en")
     session.record_turn("old", "old answer", [])
     stopped = False
@@ -247,6 +248,7 @@ async def test_sdk_cannot_swallow_failed_rollback_and_commit_a_chat_turn(
 ):
     from openkb import model_outputs, mutation
 
+    (kb_dir / "wiki/sources/write-fixture.md").write_text("Readable original.")
     session = ChatSession.new(kb_dir, "openai/test", "en")
     session.record_turn("old", "saved", [])
 

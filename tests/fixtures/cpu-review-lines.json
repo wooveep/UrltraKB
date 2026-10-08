@@ -1,0 +1,39 @@
+{
+  "origin": "final-v4 controlled C1-1, independent second review; actual PDF compatibility glyphs",
+  "answer": "| 集群 CPU 一致性 | 建议同架构同品牌同 CPU 配置的主机组成一个集群；CPU 主频或者代数不一致会影响存储性能 | 无进一步条件 | 最佳实践 PDF 第10页（正文第9页）2.2.1 CPU 要求 |",
+  "review": {
+    "units": [
+      {
+        "unit_id": 0,
+        "verdict": "supported",
+        "reason": "",
+        "proofs": [
+          {
+            "read_id": "5f6a40a552a55d539abd49ef",
+            "quote": "",
+            "subject": "同架构同品牌同CPU 配置的主机",
+            "setting": "建议同架构同品牌同CPU 配置的主机组成",
+            "condition": "CPU 主频或者代数不一致会影响存储性能",
+            "visual_region": null,
+            "lines": [
+              8,
+              13
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "read": {
+    "read_id": "5f6a40a552a55d539abd49ef",
+    "view_id": "f45df67e1a274cd096e3331a0b841530",
+    "product_id": "397fabdab9e64c06bdb4e376bd4214f9",
+    "path": "sources/CNware-WinStack-V9-4-0-最佳实践.json",
+    "digest": "6d8c6c0d14950a8af03b8694de9aa08a33c2dd507c132231244877f44c3d034b",
+    "source_revision_id": "5c4588f5cbf2407e9686514c7aa4f388",
+    "locator": "sources/CNware-WinStack-V9-4-0-最佳实践.json pages=10 part=None",
+    "content": "[Physical page 10]\n\nCNware WinStack V9.4.0 最佳实践\n版权所有\n©云宏信息科技股份有限公司\n第9 页\n第9 页\n2.2 集群内主机要求\n2.2.1 CPU 要求\n\n建议同架构同品牌同CPU 配置的主机组成⼀个集群。\n\nCPU 主频或者代数不⼀致会影响存储性能。\n2.2.2 内存要求\n同主机内\n\n同主机内要求内存频率必须相同（尽量同品牌）。\n\n禁止出现多种不同频率的内存在同⼀主机的主板上。\n\n内存频率不同会造成该主机计算性能受到大幅影响。\n不同主机之间\n\n集群内不同主机之间的内存大小和频率无异构要求，只要满足内存大小要求就可以。\n2.2.3 存储要求\n\n要求集群内主机的磁盘配置相同，包括磁盘类型、数量、转速和容量。\n\n要求使用企业级SSD，SSD 缓存盘要求使用混合读写型，DWPD 大于或等于3。\n\n扩容时，建议保持存储介质型号⼀致，允许使用同等性能或更高的其他型号。\n\n扩容时，需要保持存储介质容量⼀致，不允许使用更高或者更低的容量。",
+    "spans": [],
+    "kind": "text"
+  }
+}

@@ -1,7 +1,7 @@
 """Resolve and pin permitted knowledge evidence before creating reading tools."""
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from openkb.application.views import list_views, view_scope
@@ -27,6 +27,9 @@ class QueryView:
     head_generation: int
     reference_only: bool = False
     validity: str = "current"
+    product_id: str | None = None
+    product_aliases: tuple[str, ...] = ()
+    source_revisions_by_path: dict[str, str] = field(default_factory=dict)
 
     @property
     def view_id(self) -> str:
@@ -52,6 +55,15 @@ class QuerySelection:
     kb_dir: Path
     views: tuple[QueryView, ...]
     missing: tuple[str, ...] = ()
+    candidates: tuple[dict, ...] = ()
+
+    @property
+    def has_evidence(self) -> bool:
+        return any(
+            name.startswith("sources/") and name.endswith((".md", ".json"))
+            for view in self.views
+            for name in view.files
+        )
 
 
 def _input_family(kb_dir: Path, identity: str, view_id: str) -> str | None:
@@ -177,8 +189,10 @@ def _pin_view(
     if inputs and not allowed:
         return None
     sources = []
+    source_revisions_by_path: dict[str, str] = {}
     source_paths: set[str] = set()
     image_roots: list[str] = []
+    image_revisions: dict[str, str] = {}
     for identity in allowed:
         unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
         sources.append(read_source_revision(kb_dir, unit.source_revision_id).source_revision_id)
@@ -192,7 +206,12 @@ def _pin_view(
                 read_source_map(selected.wiki_dir, saved[1].source_map, named.doc_name)
         source_paths.update((f"sources/{named.doc_name}.md", f"sources/{named.doc_name}.json"))
         source_paths.add(f"sources/{named.doc_name}.content.json")
+        source_revisions_by_path.update(
+            (f"sources/{named.doc_name}{suffix}", unit.source_revision_id)
+            for suffix in (".md", ".json", ".content.json")
+        )
         image_roots.append(f"sources/images/{named.doc_name}/")
+        image_revisions[image_roots[-1]] = unit.source_revision_id
     files = wiki_versions(kb_dir, selected.wiki_dir)
     if not historical:
         files = {name: digest for name, digest in files.items() if name not in head.needs_refresh}
@@ -208,6 +227,15 @@ def _pin_view(
                 and set(manifest.page_dependencies[name]).issubset(allowed)
             )
         }
+    from openkb.view_records import Product
+
+    product = read_record(kb_dir, "products", view.product_id, Product) if view.product_id else None
+    source_revisions_by_path.update(
+        (name, revision)
+        for name in files
+        for prefix, revision in image_revisions.items()
+        if name.startswith(prefix)
+    )
     return QueryView(
         selected,
         view.product,
@@ -217,6 +245,9 @@ def _pin_view(
         files,
         head.generation,
         validity="historical" if historical else "current",
+        product_id=view.product_id,
+        product_aliases=product.aliases if product else (),
+        source_revisions_by_path=source_revisions_by_path,
     )
 
 
@@ -291,7 +322,11 @@ def resolve_query_views(
             else (set(), ())
         )
         if ambiguity:
-            return QuerySelection(root, (), ambiguity)
+            from openkb.application.query_choices import scope_candidates
+
+            return QuerySelection(
+                root, (), ambiguity, scope_candidates(root, candidates, product_ids=products)
+            )
         history = bool(re.search(r"historical|history|legacy|历史|旧库", question, re.IGNORECASE))
         historical = (
             tuple(
@@ -303,6 +338,8 @@ def resolve_query_views(
             if requested and history
             else ()
         )
+        if scope is None:
+            views = candidates
         if not scope and any(view.view_id != "legacy" for view in views):
             views = tuple(view for view in views if view.view_id != "legacy")
         if products:
@@ -349,7 +386,10 @@ def resolve_query_views(
             for view in historical
             if (pinned := _pin_view(root, view, scope)) is not None
         )
-        return QuerySelection(root, selected, missing)
+        from openkb.application.query_choices import scope_candidates
+
+        choices = scope_candidates(root, candidates, product_ids=products) if missing else ()
+        return QuerySelection(root, selected, missing, choices)
 
 
 def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> str:

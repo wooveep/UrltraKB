@@ -11,6 +11,11 @@ from openkb.application.conversations import continue_conversation
 from openkb.application.execution import ExecutionContext
 
 
+@pytest.fixture(autouse=True)
+def original_for_conversation(kb_dir):
+    (kb_dir / "wiki/sources/fixture.md").write_text("A source available for model reading.")
+
+
 @pytest.mark.asyncio
 async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeypatch):
     first_running, finish_first, second_waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -75,7 +80,11 @@ async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeyp
 
 @pytest.mark.asyncio
 async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_dir, monkeypatch):
+    from evidence_model import read_fixture, review_response
+
     from openkb.application.conversations import read_conversation
+
+    (kb_dir / "wiki/sources/fixture.md").write_text("Use `<think>` literally.")
 
     class ModelRun:
         is_complete = False
@@ -83,7 +92,11 @@ async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_di
             "<think>private deliberation</think>\n**可见回答**\n\nUse `<think>` literally."
         )
 
+        def __init__(self, agent):
+            self.agent = agent
+
         async def stream_events(self):
+            await read_fixture(self.agent)
             for index, text in enumerate(("I will inspect the sources. ", self.final_output)):
                 yield RawResponsesStreamEvent(
                     data=ResponseTextDeltaEvent(
@@ -101,10 +114,16 @@ async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_di
         def to_input_list(self):
             return [{"role": "assistant", "content": self.final_output}]
 
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: ModelRun())
+    monkeypatch.setattr(Runner, "run_streamed", lambda agent, *args, **kwargs: ModelRun(agent))
+
+    async def review(agent, input, **kwargs):
+        return review_response(input)
+
+    monkeypatch.setattr(Runner, "run", review)
     result = await continue_conversation(kb_dir, "请回答")
     assert result.status == "completed"
-    assert result.answer.startswith("**可见回答**\n\nUse `<think>` literally.\n\n---\n")
+    assert "**可见回答**" in result.answer and "Use `<think>` literally." in result.answer
+    assert "I will inspect" not in result.answer
     assert "private deliberation" not in result.answer
     saved = read_conversation(kb_dir, result.session_id)
     assert saved.turns == (("请回答", result.answer),)
@@ -158,7 +177,7 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
     result = await continue_conversation(kb_dir, "接着问", session_id=result.session_id)
     assert result.status == "completed"
     restored = read_conversation(kb_dir, result.session_id)
-    assert result.answer.startswith("Answer\n\n---\n")
+    assert result.answer_outcome == "insufficient_evidence"
     assert restored.turns == (("接着问", result.answer),)
     assert len(restored.timeline) == 2
 

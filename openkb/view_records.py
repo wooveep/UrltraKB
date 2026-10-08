@@ -18,6 +18,7 @@ Label = Annotated[str, AfterValidator(_nonblank)]
 
 class SourceMetadata(Record):
     product: Label | None = None
+    product_id: RecordId | None = Field(default=None, exclude_if=lambda value: value is None)
     applicable_versions: tuple[Label, ...] = ()
     family: Label | None = None
     document_revision: Label | None = None
@@ -33,6 +34,7 @@ class Product(Record):
     product_id: RecordId
     name: Label
     aliases: tuple[Label, ...] = Field(default=(), exclude_if=lambda value: not value)
+    retired_into: RecordId | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DocumentFamily(Record):

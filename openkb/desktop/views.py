@@ -52,6 +52,22 @@ class ViewPicker(FocusComboBox):
         window.workspaces.reset()
         window._refresh()
 
+    def set_candidates(self, candidates):
+        """Offer confirmed scopes by document name without changing any identity."""
+        from PySide6.QtCore import Qt
+
+        for item in candidates:
+            index = self.findData(item["view_id"])
+            if index < 0:
+                self.addItem("", item["view_id"])
+                index = self.count() - 1
+            label = f"{item['product']} · {', '.join(item['versions']) or '版本待确认'}"
+            label += " · " + "、".join(item["sources"])
+            self.setItemText(index, label)
+            self.setItemData(index, label + "\n" + item["reason"], Qt.ItemDataRole.ToolTipRole)
+        self.setToolTip("请选择此次问答的资料范围后重新提问。选择范围不会永久确认产品别名。")
+        self.setFocus()
+
 
 def source_metadata_form(window, layout):
     from PySide6.QtWidgets import QFormLayout, QLineEdit, QWidget

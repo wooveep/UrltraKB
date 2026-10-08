@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore")
 
 import asyncio
 import logging
+import re
 import shutil
 import sys
 from functools import wraps
@@ -342,7 +343,11 @@ def add_single_file(
     help="Path to a KB root directory (overrides auto-detection).",
 )
 @click.pass_context
-@click.option("--view", "view_id", help="Knowledge view ID; use views list to inspect scopes.")
+@click.option(
+    "--view",
+    "view_id",
+    help="Knowledge view ID or exact source filename; use views list to inspect scopes.",
+)
 def cli(ctx, verbose, kb_dir_override, view_id):
     """OpenKB — Karpathy's LLM Knowledge Base workflow, powered by PageIndex."""
     logging.basicConfig(
@@ -367,6 +372,10 @@ def _selected_scope(ctx, kb_dir):
     from openkb.application.views import view_scope
 
     identity = ctx.obj.get("view_id")
+    if identity and identity != "legacy" and not re.fullmatch(r"[a-f0-9]{32}", identity):
+        from openkb.application.query_choices import source_query_scope
+
+        return source_query_scope(kb_dir, identity)
     return view_scope(kb_dir, identity) if identity else None
 
 

@@ -166,6 +166,8 @@ class ManagedAgentModel(Model):
                     response = await self.executor.wait_response(
                         inner.get_response(*args, **kwargs)
                     )
+                    response.openkb_usage = inner.public_usage()
+                    response.openkb_image_digests = observed.image_digests
                     observed.finish()
                     self.executor.policy.check()
                     self._logical.set(None)
@@ -186,6 +188,7 @@ class ManagedAgentModel(Model):
                         self.executor.policy.check()
                         if event.type == "response.completed":
                             event.response.openkb_usage = inner.public_usage()
+                            event.response.openkb_image_digests = observed.image_digests
                         yield event
                     observed.finish()
                     self._logical.set(None)

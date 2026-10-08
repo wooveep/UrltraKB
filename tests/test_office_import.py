@@ -113,6 +113,27 @@ def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
     assert pdf.status == "added", pdf.message
 
 
+def test_explicit_retry_recovers_office_after_runtime_validation_is_repaired(
+    kb_dir, writer_document, office_runtime, pdf_model, monkeypatch
+):
+    from openkb.application.documents import import_document
+    from openkb.application.source_retry import retry_source
+    from openkb.office import runtime
+
+    def unavailable(_root):
+        raise ValueError("Office runtime file inventory changed or is incomplete")
+
+    with monkeypatch.context() as broken:
+        broken.setattr(runtime, "validate_runtime", unavailable)
+        failed = import_document(kb_dir, writer_document)
+    assert failed.status == "failed" and "Office runtime file inventory" in failed.message
+
+    recovered = retry_source(kb_dir, failed.source_id)
+    assert recovered.status == "added", recovered.message
+    assert recovered.source_revision_id == failed.source_revision_id
+    assert recovered.units[0].target_revision_id == failed.units[0].target_revision_id
+
+
 def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
     kb_dir, writer_document, office_runtime, tmp_path
 ):

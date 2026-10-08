@@ -6,7 +6,7 @@ mod windows {
     use std::{
         ffi::c_void,
         mem,
-        os::windows::io::AsRawHandle,
+        os::windows::{io::AsRawHandle, process::CommandExt},
         process::Command,
         ptr,
         time::{Duration, Instant},
@@ -85,7 +85,10 @@ mod windows {
         };
         // Assignment precedes spawn, so Python wrapper, core interpreter and
         // soffice inherit the job with no assign-after-spawn escape window.
-        let mut child = Command::new(&args[3]).args(&args[4..]).spawn()?;
+        let mut child = Command::new(&args[3])
+            .args(&args[4..])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW, also for the Python wrapper.
+            .spawn()?;
         let deadline = Instant::now() + Duration::from_secs(seconds);
         loop {
             if let Some(status) = child.try_wait()? {

@@ -28,6 +28,15 @@ these archives and probes the actual executables. It extracts the complete Offic
 tree, preserves upstream licenses and fonts, adds the eight unmodified fonts in
 `assets/fonts/manifest.json`, and records every resulting file and contained link.
 Conversion verifies that inventory again. System Office is never a fallback.
+On Windows, execution validation permits unlisted `program/<UUID>.dmp` files
+left by LibreOffice's crash handler, including incomplete dumps, and retains them
+for diagnosis. This exception does not apply to symbolic links, shipped files or
+other extra files; build inventory still records the complete tree.
+If verification fails, the diagnostic names the runtime directory and reports
+missing, unexpected or changed files and links, with counts and a bounded list of
+paths. Re-extract the complete application package into a fresh directory; retain
+the diagnostic if a fresh extraction still fails. Verification never rewrites the
+manifest or accepts changed binaries.
 
 Office runs in a private process and profile. The main application imports no
 UNO modules. The loader sets `MacroExecutionMode=NEVER_EXECUTE`,
@@ -51,7 +60,9 @@ whose only writer belongs to the application, and terminates the worker process
 group when that pipe closes, including after an abrupt application exit.
 Windows uses a separately built Rust launcher with
 a kill-on-close Job Object; it resets DLL search state in that child before
-starting the matching Python. Private task files sit inside the application's
+starting the matching Python. The launcher, supervisor and conversion worker use
+Windows' `CREATE_NO_WINDOW` process flag so probes and conversions do not open
+command-prompt windows. Private task files sit inside the application's
 owned input directory so task recovery can collect them after an abrupt exit.
 
 The packaged runtime supports Linux/Windows x86_64 and macOS Apple Silicon.
@@ -122,8 +133,9 @@ timeout, cancellation and application death during both probes and conversion.
 Only model calls are substituted in successful conversion tests.
 
 The macOS and Windows builds run native DOC/DOCX/PPT/PPTX conversion tests before
-freezing. macOS also checks parent-death cleanup. Extracted Windows x64, Debian
-amd64 and macOS arm64 packages convert all four formats, checking physical pages,
+freezing. Windows also checks that the private Python wrapper and its descendants
+have no visible console. macOS also checks parent-death cleanup. Extracted Windows
+x64, Debian amd64 and macOS arm64 packages convert all four formats, checking physical pages,
 hidden slides and speaker notes using authored synthetic fixtures.
 An already-disposed UNO bridge during normal document close or desktop termination
 does not discard a completed export. Loading and export errors still fail conversion,

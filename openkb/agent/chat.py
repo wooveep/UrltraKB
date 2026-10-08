@@ -911,6 +911,7 @@ async def iter_chat_turn_events(
                     trace=trace,
                     attempt_id=attempt_id,
                     usage=None if usage_recorded else data.get("usage"),
+                    answer_outcome=data.get("answer_outcome"),
                 )
                 yield {
                     "event": "final",
@@ -920,6 +921,7 @@ async def iter_chat_turn_events(
                         "turn_count": session.turn_count,
                         "usage": data.get("usage"),
                         "answer_outcome": data.get("answer_outcome"),
+                        "scope_candidates": data.get("scope_candidates", ()),
                     },
                 }
 

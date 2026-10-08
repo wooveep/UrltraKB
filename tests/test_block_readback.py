@@ -357,6 +357,10 @@ def test_query_reads_content_blocks_with_pinned_original_ranges(
     assert imported.status == "added", imported.message
 
     async def model(**kwargs):
+        from evidence_model import provider_review
+
+        if reviewed := provider_review(kwargs):
+            return reviewed
         outputs = [item["content"] for item in kwargs["messages"] if item["role"] == "tool"]
         message = (
             {"content": outputs[-1]}

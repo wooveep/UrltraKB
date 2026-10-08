@@ -13,15 +13,15 @@ def product_key(value: str) -> str:
 
 
 def confirmed_product(products: tuple[Product, ...], name: str) -> Product | None:
-    aliases = [p for p in products if product_key(name) in {product_key(a) for a in p.aliases}]
-    if len(aliases) > 1:
-        raise ValueError("Ambiguous confirmed product alias; review product identities")
-    if aliases:
-        return aliases[0]
-    exact = [p for p in products if p.name == name]
-    if len(exact) > 1:
-        raise ValueError("Duplicate product identity; confirm an alias before importing")
-    return exact[0] if exact else None
+    matches = [
+        p
+        for p in products
+        if not p.retired_into
+        and product_key(name) in {product_key(a) for a in (p.name, *p.aliases)}
+    ]
+    if len(matches) > 1:
+        raise ValueError("Ambiguous product identity; explicitly review existing sources")
+    return matches[0] if matches else None
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ def resolve_product_question(
 ) -> ProductResolution:
     text = product_key(question)
     names: dict[str, set[str]] = {}
+    hint_names: set[str] = set()
     catalog = {p.product_id: p for p in products}
     for view in views:
         if view.product_id and view.product:
@@ -52,6 +53,14 @@ def resolve_product_question(
             labels = (view.product, *(product.aliases if product else ()))
             for label in labels:
                 names.setdefault(product_key(label), set()).add(view.product_id)
+                # Camel-case boundaries can suggest an unconfirmed short name;
+                # ordinary substrings inside a word cannot establish that hint.
+                raw = unicodedata.normalize("NFKC", label)
+                hint_names.add(product_key(raw))
+                hint_names.update(
+                    product_key(raw[m.start() :])
+                    for m in re.finditer(r"(?<=[a-z0-9])(?=[A-Z])", raw)
+                )
     mentions = [(m.start(), m.end(), name) for name in names for m in _mentions(text, name)]
     mentions = [
         m
@@ -61,9 +70,7 @@ def resolve_product_question(
     selected: set[str] = set()
     ambiguous: set[str] = set()
     for _, _, name in mentions:
-        candidates = set().union(
-            *(ids for label, ids in names.items() if label == name or label.startswith(name + " "))
-        )
+        candidates = names[name]
         selected.update(candidates)
         if len(candidates) > 1:
             ambiguous.update(candidates)
@@ -90,7 +97,7 @@ def resolve_product_question(
     fragments.update(
         token
         for token in re.findall(r"[a-z][a-z0-9_.+]*", text)
-        if len(token) >= 3 and any(token in name for name in names)
+        if len(token) >= 3 and any(_mentions(name, token) for name in hint_names)
     )
     hints = {
         token

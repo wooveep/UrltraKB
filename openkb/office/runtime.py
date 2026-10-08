@@ -2,12 +2,13 @@
 
 import json
 import platform
+import re
 import sys
 from pathlib import Path
 from typing import Callable
 
 from openkb.config import resolve_effective_config
-from openkb.office.inventory import digest, inventory
+from openkb.office.inventory import digest, inventory, inventory_difference
 from openkb.office.policy import LOAD_OPTIONS, OFFICE_POLICY, PDF_OPTIONS
 from openkb.office.probe import probe
 from openkb.office.records import OfficeManifest
@@ -106,8 +107,27 @@ def validate_runtime(root: Path) -> OfficeManifest:
     if sys.platform == "win32" and manifest.launcher is None:
         raise ValueError("Office runtime is missing its owned-process Windows launcher")
     files, links = inventory(root)
+    if sys.platform == "win32":
+        # LibreOffice's Windows crash handler can leave <UUID>.dmp beside
+        # soffice. Retain that diagnostic without poisoning subsequent imports.
+        # Never exempt a shipped file or a symbolic link from verification.
+        for name in files.keys() - manifest.files.keys() - links.keys():
+            if re.fullmatch(
+                r"program/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.dmp", name, re.IGNORECASE
+            ):
+                del files[name]
     if files != manifest.files or links != manifest.links:
-        raise ValueError("Office runtime file inventory changed or is incomplete")
+        differences = []
+        if files != manifest.files:
+            differences.append("files " + inventory_difference(manifest.files, files))
+        if links != manifest.links:
+            differences.append("links " + inventory_difference(manifest.links, links))
+        raise ValueError(
+            "Office runtime file inventory changed or is incomplete: "
+            + "; ".join(differences)
+            + f". Runtime: {root}. Re-extract the complete application package into a fresh "
+            "directory; if it persists, report these file differences."
+        )
     if sys.platform == "linux":
         from openkb.office.fontconfig import require_font_supply
 

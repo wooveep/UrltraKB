@@ -35,14 +35,19 @@ class QueryRequest(ViewRequest):
     question: str = Field(..., min_length=1)
     stream: bool = True
     save: bool = False
+    source_name: str | None = None
 
 
 class QueryResponse(BaseModel):
     answer: str
+    scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     saved_path: str | None = None
-    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    answer_outcome: (
+        Literal[
+            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
+        ]
+        | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ChatRequest(ViewRequest):
@@ -50,15 +55,20 @@ class ChatRequest(ViewRequest):
     message: str = Field(..., min_length=1)
     session_id: str | None = None
     stream: bool = True
+    source_name: str | None = None
 
 
 class ChatResponse(BaseModel):
     session_id: str
     answer: str
     turn_count: int
-    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
+    answer_outcome: (
+        Literal[
+            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
+        ]
+        | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ChatSessionItem(BaseModel):
@@ -95,6 +105,7 @@ class ChatSessionLoadResponse(BaseModel):
     turn_count: int
     user_turns: list[str]
     assistant_texts: list[str]
+    answer_outcomes: list[str | None] = Field(default_factory=list)
     # Parallel to assistant_texts (1:1 by index); an empty inner list means
     # "no trace for this turn — render the flat assistant_texts entry instead".
     assistant_traces: list[list[ChatTraceStep]] = Field(default_factory=list)

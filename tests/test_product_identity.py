@@ -97,3 +97,128 @@ def test_unconfirmed_short_name_inside_chinese_product_cannot_expand():
     for name in ("WinStack", "WinSphere"):
         result = resolve_product_question(views, name + " V9.4.0")
         assert result.status == "unresolved" and not result.product_ids
+    # A word merely embedded inside a Latin product token is not a name hint.
+    assert resolve_product_question(views, "What are the deployment rules?").status == "unscoped"
+
+
+def test_typographic_product_names_bind_consistently_but_semantic_suffixes_do_not():
+    from openkb.product_identity import confirmed_product
+    from openkb.view_records import Product
+
+    product = Product(product_id="a" * 32, name="CNware WinStack")
+    assert confirmed_product((product,), "ＣＮｗａｒｅ—WinStack") == product
+    assert confirmed_product((product,), "CNware WinStack 虚拟化云平台") is None
+    duplicate = Product(product_id="b" * 32, name="CNware-WinStack")
+    with pytest.raises(ValueError, match="identity"):
+        confirmed_product((product, duplicate), "cnware winstack")
+
+
+@pytest.mark.parametrize("name", ["CNware WinStack", "Acme Ledger", "北辰资料管理"])
+def test_exact_confirmed_name_does_not_expand_to_longer_product_name(name):
+    from openkb.product_identity import resolve_product_question
+    from openkb.view_records import KnowledgeView
+
+    views = tuple(
+        KnowledgeView(
+            view_id=str(i) * 32,
+            product_id=str(i) * 32,
+            product=label,
+            applicable_versions=("9.4.0",),
+        )
+        for i, label in enumerate((name, name + " Extended"), 1)
+    )
+    result = resolve_product_question(views, name + " V9.4.0 如何配置？")
+    assert result.status == "resolved" and result.product_ids == {"1" * 32}
+
+
+def test_alias_cannot_capture_another_canonical_product_name(kb_dir, monkeypatch):
+    from test_query_views import _import_rule
+
+    from openkb.application.products import confirm_product_aliases, list_products
+
+    for name in ("Product A", "Product B"):
+        _import_rule(kb_dir, monkeypatch, name, "1.0", "Fact.", product=name)
+    a = next(p for p in list_products(kb_dir) if p.name == "Product A")
+    with pytest.raises(ValueError, match="alias"):
+        confirm_product_aliases(kb_dir, a.product_id, ("Product-B",))
+
+
+def test_existing_sources_move_by_explicit_identity_review_and_keep_history(kb_dir, monkeypatch):
+    from test_query_views import _import_rule
+
+    from openkb.application.products import list_products, retire_product_identity
+    from openkb.application.query_views import resolve_query_views
+    from openkb.application.version_review import (
+        resume_version_review,
+        review_source_version,
+        supplement_version_reviews,
+    )
+    from openkb.view_records import SourceMetadata
+
+    first = _import_rule(
+        kb_dir,
+        monkeypatch,
+        "install",
+        "9.4.0",
+        "Install rule.",
+        product="CNware WinStack",
+        family="install",
+    )
+    other = _import_rule(
+        kb_dir,
+        monkeypatch,
+        "ops",
+        "9.4.0",
+        "Ops rule.",
+        product="CNware WinStack Platform",
+        family="ops",
+    )
+    products = {p.name: p for p in list_products(kb_dir)}
+    target, old = products["CNware WinStack"], products["CNware WinStack Platform"]
+    with pytest.raises(ValueError, match="Live sources"):
+        retire_product_identity(kb_dir, old.product_id, target.product_id)
+    prior = resolve_query_views(kb_dir, "CNware WinStack Platform").views[0]
+    review = review_source_version(kb_dir, other.source_id)
+    ready = supplement_version_reviews(
+        kb_dir,
+        {review.review_id: SourceMetadata(product=target.name, product_id=target.product_id)},
+    )[0]
+    assert ready.metadata.applicable_versions == ("9.4.0",)
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "description": "Ops",
+                                "content": "Ops rule.",
+                                "create": [],
+                                "update": [],
+                                "related": [],
+                            }
+                        )
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        ),
+    )
+    result = resume_version_review(kb_dir, ready.review_id)
+    assert result.status == "added", result.message
+    retire_product_identity(kb_dir, old.product_id, target.product_id)
+    selected = resolve_query_views(kb_dir, "CNware WinStack V9.4.0")
+    assert len(selected.views) == 1
+    assert set(selected.views[0].source_revision_ids) == {
+        first.source_revision_id,
+        other.source_revision_id,
+    }
+    assert prior.scope.wiki_dir.is_dir() and prior.product_id == old.product_id
+    # A question with no product hint must not reintroduce retired identities.
+    all_current = resolve_query_views(kb_dir, "What are the installation and operations rules?")
+    assert {view.product_id for view in all_current.views} == {target.product_id}
+    historical = resolve_query_views(kb_dir, scope=prior.scope)
+    assert historical.views[0].product_id == old.product_id

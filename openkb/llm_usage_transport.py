@@ -29,6 +29,17 @@ class ModelCall:
     validate_credentials: Callable[[Mapping[str, str]], None] | None = None
     send_error: BaseException | None = None
     raw_usage_available: bool | None = None
+    image_digests: set[str] | None = None
+
+    def observe_images(self, request):
+        import json
+
+        from openkb.llm_images import request_image_digests
+
+        body = json.loads(request.content)
+        self.image_digests = request_image_digests(
+            [body[key] for key in ("messages", "input", "contents") if key in body]
+        )
 
     def check_credentials(self, headers):
         if self.validate_credentials is not None:
@@ -129,6 +140,7 @@ def install_send_observer():
             if call is None or request.method != "POST" or not _model_request(request):
                 return sync_send(client, request, *args, **kwargs)
             identity = call.sending()
+            call.observe_images(request)
             # Redirect replays occur below HTTPX.send and would bypass our
             # per-send budget. A model endpoint must be configured directly.
             kwargs["follow_redirects"] = False
@@ -149,6 +161,7 @@ def install_send_observer():
             if call is None or request.method != "POST" or not _model_request(request):
                 return await async_send(client, request, *args, **kwargs)
             identity = call.sending()
+            call.observe_images(request)
             kwargs["follow_redirects"] = False
             try:
                 response = await async_send(client, request, *args, **kwargs)

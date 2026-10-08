@@ -133,6 +133,7 @@ class ChatSession:
     incomplete: list[dict[str, Any]] = field(default_factory=list)
     completed_attempts: list[str] = field(default_factory=list)
     token_usage: dict[str, int | None] | None = None
+    answer_outcomes: list[str | None] = field(default_factory=list)
     _version: str | None = field(default=None, repr=False)
 
     @classmethod
@@ -191,6 +192,7 @@ class ChatSession:
             "incomplete": self.incomplete,
             "completed_attempts": self.completed_attempts,
             "token_usage": self.token_usage,
+            "answer_outcomes": self.answer_outcomes,
         }
 
     def save(self) -> None:
@@ -225,12 +227,16 @@ class ChatSession:
         *,
         attempt_id: str | None = None,
         usage: dict[str, int | None] | None = None,
+        answer_outcome: str | None = None,
     ) -> None:
         previous = deepcopy(self.__dict__)
         try:
             from openkb.agent.token_usage import add_usage
 
             self.token_usage = add_usage(self.token_usage, usage)
+            while len(self.answer_outcomes) < len(self.assistant_texts):
+                self.answer_outcomes.append(None)
+            self.answer_outcomes.append(answer_outcome)
             if attempt_id:
                 self.completed_attempts.append(attempt_id)
                 self.incomplete = [item for item in self.incomplete if item["id"] != attempt_id]
@@ -381,6 +387,9 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         incomplete=incomplete,
         completed_attempts=completed_attempts,
         token_usage=token_usage,
+        answer_outcomes=TypeAdapter(list[str | None]).validate_python(
+            data.get("answer_outcomes", [])
+        ),
         _version=hashlib.sha256(content).hexdigest(),
     )
 

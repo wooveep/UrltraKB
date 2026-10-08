@@ -186,7 +186,8 @@ def convert(request, directory):
             "--norestore",
             "-env:UserInstallation=" + (directory / "profile").as_uri(),
             f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
-        ]
+        ],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     document = None
     desktop = None

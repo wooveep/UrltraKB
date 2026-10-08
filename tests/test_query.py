@@ -44,7 +44,7 @@ class TestBuildQueryAgent:
 
 class TestRunQuery:
     @pytest.mark.asyncio
-    async def test_run_query_returns_final_output(self, tmp_path):
+    async def test_empty_query_does_not_call_model(self, tmp_path):
         (tmp_path / "wiki").mkdir()
         (tmp_path / ".openkb").mkdir()
 
@@ -55,13 +55,15 @@ class TestRunQuery:
             mock_run.return_value = mock_result
             answer = await run_query("What is the answer?", tmp_path, "gpt-4o-mini")
 
-        assert answer.startswith("The answer is 42.\n\n---\n")
-        assert "view=legacy" in answer
+        assert "没有可读取的原文" in answer
+        mock_run.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_run_query_passes_question_to_agent(self, tmp_path):
         (tmp_path / "wiki").mkdir()
         (tmp_path / ".openkb").mkdir()
+        (tmp_path / "wiki/sources").mkdir()
+        (tmp_path / "wiki/sources/fixture.md").write_text("An original source.")
 
         captured = {}
 

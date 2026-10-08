@@ -531,6 +531,8 @@ def test_query_agent_uses_global_language(_isolated_global, tmp_path, monkeypatc
 
     save_global_config({"language": "de"})
     kb = _kb(tmp_path / "kb")
+    (kb / "wiki/sources").mkdir(parents=True, exist_ok=True)
+    (kb / "wiki/sources/language-fixture.md").write_text("Readable original.")
 
     real_resolve = cfg.resolve_effective_config
     calls: list[Path] = []

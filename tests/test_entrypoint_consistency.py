@@ -27,6 +27,76 @@ def api_client(kb_dir, monkeypatch):
     return TestClient(create_app())
 
 
+@pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
+def test_unresolved_scope_offers_source_names_and_explicit_choice_keeps_version_guard(
+    kb_dir, monkeypatch, entry
+):
+    from test_query_views import _import_rule, _legacy_product
+
+    from openkb.application.conversations import ask_question
+    from openkb.application.query_choices import source_query_scope
+    from openkb.application.query_views import resolve_query_views
+
+    for name, product in (("install", "CNware WinStack"), ("ops", "CNware-WinStack")):
+        _import_rule(
+            kb_dir,
+            monkeypatch,
+            name,
+            "9.4.0",
+            "A source rule.",
+            product=product,
+            product_id=_legacy_product(kb_dir, product),
+        )
+    monkeypatch.setattr(
+        "agents.Runner.run_streamed",
+        lambda *a, **k: pytest.fail("Unresolved scope sent a model request"),
+    )
+    question = "WinStack 如何安装？"
+    if entry == "cli":
+        cli = importlib.import_module("openkb.cli")
+        monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
+        result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "query", question])
+        assert result.exit_code == 0, result.output
+        body = result.output
+        selected = CliRunner().invoke(
+            cli.cli,
+            ["--kb-dir", str(kb_dir), "--view", "install.pdf", "query", "WinStack V99 如何安装？"],
+        )
+        assert selected.exit_code == 0 and "尚未确定" in selected.output
+    elif entry.startswith("api"):
+        with api_client(kb_dir, monkeypatch) as client:
+            result = client.post(
+                "/api/v1/query",
+                json={"kb": "audit", "question": question, "stream": entry == "api_stream"},
+            )
+            assert result.status_code == 200, result.text
+            body = result.text
+            if entry == "api":
+                assert result.json()["answer_outcome"] == "scope_unresolved"
+                assert len(result.json()["scope_candidates"]) == 2
+            selected = client.post(
+                "/api/v1/query",
+                json={
+                    "kb": "audit",
+                    "question": "WinStack V99 如何安装？",
+                    "source_name": "install.pdf",
+                    "stream": False,
+                },
+            )
+            assert (
+                selected.status_code == 200
+                and selected.json()["answer_outcome"] == "scope_unresolved"
+            )
+    else:
+        result = asyncio.run(ask_question(kb_dir, question))
+        assert result.answer_outcome == "scope_unresolved" and len(result.scope_candidates) == 2
+        body = result.answer
+    assert "install.pdf" in body and "ops.pdf" in body
+    chosen = source_query_scope(kb_dir, "install.pdf")
+    assert len(resolve_query_views(kb_dir, question, scope=chosen).views) == 1
+    assert not resolve_query_views(kb_dir, "WinStack V99 如何安装？", scope=chosen).has_evidence
+
+
 @pytest.mark.parametrize("entry", ["cli", "api", "desktop"])
 def test_import_batch_keeps_initial_model(kb_dir, monkeypatch, entry):
     from openkb.application.documents import import_document
@@ -80,19 +150,26 @@ def test_import_batch_keeps_initial_model(kb_dir, monkeypatch, entry):
 
 
 @pytest.fixture
-def narrated_model(monkeypatch, request):
+def narrated_model(kb_dir, monkeypatch, request):
     from agents import RawResponsesStreamEvent, Runner
     from openai.types.responses import ResponseTextDeltaEvent
 
     deltas, answer = getattr(
         request, "param", (("Let me search. ", "The answer is 42."), "The answer is 42.")
     )
+    from evidence_model import read_fixture, review_response
+
+    (kb_dir / "wiki/sources/fixture.md").write_text("The answer is 42. Final answer only.")
 
     class Run:
         final_output = answer
         is_complete = False
 
+        def __init__(self, agent):
+            self.agent = agent
+
         async def stream_events(self):
+            await read_fixture(self.agent)
             for index, delta in enumerate(deltas):
                 yield RawResponsesStreamEvent(
                     data=ResponseTextDeltaEvent(
@@ -113,10 +190,13 @@ def narrated_model(monkeypatch, request):
         def to_input_list(self):
             return [{"role": "assistant", "content": self.final_output}]
 
-    monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: Run())
+    monkeypatch.setattr(Runner, "run_streamed", lambda agent, *a, **kw: Run(agent))
 
-    async def run(*args, **kwargs):
-        return Run()
+    async def run(agent, input, **kwargs):
+        if agent.name == "evidence-review":
+            return review_response(input)
+        await read_fixture(agent)
+        return Run(agent)
 
     monkeypatch.setattr(Runner, "run", run)
 
@@ -245,6 +325,7 @@ def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model
     assert "Let me search." not in saved.assistant_texts[0]
     assert "view=legacy" in saved.assistant_texts[0]
     assert saved.turn_count == 1
+    assert saved.answer_outcomes == ["answered"]
 
 
 def test_api_session_operations_respect_the_selected_view(kb_dir, monkeypatch):

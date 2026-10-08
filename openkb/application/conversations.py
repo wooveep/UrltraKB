@@ -35,7 +35,13 @@ class AnswerResult:
     error: str | None = None
     unfinished: tuple[str, ...] = ()
     usage: dict[str, int | None] | None = None
-    answer_outcome: Literal["answered", "scope_unresolved", "evidence_rejected"] | None = None
+    scope_candidates: tuple[dict, ...] = ()
+    answer_outcome: (
+        Literal[
+            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
+        ]
+        | None
+    ) = None
 
 
 def _validate_question(kb_dir: Path, question: str, *, scope: KnowledgeScope | None = None) -> Path:
@@ -107,6 +113,7 @@ async def ask_question(
                                 str(path) if path else None,
                                 usage=event["data"].get("usage"),
                                 answer_outcome=event["data"].get("answer_outcome"),
+                                scope_candidates=tuple(event["data"].get("scope_candidates", ())),
                                 resources=(str(path),) if path else (),
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
                                 if path
@@ -203,6 +210,9 @@ async def continue_conversation(
                                     changes=(*outputs.changes, f"saved turn: {session.id}"),
                                     usage=event["data"].get("usage", usage),
                                     answer_outcome=event["data"].get("answer_outcome"),
+                                    scope_candidates=tuple(
+                                        event["data"].get("scope_candidates", ())
+                                    ),
                                 )
                             if context.cancelled():
                                 break
@@ -245,6 +255,7 @@ class ConversationView:
     version: str
     incomplete: tuple[tuple[int, str], ...] = ()
     usage: dict[str, int | None] | None = None
+    answer_outcomes: tuple[str | None, ...] = ()
 
     @property
     def timeline(self) -> tuple[tuple[str, str], ...]:
@@ -276,4 +287,5 @@ def read_conversation(
         session._version or "",
         tuple((item["after_turn"], item["message"]) for item in session.incomplete),
         session.token_usage,
+        tuple(session.answer_outcomes),
     )

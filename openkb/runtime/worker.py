@@ -484,6 +484,7 @@ def _execute(
             turn_count=answer.turn_count,
             output=answer.answer,
             answer_outcome=answer.answer_outcome,
+            scope_candidates=answer.scope_candidates,
             usage=answer.usage,
             output_state="available",
         )

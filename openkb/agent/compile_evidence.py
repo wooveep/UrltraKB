@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from openkb.agent.code_examples import code_examples, example_keys
 from openkb.agent.page_response import PageResponseError
 
 MAX_EVIDENCE_UNITS = 6
@@ -72,9 +73,9 @@ class CompileEvidence:
         This does not certify old generated content or prose. Revalidating those
         facts requires their own original sources, not only this document's pages.
         """
-        previous = set(_code_examples(self.previous_content))
-        code = "\n".join(block for block in _code_examples(content) if block not in previous)
-        keys = set(re.findall(r"""(?:^|[\n,{])\s*["']?([A-Za-z_][\w.-]*)["']?\s*:""", code))
+        previous = set(code_examples(self.previous_content))
+        examples = [block for block in code_examples(content) if block not in previous]
+        keys = {key for example in examples for key in example_keys(example)}
         missing = sorted(
             key
             for key in keys
@@ -85,18 +86,10 @@ class CompileEvidence:
                 "page_unsupported_fields",
                 "Example keys absent from original evidence: " + ", ".join(missing),
             )
-        if code.strip() and not self.text.strip():
+        if any(example.content.strip() for example in examples) and not self.text.strip():
             raise PageResponseError(
                 "page_missing_evidence", "No original evidence for code example"
             )
-
-
-def _code_examples(content: str) -> list[str]:
-    fenced = re.findall(r"```[^\n]*\n(.*?)```", content, re.S)
-    inline = re.findall(r"(?<!`)`([^`\n]+)`(?!`)", content)
-    # Plain field references are not executable examples; only validate inline
-    # structured values. This includes JSON request bodies inside curl commands.
-    return fenced + [value for value in inline if ":" in value]
 
 
 class LongDocumentEvidence:

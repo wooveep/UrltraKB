@@ -299,7 +299,7 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        selected = await resolve_api_scope(kb_dir, request.view_id)
+        selected = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
         if request.stream:
             return StreamingResponse(
                 _stream_query(request, kb_dir, fastapi_request), media_type="text/event-stream"
@@ -313,7 +313,10 @@ def create_app() -> FastAPI:
         if result.status != "completed":
             raise HTTPException(status_code=500, detail=result.error or result.status)
         return QueryResponse(
-            answer=result.answer, saved_path=result.saved_path, answer_outcome=result.answer_outcome
+            answer=result.answer,
+            saved_path=result.saved_path,
+            answer_outcome=result.answer_outcome,
+            scope_candidates=result.scope_candidates,
         )
 
     @app.post("/api/v1/chat", response_model=ChatResponse)
@@ -323,7 +326,7 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        selected = await resolve_api_scope(kb_dir, request.view_id)
+        selected = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
         from openkb.application.conversations import continue_conversation
         from openkb.application.sessions import load_conversation
 
@@ -331,7 +334,10 @@ def create_app() -> FastAPI:
         if request.session_id:
             try:
                 await asyncio.to_thread(
-                    load_conversation, kb_dir, request.session_id, view_id=request.view_id
+                    load_conversation,
+                    kb_dir,
+                    request.session_id,
+                    view_id=selected.view_id if selected else None,
                 )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -358,6 +364,7 @@ def create_app() -> FastAPI:
             answer=result.answer,
             turn_count=result.turn_count,
             answer_outcome=result.answer_outcome,
+            scope_candidates=result.scope_candidates,
         )
 
     @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)
@@ -408,6 +415,7 @@ def create_app() -> FastAPI:
             user_turns=session.user_turns,
             assistant_texts=session.assistant_texts,
             assistant_traces=session.assistant_traces,
+            answer_outcomes=session.answer_outcomes,
         )
 
     @app.post("/api/v1/chat/sessions/delete", response_model=ChatSessionDeleteResponse)

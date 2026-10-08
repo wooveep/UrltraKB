@@ -23,6 +23,41 @@ def agent_for(executor, tools=()):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model,delivered", [("openai/gpt-4o-mini", True), ("deepseek/deepseek-flash", False)]
+)
+async def test_image_receipt_observes_actual_provider_payload(model_service, model, delivered):
+    from openkb.config import LlmCredentialBundle
+    from openkb.llm_execution import CompletionExecutor, RoleBindings
+    from openkb.llm_images import image_digest, request_image_digests
+
+    image = (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
+        "QVR42mP8/x8AAwMCAO+jBv8AAAAASUVORK5CYII="
+    )
+    model_service.replies.append((200, response()))
+    executor = CompletionExecutor(
+        RoleBindings(model, LlmCredentialBundle(api_key="fixture", base_url=model_service.url))
+    )
+    run = await Runner.run(
+        agent_for(executor),
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Read the image."},
+                    {"type": "input_image", "image_url": image},
+                ],
+            }
+        ],
+        run_config=RunConfig(tracing_disabled=True),
+    )
+    expected = {image_digest(image)} if delivered else set()
+    assert request_image_digests(model_service.requests[0]["messages"]) == expected
+    assert run.raw_responses[0].openkb_image_digests == expected
+
+
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.asyncio
 async def test_agent_retry_first_send_is_single_and_accounted(model_service, kb_dir, stream):
@@ -226,6 +261,7 @@ async def test_real_application_commits_only_complete_answers(
     monkeypatch.setenv("LLM_API_KEY", "fixture")
     (kb_dir / ".openkb/config.yaml").write_text("model: openai/gpt-4o-mini\nlanguage: en\n")
     (kb_dir / "wiki/index.md").write_text("# Knowledge\nAvailable knowledge.")
+    (kb_dir / "wiki/sources/stream-fixture.md").write_text("Readable original.")
     chunks = streamed_response({"role": "assistant", "content": "Saved answer."})
     if outcome == "error":
         chunks = [chunks[0], {"error": {"message": "broken", "code": 503}}]
@@ -233,7 +269,7 @@ async def test_real_application_commits_only_complete_answers(
     stopped = threading.Event()
 
     def receive(event):
-        if outcome == "cancel" and event.get("event") == "delta":
+        if outcome == "cancel" and event.get("event") == "answer_progress":
             stopped.set()
 
     context = ExecutionContext(cancelled=stopped.is_set, on_event=receive)

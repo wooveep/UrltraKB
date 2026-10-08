@@ -168,6 +168,7 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
 def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     kb_dir, tmp_path, pdf_model
 ):
+    import json
     from datetime import date
     from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -223,6 +224,56 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     )
     assert "0012" in selected["content"] and "TAIL_VALUE" in selected["content"]
     assert "=B2+1" not in selected["content"]
+    # The model uses the same retained source through a compact, pinned reader.
+    import asyncio
+
+    from agents import Agent
+    from test_answer_evidence_regression import invoke
+
+    from openkb.agent.evidence_session import EvidenceSession
+    from openkb.agent.query_evidence import restrict_query_agent
+    from openkb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, "Read worksheet values")
+    session = EvidenceSession(selection)
+    view = selection.views[0]
+    name = next(p for p in view.files if p.endswith(".content.json"))
+    agent = restrict_query_agent(Agent(name="sheet-reader"), selection, session=session)
+    result = asyncio.run(
+        invoke(
+            agent,
+            "get_cell_content",
+            doc_name=name.removeprefix("sources/").removesuffix(".content.json"),
+            cells="A1:B2,E2:F2,XFD100000",
+            view_id=view.view_id,
+        )
+    )
+    payload, _ = json.JSONDecoder().raw_decode(result[result.index("{") :])
+    projected = {cell["coordinate"]: cell for cell in payload["cells"]}
+    assert projected["E2"]["formula"] == "=B2+1" and projected["E2"]["cached"] == 43
+    assert projected["F2"]["cache_status"] == "missing"
+    assert projected["B2"]["hidden_row"] and projected["B2"]["hidden_column"]
+    assert "TAIL_VALUE" in payload["content"] and "00042" in payload["content"]
+    assert payload["read_id"] in session.reads
+    assert session.reads[payload["read_id"]].source_revision_id == imported.source_revision_id
+    assert (
+        read_document_source(kb_dir, imported.source_id, unit_id=imported.units[0].unit_id) == saved
+    )
+    frozen_path = view.scope.wiki_dir / name
+    original_bytes = frozen_path.read_bytes()
+    try:
+        frozen_path.write_bytes(b"{}")
+        assert "No permitted" in asyncio.run(
+            invoke(
+                agent,
+                "get_cell_content",
+                doc_name=name.removeprefix("sources/").removesuffix(".content.json"),
+                cells="A1",
+                view_id=view.view_id,
+            )
+        )
+    finally:
+        frozen_path.write_bytes(original_bytes)
     assert len(selected["source_spans"]) == 3
 
 

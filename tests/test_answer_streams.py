@@ -18,7 +18,10 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
     from openkb.api_models import ChatRequest, QueryRequest
     from openkb.locks import async_kb_lock
 
+    (kb_dir / "wiki/sources/cancellation-fixture.md").write_text("Readable original.")
     stopping, release, finished, acquired = (asyncio.Event() for _ in range(4))
+    started = asyncio.Event()
+    pending = asyncio.Event()
 
     class Run:
         is_complete = False
@@ -26,6 +29,7 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
 
         async def stream_events(self):
             try:
+                started.set()
                 yield RawResponsesStreamEvent(
                     data=ResponseTextDeltaEvent(
                         type="response.output_text.delta",
@@ -37,6 +41,7 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
                         logprobs=[],
                     )
                 )
+                pending.set()
                 await release.wait()
                 self.is_complete = True
             finally:
@@ -51,7 +56,18 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
 
     monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: Run())
     request = AsyncMock()
-    request.is_disconnected.side_effect = [False, True]  # stage, then first delta
+
+    # Disconnect after the SDK actually starts, independent of progress-event
+    # count and cold model setup; keep the three-second cancellation assertion.
+    async def disconnected():
+        if not started.is_set():
+            return False
+        # The fixture must have an outstanding SDK wait before disconnecting;
+        # closing a generator paused at yield has no asynchronous work to settle.
+        await pending.wait()
+        return True
+
+    request.is_disconnected.side_effect = disconnected
     stream = (
         _stream_query(QueryRequest(kb="test", question="Hi", save=True), kb_dir, request)
         if endpoint == "query"
@@ -68,6 +84,7 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
     consumer = asyncio.create_task(consume())
     writer = None
     try:
+        await asyncio.wait_for(started.wait(), 10)
         await asyncio.wait_for(stopping.wait(), 3)
         consumer.cancel()
         writer = asyncio.create_task(other_writer())

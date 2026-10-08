@@ -131,7 +131,7 @@ def test_unreadable_pdf_never_admits_source(kb_dir, tmp_path, monkeypatch, kind)
         "litellm.completion", lambda **kw: pytest.fail("PDF rejection called model")
     )
     result = import_document(kb_dir, path)
-    assert result.status == "rejected" and result.message == "PDF导入识别异常"
+    assert result.status == "rejected" and result.message.startswith("PDF导入识别异常")
     assert not list_sources(kb_dir) and result.source_id is None
     assert "pdf_recognition_anomaly" in result.quality
 

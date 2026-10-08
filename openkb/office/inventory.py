@@ -1,6 +1,7 @@
 """Hash the complete private distribution, including contained symbolic links."""
 
 import hashlib
+import json
 from pathlib import Path
 
 
@@ -26,3 +27,20 @@ def inventory(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         if path.is_file():
             files[name] = digest(path)
     return files, links
+
+
+def inventory_difference(expected: dict[str, str], actual: dict[str, str]) -> str:
+    """Bound diagnostics for a partial extraction while naming actionable differences."""
+    differences = {
+        "missing": sorted(expected.keys() - actual.keys()),
+        "unexpected": sorted(actual.keys() - expected.keys()),
+        "changed": sorted(
+            name for name in expected.keys() & actual.keys() if expected[name] != actual[name]
+        ),
+    }
+    return "; ".join(
+        f"{kind} ({len(names)}): {json.dumps(names[:5], ensure_ascii=False)}"
+        + (" ..." if len(names) > 5 else "")
+        for kind, names in differences.items()
+        if names
+    )

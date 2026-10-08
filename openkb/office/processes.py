@@ -71,6 +71,7 @@ def run_supervised(
                 stdout=log,
                 stderr=log,
                 start_new_session=sys.platform != "win32",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 **spawn_options,
             )
             try:

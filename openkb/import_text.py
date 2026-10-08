@@ -59,7 +59,13 @@ class ImportTextRejected(ValueError):
             super().__init__("HTML not imported: no readable body")
             return
         if assessment.extraction == "PDF text layer":
-            super().__init__("PDF导入识别异常")
+            reason = "无法可靠读取文本层"
+            if assessment.findings:
+                locations = "、".join(f.location for f in assessment.findings[:6])
+                reason = f"文本层出现异常重复字符（{locations}，共 {len(assessment.findings)} 处）"
+            super().__init__(
+                f"PDF导入识别异常：{reason}。请检查原件，改用原生 Office 文档或重新导出的 PDF。"
+            )
             return
         facts = "; ".join(
             f"{fact.reason} at {fact.location}: {fact.repeated_characters}/"

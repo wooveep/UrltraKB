@@ -54,6 +54,7 @@ def main():
             str(request_path),
         ],
         start_new_session=posix,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     deadline = time.monotonic() + request["timeout"]
     reason = None

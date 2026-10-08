@@ -20,7 +20,15 @@ async def _chat_chunks(delta, finish):
 
 
 def _import_rule(
-    kb_dir, monkeypatch, name, version, fact, family="installation", *, product="WinStack"
+    kb_dir,
+    monkeypatch,
+    name,
+    version,
+    fact,
+    family="installation",
+    *,
+    product="WinStack",
+    product_id=None,
 ):
     import pymupdf
 
@@ -46,10 +54,30 @@ def _import_rule(
             product=product,
             applicable_versions=(version,),
             family=family,
+            **({"product_id": product_id} if product_id else {}),
         ),
     )
     assert result.status == "added"
     return result
+
+
+def _legacy_product(kb_dir, name):
+    """A pre-fix duplicate catalog, which new normalized imports cannot create."""
+    import uuid
+
+    from openkb.locks import kb_ingest_lock
+    from openkb.mutation import mutation_scope
+    from openkb.source_catalog import record_path, write_record
+    from openkb.view_records import Product
+
+    product = Product(product_id=uuid.uuid4().hex, name=name)
+    path = record_path(kb_dir, "products", product.product_id)
+    with (
+        kb_ingest_lock(kb_dir / ".openkb"),
+        mutation_scope(kb_dir, [path], operation="fixture-legacy-product"),
+    ):
+        write_record(path, product)
+    return product.product_id
 
 
 @pytest.mark.parametrize(
@@ -79,16 +107,31 @@ def test_product_name_ambiguity_is_visible_and_cannot_fall_back(kb_dir, monkeypa
 
     products = ("CNware WinStack", "CNware-WinStack", "CNware WinStack 虚拟化云平台")
     imported = [
-        _import_rule(kb_dir, monkeypatch, f"manual-{i}", "9.4.0", "Source rule.", product=product)
+        _import_rule(
+            kb_dir,
+            monkeypatch,
+            f"manual-{i}",
+            "9.4.0",
+            "Source rule.",
+            product=product,
+            product_id=_legacy_product(kb_dir, product),
+        )
         for i, product in enumerate(products)
     ]
     (kb_dir / "wiki/concepts/connection.md").write_text("Legacy rule.")
     selection = resolve_query_views(kb_dir, "CNware WinStack 的安装、运维和最佳实践？")
     assert selection.views == ()
     assert selection.missing
+    assert {item["view_id"] for item in selection.candidates} == {
+        item.units[0].view_id for item in imported[:2]
+    }
+    assert {name for item in selection.candidates for name in item["sources"]} == {
+        "manual-0.pdf",
+        "manual-1.pdf",
+    }
     for rendered in (selection_catalog(selection), evidence_answer("", selection)):
         assert "ambiguous" in rendered.lower()
-        for product, source in zip(products, imported):
+        for product, source in zip(products[:2], imported[:2]):
             assert product in rendered
             assert source.units[0].view_id in rendered
         assert "9.4.0" in rendered
@@ -115,7 +158,8 @@ def test_confirmed_product_identity_includes_all_three_original_sources(kb_dir, 
             ("practice", "practice", "CNware WinStack", "Practice rule."),
         )
     ]
-    assert resolve_query_views(kb_dir, "CNware WinStack V9.4.0").views == ()
+    before = resolve_query_views(kb_dir, "CNware WinStack V9.4.0")
+    assert len(before.views) == 1 and len(before.views[0].source_revision_ids) == 2
     monkeypatch.setattr(
         "litellm.completion",
         lambda **kwargs: SimpleNamespace(
@@ -164,7 +208,7 @@ def test_confirmed_product_identity_includes_all_three_original_sources(kb_dir, 
         ("WinStackX V2 configuration?", {"WinStackX"}),
         ("WinStack Pro V2 configuration?", {"WinStack Pro"}),
         ("Compare WinStackX and WinStack Pro V2", {"WinStackX", "WinStack Pro"}),
-        ("WinStack V2 configuration?", set()),
+        ("WinStack V2 configuration?", {"WinStack"}),
     ],
 )
 def test_product_candidates_respect_word_boundaries_and_identity(
@@ -233,7 +277,15 @@ def test_explicit_scope_keeps_known_version_labels_from_other_products(
 @pytest.fixture
 def ambiguous_products(kb_dir, monkeypatch):
     for i, product in enumerate(("CNware-WinStack", "CNware WinStack")):
-        _import_rule(kb_dir, monkeypatch, f"manual-{i}", "9.4.0", "Source rule.", product=product)
+        _import_rule(
+            kb_dir,
+            monkeypatch,
+            f"manual-{i}",
+            "9.4.0",
+            "Source rule.",
+            product=product,
+            product_id=_legacy_product(kb_dir, product),
+        )
 
 
 @pytest.mark.asyncio
@@ -517,6 +569,10 @@ async def test_chat_cannot_reuse_previous_versions_tool_evidence(
 
     async def model(**kwargs):
         messages = kwargs["messages"]
+        from evidence_model import provider_review
+
+        if reviewed := provider_review(kwargs):
+            return reviewed
         question = [item["content"] for item in messages if item["role"] == "user"][-1]
         version = "2" if "V2" in question else "1"
         outputs = [item["content"] for item in messages if item["role"] == "tool"]
@@ -533,7 +589,7 @@ async def test_chat_cannot_reuse_previous_versions_tool_evidence(
                             "name": "read_file",
                             "arguments": json.dumps(
                                 {
-                                    "path": f"summaries/manual-{version}.md",
+                                    "path": f"sources/manual-{version}.md",
                                     "view_id": opposing_versions[int(version) - 1].units[0].view_id,
                                 }
                             ),

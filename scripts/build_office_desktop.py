@@ -47,6 +47,8 @@ def main():
                     "pytest",
                     "-q",
                     "tests/test_office_macos.py::test_private_runtime_converts_word_and_powerpoint",
+                    "tests/test_office_windows.py",
+                    "tests/test_office_inventory.py",
                 ],
                 cwd=root,
                 env={**os.environ, "OPENKB_TEST_OFFICE_RUNTIME": str(office)},

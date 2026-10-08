@@ -1,0 +1,138 @@
+{
+  "answer": "| 主体 | 配置/取值 | 条件 | 来源（资料、可核实位置） |\n|---|---|---|---|\n| 计算节点（WinServer 计算节点） | NTP 上游服务器 = **管理节点 VIP**；与管理节点进行时间同步 | WinCenter 管理节点纳管 WinServer 计算节点后 | 《CNware-WinStack-V9.4.0-安装手册》第 54 页，章节 4.3.3.5“设置时间及时区”下的“说明”第 1 条 |\n\n原文引用（第 54 页）：“WinCenter 管理节点纳管WinServer 计算节点后，计算节点会将管理节点VIP 作为NTP 上游服务器，与管理节点进行时间同步。”\n\n适用条件：WinCenter 管理节点已纳管 WinServer 计算节点。其他条件或主体的取值，已提供资料不足，未作判断。",
+  "reads": [
+    {
+      "read_id": "ec3fec4266012fecb599f43e",
+      "view_id": "f45df67e1a274cd096e3331a0b841530",
+      "product_id": "397fabdab9e64c06bdb4e376bd4214f9",
+      "path": "sources/CNware-WinStack-V9-4-0-安装手册.json",
+      "digest": "e25b2a4a1d71d4ca8c8613d2b05d3558ae3c066aefd5d7308ad4cc01febae813",
+      "source_revision_id": "7d54c59f87b744728dfba6cf634b87bb",
+      "locator": "sources/CNware-WinStack-V9-4-0-安装手册.json pages=54 part=None",
+      "content": "[Physical page 54]\n\nCNware-WinStack-V9.4.0-安装手册\n版权所有©云宏信息科技股份有限公司\n第54 页\n\n![image](sources/images/CNware-WinStack-V9-4-0-安装手册/p54_img77.png)\n\n说明：\n1.\nWinCenter 管理节点纳管WinServer 计算节点后，计算节点会将管理节点VIP 作\n为NTP 上游服务器，与管理节点进行时间同步。\n4.3.3.6 设置主机root 用户登陆密码\n设置主机root 用户登陆密码，建议复杂密码（含数字、大小写字母、特殊符号）。\n\n![image](sources/images/CNware-WinStack-V9-4-0-安装手册/p54_img78.png)\n\n输入密码以及确认密码，点击左上角“Done”，设置完成\n[Images: sources/images/CNware-WinStack-V9-4-0-安装手册/p54_img77.png, sources/images/CNware-WinStack-V9-4-0-安装手册/p54_img78.png]",
+      "spans": [],
+      "kind": "text"
+    },
+    {
+      "read_id": "28b859ab02516950b805fa76",
+      "view_id": "f45df67e1a274cd096e3331a0b841530",
+      "product_id": "397fabdab9e64c06bdb4e376bd4214f9",
+      "path": "sources/CNware-WinStack-V9-4-0-安装手册.json",
+      "digest": "e25b2a4a1d71d4ca8c8613d2b05d3558ae3c066aefd5d7308ad4cc01febae813",
+      "source_revision_id": "7d54c59f87b744728dfba6cf634b87bb",
+      "locator": "sources/CNware-WinStack-V9-4-0-安装手册.json pages=53 part=None",
+      "content": "[Physical page 53]\n\nCNware-WinStack-V9.4.0-安装手册\n版权所有©云宏信息科技股份有限公司\n第53 页\n\n![image](sources/images/CNware-WinStack-V9-4-0-安装手册/p53_img75.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-安装手册/p53_img76.png)\n\n4.3.3.5 设置时间及时区\n设置时间及时区，默认已选择Asia/Shanghai 时区。可以跳过此选项。\n[Images: sources/images/CNware-WinStack-V9-4-0-安装手册/p53_img75.png, sources/images/CNware-WinStack-V9-4-0-安装手册/p53_img76.png]",
+      "spans": [],
+      "kind": "text"
+    }
+  ],
+  "review": {
+    "units": [
+      {
+        "unit_id": 0,
+        "verdict": "reference",
+        "reason": "Neutral table header row.",
+        "proofs": []
+      },
+      {
+        "unit_id": 1,
+        "verdict": "reference",
+        "reason": "Table separator row.",
+        "proofs": []
+      },
+      {
+        "unit_id": 2,
+        "verdict": "supported",
+        "reason": "",
+        "proofs": [
+          {
+            "read_id": "ec3fec4266012fecb599f43e",
+            "quote": "",
+            "lines": [
+              9,
+              12
+            ],
+            "subject": "计算节点",
+            "setting": "NTP 上游服务器",
+            "condition": "WinCenter 管理节点纳管WinServer 计算节点后",
+            "visual_region": null
+          },
+          {
+            "read_id": "ec3fec4266012fecb599f43e",
+            "quote": "",
+            "lines": [
+              5,
+              5
+            ],
+            "subject": "第54 页",
+            "setting": "",
+            "condition": "",
+            "visual_region": null
+          },
+          {
+            "read_id": "28b859ab02516950b805fa76",
+            "quote": "",
+            "lines": [
+              12,
+              12
+            ],
+            "subject": "4.3.3.5 设置时间及时区",
+            "setting": "设置时间及时区",
+            "condition": "",
+            "visual_region": null
+          }
+        ]
+      },
+      {
+        "unit_id": 3,
+        "verdict": "supported",
+        "reason": "",
+        "proofs": [
+          {
+            "read_id": "ec3fec4266012fecb599f43e",
+            "quote": "",
+            "lines": [
+              11,
+              12
+            ],
+            "subject": "计算节点",
+            "setting": "NTP 上游服务器",
+            "condition": "WinCenter 管理节点纳管WinServer 计算节点后",
+            "visual_region": null
+          },
+          {
+            "read_id": "ec3fec4266012fecb599f43e",
+            "quote": "",
+            "lines": [
+              5,
+              5
+            ],
+            "subject": "第54 页",
+            "setting": "",
+            "condition": "",
+            "visual_region": null
+          }
+        ]
+      },
+      {
+        "unit_id": 4,
+        "verdict": "supported",
+        "reason": "",
+        "proofs": [
+          {
+            "read_id": "ec3fec4266012fecb599f43e",
+            "quote": "",
+            "lines": [
+              11,
+              12
+            ],
+            "subject": "WinCenter 管理节点",
+            "setting": "纳管WinServer 计算节点后",
+            "condition": "",
+            "visual_region": null
+          }
+        ]
+      }
+    ]
+  }
+}
