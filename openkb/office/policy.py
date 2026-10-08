@@ -31,7 +31,9 @@ PDF_OPTIONS = {
 def office_environment(directory: Path) -> dict[str, str]:
     # Do not inherit application Python/Qt/native paths or model credentials.
     environment = {
-        key: os.environ[key] for key in ("SystemRoot", "WINDIR", "COMSPEC") if key in os.environ
+        key: os.environ[key]
+        for key in ("SystemRoot", "SystemDrive", "WINDIR", "COMSPEC")
+        if key in os.environ
     }
     environment.update(
         PATH=os.defpath,

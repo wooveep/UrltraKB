@@ -38,6 +38,13 @@ paths. Re-extract the complete application package into a fresh directory; retai
 the diagnostic if a fresh extraction still fails. Verification never rewrites the
 manifest or accepts changed binaries.
 
+After repairing the runtime without changing processing identity, use the desktop
+action “重试所选资料未完成项” or CLI `retry-source` to resume a failed import from its
+retained original. If an application upgrade changes the conversion helpers, the
+old attempt keeps its saved processing policy. Use “预览重新处理” and confirm the
+new processing request in that case. Both paths reuse the retained original;
+neither requires rebuilding the KB or recovering the original external file.
+
 Office runs in a private process and profile. The main application imports no
 UNO modules. The loader sets `MacroExecutionMode=NEVER_EXECUTE`,
 `UpdateDocMode=NO_UPDATE`, hidden and read-only mode, and aborts interaction
@@ -62,8 +69,16 @@ Windows uses a separately built Rust launcher with
 a kill-on-close Job Object; it resets DLL search state in that child before
 starting the matching Python. The launcher, supervisor and conversion worker use
 Windows' `CREATE_NO_WINDOW` process flag so probes and conversions do not open
-command-prompt windows. Private task files sit inside the application's
-owned input directory so task recovery can collect them after an abrupt exit.
+command-prompt windows. Child stdout and stderr are forwarded explicitly to keep
+probe results and failure diagnostics available without a visible console.
+Linux and macOS task files sit inside the application's owned input directory.
+Windows uses leased workspaces in the user's temporary directory: placing Office's
+deep extension registries below a retained artifact can exceed Windows path limits
+and crash Office before UNO starts. Live leases protect workspaces from cleanup;
+the next Office operation collects abandoned workspaces after an abrupt exit.
+Cleanup also handles read-only shell folders created inside the owned workspace.
+The isolated environment preserves `SystemDrive` so Windows resolves system cache
+paths instead of creating a literal `%SystemDrive%` folder in the runtime.
 
 The packaged runtime supports Linux/Windows x86_64 and macOS Apple Silicon.
 Linux requires x86-64-v2. Every platform requires successful private
@@ -134,7 +149,9 @@ Only model calls are substituted in successful conversion tests.
 
 The macOS and Windows builds run native DOC/DOCX/PPT/PPTX conversion tests before
 freezing. Windows also checks that the private Python wrapper and its descendants
-have no visible console. macOS also checks parent-death cleanup. Extracted Windows
+allocate no console window, and that conversion succeeds from deep storage paths.
+Workspace tests cover live ownership and cleanup after an owner crashes.
+macOS also checks parent-death cleanup. Extracted Windows
 x64, Debian amd64 and macOS arm64 packages convert all four formats, checking physical pages,
 hidden slides and speaker notes using authored synthetic fixtures.
 An already-disposed UNO bridge during normal document close or desktop termination

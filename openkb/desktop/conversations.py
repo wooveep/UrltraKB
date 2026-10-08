@@ -348,9 +348,6 @@ class Conversations:
         if self.active is chat:
             self.render(restore_draft=False)
 
-        if self.active is chat and task.results and task.results[-1].scope_candidates:
-            self.window.view_picker.set_candidates(task.results[-1].scope_candidates)
-
     def render(self, *, restore_draft=True):
         w, chat = self.window, self.active
         w._chat_task = chat.task if chat else None

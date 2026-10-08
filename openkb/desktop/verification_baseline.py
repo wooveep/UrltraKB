@@ -34,7 +34,7 @@ def verify_baseline(window, kb, root, wait):
     assert panel.table.item(0, 2).text() == "分类未知 · 方式未记录"
     assert panel.table.item(1, 2).text() == "分类未知 · 方式未记录"
     hint = window.findChild(QLabel, "documentWorkflow").text()
-    assert "Markdown" in hint and "PageIndex" in hint
+    assert "PDF" in hint and "Word" in hint
     for row, expected in ((0, "原始 Markdown 正文"), (1, "保留的第二页")):
         panel.table.selectRow(row)
         panel.read_button.click()

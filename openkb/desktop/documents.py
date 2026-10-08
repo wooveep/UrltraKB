@@ -1,4 +1,4 @@
-"""Native document inventory and version-bound removal confirmation."""
+"""Native document inventory and revision-bound removal confirmation."""
 
 from __future__ import annotations
 
@@ -40,10 +40,10 @@ class DocumentsDialog(ManagementPanel):
         from openkb.desktop.location import LocationLabel
 
         layout.addWidget(LocationLabel(str(kb)))
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 6)
         self.table.setAccessibleName("已导入资料")
         self.table.setHorizontalHeaderLabels(
-            ["资料", "格式", "导入方式", "处理状态", "来源修订", "知识视图", "度量"]
+            ["资料", "格式", "导入方式", "处理状态", "来源修订", "度量"]
         )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -91,27 +91,15 @@ class DocumentsDialog(ManagementPanel):
         self.proposals_button = QPushButton("查看待接受差异")
         self.proposals_button.clicked.connect(self.review_proposals)
         recompilation.addWidget(self.proposals_button)
-        self.versions_button = QPushButton("查看版本待补")
         self.pending_button = QPushButton("查看待处理工作")
         self.pending_button.clicked.connect(self.pending_work)
         recompilation.addWidget(self.pending_button)
-        self.versions_button.clicked.connect(lambda: self.review_versions())
-        recompilation.addWidget(self.versions_button)
-        self.correct_versions_button = QPushButton("补充所选资料版本")
-        self.correct_versions_button.clicked.connect(lambda: self.review_versions(selected=True))
-        recompilation.addWidget(self.correct_versions_button)
-        self.defaults_button = QPushButton("问答默认版本")
-        self.defaults_button.clicked.connect(self.select_defaults)
-        recompilation.addWidget(self.defaults_button)
         self.refresh_knowledge_button = QPushButton("待刷新知识")
         self.refresh_knowledge_button.clicked.connect(self.refresh_knowledge)
         recompilation.addWidget(self.refresh_knowledge_button)
         self.empty_source_button = QPushButton("确认所选资料贡献为空")
         self.empty_source_button.clicked.connect(self.confirm_empty)
         recompilation.addWidget(self.empty_source_button)
-        self.map_legacy = QPushButton("映射旧库来源（无模型）")
-        self.map_legacy.clicked.connect(self.map_legacy_sources)
-        recompilation.addWidget(self.map_legacy)
         layout.addLayout(recompilation)
         self.status = QLabel("正在读取资料…")
         self.status.setWordWrap(True)
@@ -204,49 +192,6 @@ class DocumentsDialog(ManagementPanel):
             obsolete=lambda: self._closed or generation != self._generation,
         )
 
-    def select_defaults(self):
-        from openkb.desktop.version_defaults import VersionDefaultsDialog
-
-        dialog = VersionDefaultsDialog(self.window, self.kb)
-        dialog.show()
-
-    def review_versions(self, *, selected=False):
-        from openkb.desktop.version_reviews import VersionReviewsDialog
-
-        identities = (
-            tuple(
-                self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
-                for row in self.table.selectionModel().selectedRows()
-            )
-            if selected
-            else ()
-        )
-        if selected and not identities:
-            self.status.setText("请选择需要补充版本的资料。")
-            return
-        dialog = VersionReviewsDialog(self.window, self.kb, scope=self.scope, source_ids=identities)
-        dialog.show()
-
-    def map_legacy_sources(self):
-        from openkb.application.views import map_legacy_sources
-
-        def loaded(result, error):
-            if error:
-                self.status.setText(str(error))
-                return
-            self.details.setPlainText(
-                f"已映射 {len(result['source_ids'])} 份来源；无法映射：{result['unavailable']}"
-            )
-            self.reload(preserve_result=True)
-
-        self.window.io.submit(
-            lambda: map_legacy_sources(self.kb),
-            loaded,
-            kb=self.kb,
-            exclusive=True,
-            obsolete=lambda: self._closed,
-        )
-
     def review_proposals(self):
         from openkb.desktop.proposals import ProposalsDialog
 
@@ -327,7 +272,6 @@ class DocumentsDialog(ManagementPanel):
                         else ""
                     )
                 )
-                self.table.setItem(row, 5, QTableWidgetItem(doc.get("view_id", "legacy")))
                 measured = (
                     f"{doc['characters']} 字符 / {doc['tokens']} tokens"
                     if doc.get("tokens") is not None
@@ -339,7 +283,7 @@ class DocumentsDialog(ManagementPanel):
                     measured = f"1 个来源 / {len(doc['units'])} 个工作表"
                 if doc.get("block_count") is not None:
                     measured += f" / {doc['block_count']} 内容块"
-                self.table.setItem(row, 6, QTableWidgetItem(measured))
+                self.table.setItem(row, 5, QTableWidgetItem(measured))
                 classification = {"short": "短文", "long": "长文"}.get(
                     doc.get("length_class"), "分类未知"
                 )
@@ -362,10 +306,10 @@ class DocumentsDialog(ManagementPanel):
                     "historical": "历史依据",
                 }.get(doc.get("validity"))
                 self.table.setItem(
-                    row, 3, QTableWidgetItem(validity or doc.get("status") or "legacy")
+                    row, 3, QTableWidgetItem(validity or doc.get("status") or "未记录")
                 )
                 self.table.setItem(
-                    row, 4, QTableWidgetItem(doc.get("source_revision_id") or "legacy")
+                    row, 4, QTableWidgetItem(doc.get("source_revision_id") or "未记录")
                 )
             self.recompile_all.setEnabled(bool(value["documents"]))
             self.read_button.setEnabled(bool(value["documents"]))

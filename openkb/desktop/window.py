@@ -292,7 +292,6 @@ class Workbench(QMainWindow):
         self.kb, self.page = root, None
         self.pending_dispatcher.watch(root)
         self.view_id = None
-        self.view_picker.set_views(())
         self.page_context.clear()
         self._page_request_id += 1
         self._chat_task = None
@@ -330,21 +329,18 @@ class Workbench(QMainWindow):
 
         def read():
             from openkb.application.knowledge import list_knowledge
-            from openkb.application.views import list_views
 
             return (
                 list_knowledge(root, scope=scope),
                 list_conversations(root, view_id=view_id),
                 get_kb_list(root, scope=scope),
                 get_kb_status(root, scope=scope),
-                list_views(root),
             )
 
         def loaded(value, error):
             if obsolete() or self._error(error):
                 return
-            pages, sessions, info, status, views = value
-            self.view_picker.set_views(views)
+            pages, sessions, info, status = value
             self.workspaces.overview_loaded(info, status)
             self.workspaces.knowledge.set_entries(pages)
             if self.page:
@@ -497,8 +493,6 @@ class Workbench(QMainWindow):
             )
 
     def _import_files(self):
-        from openkb.desktop.views import import_metadata
-
         if self.kb:
             files, _ = QFileDialog.getOpenFileNames(self, "导入资料")
             if files and not self._quitting:
@@ -508,7 +502,6 @@ class Workbench(QMainWindow):
                         ImportFile(
                             str(Path(path).resolve()),
                             view_id=self.view_id,
-                            metadata=import_metadata(self),
                             download_remote_assets=self.remote_assets.currentData(),
                         )
                         for path in files
@@ -516,8 +509,6 @@ class Workbench(QMainWindow):
                 )
 
     def _import_urls(self):
-        from openkb.desktop.views import import_metadata
-
         if self.kb is None:
             return
         value, accepted = QInputDialog.getMultiLineText(
@@ -526,7 +517,7 @@ class Workbench(QMainWindow):
         if accepted and value.strip() and not self._quitting:
             try:
                 requests = [
-                    ImportUrl(line.strip(), view_id=self.view_id, metadata=import_metadata(self))
+                    ImportUrl(line.strip(), view_id=self.view_id)
                     for line in value.splitlines()
                     if line.strip()
                 ]
@@ -535,15 +526,12 @@ class Workbench(QMainWindow):
                 self._error(exc)
 
     def _import_directory(self):
-        from openkb.desktop.views import import_metadata
-
         if not self.kb:
             return
         path = QFileDialog.getExistingDirectory(self, "递归导入目录")
         if path and not self._quitting:
             root = self.kb
             view_id = self.view_id
-            metadata = import_metadata(self)
             download_remote_assets = self.remote_assets.currentData()
             deletion_version = self._kb_deletion_versions.get(root, 0)
 
@@ -567,7 +555,6 @@ class Workbench(QMainWindow):
                             ImportFile(
                                 str(path),
                                 view_id=view_id,
-                                metadata=metadata,
                                 download_remote_assets=download_remote_assets,
                             )
                             for path in files

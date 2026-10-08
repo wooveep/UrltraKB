@@ -346,7 +346,7 @@ def add_single_file(
 @click.option(
     "--view",
     "view_id",
-    help="Knowledge view ID or exact source filename; use views list to inspect scopes.",
+    help="Explicit internal storage scope or exact source filename for diagnostics.",
 )
 def cli(ctx, verbose, kb_dir_override, view_id):
     """OpenKB — Karpathy's LLM Knowledge Base workflow, powered by PageIndex."""
@@ -366,6 +366,14 @@ def cli(ctx, verbose, kb_dir_override, view_id):
             ctx.obj["kb_dir_override"] = Path(env_kb).resolve()
         else:
             ctx.obj["kb_dir_override"] = None
+
+
+def _require_kb_root(ctx):
+    """Resolve the KB once for source, refresh and pending-work commands."""
+    root = _find_kb_dir(ctx.obj.get("kb_dir_override"))
+    if root is None:
+        raise click.ClickException("No knowledge base found")
+    return root
 
 
 def _selected_scope(ctx, kb_dir):
@@ -563,17 +571,13 @@ def init(model, language):
 
 @cli.command()
 @click.argument("path", required=False)
-@click.option("--product")
-@click.option("--applicable-version", "versions", multiple=True)
-@click.option("--family")
-@click.option("--document-revision")
 @click.option(
     "--download-remote-assets/--no-download-remote-assets",
     default=None,
     help="Download remote HTML image assets for this import; otherwise inherit KB/global settings.",
 )
 @click.pass_context
-def add(ctx, path, product, versions, family, document_revision, download_remote_assets):
+def add(ctx, path, download_remote_assets):
     """Add a document or directory of documents at PATH to the knowledge base.
 
     PATH may be a local file, a local directory (which is walked
@@ -593,24 +597,8 @@ def add(ctx, path, product, versions, family, document_revision, download_remote
 
     from openkb.url_ingest import looks_like_url
     from openkb.application.execution import ExecutionContext
-    from openkb.view_records import SourceMetadata
 
-    supplied = {
-        key: value
-        for key, value in {
-            "product": product,
-            "applicable_versions": versions,
-            "family": family,
-            "document_revision": document_revision,
-        }.items()
-        if value
-    }
-    metadata = SourceMetadata.model_validate(supplied) if supplied else None
-    options = {
-        "scope": _selected_scope(ctx, kb_dir),
-        "metadata": metadata,
-        "context": ExecutionContext(),
-    }
+    options = {"context": ExecutionContext()}
     if download_remote_assets is not None:
         options["download_remote_assets"] = download_remote_assets
 
@@ -2097,8 +2085,6 @@ from openkb.cli_refresh import refresh
 from openkb.cli_source import source, retry_worksheet, reprocess, retry_source
 from openkb.cli_pending import pending, process as process_pending_command
 from openkb.cli_settings import settings
-from openkb.cli_versions import versions
-from openkb.cli_views import views
 
 cli.add_command(proposals)
 cli.add_command(refresh)
@@ -2109,5 +2095,3 @@ cli.add_command(retry_source)
 cli.add_command(pending)
 cli.add_command(process_pending_command)
 cli.add_command(settings)
-cli.add_command(views)
-cli.add_command(versions)

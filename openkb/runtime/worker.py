@@ -115,7 +115,6 @@ def _execute(
         ConfirmEmptySource,
         RefreshKnowledge,
         ReprocessSource,
-        ResumeVersionReview,
         RetrySource,
         RetryWorksheet,
         RunPendingJob,
@@ -202,21 +201,6 @@ def _execute(
             error=refreshed.message or None,
             unfinished=refreshed.unfinished,
             changes=(refreshed.message,) if refreshed.message else (),
-        )
-
-    if isinstance(request, ResumeVersionReview):
-        from openkb.application.version_review import resume_version_review
-        from openkb.ingest_result import describe_ingest
-
-        resumed = resume_version_review(root, request.review_id, context=context, scope=scope)
-        return UnitResult(
-            _import_status(resumed.status),
-            resources=resumed.resources,
-            error=resumed.message,
-            quality=resumed.quality,
-            model_usage=resumed.model_usage,
-            changes=describe_ingest(resumed),
-            unfinished=resumed.unfinished,
         )
 
     if isinstance(request, AcceptProposal):

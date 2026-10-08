@@ -53,6 +53,10 @@ def main():
             str(Path(__file__).with_name("worker.py")),
             str(request_path),
         ],
+        # A console-free child needs explicit streams so probe output still
+        # reaches the parent's process.log.
+        stdout=sys.stdout,
+        stderr=sys.stderr,
         start_new_session=posix,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )

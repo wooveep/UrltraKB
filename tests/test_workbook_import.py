@@ -230,15 +230,13 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     from agents import Agent
     from test_answer_evidence_regression import invoke
 
-    from openkb.agent.evidence_session import EvidenceSession
     from openkb.agent.query_evidence import restrict_query_agent
     from openkb.application.query_views import resolve_query_views
 
     selection = resolve_query_views(kb_dir, "Read worksheet values")
-    session = EvidenceSession(selection)
     view = selection.views[0]
     name = next(p for p in view.files if p.endswith(".content.json"))
-    agent = restrict_query_agent(Agent(name="sheet-reader"), selection, session=session)
+    agent = restrict_query_agent(Agent(name="sheet-reader"), selection)
     result = asyncio.run(
         invoke(
             agent,
@@ -254,8 +252,8 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     assert projected["F2"]["cache_status"] == "missing"
     assert projected["B2"]["hidden_row"] and projected["B2"]["hidden_column"]
     assert "TAIL_VALUE" in payload["content"] and "00042" in payload["content"]
-    assert payload["read_id"] in session.reads
-    assert session.reads[payload["read_id"]].source_revision_id == imported.source_revision_id
+    assert imported.source_revision_id in result
+    assert "read_id" not in payload
     assert (
         read_document_source(kb_dir, imported.source_id, unit_id=imported.units[0].unit_id) == saved
     )
@@ -391,10 +389,8 @@ def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_
     from openkb.application.query_views import resolve_query_views
     from openkb.application.sources import source_inventory
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Worksheets", applicable_versions=("1.0",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(kb_dir, three_sheets)
     pinned = next(
         view.scope
         for view in resolve_query_views(kb_dir, "Read all worksheets").views
@@ -404,7 +400,7 @@ def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_
     book["Alpha"].title = "Renamed"
     book.create_sheet("Delta")["A1"] = "NEW_SHEET"
     book.save(three_sheets)
-    updated = import_document(kb_dir, three_sheets, metadata=metadata)
+    updated = import_document(kb_dir, three_sheets)
     assert updated.status == "added", updated.message
     historical = source_inventory(kb_dir, scope=pinned)[0]
     assert {unit["name"] for unit in historical["units"]} == {"Alpha", "Beta", "Gamma"}

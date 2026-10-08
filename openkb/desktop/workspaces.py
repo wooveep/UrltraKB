@@ -154,9 +154,8 @@ class Workspaces:
 
     def _documents(self):
         hint = path_label(
-            "导入文件、目录或网址，保留原文与出处。PDF、Word 和演示文稿按物理页回读；"
-            "文本（含 Markdown）按字符或内容块回读，Excel 按工作表发布。"
-            "分段处理使用 PageIndex；分类与执行方式见处理结果。"
+            "导入文件、目录或网址，保留原文与出处。"
+            "支持 PDF、Word、演示文稿、表格和文本；导入后即可阅读和提问。"
         )
         hint.setObjectName("documentWorkflow")
         self.hosts["资料"].addWidget(hint)

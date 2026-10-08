@@ -36,21 +36,9 @@ def describe_preview(preview):
             else "整份资料正文"
         )
     )
-    lines.append(
-        "旧库知识保留为历史；需补充新处理结果的适用版本。"
-        if preview.get("legacy_hash")
-        else "版本信息保留；人工修改仍通过待接受差异确认。"
-    )
+    lines.append("重新处理会保留来源记录；人工修改仍通过待接受差异确认。")
     if preview["version_impact"].get("superseded_proposals"):
         lines.append("所选资料尚有待接受差异；新处理将使这些旧建议过期，人工正文仍保留。")
-    metadata = preview["version_impact"].get("metadata")
-    if metadata:
-        lines.append(
-            "产品 / 版本："
-            + str(metadata.get("product") or "未知")
-            + " / "
-            + ", ".join(metadata.get("applicable_versions") or ["未知"])
-        )
     for unit in preview["units"]:
         lines.append(
             f"\n{unit['name']}："

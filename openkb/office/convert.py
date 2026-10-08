@@ -1,7 +1,6 @@
 """Freeze one isolated Office conversion; all subsequent reads use these bytes."""
 
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable
@@ -16,6 +15,7 @@ from openkb.office.policy import LOAD_OPTIONS, PDF_OPTIONS, office_environment
 from openkb.office.processes import run_supervised
 from openkb.office.records import OfficeConversion, WorkerResult
 from openkb.office.runtime import processing_identity, require_runtime
+from openkb.office.workspace import office_directory
 
 
 def convert_office(
@@ -36,9 +36,7 @@ def convert_office(
     if processing_identity(kb_dir) != identity:
         raise ValueError("Office runtime changed during its validation")
     started = time.monotonic()
-    # The caller's owned input root also participates in runtime-worker recovery.
-    with tempfile.TemporaryDirectory(prefix="openkb-office-task-", dir=source.parent) as temporary:
-        directory = Path(temporary)
+    with office_directory(source.parent, prefix="openkb-office-task-") as directory:
         environment = office_environment(directory)
         if sys.platform == "linux":
             from openkb.office.fontconfig import build_fontconfig

@@ -59,10 +59,6 @@ You are OpenKB's wiki compilation agent for a personal knowledge base.
 
 Write all content in {language} language.
 Use [[wikilinks]] to connect related pages (e.g. [[concepts/attention]]).
-Document filenames are navigation identifiers, not verified product/version facts.
-Never infer applicable versions from filenames or generated navigation titles.
-Exact fields, commands and defaults require original source evidence.
-Keep each rule's subject, configuration item, condition and source locator together.
 """
 
 _SUMMARY_USER = """\
@@ -423,7 +419,7 @@ def _llm_call(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-evidence-v2",
+        prompt_version="compiler-shared-v3",
         generation_options=kwargs,
     )
     spinner = _Spinner(step_name)
@@ -467,7 +463,7 @@ async def _llm_call_async(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-evidence-v2",
+        prompt_version="compiler-shared-v3",
         generation_options=kwargs,
     )
     t0 = time.time()
@@ -1683,12 +1679,7 @@ async def _compile_concepts(
             )
         _write_summary(wiki_dir, doc_name, cleaned, description=doc_brief)
 
-    from openkb.agent.compile_evidence import EVIDENCE_PLAN_INSTRUCTION, LongDocumentEvidence
     from openkb.agent.compile_plan import request_compile_plan
-
-    originals = LongDocumentEvidence(wiki_dir, doc_name) if doc_type == "pageindex" else None
-    if originals is not None:
-        plan_messages.append({"role": "user", "content": EVIDENCE_PLAN_INSTRUCTION})
 
     plan = request_compile_plan(
         lambda correction: _llm_call(
@@ -1705,7 +1696,6 @@ async def _compile_concepts(
         },
         entity_types=valid_types,
         sanitize=_sanitize_concept_name,
-        require_evidence=originals is not None and originals.raw is not None,
     )
     create_items, update_items, related_items = (
         plan.concepts.create,
@@ -1773,7 +1763,6 @@ async def _compile_concepts(
     async def _gen_create(concept: dict) -> tuple[str, str, bool, str]:
         name = concept["name"]
         title = concept.get("title", name)
-        evidence = originals.select(concept) if originals is not None else None
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1782,7 +1771,6 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
-                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _CONCEPT_PAGE_USER.format(
@@ -1795,7 +1783,6 @@ async def _compile_concepts(
                 f"concept: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1811,11 +1798,6 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
-        evidence = (
-            originals.select(concept, previous_content=existing_content)
-            if originals is not None
-            else None
-        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1824,7 +1806,6 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
-                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _CONCEPT_UPDATE_USER.format(
@@ -1837,7 +1818,6 @@ async def _compile_concepts(
                 f"update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1847,7 +1827,6 @@ async def _compile_concepts(
         name = ent["name"]
         title = ent.get("title", name)
         etype = ent.get("type", "other")
-        evidence = originals.select(ent) if originals is not None else None
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1856,7 +1835,6 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
-                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _ENTITY_PAGE_USER.format(
@@ -1869,7 +1847,6 @@ async def _compile_concepts(
                 f"entity: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
@@ -1887,11 +1864,6 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
-        evidence = (
-            originals.select(ent, previous_content=existing_content)
-            if originals is not None
-            else None
-        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1900,7 +1872,6 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
-                    *([evidence.message] if evidence is not None else []),
                     {
                         "role": "user",
                         "content": _ENTITY_UPDATE_USER.format(
@@ -1914,7 +1885,6 @@ async def _compile_concepts(
                 f"entity-update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                **({"evidence": evidence} if evidence is not None else {}),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
@@ -2209,9 +2179,6 @@ async def compile_short_doc(
     # message creates a cache breakpoint that covers (system + doc) for
     # every downstream call (summary, concepts-plan, every concept page).
     system_msg, doc_msg = short_document_messages(doc_name, content, schema_md, language)
-    from openkb.agent.compile_evidence import version_context
-
-    system_msg["content"] += version_context(kb_dir, resolve_scope(kb_dir, scope))
 
     # --- Step 1: Generate summary (v1, held in memory) ---
     # The summary is NOT written to disk yet — it's used as cache context
@@ -2299,15 +2266,12 @@ async def compile_long_doc(
 
     # Base context A. cache_control marker on the doc message creates a
     # cache breakpoint covering (system + doc) for every concept call.
-    from openkb.agent.compile_evidence import version_context
-
     system_msg = {
         "role": "system",
         "content": _SYSTEM_TEMPLATE.format(
             schema_md=schema_md,
             language=language,
-        )
-        + version_context(kb_dir, resolve_scope(kb_dir, scope)),
+        ),
     }
     doc_msg = {
         "role": "user",

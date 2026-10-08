@@ -113,8 +113,8 @@ class TestAddCommand:
             runner.invoke(cli, ["add", str(doc)])
             assert mock_add.call_count == 1
             assert mock_add.call_args.args == (doc, kb_dir)
-            assert mock_add.call_args.kwargs["scope"] is None
-            assert mock_add.call_args.kwargs["metadata"] is None
+            assert mock_add.call_args.kwargs.get("scope") is None
+            assert mock_add.call_args.kwargs.get("metadata") is None
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
         from openkb.cli import add_single_file

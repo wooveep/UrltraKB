@@ -28,73 +28,34 @@ def api_client(kb_dir, monkeypatch):
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
-def test_unresolved_scope_offers_source_names_and_explicit_choice_keeps_version_guard(
-    kb_dir, monkeypatch, entry
+def test_question_wording_never_requires_product_alias_confirmation(
+    kb_dir, monkeypatch, narrated_model, entry
 ):
-    from test_query_views import _import_rule, _legacy_product
-
     from openkb.application.conversations import ask_question
-    from openkb.application.query_choices import source_query_scope
-    from openkb.application.query_views import resolve_query_views
 
-    for name, product in (("install", "CNware WinStack"), ("ops", "CNware-WinStack")):
-        _import_rule(
-            kb_dir,
-            monkeypatch,
-            name,
-            "9.4.0",
-            "A source rule.",
-            product=product,
-            product_id=_legacy_product(kb_dir, product),
-        )
-    monkeypatch.setattr(
-        "agents.Runner.run_streamed",
-        lambda *a, **k: pytest.fail("Unresolved scope sent a model request"),
-    )
-    question = "WinStack 如何安装？"
+    question = "What does Atlas V99 say about the answer?"
     if entry == "cli":
         cli = importlib.import_module("openkb.cli")
         monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "query", question])
         assert result.exit_code == 0, result.output
         body = result.output
-        selected = CliRunner().invoke(
-            cli.cli,
-            ["--kb-dir", str(kb_dir), "--view", "install.pdf", "query", "WinStack V99 如何安装？"],
-        )
-        assert selected.exit_code == 0 and "尚未确定" in selected.output
     elif entry.startswith("api"):
         with api_client(kb_dir, monkeypatch) as client:
             result = client.post(
                 "/api/v1/query",
                 json={"kb": "audit", "question": question, "stream": entry == "api_stream"},
             )
-            assert result.status_code == 200, result.text
-            body = result.text
-            if entry == "api":
-                assert result.json()["answer_outcome"] == "scope_unresolved"
-                assert len(result.json()["scope_candidates"]) == 2
-            selected = client.post(
-                "/api/v1/query",
-                json={
-                    "kb": "audit",
-                    "question": "WinStack V99 如何安装？",
-                    "source_name": "install.pdf",
-                    "stream": False,
-                },
-            )
-            assert (
-                selected.status_code == 200
-                and selected.json()["answer_outcome"] == "scope_unresolved"
-            )
+        assert result.status_code == 200, result.text
+        body = result.text
+        if entry == "api":
+            assert result.json()["answer_outcome"] == "answered"
+            assert not result.json().get("scope_candidates")
     else:
         result = asyncio.run(ask_question(kb_dir, question))
-        assert result.answer_outcome == "scope_unresolved" and len(result.scope_candidates) == 2
+        assert result.answer_outcome == "answered" and not result.scope_candidates
         body = result.answer
-    assert "install.pdf" in body and "ops.pdf" in body
-    chosen = source_query_scope(kb_dir, "install.pdf")
-    assert len(resolve_query_views(kb_dir, question, scope=chosen).views) == 1
-    assert not resolve_query_views(kb_dir, "WinStack V99 如何安装？", scope=chosen).has_evidence
+    assert "The answer is 42." in body
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "desktop"])
@@ -323,7 +284,7 @@ def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model
     assert saved.user_turns == ["Hi"]
     assert saved.assistant_texts[0].startswith("The answer is 42.")
     assert "Let me search." not in saved.assistant_texts[0]
-    assert "view=legacy" in saved.assistant_texts[0]
+    assert saved.assistant_texts[0] == "The answer is 42."
     assert saved.turn_count == 1
     assert saved.answer_outcomes == ["answered"]
 

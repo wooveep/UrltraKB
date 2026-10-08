@@ -187,6 +187,8 @@ def convert(request, directory):
             "-env:UserInstallation=" + (directory / "profile").as_uri(),
             f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
         ],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     document = None

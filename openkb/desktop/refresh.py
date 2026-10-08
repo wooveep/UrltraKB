@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.application.refresh import list_refresh_proposals, refresh_status
-from openkb.application.views import list_views, view_scope
+from openkb.application.views import view_scope
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import AcceptRefreshProposal, RefreshKnowledge
 
@@ -29,10 +29,11 @@ class RefreshDialog(QDialog):
         self.resize(980, 740)
         layout = QVBoxLayout(self)
         self.views = QComboBox()
-        self.views.setAccessibleName("要刷新的知识版本")
+        self.views.addItem("当前知识库", "legacy")
+        self.views.hide()
         self.views.currentIndexChanged.connect(self.reload)
         layout.addWidget(self.views)
-        self.status = QLabel("正在读取知识版本…")
+        self.status = QLabel("正在读取知识库…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         actions = QHBoxLayout()
@@ -67,24 +68,7 @@ class RefreshDialog(QDialog):
         self.timer.timeout.connect(self.poll)
         self.timer.start(200)
 
-        def loaded(views, error):
-            if error:
-                self.status.setText(str(error))
-                return
-            self.views.blockSignals(True)
-            for view in views:
-                versions = ", ".join(view.applicable_versions) or "未指定版本"
-                label = f"{view.product or '未指定产品'} / {versions}"
-                if view.view_id == "legacy":
-                    label = "旧知识库"
-                self.views.addItem(label, view.view_id)
-            current = self.views.findData(window.view_id)
-            if current >= 0:
-                self.views.setCurrentIndex(current)
-            self.views.blockSignals(False)
-            self.reload()
-
-        window.io.submit(lambda: list_views(kb), loaded, kb=kb, obsolete=lambda: self._closed)
+        self.reload()
 
     def reload(self):
         view_id = self.views.currentData()

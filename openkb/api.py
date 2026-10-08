@@ -91,14 +91,13 @@ from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
 from openkb.api_pending import pending_router
 from openkb.api_recompile import iter_recompile
-from openkb.api_views import make_views_router, resolve_api_scope
+from openkb.api_views import resolve_api_scope
 from openkb.application.knowledge_bases import get_kb_list, get_kb_status
 from openkb.application.removal import run_remove_for_api
 from openkb.config import (
     resolve_init_kb_dir,
     validate_kb_name,
 )
-from openkb.view_records import SourceMetadata
 from openkb.watch_service import WatchRegistry
 
 logger = logging.getLogger(__name__)
@@ -165,10 +164,6 @@ def create_app() -> FastAPI:
     app.include_router(pages_router)
     app.include_router(documents_router)
     app.include_router(pending_router)
-    app.include_router(make_views_router())
-    from openkb.api_versions import versions_router
-
-    app.include_router(versions_router)
     from openkb.api_refresh import refresh_router
 
     app.include_router(refresh_router)
@@ -248,17 +243,10 @@ def create_app() -> FastAPI:
         kb: str = Form(...),
         stream: str = Form("true"),
         files: list[UploadFile] = File(default=[]),
-        view_id: str | None = Form(None),
-        metadata: str | None = Form(None),
         download_remote_assets: bool | None = Form(None),
         _: None = Depends(require_bearer_token),
     ) -> Any:
         resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-        selected = await resolve_api_scope(resolved_kb_dir, view_id)
-        try:
-            source_metadata = SourceMetadata.model_validate_json(metadata) if metadata else None
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Invalid source metadata") from exc
         if not files:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -276,8 +264,6 @@ def create_app() -> FastAPI:
                     kb,
                     resolved_kb_dir,
                     saved_uploads,
-                    scope=selected,
-                    metadata=source_metadata,
                     download_remote_assets=download_remote_assets,
                 ),
                 uploads=saved_uploads,
@@ -287,8 +273,6 @@ def create_app() -> FastAPI:
             kb,
             resolved_kb_dir,
             saved_uploads,
-            scope=selected,
-            metadata=source_metadata,
             download_remote_assets=download_remote_assets,
         )
 

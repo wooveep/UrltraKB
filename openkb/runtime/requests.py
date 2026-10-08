@@ -208,19 +208,6 @@ class GenerateGraph(ViewSelection):
 
 
 @dataclass(frozen=True)
-class ResumeVersionReview(ViewSelection):
-    review_id: str
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        from pydantic import TypeAdapter
-
-        from openkb.source_records import RecordId
-
-        TypeAdapter(RecordId).validate_python(self.review_id)
-
-
-@dataclass(frozen=True)
 class RefreshKnowledge(ViewSelection):
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -304,7 +291,6 @@ UnitRequest = (
     | RunPendingJob
     | RetryWorksheet
     | AcceptProposal
-    | ResumeVersionReview
     | RefreshKnowledge
     | ConfirmEmptySource
     | AcceptRefreshProposal
@@ -327,7 +313,6 @@ REQUEST_TYPES = (
     RunPendingJob,
     RetryWorksheet,
     AcceptProposal,
-    ResumeVersionReview,
     RefreshKnowledge,
     ConfirmEmptySource,
     AcceptRefreshProposal,

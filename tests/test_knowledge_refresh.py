@@ -295,7 +295,7 @@ def test_retiring_a_view_retains_its_default_without_exposing_empty_evidence(kb_
     remove_document(kb_dir, first.source_id, scope=scope)
     assert asyncio.run(refresh_knowledge_view(kb_dir, scope=scope)).status == "completed"
     assert list_family_defaults(kb_dir)[0]["view_id"] == scope.view_id
-    assert resolve_query_views(kb_dir, "WinStack V1 TLS?").views == ()
+    assert not resolve_query_views(kb_dir, "WinStack V1 TLS?", scope=scope).has_evidence
 
 
 @pytest.mark.parametrize("entrypoint", ["cli", "api", "worker"])

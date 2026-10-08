@@ -104,65 +104,6 @@ def test_cancelled_clarification_does_not_resume_on_another_import(kb_dir, pdf_i
         resume_version_review(kb_dir, pending.review_id)
 
 
-def test_title_candidates_distinguish_applicability_and_manual_revision(kb_dir, pdf_imports):
-    from openkb.application.views import list_views
-    from openkb.source_catalog import read_record, read_source
-    from openkb.view_records import VersionAnnotation
-
-    run, _ = pdf_imports
-    result = run("guide.pdf", title="WinStack V9.4 Installation Manual (Document R2)")
-    annotation = read_record(
-        kb_dir,
-        "annotations",
-        read_source(kb_dir, result.source_id).annotation_id,
-        VersionAnnotation,
-    )
-    assert annotation.metadata.product == "WinStack"
-    assert annotation.metadata.applicable_versions == ("9.4",)
-    assert annotation.metadata.document_revision == "R2"
-    assert "pdf.metadata.title" in annotation.evidence["applicable_versions"]
-    selected = next(view for view in list_views(kb_dir) if view.view_id == result.units[0].view_id)
-    assert selected.unknown_source_id is None
-
-
-def test_conflicting_titles_wait_for_a_user_correction(kb_dir, pdf_imports):
-    from openkb.application.version_review import (
-        list_version_reviews,
-        resume_version_review,
-        supplement_version_reviews,
-    )
-    from openkb.source_catalog import read_record, read_source
-    from openkb.view_records import SourceMetadata, VersionAnnotation
-
-    run, calls = pdf_imports
-    run("first.pdf", title="WinStack V9.3 Installation Manual")
-    result = run(
-        "second.pdf",
-        title="WinStack V9.4 Installation Manual",
-        body="WinStack V9.5 Installation Manual",
-    )
-    assert result.status == "blocked" and len(calls) == 2
-    pending = list_version_reviews(kb_dir)[0]
-    assert {item.values for item in pending.candidates if item.field == "applicable_versions"} == {
-        ("9.4",),
-        ("9.5",),
-    }
-    supplement_version_reviews(
-        kb_dir, {pending.review_id: SourceMetadata(applicable_versions=("9.4",))}
-    )
-    resumed = resume_version_review(kb_dir, pending.review_id)
-    assert resumed.status == "added"
-    annotation = read_record(
-        kb_dir,
-        "annotations",
-        read_source(kb_dir, resumed.source_id).annotation_id,
-        VersionAnnotation,
-    )
-    assert annotation.metadata.applicable_versions == ("9.4",)
-    assert annotation.evidence["applicable_versions"] == "user"
-    assert "pdf.metadata.title" in annotation.evidence["product"]
-
-
 def test_failed_resume_can_be_explicitly_retried_after_restart(kb_dir, pdf_imports, monkeypatch):
     from openkb.application.version_review import (
         list_version_reviews,
@@ -188,72 +129,6 @@ def test_failed_resume_can_be_explicitly_retried_after_restart(kb_dir, pdf_impor
     resumed = resume_version_review(kb_dir, pending.review_id)
     assert resumed.status == "added"
     assert resumed.source_revision_id == failed.source_revision_id
-
-
-@pytest.mark.parametrize("entrypoint", ["cli", "api", "worker"])
-def test_version_review_entries_resume_the_same_retained_source(
-    kb_dir, pdf_imports, entrypoint, monkeypatch
-):
-    from openkb.application.version_review import list_version_reviews, supplement_version_reviews
-    from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
-
-    run, _ = pdf_imports
-    metadata = SourceMetadata(product="WinStack", family="installation")
-    run("first.pdf", metadata=metadata)
-    pending_source = run("second.pdf", metadata=metadata)
-    pending = list_version_reviews(kb_dir)[0]
-    if entrypoint == "cli":
-        from click.testing import CliRunner
-
-        from openkb.cli import cli
-
-        runner = CliRunner()
-        prefix = ["--kb-dir", str(kb_dir), "versions"]
-        result = runner.invoke(
-            cli,
-            prefix
-            + ["supplement", pending.review_id, "--metadata", '{"applicable_versions":["9.4"]}'],
-        )
-        assert result.exit_code == 0, result.output
-        result = runner.invoke(cli, prefix + ["resume", pending.review_id])
-        assert result.exit_code == 0, result.output
-    elif entrypoint == "api":
-        from fastapi.testclient import TestClient
-
-        from openkb.api import create_app
-
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
-        monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
-        with TestClient(create_app()) as client:
-            response = client.post(
-                "/api/v1/version-reviews/supplement",
-                json={"updates": {pending.review_id: {"applicable_versions": ["9.4"]}}},
-            )
-            assert response.status_code == 200, response.text
-            response = client.post(
-                "/api/v1/version-review/resume", json={"review_id": pending.review_id}
-            )
-            assert response.status_code == 200 and response.json()["status"] == "added", (
-                response.text
-            )
-    else:
-        from openkb.application.execution import ExecutionContext
-        from openkb.runtime.requests import ResumeVersionReview
-        from openkb.runtime.worker import _execute
-
-        supplement_version_reviews(
-            kb_dir, {pending.review_id: SourceMetadata(applicable_versions=("9.4",))}
-        )
-        result = _execute(
-            ResumeVersionReview(pending.review_id),
-            SimpleNamespace(kb_dir=str(kb_dir)),
-            ExecutionContext(),
-        )
-        assert result.status == "completed"
-    assert (
-        "retained instructions" in read_document_source(kb_dir, pending_source.source_id)["content"]
-    )
 
 
 def test_confirming_a_completed_unknown_source_preserves_its_original_view(kb_dir, pdf_imports):
@@ -293,45 +168,6 @@ def test_replaced_pending_input_is_no_longer_offered_for_resume(kb_dir, pdf_impo
     assert replacement.status == "added"
     assert list_version_reviews(kb_dir) == ()
     assert read_version_review(kb_dir, pending.review_id).status == "superseded"
-
-
-def test_cli_partial_metadata_preserves_other_title_candidates(kb_dir, pdf_imports):
-    from click.testing import CliRunner
-
-    from openkb.cli import cli
-    from openkb.source_catalog import read_record, read_source
-    from openkb.view_records import VersionAnnotation
-
-    run, _ = pdf_imports
-    result = run("manual.pdf", title="WinStack V9.4 Installation Manual")
-    outcome = CliRunner().invoke(
-        cli,
-        ["--kb-dir", str(kb_dir), "add", str(kb_dir / "manual.pdf"), "--document-revision", "R2"],
-    )
-    assert outcome.exit_code == 0, outcome.output
-    annotation = read_record(
-        kb_dir,
-        "annotations",
-        read_source(kb_dir, result.source_id).annotation_id,
-        VersionAnnotation,
-    )
-    assert annotation.metadata.product == "WinStack"
-    assert annotation.metadata.applicable_versions == ("9.4",)
-    assert annotation.evidence["product"].startswith("pdf.metadata.title")
-
-
-def test_conflicting_product_candidates_still_find_the_related_series(kb_dir, pdf_imports):
-    from openkb.application.version_review import list_version_reviews
-
-    run, calls = pdf_imports
-    run("first.pdf", title="WinStack V9.3 Installation Manual")
-    result = run(
-        "ambiguous.pdf",
-        title="WinStack V9.4 Installation Manual",
-        body="WinSphere V9.4 Installation Manual",
-    )
-    assert result.status == "blocked" and len(calls) == 2
-    assert "product" in list_version_reviews(kb_dir)[0].missing_fields
 
 
 def test_metadata_can_be_corrected_again_after_a_failed_resume(kb_dir, pdf_imports, monkeypatch):

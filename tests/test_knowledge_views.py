@@ -263,7 +263,7 @@ def test_conversation_rejects_a_different_view_before_model_work(kb_dir):
         )
 
 
-def test_api_upload_exposes_an_explicit_readable_view(kb_dir, monkeypatch):
+def test_api_upload_uses_the_shared_readable_wiki(kb_dir, monkeypatch):
     import pymupdf
     from fastapi.testclient import TestClient
 
@@ -289,16 +289,13 @@ def test_api_upload_exposes_an_explicit_readable_view(kb_dir, monkeypatch):
             data={
                 "kb": "view-test",
                 "stream": "false",
-                "metadata": json.dumps(
-                    {"product": "WinStack", "applicable_versions": ["9.4"], "family": "install"}
-                ),
             },
             files={"files": ("manual.pdf", content, "application/pdf")},
         )
         assert response.status_code == 200
         item = response.json()["files"][0]
         selected = item["units"][0]["view_id"]
-        assert selected != "legacy"
+        assert selected == "legacy"
         read = client.post(
             "/api/v1/page",
             json={"kb": "view-test", "view_id": selected, "path": "summaries/manual"},
@@ -306,9 +303,9 @@ def test_api_upload_exposes_an_explicit_readable_view(kb_dir, monkeypatch):
         assert read.status_code == 200 and "Version nine" in read.json()["content"]
         old = client.post(
             "/api/v1/page",
-            json={"kb": "view-test", "view_id": "legacy", "path": "summaries/manual"},
+            json={"kb": "view-test", "path": "summaries/manual"},
         )
-        assert old.status_code == 404
+        assert old.status_code == 200 and old.json()["content"] == read.json()["content"]
 
 
 def test_legacy_mapping_preserves_readable_evidence_without_a_model(kb_dir):
@@ -337,8 +334,9 @@ def test_selected_view_cannot_remove_legacy_files(kb_dir, import_pdf):
     from openkb.application.removal import preview_removal, remove_document, run_remove_for_api
     from openkb.application.views import view_scope
     from openkb.cli import cli
+    from openkb.view_records import SourceMetadata
 
-    own = import_pdf()
+    own = import_pdf(metadata=SourceMetadata(product="Isolated", applicable_versions=("1",)))
     scope = view_scope(kb_dir, own.units[0].view_id)
     raw = kb_dir / "raw/legacy.md"
     raw.write_text("Legacy original.")

@@ -107,7 +107,7 @@ def test_filename_hints_are_not_automatically_applied(kb_dir, tmp_path):
         admission = admit_source_revision(kb_dir, prepared)
     result = assess_version(kb_dir, admission, None)
     assert not result.metadata.applicable_versions
-    assert result.candidates and all(c.confidence == "hint" for c in result.candidates)
+    assert not result.candidates
 
 
 def test_explicit_reevaluation_retains_old_knowledge_until_resume(kb_dir, pdf_model, monkeypatch):

@@ -32,6 +32,10 @@ def assess_version(
     from openkb.version_evidence import source_title_candidates
 
     previous = source_annotation(kb_dir, admission)
+    # Ordinary imports use the shared KB. Product/version classification is an
+    # explicit metadata operation, not a prerequisite for unrelated documents.
+    if metadata is None and scope is None and not reevaluate:
+        return VersionAssessment(SourceMetadata())
     same_input = previous and previous.source_revision_id == admission.revision.source_revision_id
     if previous and previous.source_revision_id == admission.revision.reprocessed_from:
         from openkb.source_catalog import read_source_revision

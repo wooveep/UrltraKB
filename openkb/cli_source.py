@@ -23,8 +23,8 @@ def source(
 ):
     """Read SOURCE_ID (from list) with revision and coverage information."""
     from openkb.application.views import view_scope
+    from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
-    from openkb.cli_views import _root
     from openkb.documents import read_document_source
 
     root = _root(ctx)
@@ -61,8 +61,8 @@ def retry_worksheet(ctx, source_id, unit_id):
     from dataclasses import asdict
 
     from openkb.application.workbook_actions import retry_worksheet as retry
+    from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
-    from openkb.cli_views import _root
 
     root = _root(ctx)
     try:
@@ -83,8 +83,8 @@ def reprocess(ctx, source_id, execute):
     from dataclasses import asdict
 
     from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
-    from openkb.cli_views import _root
 
     root = _root(ctx)
     try:
@@ -107,8 +107,8 @@ def retry_source(ctx, source_id):
     from dataclasses import asdict
 
     from openkb.application.source_retry import retry_source as retry
+    from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
-    from openkb.cli_views import _root
 
     root = _root(ctx)
     try:

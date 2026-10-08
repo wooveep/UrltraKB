@@ -269,7 +269,7 @@ async def test_real_application_commits_only_complete_answers(
     stopped = threading.Event()
 
     def receive(event):
-        if outcome == "cancel" and event.get("event") == "answer_progress":
+        if outcome == "cancel" and event.get("event") == "delta":
             stopped.set()
 
     context = ExecutionContext(cancelled=stopped.is_set, on_event=receive)

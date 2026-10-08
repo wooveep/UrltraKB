@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pymupdf
 import pytest
 
+from openkb.view_records import SourceMetadata
+
 pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 
 
@@ -28,7 +30,6 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch):
     from openkb.cnki.convert import convert_cnki
     from openkb.documents import read_document_source
     from openkb.state import HashRegistry
-    from openkb.view_records import SourceMetadata
 
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), "Original CNKI content.")
@@ -55,13 +56,7 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch):
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         ),
     )
-    result = import_document(
-        kb_dir,
-        source,
-        metadata=SourceMetadata(
-            product="CNKI research", applicable_versions=("1",), family="paper"
-        ),
-    )
+    result = import_document(kb_dir, source)
     assert result.status == "added", result.message
     assert len(calls) == 1
     assert HashRegistry.hash_file(source) == original_digest
@@ -86,7 +81,6 @@ def test_model_retry_and_recompile_reuse_the_retained_conversion(
     from openkb.application.documents import import_document
     from openkb.application.recompilation import recompile_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     with monkeypatch.context() as failed:
 
@@ -94,11 +88,7 @@ def test_model_retry_and_recompile_reuse_the_retained_conversion(
             raise ConnectionError("fixture unavailable model")
 
         failed.setattr("litellm.completion", unavailable)
-        first = import_document(
-            kb_dir,
-            cnki_source,
-            metadata=SourceMetadata(product="CNKI", family="paper", applicable_versions=("1",)),
-        )
+        first = import_document(kb_dir, cnki_source)
     assert first.status == "failed", first.message
     assert len(conversions) == 1
     retried = import_document(kb_dir, cnki_source)
@@ -118,13 +108,8 @@ def test_changed_converter_requires_explicit_reprocessing_and_history_keeps_old_
     from openkb.application.documents import import_document
     from openkb.application.reprocessing import preview_reprocessing, reprocess_source
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    first = import_document(
-        kb_dir,
-        cnki_source,
-        metadata=SourceMetadata(product="CNKI", family="paper", applicable_versions=("1",)),
-    )
+    first = import_document(kb_dir, cnki_source)
     assert first.status == "added", first.message
     before = read_document_source(kb_dir, first.source_id)
     monkeypatch.setattr("openkb.cnki.runtime.CNKI_POLICY", "cnki-pdf-fixture-next")
@@ -208,7 +193,6 @@ def test_version_confirmation_uses_the_retained_pdf(kb_dir, cnki_source, convers
         supplement_version_reviews,
     )
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     first = import_document(kb_dir, cnki_source)
     assert first.status == "added", first.message
@@ -235,7 +219,6 @@ def test_long_cnki_uses_the_same_physical_pdf_pipeline(
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     key = b"FZHMEI"
     source = tmp_path / "long-paper.caj"

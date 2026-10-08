@@ -262,7 +262,7 @@ async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb
 
     stream = iter_chat_turn_events(Agent(name="test"), session, "Question")
     first = await anext(stream)
-    assert first["event"] == "answer_progress" and "Partial" not in str(first)
+    assert first["event"] == "delta" and "Partial" in str(first)
     await stream.aclose()
     assert settled.is_set()
     assert not session.path.exists()

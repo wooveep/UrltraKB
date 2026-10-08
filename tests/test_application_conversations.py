@@ -177,7 +177,7 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
     result = await continue_conversation(kb_dir, "接着问", session_id=result.session_id)
     assert result.status == "completed"
     restored = read_conversation(kb_dir, result.session_id)
-    assert result.answer_outcome == "insufficient_evidence"
+    assert result.answer_outcome == "answered"
     assert restored.turns == (("接着问", result.answer),)
     assert len(restored.timeline) == 2
 

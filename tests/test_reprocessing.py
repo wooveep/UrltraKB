@@ -2,6 +2,8 @@
 
 import pytest
 
+from openkb.view_records import SourceMetadata
+
 pytest_plugins = ("test_workbook_import",)
 
 
@@ -32,16 +34,13 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
     from openkb.source_catalog import read_source_revision
-    from openkb.view_records import SourceMetadata
 
     path = physical_pdf
     if kind == "markdown":
         path = tmp_path / "assets.md"
         (tmp_path / "image.png").write_bytes(b"retained image")
         path.write_text("Stable input\n![image](image.png)", encoding="utf-8")
-    first = import_document(
-        kb_dir, path, metadata=SourceMetadata(product="Fixture", applicable_versions=("1",))
-    )
+    first = import_document(kb_dir, path)
     before = read_document_source(kb_dir, first.source_id)
     original = read_source_revision(kb_dir, first.source_revision_id)
     path.unlink()
@@ -258,50 +257,6 @@ def test_reprocessing_creates_an_independent_extraction_group(kb_dir, pdf_model)
     assert {job["id"]: job for job in current["jobs"] if job["id"] in old_jobs} == old_jobs
 
 
-@pytest.mark.parametrize("mapped", [False, True])
-@pytest.mark.parametrize("same_bytes", [False, True])
-def test_legacy_preview_requires_a_verified_original_and_never_maps_on_read(
-    kb_dir, pdf_model, mapped, same_bytes
-):
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.views import map_legacy_sources
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
-    from openkb.state import HashRegistry
-
-    raw = kb_dir / "raw/old.md"
-    raw.write_text("Verified original", encoding="utf-8")
-    old_body = kb_dir / "wiki/sources/old.md"
-    legacy_content = "Verified original" if same_bytes else "Retained legacy normalization"
-    old_body.write_text(legacy_content, encoding="utf-8")
-    identity = HashRegistry.hash_file(raw)
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
-        identity,
-        {
-            "name": "old.md",
-            "doc_name": "old",
-            "type": "md",
-            "raw_path": "raw/old.md",
-            "source_path": "wiki/sources/old.md",
-        },
-    )
-    if mapped:
-        map_legacy_sources(kb_dir)
-    before = list_sources(kb_dir)
-    preview = preview_reprocessing(kb_dir, identity)
-    assert preview["status"] == "ready" and list_sources(kb_dir) == before
-    raw.unlink()
-    unavailable = preview_reprocessing(kb_dir, identity)
-    assert unavailable["status"] == "blocked" and not unavailable["original"]["available"]
-    raw.write_text("Verified original", encoding="utf-8")
-    preview = preview_reprocessing(kb_dir, identity)
-    result = reprocess_source(kb_dir, identity, version=preview["version"])
-    assert result.status == "blocked" and "version_metadata" in result.unfinished
-    assert len(list_sources(kb_dir)) == 1
-    assert old_body.read_text() == legacy_content
-    assert read_document_source(kb_dir, result.source_id)["content"] == "Verified original"
-
-
 def test_reprocessing_preserves_model_quality_and_unfinished_stages(
     kb_dir, tmp_path, pdf_model, monkeypatch
 ):
@@ -496,7 +451,6 @@ def test_request_resume_rejects_foreign_source_revision(kb_dir, tmp_path, pdf_mo
 
     from openkb.application.documents import import_document
     from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.view_records import SourceMetadata
 
     a = tmp_path / "alpha.md"
     b = tmp_path / "beta.md"

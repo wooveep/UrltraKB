@@ -169,6 +169,10 @@ def bind_source_view(
                 )
                 records[record_path(root, "families", family.family_id)] = family
         versions = tuple(sorted(confirmed.applicable_versions))
+        if scope is None and not any(
+            (confirmed.product, versions, confirmed.family, confirmed.document_revision)
+        ):
+            scope = live_scope(root)
         if scope is not None:
             scope = resolve_scope(root, scope, writable=True)
             selected = next(

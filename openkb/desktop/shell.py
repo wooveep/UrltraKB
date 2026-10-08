@@ -122,10 +122,6 @@ class WorkbenchShell(QWidget):
         )
         window.kbs.activated.connect(self._switch_kb)
         top.addWidget(window.kbs)
-        from openkb.desktop.views import ViewPicker
-
-        window.view_picker = ViewPicker(window)
-        top.addWidget(window.view_picker)
         top.addStretch()
         self.task_status = action("任务 · 0 运行", lambda: self.navigate("任务"))
         self.task_status.setObjectName("taskStatus")

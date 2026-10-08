@@ -37,16 +37,9 @@ class QueryView:
 
     @property
     def provenance(self) -> str:
-        version = ", ".join(self.applicable_versions) or "unspecified version"
         return (
-            "Historical reference only; not evidence for the requested version. "
-            if self.reference_only
-            else ""
-        ) + (
-            f"Evidence: {self.product or 'unspecified product'} / {version}; "
-            f"view={self.view_id}; knowledge={self.knowledge_revision_id or 'legacy snapshot'}; "
-            f"source revisions={', '.join(self.source_revision_ids) or 'legacy, unrecorded'}; "
-            f"status={self.validity}"
+            f"Source revisions: {', '.join(self.source_revision_ids) or 'unrecorded'}; "
+            f"knowledge={self.knowledge_revision_id or 'current wiki'}; status={self.validity}"
         )
 
 
@@ -288,108 +281,30 @@ def _resolve_product_candidates(
 def resolve_query_views(
     kb_dir: Path, question: str = "", *, scope: KnowledgeScope | None = None
 ) -> QuerySelection:
-    """An unspecified selection keeps each available applicability scope separate."""
+    """Read the KB by default; only an explicit selection narrows its storage scope.
+
+    Product names and version strings in a question are retrieval terms. They do
+    not establish a second admission policy before the agent can read documents.
+    Ordinary imports and questions use the shared wiki in a freshly built KB.
+    """
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
-        views = list_views(root)
-        version_labels = {v for view in views for v in view.applicable_versions}
-        if scope:
-            views = tuple(view for view in views if view.view_id == scope.view_id)
-        requested = _requested_versions(question, version_labels)
-        compare = bool(
-            re.search(r"\b(?:compare|versus|vs)\b|比较|对比|差异", question, re.IGNORECASE)
-        )
-        candidates = views
-        if scope is None:
-            from openkb.source_catalog import list_sources
-            from openkb.source_changes import source_view
-
-            current_views = {
-                source_view(root, source) for source in list_sources(root) if not source.removed
-            }
-            current_products = {view.product_id for view in views if view.view_id in current_views}
-            # Old views preserve exact prior applicability after a metadata
-            # correction. Infer names from currently confirmed product identities;
-            # explicit scopes still retain those older views and their boundaries.
-            candidates = tuple(view for view in views if view.product_id in current_products)
-        from openkb.application.products import list_products
-
-        products, ambiguity = (
-            _resolve_product_candidates(candidates, question, list_products(root))
+        views = (
+            (KnowledgeView(view_id="legacy"),)
             if scope is None
-            else (set(), ())
-        )
-        if ambiguity:
-            from openkb.application.query_choices import scope_candidates
-
-            return QuerySelection(
-                root, (), ambiguity, scope_candidates(root, candidates, product_ids=products)
-            )
-        history = bool(re.search(r"historical|history|legacy|历史|旧库", question, re.IGNORECASE))
-        historical = (
-            tuple(
-                view
-                for view in views
-                if (view.unknown_source_id or view.view_id == "legacy")
-                and (not products or view.product is None or view.product_id in products)
-            )
-            if requested and history
-            else ()
-        )
-        if scope is None:
-            views = candidates
-        if not scope and any(view.view_id != "legacy" for view in views):
-            views = tuple(view for view in views if view.view_id != "legacy")
-        if products:
-            views = tuple(view for view in views if view.product_id in products)
-        if requested:
-            views = tuple(
-                view
-                for view in views
-                if not view.unknown_source_id
-                and view.view_id != "legacy"
-                and requested.intersection(_version_key(v) for v in view.applicable_versions)
-            )
-        defaults = (
-            {
-                item["family_id"]: item["view_id"]
-                for item in list_family_defaults(root)
-                if item["view_id"]
-            }
-            if scope is None and not requested and not compare
-            else {}
+            else tuple(view for view in list_views(root) if view.view_id == scope.view_id)
         )
         selected = tuple(
-            pinned
-            for view in views
-            if (pinned := _pin_view(root, view, scope, defaults=defaults)) is not None
+            pinned for view in views if (pinned := _pin_view(root, view, scope)) is not None
         )
-        if not selected and scope is None and not requested:
-            selected = tuple(
-                pinned
-                for view in list_views(root)
-                if view.view_id == "legacy" and (pinned := _pin_view(root, view)) is not None
-            )
-        missing = tuple(
-            f"No current evidence for requested version {version}."
-            for version in sorted(requested)
-            if not any(
-                version in {_version_key(v) for v in view.applicable_versions} for view in selected
-            )
+        missing = (
+            (f"No published documents in selected collection {scope.view_id}.",)
+            if scope is not None and not selected
+            else ()
         )
-        if scope is not None and not selected and not missing:
-            missing = (f"No permitted published evidence for selected view {scope.view_id}.",)
-        selected += tuple(
-            replace(pinned, reference_only=True)
-            for view in historical
-            if (pinned := _pin_view(root, view, scope)) is not None
-        )
-        from openkb.application.query_choices import scope_candidates
-
-        choices = scope_candidates(root, candidates, product_ids=products) if missing else ()
-        return QuerySelection(root, selected, missing, choices)
+        return QuerySelection(root, selected, missing)
 
 
 def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> str:

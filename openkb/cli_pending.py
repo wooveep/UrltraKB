@@ -20,7 +20,7 @@ from openkb.application.pending import (
 @click.pass_context
 def process(ctx, path, max_jobs):
     """Drain runnable discoveries/imports and exit; waiting/unknown jobs remain visible."""
-    from openkb.cli_views import _root
+    from openkb.cli import _require_kb_root as _root
 
     try:
         result = process_pending(path or _root(ctx), max_jobs=max_jobs)
@@ -37,7 +37,7 @@ def pending():
 @pending.command("list")
 @click.pass_context
 def inventory(ctx):
-    from openkb.cli_views import _root
+    from openkb.cli import _require_kb_root as _root
 
     click.echo(json.dumps(pending_status(_root(ctx)), ensure_ascii=False, indent=2))
 
@@ -46,7 +46,7 @@ def inventory(ctx):
 @click.argument("job_id")
 @click.pass_context
 def retry(ctx, job_id):
-    from openkb.cli_views import _root
+    from openkb.cli import _require_kb_root as _root
 
     try:
         retry_pending_job(_root(ctx), job_id)
@@ -59,7 +59,7 @@ def retry(ctx, job_id):
 @click.argument("group_id")
 @click.pass_context
 def cancel(ctx, group_id):
-    from openkb.cli_views import _root
+    from openkb.cli import _require_kb_root as _root
 
     try:
         cancel_execution_group(_root(ctx), group_id)
@@ -74,7 +74,7 @@ def cancel(ctx, group_id):
 @click.pass_context
 def budget(ctx, group_id, limits):
     """Set LIMIT=VALUE, e.g. max_sources=200 or max_discovery_seconds=60."""
-    from openkb.cli_views import _root
+    from openkb.cli import _require_kb_root as _root
 
     try:
         patch = dict(item.split("=", 1) for item in limits)

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 
-from openkb.agent.query_evidence import evidence_answer, evidence_input, restrict_query_agent
+from openkb.agent.query_evidence import evidence_answer, restrict_query_agent
 from openkb.agent.streaming import settled_stream
 from openkb.agent.tools import (
     artifact_event_from_write,
@@ -175,20 +175,11 @@ async def iter_agent_response_events(
     history.
     """
     from agents import RawResponsesStreamEvent, RunItemStreamEvent
-    from agents.exceptions import MaxTurnsExceeded
     from openai.types.responses import ResponseTextDeltaEvent
 
-    from openkb.agent.evidence_budget import budget_run_config
-    from openkb.llm_execution import ModelBudgetExceeded
-
-    session = None
     if selection is not None:
-        input_data = evidence_input(input_data)
         if not selection.has_evidence:
-            from openkb.agent.answer_finalization import decide_answer
-
-            decision = decide_answer("", selection)
-            answer = decision.answer
+            answer = evidence_answer("", selection)
             history = (
                 [{"role": "user", "content": input_data}]
                 if isinstance(input_data, str)
@@ -200,28 +191,22 @@ async def iter_agent_response_events(
                 "data": {
                     "answer": answer,
                     "history": [*history, {"role": "assistant", "content": answer}],
-                    "answer_outcome": decision.outcome,
-                    "scope_candidates": selection.candidates,
+                    "answer_outcome": "insufficient_evidence",
+                    "scope_candidates": (),
                 },
             }
             return
-        from openkb.agent.evidence_session import EvidenceSession
-
-        session = EvidenceSession(selection)
-        agent = restrict_query_agent(agent, selection, session=session)
-        run_config = budget_run_config(agent, run_config, session.budget)
+        agent = restrict_query_agent(agent, selection)
 
     result = (
         Runner.run_streamed(
             agent,
             input_data,
-            max_turns=min(max_turns, 20) if session else max_turns,
+            max_turns=max_turns,
             run_config=run_config,
         )
         if run_config
-        else Runner.run_streamed(
-            agent, input_data, max_turns=min(max_turns, 20) if session else max_turns
-        )
+        else Runner.run_streamed(agent, input_data, max_turns=max_turns)
     )
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
@@ -245,11 +230,8 @@ async def iter_agent_response_events(
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text:
-                        if selection is not None:
-                            yield {"event": "answer_progress", "data": {"phase": "drafting"}}
                         collected.append(text)
-                        if selection is None:
-                            yield {"event": "delta", "data": {"text": text}}
+                        yield {"event": "delta", "data": {"text": text}}
             elif isinstance(event, RunItemStreamEvent):
                 item = event.item
                 if item.type == "tool_call_item":
@@ -274,10 +256,6 @@ async def iter_agent_response_events(
                     if payload is not None:
                         yield {"event": "artifact", "data": payload}
 
-    except (MaxTurnsExceeded, ModelBudgetExceeded):
-        if session is None:
-            raise
-        session.budget.stop_reason = "question_generation_budget"
     finally:
         await stream.aclose()
 
@@ -292,27 +270,6 @@ async def iter_agent_response_events(
     answer = visible_answer(final if isinstance(final, str) else "".join(collected))
     answer_outcome = "answered"
     history = result.to_input_list()
-    if selection is not None:
-        from openkb.agent.answer_finalization import finalize_answer
-
-        assert session is not None
-        yield {"event": "answer_progress", "data": {"phase": "verifying"}}
-        decision, review_usage = await finalize_answer(
-            agent, input_data, answer, session, run_config
-        )
-        usage = add_usage(usage, review_usage)
-        if session.budget.usage is not None:
-            usage = session.budget.usage
-        if review_usage is not None:
-            yield {"event": "usage", "data": usage}
-        answer, answer_outcome = decision.answer, decision.outcome
-        yield {"event": "delta", "data": {"text": answer}}
-        # Raw model drafts belong in request traces, never in reusable chat history.
-        history = (
-            [{"role": "user", "content": input_data}]
-            if isinstance(input_data, str)
-            else evidence_input(input_data)
-        ) + [{"role": "assistant", "content": answer}]
     yield {
         "event": "final",
         "data": {
@@ -320,7 +277,7 @@ async def iter_agent_response_events(
             "history": history,
             "usage": usage,
             "answer_outcome": answer_outcome,
-            "evidence_audit": session.audit_path if session else None,
+            "evidence_audit": None,
             "scope_candidates": selection.candidates if selection else (),
         },
     }
@@ -512,26 +469,11 @@ async def run_query(
 
     agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
     if not stream:
-        from openkb.agent.answer_finalization import finalize_answer
         from openkb.agent.answer_text import visible_answer
-        from openkb.agent.evidence_session import EvidenceSession
 
-        session = EvidenceSession(selection)
-        agent = restrict_query_agent(agent, selection, session=session)
-        from agents.exceptions import MaxTurnsExceeded
-
-        from openkb.agent.evidence_budget import budget_run_config
-        from openkb.llm_execution import ModelBudgetExceeded
-
-        run_config = budget_run_config(agent, run_config, session.budget)
-        try:
-            result = await Runner.run(agent, question, max_turns=20, run_config=run_config)
-            draft = visible_answer(result.final_output or "")
-        except (MaxTurnsExceeded, ModelBudgetExceeded):
-            session.budget.stop_reason = "question_generation_budget"
-            draft = "\n".join(fact["quote"] for fact in session.facts.values())
-        decision, _ = await finalize_answer(agent, question, draft, session, run_config)
-        return decision.answer
+        agent = restrict_query_agent(agent, selection)
+        result = await Runner.run(agent, question, max_turns=MAX_TURNS, run_config=run_config)
+        return visible_answer(result.final_output or "")
 
     import os
     from contextlib import aclosing

@@ -187,7 +187,9 @@ def streamed_response(message, reason="stop"):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_query_rejects_unread_provider_answer(model_service, kb_dir):
+async def test_ordinary_query_returns_the_provider_answer_without_an_extra_review(
+    model_service, kb_dir
+):
     from openkb.agent.query import build_run_config_from_bundle, run_query
     from openkb.config import LlmCredentialBundle
     from openkb.locks import atomic_write_text
@@ -207,8 +209,7 @@ async def test_ordinary_query_rejects_unread_provider_answer(model_service, kb_d
         bundle=bundle,
         run_config=config,
     )
-    assert "没有读取到可核实的原文" in answer
-    assert "Baseline answer." not in answer
+    assert answer == "Baseline answer."
     assert len(model_service.requests) == 1
     assert "Explain baseline knowledge." in json.dumps(model_service.requests[0]["messages"])
 

@@ -1,6 +1,7 @@
 """Office inputs retain original bytes and use the common physical PDF readback."""
 
 import os
+import sys
 import zipfile
 from pathlib import Path
 
@@ -113,28 +114,48 @@ def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
     assert pdf.status == "added", pdf.message
 
 
-def test_explicit_retry_recovers_office_after_runtime_validation_is_repaired(
-    kb_dir, writer_document, office_runtime, pdf_model, monkeypatch
+@pytest.mark.parametrize("upgraded", [False, True])
+def test_failed_office_import_recovers_after_runtime_repair_or_upgrade(
+    kb_dir, writer_document, office_runtime, pdf_model, monkeypatch, upgraded
 ):
     from openkb.application.documents import import_document
+    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
     from openkb.application.source_retry import retry_source
+    from openkb.documents import read_document_source
     from openkb.office import runtime
 
     def unavailable(_root):
         raise ValueError("Office runtime file inventory changed or is incomplete")
 
+    digest = runtime.digest
+
+    def old_helpers(path):
+        return "0" * 64 if path.name == "worker.py.txt" else digest(path)
+
+    original = writer_document.read_bytes()
     with monkeypatch.context() as broken:
         broken.setattr(runtime, "validate_runtime", unavailable)
+        if upgraded:
+            broken.setattr(runtime, "digest", old_helpers)
         failed = import_document(kb_dir, writer_document)
     assert failed.status == "failed" and "Office runtime file inventory" in failed.message
+    writer_document.unlink()
 
     recovered = retry_source(kb_dir, failed.source_id)
+    if upgraded:
+        assert recovered.status == "blocked" and "processing policy changed" in recovered.message
+        preview = preview_reprocessing(kb_dir, failed.source_id)
+        assert preview["status"] == "ready" and preview["original"]["available"]
+        recovered = reprocess_source(kb_dir, failed.source_id, version=preview["version"])
     assert recovered.status == "added", recovered.message
-    assert recovered.source_revision_id == failed.source_revision_id
-    assert recovered.units[0].target_revision_id == failed.units[0].target_revision_id
+    assert recovered.source_id == failed.source_id
+    assert (recovered.source_revision_id != failed.source_revision_id) == upgraded
+    assert (recovered.units[0].target_revision_id != failed.units[0].target_revision_id) == upgraded
+    saved = read_document_source(kb_dir, recovered.source_id)
+    assert (kb_dir / saved["original_path"]).read_bytes() == original
 
 
-def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
+def test_office_font_fallback_keeps_symbols_and_cjk_readable(
     kb_dir, writer_document, office_runtime, tmp_path
 ):
     import pymupdf
@@ -157,14 +178,17 @@ def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
     with pymupdf.open(pdf_path) as pdf:
         assert pdf.page_count == 1
         assert "80+ 40+ 100+ 20- 2× 50% 中文" in pdf[0].get_text()
-        fonts = {
-            span["font"]
-            for block in pdf[0].get_text("dict")["blocks"]
-            for line in block.get("lines", [])
-            for span in line["spans"]
-            if "+" in span["text"]
-        }
-        assert fonts == {"FrankRuhlHofshi-Bold"}
+        if sys.platform == "linux":
+            # The private font correction applies to Linux; Windows and macOS
+            # also use their recorded OS fonts, so the chosen family can differ.
+            fonts = {
+                span["font"]
+                for block in pdf[0].get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                for span in line["spans"]
+                if "+" in span["text"]
+            }
+            assert fonts == {"FrankRuhlHofshi-Bold"}
 
 
 @pytest.mark.parametrize("limit", [10, 1])

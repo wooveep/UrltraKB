@@ -108,7 +108,7 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         independent = manager.submit(other, [AskQuestion("Independent")])
         assert (
             manager.wait(independent, timeout=30).results[0].answer_outcome
-            == "insufficient_evidence"
+            == "answered"
         )
         # An external editor changes settings after actual first execution.
         # Later batch units keep the acknowledged context; a new task gets it.
@@ -117,8 +117,8 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         release.set()
         finished = manager.wait(batch, timeout=45)
         assert finished.state == "completed", finished
-        assert all(result.answer_outcome == "insufficient_evidence" for result in finished.results)
-        assert manager.wait(queued, timeout=45).results[0].answer_outcome == "insufficient_evidence"
+        assert all(result.answer_outcome == "answered" for result in finished.results)
+        assert manager.wait(queued, timeout=45).results[0].answer_outcome == "answered"
         seen = [requests.get_nowait() for _ in range(requests.qsize())]
         assert sorted(seen) == sorted(
             [

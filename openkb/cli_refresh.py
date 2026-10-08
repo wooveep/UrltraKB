@@ -8,8 +8,8 @@ import click
 
 
 def _selection(ctx, *, required=True):
+    from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
-    from openkb.cli_views import _root
 
     root = _root(ctx)
     scope = _selected_scope(ctx, root)
