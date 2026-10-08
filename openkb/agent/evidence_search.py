@@ -3,8 +3,7 @@
 import json
 from pathlib import Path
 
-from openkb.application.query_views import QuerySelection
-from openkb.state import HashRegistry
+from openkb.application.query_views import QuerySelection, read_selected_file
 
 
 def search_originals(
@@ -14,10 +13,11 @@ def search_originals(
         raise ValueError("Use 1-6 short literal subject/configuration terms")
     needles = tuple(dict.fromkeys(t.casefold().strip() for t in terms))
     hits = []
+    found_document = not doc_name
     for view in selection.views:
         if view_id and view.view_id != view_id:
             continue
-        for path, digest in sorted(view.files.items()):
+        for path in sorted(view.files):
             if not path.startswith("sources/") or not path.endswith((".json", ".md")):
                 continue
             name = (
@@ -28,21 +28,14 @@ def search_originals(
             )
             if doc_name and name != doc_name:
                 continue
+            found_document = True
             if path.endswith(".md") and any(
                 f"sources/{name}{s}" in view.files for s in (".json", ".content.json")
             ):
                 continue
-            target = (view.scope.wiki_dir / path).resolve()
-            if (
-                not target.is_relative_to(view.scope.wiki_dir)
-                or not target.is_file()
-                or HashRegistry.hash_file(target) != digest
-            ):
-                raise ValueError("Original changed after selection; start a new question")
+            data = read_selected_file(view, path)
             raw = (
-                json.loads(target.read_text("utf-8"))
-                if path.endswith(".json")
-                else target.read_text("utf-8")
+                json.loads(data) if path.endswith(".json") else data.decode("utf-8")
             )
             for locator, body in _units(raw):
                 folded = body.casefold()
@@ -52,15 +45,19 @@ def search_originals(
                 first = min(folded.index(t) for t in found)
                 hits.append(
                     {
-                        "view_id": view.view_id,
                         "doc_name": name,
                         **locator,
                         "matched_terms": found,
                         "excerpt": body[max(0, first - 120) : first + 580],
                     }
                 )
+    if not found_document:
+        raise ValueError(
+            "Document not found in this snapshot. Read index.md for valid identifiers."
+        )
     hits.sort(key=lambda hit: -len(hit["matched_terms"]))
     return {
+        "status": "matches" if hits else "no_matches",
         "coverage": "search_hits_not_exhaustive",
         "hits": hits[:12],
         "total_hits": len(hits),

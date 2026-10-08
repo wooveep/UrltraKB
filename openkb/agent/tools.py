@@ -136,7 +136,7 @@ _MIME_TYPES = {
 }
 
 
-def read_wiki_image(path: str, wiki_root: str) -> dict:
+def read_wiki_image(path: str, wiki_root: str, *, expected_digest: str | None = None) -> dict:
     """Read an image file from the wiki and return as base64 data URL.
 
     Args:
@@ -151,6 +151,7 @@ def read_wiki_image(path: str, wiki_root: str) -> dict:
         or a dict with ``type``, ``text`` keys on error.
     """
     import base64
+    import hashlib
 
     root = Path(wiki_root).resolve()
     full_path = (root / path).resolve()
@@ -166,7 +167,10 @@ def read_wiki_image(path: str, wiki_root: str) -> dict:
         full_path = alt_path
 
     mime = _MIME_TYPES.get(full_path.suffix.lower(), "image/png")
-    b64 = base64.b64encode(full_path.read_bytes()).decode()
+    data = full_path.read_bytes()
+    if expected_digest and hashlib.sha256(data).hexdigest() != expected_digest:
+        return {"type": "text", "text": "Image changed after selection; start a new question."}
+    b64 = base64.b64encode(data).decode()
     return {"type": "image", "image_url": f"data:{mime};base64,{b64}"}
 
 

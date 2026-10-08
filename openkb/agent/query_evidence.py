@@ -5,11 +5,12 @@ from typing import Literal
 
 from agents import ToolOutputImage, ToolOutputText, function_tool
 
-from openkb.agent.tools import get_wiki_page_content, read_wiki_image
+from openkb.agent.tools import read_wiki_image
 from openkb.application.query_views import (
     QuerySelection,
     QueryView,
     read_query_page,
+    read_selected_file,
     selection_current,
 )
 from openkb.state import HashRegistry
@@ -23,7 +24,7 @@ def evidence_input(input_data):
 def selection_catalog(selection: QuerySelection) -> str:
     lines = [*selection.missing]
     for view in selection.views:
-        lines.append(f"Collection: {view.view_id}")
+        lines.append("Knowledge base document catalog")
         if "index.md" in view.files:
             lines.append(read_query_page(selection, "index.md", view_id=view.view_id))
         else:
@@ -33,7 +34,7 @@ def selection_catalog(selection: QuerySelection) -> str:
                 import json
                 from pathlib import Path
 
-                pages = json.loads((view.scope.wiki_dir / name).read_text("utf-8"))
+                pages = json.loads(read_selected_file(view, name))
                 if name.endswith(".content.json"):
                     from openkb.text_source import read_text_selection
 
@@ -66,13 +67,10 @@ def selection_catalog(selection: QuerySelection) -> str:
     return "\n".join(lines) or "No permitted knowledge evidence is available."
 
 
-def _selected(selection: QuerySelection, view_id: str) -> QueryView:
-    if not view_id and len(selection.views) == 1:
-        return selection.views[0]
-    view = next((item for item in selection.views if item.view_id == view_id), None)
-    if view is None:
-        raise ValueError("Choose one of the allowed evidence views from the catalog")
-    return view
+def _selected(selection: QuerySelection) -> QueryView:
+    if len(selection.views) != 1:
+        raise ValueError("A reader requires one bound source collection")
+    return selection.views[0]
 
 
 def _available(view: QueryView, path: str) -> bool:
@@ -85,48 +83,47 @@ def _available(view: QueryView, path: str) -> bool:
     )
 
 
+def _read_error(context, error: Exception) -> str:
+    return str(error) + " Use a valid document and range from read_file(index.md)."
+
+
 def restrict_query_agent(agent, selection: QuerySelection):
     """Replace every wiki reader; preserving artifact writers grants no extra knowledge reads."""
+    if len(selection.views) > 1:
+        raise ValueError("Multiple source collections are unsupported; bind one at the application")
 
-    @function_tool
-    def read_file(path: str, view_id: str = "") -> str:
-        """Read a permitted Markdown page in one named evidence view.
+    @function_tool(failure_error_function=_read_error)
+    def read_file(path: str) -> str:
+        """Read a permitted Markdown page in the current knowledge base.
 
-        Read index.md without a view_id to see all allowed views and their pages.
-        Every other read must select a view_id when multiple versions are available.
+        Read index.md first for document identifiers and their native reading locations.
         """
-        if path == "index.md" and not view_id:
-            return selection_catalog(selection)
-        view = _selected(selection, view_id)
         if path == "index.md":
-            return selection_catalog(QuerySelection(selection.kb_dir, (view,)))
+            return selection_catalog(selection)
+        view = _selected(selection)
         return read_query_page(selection, path, view_id=view.view_id)
 
-    @function_tool
+    @function_tool(failure_error_function=_read_error)
     def get_page_content(
-        doc_name: str, pages: str, view_id: str = "", part: Literal["body", "notes"] | None = None
+        doc_name: str, pages: str, part: Literal["body", "notes"] | None = None
     ) -> str | list[ToolOutputText | ToolOutputImage]:
         """Read original physical pages from the knowledge base.
 
         For slides, part may be body or notes; null includes both without extra pages.
         """
-        view = _selected(selection, view_id)
-        if not _available(view, f"sources/{doc_name}.json"):
-            return "No permitted indexed source in this evidence view."
-        content = (
-            view.provenance
-            + "\n\n"
-            + get_wiki_page_content(doc_name, pages, str(view.scope.wiki_dir), part or None)
-        )
+        view = _selected(selection)
         from openkb.source_pages import read_page_selection, select_page_part
 
         selected = select_page_part(
             read_page_selection(
-                json.loads((view.scope.wiki_dir / f"sources/{doc_name}.json").read_text("utf-8")),
+                json.loads(read_selected_file(view, f"sources/{doc_name}.json")),
                 pages,
             ),
             part or None,
         )
+        if any(note.startswith("No recorded content") for note in selected["diagnostics"]):
+            return "Requested pages are outside the recorded range. Read index.md for valid pages."
+        content = view.provenance + "\n\n" + selected["content"]
         paths = list(
             dict.fromkeys(
                 image["path"] for unit in selected["units"] for image in unit.get("images", [])
@@ -135,7 +132,9 @@ def restrict_query_agent(agent, selection: QuerySelection):
         outputs: list[ToolOutputText | ToolOutputImage] = []
         for path in paths[:4]:
             if _available(view, path) and (view.scope.wiki_dir / path).stat().st_size <= 5_000_000:
-                image = read_wiki_image(path, str(view.scope.wiki_dir))
+                image = read_wiki_image(
+                    path, str(view.scope.wiki_dir), expected_digest=view.files[path]
+                )
                 if image["type"] == "image":
                     outputs.extend(
                         [
@@ -147,24 +146,21 @@ def restrict_query_agent(agent, selection: QuerySelection):
             content += "\nUse get_image for relevant images not attached: " + ", ".join(paths)
         return [ToolOutputText(text=content), *outputs] if outputs else content
 
-    @function_tool
-    def get_text_content(doc_name: str, chars: str, view_id: str = "", offset: int = 0) -> str:
+    @function_tool(failure_error_function=_read_error)
+    def get_text_content(doc_name: str, chars: str, offset: int = 0) -> str:
         """Read a frozen Unicode codepoint range START:END (0-based, end exclusive).
 
         Returns exact original-file locators separately from normalized text coordinates.
-        Text has no physical pages. Choose doc_name and view_id from the evidence catalog.
+        Text has no physical pages. Choose doc_name from read_file(index.md); use offset=0
+        initially, then the returned continuation for further reading.
         """
         import json
 
         from openkb.text_source import read_text_selection
 
-        view = _selected(selection, view_id)
+        view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        if not _available(view, path):
-            return "No permitted frozen text in this evidence view."
-        selected = read_text_selection(
-            json.loads((view.scope.wiki_dir / path).read_text("utf-8")), chars
-        )
+        selected = read_text_selection(json.loads(read_selected_file(view, path)), chars)
         from openkb.agent.evidence_payload import project_evidence
 
         return (
@@ -173,23 +169,20 @@ def restrict_query_agent(agent, selection: QuerySelection):
             + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
         )
 
-    @function_tool
-    def get_block_content(doc_name: str, blocks: str, view_id: str = "", offset: int = 0) -> str:
+    @function_tool(failure_error_function=_read_error)
+    def get_block_content(doc_name: str, blocks: str, offset: int = 0) -> str:
         """Read frozen blocks, original ranges and display context in one allowed view.
 
         blocks uses one-based ordinals (e.g. 1,3-5). These are not physical pages.
+        Use offset=0 initially, then the returned continuation.
         """
         import json
 
         from openkb.block_package import read_block_selection
 
-        view = _selected(selection, view_id)
+        view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        if not _available(view, path):
-            return "No permitted content blocks in this evidence view."
-        selected = read_block_selection(
-            json.loads((view.scope.wiki_dir / path).read_text("utf-8")), blocks
-        )
+        selected = read_block_selection(json.loads(read_selected_file(view, path)), blocks)
         from openkb.agent.evidence_payload import project_evidence
 
         return (
@@ -198,21 +191,19 @@ def restrict_query_agent(agent, selection: QuerySelection):
             + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
         )
 
-    @function_tool
-    def get_cell_content(doc_name: str, cells: str, view_id: str = "", offset: int = 0) -> str:
+    @function_tool(failure_error_function=_read_error)
+    def get_cell_content(doc_name: str, cells: str, offset: int = 0) -> str:
         """Read finite worksheet ranges in A1 notation, retaining cell locations.
 
-        Repeat the same range with offset=continuation for paginated results.
+        Use offset=0 initially; repeat the same range with offset=continuation.
         """
         from openkb.agent.evidence_payload import project_evidence
         from openkb.text_source import read_text_selection
         from openkb.workbooks.selection import select_cells
 
-        view = _selected(selection, view_id)
+        view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        if not _available(view, path):
-            return "No permitted worksheet in this knowledge base."
-        full = read_text_selection(json.loads((view.scope.wiki_dir / path).read_text("utf-8")))
+        full = read_text_selection(json.loads(read_selected_file(view, path)))
         selected = select_cells(full, cells)
         cursor, segments = 0, []
         for origin in selected["origin_locators"]:
@@ -227,25 +218,27 @@ def restrict_query_agent(agent, selection: QuerySelection):
             + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
         )
 
-    @function_tool
-    def search_originals(terms: list[str], view_id: str = "", doc_name: str = "") -> str:
-        """Locate phrases in the selected documents; read the matching original next."""
+    @function_tool(failure_error_function=_read_error)
+    def search_originals(terms: list[str], doc_name: str = "") -> str:
+        """Locate phrases in the current sources; read the matching original next.
+
+        Use doc_name="" to search all permitted documents, or an identifier from index.md.
+        Empty results only mean this literal search found no matches.
+        """
         from openkb.agent.evidence_search import search_originals as search
 
-        if view_id:
-            _selected(selection, view_id)
-        return json.dumps(
-            search(selection, terms, view_id=view_id, doc_name=doc_name), ensure_ascii=False
-        )
+        return json.dumps(search(selection, terms, doc_name=doc_name), ensure_ascii=False)
 
-    @function_tool
-    def get_image(image_path: str, view_id: str = "") -> ToolOutputImage | ToolOutputText:
-        """View a retained image belonging to one permitted evidence view."""
-        view = _selected(selection, view_id)
-        path = image_path if _available(view, image_path) else f"sources/{image_path}"
-        if not _available(view, path):
-            return ToolOutputText(text="No permitted image in this evidence view.")
-        result = read_wiki_image(path, str(view.scope.wiki_dir))
+    @function_tool(failure_error_function=_read_error)
+    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
+        """View a retained image at a location returned by an original source reader."""
+        view = _selected(selection)
+        path = image_path if image_path in view.files else f"sources/{image_path}"
+        try:
+            read_selected_file(view, path)
+        except ValueError as error:
+            return ToolOutputText(text=str(error))
+        result = read_wiki_image(path, str(view.scope.wiki_dir), expected_digest=view.files[path])
         return (
             ToolOutputImage(image_url=result["image_url"])
             if result["type"] == "image"

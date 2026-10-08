@@ -243,7 +243,6 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
             "get_cell_content",
             doc_name=name.removeprefix("sources/").removesuffix(".content.json"),
             cells="A1:B2,E2:F2,XFD100000",
-            view_id=view.view_id,
         )
     )
     payload, _ = json.JSONDecoder().raw_decode(result[result.index("{") :])
@@ -261,13 +260,12 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     original_bytes = frozen_path.read_bytes()
     try:
         frozen_path.write_bytes(b"{}")
-        assert "No permitted" in asyncio.run(
+        assert "changed after selection" in asyncio.run(
             invoke(
                 agent,
                 "get_cell_content",
                 doc_name=name.removeprefix("sources/").removesuffix(".content.json"),
                 cells="A1",
-                view_id=view.view_id,
             )
         )
     finally:

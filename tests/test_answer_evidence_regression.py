@@ -56,6 +56,49 @@ def source(kb_dir, *, slides=False, images=()):
     (kb_dir / "wiki/sources/manual.json").write_text(json.dumps(data))
 
 
+def test_bound_reader_schemas_only_accept_business_arguments(kb_dir):
+    expected = {
+        "read_file": {"path"},
+        "get_page_content": {"doc_name", "pages", "part"},
+        "get_text_content": {"doc_name", "chars", "offset"},
+        "get_block_content": {"doc_name", "blocks", "offset"},
+        "get_cell_content": {"doc_name", "cells", "offset"},
+        "get_image": {"image_path"},
+        "search_originals": {"terms", "doc_name"},
+    }
+    for tool in agent_for(kb_dir).tools:
+        assert set(tool.params_json_schema["properties"]) == expected[tool.name]
+
+
+@pytest.mark.asyncio
+async def test_search_distinguishes_unknown_document_from_no_phrase_match(kb_dir):
+    source(kb_dir)
+    agent = agent_for(kb_dir)
+    empty = await invoke(agent, "search_originals", terms=["unmentioned"], doc_name="manual")
+    assert json.loads(empty)["status"] == "no_matches"
+    unknown = await invoke(agent, "search_originals", terms=["VIP"], doc_name="missing")
+    assert "Document not found" in unknown
+    assert "index.md" in unknown
+
+
+@pytest.mark.asyncio
+async def test_first_catalog_read_uses_the_frozen_source_bytes(kb_dir):
+    source(kb_dir)
+    agent = agent_for(kb_dir)
+    catalog = await invoke(agent, "read_file", path="index.md")
+    assert "doc_name=manual; pages=1-1" in catalog
+    (kb_dir / "wiki/sources/manual.json").write_text("[]")
+    changed = await invoke(agent, "read_file", path="index.md")
+    assert "changed after selection" in changed
+    assert "start a new question" in changed
+
+
+def test_application_rejects_ambiguous_reading_collections(kb_dir):
+    view = selection(kb_dir).views[0]
+    with pytest.raises(ValueError, match="Multiple source collections"):
+        QuerySelection(kb_dir, (view, view))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("slides", [False, True])
 async def test_actual_tool_nullable_part_contract(kb_dir, slides):
@@ -65,10 +108,10 @@ async def test_actual_tool_nullable_part_contract(kb_dir, slides):
     schema = tool.params_json_schema["properties"]["part"]["anyOf"]
     assert {item["type"] for item in schema} == {"string", "null"}
     assert next(item["enum"] for item in schema if item["type"] == "string") == ["body", "notes"]
-    full = await invoke(agent, tool.name, doc_name="manual", pages="1", view_id="", part=None)
+    full = await invoke(agent, tool.name, doc_name="manual", pages="1", part=None)
     assert "Physical page 1" in full
-    body = await invoke(agent, tool.name, doc_name="manual", pages="1", view_id="", part="body")
-    notes = await invoke(agent, tool.name, doc_name="manual", pages="1", view_id="", part="notes")
+    body = await invoke(agent, tool.name, doc_name="manual", pages="1", part="body")
+    notes = await invoke(agent, tool.name, doc_name="manual", pages="1", part="notes")
     if slides:
         assert "Visible body" in body and "Speaker notes" not in body
         assert "Speaker notes" in notes and "Visible body" not in notes
@@ -95,6 +138,20 @@ async def test_selected_page_attaches_its_actual_image(kb_dir):
     assert isinstance(result, list)
     assert any(isinstance(item, ToolOutputImage) for item in result)
     assert any(path in item.text for item in result if isinstance(item, ToolOutputText))
+
+
+@pytest.mark.asyncio
+async def test_image_changes_have_actionable_feedback(kb_dir):
+    path = "sources/images/diagram.png"
+    image = kb_dir / "wiki" / path
+    image.write_bytes(b"original")
+    agent = agent_for(kb_dir)
+    image.write_bytes(b"changed")
+    result = await invoke(agent, "get_image", image_path=path)
+    assert "changed after selection" in result.text
+    image.unlink()
+    missing = await invoke(agent, "get_image", image_path=path)
+    assert "missing" in missing.text
 
 
 def test_answer_outcome_survives_runtime_receipt_readback():

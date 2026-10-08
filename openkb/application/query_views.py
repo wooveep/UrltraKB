@@ -10,7 +10,6 @@ from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_ingest_lock, kb_read_lock
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import read_record, read_source_revision, record_path, write_record
-from openkb.state import HashRegistry
 from openkb.unit_publication import read_head, wiki_versions
 from openkb.version_labels import version_key as _version_key
 from openkb.view_records import DocumentFamily, FamilyDefault, KnowledgeView
@@ -49,6 +48,10 @@ class QuerySelection:
     views: tuple[QueryView, ...]
     missing: tuple[str, ...] = ()
     candidates: tuple[dict, ...] = ()
+
+    def __post_init__(self):
+        if len(self.views) > 1:
+            raise ValueError("Multiple source collections are unsupported; bind one at application")
 
     @property
     def has_evidence(self) -> bool:
@@ -307,23 +310,40 @@ def resolve_query_views(
         return QuerySelection(root, selected, missing)
 
 
+def read_selected_file(view: QueryView, path: str) -> bytes:
+    """Read and verify the exact bytes bound to this request, including catalog inputs."""
+    import hashlib
+
+    root = view.scope.wiki_dir.resolve()
+    target = (root / path).resolve()
+    if Path(path).is_absolute() or not target.is_relative_to(root):
+        raise ValueError("Access denied: path escapes wiki root. Use a path from index.md.")
+    if path not in view.files:
+        raise ValueError("Document or image not found in this reading snapshot. Read index.md.")
+    if not target.is_file():
+        raise ValueError("Selected document or image is missing; start a new question.")
+    data = target.read_bytes()
+    if hashlib.sha256(data).hexdigest() != view.files[path]:
+        raise ValueError("Evidence changed after selection; start a new question.")
+    return data
+
+
 def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> str:
     """A caller can only read the evidence captured in this selection."""
     view = next((view for view in selection.views if view.view_id == view_id), None)
     if view is None:
         raise ValueError("Requested view is outside this question's evidence scope")
-    target = (view.scope.wiki_dir / path).resolve()
-    if not target.is_relative_to(view.scope.wiki_dir) or path not in view.files:
-        return "No permitted evidence for this page."
-    if not target.is_file() or HashRegistry.hash_file(target) != view.files[path]:
-        return "Evidence changed after selection; start a new question."
+    try:
+        data = read_selected_file(view, path)
+    except ValueError as error:
+        return "No permitted evidence for this page. " + str(error)
     if path.endswith(".md"):
         from openkb.knowledge_evidence import page_evidence
 
         evidence = page_evidence(view.scope, path)
         if evidence["source_revision_ids"]:
             view = replace(view, source_revision_ids=evidence["source_revision_ids"])
-    return f"{view.provenance}\n\n{target.read_bytes().decode('utf-8')}"
+    return f"{view.provenance}\n\n{data.decode('utf-8')}"
 
 
 def selection_current(selection: QuerySelection) -> bool:
