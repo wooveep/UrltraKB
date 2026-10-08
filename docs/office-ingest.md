@@ -38,6 +38,13 @@ paths. Re-extract the complete application package into a fresh directory; retai
 the diagnostic if a fresh extraction still fails. Verification never rewrites the
 manifest or accepts changed binaries.
 
+After repairing the runtime without changing processing identity, use the desktop
+action “重试所选资料未完成项” or CLI `retry-source` to resume a failed import from its
+retained original. If an application upgrade changes the conversion helpers, the
+old attempt keeps its saved processing policy. Use “预览重新处理” and confirm the
+new processing request in that case. Both paths reuse the retained original;
+neither requires rebuilding the KB or recovering the original external file.
+
 Office runs in a private process and profile. The main application imports no
 UNO modules. The loader sets `MacroExecutionMode=NEVER_EXECUTE`,
 `UpdateDocMode=NO_UPDATE`, hidden and read-only mode, and aborts interaction
@@ -62,7 +69,9 @@ Windows uses a separately built Rust launcher with
 a kill-on-close Job Object; it resets DLL search state in that child before
 starting the matching Python. The launcher, supervisor and conversion worker use
 Windows' `CREATE_NO_WINDOW` process flag so probes and conversions do not open
-command-prompt windows. Private task files sit inside the application's
+command-prompt windows. Child stdout and stderr are forwarded explicitly to keep
+probe results and failure diagnostics available without a visible console.
+Private task files sit inside the application's
 owned input directory so task recovery can collect them after an abrupt exit.
 
 The packaged runtime supports Linux/Windows x86_64 and macOS Apple Silicon.

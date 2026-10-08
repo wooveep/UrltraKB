@@ -53,6 +53,10 @@ def main():
             str(Path(__file__).with_name("worker.py")),
             str(request_path),
         ],
+        # CREATE_NO_WINDOW gives the child a new hidden console. Forward the
+        # parent's streams explicitly so probe output still reaches process.log.
+        stdout=sys.stdout,
+        stderr=sys.stderr,
         start_new_session=posix,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )

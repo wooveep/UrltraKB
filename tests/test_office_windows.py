@@ -51,11 +51,17 @@ def test_windows_supervisor_does_not_create_worker_console(tmp_path, monkeypatch
 
     def launch(command, **options):
         assert options.get("creationflags", 0) & 0x08000000
+        assert options.get("stdout") is sys.stdout
+        assert options.get("stderr") is sys.stderr
         return SimpleNamespace(returncode=0, poll=lambda: 0, wait=lambda **_: 0)
 
     namespace = supervisor["main"].__globals__
     monkeypatch.setitem(
-        namespace, "sys", SimpleNamespace(platform="win32", argv=["", str(request)])
+        namespace,
+        "sys",
+        SimpleNamespace(
+            platform="win32", argv=["", str(request)], stdout=sys.stdout, stderr=sys.stderr
+        ),
     )
     monkeypatch.setitem(
         namespace, "signal", SimpleNamespace(SIGTERM=15, SIGINT=2, signal=lambda *_: None)
@@ -88,11 +94,17 @@ def test_windows_worker_does_not_create_office_console(tmp_path, monkeypatch):
 
     def launch(command, **options):
         assert options.get("creationflags", 0) & 0x08000000
+        assert options.get("stdout") is sys.stdout
+        assert options.get("stderr") is sys.stderr
         assert command[0] == "soffice.com"
         raise SpawnChecked
 
     namespace = worker["convert"].__globals__
-    monkeypatch.setitem(namespace, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setitem(
+        namespace,
+        "sys",
+        SimpleNamespace(platform="win32", stdout=sys.stdout, stderr=sys.stderr),
+    )
     monkeypatch.setitem(
         namespace, "subprocess", SimpleNamespace(Popen=launch, CREATE_NO_WINDOW=0x08000000)
     )

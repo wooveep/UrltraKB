@@ -74,7 +74,11 @@ def test_worker_starts_when_embedded_python_reports_a_directory(tmp_path):
 
     supervisor = tmp_path / "supervisor.py"
     supervisor.write_bytes(Path(processes.__file__).with_name("supervisor.py.txt").read_bytes())
-    (tmp_path / "worker.py").write_text("print('private worker started')\n", encoding="utf-8")
+    (tmp_path / "worker.py").write_text(
+        "import sys\nprint('private worker started')\n"
+        "print('private worker diagnostic', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
     identity = None
     if sys.platform == "linux":
         identity = Path(f"/proc/{os.getpid()}/stat").read_text().rsplit(")", 1)[1].split()[19]
@@ -106,3 +110,4 @@ def test_worker_starts_when_embedded_python_reports_a_directory(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "private worker started"
+    assert result.stderr.strip() == "private worker diagnostic"
