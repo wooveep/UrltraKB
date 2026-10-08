@@ -110,7 +110,7 @@ def test_inventory_detects_retargeted_links(office_tree):
     path.write_text(json.dumps(manifest), encoding="utf-8")
     validate_runtime(office_tree)
     link.unlink()
-    link.symlink_to("program/python.exe")
+    link.symlink_to(Path("program") / "python.exe")
     with pytest.raises(ValueError, match='links changed \\(1\\): \\["license-link"\\]'):
         validate_runtime(office_tree)
 
