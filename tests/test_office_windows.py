@@ -113,7 +113,7 @@ def test_windows_worker_does_not_create_office_console(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Requires the native Windows console APIs")
-def test_private_windows_python_and_descendants_have_no_visible_console(tmp_path):
+def test_private_windows_python_and_descendants_have_no_console_window(tmp_path):
     from openkb.office.policy import office_environment
     from openkb.office.processes import run_supervised
     from openkb.office.runtime import validate_runtime
@@ -127,13 +127,12 @@ def test_private_windows_python_and_descendants_have_no_visible_console(tmp_path
     check = (
         "import ctypes; "
         "ctypes.windll.kernel32.GetConsoleWindow.restype=ctypes.c_void_p; "
-        "ctypes.windll.user32.IsWindowVisible.argtypes=[ctypes.c_void_p]; "
         "window=ctypes.windll.kernel32.GetConsoleWindow(); "
-        "assert not window or not ctypes.windll.user32.IsWindowVisible(window), "
-        "'Visible Office console'; "
+        "assert not window, 'Office allocated a console window'; "
     )
     # The upstream wrapper launches its core interpreter without creation flags.
-    # Verify that these uncontrolled descendants also stay invisible.
+    # Require no window handle: visibility alone can pass in an SSH session
+    # even when the same process chain would display a console on the desktop.
     code = check + (
         "import subprocess; "
         f"subprocess.run([{python!r},'-B','-c',{check!r}],check=True); "
