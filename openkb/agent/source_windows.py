@@ -285,12 +285,22 @@ class CompileSourceWindows:
         blocks: list[dict] = [
             {
                 "type": "text",
-                "text": "Original source windows (bounded, frozen):\n"
+                "text": (
+                    "Current short-document original is supplied in full in the earlier "
+                    "document message. The windows below supplement it with linked sources.\n"
+                    if not long
+                    else ""
+                )
+                + "Original source windows (bounded, frozen):\n"
                 + json.dumps(windows, ensure_ascii=False)
                 + "\nCoverage describes only these reads. Prior generated pages are "
-                "drafts, not evidence. Unread claims are not verified. If no relevant "
-                "original is available, retain only a navigation brief. Keep OCR "
-                "transcriptions separate from generated visual interpretations.",
+                "drafts, not evidence. Unread claims are not verified. "
+                + (
+                    "If no relevant original window is available, retain only a navigation brief. "
+                    if long
+                    else "An empty supplementary list does not remove the current full original. "
+                )
+                + "Keep OCR transcriptions separate from generated visual interpretations.",
             }
         ]
         from openkb.agent.tools import read_wiki_image

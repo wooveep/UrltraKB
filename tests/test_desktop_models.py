@@ -82,6 +82,10 @@ def configure(kb, url, name):
                 "pageindex_threshold": 20,
                 "extra_headers": {"X-KB": name},
                 "timeout": 5,
+                "model_capacity": {
+                    "max_input_tokens": 65536,
+                    "tokenizer_model": "gpt-4o-mini",
+                },
             }
         ),
     )

@@ -50,6 +50,7 @@ dependencies = [
     "watchdog==6.0.0",
     "litellm==1.87.2+urltrakb.3",
     "tiktoken==0.13.0",
+    "tokenizers==0.23.1",
     "markdown-it-py==4.2.0",
     "openai-agents==0.17.3",
     # openai 2.45.0 added a required `cache_write_tokens` field to

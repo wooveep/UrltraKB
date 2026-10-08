@@ -14,6 +14,19 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_CONFIG_LOCK_PATH", tmp_path / "settings/.lock")
 
 
+@pytest.fixture
+def capacity_without_defaults(kb_dir):
+    """Capacity-policy cases start without the general fixture's explicit model limit."""
+    import yaml
+
+    from openkb.locks import atomic_write_text
+
+    path = kb_dir / ".openkb/config.yaml"
+    values = yaml.safe_load(path.read_text())
+    values.pop("model_capacity")
+    atomic_write_text(path, yaml.safe_dump(values))
+
+
 @pytest.mark.parametrize(
     "page_count,length,mode",
     [(9, "short", "full"), (10, "short", "full"), (11, "long", "segmented")],
@@ -106,7 +119,15 @@ def test_settings_preserve_pdf_policy_precedence_and_snapshot(
     ],
 )
 def test_short_pdf_uses_only_known_execution_capacity(
-    kb_dir, physical_pdf, pdf_model, model, capacity, status, mode, endpoint
+    kb_dir,
+    physical_pdf,
+    pdf_model,
+    model,
+    capacity,
+    status,
+    mode,
+    endpoint,
+    capacity_without_defaults,
 ):
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
@@ -247,7 +268,9 @@ def test_failed_compile_keeps_target_processing_visible(
 
 
 @pytest.mark.parametrize("global_layer", [True, False])
-def test_capacity_patch_preserves_unspecified_nested_values(kb_dir, global_layer):
+def test_capacity_patch_preserves_unspecified_nested_values(
+    kb_dir, global_layer, capacity_without_defaults
+):
     from openkb.application.settings import (
         apply_global_config_patch,
         apply_kb_config_patch,

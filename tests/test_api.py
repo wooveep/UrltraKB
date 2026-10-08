@@ -100,7 +100,10 @@ def test_query_non_stream_returns_json(monkeypatch, kb_dir):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "A knowledge base.", "saved_path": None}
+    payload = response.json()
+    assert payload["answer"] == "A knowledge base."
+    assert payload["saved_path"] is None
+    assert payload["model_usage"]["current"]["requests"] == 0
 
 
 def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
@@ -113,7 +116,6 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
         yield {"event": "delta", "data": {"text": " base."}}
         yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
 
-    monkeypatch.setattr("openkb.agent.query.build_query_agent", lambda *args, **kwargs: object())
     monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
 
     response = client.post(
@@ -125,7 +127,14 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events_from_sse(response.text)
-    assert [event["event"] for event in events] == ["start", "delta", "delta", "final", "done"]
+    assert [event["event"] for event in events] == [
+        "start",
+        "progress",
+        "delta",
+        "delta",
+        "final",
+        "done",
+    ]
     assert events[-2]["data"]["answer"] == "A knowledge base."
 
 
@@ -172,10 +181,6 @@ def test_chat_non_stream_creates_and_persists_session(monkeypatch, kb_dir):
             },
         }
 
-    monkeypatch.setattr(
-        "openkb.agent.chat.build_chat_session_agent",
-        lambda *args, **kwargs: object(),
-    )
     monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_agent_events)
 
     response = client.post(
@@ -202,7 +207,9 @@ def test_chat_stream_resumes_session(monkeypatch, kb_dir):
     session.record_turn("Hi", "Hello", [{"role": "assistant", "content": "Hello"}])
 
     async def fake_chat_events(agent, history, **kwargs):
-        assert history[-1] == {"role": "user", "content": "Again"}
+        assert history[-1]["role"] == "user"
+        assert history[-1]["content"][-1] == {"type": "input_text", "text": "Again"}
+        assert "Hello" not in json.dumps(history)
         yield {"event": "delta", "data": {"text": "Again"}}
         yield {
             "event": "final",
@@ -212,10 +219,6 @@ def test_chat_stream_resumes_session(monkeypatch, kb_dir):
             },
         }
 
-    monkeypatch.setattr(
-        "openkb.agent.chat.build_chat_session_agent",
-        lambda *args, **kwargs: object(),
-    )
     monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
 
     response = client.post(
@@ -241,7 +244,6 @@ def test_chat_stream_forwards_artifact_event(monkeypatch, kb_dir):
         }
         yield {"event": "final", "data": {"answer": "done", "history": history}}
 
-    monkeypatch.setattr("openkb.agent.chat.build_chat_session_agent", lambda *a, **k: object())
     monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
 
     response = client.post(

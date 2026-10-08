@@ -90,11 +90,14 @@ async def test_query_keeps_generated_text_without_a_fact_registration_protocol(k
 @pytest.mark.asyncio
 async def test_long_document_plan_does_not_require_added_evidence_fields(kb_dir, monkeypatch):
     from openkb.agent.compiler import _compile_concepts
+    from openkb.agent.source_windows import CompileSourceWindows
     from openkb.compilation_report import collect_compile_report
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/garden.json").write_text(
-        json.dumps([{"page": 1, "content": "Seedlings require water twice per week."}])
+        json.dumps(
+            [{"page": 1, "unit_kind": "page", "content": "Seedlings require water twice per week."}]
+        )
     )
     plan = {"concepts": {"create": [{"name": "seedlings", "title": "Seedlings"}]}}
     monkeypatch.setattr("openkb.agent.compiler._llm_call", lambda *a, **kw: json.dumps(plan))
@@ -105,7 +108,22 @@ async def test_long_document_plan_does_not_require_added_evidence_fields(kb_dir,
     monkeypatch.setattr("openkb.agent.compiler._llm_call_async", generate)
     with collect_compile_report() as report:
         await _compile_concepts(
-            wiki, kb_dir, "test", {}, {}, "Seedling care", "garden", 1, doc_type="pageindex"
+            wiki,
+            kb_dir,
+            "test",
+            {},
+            {},
+            "Seedling care",
+            "garden",
+            1,
+            doc_type="pageindex",
+            source_windows=CompileSourceWindows(
+                wiki,
+                "garden",
+                navigation=[
+                    {"title": "Seedlings", "node_id": "care", "start_index": 1, "end_index": 1}
+                ],
+            ),
         )
         report.require_complete()
     assert "Water twice per week" in (wiki / "concepts/seedlings.md").read_text()
