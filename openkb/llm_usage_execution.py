@@ -126,6 +126,8 @@ def _project(root, result, before):
     if isinstance(result, dict):
         return {**result, "model_usage": receipt}
     if hasattr(result, "model_usage"):
+        if not hasattr(result, "units"):
+            return replace(result, model_usage=receipt)
         units = tuple(
             replace(
                 unit,

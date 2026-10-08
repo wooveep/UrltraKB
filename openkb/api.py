@@ -298,6 +298,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=result.error or result.status)
         return QueryResponse(
             answer=result.answer,
+            usage=result.usage,
+            model_usage=result.model_usage,
             saved_path=result.saved_path,
             answer_outcome=result.answer_outcome,
             scope_candidates=result.scope_candidates,
@@ -347,6 +349,9 @@ def create_app() -> FastAPI:
             session_id=result.session_id,
             answer=result.answer,
             turn_count=result.turn_count,
+            context=result.context,
+            usage=result.usage,
+            model_usage=result.model_usage,
             answer_outcome=result.answer_outcome,
             scope_candidates=result.scope_candidates,
         )

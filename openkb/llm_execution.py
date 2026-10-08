@@ -15,7 +15,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable, Iterator, Mapping
 
 import litellm
@@ -24,6 +24,7 @@ from openkb.config import LlmCredentialBundle
 from openkb.llm_usage import UsageScope, active_scope
 from openkb.llm_usage_transport import observe_model_call
 from openkb.locks import LockCancelled
+from openkb.model_tokenizer import ContextCapacityError, TokenMeasure
 
 ROLES = frozenset(
     {
@@ -316,12 +317,18 @@ class CompletionExecutor:
         scope: UsageScope | None = None,
     ):
         self.bindings = bindings
-        self.policy = policy or ModelCallPolicy()
+        base_policy = policy or ModelCallPolicy()
+        self._stop_requested = threading.Event()
+        self.policy = replace(
+            base_policy,
+            cancelled=lambda: (self._stop_requested.is_set() or base_policy.cancelled()),
+        )
         self.scope = scope or active_scope()
         self._guard = threading.Lock()
         self._calls = 0
         self._stage_calls: dict[str, int] = {}
         self.request_cache: dict[str, Any] = {}
+        self.question_capacity: TokenMeasure | None = None
         self._retrieval_slots = threading.BoundedSemaphore(1)
         self._slots = threading.BoundedSemaphore(self.policy.concurrency)
         identity = {
@@ -344,6 +351,20 @@ class CompletionExecutor:
         with self._guard:
             self._stage_calls.clear()
             self.request_cache.clear()
+            self.question_capacity = None
+
+    def cancel(self) -> None:
+        self._stop_requested.set()
+
+    def check_capacity_input(self, payload, *, role="answer") -> None:
+        measure = self.question_capacity
+        if measure is not None and measure.payload_tokens(payload) > measure.input_limit:
+            message = (
+                "Prepared model input exceeds the captured capacity; current input is retained"
+            )
+            if role == "answer":
+                raise ContextCapacityError(message)
+            raise ValueError(message)  # An index/search may retain limited coverage.
 
     @property
     def stage_calls(self) -> dict[str, int]:
@@ -498,6 +519,7 @@ class CompletionExecutor:
 
     def complete(self, role: str, request: ModelRequest) -> CompletionResult:
         self.policy.check()
+        self.check_capacity_input(request.payload(), role=role)
         while not self._slots.acquire(timeout=0.05):
             self.policy.check()
         try:
@@ -538,6 +560,7 @@ class CompletionExecutor:
 
     async def acomplete(self, role: str, request: ModelRequest) -> CompletionResult:
         self.policy.check()
+        self.check_capacity_input(request.payload(), role=role)
         while not self._slots.acquire(blocking=False):
             self.policy.check()
             await asyncio.sleep(0.01)
@@ -592,6 +615,7 @@ def raise_if_terminal(error: BaseException) -> None:
             ModelDeadlineExceeded,
             litellm.AuthenticationError,
             litellm.BadRequestError,
+            ContextCapacityError,
         ),
     ):
         raise error

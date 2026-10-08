@@ -36,6 +36,7 @@ class UnitResult:
     unfinished: tuple[str, ...] = ()
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
+    context: dict | None = None
     quality_known: bool | None = None
     answer_outcome: str | None = None
     scope_candidates: tuple[dict, ...] = ()
@@ -110,6 +111,7 @@ class UnitResult:
             unfinished=tuple(value.get("unfinished", ())),
             usage=value.get("usage"),
             model_usage=value.get("model_usage"),
+            context=value.get("context"),
             quality_known=value.get("quality_known"),
             answer_outcome=value.get("answer_outcome"),
             scope_candidates=tuple(value.get("scope_candidates", ())),

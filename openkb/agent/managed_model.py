@@ -116,6 +116,25 @@ class ManagedAgentModel(Model):
 
     def _arguments(self, args, kwargs):
         args = list(args)
+
+        def argument(name, index):
+            return kwargs[name] if name in kwargs else args[index] if len(args) > index else None
+
+        tools = argument("tools", 3) or []
+        self.executor.check_capacity_input(
+            {
+                "instructions": argument("system_instructions", 0),
+                "input": argument("input", 1),
+                "tools": [
+                    {
+                        "name": getattr(t, "name", ""),
+                        "description": getattr(t, "description", ""),
+                        "parameters": getattr(t, "params_json_schema", {}),
+                    }
+                    for t in tools
+                ],
+            }
+        )
         settings = kwargs.get("model_settings") if "model_settings" in kwargs else args[2]
         # Only validated generation extras can pass through this algorithm seam.
         extras = dict(settings.extra_args or {})

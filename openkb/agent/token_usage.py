@@ -61,3 +61,24 @@ def add_usage(previous: dict | None, current: dict | None) -> dict | None:
         return previous
     usage = TokenUsage.from_dict(current)
     return (TokenUsage.from_dict(previous).plus(usage) if previous is not None else usage).to_dict()
+
+
+def execution_usage(fallback: dict | None = None) -> dict | None:
+    """Project the shared transport ledger; SDK-only callers keep their reported usage."""
+    from openkb.llm_usage import active_scope, aggregate_usage
+
+    scope = active_scope()
+    if scope is None:
+        return fallback
+    total = aggregate_usage(scope.kb_dir, execution_ids=[scope.execution_id])
+    if not total["requests"]:
+        return fallback
+    unknown = total["unknown_fields"]
+    cached = None if unknown["cached_input"] else total["cached_input"]
+    input_total = None if unknown["input_total"] else total["input_total"]
+    return TokenUsage(
+        cached,
+        input_total - cached if input_total is not None and cached is not None else None,
+        None if unknown["output_total"] else total["output_total"],
+        None if unknown["reasoning_output"] else total["reasoning_output"],
+    ).to_dict()

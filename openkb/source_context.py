@@ -49,6 +49,8 @@ mentions one change does not establish that other properties stay unchanged. Do 
 add "still", "unaffected" or invariant claims unless the source supports that relation.
 Historical user context explains intent, preferences and corrections; it does not prove
 knowledge-base facts. Historical assistant text is not evidence.
+If a reference such as "the second method" cannot be resolved from real user statements,
+ask the user to identify it. Do not reconstruct omitted assistant answers or guess.
 """
 
 

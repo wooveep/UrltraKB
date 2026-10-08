@@ -164,6 +164,7 @@ async def iter_agent_response_events(
     max_turns: int = MAX_TURNS,
     run_config: Any = None,
     selection: QuerySelection | None = None,
+    readers_bound: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for a streamed agent response.
 
@@ -196,7 +197,8 @@ async def iter_agent_response_events(
                 },
             }
             return
-        agent = restrict_query_agent(agent, selection)
+        if not readers_bound:
+            agent = restrict_query_agent(agent, selection)
 
     result = (
         Runner.run_streamed(
@@ -210,7 +212,7 @@ async def iter_agent_response_events(
     )
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
-    from openkb.agent.token_usage import TokenUsage, add_usage
+    from openkb.agent.token_usage import TokenUsage, add_usage, execution_usage
 
     usage = None
 
@@ -226,7 +228,7 @@ async def iter_agent_response_events(
                     )
                     current = TokenUsage.from_provider(reported).to_dict()
                     usage = add_usage(usage, current)
-                    yield {"event": "usage", "data": usage}
+                    yield {"event": "usage", "data": execution_usage(usage)}
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     text = event.data.delta
                     if text:
@@ -275,7 +277,7 @@ async def iter_agent_response_events(
         "data": {
             "answer": answer,
             "history": history,
-            "usage": usage,
+            "usage": execution_usage(usage),
             "answer_outcome": answer_outcome,
             "evidence_audit": None,
             "scope_candidates": selection.candidates if selection else (),

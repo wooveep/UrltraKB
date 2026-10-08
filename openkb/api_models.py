@@ -40,6 +40,8 @@ class QueryRequest(ViewRequest):
 
 class QueryResponse(BaseModel):
     answer: str
+    usage: dict[str, int | None] | None = None
+    model_usage: dict | None = None
     scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     saved_path: str | None = None
     answer_outcome: (
@@ -62,6 +64,9 @@ class ChatResponse(BaseModel):
     session_id: str
     answer: str
     turn_count: int
+    usage: dict[str, int | None] | None = None
+    model_usage: dict | None = None
+    context: dict | None = None
     scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     answer_outcome: (
         Literal[

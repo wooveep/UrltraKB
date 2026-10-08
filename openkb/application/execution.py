@@ -50,7 +50,9 @@ class ExecutionContext:
         from openkb.llm_usage_execution import import_usage_execution
 
         with (
-            import_usage_execution(kb_dir, "model_task", task_id=self.usage_task_id),
+            import_usage_execution(
+                kb_dir, "model_task", task_id=self.usage_task_id, on_event=self.on_event
+            ),
             self.snapshot.activate(),
             self.executor.activate(),
         ):

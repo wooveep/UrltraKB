@@ -91,6 +91,12 @@ def test_knowledge_projection_retrieves_multiple_sources_and_invalidates_changed
     (kb_dir / "wiki/sources/beta.md").write_text("Beta recommends 24 slots.")
     captured = selection(kb_dir)
     executor = executor_for(model_service)
+    from openkb.config_state import capture_config
+    from openkb.locks import kb_ingest_lock
+    from openkb.model_tokenizer import question_measure
+
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        executor.question_capacity = question_measure(capture_config(kb_dir))
     search = KnowledgeRetrieval(captured, executor)
     projection = search.ensure_projection()
     assert model_service.requests == []
@@ -126,7 +132,8 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     from openkb.locks import atomic_write_text
 
     (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\n"
+        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
     )
     (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
     from agents import set_tracing_disabled
@@ -167,9 +174,11 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     def answer(request):
         tools = [m["content"] for m in request["messages"] if m["role"] == "tool"]
         assert len(tools) == 2
-        assert "Alpha requires 12 slots." in tools[-1]
-        assert "Beta recommends 24 slots." in tools[-1]
+        assert "Alpha requires 12 slots." in tools[0]
+        assert "Beta recommends 24 slots." in tools[0]
         assert json.loads(tools[-1])["cache_hit"] is True
+        assert all(hit["coverage"] == "already_returned" for hit in json.loads(tools[-1])["hits"])
+        assert json.loads(tools[-1])["question_context_tokens"] <= 6000
         return streamed_response(
             {"role": "assistant", "content": "Alpha requires 12; Beta recommends 24."}
         )
@@ -185,3 +194,61 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     receipts = read_requests(kb_dir)
     assert len(receipts) == 5
     assert {r.operation for r in receipts} == {"knowledge_retrieval", "answer"}
+
+
+def test_projection_keeps_selected_publication_identity_after_source_update(kb_dir, model_service):
+    import pymupdf
+
+    from openkb.application.documents import import_document
+    from openkb.application.query_views import resolve_query_views
+    from openkb.application.views import view_scope
+    from openkb.context.projection import knowledge_forest
+    from openkb.locks import kb_ingest_lock
+    from openkb.unit_publication import read_head
+
+    (kb_dir / ".openkb/config.yaml").write_text(
+        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
+    )
+    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
+
+    def publish(name, text):
+        path = kb_dir / name
+        with pymupdf.open() as pdf:
+            pdf.new_page().insert_text((72, 72), text)
+            path.write_bytes(pdf.tobytes())
+        model_service.replies.extend(
+            (200, response({"role": "assistant", "content": json.dumps(value)}))
+            for value in ({"description": "Source", "content": text}, {})
+        )
+        result = import_document(kb_dir, path)
+        assert result.status == "added", result
+        return result
+
+    first = publish("alpha.pdf", "Original Alpha requires 12 slots.")
+    publish("beta.pdf", "Beta recommends 24 slots.")
+    revision = read_head(kb_dir, "legacy").knowledge_revision_id
+    snapshot = view_scope(kb_dir, "legacy", historical_revision=revision)
+    latest = publish("alpha.pdf", "Updated Alpha requires 36 slots.")
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        old_selection = resolve_query_views(kb_dir, "Compare slots", scope=snapshot)
+        new_selection = resolve_query_views(kb_dir, "Compare slots")
+        old = knowledge_forest(old_selection)
+        new = knowledge_forest(new_selection)
+    old_refs = [
+        leaf["source_ref"]
+        for doc in old["children"].values()
+        for leaf in doc["children"].values()
+        if leaf.get("source_ref", {}).get("doc_name") == "alpha"
+    ]
+    new_refs = [
+        leaf["source_ref"]
+        for doc in new["children"].values()
+        for leaf in doc["children"].values()
+        if leaf.get("source_ref", {}).get("doc_name") == "alpha"
+    ]
+    assert old_refs and new_refs
+    assert {ref["source_revision_id"] for ref in old_refs} == {first.source_revision_id}
+    assert {ref["unit_revision_id"] for ref in old_refs} == {first.units[0].successful_revision_id}
+    assert {ref["source_revision_id"] for ref in new_refs} == {latest.source_revision_id}
+    assert {ref["unit_revision_id"] for ref in new_refs} == {latest.units[0].successful_revision_id}

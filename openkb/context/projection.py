@@ -10,6 +10,7 @@ from pathlib import Path
 from contextdb import ConDB, TreeDB
 
 from openkb.application.query_views import QuerySelection, read_selected_file
+from openkb.lifecycle import current_generation
 from openkb.source_navigation import published_navigation
 
 PROJECTION_VERSION = "openkb-knowledge-forest-v1"
@@ -48,6 +49,7 @@ def selection_identity(selection: QuerySelection) -> dict:
         "views": [
             {
                 "kb": str(v.scope.kb_dir),
+                "kb_generation": current_generation(v.scope.kb_dir),
                 "generation": v.head_generation,
                 "knowledge_revision_id": v.knowledge_revision_id,
                 "source_revisions": v.source_revisions_by_path,
@@ -117,7 +119,13 @@ def knowledge_forest(selection: QuerySelection) -> dict:
             if path.endswith(".md") and doc_name in richer:
                 continue
             data = read_selected_file(view, path)
-            published = published_navigation(view.scope.kb_dir, view.view_id, doc_name)
+            published = published_navigation(
+                view.scope.kb_dir,
+                view.view_id,
+                doc_name,
+                knowledge_revision_id=view.knowledge_revision_id,
+                source_revision_id=view.source_revisions_by_path.get(path),
+            )
             if published and published["source_revision_id"] != view.source_revisions_by_path.get(
                 path
             ):
@@ -138,6 +146,8 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                 raw = json.loads(data)
                 source = read_text_selection(raw)
                 if source.get("block_count"):
+                    from openkb.block_package import read_block_selection
+
                     nodes = _indexed_nodes(published.get("structure", []), reference, "blocks")
                     if not nodes:
                         nodes = {
@@ -146,7 +156,7 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                                 reference,
                                 {"blocks": str(b["ordinal"])},
                             )
-                            for b in source["units"]
+                            for b in read_block_selection(raw)["units"]
                         }
                 else:
                     nodes = _text_nodes(raw, reference)

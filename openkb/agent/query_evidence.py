@@ -165,10 +165,8 @@ def restrict_query_agent(agent, selection: QuerySelection):
         if any(note.startswith("No recorded content") for note in selected["diagnostics"]):
             return "Requested pages are outside the recorded range. Read index.md for valid pages."
         content = (
-            view.provenance
-            + "\nContent nature: original page extraction; OCR is transcription, "
-            "and generated image interpretations are not source text.\n\n"
-            + selected["content"]
+            view.provenance + "\nContent nature: original page extraction; OCR is transcription, "
+            "and generated image interpretations are not source text.\n\n" + selected["content"]
         )
         paths = list(
             dict.fromkeys(

@@ -470,6 +470,8 @@ def _execute(
             answer_outcome=answer.answer_outcome,
             scope_candidates=answer.scope_candidates,
             usage=answer.usage,
+            model_usage=answer.model_usage,
+            context=answer.context,
             output_state="available",
         )
     raise ValueError("Unsupported task request")

@@ -17,7 +17,8 @@ from openkb.application.answers import save_exploration
 from openkb.application.execution import ExecutionContext
 from openkb.config import resolve_effective_config
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
-from openkb.locks import async_kb_lock, async_session_lock
+from openkb.llm_usage_execution import track_import_usage
+from openkb.locks import LockCancelled, async_kb_lock, async_session_lock
 from openkb.log import append_log
 from openkb.model_outputs import ModelOutputs
 from openkb.mutation import RecoveryRequired
@@ -35,6 +36,8 @@ class AnswerResult:
     error: str | None = None
     unfinished: tuple[str, ...] = ()
     usage: dict[str, int | None] | None = None
+    model_usage: dict | None = None
+    context: dict | None = None
     scope_candidates: tuple[dict, ...] = ()
     answer_outcome: (
         Literal[
@@ -54,6 +57,17 @@ def _validate_question(kb_dir: Path, question: str, *, scope: KnowledgeScope | N
     return root
 
 
+def _settle_usage(session: ChatSession, previous, fallback=None):
+    from openkb.agent.token_usage import add_usage, execution_usage
+
+    usage = execution_usage(fallback)
+    if usage is not None:
+        session.token_usage = add_usage(previous, usage)
+        session.save()
+    return usage
+
+
+@track_import_usage
 async def ask_question(
     kb_dir: Path,
     question: str,
@@ -84,6 +98,15 @@ async def ask_question(
             selection = resolve_query_views(root, question, scope=query_scope)
             model = config["model"]
             agent = build_query_agent(str(scope.wiki_dir), model, config["language"], bundle)
+            from openkb.model_tokenizer import ContextCapacityError, question_measure
+
+            try:
+                context.executor.question_capacity = question_measure(context.snapshot)
+                context.executor.question_capacity.require_current(question)
+            except ContextCapacityError as error:
+                return AnswerResult(
+                    "blocked", "", error=str(error), unfinished=("prepare context",)
+                )
             context.on_event({"stage": "answering"})
             stream = iter_agent_response_events(
                 agent,
@@ -127,18 +150,30 @@ async def ask_question(
                             parts.append(event["data"]["text"])
                         context.on_event(event)
             except Exception as exc:
+                from openkb.agent.token_usage import execution_usage
+
                 return AnswerResult(
-                    "blocked" if isinstance(exc, RecoveryRequired) else "failed",
+                    "blocked"
+                    if isinstance(exc, (RecoveryRequired, ContextCapacityError))
+                    else "stopped"
+                    if isinstance(exc, LockCancelled)
+                    else "failed",
                     answer or "".join(parts),
                     str(path) if path else None,
                     resources=(str(path),) if path else (),
                     changes=(f"created: {path.relative_to(root).as_posix()}",) if path else (),
-                    error=f"Question did not complete ({type(exc).__name__})",
+                    error=str(exc)
+                    if isinstance(exc, ContextCapacityError)
+                    else f"Question did not complete ({type(exc).__name__})",
                     unfinished=(unfinished_stage,),
+                    usage=execution_usage(),
                 )
-            return AnswerResult("stopped", "".join(parts))
+            from openkb.agent.token_usage import execution_usage
+
+            return AnswerResult("stopped", "".join(parts), usage=execution_usage())
 
 
+@track_import_usage
 async def continue_conversation(
     kb_dir: Path,
     message: str,
@@ -171,7 +206,9 @@ async def continue_conversation(
             session.require_view(scope.view_id)
             with context.begin(root) as bundle:
                 assert context.executor is not None
-                context.executor.begin_question()
+                executor = context.executor
+                executor.begin_question()
+                previous_usage = session.token_usage
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
 
@@ -185,9 +222,67 @@ async def continue_conversation(
                 attempt_id = session.begin_attempt(
                     message, identity=attempt_id, submission_order=submission_order
                 )
+                from openkb.model_tokenizer import ContextCapacityError, question_measure
+
+                try:
+                    executor.question_capacity = question_measure(context.snapshot)
+                    executor.question_capacity.require_current(message)
+                except Exception as error:
+                    usage = _settle_usage(session, previous_usage)
+                    return AnswerResult(
+                        "blocked"
+                        if isinstance(error, (ContextCapacityError, RecoveryRequired))
+                        else "stopped"
+                        if isinstance(error, LockCancelled)
+                        else "failed",
+                        "",
+                        session_id=session.id,
+                        turn_count=session.turn_count,
+                        resources=(str(session.path),),
+                        error=str(error)
+                        if isinstance(error, ContextCapacityError)
+                        else f"Context preparation did not complete ({type(error).__name__})",
+                        unfinished=("prepare context",),
+                        usage=usage,
+                    )
                 agent = await asyncio.to_thread(
                     build_chat_session_agent, root, session, bundle, scope=scope
                 )
+                from openkb.agent.query_evidence import restrict_query_agent
+                from openkb.application.query_views import resolve_query_views
+                from openkb.context.preparation import prepare_conversation_input
+                from openkb.context.workers import run_blocking
+
+                selection = resolve_query_views(root, message, scope=query_scope)
+                agent = restrict_query_agent(agent, selection)
+                try:
+                    prepared = await run_blocking(
+                        lambda: prepare_conversation_input(
+                            session, message, executor, agent=agent, selection=selection
+                        )
+                    )
+                except asyncio.CancelledError:
+                    _settle_usage(session, previous_usage)
+                    raise
+                except Exception as error:
+                    usage = _settle_usage(session, previous_usage)
+                    return AnswerResult(
+                        "blocked"
+                        if isinstance(error, (ContextCapacityError, RecoveryRequired))
+                        else "stopped"
+                        if isinstance(error, LockCancelled)
+                        else "failed",
+                        "",
+                        session_id=session.id,
+                        turn_count=session.turn_count,
+                        resources=(str(session.path),),
+                        error=str(error)
+                        if isinstance(error, ContextCapacityError)
+                        else f"Context preparation did not complete ({type(error).__name__})",
+                        unfinished=("prepare context",),
+                        usage=usage,
+                    )
+                context.on_event({"stage": "context_preparation", "context": prepared.diagnostics})
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(
                     agent,
@@ -197,6 +292,8 @@ async def continue_conversation(
                     outputs=(outputs := ModelOutputs()),
                     attempt_id=attempt_id,
                     scope=query_scope,
+                    selection=selection,
+                    prepared_input=prepared,
                 )
                 parts = []
                 usage = None
@@ -213,6 +310,7 @@ async def continue_conversation(
                                     resources=(*outputs.resources, str(session.path)),
                                     changes=(*outputs.changes, f"saved turn: {session.id}"),
                                     usage=event["data"].get("usage", usage),
+                                    context=prepared.diagnostics,
                                     answer_outcome=event["data"].get("answer_outcome"),
                                     scope_candidates=tuple(
                                         event["data"].get("scope_candidates", ())
@@ -225,18 +323,30 @@ async def continue_conversation(
                             if event["event"] == "usage":
                                 usage = event["data"]
                             context.on_event(event)
+                except asyncio.CancelledError:
+                    _settle_usage(session, previous_usage, usage)
+                    raise
                 except Exception as exc:
+                    usage = _settle_usage(session, previous_usage, usage)
                     return AnswerResult(
-                        "blocked" if isinstance(exc, RecoveryRequired) else "failed",
+                        "blocked"
+                        if isinstance(exc, (RecoveryRequired, ContextCapacityError))
+                        else "stopped"
+                        if isinstance(exc, LockCancelled)
+                        else "failed",
                         "".join(parts),
                         session_id=session.id,
                         turn_count=session.turn_count,
                         resources=(*outputs.resources, str(session.path)),
                         changes=outputs.changes,
-                        error=f"Conversation did not complete ({type(exc).__name__})",
+                        error=str(exc)
+                        if isinstance(exc, ContextCapacityError)
+                        else f"Conversation did not complete ({type(exc).__name__})",
                         unfinished=("complete conversation turn",),
                         usage=usage,
+                        context=prepared.diagnostics,
                     )
+                usage = _settle_usage(session, previous_usage, usage)
                 return AnswerResult(
                     "stopped",
                     "".join(parts),
@@ -246,6 +356,7 @@ async def continue_conversation(
                     changes=outputs.changes,
                     unfinished=("complete conversation turn",),
                     usage=usage,
+                    context=prepared.diagnostics,
                 )
 
 

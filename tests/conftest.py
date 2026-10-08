@@ -41,6 +41,9 @@ embedding_model: text-embedding-3-small
 llm_model: gpt-4o-mini
 chunk_size: 512
 chunk_overlap: 64
+model_capacity:
+  max_input_tokens: 65536
+  tokenizer_model: gpt-4o-mini
 """
     (openkb_dir / "config.yaml").write_text(config_yaml)
     (openkb_dir / "hashes.json").write_text(json.dumps({}))

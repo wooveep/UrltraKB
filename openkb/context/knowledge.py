@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 
-import tiktoken
 from contextdb import ConDB
 
 from openkb.application.query_views import QuerySelection, read_selected_file
@@ -49,9 +48,7 @@ class KnowledgeRetrieval:
             cached = self.executor.request_cache.get(key)
             if cached is None:
                 with open_runtime(self.selection.views[0].scope.kb_dir) as db:
-                    result = ConDB(
-                        storage=db
-                    ).query(
+                    result = ConDB(storage=db).query(
                         projection.tree_id,
                         question,
                         llm=ConDBLLMAdapter(self.executor, "knowledge_retrieval"),
@@ -72,14 +69,23 @@ class KnowledgeRetrieval:
                 self.executor.request_cache[key] = refs
             else:
                 refs = cached
-            hits, remaining = [], 6000
-            # A stable measurement for retrieval windows; final SDK capacity is checked separately.
-            encoding = tiktoken.get_encoding("cl100k_base")
+            allocation = self.executor.request_cache.setdefault(
+                "knowledge_context", {"tokens": 0, "returned": set()}
+            )
+            hits, remaining = [], 6000 - allocation["tokens"]
+            measure = self.executor.question_capacity
+            if measure is None:
+                raise ValueError("Knowledge context requires captured model capacity")
             for reference in refs:
                 hit = self._read(reference)
-                tokens = len(
-                    encoding.encode(json.dumps(hit, ensure_ascii=False), disallowed_special=())
-                )
+                identity = fingerprint(reference)
+                if identity in allocation["returned"]:
+                    hit = {
+                        **reference,
+                        "coverage": "already_returned",
+                        "reading_action": "Original text was returned earlier in this question",
+                    }
+                tokens = measure.payload_tokens(hit)
                 if tokens > remaining:
                     hit = {
                         **reference,
@@ -87,18 +93,20 @@ class KnowledgeRetrieval:
                         "content": "",
                         "reading_action": "Read this native location with the original tools",
                     }
-                    tokens = len(
-                        encoding.encode(json.dumps(hit, ensure_ascii=False), disallowed_special=())
-                    )
+                    tokens = measure.payload_tokens(hit)
                 if tokens <= remaining:
                     hits.append(hit)
                     remaining -= tokens
+                    allocation["tokens"] += tokens
+                    if hit.get("content"):
+                        allocation["returned"].add(identity)
             return {
                 "status": "completed",
                 "hits": hits,
                 "coverage": "selected_candidates",
                 "cache_hit": cached is not None,
-                "context_tokens": 6000 - remaining,
+                "context_tokens": sum(measure.payload_tokens(hit) for hit in hits),
+                "question_context_tokens": allocation["tokens"],
                 "diagnostics": [
                     "Candidates are partial coverage; missing hits do not prove absence"
                 ],

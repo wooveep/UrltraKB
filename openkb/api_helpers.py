@@ -433,6 +433,8 @@ async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[
                     data = {
                         "answer": result.answer,
                         "usage": result.usage,
+                        "model_usage": result.model_usage,
+                        "context": result.context,
                         "answer_outcome": result.answer_outcome,
                         "scope_candidates": result.scope_candidates,
                     }
@@ -443,6 +445,8 @@ async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[
                     yield _sse("final", data)
                 elif "event" in event:
                     yield _sse(event["event"], event.get("data", {}))
+                elif "stage" in event:
+                    yield _sse("progress", event)
     except Exception as exc:
         yield _sse("error", {"message": str(exc)})
     yield _sse("done", {})

@@ -65,7 +65,9 @@ class UsageAggregate(_UsageModel):
             raise ValueError("Usage request set does not match its count")
         if self.total_known != self.input_total + self.output_total:
             raise ValueError("Usage total must be the sum of known input and output")
-        if self.unknown_requests > self.requests or self.in_flight_requests > self.unknown_requests:
+        # Streaming usage can arrive before the transport is marked terminal.
+        # In-flight and unknown are independent subsets of the request set.
+        if self.unknown_requests > self.requests or self.in_flight_requests > self.requests:
             raise ValueError("Invalid unknown usage counts")
         if set(self.unknown_fields) != {
             "input_total",

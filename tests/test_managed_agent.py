@@ -259,7 +259,10 @@ async def test_real_application_commits_only_complete_answers(
 
     set_tracing_disabled(True)
     monkeypatch.setenv("LLM_API_KEY", "fixture")
-    (kb_dir / ".openkb/config.yaml").write_text("model: openai/gpt-4o-mini\nlanguage: en\n")
+    (kb_dir / ".openkb/config.yaml").write_text(
+        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
+    )
     (kb_dir / "wiki/index.md").write_text("# Knowledge\nAvailable knowledge.")
     (kb_dir / "wiki/sources/stream-fixture.md").write_text("Readable original.")
     chunks = streamed_response({"role": "assistant", "content": "Saved answer."})

@@ -17,7 +17,9 @@ def _model_catalog() -> tuple[dict, str]:
     return json.loads(raw), hashlib.sha256(raw).hexdigest()
 
 
-def capacity_policy(config: dict, *, custom_endpoint: bool, origin: str | None = None) -> dict:
+def capacity_policy(
+    config: dict, *, custom_endpoint: bool, origin: str | None = None, tokenizer_snapshot=None
+) -> dict:
     model = config["model"]
     catalog, fingerprint = _model_catalog()
     explicit = config.get("model_capacity")
@@ -27,7 +29,12 @@ def capacity_policy(config: dict, *, custom_endpoint: bool, origin: str | None =
     # token_counter's fallback encoding imply that a private model is known.
     card = catalog.get(measurement_model, {})
     known_measurement = card.get("litellm_provider") == "openai" and card.get("mode") == "chat"
-    if known_measurement:
+    from openkb.model_tokenizer import tokenizer_asset
+
+    asset = tokenizer_snapshot or tokenizer_asset(config)
+    if asset:
+        known_measurement = True
+    if known_measurement and not asset:
         import tiktoken
 
         try:
@@ -61,6 +68,7 @@ def capacity_policy(config: dict, *, custom_endpoint: bool, origin: str | None =
         "source": source,
         "unknown_reason": reason,
         "catalog_fingerprint": fingerprint,
+        "tokenizer_asset": asset,
     }
 
 
@@ -104,13 +112,13 @@ def select_execution_mode(
         config.get("language", "en"),
     )
     try:
-        import tiktoken
+        from openkb.model_tokenizer import TokenMeasure
 
-        encoding = tiktoken.encoding_for_model(policy["measurement_model"])
+        measure = TokenMeasure(policy)
         # Use the public custom-tokenizer seam to prevent LiteLLM from guessing
         # a fallback model or downloading a provider tokenizer.
-        tokenizer = SimpleNamespace(
-            encode=lambda text: SimpleNamespace(ids=encoding.encode(text, disallowed_special=()))
+        tokenizer = measure.tokenizer or SimpleNamespace(
+            encode=lambda text: SimpleNamespace(ids=measure.encode(text))
         )
         measured = litellm.token_counter(
             model=policy["measurement_model"],

@@ -70,6 +70,10 @@ def delete_conversation(
     ):
         contained_paths(root, [path])
         if not path.exists():
+            if deletion_marker(root, session_id).exists():
+                from openkb.context.conversation import delete_memory
+
+                delete_memory(root, session_id)
             return SessionResult("missing")
         load_session(root, session_id).require_view(view_id or "legacy")
         if version is not None and hashlib.sha256(path.read_bytes()).hexdigest() != version:

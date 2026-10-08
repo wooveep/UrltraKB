@@ -32,7 +32,7 @@ async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeyp
             inputs.append(history)
 
         async def stream_events(self):
-            question = self.history[-1]["content"]
+            question = self.history[-1]["content"][-1]["text"]
             if question == "First":
                 first_running.set()
                 await finish_first.wait()
@@ -71,7 +71,11 @@ async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeyp
     finish_first.set()
     outcomes = await asyncio.wait_for(asyncio.gather(first, second), 5)
     assert [result.turn_count for result in outcomes] == [2, 3]
-    assert [turn["content"] for turn in inputs[1] if turn["role"] == "user"] == ["First", "Second"]
+    assert len(inputs[1]) == 1 and inputs[1][0]["role"] == "user"
+    content = inputs[1][0]["content"]
+    assert content[-1]["text"] == "Second"
+    assert '"text": "First"' in content[0]["text"]
+    assert "Saved" not in content[0]["text"]
     saved = load_session(kb_dir, session.id)
     assert saved.user_turns == ["Original", "First", "Second"]
     assert saved.model == "openai/original"

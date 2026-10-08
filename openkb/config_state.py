@@ -130,6 +130,9 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                 if value:
                     environment[key] = value
             bundle = config.resolve_credential_bundle(kb_dir)
+            from openkb.model_tokenizer import tokenizer_asset
+
+            asset = tokenizer_asset(effective)
             if read_versions() != before:
                 continue
             if bundle.api_key:
@@ -150,6 +153,7 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                         "credentials": asdict(bundle),
                         "environment": environment,
                         "model_table": get_model_cost_map_source_info(),
+                        "tokenizer_asset": asset,
                     },
                     ensure_ascii=False,
                 ),

@@ -803,6 +803,8 @@ async def iter_chat_turn_events(
     outputs: ModelOutputs | None = None,
     attempt_id: str | None = None,
     scope: KnowledgeScope | None = None,
+    prepared_input=None,
+    selection=None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Yield non-TTY events for one chat turn and persist the final turn.
 
@@ -821,10 +823,12 @@ async def iter_chat_turn_events(
             session.reload()
             session.require_view(scope.view_id)
             append_log(scope.wiki_dir, "query", user_input, scope=scope)
-            new_input = session.history + [{"role": "user", "content": user_input}]
+            from openkb.context.preparation import recent_input
+
+            new_input = (prepared_input or recent_input(session, user_input)).sdk_input
             from openkb.application.query_views import resolve_query_views
 
-            selection = resolve_query_views(kb_dir, user_input, scope=query_scope)
+            selection = selection or resolve_query_views(kb_dir, user_input, scope=query_scope)
 
             # Accumulate the ordered, interleaved trace (narration text + tool reads) in
             # SSE arrival order, mirroring the frontend's live fold, so a RESTORED turn
@@ -847,6 +851,7 @@ async def iter_chat_turn_events(
                     max_turns=MAX_TURNS,
                     run_config=run_config,
                     selection=selection,
+                    readers_bound=prepared_input is not None,
                 )
                 async with aclosing(stream):
                     async for event in stream:
