@@ -37,6 +37,12 @@ make bundle
 make package  # Application wheel/sdist plus all four local SDK wheels
 ```
 
+To prepare and verify only the native Office runtime before a full build, run
+`python scripts/build_native_desktop.py --cache-dir /path/to/downloads --office-only`
+from the locked development environment. This checks real DOC/DOCX/PPT/PPTX
+conversion without freezing the application; Windows also requires Rust 1.95.0
+for its process launcher.
+
 All stages export `COMMIT=HEAD` by default; commit changes before building.
 `BUILD_DIR` and `DIST_DIR` override `build/packages` and `dist`. Windows users
 can run `python scripts/make_packages.py desktop` and `bundle` without Make.

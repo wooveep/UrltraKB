@@ -1,4 +1,4 @@
-# UrltraKB 1.2.1
+# UrltraKB 1.2.2
 
 基于 `dev-1.2.0` 发布原生桌面工作台、命令行和独立 REST API。
 
@@ -7,19 +7,20 @@
 - macOS Apple Silicon 新增 Word（DOC、DOCX）和 PowerPoint（PPT、PPTX）转换，内置完整锁定的 LibreOffice、私有 Python/UNO 和字体，无需安装 Microsoft Office。
 - 保留 Word 物理页、PowerPoint 隐藏幻灯片及演讲备注，继续使用统一的来源阅读与知识编译流程。
 - macOS 转换进程独立管理，应用被强制结束后清理转换子进程。
+- 修复 Windows PowerPoint 转换完成后，Office 退出时 UNO 连接释放导致成功结果被误判为失败的问题。
 - 安装包验收增加四种 Office 格式的实际转换，并检查页码、隐藏页与备注。
 
 ## 下载与安装
 
 | 平台 | 安装包 | 使用方式 |
 | --- | --- | --- |
-| Debian amd64 | `UrltraKB-1.2.1-debian-amd64.deb` | `sudo apt install ./UrltraKB-1.2.1-debian-amd64.deb` |
-| Debian arm64 | `UrltraKB-1.2.1-debian-arm64.deb` | `sudo apt install ./UrltraKB-1.2.1-debian-arm64.deb` |
-| Windows x64 | `UrltraKB-1.2.1-windows-x64.zip` | 解压后运行 `UrltraKB.exe`，保留完整目录 |
-| macOS arm64 | `UrltraKB-1.2.1-macos-arm64.zip` | 解压后将 `UrltraKB.app` 移至 Applications |
+| Debian amd64 | `UrltraKB-1.2.2-debian-amd64.deb` | `sudo apt install ./UrltraKB-1.2.2-debian-amd64.deb` |
+| Debian arm64 | `UrltraKB-1.2.2-debian-arm64.deb` | `sudo apt install ./UrltraKB-1.2.2-debian-arm64.deb` |
+| Windows x64 | `UrltraKB-1.2.2-windows-x64.zip` | 解压后运行 `UrltraKB.exe`，保留完整目录 |
+| macOS arm64 | `UrltraKB-1.2.2-macos-arm64.zip` | 解压后将 `UrltraKB.app` 移至 Applications |
 
 附件同时提供各平台对应的 `-source.zip`、`-build.json` 和统一的
-`SHA256SUMS.txt`，全部绑定 `v1.2.1` 的同一提交。程序内含 Python 运行时，
+`SHA256SUMS.txt`，全部绑定 `v1.2.2` 的同一提交。程序内含 Python 运行时，
 无需另行安装 Python；模型服务通过应用设置配置。
 
 ## 运行要求与验证范围
@@ -32,4 +33,4 @@
 - Linux/macOS 自动验收使用 Qt offscreen，不替代实机窗口、菜单和首次启动检查。
 - 应用源码和构建清单随附件提供；完整第三方源码与许可证材料审计范围另见构建文档。
 
-详见[桌面构建说明](https://github.com/wooveep/UrltraKB/blob/v1.2.1/packaging/desktop/README.md)。
+详见[桌面构建说明](https://github.com/wooveep/UrltraKB/blob/v1.2.2/packaging/desktop/README.md)。
