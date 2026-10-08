@@ -1672,8 +1672,13 @@ class TestCompileConceptsPlan:
         wiki = self._setup_wiki(
             tmp_path,
             existing_concepts={
-                "attention": "---\nsources: [old-paper.pdf]\n---\n\n# Attention\n\nOriginal content about attention.",
+                "attention": "---\nsources: [summaries/old-paper.md]\n---\n\n# Attention\n\nOriginal content about attention.",
             },
+        )
+        (wiki / "sources").mkdir(exist_ok=True)
+        (wiki / "sources/old-paper.md").write_text("Original statements about attention.")
+        (wiki / "summaries/old-paper.md").write_text(
+            "---\nfull_text: sources/old-paper.md\n---\n\nEarlier paper summary."
         )
 
         plan_response = json.dumps(
@@ -1742,7 +1747,7 @@ class TestCompileConceptsPlan:
         assert att_path.exists()
         att_text = att_path.read_text()
         assert "summaries/test-doc.md" in att_text
-        assert "old-paper.pdf" in att_text
+        assert "summaries/old-paper.md" in att_text
 
         # Verify index updated
         index_text = (wiki / "index.md").read_text()

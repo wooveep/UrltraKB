@@ -82,6 +82,7 @@ def normalize_plan(
                         "type",
                         "brief",
                         "evidence_units",
+                        "reading_locations",
                     }:
                         raise ValueError(
                             f"{location} must be a page object with name/title/type/brief"
@@ -106,6 +107,12 @@ def normalize_plan(
                 if not isinstance(title, str) or not title.strip():
                     raise ValueError(f"{location}.title must be a nonempty string")
                 value: dict = {"name": slug, "title": title.strip()}
+                if "reading_locations" in item:
+                    from openkb.agent.source_windows import validate_reading_locations
+
+                    value["reading_locations"] = validate_reading_locations(
+                        item["reading_locations"]
+                    )
                 if require_evidence and "evidence_units" not in item:
                     raise ValueError(f"{location} requires evidence_units from the original source")
                 if "evidence_units" in item:

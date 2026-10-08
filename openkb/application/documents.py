@@ -268,6 +268,7 @@ def _add_single_file_locked(
                     kb_dir,
                     model,
                     doc_description=index_result.description,
+                    navigation=index_result.tree.get("structure", []),
                     max_concurrency=resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY,
                     bundle=bundle,
                     scope=scope,

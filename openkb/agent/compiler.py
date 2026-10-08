@@ -53,14 +53,17 @@ logger = logging.getLogger(__name__)
 # is set; the templates below already do.
 _JSON_RESPONSE_FORMAT = {"type": "json_object"}
 
-_SYSTEM_TEMPLATE = """\
+_SYSTEM_TEMPLATE = (
+    """\
 You are OpenKB's wiki compilation agent for a personal knowledge base.
 
 {schema_md}
 
 Write all content in {language} language.
 Use [[wikilinks]] to connect related pages (e.g. [[concepts/attention]]).
-""" + COMPILATION_FACT_RULES
+"""
+    + COMPILATION_FACT_RULES
+)
 
 _SUMMARY_USER = """\
 New document: {doc_name}
@@ -260,8 +263,10 @@ This is a PageIndex summary for long document "{doc_name}" (doc_id: {doc_id}):
 
 {content}
 
-Based on this structured summary, write a concise overview that captures \
-the key themes and findings. This will be used to generate concept pages.
+Write a concise navigation overview of the themes and sections in this tree.
+The tree summaries are generated navigation, not original evidence for values,
+requirements or procedures. Do not add concrete specifications or guarantees
+here. Page generation will read bounded original windows separately.
 
 Return ONLY the Markdown content (no frontmatter, no code fences).
 """
@@ -1627,6 +1632,7 @@ async def _compile_concepts(
     rewrite_summary: bool = False,
     entity_types: list[str] | None = None,
     bundle=None,
+    source_windows=None,
 ) -> None:
     """Shared Steps 2-4: concepts plan → generate/update → index.
 
@@ -1654,6 +1660,9 @@ async def _compile_concepts(
     # (system + doc + summary) for the plan call and every concept call.
     summary_msg = {"role": "assistant", "content": _cached_text(summary)}
 
+    from openkb.agent.source_windows import READING_PLAN_INSTRUCTION, CompileSourceWindows
+
+    source_windows = source_windows or CompileSourceWindows(wiki_dir, doc_name, kb_dir=kb_dir)
     plan_messages = [
         system_msg,
         doc_msg,
@@ -1663,7 +1672,8 @@ async def _compile_concepts(
             "content": _CONCEPTS_PLAN_USER.format(
                 concept_briefs=concept_briefs,
                 entity_briefs=entity_briefs,
-            ).replace("__ENTITY_TYPES__", types_str),
+            ).replace("__ENTITY_TYPES__", types_str)
+            + (READING_PLAN_INSTRUCTION if doc_type == "pageindex" else ""),
         },
     ]
 
@@ -1773,6 +1783,10 @@ async def _compile_concepts(
     async def _gen_create(concept: dict) -> tuple[str, str, bool, str]:
         name = concept["name"]
         title = concept.get("title", name)
+        originals = source_windows.prepare(concept, long=doc_type == "pageindex")
+        if doc_type == "pageindex" and not originals.has_original:
+            brief, content = originals.navigation_page(title, doc_name)
+            return name, content, False, brief
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1781,6 +1795,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    originals.message,
                     {
                         "role": "user",
                         "content": _CONCEPT_PAGE_USER.format(
@@ -1808,6 +1823,12 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
+        originals = source_windows.prepare(
+            concept, f"concepts/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
+        )
+        if doc_type == "pageindex" and not originals.has_original:
+            brief, content = originals.navigation_page(title, doc_name)
+            return name, content, True, brief
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1816,6 +1837,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    originals.message,
                     {
                         "role": "user",
                         "content": _CONCEPT_UPDATE_USER.format(
@@ -1837,6 +1859,10 @@ async def _compile_concepts(
         name = ent["name"]
         title = ent.get("title", name)
         etype = ent.get("type", "other")
+        originals = source_windows.prepare(ent, long=doc_type == "pageindex")
+        if doc_type == "pageindex" and not originals.has_original:
+            brief, content = originals.navigation_page(title, doc_name)
+            return name, content, brief, etype
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1845,6 +1871,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    originals.message,
                     {
                         "role": "user",
                         "content": _ENTITY_PAGE_USER.format(
@@ -1874,6 +1901,12 @@ async def _compile_concepts(
             existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
         else:
             existing_content = "(page not found — create from scratch)"
+        originals = source_windows.prepare(
+            ent, f"entities/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
+        )
+        if doc_type == "pageindex" and not originals.has_original:
+            brief, content = originals.navigation_page(title, doc_name)
+            return name, content, brief, etype
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1882,6 +1915,7 @@ async def _compile_concepts(
                     doc_msg,  # cached (BP1)
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
+                    originals.message,
                     {
                         "role": "user",
                         "content": _ENTITY_UPDATE_USER.format(
@@ -2244,6 +2278,7 @@ async def compile_long_doc(
     bundle=None,
     *,
     scope: KnowledgeScope | None = None,
+    navigation: list[dict] | None = None,
 ) -> None:
     """Compile a long (PageIndex) document's concepts and index.
 
@@ -2297,6 +2332,22 @@ async def compile_long_doc(
     # --- Step 1: Generate overview ---
     overview = _llm_call(model, [system_msg, doc_msg], "overview", bundle=bundle)
 
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.source_navigation import stored_navigation
+
+    if navigation is None:
+        index_root = wiki_dir.parent / "index"
+        if not index_root.exists():
+            index_root = kb_dir / ".openkb"
+        navigation = stored_navigation(index_root, doc_id)
+    windows = CompileSourceWindows(
+        wiki_dir,
+        doc_name,
+        navigation=navigation,
+        kb_dir=kb_dir,
+        view_id=resolve_scope(kb_dir, scope).view_id,
+    )
+
     # --- Steps 2-4: Concept plan → generate/update → index ---
     try:
         await _compile_concepts(
@@ -2312,6 +2363,7 @@ async def compile_long_doc(
             doc_type="pageindex",
             entity_types=entity_types,
             bundle=bundle,
+            source_windows=windows,
         )
     finally:
         # Close per-loop litellm async clients before asyncio.run tears this

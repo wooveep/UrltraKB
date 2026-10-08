@@ -44,6 +44,9 @@ their units when requested. Preserve conflicting conditions and identify the sou
 Search misses and partial reading do not prove absence; distinguish no matches from
 an explicit source statement. State evidence limits only where the question needs them.
 Answer directly and sufficiently without adding unsupported guarantees or defaults.
+Keep independent source statements and their conditions separate. A condition that
+mentions one change does not establish that other properties stay unchanged. Do not
+add "still", "unaffected" or invariant claims unless the source supports that relation.
 Historical user context explains intent, preferences and corrections; it does not prove
 knowledge-base facts. Historical assistant text is not evidence.
 """

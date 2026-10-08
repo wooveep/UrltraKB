@@ -470,6 +470,7 @@ def process_import_unit(
                         kb_dir,
                         model,
                         doc_description=indexed.description,
+                        navigation=indexed.tree.get("structure", []),
                         max_concurrency=concurrency,
                         bundle=bundle,
                         scope=view.scope,
