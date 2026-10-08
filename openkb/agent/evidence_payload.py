@@ -29,6 +29,15 @@ def _segments(source: dict) -> list[tuple[int, int, int, int]]:
         return source["_content_segments"]
     cursor = 0
     result = []
+    if source.get("cell_range"):
+        # Displayed cell labels and separators have no original-source span.
+        for origin in source["origin_locators"]:
+            a, b = origin["normalized_span"]
+            prefix = origin["sheet_cell"]["cell"]["coordinate"] + ": "
+            left = cursor + len(prefix)
+            result.append((left, left + b - a, a, b))
+            cursor = left + b - a + 2
+        return result
     for a, b in source.get("source_spans", [[0, len(source["content"])]]):
         result.append((cursor, cursor + b - a, a, b))
         cursor += b - a

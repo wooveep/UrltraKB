@@ -87,14 +87,17 @@ def select_execution_mode(
 
     from openkb.agent.compiler import get_agents_md, short_document_messages
     from openkb.config import resolve_credential_bundle, resolve_effective_config
+    from openkb.config_state import active_values
     from openkb.knowledge_scope import resolve_scope
 
     config, sources = resolve_effective_config(kb_dir)
     credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
+    captured = active_values(kb_dir)
     policy = capacity_policy(
         config,
         custom_endpoint=bool(credentials.base_url),
         origin=sources.get("model_capacity", "default"),
+        tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
     )
     updates = {
         "capacity_model": policy["model"],

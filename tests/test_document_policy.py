@@ -27,6 +27,46 @@ def capacity_without_defaults(kb_dir):
     atomic_write_text(path, yaml.safe_dump(values))
 
 
+@pytest.mark.parametrize("operation", ["fingerprint", "short-document"])
+def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operation):
+    from tokenizers import Tokenizer, models
+
+    from openkb.application.settings import apply_kb_config_patch
+    from openkb.application.settings_data import KbConfigPatchRequest
+    from openkb.config_state import capture_config
+    from openkb.execution_capacity import select_execution_mode
+    from openkb.locks import kb_ingest_lock
+    from openkb.normalization import normalization_fingerprint
+    from openkb.processing_policy import classify_markdown_tokens
+
+    asset = tmp_path / "tokenizer.json"
+    Tokenizer(models.WordLevel({"[UNK]": 0, "note": 1}, unk_token="[UNK]")).save(str(asset))
+    apply_kb_config_patch(
+        kb_dir,
+        KbConfigPatchRequest(
+            kb=str(kb_dir),
+            config={
+                "model_capacity": {
+                    "max_input_tokens": 65536,
+                    "tokenizer_model": f"local:{asset}",
+                }
+            },
+        ),
+    )
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        snapshot = capture_config(kb_dir)
+    with snapshot.activate():
+        before = normalization_fingerprint(kb_dir)
+        Tokenizer(models.WordLevel({"[UNK]": 0, "changed": 1}, unk_token="[UNK]")).save(str(asset))
+        if operation == "fingerprint":
+            assert normalization_fingerprint(kb_dir) == before
+        else:
+            source = tmp_path / "source.md"
+            source.write_text("note", encoding="utf-8")
+            decision = select_execution_mode(kb_dir, classify_markdown_tokens(1), source, "note")
+            assert decision.capacity_status == "unknown"
+
+
 @pytest.mark.parametrize(
     "page_count,length,mode",
     [(9, "short", "full"), (10, "short", "full"), (11, "long", "segmented")],

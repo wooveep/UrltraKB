@@ -32,6 +32,90 @@ def rank_reply(ids):
     )
 
 
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [{"page": True, "unit_kind": "page", "content": "Invalid ordinal."}],
+        [{"page": 0, "unit_kind": "page", "content": "Invalid ordinal."}],
+        [{"page": 1, "unit_kind": "page", "content": None}],
+        [{"page": 1, "unit_kind": "page", "content": "Duplicate."}] * 2,
+    ],
+)
+def test_projection_rejects_corrupt_native_pages_before_retrieval(kb_dir, model_service, pages):
+    from openkb.context.knowledge import KnowledgeRetrieval
+    from openkb.locks import atomic_write_json
+
+    atomic_write_json(kb_dir / "wiki/sources/broken.json", pages)
+    search = KnowledgeRetrieval(selection(kb_dir), executor_for(model_service))
+    with pytest.raises(ValueError, match="Stored source"):
+        search.ensure_projection()
+    assert model_service.requests == []
+    with sqlite3.connect(kb_dir / ".openkb/context/runtime.sqlite") as db:
+        assert db.execute("SELECT count(*) FROM okb_projections").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("cell_size", [19610, 19615, 19617])
+def test_bounded_worksheet_retrieval_does_not_cover_unread_values(
+    kb_dir, tmp_path, model_service, cell_size
+):
+    from pathlib import Path
+
+    from openpyxl import Workbook
+
+    from openkb.application.documents import import_document
+    from openkb.config_state import capture_config
+    from openkb.context.knowledge import KnowledgeRetrieval
+    from openkb.locks import atomic_write_text, kb_ingest_lock
+    from openkb.model_tokenizer import question_measure
+
+    atomic_write_text(
+        kb_dir / ".env", f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n"
+    )
+    source = tmp_path / "large-cell.xlsx"
+    book = Workbook()
+    book.active["A1"] = "x" * cell_size
+    book.active["A2"] = "45"
+    book.save(source)
+    model_service.replies.extend(
+        (200, response({"role": "assistant", "content": json.dumps(value)}))
+        for value in ({"description": "Sheet", "content": "Retained cells."}, {})
+    )
+    assert import_document(kb_dir, source).status == "added"
+    captured = selection(kb_dir)
+    assert any(Path(p).name.endswith(".content.json") for p in captured.views[0].files)
+    executor = executor_for(model_service)
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        executor.question_capacity = question_measure(capture_config(kb_dir))
+    search = KnowledgeRetrieval(captured, executor)
+    projection = search.ensure_projection()
+    with sqlite3.connect(kb_dir / ".openkb/context/runtime.sqlite") as db:
+        rows = db.execute(
+            "SELECT node_id, attrs_json FROM nodes WHERE tree_id=?", (projection.tree_id,)
+        ).fetchall()
+    directories = [node for node, attrs in rows if json.loads(attrs or "{}").get("doc_name")]
+    leaves = [node for node, attrs in rows if json.loads(attrs or "{}").get("source_ref")]
+    original_reads = [
+        search._read(json.loads(attrs)["source_ref"])
+        for _, attrs in rows
+        if json.loads(attrs or "{}").get("source_ref")
+    ]
+    assert any(hit.get("cells") for hit in original_reads)
+    for hit in original_reads:
+        for cell in hit.get("cells", []):
+            if cell.get("value_complete") is not False:
+                value = "x" * cell_size if cell["coordinate"] == "A1" else "45"
+                assert f"{cell['coordinate']}: {json.dumps(value)}" in hit.get("content", "")
+    model_service.replies.extend([(200, rank_reply(directories)), (200, rank_reply(leaves))])
+    result = search.search("Read A1 and A2")
+    assert result["status"] == "completed", result
+    assert result["hits"]
+    for hit in result["hits"]:
+        for cell in hit.get("cells", []):
+            if cell.get("value_complete") is not False:
+                value = "x" * cell_size if cell["coordinate"] == "A1" else "45"
+                assert f"{cell['coordinate']}: {json.dumps(value)}" in hit.get("content", "")
+
+
 def test_condb_adapter_preserves_tools_and_shares_retry_stage_budget(kb_dir, model_service):
     from openkb.context.condb_llm import ConDBLLMAdapter
     from openkb.llm_execution import ModelRequest, StageBudgetExceeded

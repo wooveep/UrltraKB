@@ -304,19 +304,39 @@ class CompileSourceWindows:
             }
         ]
         from openkb.agent.tools import read_wiki_image
+        from openkb.markdown_images import image_references
 
         seen: set[str] = set()
         for window in windows:
-            for entry in window.get("images", []):
+            entries = list(window.get("images", []))
+            assets = window.get("assets", {})
+            for reference in image_references(window["content"]):
+                if path := reference.local_path:
+                    if path not in assets:
+                        path = f"sources/{path}"
+                    if path in assets:
+                        entries.append({"path": path, "digest": assets[path]})
+            for entry in entries:
                 image_path = entry["path"]
-                if image_path in seen or len(seen) >= 4:
+                if image_path in seen:
+                    continue
+                if len(seen) >= 4:
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"Original image unread (image limit): {image_path}",
+                        }
+                    )
                     continue
                 seen.add(image_path)
                 data = self._read(image_path)
-                if len(data) <= 5_000_000:
-                    image = read_wiki_image(
-                        image_path, str(self.wiki), expected_digest=hashlib.sha256(data).hexdigest()
+                digest = hashlib.sha256(data).hexdigest()
+                if entry.get("digest") and entry["digest"] != digest:
+                    raise PageResponseError(
+                        "page_evidence_changed", "Frozen original image changed"
                     )
+                if len(data) <= 5_000_000:
+                    image = read_wiki_image(image_path, str(self.wiki), expected_digest=digest)
                     if image["type"] == "image":
                         blocks.extend(
                             [
@@ -324,6 +344,15 @@ class CompileSourceWindows:
                                 {"type": "image_url", "image_url": {"url": image["image_url"]}},
                             ]
                         )
+                    else:
+                        raise PageResponseError("page_invalid_evidence", image["text"])
+                else:
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"Original image unread (size limit): {image_path}",
+                        }
+                    )
         return PageOriginalContext(
             {"role": "user", "content": blocks}, any(w["content"].strip() for w in windows)
         )

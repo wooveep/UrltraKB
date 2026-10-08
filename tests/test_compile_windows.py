@@ -52,6 +52,70 @@ def test_short_update_rereads_prior_originals(kb_dir, monkeypatch):
     assert "coverage" in str(update)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+async def test_long_block_compile_receives_only_selected_frozen_image(
+    kb_dir, tmp_path, monkeypatch, changed
+):
+    from PIL import Image
+
+    from openkb.agent.compiler import _compile_concepts
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.block_package import freeze_block_package
+    from openkb.inputs import prepared_input
+    from openkb.llm_images import request_image_digests
+    from openkb.locks import atomic_write_json, atomic_write_text
+    from openkb.text_source import freeze_markdown
+
+    for name, color in [("first.png", "red"), ("other.png", "blue")]:
+        Image.new("RGB", (4, 4), color).save(tmp_path / name)
+    source = tmp_path / "manual.md"
+    source.write_text(
+        "# Selected\n\n![Selected figure](first.png)\n\n"
+        "# Unrelated\n\n![Unrelated figure](other.png)\n",
+        encoding="utf-8",
+    )
+    wiki = kb_dir / "wiki"
+    with prepared_input(source) as ready:
+        frozen = freeze_markdown(ready, "manual", wiki)
+    path = wiki / "sources/manual.md"
+    atomic_write_text(path, frozen.text)
+    atomic_write_json(path.with_suffix(".content.json"), frozen.model_dump(mode="json"))
+    freeze_block_package(path, "manual")
+    end = frozen.text.index("# Unrelated")
+    item = {"name": "selected", "reading_locations": {"chars": f"0:{end}"}}
+    if changed:
+        from openkb.agent.page_response import PageResponseError
+
+        Image.new("RGB", (4, 4), "green").save(wiki / "sources/images/manual/first.png")
+        with pytest.raises(PageResponseError, match="changed"):
+            CompileSourceWindows(wiki, "manual").prepare(item, long=True)
+        return
+    requests = []
+    compile_boundary(
+        monkeypatch,
+        {"concepts": {"create": [item]}},
+        requests,
+    )
+    await _compile_concepts(
+        wiki,
+        kb_dir,
+        "test-model",
+        {"role": "system", "content": "You are a wiki compilation agent."},
+        {"role": "user", "content": "Long source navigation; read selected originals."},
+        "Figure navigation",
+        "manual",
+        1,
+        doc_type="pageindex",
+        source_windows=CompileSourceWindows(wiki, "manual"),
+    )
+    import hashlib
+
+    assert request_image_digests(requests) == {
+        hashlib.sha256((tmp_path / "first.png").read_bytes()).hexdigest()
+    }
+
+
 @pytest.mark.parametrize("suggestions", [None, {"pages": "3"}, {"pages": [3]}, {"pages": "9"}])
 def test_long_import_reads_native_windows_without_requiring_suggestions(
     kb_dir, physical_pdf, pdf_model, monkeypatch, suggestions

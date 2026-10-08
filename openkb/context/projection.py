@@ -161,7 +161,9 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                 else:
                     nodes = _text_nodes(raw, reference)
             elif path.endswith(".json"):
-                raw = json.loads(data)
+                from openkb.source_pages import read_page_selection
+
+                raw = read_page_selection(json.loads(data))["units"]
                 nodes = _indexed_nodes(published.get("structure", []), reference, "pages")
                 if not nodes:
                     nodes = {

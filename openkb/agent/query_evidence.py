@@ -244,13 +244,6 @@ def restrict_query_agent(agent, selection: QuerySelection):
         path = f"sources/{doc_name}.content.json"
         full = read_text_selection(json.loads(read_selected_file(view, path)))
         selected = select_cells(full, cells)
-        cursor, segments = 0, []
-        for origin in selected["origin_locators"]:
-            a, b = origin["normalized_span"]
-            prefix = origin["sheet_cell"]["cell"]["coordinate"] + ": "
-            segments.append((cursor + len(prefix), cursor + len(prefix) + b - a, a, b))
-            cursor += len(prefix) + b - a + 2
-        selected["_content_segments"] = segments
         return (
             view.provenance
             + "\n\n"

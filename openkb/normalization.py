@@ -45,12 +45,14 @@ def normalization_fingerprint(
 
     from openkb.agent.compiler import get_agents_md, short_document_messages
     from openkb.config import resolve_credential_bundle
+    from openkb.config_state import active_values
     from openkb.execution_capacity import capacity_policy
     from openkb.knowledge_scope import resolve_scope
     from openkb.pdf_recognition import PDF_RECOGNITION_POLICY
 
     config = resolve_effective_config(kb_dir)[0]
     credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
+    captured = active_values(kb_dir)
     request_basis = short_document_messages(
         "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
     )
@@ -136,7 +138,11 @@ def normalization_fingerprint(
             "index_endpoint": hashlib.sha256(
                 (credentials.base_url or "provider-default").encode()
             ).hexdigest(),
-            "capacity": capacity_policy(config, custom_endpoint=bool(credentials.base_url)),
+            "capacity": capacity_policy(
+                config,
+                custom_endpoint=bool(credentials.base_url),
+                tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
+            ),
             "request_basis": hashlib.sha256(
                 json.dumps(request_basis, sort_keys=True).encode()
             ).hexdigest(),
