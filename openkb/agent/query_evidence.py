@@ -13,6 +13,7 @@ from openkb.application.query_views import (
     read_selected_file,
     selection_current,
 )
+from openkb.source_context import ANSWER_SOURCE_RULES
 from openkb.state import HashRegistry
 
 
@@ -87,6 +88,17 @@ def _read_error(context, error: Exception) -> str:
     return str(error) + " Use a valid document and range from read_file(index.md)."
 
 
+def _original_payload(selected: dict, offset: int) -> dict:
+    from openkb.agent.evidence_payload import project_evidence
+
+    return {
+        **project_evidence(selected, offset=offset),
+        "content_kind": "original_source",
+        "interpretation": "Original extraction and recorded native locators; generated "
+        "image interpretations are not original text. Partial reading does not establish absence.",
+    }
+
+
 def restrict_query_agent(agent, selection: QuerySelection):
     """Replace every wiki reader; preserving artifact writers grants no extra knowledge reads."""
     if len(selection.views) > 1:
@@ -123,7 +135,12 @@ def restrict_query_agent(agent, selection: QuerySelection):
         )
         if any(note.startswith("No recorded content") for note in selected["diagnostics"]):
             return "Requested pages are outside the recorded range. Read index.md for valid pages."
-        content = view.provenance + "\n\n" + selected["content"]
+        content = (
+            view.provenance
+            + "\nContent nature: original page extraction; OCR is transcription, "
+            "and generated image interpretations are not source text.\n\n"
+            + selected["content"]
+        )
         paths = list(
             dict.fromkeys(
                 image["path"] for unit in selected["units"] for image in unit.get("images", [])
@@ -161,12 +178,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
         selected = read_text_selection(json.loads(read_selected_file(view, path)), chars)
-        from openkb.agent.evidence_payload import project_evidence
-
         return (
             view.provenance
             + "\n\n"
-            + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
+            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
         )
 
     @function_tool(failure_error_function=_read_error)
@@ -183,12 +198,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
         selected = read_block_selection(json.loads(read_selected_file(view, path)), blocks)
-        from openkb.agent.evidence_payload import project_evidence
-
         return (
             view.provenance
             + "\n\n"
-            + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
+            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
         )
 
     @function_tool(failure_error_function=_read_error)
@@ -197,7 +210,6 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         Use offset=0 initially; repeat the same range with offset=continuation.
         """
-        from openkb.agent.evidence_payload import project_evidence
         from openkb.text_source import read_text_selection
         from openkb.workbooks.selection import select_cells
 
@@ -215,7 +227,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return (
             view.provenance
             + "\n\n"
-            + json.dumps(project_evidence(selected, offset=offset), ensure_ascii=False)
+            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
         )
 
     @function_tool(failure_error_function=_read_error)
@@ -265,6 +277,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         "For text sources use get_text_content/get_block_content; for worksheets "
         "use get_cell_content. These preserve original locations. "
         "Distinguish conflicting statements using the documents themselves and cite them."
+        + ANSWER_SOURCE_RULES
     )
     return agent.clone(
         tools=[

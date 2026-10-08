@@ -343,7 +343,12 @@ def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> st
         evidence = page_evidence(view.scope, path)
         if evidence["source_revision_ids"]:
             view = replace(view, source_revision_ids=evidence["source_revision_ids"])
-    return f"{view.provenance}\n\n{data.decode('utf-8')}"
+    import json
+
+    from openkb.source_context import reading_metadata
+
+    metadata = json.dumps(reading_metadata(view, path, data), ensure_ascii=False)
+    return f"{view.provenance}\nReading metadata: {metadata}\n\n{data.decode('utf-8')}"
 
 
 def selection_current(selection: QuerySelection) -> bool:

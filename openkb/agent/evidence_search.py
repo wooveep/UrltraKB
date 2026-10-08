@@ -34,9 +34,7 @@ def search_originals(
             ):
                 continue
             data = read_selected_file(view, path)
-            raw = (
-                json.loads(data) if path.endswith(".json") else data.decode("utf-8")
-            )
+            raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
             for locator, body in _units(raw):
                 folded = body.casefold()
                 found = [t for t in needles if t in folded]

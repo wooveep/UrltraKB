@@ -40,6 +40,7 @@ from openkb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
 from openkb.llm_execution import check_model_stop, raise_if_terminal
 from openkb.locks import atomic_write_text
 from openkb.schema import INDEX_SEED, get_agents_md
+from openkb.source_context import COMPILATION_FACT_RULES
 from openkb.source_refs import scan_affected_pages as scan_affected_pages
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ You are OpenKB's wiki compilation agent for a personal knowledge base.
 
 Write all content in {language} language.
 Use [[wikilinks]] to connect related pages (e.g. [[concepts/attention]]).
-"""
+""" + COMPILATION_FACT_RULES
 
 _SUMMARY_USER = """\
 New document: {doc_name}
@@ -151,11 +152,14 @@ This concept relates to the document "{doc_name}" summarized above.
 {update_instruction}
 
 Return a JSON object with two keys:
-- "description": A single sentence (under 100 chars) defining this concept
-- "content": The full concept page in Markdown. Include clear explanation, \
-key details from the source document, and [[wikilinks]] to related concepts \
-and [[summaries/{doc_name}]] — subject to the wikilink rules from the \
-whitelist message above.
+- "description": A single sentence (under 100 chars) describing this topic as documented
+- "content": A Markdown page of the relevant original statements and supported
+  derivations. A short page is sufficient when the source is sparse. Preserve
+  conditions exactly. Related links are navigation: they do not imply effects,
+  independence, guarantees or unchanged properties between the linked topics.
+  Add a labelled synthesis only when it explains the recorded statements;
+  do not fill sections with general background or lists of unspecified rules.
+  Link [[summaries/{doc_name}]] and use the whitelist above.
 
 Return ONLY valid JSON, no fences.
 """
@@ -168,8 +172,10 @@ Current content of this page:
 
 New information from document "{doc_name}" (summarized above) should be \
 integrated into this page. Rewrite the full page incorporating the new \
-information naturally — do not just append. Preserve the existing structure \
-and intent of the page.
+information naturally — do not just append. Reconsider old generated claims
+against the originals provided for this update. Retain supported statements
+with their separate source conditions; narrow unsupported content. Related
+links are navigation and do not establish effects or invariant properties.
 
 For [[wikilinks]] in the rewrite, follow the whitelist rules from the \
 message above: keep links whose target is in the whitelist, convert any \
@@ -191,10 +197,11 @@ This entity relates to the document "{doc_name}" summarized above.
 Return a JSON object with three keys:
 - "description": A single sentence (under 100 chars) identifying this entity
 - "type": one of __ENTITY_TYPES__
-- "content": The full entity page in Markdown — what this entity is, the key
-  facts about it from this document, and [[wikilinks]] to related concepts,
-  other [[entities/...]], and [[summaries/{doc_name}]] — subject to the
-  whitelist rules from the message above.
+- "content": A Markdown page identifying the entity and reporting the relevant
+  original statements and supported derivations. Keep a sparse source's page
+  short. Related links establish no additional effects or guarantees. Omit
+  external background and irrelevant unspecified rules. Link related pages
+  and [[summaries/{doc_name}]] using the whitelist above.
 
 Return ONLY valid JSON, no fences.
 """
@@ -206,8 +213,10 @@ Current content of this page:
 {existing_content}
 
 Integrate the new facts about this entity from document "{doc_name}"
-(summarized above). Rewrite the full page — do not just append. Preserve the
-existing structure and intent. Follow the whitelist rules from the message
+(summarized above). Rewrite the full page — do not just append. Reconsider old
+generated claims against the supplied originals, retain separate conditions
+and narrow unsupported content. Related links establish no effects or invariant
+properties. Follow the whitelist rules from the message
 above for all [[wikilinks]].
 
 Return a JSON object with three keys:
@@ -227,13 +236,14 @@ Return ONLY valid JSON, no fences.
 # the ``{{ }}`` JSON braces these templates feed to ``str.format``.
 
 _SUMMARY_REWRITE_USER = """\
-Task: Rewrite the summary you wrote above into a final version that is \
-consistent with the concept pages now in the wiki (per the whitelist message \
-above).
+Task: Organize the draft summary and update its links using the whitelist.
+The original document remains authoritative; concept-page explanations must
+not become new source facts.
 
 STRICT rules:
-- Preserve every factual claim, finding, and detail from your draft. Do \
-NOT add or remove technical content, examples, or claims.
+- Preserve source-supported claims, findings, conditions and units. Correct
+  unsupported draft claims against the original, without importing new claims
+  from generated concepts or adding external advice.
 - For [[wikilinks]], follow the whitelist message above: keep valid links, \
 replace targets not in the whitelist with plain text, do not invent new \
 wikilink targets.

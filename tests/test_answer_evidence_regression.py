@@ -154,6 +154,22 @@ async def test_image_changes_have_actionable_feedback(kb_dir):
     assert "missing" in missing.text
 
 
+@pytest.mark.asyncio
+async def test_derived_page_read_points_to_original_without_certifying_its_claims(kb_dir):
+    source(kb_dir)
+    (kb_dir / "wiki/summaries/manual.md").write_text(
+        "---\ntype: Summary\nfull_text: sources/manual.json\n---\nGenerated summary"
+    )
+    (kb_dir / "wiki/concepts/rules.md").write_text(
+        "---\ntype: Concept\nsources: [summaries/manual.md]\n---\nUnsupported guarantee"
+    )
+    result = await invoke(agent_for(kb_dir), "read_file", path="concepts/rules.md")
+    assert '"content_kind": "derived_concept"' in result
+    assert '"doc_name": "manual"' in result
+    assert '"reader": "get_page_content"' in result
+    assert "not factual verification" in result
+
+
 def test_answer_outcome_survives_runtime_receipt_readback():
     from openkb.runtime.records import UnitResult
 
