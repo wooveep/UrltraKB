@@ -1,6 +1,7 @@
 """Office inputs retain original bytes and use the common physical PDF readback."""
 
 import os
+import sys
 import zipfile
 from pathlib import Path
 
@@ -154,7 +155,7 @@ def test_failed_office_import_recovers_after_runtime_repair_or_upgrade(
     assert (kb_dir / saved["original_path"]).read_bytes() == original
 
 
-def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
+def test_office_font_fallback_keeps_symbols_and_cjk_readable(
     kb_dir, writer_document, office_runtime, tmp_path
 ):
     import pymupdf
@@ -177,14 +178,17 @@ def test_private_serif_replacement_keeps_symbols_and_cjk_readable(
     with pymupdf.open(pdf_path) as pdf:
         assert pdf.page_count == 1
         assert "80+ 40+ 100+ 20- 2× 50% 中文" in pdf[0].get_text()
-        fonts = {
-            span["font"]
-            for block in pdf[0].get_text("dict")["blocks"]
-            for line in block.get("lines", [])
-            for span in line["spans"]
-            if "+" in span["text"]
-        }
-        assert fonts == {"FrankRuhlHofshi-Bold"}
+        if sys.platform == "linux":
+            # The private font correction applies to Linux; Windows and macOS
+            # also use their recorded OS fonts, so the chosen family can differ.
+            fonts = {
+                span["font"]
+                for block in pdf[0].get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                for span in line["spans"]
+                if "+" in span["text"]
+            }
+            assert fonts == {"FrankRuhlHofshi-Bold"}
 
 
 @pytest.mark.parametrize("limit", [10, 1])
