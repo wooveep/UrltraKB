@@ -21,6 +21,7 @@ from time import time_ns
 from typing import Any
 from uuid import uuid4
 
+from openkb.conversation_turns import SESSION_FORMAT_VERSION, ConversationTurn, load_turns
 from openkb.locks import atomic_write_text, kb_ingest_lock, session_lock
 from openkb.mutation import mutation_scope
 
@@ -120,21 +121,37 @@ class ChatSession:
     model: str
     language: str
     title: str
-    turn_count: int
     history: list[dict[str, Any]]
-    user_turns: list[str]
-    assistant_texts: list[str]
-    # Per-turn ordered trace (narration text + tool reads), parallel to
-    # assistant_texts. Empty for turns saved before this existed (and for
-    # CLI-recorded turns): the frontend falls back to the flat text for those.
-    assistant_traces: list[list[dict[str, Any]]]
+    turns: list[ConversationTurn]
     path: Path
     view_id: str = "legacy"
     incomplete: list[dict[str, Any]] = field(default_factory=list)
-    completed_attempts: list[str] = field(default_factory=list)
     token_usage: dict[str, int | None] | None = None
-    answer_outcomes: list[str | None] = field(default_factory=list)
     _version: str | None = field(default=None, repr=False)
+
+    @property
+    def turn_count(self) -> int:
+        return len(self.turns)
+
+    @property
+    def user_turns(self) -> list[str]:
+        return [turn.user_text for turn in self.turns]
+
+    @property
+    def assistant_texts(self) -> list[str]:
+        return [turn.assistant_text for turn in self.turns]
+
+    @property
+    def assistant_traces(self) -> list[list[dict[str, Any]]]:
+        return [deepcopy(turn.trace) for turn in self.turns]
+
+    @property
+    def completed_attempts(self) -> list[str]:
+        return [turn.attempt_id for turn in self.turns]
+
+    @property
+    def answer_outcomes(self) -> list[str | None]:
+        return [turn.answer_outcome for turn in self.turns]
 
     @classmethod
     def new(
@@ -160,11 +177,8 @@ class ChatSession:
             model=model,
             language=language,
             title="",
-            turn_count=0,
             history=[],
-            user_turns=[],
-            assistant_texts=[],
-            assistant_traces=[],
+            turns=[],
             path=_session_path(kb_dir, sid),
             view_id=view_id,
         )
@@ -176,7 +190,11 @@ class ChatSession:
             )
 
     def to_dict(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
         return {
+            "format_version": SESSION_FORMAT_VERSION,
+            "turns": [asdict(turn) for turn in self.turns],
             "id": self.id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -229,18 +247,25 @@ class ChatSession:
         usage: dict[str, int | None] | None = None,
         answer_outcome: str | None = None,
     ) -> None:
+        if attempt_id in self.completed_attempts:
+            turn = next(t for t in self.turns if t.attempt_id == attempt_id)
+            if (turn.user_text, turn.assistant_text) != (user_message, assistant_text):
+                raise ValueError("Completed conversation submission identity mismatch")
+            return
         previous = deepcopy(self.__dict__)
         try:
             from openkb.agent.token_usage import add_usage
 
             self.token_usage = add_usage(self.token_usage, usage)
-            while len(self.answer_outcomes) < len(self.assistant_texts):
-                self.answer_outcomes.append(None)
-            self.answer_outcomes.append(answer_outcome)
             if attempt_id:
-                self.completed_attempts.append(attempt_id)
+                if any(
+                    i["id"] == attempt_id and i["message"] != user_message for i in self.incomplete
+                ):
+                    raise ValueError("Conversation submission identity mismatch")
                 self.incomplete = [item for item in self.incomplete if item["id"] != attempt_id]
-            self._record_turn(user_message, assistant_text, new_history, trace)
+            self._record_turn(
+                user_message, assistant_text, new_history, trace, attempt_id, answer_outcome
+            )
         except BaseException:
             self.__dict__.update(previous)
             raise
@@ -306,19 +331,15 @@ class ChatSession:
         assistant_text: str,
         new_history: list[dict[str, Any]],
         trace: list[dict[str, Any]] | None,
+        attempt_id: str | None,
+        answer_outcome: str | None,
     ) -> None:
         self.history = sanitize_history(new_history)
-        self.user_turns.append(user_message)
-        self.assistant_texts.append(assistant_text)
-        # Keep assistant_traces aligned 1:1 with assistant_texts. A session
-        # created before traces existed (or via the CLI, which passes none)
-        # back-fills empty traces for its earlier turns so index i always maps
-        # to the same turn; an empty trace makes the frontend fall back to the
-        # flat assistant_text for that turn.
-        while len(self.assistant_traces) < len(self.assistant_texts) - 1:
-            self.assistant_traces.append([])
-        self.assistant_traces.append(trace or [])
-        self.turn_count = len(self.user_turns)
+        self.turns.append(
+            ConversationTurn.create(
+                self.turn_count + 1, user_message, assistant_text, attempt_id, trace, answer_outcome
+            )
+        )
         if not self.title:
             self.title = _title_from(user_message)
         self.updated_at = _utcnow_iso()
@@ -335,19 +356,16 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
     data = json.loads(content.decode("utf-8"))
     if not isinstance(data, dict) or data.get("id") != session_id:
         raise ValueError("Conversation identity does not match its file")
+    if data.get("format_version") != SESSION_FORMAT_VERSION:
+        raise ValueError("Unsupported conversation format; start a new conversation")
+    turns = load_turns(data.get("turns"))
     if any(not isinstance(data.get(key), str) for key in ("created_at", "updated_at", "model")):
         raise ValueError("Invalid conversation metadata")
     if any(not isinstance(data.get(key, ""), str) for key in ("title", "language")):
         raise ValueError("Invalid conversation display metadata")
-    for key in ("user_turns", "assistant_texts"):
-        value = data.get(key, [])
-        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-            raise ValueError("Invalid completed conversation text")
-    for key in ("history", "assistant_traces"):
+    for key in ("history",):
         if not isinstance(data.get(key, []), list):
             raise ValueError("Invalid conversation history")
-    if type(data.get("turn_count", 0)) is not int or data.get("turn_count", 0) < 0:
-        raise ValueError("Invalid completed conversation count")
     incomplete = data.get("incomplete", [])
     if not isinstance(incomplete, list) or any(
         not isinstance(item, dict)
@@ -356,20 +374,15 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         or type(item.get("order", 0)) is not int
         or item.get("order", 0) < 0
         or type(item.get("after_turn")) is not int
-        or not 0 <= item["after_turn"] <= data.get("turn_count", 0)
+        or not 0 <= item["after_turn"] <= len(turns)
         for item in incomplete
     ):
         raise ValueError("Invalid incomplete conversation entries")
-    completed_attempts = data.get("completed_attempts", [])
     token_usage = data.get("token_usage")
     if token_usage is not None:
         from openkb.agent.token_usage import TokenUsage
 
         token_usage = TokenUsage.from_dict(token_usage).to_dict()
-    if not isinstance(completed_attempts, list) or any(
-        not isinstance(item, str) for item in completed_attempts
-    ):
-        raise ValueError("Invalid completed submission identities")
     return ChatSession(
         id=data["id"],
         created_at=data["created_at"],
@@ -378,18 +391,11 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         language=data.get("language", "en"),
         view_id=TypeAdapter(ViewId).validate_python(data.get("view_id", "legacy")),
         title=data.get("title", ""),
-        turn_count=data.get("turn_count", 0),
         history=sanitize_history(data.get("history", [])),
-        user_turns=data.get("user_turns", []),
-        assistant_texts=data.get("assistant_texts", []),
-        assistant_traces=data.get("assistant_traces", []),
+        turns=turns,
         path=path,
         incomplete=incomplete,
-        completed_attempts=completed_attempts,
         token_usage=token_usage,
-        answer_outcomes=TypeAdapter(list[str | None]).validate_python(
-            data.get("answer_outcomes", [])
-        ),
         _version=hashlib.sha256(content).hexdigest(),
     )
 

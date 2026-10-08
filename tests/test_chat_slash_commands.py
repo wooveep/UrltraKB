@@ -301,12 +301,13 @@ def test_save_transcript_strips_ghost_wikilinks(tmp_path):
     )
 
     session = _make_session(kb_dir)
-    session.user_turns = ["What is a transformer?"]
-    session.assistant_texts = [
+    session.record_turn(
+        "What is a transformer?",
         "A transformer uses [[concepts/attention]] to model relationships. "
         "Unlike [[concepts/rnn]], it processes tokens in parallel and relies "
-        "on [[concepts/positional-encoding]] for order."
-    ]
+        "on [[concepts/positional-encoding]] for order.",
+        [],
+    )
     session.title = "transformer-q"
 
     path = _save_transcript(kb_dir, session, name=None)

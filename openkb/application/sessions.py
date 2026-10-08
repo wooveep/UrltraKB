@@ -80,6 +80,9 @@ def delete_conversation(
             with mutation_scope(root, [path, marker], operation="delete-conversation"):
                 atomic_write_text(marker, "deleted\n")
                 path.unlink()
+            from openkb.context.conversation import delete_memory
+
+            delete_memory(root, session_id)
             return SessionResult(
                 "deleted", changes=(f"deleted: {path.relative_to(root).as_posix()}",)
             )

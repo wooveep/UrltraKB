@@ -52,25 +52,14 @@ def test_record_turn_replaces_data_image_with_text_reference(tmp_path):
     assert "Call get_image again" in output_part["text"]
 
 
-def test_load_session_sanitizes_legacy_image_history(tmp_path):
+def test_load_session_sanitizes_image_history_in_current_format(tmp_path):
     session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
     raw_history = _image_history()
-    session.path.parent.mkdir(parents=True, exist_ok=True)
+    session.record_turn("Describe the diagram.", "It is a flow chart.", [])
+    document = session.to_dict()
+    document["history"] = raw_history
     session.path.write_text(
-        json.dumps(
-            {
-                "id": session.id,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-                "model": session.model,
-                "language": session.language,
-                "title": "",
-                "turn_count": 1,
-                "history": raw_history,
-                "user_turns": ["Describe the diagram."],
-                "assistant_texts": ["It is a flow chart."],
-            }
-        ),
+        json.dumps(document),
         encoding="utf-8",
     )
 
@@ -106,33 +95,16 @@ def test_record_turn_without_trace_stores_empty_list(tmp_path):
 
 
 def test_load_session_missing_traces_then_new_turn_stays_aligned(tmp_path):
-    # A session saved before traces existed: assistant_texts present, no
-    # assistant_traces key at all.
     session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
-    session.path.parent.mkdir(parents=True, exist_ok=True)
-    session.path.write_text(
-        json.dumps(
-            {
-                "id": session.id,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-                "model": session.model,
-                "language": session.language,
-                "title": "old",
-                "turn_count": 2,
-                "history": [],
-                "user_turns": ["q1", "q2"],
-                "assistant_texts": ["a1", "a2"],
-            }
-        ),
-        encoding="utf-8",
-    )
+    session.record_turn("q1", "a1", [])
+    session.record_turn("q2", "a2", [])
+    document = session.to_dict()
+    document.pop("assistant_traces")  # Display projections are optional.
+    session.path.write_text(json.dumps(document), encoding="utf-8")
 
     loaded = load_session(tmp_path, session.id)
-    assert loaded.assistant_traces == []  # backward compat: absent -> empty, no crash
+    assert loaded.assistant_traces == [[], []]
 
-    # A new turn back-fills empty traces for the two legacy turns (so index i
-    # keeps mapping to the same turn), then appends the new turn's real trace.
     new_trace = [{"kind": "text", "text": "a3"}]
     loaded.record_turn("q3", "a3", [], trace=new_trace)
     assert loaded.assistant_traces == [[], [], new_trace]
