@@ -14,7 +14,6 @@ from openkb.application.query_views import (
     selection_current,
 )
 from openkb.source_context import ANSWER_SOURCE_RULES
-from openkb.state import HashRegistry
 
 
 def evidence_input(input_data):
@@ -72,16 +71,6 @@ def _selected(selection: QuerySelection) -> QueryView:
     if len(selection.views) != 1:
         raise ValueError("A reader requires one bound source collection")
     return selection.views[0]
-
-
-def _available(view: QueryView, path: str) -> bool:
-    target = (view.scope.wiki_dir / path).resolve()
-    return (
-        target.is_relative_to(view.scope.wiki_dir)
-        and path in view.files
-        and target.is_file()
-        and HashRegistry.hash_file(target) == view.files[path]
-    )
 
 
 def _read_error(context, error: Exception) -> str:
@@ -147,10 +136,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
     @function_tool(failure_error_function=_read_error)
     def get_page_content(
         doc_name: str, pages: str, part: Literal["body", "notes"] | None = None
-    ) -> str | list[ToolOutputText | ToolOutputImage]:
+    ) -> str:
         """Read original physical pages from the knowledge base.
 
         For slides, part may be body or notes; null includes both without extra pages.
+        Images are references, not read pixels. Use get_image for relevant screenshots.
         """
         view = _selected(selection)
         from openkb.source_pages import read_page_selection, select_page_part
@@ -173,22 +163,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
                 image["path"] for unit in selected["units"] for image in unit.get("images", [])
             )
         )
-        outputs: list[ToolOutputText | ToolOutputImage] = []
-        for path in paths[:4]:
-            if _available(view, path) and (view.scope.wiki_dir / path).stat().st_size <= 5_000_000:
-                image = read_wiki_image(
-                    path, str(view.scope.wiki_dir), expected_digest=view.files[path]
-                )
-                if image["type"] == "image":
-                    outputs.extend(
-                        [
-                            ToolOutputText(text=f"Original page image: {path}"),
-                            ToolOutputImage(image_url=image["image_url"]),
-                        ]
-                    )
         if paths:
-            content += "\nUse get_image for relevant images not attached: " + ", ".join(paths)
-        return [ToolOutputText(text=content), *outputs] if outputs else content
+            content += "\nImage pixels not read. Use get_image for relevant images: " + ", ".join(
+                paths
+            )
+        return content
 
     @function_tool(failure_error_function=_read_error)
     def get_text_content(doc_name: str, chars: str, offset: int = 0) -> str:

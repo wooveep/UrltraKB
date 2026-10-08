@@ -124,21 +124,23 @@ async def test_actual_tool_nullable_part_contract(kb_dir, slides):
 
 
 @pytest.mark.asyncio
-async def test_selected_page_attaches_its_actual_image(kb_dir):
+async def test_selected_page_returns_image_location_for_explicit_read(kb_dir):
     import pymupdf
-    from agents import ToolOutputImage, ToolOutputText
+    from agents import ToolOutputImage
 
     path = "sources/diagram.png"
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 64, 64), False)
     pix.clear_with(128)
     (kb_dir / "wiki" / path).write_bytes(pix.tobytes("png"))
     source(kb_dir, images=[path])
-    result = await invoke(
-        agent_for(kb_dir), "get_page_content", doc_name="manual", pages="1", part=None
-    )
-    assert isinstance(result, list)
-    assert any(isinstance(item, ToolOutputImage) for item in result)
-    assert any(path in item.text for item in result if isinstance(item, ToolOutputText))
+    agent = agent_for(kb_dir)
+    result = await invoke(agent, "get_page_content", doc_name="manual", pages="1", part=None)
+    assert isinstance(result, str)
+    assert path in result and "not read" in result and "get_image" in result
+    assert "data:image" not in result
+    image = await invoke(agent, "get_image", image_path=path)
+    assert isinstance(image, ToolOutputImage)
+    assert image.image_url.startswith("data:image/png;base64,")
 
 
 @pytest.mark.asyncio
