@@ -58,6 +58,7 @@ def source(kb_dir, *, slides=False, images=()):
 
 def test_bound_reader_schemas_only_accept_business_arguments(kb_dir):
     expected = {
+        "search_knowledge": {"query"},
         "read_file": {"path"},
         "get_page_content": {"doc_name", "pages", "part"},
         "get_text_content": {"doc_name", "chars", "offset"},

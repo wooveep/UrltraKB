@@ -85,6 +85,9 @@ def _available(view: QueryView, path: str) -> bool:
 
 
 def _read_error(context, error: Exception) -> str:
+    from openkb.llm_execution import raise_if_terminal
+
+    raise_if_terminal(error)
     return str(error) + " Use a valid document and range from read_file(index.md)."
 
 
@@ -103,6 +106,32 @@ def restrict_query_agent(agent, selection: QuerySelection):
     """Replace every wiki reader; preserving artifact writers grants no extra knowledge reads."""
     if len(selection.views) > 1:
         raise ValueError("Multiple source collections are unsupported; bind one at the application")
+
+    from openkb.context.knowledge import KnowledgeRetrieval
+    from openkb.llm_execution import active_executor
+
+    executor = active_executor()
+    retrieval = KnowledgeRetrieval(selection, executor) if executor else None
+
+    @function_tool(failure_error_function=_read_error)
+    async def search_knowledge(query: str) -> str:
+        """Find relevant originals in this knowledge base and read bounded native locations.
+
+        Use a complete question. Returned coverage is partial; follow original reading actions
+        for unread material. Missing candidates do not establish that a fact does not exist.
+        """
+        from openkb.context.workers import run_blocking
+
+        result = (
+            await run_blocking(lambda: retrieval.search(query))
+            if retrieval
+            else {
+                "status": "unavailable",
+                "hits": [],
+                "diagnostics": ["Use read_file(index.md) and the original readers"],
+            }
+        )
+        return json.dumps(result, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
     def read_file(path: str) -> str:
@@ -265,6 +294,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         "get_image",
         "get_cell_content",
         "search_originals",
+        "search_knowledge",
         "record_source_fact",
         "read_wiki_file",
         "list_wiki_dir",
@@ -273,6 +303,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
     extra_tools = [tool for tool in agent.tools if getattr(tool, "name", None) not in readers]
     instructions = (
         "\n\n# Reading this knowledge base\n"
+        "Begin ordinary knowledge questions with search_knowledge(query). It uses the "
+        "published navigation to select multiple candidates and rereads their originals. "
+        "If you already have a valid exact source location, you may read it directly. "
+        "Generated navigation only locates evidence; it does not certify its statements. "
         "Use read_file(index.md) for the document and concept index. "
         "For text sources use get_text_content/get_block_content; for worksheets "
         "use get_cell_content. These preserve original locations. "
@@ -281,6 +315,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     )
     return agent.clone(
         tools=[
+            search_knowledge,
             read_file,
             get_page_content,
             get_text_content,

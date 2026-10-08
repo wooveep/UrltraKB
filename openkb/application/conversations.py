@@ -70,6 +70,8 @@ async def ask_question(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
     ):
         with context.begin(root) as bundle:
+            assert context.executor is not None
+            context.executor.begin_question()
             from openkb.agent.query import (
                 build_query_agent,
                 build_run_config_from_bundle,
@@ -168,6 +170,8 @@ async def continue_conversation(
                 session = load_session(root, new_session_id)
             session.require_view(scope.view_id)
             with context.begin(root) as bundle:
+                assert context.executor is not None
+                context.executor.begin_question()
                 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
                 from openkb.agent.query import build_run_config_from_bundle
 

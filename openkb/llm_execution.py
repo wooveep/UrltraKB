@@ -68,6 +68,10 @@ _GENERATION = frozenset(
 )
 
 
+class StageBudgetExceeded(RuntimeError):
+    """A bounded indexing/retrieval stage stops; the answer may use remaining task sends."""
+
+
 class ModelBudgetExceeded(RuntimeError):
     """No more requests may be sent during this execution."""
 
@@ -316,6 +320,9 @@ class CompletionExecutor:
         self.scope = scope or active_scope()
         self._guard = threading.Lock()
         self._calls = 0
+        self._stage_calls: dict[str, int] = {}
+        self.request_cache: dict[str, Any] = {}
+        self._retrieval_slots = threading.BoundedSemaphore(1)
         self._slots = threading.BoundedSemaphore(self.policy.concurrency)
         identity = {
             **bindings.public_identity(),
@@ -331,11 +338,46 @@ class CompletionExecutor:
         with self._guard:
             return self._calls
 
-    def reserve(self) -> None:
+    def begin_question(self) -> None:
+        """Renew stage allowances while preserving the task's total budget and deadline."""
+        self.policy.check()
+        with self._guard:
+            self._stage_calls.clear()
+            self.request_cache.clear()
+
+    @property
+    def stage_calls(self) -> dict[str, int]:
+        with self._guard:
+            return dict(self._stage_calls)
+
+    @contextmanager
+    def retrieval_slot(self):
+        while not self._retrieval_slots.acquire(blocking=False):
+            self.policy.check()
+            time.sleep(0.01)
+        try:
+            self.policy.check()
+            yield
+        finally:
+            self._retrieval_slots.release()
+
+    def reserve(self, role: str = "answer") -> None:
         self.policy.check()
         with self._guard:
             if self._calls >= self.policy.max_calls:
                 raise ModelBudgetExceeded("Model request budget exhausted")
+            stage = (
+                "retrieval"
+                if role in {"knowledge_retrieval", "conversation_retrieval"}
+                else "conversation_index"
+                if role == "conversation_index"
+                else None
+            )
+            limit = 8 if stage == "retrieval" else 6
+            if stage and self._stage_calls.get(stage, 0) >= limit:
+                raise StageBudgetExceeded(f"{stage} stage send allowance exhausted")
+            if stage:
+                self._stage_calls[stage] = self._stage_calls.get(stage, 0) + 1
             self._calls += 1
 
     @asynccontextmanager
@@ -399,7 +441,7 @@ class CompletionExecutor:
     def attempt(self, role: str, request: ModelRequest, logical_id: str):
         from litellm._urltrakb_auth import authentication_scope
 
-        self.reserve()
+        self.reserve(role)
         scope = active_scope() or self.scope
         if scope and self.scope and scope.kb_dir != self.scope.kb_dir:
             raise ValueError("Model execution belongs to another knowledge base")
@@ -414,7 +456,7 @@ class CompletionExecutor:
                 operation=request.operation,
                 prompt_version=request.prompt_version,
                 fingerprint=self.fingerprint,
-                before_send=self._before_send,
+                before_send=lambda count: self._before_send(count, role),
                 validate_credentials=lambda headers: self.bindings.validate_request_credentials(
                     role, headers, selected_auth=authentication.kind
                 ),
@@ -422,10 +464,10 @@ class CompletionExecutor:
         ):
             yield observed
 
-    def _before_send(self, count: int) -> None:
+    def _before_send(self, count: int, role: str = "answer") -> None:
         self.policy.check()
         if count:
-            self.reserve()  # Any additional SDK transport must use the same budget.
+            self.reserve(role)  # Additional transports share both task and stage allowances.
 
     def _result(self, response, observed, logical_id: str) -> CompletionResult:
         if observed is not None:

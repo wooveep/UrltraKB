@@ -30,6 +30,8 @@ def running_model_service(monkeypatch):
             interval = [time.monotonic(), float("inf")]
             service.intervals.append(interval)
             status, response = service.replies.pop(0)
+            if callable(response):
+                response = response(request)
             time.sleep(service.delay)
             if isinstance(response, list):
                 data = (
