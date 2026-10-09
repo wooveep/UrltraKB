@@ -28,9 +28,9 @@ class TestBuildQueryAgent:
         assert "get_page_content" in names
         assert "get_image" in names
 
-    def test_instructions_mention_get_page_content(self, tmp_path):
+    def test_instructions_use_bound_native_reading_workflow(self, tmp_path):
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
-        assert "get_page_content" in agent.instructions
+        assert "native source actions" in agent.instructions
         assert "pageindex_retrieve" not in agent.instructions
 
     def test_schema_in_instructions(self, tmp_path):

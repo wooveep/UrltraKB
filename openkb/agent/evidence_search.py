@@ -34,6 +34,9 @@ def search_originals(
             ):
                 continue
             data = read_selected_file(view, path)
+            from openkb.source_reading import native_source, reading_action
+
+            source = native_source(view, path)
             raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
             for locator, body in _units(raw):
                 folded = body.casefold()
@@ -44,6 +47,8 @@ def search_originals(
                 hits.append(
                     {
                         "doc_name": name,
+                        "unit_kind": source["unit_kind"],
+                        "reading_action": reading_action(source, locator),
                         **locator,
                         "matched_terms": found,
                         "excerpt": body[max(0, first - 120) : first + 580],

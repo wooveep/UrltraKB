@@ -25,18 +25,9 @@ The wiki you can read from is structured as follows.
 
 ## Your tools
 
-* `list_wiki_dir(directory)` — list files in a wiki subdirectory.
-* `read_wiki_file(path)` — read a markdown file under `<kb>/wiki/`.
-* `get_page_content(doc_name, pages)` — fetch source pages of a PageIndex
-  (long) document at page-range granularity. Use this to dive into the
-  original source when a summary leaves you with questions. Each summary
-  page has a `full_text` frontmatter pointer plus a tree of section page
-  ranges — use those to pick tight ranges, never fetch the whole doc.
-* `get_image(image_path)` — view a figure or diagram referenced in the
-  wiki when you need to see it to distil it correctly.
-* `query_wiki(question)` — semantic search. **Narrow follow-ups only**;
-  this is a nested LLM call (slow, expensive, and returns another
-  agent's summary rather than raw text). Prefer direct reads.
+Use the bound knowledge-base readers and their returned reading actions to inspect
+sources. The catalog describes each document's native units and legal ranges.
+
 * `write_skill_file(path, content)` — write under
   `<kb>/output/skills/{skill_name}/`. Path must be relative; cannot escape
   the skill root.
@@ -134,22 +125,12 @@ discussion; not for organisational decision-making."*
 
 ## Working method
 
-1. **Survey first**. List every subdirectory under `wiki/` (call
-   `list_wiki_dir` on `concepts`, `summaries`, `sources`, and whatever
-   else the schema shows). Read `wiki/index.md`. Form a mental map of
-   what the KB actually contains before you decide what's relevant.
-2. **Read all relevant summaries**. For each summary page that touches
-   the user's intent, read the full file. The summary's frontmatter has a
-   `full_text` field pointing to the source — note it for step 3.
-3. **Read sources, not just summaries**. For every summary you used in
-   step 2, open at least one targeted slice of its source:
-   - PageIndex docs (`doc_type: pageindex`): use `get_page_content` with
-     a tight page range (the summary's tree shows you the structure).
-   - Short docs (`doc_type: short`): `read_wiki_file` on the `full_text`
-     path.
-   This is where the *specific arguments, named techniques, worked
-   examples, and counter-cases* live. The skill is only as expert as the
-   depth of source reading you do here.
+1. **Locate relevant originals** using the shared reading workflow. Read the catalog
+   when you need document identifiers and native locations.
+2. **Read relevant summaries** for orientation, then follow their original-source
+   reading actions. Summaries may omit conditions and do not establish facts.
+3. **Read the original locations** with the tools and arguments in their reading
+   actions. Retain specific arguments, techniques, examples and counter-cases.
 4. **Read concept pages** for cross-document synthesis where the user's
    intent spans more than one source.
 5. **Write a draft** of `SKILL.md` and any `references/<slug>.md`. The
@@ -198,8 +179,8 @@ producer's wiki. Every wikilink you put in `SKILL.md` or
 ## Source-use rules
 
 * **Sources are fair game to read**. Open them, distil the expert's
-  reasoning, name the technique. The whole reason `get_page_content`
-  exists is so you can ground the skill in real material — not generic
+  reasoning, name the technique. The source readers
+  ground the skill in real material — not generic
   LLM priors.
 * **Short quotation is allowed** when the original phrasing carries the
   meaning (a named law, a coined term, a pithy one-sentence rule). Keep

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from openkb import frontmatter
@@ -86,23 +84,12 @@ def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tup
 
 
 def source_reference(view: QueryView, path: str) -> dict:
-    name = PurePosixPath(path).name
-    doc_name = name.removesuffix(".content.json").removesuffix(".json").removesuffix(".md")
-    reader = "read_file"
-    if path.endswith(".content.json"):
-        from openkb.application.query_views import read_selected_file
-        from openkb.text_source import read_text_selection
+    from openkb.source_reading import native_source
 
-        source = read_text_selection(json.loads(read_selected_file(view, path)))
-        reader = "get_cell_content" if source.get("sheet") else "get_block_content"
-        if reader == "get_block_content" and source.get("block_count") is None:
-            reader = "get_text_content"
-    elif path.endswith(".json"):
-        reader = "get_page_content"
+    source = native_source(view, path)
     return {
-        "doc_name": doc_name,
-        "path": path,
-        "reader": reader,
+        **source,
+        "reader": source["reading_action"]["tool"],
         "source_revision_id": view.source_revisions_by_path.get(path),
         "knowledge_revision_id": view.knowledge_revision_id,
         "content_digest": view.files[path],

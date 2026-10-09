@@ -145,7 +145,6 @@ async def run_skill(
     wiki_root = str(scope.wiki_dir)
     kb_root = str(kb_dir)
     base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
-    base = restrict_query_agent(base, selection)
 
     @function_tool
     def write_file(path: str, content: str) -> str:
@@ -185,6 +184,7 @@ async def run_skill(
         + intent,
         tools=[*base.tools, write_file, read_output_or_skill_file],
     )
+    agent = restrict_query_agent(agent, selection)
 
     user_seed = seed or (
         f"Follow the skill instructions above. Begin work now. User intent: {intent}"

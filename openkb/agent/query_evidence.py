@@ -29,41 +29,10 @@ def selection_catalog(selection: QuerySelection) -> str:
             lines.append(read_query_page(selection, "index.md", view_id=view.view_id))
         else:
             lines.extend(f"  {name}" for name in sorted(view.files) if name.endswith(".md"))
-        for name in sorted(view.files):
-            if name.startswith("sources/") and name.endswith(".json"):
-                import json
-                from pathlib import Path
+        from openkb.source_reading import source_capabilities
 
-                pages = json.loads(read_selected_file(view, name))
-                if name.endswith(".content.json"):
-                    from openkb.text_source import read_text_selection
-
-                    text = read_text_selection(pages)
-                    doc_name = Path(name).name.removesuffix(".content.json")
-                    if text["block_count"] is not None:
-                        lines.append(
-                            f"  Content blocks: doc_name={doc_name}; "
-                            f"blocks=1-{text['block_count']}; read with get_block_content."
-                        )
-                    lines.append(
-                        f"  Source: doc_name={doc_name}; "
-                        f"characters=0:{text['characters']}; tokens={text['tokens']}; "
-                        f"unit_kind={text['unit_kind']}; pages=none; "
-                        "use get_text_content with chars=START:END"
-                    )
-                    continue
-                if not isinstance(pages, list):
-                    raise ValueError("Indexed evidence must contain a page list")
-                from openkb.source_pages import read_page_selection
-
-                selected = read_page_selection(pages)
-                numbers = selected["page_range"]
-                available = f"{min(numbers)}-{max(numbers)}" if numbers else "none"
-                lines.append(
-                    f"  Source: doc_name={Path(name).stem}; pages={available}; "
-                    f"unit_kind={selected['unit_kind'] or 'unknown'}; "
-                    f"coverage={selected['coverage']}"
-                )
+        for source in source_capabilities(view).values():
+            lines.append(json.dumps(source, ensure_ascii=False))
     return "\n".join(lines) or "No permitted knowledge evidence is available."
 
 
@@ -77,7 +46,30 @@ def _read_error(context, error: Exception) -> str:
     from openkb.llm_execution import raise_if_terminal
 
     raise_if_terminal(error)
-    return str(error) + " Use a valid document and range from read_file(index.md)."
+    from agents.exceptions import ModelBehaviorError
+
+    from openkb.source_pages import PageRangeError
+    from openkb.source_reading import CATALOG_ACTION, ReaderFailure
+
+    code, message, action = (
+        "invalid_arguments",
+        "Use the tool's declared argument types.",
+        CATALOG_ACTION,
+    )
+    if isinstance(error, ReaderFailure):
+        code, message, action = error.code, error.message, error.action
+    elif "changed after selection" in str(error):
+        code, message = "stale_snapshot", "Evidence changed after selection; start a new question."
+    elif "missing" in str(error).lower() or "not found" in str(error).lower():
+        code, message = "content_not_found", "Document not found or image missing in this snapshot."
+    elif isinstance(error, PageRangeError):
+        code, message = "range_out_of_bounds", "Choose a recorded native range from index.md."
+    elif not isinstance(error, (ModelBehaviorError, ValueError, TypeError)):
+        code, message = "read_failed", "The source could not be read; use the catalog to recover."
+    return json.dumps(
+        {"status": "error", "reason_code": code, "message": message, "reading_action": action},
+        ensure_ascii=False,
+    )
 
 
 def _original_payload(selected: dict, offset: int) -> dict:
@@ -98,7 +90,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
     from openkb.context.knowledge import KnowledgeRetrieval
     from openkb.llm_execution import active_executor
+    from openkb.source_reading import require_reader, source_capabilities
 
+    sources = source_capabilities(_selected(selection)) if selection.views else {}
+    available = {tool for source in sources.values() for tool in source["readers"]}
     executor = active_executor()
     retrieval = KnowledgeRetrieval(selection, executor) if executor else None
 
@@ -126,34 +121,29 @@ def restrict_query_agent(agent, selection: QuerySelection):
     def read_file(path: str) -> str:
         """Read a permitted Markdown page in the current knowledge base.
 
-        Read index.md first for document identifiers and their native reading locations.
+        Use index.md for document identifiers and executable native reading actions.
         """
         if path == "index.md":
             return selection_catalog(selection)
         view = _selected(selection)
+        read_selected_file(view, path)
         return read_query_page(selection, path, view_id=view.view_id)
 
-    @function_tool(failure_error_function=_read_error)
-    def get_page_content(
-        doc_name: str, pages: str, part: Literal["body", "notes"] | None = None
-    ) -> str:
-        """Read original physical pages from the knowledge base.
-
-        For slides, part may be body or notes; null includes both without extra pages.
-        Images are references, not read pixels. Use get_image for relevant screenshots.
-        """
+    def read_pages(doc_name, pages, tool, part=None):
+        source = require_reader(sources, doc_name, tool)
         view = _selected(selection)
         from openkb.source_pages import read_page_selection, select_page_part
+        from openkb.source_reading import ReaderFailure
 
         selected = select_page_part(
-            read_page_selection(
-                json.loads(read_selected_file(view, f"sources/{doc_name}.json")),
-                pages,
-            ),
-            part or None,
+            read_page_selection(json.loads(read_selected_file(view, source["path"])), pages), part
         )
         if any(note.startswith("No recorded content") for note in selected["diagnostics"]):
-            return "Requested pages are outside the recorded range. Read index.md for valid pages."
+            raise ReaderFailure(
+                "range_out_of_bounds",
+                "Requested pages are outside the recorded range.",
+                source["reading_action"],
+            )
         content = (
             view.provenance + "\nContent nature: original page extraction; OCR is transcription, "
             "and generated image interpretations are not source text.\n\n" + selected["content"]
@@ -170,6 +160,19 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return content
 
     @function_tool(failure_error_function=_read_error)
+    def get_page_content(doc_name: str, pages: str) -> str:
+        """Read recorded physical pages, using a page range such as 1-3.
+
+        Image references are not read pixels. Use the returned image actions when relevant.
+        """
+        return read_pages(doc_name, pages, "get_page_content")
+
+    @function_tool(failure_error_function=_read_error)
+    def get_slide_content(doc_name: str, slides: str, part: Literal["all", "body", "notes"]) -> str:
+        """Read recorded slides with their complete content, visible body, or speaker notes."""
+        return read_pages(doc_name, slides, "get_slide_content", None if part == "all" else part)
+
+    @function_tool(failure_error_function=_read_error)
     def get_text_content(doc_name: str, chars: str, offset: int = 0) -> str:
         """Read a frozen Unicode codepoint range START:END (0-based, end exclusive).
 
@@ -181,6 +184,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         from openkb.text_source import read_text_selection
 
+        require_reader(sources, doc_name, "get_text_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
         selected = read_text_selection(json.loads(read_selected_file(view, path)), chars)
@@ -201,6 +205,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         from openkb.block_package import read_block_selection
 
+        require_reader(sources, doc_name, "get_block_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
         selected = read_block_selection(json.loads(read_selected_file(view, path)), blocks)
@@ -219,6 +224,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         from openkb.text_source import read_text_selection
         from openkb.workbooks.selection import select_cells
 
+        require_reader(sources, doc_name, "get_cell_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
         full = read_text_selection(json.loads(read_selected_file(view, path)))
@@ -245,10 +251,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         """View a retained image at a location returned by an original source reader."""
         view = _selected(selection)
         path = image_path if image_path in view.files else f"sources/{image_path}"
-        try:
-            read_selected_file(view, path)
-        except ValueError as error:
-            return ToolOutputText(text=str(error))
+        read_selected_file(view, path)
         result = read_wiki_image(path, str(view.scope.wiki_dir), expected_digest=view.files[path])
         return (
             ToolOutputImage(image_url=result["image_url"])
@@ -259,6 +262,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     readers = {
         "read_file",
         "get_page_content",
+        "get_slide_content",
         "get_block_content",
         "get_text_content",
         "get_image",
@@ -278,24 +282,38 @@ def restrict_query_agent(agent, selection: QuerySelection):
         "If you already have a valid exact source location, you may read it directly. "
         "Generated navigation only locates evidence; it does not certify its statements. "
         "Use read_file(index.md) for the document and concept index. "
-        "For text sources use get_text_content/get_block_content; for worksheets "
-        "use get_cell_content. These preserve original locations. "
+        "Execute the reading_action returned by the catalog or retrieval using its exact "
+        "tool and arguments. Only registered tools apply to this source collection. "
         "Distinguish conflicting statements using the documents themselves and cite them."
         + ANSWER_SOURCE_RULES
+        + "\n# End knowledge-base reading\n"
     )
+    native = [
+        get_page_content,
+        get_slide_content,
+        get_text_content,
+        get_block_content,
+        get_cell_content,
+    ]
+    selected_tools = [
+        search_knowledge,
+        read_file,
+        *[tool for tool in native if tool.name in available],
+    ]
+    if sources:
+        selected_tools.append(search_originals)
+    if selection.views and any(
+        name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+        for name in selection.views[0].files
+    ):
+        selected_tools.append(get_image)
+    base_instructions, marker, previous = (agent.instructions or "").partition(
+        "\n\n# Reading this knowledge base"
+    )
+    if marker:
+        base_instructions += previous.partition("\n# End knowledge-base reading\n")[2]
     return agent.clone(
-        tools=[
-            search_knowledge,
-            read_file,
-            get_page_content,
-            get_text_content,
-            get_block_content,
-            get_cell_content,
-            search_originals,
-            get_image,
-            *extra_tools,
-        ],
-        instructions=(agent.instructions or "") + instructions,
+        tools=[*selected_tools, *extra_tools], instructions=base_instructions + instructions
     )
 
 

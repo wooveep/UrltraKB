@@ -88,7 +88,7 @@ class KnowledgeRetrieval:
                     hit = {
                         **reference,
                         "coverage": "already_returned",
-                        "reading_action": "Original text was returned earlier in this question",
+                        "reading_action": hit["reading_action"],
                     }
                 tokens = measure.payload_tokens(hit)
                 if tokens > remaining:
@@ -96,7 +96,7 @@ class KnowledgeRetrieval:
                         **reference,
                         "coverage": "unread",
                         "content": "",
-                        "reading_action": "Read this native location with the original tools",
+                        "reading_action": hit["reading_action"],
                     }
                     tokens = measure.payload_tokens(hit)
                 if tokens <= remaining:
@@ -150,6 +150,8 @@ class KnowledgeRetrieval:
             }
 
     def _read(self, reference: dict) -> dict:
+        from openkb.source_reading import native_source, reading_action
+
         view = self.selection.views[0]
         path = reference["path"]
         if view.files.get(path) != reference["content_digest"] or (
@@ -191,24 +193,17 @@ class KnowledgeRetrieval:
                 "content": content,
                 "units": units,
                 "coverage": "partial",
-                "reading_action": {
-                    "get_page_content": {
-                        "doc_name": reference["doc_name"],
-                        "pages": location["pages"],
-                        "part": None,
-                    }
-                },
             }
         else:
             text = data.decode("utf-8")
             selected = {
                 "content": text if len(text) <= 20000 else "",
                 "coverage": "complete" if len(text) <= 20000 else "unread",
-                "reading_action": {"read_file": {"path": path}},
             }
         return {
             **reference,
             **selected,
+            "reading_action": reading_action(native_source(view, path), location),
             "content_kind": "original_source",
             "interpretation": "Original extraction; generated navigation and image interpretations "
             "are separate content",
