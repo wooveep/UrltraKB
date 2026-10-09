@@ -46,6 +46,14 @@ class ImageDeliveries:
         with self._guard:
             return tuple(sorted(found & self._records.keys()))
 
+    def fail_read(self, occurrence: dict, code: str) -> None:
+        with self._guard:
+            prepared = self.prepare(occurrence)
+            _, receipt = self._records[prepared["delivery_id"]]
+            receipt.update(status="failed", provider_delivery="not_sent", reason_code=code)
+            if occurrence["status"] != "pixels_delivered":
+                occurrence.update(copy.deepcopy(receipt))
+
     def settle(self, identities, observed, *, accepted: bool) -> None:
         request_ids = list(observed.sent_ids) if observed else []
         digests = observed.image_digests if observed else None
@@ -53,7 +61,7 @@ class ImageDeliveries:
         with self._guard:
             for identity in identities:
                 occurrence, receipt = self._records[identity]
-                if not request_ids or (
+                if observed is None or (
                     digests is not None and receipt["content_digest"] not in digests
                 ):
                     status, delivery, reason = "failed", "not_sent", "image_not_sent"

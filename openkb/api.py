@@ -31,6 +31,7 @@ from openkb.api_config_router import config_router
 from openkb.api_documents_router import documents_router
 from openkb.api_graph import graph_router
 from openkb.api_helpers import (
+    _answer_error_response,
     _configure_cors,
     _init_kb_for_api,
     _iter_deck,
@@ -295,11 +296,12 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
         if result.status != "completed":
-            raise HTTPException(status_code=500, detail=result.error or result.status)
+            return _answer_error_response(result)
         return QueryResponse(
             answer=result.answer,
             usage=result.usage,
             model_usage=result.model_usage,
+            image_coverage=result.image_coverage,
             saved_path=result.saved_path,
             answer_outcome=result.answer_outcome,
             scope_candidates=result.scope_candidates,
@@ -344,7 +346,7 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
         if result.status != "completed":
-            raise HTTPException(status_code=500, detail=result.error or result.status)
+            return _answer_error_response(result)
         return ChatResponse(
             session_id=result.session_id,
             answer=result.answer,
@@ -352,6 +354,7 @@ def create_app() -> FastAPI:
             context=result.context,
             usage=result.usage,
             model_usage=result.model_usage,
+            image_coverage=result.image_coverage,
             answer_outcome=result.answer_outcome,
             scope_candidates=result.scope_candidates,
         )

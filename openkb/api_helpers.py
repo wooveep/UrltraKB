@@ -9,11 +9,12 @@ import os
 import threading
 from contextlib import aclosing
 from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator, Callable
 
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -45,6 +46,9 @@ from openkb.config import (
 )
 from openkb.knowledge_scope import KnowledgeScope
 from openkb.view_records import SourceMetadata
+
+if TYPE_CHECKING:
+    from openkb.application.conversations import AnswerResult
 
 security = HTTPBearer(auto_error=False)
 UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -224,6 +228,17 @@ def _summarize_add_results(kb: str, results: list[AddFileItem]) -> AddResponse:
         rejected_count=sum(item.status == "rejected" for item in results),
         model_usage=merge_usage_receipts(root, receipts) if root else None,
     )
+
+
+def _answer_error_response(result: AnswerResult) -> JSONResponse:
+    content: dict[str, Any] = {"detail": result.error or result.status}
+    if result.image_coverage:
+        content.update(
+            image_coverage=result.image_coverage,
+            model_usage=result.model_usage,
+            usage=result.usage,
+        )
+    return JSONResponse(status_code=500, content=content)
 
 
 def _model_payload(model: BaseModel) -> dict[str, Any]:

@@ -105,8 +105,10 @@ class ImageCoverage:
                 raise ReaderFailure(
                     "image_capacity", "Image exceeds the remaining question context."
                 )
-        except Exception:
-            record["status"] = "failed"
+        except Exception as error:
+            self.receipts.fail_read(
+                record, error.code if isinstance(error, ReaderFailure) else "image_read_failed"
+            )
             raise
         self.deliveries += 1
         self.pixels += pixels

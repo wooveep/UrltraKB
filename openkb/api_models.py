@@ -42,6 +42,7 @@ class QueryResponse(BaseModel):
     answer: str
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
+    image_coverage: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     saved_path: str | None = None
     answer_outcome: (
@@ -66,6 +67,7 @@ class ChatResponse(BaseModel):
     turn_count: int
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
+    image_coverage: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     context: dict | None = None
     scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     answer_outcome: (

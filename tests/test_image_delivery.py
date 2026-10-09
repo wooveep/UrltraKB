@@ -80,6 +80,17 @@ async def test_image_delivery_is_confirmed_at_the_provider_boundary(
     assert [image["status"] for image in images] == [expected, "unread"]
     if expected == "failed":
         assert images[0]["reason_code"] == "image_not_sent"
+    else:
+        for _ in range(5):
+            await invoke(agent, "get_image", image_path=images[0]["occurrence_id"])
+        failure = json.loads(
+            await invoke(agent, "get_image", image_path=images[0]["occurrence_id"])
+        )
+        assert failure["reason_code"] == "image_capacity"
+        content = await invoke(agent, "get_page_content", doc_name="manual", pages="1-2")
+        images = json.loads(content.split("\nImage coverage: ")[1])["occurrences"]
+        assert [image["status"] for image in images] == ["pixels_delivered", "unread"]
+        assert executor.image_deliveries.snapshot()[-1]["reason_code"] == "image_capacity"
 
 
 @pytest.mark.asyncio
@@ -133,8 +144,12 @@ async def test_question_returns_image_receipts_even_without_a_following_send(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ending", ["retry", "reject", "cancel", "length_without_usage"])
-async def test_image_delivery_keeps_request_failures_and_unknowns(kb_dir, model_service, ending):
+@pytest.mark.parametrize(
+    "ending", ["retry", "reject", "cancel", "length_without_usage", "unobserved"]
+)
+async def test_image_delivery_keeps_request_failures_and_unknowns(
+    kb_dir, model_service, monkeypatch, ending
+):
     from agents.items import ItemHelpers
     from openai.types.responses import ResponseFunctionToolCall
 
@@ -170,6 +185,13 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(kb_dir, model_
     if ending in {"retry", "length_without_usage"}:
         model_service.replies.append((200, response(reason="length", usage=False)))
     started = threading.Event()
+    if ending == "unobserved":
+        from litellm import ModelResponse
+
+        async def provider_without_httpx(**kwargs):
+            return ModelResponse(**response())
+
+        monkeypatch.setattr("litellm.acompletion", provider_without_httpx)
     if ending == "cancel":
 
         def reply(request):
@@ -195,7 +217,11 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(kb_dir, model_
         await task
     content = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     image = json.loads(content.split("\nImage coverage: ")[1])["occurrences"][0]
-    expected = {"reject": "failed", "cancel": "delivery_unknown"}.get(ending, "pixels_delivered")
+    expected = {
+        "reject": "failed",
+        "cancel": "delivery_unknown",
+        "unobserved": "delivery_unknown",
+    }.get(ending, "pixels_delivered")
     assert image["status"] == expected
     assert len(image["attempts"]) == (2 if ending == "retry" else 1)
     identities = [identity for attempt in image["attempts"] for identity in attempt["request_ids"]]
