@@ -126,8 +126,8 @@ async def test_selected_page_returns_image_location_for_explicit_read(kb_dir):
     assert path in result and "not read" in result and "get_image" in result
     assert "data:image" not in result
     image = await invoke(agent, "get_image", image_path=path)
-    assert isinstance(image, ToolOutputImage)
-    assert image.image_url.startswith("data:image/png;base64,")
+    assert isinstance(image[1], ToolOutputImage)
+    assert image[1].image_url.startswith("data:image/png;base64,")
 
 
 @pytest.mark.asyncio

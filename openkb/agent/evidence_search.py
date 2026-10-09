@@ -1,6 +1,7 @@
 """Lexical navigation over pinned originals; search snippets are not proof."""
 
 import json
+import re
 from pathlib import Path
 
 from openkb.application.query_views import QuerySelection, read_selected_file
@@ -43,17 +44,35 @@ def search_originals(
                 found = [t for t in needles if t in folded]
                 if not found:
                     continue
-                first = min(folded.index(t) for t in found)
-                hits.append(
+                from openkb.original_context import original_context
+
+                positions = sorted(
                     {
-                        "doc_name": name,
-                        "unit_kind": source["unit_kind"],
-                        "reading_action": reading_action(source, locator),
-                        **locator,
-                        "matched_terms": found,
-                        "excerpt": body[max(0, first - 120) : first + 580],
+                        m.start()
+                        for term in needles
+                        for m in re.finditer(re.escape(term), body, re.IGNORECASE)
                     }
                 )
+                seen_scopes = set()
+                for first in positions:
+                    context = original_context(source, raw, locator, match_offset=first)
+                    scope = json.dumps(
+                        context["regions"][0]["headings"] if context["regions"] else []
+                    )
+                    if scope in seen_scopes:
+                        continue
+                    seen_scopes.add(scope)
+                    hits.append(
+                        {
+                            "doc_name": name,
+                            "unit_kind": source["unit_kind"],
+                            "reading_action": reading_action(source, locator),
+                            **locator,
+                            "matched_terms": found,
+                            "excerpt": context["regions"][0]["nearby_original"],
+                            "source_context": context,
+                        }
+                    )
     if not found_document:
         raise ValueError(
             "Document not found in this snapshot. Read index.md for valid identifiers."

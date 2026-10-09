@@ -30,7 +30,8 @@ Existing generated assertions must be reconsidered against originals; do not inh
 an unsupported inference or promote it into a source fact during an update.
 """
 
-ANSWER_SOURCE_RULES = """
+ANSWER_SOURCE_RULES = (
+    """
 Original sources establish document facts. Summaries, concepts, entities and navigation
 are generated aids, even when they have valid source links. Before concluding specific
 values, specifications, API parameters, commands, prices or operating conditions,
@@ -50,6 +51,14 @@ knowledge-base facts. Historical assistant text is not evidence.
 If a reference such as "the second method" cannot be resolved from real user statements,
 ask the user to identify it. Do not reconstruct omitted assistant answers or guess.
 """
+    + """
+Keep fields and conditions within their original heading, object, operation and source revision.
+Unconfirmed section ancestry requires adjacent reading before combining conditions. Answer directly
+when evidence is sufficient. Limit negative claims to actual coverage: distinguish not searched,
+not read, a specific entry not explaining a fact, and an explicit statement of non-support.
+An unread or failed image remains unknown independently of other images on the same page.
+"""
+)
 
 
 def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tuple[str, ...]:

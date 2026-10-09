@@ -274,7 +274,7 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     result = await ask_question(kb_dir, query, context=context)
     assert result.status == "completed", result
     assert result.answer == "Alpha requires 12; Beta recommends 24."
-    assert context.executor.stage_calls == {"retrieval": 2}
+    assert context.executor.stage_calls == {"retrieval": 2, "answer": 3}
     receipts = read_requests(kb_dir)
     assert len(receipts) == 5
     assert {r.operation for r in receipts} == {"knowledge_retrieval", "answer"}

@@ -5,7 +5,6 @@ from typing import Literal
 
 from agents import ToolOutputImage, ToolOutputText, function_tool
 
-from openkb.agent.tools import read_wiki_image
 from openkb.application.query_views import (
     QuerySelection,
     QueryView,
@@ -95,7 +94,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
     sources = source_capabilities(_selected(selection)) if selection.views else {}
     available = {tool for source in sources.values() for tool in source["readers"]}
     executor = active_executor()
-    retrieval = KnowledgeRetrieval(selection, executor) if executor else None
+    from openkb.image_coverage import ImageCoverage
+    from openkb.original_context import original_context
+
+    images = ImageCoverage(_selected(selection)) if selection.views else None
+    retrieval = KnowledgeRetrieval(selection, executor, images=images) if executor else None
 
     @function_tool(failure_error_function=_read_error)
     async def search_knowledge(query: str) -> str:
@@ -135,9 +138,8 @@ def restrict_query_agent(agent, selection: QuerySelection):
         from openkb.source_pages import read_page_selection, select_page_part
         from openkb.source_reading import ReaderFailure
 
-        selected = select_page_part(
-            read_page_selection(json.loads(read_selected_file(view, source["path"])), pages), part
-        )
+        raw = json.loads(read_selected_file(view, source["path"]))
+        selected = select_page_part(read_page_selection(raw, pages), part)
         if any(note.startswith("No recorded content") for note in selected["diagnostics"]):
             raise ReaderFailure(
                 "range_out_of_bounds",
@@ -148,14 +150,12 @@ def restrict_query_agent(agent, selection: QuerySelection):
             view.provenance + "\nContent nature: original page extraction; OCR is transcription, "
             "and generated image interpretations are not source text.\n\n" + selected["content"]
         )
-        paths = list(
-            dict.fromkeys(
-                image["path"] for unit in selected["units"] for image in unit.get("images", [])
-            )
+        content += "\nSource context: " + json.dumps(
+            original_context(source, raw, {"pages": pages}), ensure_ascii=False
         )
-        if paths:
-            content += "\nImage pixels not read. Use get_image for relevant images: " + ", ".join(
-                paths
+        if images:
+            content += "\nImage coverage: " + json.dumps(
+                images.listed(source, selected["units"]), ensure_ascii=False
             )
         return content
 
@@ -184,15 +184,14 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         from openkb.text_source import read_text_selection
 
-        require_reader(sources, doc_name, "get_text_content")
+        source = require_reader(sources, doc_name, "get_text_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        selected = read_text_selection(json.loads(read_selected_file(view, path)), chars)
-        return (
-            view.provenance
-            + "\n\n"
-            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
-        )
+        raw = json.loads(read_selected_file(view, path))
+        selected = read_text_selection(raw, chars)
+        payload = _original_payload(selected, offset)
+        payload["source_context"] = original_context(source, raw, {"chars": chars})
+        return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
     def get_block_content(doc_name: str, blocks: str, offset: int = 0) -> str:
@@ -205,15 +204,14 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         from openkb.block_package import read_block_selection
 
-        require_reader(sources, doc_name, "get_block_content")
+        source = require_reader(sources, doc_name, "get_block_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        selected = read_block_selection(json.loads(read_selected_file(view, path)), blocks)
-        return (
-            view.provenance
-            + "\n\n"
-            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
-        )
+        raw = json.loads(read_selected_file(view, path))
+        selected = read_block_selection(raw, blocks)
+        payload = _original_payload(selected, offset)
+        payload["source_context"] = original_context(source, raw, {"blocks": blocks})
+        return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
     def get_cell_content(doc_name: str, cells: str, offset: int = 0) -> str:
@@ -224,16 +222,15 @@ def restrict_query_agent(agent, selection: QuerySelection):
         from openkb.text_source import read_text_selection
         from openkb.workbooks.selection import select_cells
 
-        require_reader(sources, doc_name, "get_cell_content")
+        source = require_reader(sources, doc_name, "get_cell_content")
         view = _selected(selection)
         path = f"sources/{doc_name}.content.json"
-        full = read_text_selection(json.loads(read_selected_file(view, path)))
+        raw = json.loads(read_selected_file(view, path))
+        full = read_text_selection(raw)
         selected = select_cells(full, cells)
-        return (
-            view.provenance
-            + "\n\n"
-            + json.dumps(_original_payload(selected, offset), ensure_ascii=False)
-        )
+        payload = _original_payload(selected, offset)
+        payload["source_context"] = original_context(source, raw, {"cells": cells})
+        return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
     def search_originals(terms: list[str], doc_name: str = "") -> str:
@@ -247,17 +244,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return json.dumps(search(selection, terms, doc_name=doc_name), ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
-    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
-        """View a retained image at a location returned by an original source reader."""
-        view = _selected(selection)
-        path = image_path if image_path in view.files else f"sources/{image_path}"
-        read_selected_file(view, path)
-        result = read_wiki_image(path, str(view.scope.wiki_dir), expected_digest=view.files[path])
-        return (
-            ToolOutputImage(image_url=result["image_url"])
-            if result["type"] == "image"
-            else ToolOutputText(text=result["text"])
-        )
+    def get_image(image_path: str) -> list[ToolOutputImage | ToolOutputText]:
+        """View a retained image using its occurrence action; returns identity and pixels."""
+        if images is None:
+            raise ValueError("No source collection is bound")
+        return images.read(image_path)
 
     readers = {
         "read_file",
@@ -303,7 +294,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     if sources:
         selected_tools.append(search_originals)
     if selection.views and any(
-        name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+        name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
         for name in selection.views[0].files
     ):
         selected_tools.append(get_image)

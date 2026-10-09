@@ -14,9 +14,10 @@ from openkb.llm_execution import CompletionExecutor, StageBudgetExceeded, raise_
 
 
 class KnowledgeRetrieval:
-    def __init__(self, selection: QuerySelection, executor: CompletionExecutor):
+    def __init__(self, selection: QuerySelection, executor: CompletionExecutor, *, images=None):
         self.selection, self.executor = selection, executor
         self._guard = threading.Lock()
+        self.images = images
 
     def ensure_projection(self):
         credentials = self.executor.bindings.credentials()
@@ -160,6 +161,8 @@ class KnowledgeRetrieval:
             raise ValueError("Candidate belongs to a different source revision")
         data = read_selected_file(view, path)
         location = reference["native_location"]
+        source = native_source(view, path)
+        raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
         if path.endswith(".content.json"):
             from openkb.agent.evidence_payload import project_evidence
             from openkb.block_package import read_block_selection
@@ -200,9 +203,14 @@ class KnowledgeRetrieval:
                 "content": text if len(text) <= 20000 else "",
                 "coverage": "complete" if len(text) <= 20000 else "unread",
             }
+        from openkb.original_context import original_context
+
+        if self.images and "units" in selected:
+            selected["image_coverage"] = self.images.listed(source, selected["units"])
         return {
             **reference,
             **selected,
+            "source_context": original_context(source, raw, location),
             "reading_action": reading_action(native_source(view, path), location),
             "content_kind": "original_source",
             "interpretation": "Original extraction; generated navigation and image interpretations "
