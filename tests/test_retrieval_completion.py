@@ -44,7 +44,9 @@ def test_truncated_response_is_classified_before_rank_conversion(model_service, 
 
 
 @pytest.mark.parametrize("role", ["knowledge_retrieval", "conversation_retrieval"])
-@pytest.mark.parametrize("kind", ["valid", "empty", "missing", "json", "shape", "outside"])
+@pytest.mark.parametrize(
+    "kind", ["valid", "empty", "missing", "json", "shape", "outside", "no_done"]
+)
 def test_completed_rank_protocol_keeps_distinct_failure_reasons(model_service, role, kind):
     from openkb.context.condb_llm import ConDBLLMAdapter, RetrievalFailure
 
@@ -55,6 +57,10 @@ def test_completed_rank_protocol_keeps_distinct_failure_reasons(model_service, r
     elif kind in {"json", "shape"}:
         reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = (
             "{" if kind == "json" else '{"ranked_ids": "valid"}'
+        )
+    elif kind == "no_done":
+        reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = (
+            '{"ranked_ids": ["valid"]}'
         )
     model_service.replies.append((200, reply))
     adapter = ConDBLLMAdapter(executor_for(model_service, retrieval_repairs=0), role)
@@ -71,6 +77,7 @@ def test_completed_rank_protocol_keeps_distinct_failure_reasons(model_service, r
                 "json": "rank_invalid_json",
                 "shape": "rank_invalid",
                 "outside": "candidate_outside_selection",
+                "no_done": "rank_invalid",
             }[kind]
         )
 

@@ -40,7 +40,7 @@ def processing_key(path: Path, parser, model, config) -> str:
         ) if key in params
     }
     payload = {
-        "index_content_policy": "content-based-physical-v2",
+        "index_content_policy": "content-based-physical-v3",
         "source_digest": digest(path), "parser_policy": parser_policy(parser),
         "parser": parser_identity(parser),
         "model": model, "config": options,

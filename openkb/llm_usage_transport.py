@@ -84,6 +84,8 @@ class ModelCall:
         if raw is None and response.is_stream_consumed:
             import json
 
+            merged = {}
+            usage = {}
             for line in response.text.splitlines():
                 if not line.startswith("data:"):
                     continue
@@ -94,11 +96,16 @@ class ModelCall:
                 if not isinstance(event, dict):
                     continue
                 receipt = event.get("message", event)
-                if isinstance(receipt, dict) and receipt.get("usage") is not None:
-                    self.raw_usage_available = True
-                    finish_request(
-                        identity, receipt, scope=self.scope, observation="transport", terminal=False
-                    )
+                if isinstance(receipt, dict):
+                    if receipt.get("id"):
+                        merged["id"] = receipt["id"]
+                    if isinstance(receipt.get("usage"), dict):
+                        # Stream deltas are cumulative snapshots, not separate
+                        # requests. Preserve input/cache fields and final output.
+                        usage.update({k: v for k, v in receipt["usage"].items() if v is not None})
+            if usage:
+                raw = {**merged, "usage": usage}
+                self.raw_usage_available = True
         finish_request(
             identity,
             raw,

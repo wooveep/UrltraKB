@@ -74,6 +74,9 @@ class SectionBoundary:
         position = (anchor['unit'], anchor['range'][0])
         return self.start <= position < self.end
 
+    def proves_membership(self, anchor):
+        return self.start_confirmed and self.end_confirmed and self.contains(anchor)
+
     @classmethod
     def from_node(cls, node):
         start, end = node.get('anchor'), node.get('end_anchor')

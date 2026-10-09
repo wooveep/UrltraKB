@@ -252,6 +252,9 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     assert projected["B2"]["hidden_row"] and projected["B2"]["hidden_column"]
     assert "TAIL_VALUE" in payload["content"] and "00042" in payload["content"]
     assert imported.source_revision_id in result
+    assert [region["char_range"] for region in payload["source_context"]["regions"]] == (
+        payload["source_spans"][:8]
+    )
     assert "read_id" not in payload
     assert (
         read_document_source(kb_dir, imported.source_id, unit_id=imported.units[0].unit_id) == saved

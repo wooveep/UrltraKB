@@ -13,8 +13,9 @@ from openkb.source_reading import ReaderFailure
 
 
 class ImageCoverage:
-    def __init__(self, view: QueryView):
+    def __init__(self, view: QueryView, *, executor=None):
         self.view = view
+        self.executor = executor
         self.occurrences: dict[str, dict] = {}
         self.deliveries = 0
         self.pixels = 0
@@ -29,6 +30,7 @@ class ImageCoverage:
                         [
                             self.view.view_id,
                             source["content_digest"],
+                            source["path"],
                             unit["page"],
                             ordinal,
                             image["path"],
@@ -84,6 +86,7 @@ class ImageCoverage:
                     self.deliveries >= 6
                     or self.pixels + pixels > 16_000_000
                     or len(data) > 8_000_000
+                    or self.context_tokens + tokens > 6000
                 ):
                     raise ReaderFailure(
                         "image_capacity", "Image delivery capacity reached; narrow the question."
@@ -94,6 +97,12 @@ class ImageCoverage:
             if result["type"] != "image":
                 raise ReaderFailure("read_failed", "Image pixels could not be read.")
             output = ToolOutputImage(image_url=result["image_url"])
+            if self.executor and not self.executor.reserve_tool_output(
+                [record, output.model_dump()], minimum_tokens=tokens + 512
+            ):
+                raise ReaderFailure(
+                    "image_capacity", "Image exceeds the remaining question context."
+                )
         except Exception:
             record["status"] = "failed"
             raise

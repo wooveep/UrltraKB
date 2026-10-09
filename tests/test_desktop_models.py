@@ -110,10 +110,7 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
         batch = manager.submit(kb_dir, [AskQuestion("First"), AskQuestion("Second")])
         assert arrived.wait(30), manager.get(batch)
         independent = manager.submit(other, [AskQuestion("Independent")])
-        assert (
-            manager.wait(independent, timeout=30).results[0].answer_outcome
-            == "answered"
-        )
+        assert manager.wait(independent, timeout=30).results[0].answer_outcome == "answered"
         # An external editor changes settings after actual first execution.
         # Later batch units keep the acknowledged context; a new task gets it.
         configure(kb_dir, url, "unit-new")

@@ -7,15 +7,19 @@ from openkb.source_reading import reading_action
 _HEADING = re.compile(r"(?m)^(?:(#{1,6})[ \t]+|([0-9]+(?:\.[0-9]+)*)(?:\.)?[ \t]+)([^\n]+)$")
 
 
-def _units(raw):
+def _units(raw, part=None):
     if isinstance(raw, list):
-        return [(p["page"], p.get("content", "")) for p in raw]
+        return [(p["page"], p["parts"][part] if part else p.get("content", "")) for p in raw]
     return [(1, raw["text"] if isinstance(raw, dict) else raw)]
 
 
-def _bounds(source, raw, location):
+def _bounds(raw, location, selected):
     from pageindex.index.utils import parse_pages
 
+    if selected is not None:
+        if isinstance(raw, list):
+            return [(p["page"], 0, len(p["content"])) for p in selected.get("units", [])]
+        return [(1, a, b) for a, b in selected.get("source_spans", [])]
     if isinstance(raw, list):
         requested = parse_pages(str(location.get("pages", location.get("slides", "1"))))
         return [(n, 0, len(t)) for n, t in _units(raw) if n in requested]
@@ -34,9 +38,11 @@ def _bounds(source, raw, location):
     return [(1, 0, len(text))]
 
 
-def original_context(source: dict, raw, location: dict, *, match_offset: int | None = None) -> dict:
+def original_context(
+    source: dict, raw, location: dict, *, match_offset: int | None = None, selected=None
+) -> dict:
     """Report source spans and their evidenced heading path, with executable neighbors."""
-    units = _units(raw)
+    units = _units(raw, location.get("part"))
     headings = []
     for number, body in units:
         for m in _HEADING.finditer(body):
@@ -69,7 +75,7 @@ def original_context(source: dict, raw, location: dict, *, match_offset: int | N
         h["path"] = [{k: v for k, v in item.items() if k != "level"} for item in stack]
     regions, actions = [], []
     bodies = dict(units)
-    for n, start, end in _bounds(source, raw, location):
+    for n, start, end in _bounds(raw, location, selected):
         if match_offset is not None:
             start = min(end, start + match_offset)
             end = min(end, start + 1)
@@ -84,6 +90,8 @@ def original_context(source: dict, raw, location: dict, *, match_offset: int | N
                 len(bodies[n]),
             )
             lower = before[-1]["offset"] if before and before[-1]["unit"] == n else 0
+            if "cells" in location:
+                lower, following = start, end
             regions.append(
                 {
                     "unit": n,

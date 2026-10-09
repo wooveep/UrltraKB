@@ -495,6 +495,7 @@ def run_unit(
     from openkb.application.execution import ExecutionContext
     from openkb.inputs import InputChanged, preparation_directory
     from openkb.lifecycle import KnowledgeBaseIncomplete, KnowledgeBaseRemoved, expected_generation
+    from openkb.llm_execution import ModelBudgetExceeded, ModelDeadlineExceeded
     from openkb.locks import LockCancelled
     from openkb.mutation import RecoveryRequired
     from openkb.runtime.input_store import child_preparation, reap_orphaned_inputs
@@ -524,6 +525,8 @@ def run_unit(
                 channel.send("deferred", reason="input")
                 return
             result = UnitResult("failed", error="Input changed during preparation")
+        except (ModelBudgetExceeded, ModelDeadlineExceeded) as exc:
+            result = UnitResult("stopped", error=f"Task stopped ({type(exc).__name__})")
         except LockCancelled:
             result = UnitResult("stopped")
         except (KnowledgeBaseRemoved, KnowledgeBaseIncomplete):

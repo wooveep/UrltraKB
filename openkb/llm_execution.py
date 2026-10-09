@@ -353,6 +353,8 @@ class CompletionExecutor:
         self.budget = TaskBudget(self.policy)
         self.request_cache: dict[str, Any] = {}
         self.question_capacity: TokenMeasure | None = None
+        self._answer_input_tokens = 0
+        self._tool_output_tokens = 0
         self._retrieval_slots = threading.BoundedSemaphore(1)
         self._slots = threading.BoundedSemaphore(self.policy.concurrency)
         identity = {
@@ -385,19 +387,36 @@ class CompletionExecutor:
             self.budget.reset_question()
             self.request_cache.clear()
             self.question_capacity = None
+            self._answer_input_tokens = self._tool_output_tokens = 0
 
     def cancel(self) -> None:
         self._stop_requested.set()
 
     def check_capacity_input(self, payload, *, role="answer") -> None:
         measure = self.question_capacity
-        if measure is not None and measure.payload_tokens(payload) > measure.input_limit:
+        tokens = measure.payload_tokens(payload) if measure is not None else 0
+        if role == "answer":
+            with self._guard:
+                self._answer_input_tokens, self._tool_output_tokens = tokens, 0
+        if measure is not None and tokens > measure.input_limit:
             message = (
                 "Prepared model input exceeds the captured capacity; current input is retained"
             )
             if role == "answer":
                 raise ContextCapacityError(message)
             raise ValueError(message)  # An index/search may retain limited coverage.
+
+    def reserve_tool_output(self, payload, *, minimum_tokens: int) -> bool:
+        """All outputs in one tool turn share the remaining answer input capacity."""
+        measure = self.question_capacity
+        if measure is None:
+            return True
+        tokens = max(minimum_tokens, measure.payload_tokens(payload) + 512)
+        with self._guard:
+            if self._answer_input_tokens + self._tool_output_tokens + tokens > measure.input_limit:
+                return False
+            self._tool_output_tokens += tokens
+        return True
 
     @property
     def stage_calls(self) -> dict[str, int]:

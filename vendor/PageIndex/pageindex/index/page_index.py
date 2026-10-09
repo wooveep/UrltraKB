@@ -29,7 +29,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
     anchor = unique_heading(item, page_list, start_index)
-    if anchor:
+    if anchor and (boundary is None or boundary.proves_membership(anchor)):
         return {'list_index': item.get('list_index'), 'title': title,
                 'page_number': item.get('physical_index'),
                 'answer': 'yes' if anchor['unit'] == item.get('physical_index') and

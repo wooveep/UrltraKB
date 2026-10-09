@@ -26,6 +26,7 @@ class ModelTask(Record):
     used: int = Field(default=0, ge=0)
     stages: dict[str, int] = Field(default_factory=dict)
     inputs: dict[str, str] = Field(default_factory=dict)
+    execution_task_ids: list[RecordId] = Field(default_factory=list)
 
 
 def task_path(kb_dir: Path, task_id: str) -> Path:
@@ -43,10 +44,12 @@ def read_task(kb_dir: Path, task_id: str) -> ModelTask:
 
 
 class TaskJournal:
-    def __init__(self, kb_dir, executor, *, resume=None, policy=None):
+    def __init__(self, kb_dir, executor, *, resume=None, policy=None, execution_task_id=None):
         self.root, self.executor = kb_dir, executor
         policy = dict(policy or {})
         policy.setdefault("max_calls", executor.policy.max_calls)
+        if execution_task_id:
+            resume = execution_task(kb_dir, execution_task_id) or resume
         previous = read_task(kb_dir, resume) if resume else None
         bindings = executor.bindings.public_identity()
         deadline = executor.policy.deadline
@@ -74,6 +77,8 @@ class TaskJournal:
                         "used": previous.used,
                         "stages": previous.stages,
                         "inputs": previous.inputs,
+                        "deadline_at": previous.deadline_at,
+                        "execution_task_ids": previous.execution_task_ids,
                     }
                 )
             )
@@ -84,6 +89,11 @@ class TaskJournal:
                 )
                 executor.budget.policy = executor.policy
             executor.budget.restore(self.record.used, self.record.stages)
+        if execution_task_id and execution_task_id not in self.record.execution_task_ids:
+            TypeAdapter(RecordId).validate_python(execution_task_id)
+            self.record = self.record.model_copy(
+                update={"execution_task_ids": [*self.record.execution_task_ids, execution_task_id]}
+            )
         self.save(executor.budget.snapshot())
         executor.budget.on_change = self.save
 
@@ -101,6 +111,16 @@ class TaskJournal:
             update={"inputs": {**self.record.inputs, source_id: revision_id}}
         )
         self.save(self.executor.budget.snapshot())
+
+
+def execution_task(kb_dir, execution_task_id):
+    """Resume successive spawned units while holding their shared KB lease."""
+    candidates = []
+    for path in (kb_dir / ".openkb/model-tasks").glob("*.json"):
+        record = read_task(kb_dir, path.stem)
+        if execution_task_id in record.execution_task_ids:
+            candidates.append((path.stat().st_mtime_ns, record.task_id))
+    return max(candidates)[1] if candidates else None
 
 
 def source_task(kb_dir, source_id, revision_id):

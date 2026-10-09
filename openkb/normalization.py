@@ -123,7 +123,7 @@ def normalization_fingerprint(
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": {
-                "version": "content-based-physical-v2",
+                "version": "content-based-physical-v3",
                 "navigation": config.get("index_navigation", {}),
             },
             # Runtime injection changed no successful tree content. Keep the

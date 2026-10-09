@@ -202,6 +202,7 @@ class KnowledgeRetrieval:
             selected = {
                 "content": text if len(text) <= 20000 else "",
                 "coverage": "complete" if len(text) <= 20000 else "unread",
+                "source_spans": [[0, len(text)]] if len(text) <= 20000 else [],
             }
         from openkb.original_context import original_context
 
@@ -210,7 +211,7 @@ class KnowledgeRetrieval:
         return {
             **reference,
             **selected,
-            "source_context": original_context(source, raw, location),
+            "source_context": original_context(source, raw, location, selected=selected),
             "reading_action": reading_action(native_source(view, path), location),
             "content_kind": "original_source",
             "interpretation": "Original extraction; generated navigation and image interpretations "

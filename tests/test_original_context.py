@@ -96,3 +96,74 @@ async def test_each_occurrence_records_only_its_own_pixels(kb_dir):
     )
     first = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     assert json.loads(first.split("\nImage coverage: ")[1])["occurrences"][1]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size,context_limit", [(4000, None), (512, 800)])
+async def test_image_context_admission_precedes_delivery(kb_dir, size, context_limit):
+    from types import SimpleNamespace
+
+    from openkb.config import LlmCredentialBundle
+    from openkb.llm_execution import CompletionExecutor, RoleBindings
+
+    Image.new("RGB", (size, size), "white").save(kb_dir / "wiki/sources/large.png")
+    pages(kb_dir, ["# Figure\nImage"], ["sources/large.png"])
+    executor = CompletionExecutor(RoleBindings("openai/gpt-4o-mini", LlmCredentialBundle()))
+    if context_limit:
+        executor.question_capacity = SimpleNamespace(
+            input_limit=context_limit, payload_tokens=lambda payload: 100
+        )
+        executor.check_capacity_input({"input": "question"})
+    with executor.activate():
+        agent = agent_for(kb_dir)
+    content = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    occurrence = json.loads(content.split("\nImage coverage: ")[1])["occurrences"][0]
+    output = json.loads(await invoke(agent, "get_image", image_path=occurrence["occurrence_id"]))
+    assert output["reason_code"] == "image_capacity"
+    executor.question_capacity = None  # Inspect coverage independently of exhausted context.
+    content = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    assert (
+        json.loads(content.split("\nImage coverage: ")[1])["occurrences"][0]["status"] == "failed"
+    )
+
+
+def test_projected_native_spans_define_context_coverage():
+    from openkb.original_context import original_context
+
+    source = {
+        "path": "sources/sheet.content.json",
+        "source_revision_id": "revision",
+        "content_digest": "digest",
+        "unit_kind": "worksheet",
+        "readers": {},
+        "reading_action": {"tool": "read_file", "arguments": {"path": "index.md"}},
+    }
+    raw = {"text": "A1 unrelated\nA2 target\nA3 unrelated"}
+    context = original_context(source, raw, {"cells": "A2"}, selected={"source_spans": [[13, 22]]})
+    assert context["regions"][0]["char_range"] == [13, 22]
+    assert "A1" not in context["regions"][0]["nearby_original"]
+    assert original_context(source, raw, {"chars": "0:36"}, selected={})["regions"] == []
+
+
+@pytest.mark.asyncio
+async def test_image_admission_counts_other_tools_from_the_same_turn(kb_dir):
+    from types import SimpleNamespace
+
+    from openkb.config import LlmCredentialBundle
+    from openkb.llm_execution import CompletionExecutor, RoleBindings
+
+    Image.new("RGB", (32, 32), "white").save(kb_dir / "wiki/sources/figure.png")
+    pages(kb_dir, ["# Figure\nCONTEXT_LOAD"], ["sources/figure.png"])
+    executor = CompletionExecutor(RoleBindings("openai/gpt-4o-mini", LlmCredentialBundle()))
+    executor.question_capacity = SimpleNamespace(
+        input_limit=2600,
+        payload_tokens=lambda payload: 1200 if "CONTEXT_LOAD" in str(payload) else 400,
+    )
+    executor.check_capacity_input({"input": "question"})
+    with executor.activate():
+        agent = agent_for(kb_dir)
+    content = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    assert "CONTEXT_LOAD" in content
+    occurrence = json.loads(content.split("\nImage coverage: ")[1])["occurrences"][0]
+    output = await invoke(agent, "get_image", image_path=occurrence["occurrence_id"])
+    assert isinstance(output, str) and json.loads(output)["reason_code"] == "image_capacity"

@@ -66,6 +66,7 @@ class ExecutionContext:
                 self.executor,
                 resume=self.resume_model_task_id,
                 policy=self.snapshot.values()["effective"].get("model_policy", {}),
+                execution_task_id=self.usage_task_id,
             )
         from openkb.llm_usage_execution import import_usage_execution
 

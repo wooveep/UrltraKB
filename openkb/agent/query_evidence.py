@@ -97,7 +97,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     from openkb.image_coverage import ImageCoverage
     from openkb.original_context import original_context
 
-    images = ImageCoverage(_selected(selection)) if selection.views else None
+    images = ImageCoverage(_selected(selection), executor=executor) if selection.views else None
     retrieval = KnowledgeRetrieval(selection, executor, images=images) if executor else None
 
     @function_tool(failure_error_function=_read_error)
@@ -151,7 +151,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
             "and generated image interpretations are not source text.\n\n" + selected["content"]
         )
         content += "\nSource context: " + json.dumps(
-            original_context(source, raw, {"pages": pages}), ensure_ascii=False
+            original_context(
+                source, raw, {"pages": pages, **({"part": part} if part else {})}, selected=selected
+            ),
+            ensure_ascii=False,
         )
         if images:
             content += "\nImage coverage: " + json.dumps(
@@ -190,7 +193,9 @@ def restrict_query_agent(agent, selection: QuerySelection):
         raw = json.loads(read_selected_file(view, path))
         selected = read_text_selection(raw, chars)
         payload = _original_payload(selected, offset)
-        payload["source_context"] = original_context(source, raw, {"chars": chars})
+        payload["source_context"] = original_context(
+            source, raw, {"chars": chars, "offset": offset}, selected=payload
+        )
         return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
@@ -210,7 +215,9 @@ def restrict_query_agent(agent, selection: QuerySelection):
         raw = json.loads(read_selected_file(view, path))
         selected = read_block_selection(raw, blocks)
         payload = _original_payload(selected, offset)
-        payload["source_context"] = original_context(source, raw, {"blocks": blocks})
+        payload["source_context"] = original_context(
+            source, raw, {"blocks": blocks, "offset": offset}, selected=payload
+        )
         return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
@@ -229,7 +236,9 @@ def restrict_query_agent(agent, selection: QuerySelection):
         full = read_text_selection(raw)
         selected = select_cells(full, cells)
         payload = _original_payload(selected, offset)
-        payload["source_context"] = original_context(source, raw, {"cells": cells})
+        payload["source_context"] = original_context(
+            source, raw, {"cells": cells, "offset": offset}, selected=payload
+        )
         return view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
 
     @function_tool(failure_error_function=_read_error)
@@ -298,6 +307,31 @@ def restrict_query_agent(agent, selection: QuerySelection):
         for name in selection.views[0].files
     ):
         selected_tools.append(get_image)
+    if executor:
+
+        def bounded(tool):
+            invoke = tool.on_invoke_tool
+
+            async def read(context, arguments):
+                result = await invoke(context, arguments)
+                if not executor.reserve_tool_output(result, minimum_tokens=0):
+                    from openkb.source_reading import ReaderFailure
+
+                    return _read_error(
+                        context,
+                        ReaderFailure(
+                            "context_capacity",
+                            "Reader result exceeds the remaining context; "
+                            "request a narrower native range.",
+                        ),
+                    )
+                return result
+
+            tool.on_invoke_tool = read
+
+        for tool in selected_tools:
+            if tool.name != "get_image":  # Image delivery reserves before updating coverage.
+                bounded(tool)
     base_instructions, marker, previous = (agent.instructions or "").partition(
         "\n\n# Reading this knowledge base"
     )

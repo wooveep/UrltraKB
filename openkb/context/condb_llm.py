@@ -35,7 +35,7 @@ def completed_rank(result, tools):
             not isinstance(args, dict)
             or not isinstance(args.get("ranked_ids"), list)
             or any(not isinstance(identity, str) for identity in args["ranked_ids"])
-            or type(args.get("done", False)) is not bool
+            or type(args.get("done")) is not bool
             or len(set(args["ranked_ids"])) != len(args["ranked_ids"])
         ):
             raise RetrievalFailure("rank_invalid")

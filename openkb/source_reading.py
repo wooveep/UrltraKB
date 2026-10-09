@@ -38,8 +38,14 @@ def native_source(view: QueryView, path: str) -> dict:
         if count := source.get("block_count"):
             ranges["blocks"] = f"1-{count}"
             actions["get_block_content"] = {"doc_name": doc, "blocks": "1", "offset": 0}
-        if sheet := source.get("sheet"):
-            coordinates = [cell["coordinate"] for cell in sheet["cells"]]
+        if source.get("sheet"):
+            coordinates = list(
+                dict.fromkeys(
+                    origin["sheet_cell"]["cell"]["coordinate"]
+                    for origin in source["origin_locators"]
+                    if origin.get("sheet_cell")
+                )
+            )
             ranges["cells"] = coordinates
             if coordinates:
                 actions["get_cell_content"] = {
@@ -115,7 +121,20 @@ def reading_action(source: dict, location: dict | None = None) -> dict:
         if tool in source["readers"]:
             return {
                 "tool": tool,
-                "arguments": {**source["readers"][tool], argument: location[selector]},
+                "arguments": {
+                    **source["readers"][tool],
+                    argument: location[selector],
+                    **(
+                        {"offset": location["offset"]}
+                        if "offset" in location and "offset" in source["readers"][tool]
+                        else {}
+                    ),
+                    **(
+                        {"part": location["part"]}
+                        if "part" in location and tool == "get_slide_content"
+                        else {}
+                    ),
+                },
             }
     return source["reading_action"]
 
