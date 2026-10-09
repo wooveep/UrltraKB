@@ -212,6 +212,11 @@ def index_long_document(
         storage_path=str(openkb_dir),
         index_config=index_config,
     )
+    from openkb.llm_execution import active_executor
+
+    executor = active_executor()
+    if executor:
+        executor.budget.preserve("compile", executor.policy.compile_reserve_calls)
     try:
         col = client.collection()
         retained_ids = {item["doc_id"] for item in col.list_documents()}
@@ -220,6 +225,9 @@ def index_long_document(
         max_retries = 3
         doc_id = None
         for attempt in range(1, max_retries + 1):
+            if executor:
+                executor.budget.require("document_index")
+            calls_before = executor.calls if executor else 0
             try:
                 doc_id = col.add(str(pdf_path))
                 logger.info(
@@ -248,6 +256,8 @@ def index_long_document(
                     raise RuntimeError(
                         f"Failed to index {pdf_path.name} after {max_retries} attempts: {exc}"
                     ) from exc
+                if executor:
+                    executor.budget.require("document_index", max(1, executor.calls - calls_before))
 
         # New managed inputs are registered with the outer mutation only on a
         # successful return. Clean them on failure, preserving a deduplication
@@ -323,3 +333,5 @@ def index_long_document(
             raise
     finally:
         client.close()
+        if executor:
+            executor.budget.release("compile")

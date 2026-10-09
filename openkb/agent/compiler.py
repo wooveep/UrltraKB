@@ -1717,6 +1717,9 @@ async def _compile_concepts(
         entity_types=valid_types,
         sanitize=_sanitize_concept_name,
     )
+    from openkb.execution_budget import admit_compile_plan
+
+    admit_compile_plan(plan, rewrite_summary=rewrite_summary)
     create_items, update_items, related_items = (
         plan.concepts.create,
         plan.concepts.update,

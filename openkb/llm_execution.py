@@ -172,9 +172,15 @@ class ModelCallPolicy:
     retrieval_tokens: int = 1024
     retrieval_repair_tokens: int = 8192
     retrieval_repairs: int = 2
+    compile_reserve_calls: int = 3  # Overview, plan and one bounded plan correction.
+    compile_repair_calls: int = 1
 
     def __post_init__(self):
-        if self.retrieval_tokens not in (1024, 2048, 4096):
+        if type(self.retrieval_tokens) is not int or self.retrieval_tokens not in (
+            1024,
+            2048,
+            4096,
+        ):
             raise ValueError("retrieval_tokens must be 1024, 2048 or 4096")
         if type(self.retrieval_repair_tokens) is not int or not (
             self.retrieval_tokens <= self.retrieval_repair_tokens <= 8192
@@ -182,7 +188,13 @@ class ModelCallPolicy:
             raise ValueError("retrieval_repair_tokens must be within initial tokens and 8192")
         if type(self.retrieval_repairs) is not int or not 0 <= self.retrieval_repairs <= 2:
             raise ValueError("retrieval_repairs must be between 0 and 2 per question")
-        for name, minimum in (("max_calls", 0), ("concurrency", 1), ("retries", 0)):
+        for name, minimum in (
+            ("max_calls", 0),
+            ("concurrency", 1),
+            ("retries", 0),
+            ("compile_reserve_calls", 2),
+            ("compile_repair_calls", 0),
+        ):
             value = getattr(self, name)
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
@@ -336,8 +348,9 @@ class CompletionExecutor:
         )
         self.scope = scope or active_scope()
         self._guard = threading.Lock()
-        self._calls = 0
-        self._stage_calls: dict[str, int] = {}
+        from openkb.execution_budget import TaskBudget
+
+        self.budget = TaskBudget(self.policy)
         self.request_cache: dict[str, Any] = {}
         self.question_capacity: TokenMeasure | None = None
         self._retrieval_slots = threading.BoundedSemaphore(1)
@@ -354,6 +367,8 @@ class CompletionExecutor:
                     "retrieval_tokens",
                     "retrieval_repair_tokens",
                     "retrieval_repairs",
+                    "compile_reserve_calls",
+                    "compile_repair_calls",
                 )
             },
         }
@@ -361,14 +376,13 @@ class CompletionExecutor:
 
     @property
     def calls(self) -> int:
-        with self._guard:
-            return self._calls
+        return self.budget.snapshot()["used"]
 
     def begin_question(self) -> None:
         """Renew stage allowances while preserving the task's total budget and deadline."""
         self.policy.check()
         with self._guard:
-            self._stage_calls.clear()
+            self.budget.reset_question()
             self.request_cache.clear()
             self.question_capacity = None
 
@@ -387,8 +401,7 @@ class CompletionExecutor:
 
     @property
     def stage_calls(self) -> dict[str, int]:
-        with self._guard:
-            return dict(self._stage_calls)
+        return self.budget.snapshot()["stages"]
 
     @contextmanager
     def retrieval_slot(self):
@@ -402,33 +415,17 @@ class CompletionExecutor:
             self._retrieval_slots.release()
 
     def reserve(self, role: str = "answer") -> None:
-        self.policy.check()
-        with self._guard:
-            if self._calls >= self.policy.max_calls:
-                raise ModelBudgetExceeded("Model request budget exhausted")
-            stage = (
-                "retrieval"
-                if role in {"knowledge_retrieval", "conversation_retrieval"}
-                else "conversation_index"
-                if role == "conversation_index"
-                else None
-            )
-            limit = 8 if stage == "retrieval" else 6
-            if stage and self._stage_calls.get(stage, 0) >= limit:
-                raise StageBudgetExceeded(f"{stage} stage send allowance exhausted")
-            if stage:
-                self._stage_calls[stage] = self._stage_calls.get(stage, 0) + 1
-            self._calls += 1
+        self.budget.sent(self.budget.acquire(role))
 
     def allow_retrieval_repair(self) -> bool:
         """Reserve one logical repair; actual sends still use reserve/transport accounting."""
         self.policy.check()
         with self._guard:
-            if self._calls >= self.policy.max_calls:
+            if self.calls >= self.policy.max_calls:
                 raise ModelBudgetExceeded("Model request budget exhausted")
             repairs = self.request_cache.get("retrieval_repairs", 0)
             if (
-                self._stage_calls.get("retrieval", 0) >= 8
+                self.stage_calls.get("retrieval", 0) >= 8
                 or repairs >= self.policy.retrieval_repairs
             ):
                 return False
@@ -494,12 +491,20 @@ class CompletionExecutor:
 
     @contextmanager
     def attempt(self, role: str, request: ModelRequest, logical_id: str):
-        from litellm._urltrakb_auth import authentication_scope
-
-        self.reserve(role)
         scope = active_scope() or self.scope
         if scope and self.scope and scope.kb_dir != self.scope.kb_dir:
             raise ValueError("Model execution belongs to another knowledge base")
+        admission = self.budget.acquire(role)
+        try:
+            with self._observe_attempt(role, request, logical_id, scope, admission) as observed:
+                yield observed
+        finally:
+            self.budget.abandon(admission)
+
+    @contextmanager
+    def _observe_attempt(self, role, request, logical_id, scope, admission):
+        from litellm._urltrakb_auth import authentication_scope
+
         with (
             authentication_scope() as authentication,
             observe_model_call(
@@ -511,18 +516,15 @@ class CompletionExecutor:
                 operation=request.operation,
                 prompt_version=request.prompt_version,
                 fingerprint=self.fingerprint,
-                before_send=lambda count: self._before_send(count, role),
+                before_send=lambda count: (
+                    self.reserve(role) if count else self.budget.sent(admission)
+                ),
                 validate_credentials=lambda headers: self.bindings.validate_request_credentials(
                     role, headers, selected_auth=authentication.kind
                 ),
             ) as observed,
         ):
             yield observed
-
-    def _before_send(self, count: int, role: str = "answer") -> None:
-        self.policy.check()
-        if count:
-            self.reserve(role)  # Additional transports share both task and stage allowances.
 
     def _result(self, response, observed, logical_id: str) -> CompletionResult:
         if observed is not None:
@@ -699,6 +701,8 @@ def validate_model_policy(config: dict) -> dict:
         "retrieval_tokens",
         "retrieval_repair_tokens",
         "retrieval_repairs",
+        "compile_reserve_calls",
+        "compile_repair_calls",
     }
     if raw is not None and (not isinstance(raw, dict) or raw.keys() - allowed):
         raise ValueError("Configuration field 'model_policy' is invalid")

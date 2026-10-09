@@ -29,11 +29,7 @@ def retry_source(
 
     root = kb_dir.resolve()
     context = context or ExecutionContext()
-    with (
-        kb_ingest_lock(root / ".openkb", cancelled=context.cancelled, on_wait=context.waiting),
-        context.begin(root) as credentials,
-        collect_compile_report() as compilation,
-    ):
+    with kb_ingest_lock(root / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
         source = read_source(root, source_id)
         admission = read_admission(root, source)
         if source.removed or admission.revision.original_kind != "original":
@@ -55,17 +51,22 @@ def retry_source(
             revision = read_record(root, "unit-revisions", unit.target_revision_id, UnitRevision)
             if revision.source_revision_id != source.target_revision_id:
                 raise ValueError("Worksheet target was superseded by another workbook revision")
-        result = import_prepared_source(
-            root,
-            frozen_source_input(root, source, admission.revision),
-            admission=admission,
-            bundle=credentials,
-            context=context,
-            on_event=context.on_event,
-            scope=scope,
-            retry_confirmed=True,
-            unit_id=unit_id,
-        )
+        from openkb.model_task import source_task
+
+        if context.executor is None and context.resume_model_task_id is None:
+            context.resume_model_task_id = source_task(root, source_id, source.target_revision_id)
+        with context.begin(root) as credentials, collect_compile_report() as compilation:
+            result = import_prepared_source(
+                root,
+                frozen_source_input(root, source, admission.revision),
+                admission=admission,
+                bundle=credentials,
+                context=context,
+                on_event=context.on_event,
+                scope=scope,
+                retry_confirmed=True,
+                unit_id=unit_id,
+            )
         return replace(
             result,
             quality=tuple(dict.fromkeys((*result.quality, *compilation.quality))),

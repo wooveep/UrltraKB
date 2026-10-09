@@ -364,6 +364,8 @@ def process_import_unit(
             status="skipped" if state.status in {"completed", "empty", "retired"} else "blocked",
         )
     config = resolve_effective_config(kb_dir)[0]
+    if context is not None:
+        context.bind_model_input(admission.source.source_id, admission.revision.source_revision_id)
     model = config.get("model", DEFAULT_CONFIG["model"])
     concurrency = resolve_concurrency(config) or DEFAULT_COMPILE_CONCURRENCY
     stage = "conversion"

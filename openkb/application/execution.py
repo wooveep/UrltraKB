@@ -5,12 +5,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
 from openkb.llm_execution import CompletionExecutor, executor_from_snapshot
 from openkb.locks import LockCancelled
+
+if TYPE_CHECKING:
+    from openkb.model_task import TaskJournal
 
 
 @dataclass
@@ -22,6 +25,12 @@ class ExecutionContext:
     install_process_settings: bool = False
     usage_task_id: str | None = None
     executor: CompletionExecutor | None = field(default=None, repr=False)
+    resume_model_task_id: str | None = None
+    model_task: TaskJournal | None = field(default=None, repr=False)
+
+    def bind_model_input(self, source_id: str, revision_id: str) -> None:
+        if self.model_task is not None:
+            self.model_task.bind(source_id, revision_id)
 
     def check_stop(self) -> None:
         if self.cancelled():
@@ -49,6 +58,15 @@ class ExecutionContext:
             self.snapshot.install_worker_environment()
         if self.executor is None:
             self.executor = executor_from_snapshot(self.snapshot, self.cancelled)
+        if self.model_task is None:
+            from openkb.model_task import TaskJournal
+
+            self.model_task = TaskJournal(
+                kb_dir,
+                self.executor,
+                resume=self.resume_model_task_id,
+                policy=self.snapshot.values()["effective"].get("model_policy", {}),
+            )
         from openkb.llm_usage_execution import import_usage_execution
 
         with (
