@@ -14,9 +14,13 @@ from functools import partial
 
 from .block_policy import BlockContractError
 from .page_parts_policy import PagePartsContractError, PagePartsPolicy
+from .physical_sections import (
+    SectionBoundary, SubtreeQualityError, merge_continuation, prepare_entries, unique_heading,
+    validate_order as validate_physical_order,
+)
 
 ################### check title in page #########################################################
-async def check_title_appearance(item, page_list, start_index=1, model=None, policy=None):    
+async def check_title_appearance(item, page_list, start_index=1, model=None, policy=None, boundary=None):
     title=item['title']
     if policy:
         return {'list_index': item.get('list_index'), 'title': title,
@@ -24,6 +28,12 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
                 'answer': 'yes' if policy.valid(item, start_index, len(page_list)) else 'no'}
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
+    anchor = unique_heading(item, page_list, start_index)
+    if anchor:
+        return {'list_index': item.get('list_index'), 'title': title,
+                'page_number': item.get('physical_index'),
+                'answer': 'yes' if anchor['unit'] == item.get('physical_index') and
+                (boundary is None or boundary.contains(anchor)) else 'no'}
     
     
     page_number = item['physical_index']
@@ -39,6 +49,9 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
 
     The given section title is {title}.
     The given page_text is {page_text}.
+    Repeated headers, TOC references and ordinary word occurrences do not prove
+    a section heading. Check heading context on adjacent pages as well:
+    {page_list[max(0, page_number-start_index-1):page_number-start_index+2]}
     
     Reply format:
     {{
@@ -48,11 +61,19 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
+    if boundary:
+        prompt += (f'\nThis is a subtree of {boundary.title!r}, bounded by '
+                   f'{boundary.start} and {boundary.end} (page, character offset). '
+                   'Full boundary pages include neighboring chapters. Also return '
+                   '"belongs_to_parent": true ONLY if source context places this heading '
+                   'inside that parent section, not a neighboring operation or chapter.')
     response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
     response = extract_json(response)
     if 'answer' in response:
         answer = response['answer']
     else:
+        answer = 'no'
+    if boundary and response.get('belongs_to_parent') is not True:
         answer = 'no'
     return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
 
@@ -108,6 +129,13 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
     valid_items = []
     for item in structure:
         if _valid_physical_index(item):
+            anchor = unique_heading(item, page_list)
+            if anchor and anchor['unit'] == item['physical_index']:
+                item['anchor'] = anchor
+                item['title_origin'] = 'original'
+                prefix = page_list[anchor['unit'] - 1][0][:anchor['range'][0]]
+                item['appear_start'] = 'no' if prefix.strip() else 'yes'
+                continue
             page_text = page_list[item['physical_index'] - 1][0]
             tasks.append(check_title_appearance_in_start(item['title'], page_text, model=model, logger=logger))
             valid_items.append(item)
@@ -608,7 +636,10 @@ def process_no_toc(page_list, start_index=1, model=None, logger=None, policy=Non
     toc_with_page_number= generate_toc_init(group_texts[0], model, **({"policy": policy} if policy else {}))
     for group_text in group_texts[1:]:
         toc_with_page_number_additional = generate_toc_continue(toc_with_page_number, group_text, model, **({"policy": policy} if policy else {}))    
-        toc_with_page_number.extend(toc_with_page_number_additional)
+        toc_with_page_number.extend(
+            toc_with_page_number_additional if policy else
+            merge_continuation(toc_with_page_number, toc_with_page_number_additional)
+        )
     logger.info(f'generate_toc: {toc_with_page_number}')
 
     toc_with_page_number = convert_physical_index_to_int(toc_with_page_number)
@@ -784,7 +815,7 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
 
 
 
-async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None, policy=None):
+async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None, policy=None, boundary=None):
     print(f'start fix_incorrect_toc with {len(incorrect_results)} incorrect results')
     incorrect_indices = {result['list_index'] for result in incorrect_results}
     
@@ -858,7 +889,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
         # Check if the result is correct
         check_item = incorrect_item.copy()
         check_item['physical_index'] = physical_index_int
-        check_result = await check_title_appearance(check_item, page_list, start_index, model)
+        check_result = await check_title_appearance(check_item, page_list, start_index, model, boundary=boundary)
 
         if check_result['answer'] != 'yes':
             replacement = await reconcile_body_title(
@@ -866,6 +897,12 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
                 prev_correct, next_correct, model, partial(llm_acompletion, usage_stage="correction"),
             )
             if replacement is not None:
+                if boundary:
+                    checked = await check_title_appearance(
+                        {**check_item, **replacement}, page_list, start_index, model, boundary=boundary)
+                    if checked['answer'] != 'yes':
+                        return {'list_index': list_index, 'title': incorrect_item['title'],
+                                'is_valid': False}
                 return {'list_index': list_index, 'is_valid': True, **replacement}
 
         return {
@@ -920,7 +957,7 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
 
 
 
-async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None, policy=None):
+async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None, policy=None, boundary=None):
     print('start fix_incorrect_toc')
     fix_attempt = 0
     current_toc = toc_with_page_number
@@ -930,7 +967,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
         print(f"Fixing {len(current_incorrect)} incorrect results")
         before = copy.deepcopy(current_toc) if getattr(policy, 'unit_kind', None) == 'block' else None
         
-        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger, **({"policy": policy} if policy else {}))
+        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
                 
         fix_attempt += 1
         if before is not None and current_incorrect and before == current_toc:
@@ -950,7 +987,7 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
 
 ################### verify toc #########################################################
-async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, policy=None):
+async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, policy=None, boundary=None):
     print('start verify_toc')
     # Find the last non-None physical_index
     last_physical_index = None
@@ -960,7 +997,7 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, 
             break
     
     # Early return if we don't have valid physical indices
-    if not policy and (last_physical_index is None or last_physical_index < len(page_list)/2):
+    if not list_result:
         return 0, []
     
     # Determine which items to check
@@ -979,13 +1016,13 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, 
         if getattr(policy, 'unit_kind', None) == 'block':
             policy.normalize_title_origin(item, start_index, len(page_list))
         # Skip items with None physical_index (these were invalidated by validate_and_truncate_physical_indices)
-        if policy or item.get('physical_index') is not None:
+        if isinstance(item, dict):
             item_with_index = item.copy()
             item_with_index['list_index'] = idx  # Add the original index in list_result
             indexed_sample_list.append(item_with_index)
 
     tasks = [
-        check_title_appearance(item, page_list, start_index, model, **({"policy": policy} if policy else {}))
+        check_title_appearance(item, page_list, start_index, model, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
         for item in indexed_sample_list
     ]
     results = await gather_required(*tasks)
@@ -1010,7 +1047,21 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None, 
 
 
 ################### main process #########################################################
-async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None, policy=None):
+async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None, policy=None, boundary=None):
+    from ..errors import IndexQualityError
+    attempts = getattr(opt, 'max_subtree_attempts', 2) if boundary else 1
+    for attempt in range(attempts):
+        try:
+            return await _meta_processor_once(page_list, mode, toc_content, toc_page_list,
+                                             start_index, opt, logger, policy, boundary)
+        except IndexQualityError as error:
+            if not boundary:
+                raise
+            if attempt + 1 == attempts:
+                raise SubtreeQualityError('Subtree correction and rebuilding exhausted') from error
+
+
+async def _meta_processor_once(page_list, mode=None, toc_content=None, toc_page_list=None, start_index=1, opt=None, logger=None, policy=None, boundary=None):
     print(mode)
     print(f'start_index: {start_index}')
     
@@ -1021,12 +1072,14 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     else:
         toc_with_page_number = await run_sync(process_no_toc, page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
             
-    toc_with_page_number = [item for item in toc_with_page_number if policy or item.get('physical_index') is not None] 
+    if not policy:
+        toc_with_page_number = prepare_entries(toc_with_page_number, page_list, start_index,
+                                              boundary, getattr(opt, 'max_nodes_per_unit', 4))
     if isinstance(policy, PagePartsPolicy):
         toc_with_page_number = policy.prepare_navigation(toc_with_page_number, start_index,
                                                          start_index + len(page_list) - 1)
     
-    if not isinstance(policy, PagePartsPolicy):
+    if policy and not isinstance(policy, PagePartsPolicy):
         toc_with_page_number = validate_and_truncate_physical_indices(
             toc_with_page_number,
             len(page_list),
@@ -1034,7 +1087,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
             logger=logger
         )
     
-    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model, **({"policy": policy} if policy else {}))
+    accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
         
     logger.info({
         'mode': 'process_toc_with_page_numbers',
@@ -1042,13 +1095,15 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         'incorrect_results': incorrect_results
     })
     if accuracy == 1.0 and len(incorrect_results) == 0:
+        if not policy:
+            validate_physical_order(toc_with_page_number, start_index, len(page_list))
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))
             for item in toc_with_page_number:
                 item['unit_kind'] = policy.unit_kind
         return toc_with_page_number
-    if (policy or accuracy > 0.6) and len(incorrect_results) > 0:
-        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
+    if (policy or boundary or accuracy > 0.6) and len(incorrect_results) > 0:
+        toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
         if incorrect_results:
             if getattr(policy, 'unit_kind', None) == 'block':
                 raise BlockContractError("Block correction attempts exhausted")
@@ -1056,6 +1111,8 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
                 raise PagePartsContractError("Unverified slide anchors after correction")
             from ..errors import IndexQualityError
             raise IndexQualityError("Unverified physical-page anchors after correction")
+        if not policy:
+            validate_physical_order(toc_with_page_number, start_index, len(page_list))
         if policy:
             policy.validate_order(toc_with_page_number, start_index, len(page_list))
             for item in toc_with_page_number:
@@ -1071,7 +1128,15 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
             raise IndexQualityError('Unverified table of contents')
         
  
-async def process_large_node_recursively(node, page_list, opt=None, logger=None, policy=None):
+async def process_large_node_recursively(node, page_list, opt=None, logger=None, policy=None, depth=0):
+    if depth >= getattr(opt, 'max_navigation_depth', 8):
+        return node
+    if node.get('nodes'):
+        await gather_required(*[
+            process_large_node_recursively(child, page_list, opt, logger, policy, depth + 1)
+            for child in node['nodes']
+        ])
+        return node
     if isinstance(policy, PagePartsPolicy) and not policy.has_navigation_text(node['start_index'], node['end_index']):
         return node
     node_page_list = page_list[node['start_index']-1:node['end_index']]
@@ -1080,7 +1145,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
     if node['end_index'] - node['start_index'] > opt.max_page_num_each_node and token_num >= opt.max_token_num_each_node:
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
 
-        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger, **({'policy': policy} if policy else {}))
+        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger, boundary=SectionBoundary.from_node(node), **({'policy': policy} if policy else {}))
         node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
         
         # Filter out items with None physical_index before post_processing
@@ -1100,14 +1165,12 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
         
         elif valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
             node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], **({"policy": policy} if policy else {}))
-            node['end_index'] = valid_node_toc_items[1]['start_index'] if len(valid_node_toc_items) > 1 else node['end_index']
         else:
             node['nodes'] = post_processing(valid_node_toc_items, node['end_index'], **({"policy": policy} if policy else {}))
-            node['end_index'] = valid_node_toc_items[0]['start_index'] if valid_node_toc_items else node['end_index']
         
     if 'nodes' in node and node['nodes']:
         tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger, **({"policy": policy} if policy else {}))
+            process_large_node_recursively(child_node, page_list, opt, logger=logger, depth=depth + 1, **({"policy": policy} if policy else {}))
             for child_node in node['nodes']
         ]
         await gather_required(*tasks)
@@ -1183,13 +1246,13 @@ def page_index_main(doc, opt=None):
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = await run_sync(generate_doc_description, clean_structure, model=opt.model)
-                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'summary', 'text', 'nodes'])
+                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'title_origin', 'anchor', 'end_anchor', 'source_node_id', 'structure', 'summary', 'text', 'nodes'])
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
-        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'summary', 'text', 'nodes'])
+        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'title_correction', 'title_origin', 'anchor', 'end_anchor', 'source_node_id', 'structure', 'summary', 'text', 'nodes'])
         return {
             'doc_name': get_pdf_name(doc),
             'structure': structure,

@@ -144,6 +144,7 @@ def _build_index_config(
     forbids unknown kwargs).
     """
     kwargs: dict[str, Any] = {
+        **config.get("index_navigation", {}),
         "if_add_node_text": True,
         "if_add_node_summary": True,
         "if_add_doc_description": True,
@@ -241,6 +242,8 @@ def index_long_document(
                 cause: BaseException | None = exc
                 while cause is not None:
                     if isinstance(cause, (BlockContractError, PagePartsContractError)):
+                        raise cause from None
+                    if getattr(cause, "local_recovery_exhausted", False):
                         raise cause from None
                     cause = cause.__cause__
                 if not isinstance(exc, IndexQualityError):

@@ -23,6 +23,9 @@ class IndexConfig(BaseModel):
     toc_check_page_num: int = 20
     max_page_num_each_node: int = 10
     max_token_num_each_node: int = 20000
+    max_navigation_depth: int = Field(default=8, ge=1, le=32)
+    max_nodes_per_unit: int = Field(default=4, ge=1, le=32)
+    max_subtree_attempts: int = Field(default=2, ge=1, le=3)
     if_add_node_id: bool = True
     if_add_node_summary: bool = True
     if_add_doc_description: bool = True

@@ -14,6 +14,18 @@ def validate_runtime_config(config: dict[str, Any], *, allow_inherited: bool = F
     from openkb.llm_execution import validate_model_policy
 
     validate_model_policy(config)
+    if config.get("index_navigation") is not None:
+        navigation = config["index_navigation"]
+        bounds = {"max_navigation_depth": 32, "max_nodes_per_unit": 32, "max_subtree_attempts": 3}
+        if (
+            not isinstance(navigation, dict)
+            or navigation.keys() - bounds.keys()
+            or any(
+                type(value) is not int or not 1 <= value <= bounds[key]
+                for key, value in navigation.items()
+            )
+        ):
+            raise ValueError("Configuration field 'index_navigation' is invalid")
     if config.get("extraction_budget") is not None:
         from openkb.pending.records import ExecutionBudget
 

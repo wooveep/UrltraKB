@@ -101,10 +101,9 @@ def test_malformed_response_stays_unresolved(monkeypatch, response):
     assert len(incorrect) == 1
 
 
-def test_failed_repair_remains_in_unresolved_results(monkeypatch):
-    (_, incorrect), _ = run_repair(monkeypatch, failure=RuntimeError("provider unavailable"))
-    assert len(incorrect) == 1
-    assert incorrect[0]["list_index"] == 1
+def test_provider_failure_propagates_instead_of_rebuilding(monkeypatch):
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        run_repair(monkeypatch, failure=RuntimeError("provider unavailable"))
 
 
 def test_invalid_candidate_page_is_not_indexed(monkeypatch):

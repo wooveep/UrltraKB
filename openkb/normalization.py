@@ -122,7 +122,10 @@ def normalization_fingerprint(
             "pdf_recognition_policy": PDF_RECOGNITION_POLICY,
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
-            "index_policy": "content-based-physical-v1",
+            "index_policy": {
+                "version": "content-based-physical-v2",
+                "navigation": config.get("index_navigation", {}),
+            },
             # Runtime injection changed no successful tree content. Keep the
             # established content identity so old paid trees remain reusable.
             "index_sdk": (

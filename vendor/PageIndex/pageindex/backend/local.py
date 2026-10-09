@@ -148,7 +148,7 @@ class LocalBackend:
                     "source_digest": digest(managed_path),
                     "processing_fingerprint": file_hash,
                     "sdk_version": version("pageindex"),
-                    "index_content_policy": "content-based-physical-v1",
+                    "index_content_policy": "content-based-physical-v2",
                     "storage_format": "pageindex.document.v1",
                 },
             })

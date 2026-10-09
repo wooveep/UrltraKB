@@ -361,6 +361,7 @@ def list_to_tree(data):
 
     for item in data:
         structure = item.get('structure')
+        parent_structure = get_parent_structure(structure)
         node = {
             'title': item.get('title'),
             'start_index': item.get('start_index'),
@@ -369,9 +370,16 @@ def list_to_tree(data):
         }
         if 'title_correction' in item:
             node['title_correction'] = copy.deepcopy(item['title_correction'])
-        for key in ('title_origin', 'anchor', 'unit_kind'):
+        for key in ('title_origin', 'anchor', 'end_anchor', 'unit_kind', 'structure'):
             if key in item:
                 node[key] = copy.deepcopy(item[key])
+        import hashlib
+        identity = {
+            'parent': nodes.get(parent_structure, {}).get('source_node_id'),
+            'position': item.get('anchor') or {'page': item.get('start_index'),
+                                              'section': structure, 'title': item.get('title')},
+        }
+        node['source_node_id'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
 
         nodes[structure] = node
 
@@ -406,6 +414,8 @@ def post_processing(structure, end_physical_index, policy=None, start_physical_i
     for i, item in enumerate(structure):
         item['start_index'] = item.get('physical_index')
         if i < len(structure) - 1:
+            if structure[i + 1].get('anchor'):
+                item['end_anchor'] = copy.deepcopy(structure[i + 1]['anchor'])
             if structure[i + 1].get('appear_start') == 'yes':
                 item['end_index'] = structure[i + 1]['physical_index']-1
             else:
