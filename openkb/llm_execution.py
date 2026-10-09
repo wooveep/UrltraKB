@@ -169,8 +169,19 @@ class ModelCallPolicy:
     backoff: float = 0.25
     deadline: float | None = None  # monotonic; shared across retries and roles
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False, compare=False)
+    retrieval_tokens: int = 1024
+    retrieval_repair_tokens: int = 8192
+    retrieval_repairs: int = 2
 
     def __post_init__(self):
+        if self.retrieval_tokens not in (1024, 2048, 4096):
+            raise ValueError("retrieval_tokens must be 1024, 2048 or 4096")
+        if type(self.retrieval_repair_tokens) is not int or not (
+            self.retrieval_tokens <= self.retrieval_repair_tokens <= 8192
+        ):
+            raise ValueError("retrieval_repair_tokens must be within initial tokens and 8192")
+        if type(self.retrieval_repairs) is not int or not 0 <= self.retrieval_repairs <= 2:
+            raise ValueError("retrieval_repairs must be between 0 and 2 per question")
         for name, minimum in (("max_calls", 0), ("concurrency", 1), ("retries", 0)):
             value = getattr(self, name)
             if type(value) is not int or value < minimum:
@@ -335,7 +346,15 @@ class CompletionExecutor:
             **bindings.public_identity(),
             "policy": {
                 name: getattr(self.policy, name)
-                for name in ("max_calls", "concurrency", "retries", "backoff")
+                for name in (
+                    "max_calls",
+                    "concurrency",
+                    "retries",
+                    "backoff",
+                    "retrieval_tokens",
+                    "retrieval_repair_tokens",
+                    "retrieval_repairs",
+                )
             },
         }
         self.fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
@@ -400,6 +419,21 @@ class CompletionExecutor:
             if stage:
                 self._stage_calls[stage] = self._stage_calls.get(stage, 0) + 1
             self._calls += 1
+
+    def allow_retrieval_repair(self) -> bool:
+        """Reserve one logical repair; actual sends still use reserve/transport accounting."""
+        self.policy.check()
+        with self._guard:
+            if self._calls >= self.policy.max_calls:
+                raise ModelBudgetExceeded("Model request budget exhausted")
+            repairs = self.request_cache.get("retrieval_repairs", 0)
+            if (
+                self._stage_calls.get("retrieval", 0) >= 8
+                or repairs >= self.policy.retrieval_repairs
+            ):
+                return False
+            self.request_cache["retrieval_repairs"] = repairs + 1
+            return True
 
     @asynccontextmanager
     async def slot(self):
@@ -656,7 +690,16 @@ def validate_model_policy(config: dict) -> dict:
         ):
             raise ValueError(f"Configuration field '{name}' must be nonempty")
     raw = config.get("model_policy")
-    allowed = {"max_calls", "concurrency", "retries", "backoff", "deadline_seconds"}
+    allowed = {
+        "max_calls",
+        "concurrency",
+        "retries",
+        "backoff",
+        "deadline_seconds",
+        "retrieval_tokens",
+        "retrieval_repair_tokens",
+        "retrieval_repairs",
+    }
     if raw is not None and (not isinstance(raw, dict) or raw.keys() - allowed):
         raise ValueError("Configuration field 'model_policy' is invalid")
     options = dict(raw or {})

@@ -8,7 +8,7 @@ ConDB。自动会话记忆和检索路由仍由后续任务接入。
 | --- | --- | --- | --- | --- |
 | PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.8 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
 | ChatIndex | ictree / ctree | 0.1.0+urltrakb.3 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
-| ConDB | pageindex-condb / contextdb | 1.0+urltrakb.4 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
+| ConDB | pageindex-condb / contextdb | 1.0+urltrakb.5 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
 | LiteLLM | litellm / litellm | 1.87.2+urltrakb.3 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
 
 每个目录的 `UPSTREAM.json` 记录原文件 SHA-256、选定与排除范围、实际纳入文件、

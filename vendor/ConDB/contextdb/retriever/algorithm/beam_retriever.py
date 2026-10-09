@@ -1,6 +1,7 @@
 """Beam search retriever — keep top-k paths instead of a single path."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -253,7 +254,11 @@ class BeamRetriever(BaseRetriever):
             top_candidate_ids=top_candidate_ids,
             pick_limit=pick_limit,
         )
-        resp = self.llm.chat([{"role": "user", "content": prompt}], tools=TOOLS)
+        tools = deepcopy(TOOLS)
+        tools[0]["input_schema"]["properties"]["ranked_ids"]["items"]["enum"] = [
+            candidate["node_id"] for candidate in candidates
+        ]
+        resp = self.llm.chat([{"role": "user", "content": prompt}], tools=tools)
         for block in resp.get("content", []):
             if block.get("type") != "tool_use":
                 continue

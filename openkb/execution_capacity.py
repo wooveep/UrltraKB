@@ -65,6 +65,7 @@ def capacity_policy(
         "measurement_model": measurement_model if known_measurement else None,
         "input_limit": limit,
         "output_reserve_tokens": settings.output_reserve_tokens,
+        "context_window_tokens": settings.context_window_tokens,
         "source": source,
         "unknown_reason": reason,
         "catalog_fingerprint": fingerprint,

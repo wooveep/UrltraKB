@@ -6,7 +6,7 @@ import json
 
 from contextdb import ConDB
 
-from openkb.context.condb_llm import ConDBLLMAdapter
+from openkb.context.condb_llm import ConDBLLMAdapter, RetrievalFailure
 from openkb.context.conversation import ConversationMemory, MemoryState
 from openkb.context.projection import fingerprint, open_runtime, selection_identity
 from openkb.llm_execution import StageBudgetExceeded, raise_if_terminal
@@ -28,6 +28,8 @@ def recall_users(
     assert measure is not None
     if not state.tree_id or budget <= 0:
         return [], {"status": "unavailable", "context_tokens": 0, "coverage": "recent_only"}
+    key, refs = None, None
+    before = executor.calls
     try:
         memory.check_current()
         key = fingerprint(
@@ -39,9 +41,12 @@ def recall_users(
                 "question": question,
                 "retrieval": RECALL_VERSION,
                 "tokenizer": measure.fingerprint,
+                "role_policy": executor.fingerprint,
             }
         )
         refs = executor.request_cache.get(key)
+        if isinstance(refs, RetrievalFailure):
+            raise refs
         cache_hit = refs is not None
         if refs is None:
             with open_runtime(memory.kb_dir) as db:
@@ -128,10 +133,24 @@ def recall_users(
         raise_if_terminal(error)
         if isinstance(error, FileNotFoundError) or "changed during context" in str(error):
             raise
+        if key and isinstance(error, RetrievalFailure) and refs is None:
+            error.consumed_sends = executor.calls - before
+            executor.request_cache[key] = error
         return [], {
             "status": "budget_exhausted" if isinstance(error, StageBudgetExceeded) else "degraded",
             "context_tokens": 0,
             "coverage": "recent_only",
+            "reason_code": error.code
+            if isinstance(error, RetrievalFailure)
+            else (
+                "retrieval_budget_exhausted"
+                if isinstance(error, StageBudgetExceeded)
+                else "retrieval_failed"
+            ),
+            "cache_hit": isinstance(refs, RetrievalFailure),
+            "consumed_sends": error.consumed_sends
+            if isinstance(error, RetrievalFailure)
+            else executor.calls - before,
             "notes": [type(error).__name__, "Earlier user history has limited coverage"],
             "stage_sends": executor.stage_calls,
         }

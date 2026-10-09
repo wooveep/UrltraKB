@@ -8,7 +8,7 @@ import threading
 from contextdb import ConDB
 
 from openkb.application.query_views import QuerySelection, read_selected_file
-from openkb.context.condb_llm import ConDBLLMAdapter
+from openkb.context.condb_llm import ConDBLLMAdapter, RetrievalFailure
 from openkb.context.projection import ensure_projection, fingerprint, open_runtime
 from openkb.llm_execution import CompletionExecutor, StageBudgetExceeded, raise_if_terminal
 
@@ -34,6 +34,8 @@ class KnowledgeRetrieval:
             return self._search(question)
 
     def _search(self, question: str) -> dict:
+        key, cached = None, None
+        before = self.executor.calls
         try:
             projection = self.ensure_projection()
             key = fingerprint(
@@ -43,9 +45,12 @@ class KnowledgeRetrieval:
                     "strategy": "beam",
                     "beam_size": 3,
                     "select_k": 6,
+                    "role_policy": self.executor.fingerprint,
                 }
             )
             cached = self.executor.request_cache.get(key)
+            if isinstance(cached, RetrievalFailure):
+                raise cached
             if cached is None:
                 with open_runtime(self.selection.views[0].scope.kb_dir) as db:
                     result = ConDB(storage=db).query(
@@ -114,6 +119,9 @@ class KnowledgeRetrieval:
             }
         except Exception as error:
             raise_if_terminal(error)
+            if key and isinstance(error, RetrievalFailure) and cached is None:
+                error.consumed_sends = self.executor.calls - before
+                self.executor.request_cache[key] = error
             return {
                 "status": "budget_exhausted"
                 if isinstance(error, StageBudgetExceeded)
@@ -121,6 +129,18 @@ class KnowledgeRetrieval:
                 if "changed after selection" in str(error)
                 else "degraded",
                 "hits": [],
+                "reason_code": error.code
+                if isinstance(error, RetrievalFailure)
+                else (
+                    "retrieval_budget_exhausted"
+                    if isinstance(error, StageBudgetExceeded)
+                    else "retrieval_failed"
+                ),
+                "cache_hit": isinstance(cached, RetrievalFailure),
+                "consumed_sends": error.consumed_sends
+                if isinstance(error, RetrievalFailure)
+                else self.executor.calls - before,
+                "reading_action": {"tool": "read_file", "arguments": {"path": "index.md"}},
                 "coverage": "limited",
                 "diagnostics": [
                     str(error),
