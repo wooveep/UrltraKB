@@ -83,4 +83,10 @@ class ExecutionContext:
 
             bind_model_task(self.model_task.record.task_id)
             self.check_stop()
-            yield LlmCredentialBundle(**self.snapshot.values()["credentials"])
+            previous_images = self.executor.image_deliveries.snapshot()
+            try:
+                yield LlmCredentialBundle(**self.snapshot.values()["credentials"])
+            finally:
+                images = self.executor.image_deliveries.finish()
+                if images and images != previous_images:
+                    self.on_event({"event": "image_coverage", "data": {"images": list(images)}})

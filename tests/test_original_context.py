@@ -81,10 +81,10 @@ async def test_each_occurrence_records_only_its_own_pixels(kb_dir):
     assert hashlib.sha256(pixels).hexdigest() == json.loads(outgoing[0]["text"])["content_digest"]
     metadata = json.loads(delivered[0].text)
     assert metadata["occurrence_id"] == images[0]["occurrence_id"]
-    assert metadata["status"] == "pixels_delivered" and metadata["page"] == 1
+    assert metadata["status"] == "delivery_pending" and metadata["page"] == 1
     first = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     images = json.loads(first.split("\nImage coverage: ")[1])["occurrences"]
-    assert [i["status"] for i in images] == ["pixels_delivered", "unread"]
+    assert [i["status"] for i in images] == ["delivery_pending", "unread"]
     second = await invoke(agent, "get_page_content", doc_name="manual", pages="2")
     images2 = json.loads(second.split("\nImage coverage: ")[1])["occurrences"]
     assert images2[0]["status"] == "unread"

@@ -349,8 +349,10 @@ class CompletionExecutor:
         self.scope = scope or active_scope()
         self._guard = threading.Lock()
         from openkb.execution_budget import TaskBudget
+        from openkb.image_delivery import ImageDeliveries
 
         self.budget = TaskBudget(self.policy)
+        self.image_deliveries = ImageDeliveries()
         self.request_cache: dict[str, Any] = {}
         self.question_capacity: TokenMeasure | None = None
         self._answer_input_tokens = 0
@@ -383,9 +385,12 @@ class CompletionExecutor:
     def begin_question(self) -> None:
         """Renew stage allowances while preserving the task's total budget and deadline."""
         self.policy.check()
+        from openkb.image_delivery import ImageDeliveries
+
         with self._guard:
             self.budget.reset_question()
             self.request_cache.clear()
+            self.image_deliveries = ImageDeliveries()
             self.question_capacity = None
             self._answer_input_tokens = self._tool_output_tokens = 0
 

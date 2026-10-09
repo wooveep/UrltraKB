@@ -30,6 +30,7 @@ class ModelCall:
     send_error: BaseException | None = None
     raw_usage_available: bool | None = None
     image_digests: set[str] | None = None
+    response_status: int | None = None
     cleanup_deadline: float | None = None
 
     def observe_images(self, request):
@@ -79,6 +80,7 @@ class ModelCall:
         )
 
     def received(self, identity, response):
+        self.response_status = response.status_code
         raw = _response(response)
         self.raw_usage_available = isinstance(raw, dict) and raw.get("usage") is not None
         if raw is None and response.is_stream_consumed:

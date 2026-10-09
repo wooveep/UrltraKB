@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import wraps
 from pathlib import Path
 from typing import Literal
 
@@ -45,6 +46,22 @@ class AnswerResult:
         ]
         | None
     ) = None
+    image_coverage: tuple[dict, ...] = ()
+
+
+def _with_image_receipt(operation):
+    @wraps(operation)
+    async def run(*args, **kwargs):
+        context = kwargs.get("context") or ExecutionContext()
+        before = context.executor.image_deliveries if context.executor else None
+        result = await operation(*args, **{**kwargs, "context": context})
+        after = context.executor.image_deliveries if context.executor else None
+        return replace(
+            result,
+            image_coverage=after.snapshot() if after is not None and after is not before else (),
+        )
+
+    return run
 
 
 def _validate_question(kb_dir: Path, question: str, *, scope: KnowledgeScope | None = None) -> Path:
@@ -68,6 +85,7 @@ def _settle_usage(session: ChatSession, previous, fallback=None):
 
 
 @track_import_usage
+@_with_image_receipt
 async def ask_question(
     kb_dir: Path,
     question: str,
@@ -174,6 +192,7 @@ async def ask_question(
 
 
 @track_import_usage
+@_with_image_receipt
 async def continue_conversation(
     kb_dir: Path,
     message: str,

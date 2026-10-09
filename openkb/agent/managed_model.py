@@ -32,8 +32,11 @@ class _ReceiptModel(LitellmModel):
         self.executor = executor
         self.raw_usage = None
         self.raw_stream = None
+        self.response_accepted = False
 
     def receipt(self, response):
+        if getattr(response, "id", None) and isinstance(getattr(response, "choices", None), list):
+            self.response_accepted = True
         usage = getattr(response, "usage", None)
         if usage is not None:
             self.raw_usage = usage
@@ -205,7 +208,16 @@ class ManagedAgentModel(Model):
                     self._logical.set(None)
                     return response
                 finally:
-                    await inner.close()
+                    try:
+                        await inner.close()
+                    finally:
+                        self.executor.image_deliveries.settle(
+                            self.executor.image_deliveries.capture(
+                                kwargs.get("input", args[1] if len(args) > 1 else None)
+                            ),
+                            observed,
+                            accepted=inner.response_accepted,
+                        )
 
     async def stream_response(self, *args, **kwargs):
         args, kwargs, request = self._arguments(args, kwargs)
@@ -225,5 +237,14 @@ class ManagedAgentModel(Model):
                     observed.finish()
                     self._logical.set(None)
                 finally:
-                    await stream.aclose()
-                    await inner.close()
+                    try:
+                        await stream.aclose()
+                        await inner.close()
+                    finally:
+                        self.executor.image_deliveries.settle(
+                            self.executor.image_deliveries.capture(
+                                kwargs.get("input", args[1] if len(args) > 1 else None)
+                            ),
+                            observed,
+                            accepted=inner.response_accepted,
+                        )

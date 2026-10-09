@@ -9,6 +9,7 @@ from PIL import Image
 
 from openkb.agent.tools import read_wiki_image
 from openkb.application.query_views import QueryView, read_selected_file
+from openkb.image_delivery import ImageDeliveries
 from openkb.source_reading import ReaderFailure
 
 
@@ -16,6 +17,7 @@ class ImageCoverage:
     def __init__(self, view: QueryView, *, executor=None):
         self.view = view
         self.executor = executor
+        self.receipts = executor.image_deliveries if executor else ImageDeliveries()
         self.occurrences: dict[str, dict] = {}
         self.deliveries = 0
         self.pixels = 0
@@ -110,9 +112,9 @@ class ImageCoverage:
         self.pixels += pixels
         self.context_tokens += tokens
         record.update(
-            status="pixels_delivered",
             content_digest=self.view.files[path],
             width=width,
             height=height,
         )
-        return [ToolOutputText(text=json.dumps(record, ensure_ascii=False)), output]
+        receipt = self.receipts.prepare(record)
+        return [ToolOutputText(text=json.dumps(receipt, ensure_ascii=False)), output]
