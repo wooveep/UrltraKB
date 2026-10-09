@@ -26,6 +26,8 @@ class ExecutionContext:
     def check_stop(self) -> None:
         if self.cancelled():
             raise LockCancelled("Stopped before starting the next operation")
+        if self.executor is not None:
+            self.executor.policy.check()
 
     def waiting(self) -> None:
         self.on_event({"stage": "waiting"})

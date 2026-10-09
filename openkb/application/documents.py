@@ -84,25 +84,53 @@ def _snapshot_add_paths(
     return paths + IndexLocation.package(kb_dir / ".openkb").mutation_paths()
 
 
-def _run_compile_with_retry(coro_factory, label: str, *, report=logger.info):
+def _run_compile_with_retry(
+    coro_factory, label: str, *, report=logger.info, check_current=lambda: None
+):
     from openkb.compilation_report import CompilationIncomplete, compilation_attempt
+    from openkb.ingest_diagnostics import failure_reason
+    from openkb.llm_execution import (
+        ModelBudgetExceeded,
+        ModelCallPolicy,
+        active_executor,
+        raise_if_terminal,
+    )
+
+    executor = active_executor()
+    policy = executor.policy if executor else ModelCallPolicy()
+
+    def check_start():
+        policy.check()
+        if executor and executor.calls >= policy.max_calls:
+            raise ModelBudgetExceeded("Model request budget exhausted before compilation")
 
     report(f"  {label}...")
+    first_failure = None
     for attempt in range(2):
         try:
+            check_start()
+            check_current()
             with compilation_attempt() as compilation:
                 asyncio.run(coro_factory())
+                policy.check()
             return compilation
         except (RecoveryRequired, CompilationIncomplete):
             raise
         except Exception as exc:
-            if attempt == 0:
-                report("  Retrying compilation in 2s...")
-                time.sleep(2)
-            else:
-                report(f"  [ERROR] Compilation failed: {exc}")
-                logger.debug("Compilation traceback:", exc_info=True)
+            raise_if_terminal(exc)
+            report(f"  Compilation failed ({type(exc).__name__}): {failure_reason(exc)}")
+            if attempt or not policy.retryable(exc):
+                if first_failure is not None:
+                    raise exc from first_failure
                 raise
+            first_failure = exc
+            check_start()
+            check_current()
+            report("  Retrying compilation in 2s...")
+            until = time.monotonic() + 2
+            while time.monotonic() < until:
+                check_start()
+                time.sleep(min(0.05, max(0, until - time.monotonic())))
 
 
 def add_single_file(

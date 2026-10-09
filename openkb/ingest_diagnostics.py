@@ -5,7 +5,7 @@ import re
 from pydantic import ValidationError
 
 
-def failure_reason(error: Exception) -> str:
+def failure_reason(error: BaseException) -> str:
     category = type(error).__name__
     if isinstance(error, ConnectionError):
         return "provider unavailable; connection failed"

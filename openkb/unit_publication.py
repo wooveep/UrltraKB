@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import shutil
 import uuid
@@ -252,7 +253,7 @@ def record_unit_failure(
     kb_dir: Path,
     state: UnitPublication,
     stage: str,
-    error: Exception,
+    error: BaseException,
     *,
     discovery_intent: DiscoveryIntent | None = None,
 ) -> UnitPublication:
@@ -262,7 +263,7 @@ def record_unit_failure(
     failed = state.model_copy(
         update={
             "status": "stopped"
-            if isinstance(error, LockCancelled)
+            if isinstance(error, (LockCancelled, asyncio.CancelledError))
             else "blocked"
             if isinstance(error, ReprocessingRequired)
             else "failed",
@@ -289,7 +290,7 @@ def record_unit_failure(
     return failed
 
 
-def _check_target(
+def check_import_target(
     kb_dir: Path, source: Source, unit: ImportUnit, state: UnitPublication, view: CompileView
 ) -> None:
     if current_generation(kb_dir) != view.kb_generation:
@@ -326,7 +327,7 @@ def publish_unit_revision(
 ) -> UnitPublication:
     """The knowledge head, exact input, output and checkpoint commit together."""
     check_stop()
-    _check_target(kb_dir, admission.source, unit, state, view)
+    check_import_target(kb_dir, admission.source, unit, state, view)
     live = live_scope(kb_dir, state.view_id).wiki_dir
     current_head = read_head(kb_dir, state.view_id)
     current_pages = wiki_versions(kb_dir, live)
@@ -433,7 +434,7 @@ def publish_unit_revision(
             write_record(state_path, awaiting)
             write_record(attempt_path, awaiting)
             check_stop()
-            _check_target(kb_dir, admission.source, unit, awaiting, view)
+            check_import_target(kb_dir, admission.source, unit, awaiting, view)
         return awaiting
     return commit_unit_revision(
         kb_dir, admission, unit, revision, state, view, manifest, check_stop=check_stop
@@ -453,7 +454,7 @@ def commit_unit_revision(
 ) -> UnitPublication:
     """Commit a generated or explicitly reviewed candidate and its exact checkpoint."""
     check_stop()
-    _check_target(kb_dir, admission.source, unit, state, view)
+    check_import_target(kb_dir, admission.source, unit, state, view)
     if read_head(kb_dir, state.view_id) != view.head:
         raise ValueError("Knowledge view changed before publication")
     live = live_scope(kb_dir, state.view_id).wiki_dir
@@ -509,5 +510,5 @@ def commit_unit_revision(
         write_record(state_path, completed)
         write_record(attempt_path, completed)
         check_stop()
-        _check_target(kb_dir, admission.source, unit, completed, view)
+        check_import_target(kb_dir, admission.source, unit, completed, view)
     return completed

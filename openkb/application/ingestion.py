@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from functools import partial
 from pathlib import Path
@@ -14,7 +15,6 @@ from openkb.ingest_result import ImportUnitOutcome, IngestResult
 from openkb.inputs import TEXT_SOURCE_EXTENSIONS, PreparedInput
 from openkb.knowledge_scope import KnowledgeScope
 from openkb.llm_usage_execution import track_import_unit, track_import_usage
-from openkb.locks import LockCancelled
 from openkb.mutation import RecoveryRequired, mutation_scope
 from openkb.source_catalog import (
     Admission,
@@ -24,6 +24,7 @@ from openkb.source_catalog import (
 )
 from openkb.unit_publication import (
     begin_unit_attempt,
+    check_import_target,
     plan_import_units,
     prepare_compile_view,
     publish_unit_revision,
@@ -492,7 +493,12 @@ def process_import_unit(
                 if on_event:
                     on_event({"stage": "compiling", "source": admission.source.name})
                 compilation = _run_compile_with_retry(
-                    compile_document, "Compiling wiki", report=report
+                    compile_document,
+                    "Compiling wiki",
+                    report=report,
+                    check_current=lambda: check_import_target(
+                        kb_dir, admission.source, unit, state, view
+                    ),
                 )
                 state = state.model_copy(
                     update={"quality": tuple(compilation.quality), "unfinished": ()}
@@ -540,12 +546,14 @@ def process_import_unit(
             )
     except RecoveryRequired:
         raise
-    except LockCancelled as exc:
-        record_unit_failure(kb_dir, state, stage, exc, discovery_intent=admission.discovery_intent)
-        raise
-    except Exception as exc:
+    except (Exception, asyncio.CancelledError) as exc:
+        from openkb.llm_execution import raise_if_terminal
+
         logger.debug("Unit processing failed", exc_info=True)
-        failed = record_unit_failure(kb_dir, state, stage, exc)
+        failed = record_unit_failure(
+            kb_dir, state, stage, exc, discovery_intent=admission.discovery_intent
+        )
+        raise_if_terminal(exc)
         return result_from_publication(
             kb_dir, admission, failed, status="blocked" if failed.status == "blocked" else "failed"
         )
