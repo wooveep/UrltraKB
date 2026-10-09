@@ -27,7 +27,10 @@ useful. External advice or background must be separately labelled, and is normal
 omitted from document summaries. Do not add a list of irrelevant unknowns.
 When evidence is limited, narrow the page to supported content or a navigation brief.
 Existing generated assertions must be reconsidered against originals; do not inherit
-an unsupported inference or promote it into a source fact during an update.
+an unsupported inference or promote it into a source fact during an update. Reassessment
+is scoped to the originals actually read: missing windows do not refute old facts.
+Preserve unrelated supported content, source conditions, supported calculations and
+labelled synthesis; changed sources retain their old basis and pending refresh status.
 """
 
 ANSWER_SOURCE_RULES = (

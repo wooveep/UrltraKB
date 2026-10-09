@@ -177,7 +177,9 @@ New information from document "{doc_name}" (summarized above) should be \
 integrated into this page. Rewrite the full page incorporating the new \
 information naturally — do not just append. Reconsider old generated claims
 against the originals provided for this update. Retain supported statements
-with their separate source conditions; narrow unsupported content. Related
+with their separate source conditions; correct demonstrably unsupported content within
+the supplied ranges. Missing windows do not contradict old facts. Preserve supported
+content outside the covered scope without claiming it was reverified. Related
 links are navigation and do not establish effects or invariant properties.
 
 For [[wikilinks]] in the rewrite, follow the whitelist rules from the \
@@ -218,7 +220,9 @@ Current content of this page:
 Integrate the new facts about this entity from document "{doc_name}"
 (summarized above). Rewrite the full page — do not just append. Reconsider old
 generated claims against the supplied originals, retain separate conditions
-and narrow unsupported content. Related links establish no effects or invariant
+and correct unsupported content only within the supplied source scope. Unread old
+material is not counterevidence; preserve its conditions and pending refresh status.
+Related links establish no effects or invariant
 properties. Follow the whitelist rules from the message
 above for all [[wikilinks]].
 
@@ -1829,9 +1833,7 @@ async def _compile_concepts(
         originals = source_windows.prepare(
             concept, f"concepts/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
-        if doc_type == "pageindex" and not originals.has_original:
-            brief, content = originals.navigation_page(title, doc_name)
-            return name, content, True, brief
+        originals.require_update(f"concepts/{_sanitize_concept_name(name)}.md")
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1907,9 +1909,7 @@ async def _compile_concepts(
         originals = source_windows.prepare(
             ent, f"entities/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
-        if doc_type == "pageindex" and not originals.has_original:
-            brief, content = originals.navigation_page(title, doc_name)
-            return name, content, brief, etype
+        originals.require_update(f"entities/{_sanitize_concept_name(name)}.md")
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,

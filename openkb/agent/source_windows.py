@@ -29,6 +29,18 @@ array of 1-6 unique positive ordinals. Cells/chars must be range strings.
 class PageOriginalContext:
     message: dict
     has_original: bool
+    has_current_original: bool = False
+    windows: tuple[dict, ...] = ()
+
+    def require_update(self, page: str) -> None:
+        if not self.has_current_original:
+            from openkb.compilation_report import CompilationIncomplete, report_compile_issue
+
+            code = "page_update_originals_unread"
+            report_compile_issue(code, page)
+            raise CompilationIncomplete(
+                (code,), (page,), "Existing page retained; locate relevant current originals first"
+            )
 
     def navigation_page(self, title: str, doc_name: str) -> tuple[str, str]:
         return (
@@ -276,12 +288,38 @@ class CompileSourceWindows:
         windows: list[dict] = []
         remaining = MAX_EVIDENCE_CHARS
         for path, location in paths.items():
+            window: dict
             if not remaining:
-                windows.append({"path": path, "coverage": "unread", "content": ""})
-                continue
-            window = self._window(path, location, remaining)
+                window = {"path": path, "coverage": "unread", "content": ""}
+            else:
+                try:
+                    window = self._window(path, location, remaining)
+                except FileNotFoundError:
+                    window = {
+                        "path": path,
+                        "coverage": "unread",
+                        "content": "",
+                        "diagnostics": ["Linked original unavailable; do not infer absence"],
+                    }
+            if not window["content"].strip():
+                window["coverage"] = "unread"
             remaining -= len(window["content"])
+            window["source_role"] = "current" if path == self._path() else "prior_linked_source"
+            window["unread"] = window["coverage"] != "complete"
+            window["reading_action"] = {
+                "source_path": path,
+                "native_location": location,
+                "continuation": window.get("continuation"),
+                "instruction": "Locate or extend this source window before "
+                "reassessing uncovered claims",
+            }
             windows.append(window)
+        prior_evidence = {}
+        if previous_page and self.kb_dir:
+            from openkb.knowledge_evidence import page_evidence
+            from openkb.knowledge_scope import live_scope
+
+            prior_evidence = page_evidence(live_scope(self.kb_dir, self.view_id), previous_page)
         blocks: list[dict] = [
             {
                 "type": "text",
@@ -293,13 +331,24 @@ class CompileSourceWindows:
                 )
                 + "Original source windows (bounded, frozen):\n"
                 + json.dumps(windows, ensure_ascii=False)
+                + "\nPrior page basis (retain these source revisions and any pending refresh): "
+                + json.dumps(prior_evidence, ensure_ascii=False)
+                + f"\nWindow capacity remaining: {remaining} characters. "
                 + "\nCoverage describes only these reads. Prior generated pages are "
                 "drafts, not evidence. Unread claims are not verified. "
                 + (
-                    "If no relevant original window is available, retain only a navigation brief. "
+                    "For a NEW page without relevant originals, produce only a navigation brief. "
                     if long
                     else "An empty supplementary list does not remove the current full original. "
                 )
+                + "For an existing page, a missing or partial window is not evidence of error. "
+                "Reassess only the supplied source ranges. Retain supported content and source "
+                "conditions outside those ranges; do not claim unread material was reverified. "
+                "Correct explicit counterevidence or demonstrably unsupported generated claims "
+                "within the covered scope. Preserve supported calculations and labelled synthesis. "
+                "A changed source leaves old evidence pending refresh; never relabel it as the "
+                "new source revision. Do not transfer one source's defaults or guarantees "
+                "to another. "
                 + "Keep OCR transcriptions separate from generated visual interpretations.",
             }
         ]
@@ -354,5 +403,8 @@ class CompileSourceWindows:
                         }
                     )
         return PageOriginalContext(
-            {"role": "user", "content": blocks}, any(w["content"].strip() for w in windows)
+            {"role": "user", "content": blocks},
+            any(w["content"].strip() for w in windows),
+            not long or any(w["path"] == self._path() and w["content"].strip() for w in windows),
+            tuple(windows),
         )
