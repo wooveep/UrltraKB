@@ -203,11 +203,17 @@ assert not store.group.exists()
 
 
 def _holding_worker(*args):
+    from inspect import signature
+
+    from openkb.runtime.worker import run_unit
+
+    prepared_dir = signature(run_unit).bind(*args).arguments["prepared_dir"]
+
     def hold(prepared):
         frozen = prepared.path
         root = Path(args[1].kb_dir).parent
         (root / "worker-ready.json").write_text(
-            json.dumps({"copy": str(frozen), "group": str(args[-1].parents[2])}),
+            json.dumps({"copy": str(frozen), "group": str(prepared_dir.parents[2])}),
             encoding="utf-8",
         )
         deadline = time.monotonic() + 30
