@@ -16,6 +16,7 @@ log = get_logger(__name__)
 # Prompt template for LLM ranking (kept in prompts/ for easy editing).
 PROMPT = Template((Path(__file__).parent.parent.parent / "prompts/beam.jinja").read_text())
 PROMPT_FS = Template((Path(__file__).parent.parent.parent / "prompts/beam_fs.jinja").read_text())
+PROMPT_CHAT = Template((Path(__file__).parent.parent.parent / "prompts/beam_chat.jinja").read_text())
 
 # Tool schema: LLM returns ranked node ids and can signal "done".
 TOOLS = [
@@ -130,9 +131,9 @@ class BeamRetriever(BaseRetriever):
             # Guard against premature termination in filesystem mode: the LLM must
             # commit to at least one non-directory before we accept done=True.
             # Otherwise we'd stop after picking a directory and return no files.
-            if done and self.mode == "filesystem":
+            if done and self.mode in {"filesystem", "conversation"}:
                 picked_file = any(
-                    not candidate_map.get(nid, {}).get("is_dir", False)
+                    self._is_result_candidate(candidate_map[nid])
                     for nid in ranked_ids
                 )
                 if not picked_file:
@@ -148,11 +149,11 @@ class BeamRetriever(BaseRetriever):
 
             # Add file-like ranked ids until the final result limit is reached.
             remaining_result_slots = max(0, result_limit - len(top_candidate_ids))
-            if self.mode == "filesystem":
+            if self.mode in {"filesystem", "conversation"}:
                 ranked_file_ids = [
                     node_id
                     for node_id in ranked_ids
-                    if not candidate_map.get(node_id, {}).get("is_dir", False)
+                    if self._is_result_candidate(candidate_map[node_id])
                 ]
                 top_ids_this_turn = ranked_file_ids[:remaining_result_slots]
             else:
@@ -173,9 +174,9 @@ class BeamRetriever(BaseRetriever):
                         continue
                     seen.add(node_id)
                     cand = candidate_map[node_id]
-                    if cand.get("is_leaf") or (self.mode == "filesystem" and not cand.get("is_dir", False)):
+                    if cand.get("is_leaf") or (self.mode in {"filesystem", "conversation"} and self._is_result_candidate(cand)):
                         # Leaf/file nodes go to top candidates, not next frontier.
-                        if self.mode != "filesystem" and node_id not in top_candidate_ids:
+                        if self.mode not in {"filesystem", "conversation"} and node_id not in top_candidate_ids:
                             top_candidate_ids.append(node_id)
                         continue
                     next_frontier.append({
@@ -223,6 +224,11 @@ class BeamRetriever(BaseRetriever):
                     continue
                 file_top_candidate_ids.append(node_id)
             top_candidate_ids = file_top_candidate_ids if file_top_candidate_ids else top_candidate_ids
+        elif self.mode == "conversation":
+            top_candidate_ids = [
+                node_id for node_id in top_candidate_ids
+                if self._node_attrs(self._get_node(tree_id, node_id)).get("kind") == "exchange"
+            ]
 
         # Final results
         contents = []
@@ -247,7 +253,7 @@ class BeamRetriever(BaseRetriever):
         Ask the LLM to rank candidates. Returns (ranked_ids, done).
         This is the core "LLM as judge" step.
         """
-        tmpl = PROMPT_FS if self.mode == "filesystem" else PROMPT
+        tmpl = PROMPT_CHAT if self.mode == "conversation" else PROMPT_FS if self.mode == "filesystem" else PROMPT
         prompt = tmpl.render(
             query=query,
             candidates=candidates,
@@ -281,6 +287,11 @@ class BeamRetriever(BaseRetriever):
     ) -> list[dict[str, Any]]:
         return list(candidates)
 
+    def _is_result_candidate(self, candidate: dict[str, Any]) -> bool:
+        if self.mode == "conversation":
+            return candidate.get("kind") == "exchange"
+        return not candidate.get("is_dir", False)
+
     def _candidate_from_child(
         self, tree_id: str, child, parent_titles: list[str], parent_summary: str = "", is_leaf: bool = False
     ) -> dict[str, Any]:
@@ -307,6 +318,13 @@ class BeamRetriever(BaseRetriever):
             cand["rel_path"] = attrs.get("rel_path", "")
             cand["is_dir"] = attrs.get("is_dir", False)
             cand["summary"] = ""
+        elif self.mode == "conversation":
+            cand.update(
+                kind=attrs.get("kind"), turn_id=attrs.get("turn_id"),
+                start_turn=attrs.get("start_turn"), end_turn=attrs.get("end_turn"),
+                text=text[:2000], text_complete=len(text) <= 2000,
+                is_leaf=attrs.get("kind") == "exchange",
+            )
         return cand
 
     def _candidate_from_node(
@@ -352,6 +370,9 @@ class BeamRetriever(BaseRetriever):
             entity = self.storage.get_entity(tree_id, node_id)
             payload = json.loads(entity.payload_json) if entity else {}
             self._entity_cache[node_id] = payload
+        if self.mode == "conversation" and payload.get("type") == "exchange":
+            # Messages already obey the role policy validated by ChatIndexAdapter.
+            return "\n".join(f"{m['role']}: {m['content']}" for m in payload.get("messages", []))
         return payload.get("text") or payload.get("content") or ""
 
     def _get_node(self, tree_id: str, node_id: str):

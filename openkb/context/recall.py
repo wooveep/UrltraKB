@@ -11,7 +11,7 @@ from openkb.context.conversation import ConversationMemory, MemoryState
 from openkb.context.projection import fingerprint, open_runtime, selection_identity
 from openkb.llm_execution import StageBudgetExceeded, raise_if_terminal
 
-RECALL_VERSION = "openkb-user-intent-beam-v1"
+RECALL_VERSION = "openkb-user-intent-beam-v2"
 
 
 def recall_users(
@@ -68,11 +68,14 @@ def recall_users(
                     attrs = json.loads(node.attrs_json or "{}")
                     start, end = attrs.get("start_turn"), attrs.get("end_turn")
                     if (
-                        type(start) is not int
+                        attrs.get("kind") != "exchange"
+                        or type(start) is not int
                         or type(end) is not int
                         or not 0 <= start < end <= state.indexed_turns
+                        or end != start + 1
+                        or attrs.get("turn_id") != memory.session.turns[start].turn_id
                     ):
-                        raise ValueError("Recall candidate is outside the committed prefix")
+                        raise ValueError("Recall candidate is not a committed exchange")
                     for turn in memory.session.turns[start:end]:
                         refs.append(
                             {
@@ -88,6 +91,7 @@ def recall_users(
         memory.check_current()
         by_id = {t.turn_id: t for t in memory.session.turns[: state.indexed_turns]}
         found: list[dict] = []
+        selected: list[dict] = []
         seen = set(recent_ids)
         for reference in refs:
             original = by_id.get(reference["turn_id"])
@@ -100,20 +104,31 @@ def recall_users(
             if original.turn_id in seen:
                 continue
             seen.add(original.turn_id)
-            item = {
-                **reference,
-                "text": original.user_text,
-                "origin": "recalled_user",
-                "char_start": 0,
-                "char_end": len(original.user_text),
-            }
-            available = budget - measure.payload_tokens([*found, {**item, "text": ""}])
+            selected.append(
+                {
+                    **reference,
+                    "text": original.user_text,
+                    "origin": "recalled_user",
+                    "char_start": 0,
+                    "char_end": len(original.user_text),
+                }
+            )
+        for index, item in enumerate(selected):
+            # Reserve every selected turn's locator and share the remaining text
+            # allowance, so one long exchange cannot hide another relevant match.
+            frames = [{**turn, "text": ""} for turn in selected[index:]]
+            framed_tokens = measure.payload_tokens([*found, *frames])
+            available = (budget - framed_tokens) // len(frames)
             if available <= 0:
                 break
-            item["text"] = measure.prefix(original.user_text, available)
+            item["text"] = measure.prefix(item["text"], available)
             item["char_end"] = len(item["text"])
-            # Escapes and locator framing count toward the recall allowance too.
-            while item["text"] and measure.payload_tokens([*found, item]) > budget:
+            # JSON escaping counts toward this turn's share, not just the total.
+            # Keep every remaining locator reserved while fitting this excerpt.
+            while (
+                item["text"]
+                and measure.payload_tokens([*found, item, *frames[1:]]) > framed_tokens + available
+            ):
                 item["text"] = item["text"][:-1]
                 item["char_end"] = len(item["text"])
             if item["text"]:

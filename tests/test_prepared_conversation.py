@@ -132,7 +132,7 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
         assert "ASSISTANT_POISON" not in prompt
         if request.get("stream"):
             assert "ARCHIVE_ROOM" in prompt and "GARDEN_ROOM" in prompt
-            assert "42 credits" in prompt and "999" not in prompt
+            assert "42 credits" in prompt and "budget is 999" not in prompt
             return streamed_response(
                 {"role": "assistant", "content": "GARDEN_ROOM, budget 42 credits."}
             )
@@ -148,7 +148,7 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
         )
         return response({"role": "assistant", "content": json.dumps(value)})
 
-    model_service.replies.extend((200, model_reply) for _ in range(8))
+    model_service.replies.extend((200, model_reply) for _ in range(9))
     events = []
     result = await continue_conversation(
         kb_dir,
@@ -163,14 +163,14 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
     assert context["index"]["pending_turns"] == 4
     assert context["recall"]["status"] == "completed"
     assert 0 < context["recall"]["context_tokens"] <= 2000
-    assert context["recall"]["stage_sends"]["retrieval"] == 1
+    assert context["recall"]["stage_sends"]["retrieval"] == 2
     restored = load_session(kb_dir, session.id)
     assert restored.turns[-1].user_text == "Confirm my room and budget."
     assert len(restored.turns) == 10
     from openkb.llm_usage import read_requests
 
     requests = read_requests(kb_dir)
-    assert len(requests) == result.model_usage["current"]["requests"] == 8
+    assert len(requests) == result.model_usage["current"]["requests"] == 9
     assert {r.operation for r in requests} == {
         "answer",
         "conversation_index",

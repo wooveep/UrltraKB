@@ -1,0 +1,24 @@
+Locate relevant past conversation exchanges. Topic labels only guide navigation;
+they are not remembered facts and must not be returned as final matches.
+
+Query: {{ query }}
+
+Selected exchanges so far: {{ top_candidate_ids }}
+
+Candidates (pick up to {{ pick_limit }} ids, best first):
+{% for c in candidates -%}
+- id: {{ c.node_id }}
+  kind: {{ c.kind }}
+  title: {{ c.title }}
+  summary: {{ c.summary }}
+  turn_id: {{ c.turn_id }}
+  turn_range: [{{ c.start_turn }}, {{ c.end_turn }}) (zero-based, half-open)
+  message_excerpt: {{ c.text }}
+  excerpt_complete: {{ c.text_complete }}
+  topic_path: {{ c.path }}
+{% endfor %}
+
+Return ONE tool call "rank" with ranked_ids in relevance order and done.
+Choose topic candidates to explore further; done must be false for topics.
+Only exchange candidates can be final matches. Read the relevant exchanges;
+an incomplete excerpt or unvisited topic cannot establish that a detail is absent.

@@ -172,6 +172,14 @@ class ConDB:
         )
 
     def _tree_mode(self, tree_id: str) -> str:
+        root_id = self.storage.get_root_id(tree_id)
+        root = self.storage.get_entity(tree_id, root_id) if root_id else None
+        payload = json.loads(root.payload_json) if root else {}
+        # Generic entity type names are user data. Only the validated ChatIndex
+        # adapter emits a conversation topic with its source-prefix basis.
+        if (root and root.entity_type == "conversation"
+                and payload.get("kind") == "topic" and isinstance(payload.get("basis"), dict)):
+            return "conversation"
         cur = self.storage.conn.cursor()
         cur.execute("SELECT meta_json FROM trees WHERE tree_id = ?", (tree_id,))
         row = cur.fetchone()

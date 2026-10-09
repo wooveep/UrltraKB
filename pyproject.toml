@@ -34,7 +34,7 @@ keywords = ["ai", "rag", "retrieval", "knowledge-base", "llm", "pageindex", "age
 dependencies = [
     "pageindex==0.3.0.dev3+urltrakb.11",
     "ictree==0.1.0+urltrakb.3",
-    "pageindex-condb==1.0+urltrakb.5",
+    "pageindex-condb==1.0+urltrakb.6",
     "pymupdf==1.27.2.3",
     "regex==2026.5.9",
     "charset-normalizer==3.4.7",

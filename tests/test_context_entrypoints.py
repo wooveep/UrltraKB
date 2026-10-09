@@ -56,7 +56,7 @@ def test_long_conversation_entrypoints_keep_users_and_all_stage_usage(
         )
         return response({"role": "assistant", "content": json.dumps(value)})
 
-    model_service.replies.extend((200, reply) for _ in range(8))
+    model_service.replies.extend((200, reply) for _ in range(9))
     question = "Confirm my room and budget."
     public = None
     if entry == "cli":
@@ -123,14 +123,14 @@ def test_long_conversation_entrypoints_keep_users_and_all_stage_usage(
     assert restored.turns[-1].user_text == question
     assert restored.turns[-1].assistant_text == "GARDEN_ROOM, 42 credits."
     requests = read_requests(kb_dir)
-    assert len(requests) == len(model_service.requests) == 8
+    assert len(requests) == len(model_service.requests) == 9
     assert {r.operation for r in requests} == {
         "conversation_index",
         "conversation_retrieval",
         "answer",
     }
     if public:
-        assert public["model_usage"]["current"]["requests"] == 8
+        assert public["model_usage"]["current"]["requests"] == 9
         assert public["context"]["index"]["indexed_turns"] == 5
         assert public["context"]["recall"]["status"] == "completed"
         assert public["usage"] == restored.token_usage

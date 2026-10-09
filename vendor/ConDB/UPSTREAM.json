@@ -2,11 +2,11 @@
   "schema_version": 2,
   "distribution": "pageindex-condb",
   "module": "contextdb",
-  "version": "1.0+urltrakb.5",
+  "version": "1.0+urltrakb.6",
   "repository": "https://github.com/VectifyAI/ConDB",
   "commit": "62da030426b3eee96a77b464e7007cdf8530c42e",
   "license": "Apache-2.0",
-  "local_version": "1.0+urltrakb.5",
+  "local_version": "1.0+urltrakb.6",
   "retrieved": "2026-10-06",
   "upstream_archive": {
     "url": "https://api.github.com/repos/VectifyAI/ConDB/tarball/62da030426b3eee96a77b464e7007cdf8530c42e",
@@ -90,24 +90,25 @@
   ],
   "local_patch": {
     "date": "2026-10-09",
-    "purpose": "Lossless document navigation and original payloads; injected native TreeDB, composable savepoint transactions, ordered paths, schema-validated sealed read-only access. Strict ctree.retrieval v1 adapter verifies complete role-filtered conversation prefixes and rejects legacy previews. 本地 `.4` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；数据库 schema 与交换格式不变。 Local .5 binds rank schema IDs to the actual candidate set.",
+    "purpose": "Lossless document navigation and original payloads; injected native TreeDB, composable savepoint transactions, ordered paths, schema-validated sealed read-only access. Strict ctree.retrieval v1 adapter verifies complete role-filtered conversation prefixes and rejects legacy previews. 本地 `.4` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；数据库 schema 与交换格式不变。 Local .5 binds rank schema IDs to the actual candidate set.; Conversation beam ranks declared-role message excerpts and returns exchanges, not navigation topics.",
     "modified": {
-      "pyproject.toml": "ef7ded3e63aa0c2c39b0e49f8a269cc79bf2e702caab368da9beabbcd3422fcd",
-      "contextdb/llm.py": "17541ea1fc23f9dab207fef8ae1843c193b32ebbadc2ff10339f6dfb98e6e9ee",
-      "contextdb/__init__.py": "343913ebf99c89bc486b1740c5e8f0ec3958df9cec9a34e04bdb1285257c7e00",
-      "contextdb/core/storage.py": "9fa5aac4e1a490468c34790f719c0a89610917f60b2e52ebf2b273be0636a6e2",
-      "contextdb/api/context_tree.py": "ad52e158fad9b063720efdd0afdacc8f6ba1760a14f8fc2a4749d78f0454f0c4",
-      "contextdb/api/condb.py": "c2beac5327bfcefaf5397edf31756e584d7231de01f7a930990d373129602115",
+      "contextdb/__init__.py": "208b580b863cfc3b098b76fc73299457f885f444812971d2c342a88fd901d803",
       "contextdb/adapter/base.py": "c87fffee8112299ef6b7e719d1ffed8ebc3f1d7a186f2f864c97207ae081c138",
-      "contextdb/retriever/algorithm/beam_retriever.py": "660bba526cf6a29a519a589af997acac2478c2e4ed30c35b73af5873ff8837d4"
+      "contextdb/api/condb.py": "148f6d369fcb5550c972cca744e2f66f78b9fd441d564b7005cbb0614e702cb8",
+      "contextdb/api/context_tree.py": "ad52e158fad9b063720efdd0afdacc8f6ba1760a14f8fc2a4749d78f0454f0c4",
+      "contextdb/core/storage.py": "9fa5aac4e1a490468c34790f719c0a89610917f60b2e52ebf2b273be0636a6e2",
+      "contextdb/llm.py": "17541ea1fc23f9dab207fef8ae1843c193b32ebbadc2ff10339f6dfb98e6e9ee",
+      "contextdb/retriever/algorithm/beam_retriever.py": "25e26ac7c3fc26f0ba68d6b69416096b63ffbfc5ab33cc13e0d982c35bbdf9fb",
+      "pyproject.toml": "85f1ab99520d0909c224da418f159a511753acb3cd30a021dd607a00d2d07c3e"
     },
     "added": {
-      "README.urltrakb.md": "a99cd49b9966c555f316b3fb1e32fad6203537f4613a57545a4d9ee97db632f7",
-      "contextdb/_urltrakb_source.json": "47dfa735a698ad040b8c80a816e1efad78f21a48bee6fe9aa9edbb05d5a00568",
-      "contextdb/core/json_values.py": "f5413d424a9d1a48f5f8bd41869309810aea881bae87ae8704eebd58850bfccd",
+      "README.urltrakb.md": "d03d39a3aede9ee80be40ff3876f41dfac18ca52dd61e3cca06aef80a5037223",
+      "contextdb/_urltrakb_source.json": "9e0df9ef055d2bfc50e918824a5bd971e7dad3a64e21de4e84ce31a6051c4337",
+      "contextdb/adapter/chatindex.py": "fcd971601531ce4e61a8022057a781920be9040d3b0ca6851481157fc37e5a71",
       "contextdb/adapter/document.py": "e375063981b006cf7bd781d5da797e8cfb91010ff24b2968f22da23a91e521d1",
       "contextdb/adapter/protocol.py": "bce0c553b317ed1930bb211fe087ee974fef039ae045a6da6d0e1945a1756564",
-      "contextdb/adapter/chatindex.py": "fcd971601531ce4e61a8022057a781920be9040d3b0ca6851481157fc37e5a71"
+      "contextdb/core/json_values.py": "f5413d424a9d1a48f5f8bd41869309810aea881bae87ae8704eebd58850bfccd",
+      "contextdb/prompts/beam_chat.jinja": "c401ed5efd60e7a2738a9b686c43ce75b094ac3d197a365f5312a3b90b5173a2"
     },
     "deleted": [
       "requirements.txt"
@@ -143,6 +144,7 @@
     "contextdb/metrics/__init__.py",
     "contextdb/metrics/statistics_recorder.py",
     "contextdb/prompts/beam.jinja",
+    "contextdb/prompts/beam_chat.jinja",
     "contextdb/prompts/beam_fs.jinja",
     "contextdb/prompts/block.jinja",
     "contextdb/prompts/block_cache_prefix.jinja",

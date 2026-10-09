@@ -160,6 +160,14 @@ def test_empty_current_export_and_public_import_remain_supported(tmp_path):
         assert db.storage.get_children(tree_id, root) == []
 
 
+def test_generic_conversation_type_still_returns_document_content(tmp_path):
+    with ConDB(str(tmp_path / "context.sqlite")) as db:
+        tree_id = db.store({"type": "conversation", "content": "Retained notes."}, format="generic")
+        result = db.query(tree_id, "Read my notes", llm=Recorder(), strategy="beam", max_turns=1)
+        assert len(result.contents) == 1
+        assert result.contents[0]["content"]["content"] == "Retained notes."
+
+
 @pytest.mark.parametrize("where", ["topic", "exchange", "message", "turn"])
 def test_nested_legacy_or_undeclared_content_is_rejected(where):
     tree, _ = conversation(count=1)
