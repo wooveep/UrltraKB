@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pageindex"
-version = "0.3.0.dev3+urltrakb.10"
+version = "0.3.0.dev3+urltrakb.11"
 description = "Python SDK for PageIndex"
 readme = "README.md"
 license = "MIT"

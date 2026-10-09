@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.10",
+  "local_version": "0.3.0.dev3+urltrakb.11",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -128,14 +128,15 @@
     "Reconcile the recorded patch hashes with the existing .5 snapshot; retain all current parser, frozen-input and slide readback fixes unchanged.",
     "Add packaged source identity for editable and wheel checks; package-only changes do not alter the content policy or request index rebuilding.",
     "Physical slide navigation v3: enforce incremental continuation before append, verify new IDs and original anchors, and allow one bounded correction of the current chunk. Earlier entries remain immutable and retain their existing verification phase.",
-    "Physical subtree recovery (#139): reliable native heading anchors, source/parent node identities, immutable continuation prefixes, parent boundary checks, bounded local repair, frozen generic navigation limits; content policy v2."
+    "Physical subtree recovery (#139): reliable native heading anchors, source/parent node identities, immutable continuation prefixes, parent boundary checks, bounded local repair, frozen generic navigation limits; content policy v2.",
+    "Physical ordering keeps unlocated model-verified headings at unknown offsets instead of fabricating page-start offsets (#143)."
   ],
   "local_patch": {
     "date": "2026-10-09",
     "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
-      "pyproject.toml": "c3e9dafa6d1ddfbedf978497c66eef9b697b2ecf0bbb92415b73dd442faa87bc",
+      "pyproject.toml": "8d65eadec14d7cacb5e5a44bdff7a5a332cac9864cf159d27549f5715f53c21a",
       "pageindex/config.py": "75e073ac0dbbd98ad48a4719491ed997209c5a02c918f66a643e89aec80e90a9",
       "pageindex/errors.py": "21a519e8c8e6bb28c59ce6e8bb5675b21b63ac131edb1beb7abed93a95c1679f",
       "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
@@ -162,8 +163,8 @@
       "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d"
     },
     "added": {
-      "README.urltrakb.md": "3d7b24f6dc78f7496fc5e975991b2105c3f071172828355599ecd2f99a36d828",
-      "pageindex/_urltrakb_source.json": "c812ddc762caa17c1f7ec3df50582f589b4be40fb2fc216058d9c2d2f859f5dd",
+      "README.urltrakb.md": "b8d7aab1dbb7fc89fb1d54948609d5ddcd71a50e4132fe59d4be9267b7c64fe1",
+      "pageindex/_urltrakb_source.json": "de9f54f61c71226f61596c1479e0a421759a7d7c4752e1e3513e2c7261cad443",
       "pageindex/llm.py": "54d5b095a4467dbaab9ce16ab76edb803faf21045ad7fbf46defbc0ffaba3c22",
       "pageindex/default_llm.py": "f95550d10ffc1b05bacdcb990ab267b6a4c0cf5f329cf8f99879406105965d24",
       "tests/test_toc_body_titles.py": "e8ee446afb0b4ac305871246a481f2e3a7acb5420aec3ea8a738611ba1e808f4",
@@ -171,7 +172,7 @@
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
       "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed",
-      "pageindex/index/physical_sections.py": "bc636403c342c535e3d639f6e258c91b9c1923aeba1ff8801765a7f21f178aa8"
+      "pageindex/index/physical_sections.py": "5e9cc40c8966b523f93f63713416f1c80ab6b956712f4e3d405185d56a5a5414"
     },
     "deleted": [
       "cookbook/README.md",
@@ -190,7 +191,7 @@
   "schema_version": 2,
   "distribution": "pageindex",
   "module": "pageindex",
-  "version": "0.3.0.dev3+urltrakb.10",
+  "version": "0.3.0.dev3+urltrakb.11",
   "included_files": [
     ".claude/commands/dedupe.md",
     ".gitattributes",

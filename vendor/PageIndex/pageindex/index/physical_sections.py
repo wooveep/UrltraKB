@@ -134,13 +134,21 @@ def merge_continuation(previous, incoming):
 
 
 def validate_order(entries, start, length):
-    previous = (start, -1)
+    previous_page, previous_offset = start, -1
     for item in entries:
         page = item.get('physical_index')
         if type(page) is not int or not start <= page < start + length:
             raise IndexQualityError('Physical heading is outside its original range')
-        offset = item.get('anchor', {}).get('range', [0])[0]
-        position = (page, offset)
-        if position < previous:
+        if page < previous_page:
             raise IndexQualityError('Physical headings do not follow original source order')
-        previous = position
+        if page > previous_page:
+            previous_offset = -1
+        # Model verification establishes a page, not a character offset. An
+        # absent local anchor must not become a fabricated offset at page start.
+        anchor = item.get('anchor')
+        if anchor:
+            offset = anchor['range'][0]
+            if offset < previous_offset:
+                raise IndexQualityError('Physical headings do not follow original source order')
+            previous_offset = offset
+        previous_page = page

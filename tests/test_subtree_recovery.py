@@ -149,3 +149,45 @@ async def test_exhausted_subtree_never_falls_back_to_whole_document(monkeypatch)
             logger=SimpleNamespace(info=lambda *a: None),
         )
     assert calls == [7, 7]
+
+
+@pytest.mark.asyncio
+async def test_model_verified_heading_without_offset_can_follow_local_anchor(monkeypatch):
+    engine = importlib.import_module("pageindex.index.page_index")
+    pages = [("Introductory text.\n1 Gardening\nPruning\nCut above a bud.\n", 20)]
+    entries = [
+        {"title": "Gardening", "structure": "1", "physical_index": 1},
+        {"title": "Pruning", "structure": "1.1", "physical_index": 1},
+    ]
+    verified = []
+
+    async def verify(**kwargs):
+        verified.append(kwargs["prompt"])
+        return '{"answer": "yes"}'
+
+    monkeypatch.setattr(engine, "process_no_toc", lambda *a, **kw: entries)
+    monkeypatch.setattr(engine, "llm_acompletion", verify)
+    result = await engine.meta_processor(
+        pages,
+        mode="process_no_toc",
+        opt=SimpleNamespace(model="fixture"),
+        logger=SimpleNamespace(info=lambda *a: None),
+    )
+    assert [item["title"] for item in result] == ["Gardening", "Pruning"]
+    assert result[0]["anchor"]["range"][0] > 0
+    assert "anchor" not in result[1]
+    assert len(verified) == 1
+
+
+@pytest.mark.parametrize("last_page,last_offset", [(1, 10), (0, 40)])
+def test_unknown_offset_does_not_hide_a_known_order_violation(last_page, last_offset):
+    from pageindex.errors import IndexQualityError
+    from pageindex.index.physical_sections import validate_order
+
+    entries = [
+        {"physical_index": 1, "anchor": {"range": [30, 35]}},
+        {"physical_index": 1},
+        {"physical_index": last_page, "anchor": {"range": [last_offset, last_offset + 5]}},
+    ]
+    with pytest.raises(IndexQualityError):
+        validate_order(entries, 0, 2)
