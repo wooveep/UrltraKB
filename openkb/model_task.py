@@ -46,6 +46,7 @@ class TaskJournal:
     def __init__(self, kb_dir, executor, *, resume=None, policy=None):
         self.root, self.executor = kb_dir, executor
         policy = dict(policy or {})
+        policy.setdefault("max_calls", executor.policy.max_calls)
         previous = read_task(kb_dir, resume) if resume else None
         bindings = executor.bindings.public_identity()
         deadline = executor.policy.deadline

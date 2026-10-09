@@ -50,10 +50,11 @@ class _ReceiptModel(LitellmModel):
     async def _chunks(self):
         while True:
             try:
-                chunk = await self.executor.wait_response(anext(self.raw_stream))
+                chunk = await self.executor.wait_response(
+                    anext(self.raw_stream), on_response=self.receipt
+                )
             except StopAsyncIteration:
                 break
-            self.receipt(chunk)
             yield chunk
 
     async def _fetch_response(self, *args, **kwargs):
@@ -73,6 +74,18 @@ class _ReceiptModel(LitellmModel):
 
     async def close(self):
         if self.raw_stream is not None:
+            if self.raw_usage is None and self.observed and self.observed.sent_ids:
+                import asyncio
+
+                from openkb.llm_usage_transport import settle_received
+
+                async def remaining_receipts():
+                    async for chunk in self.raw_stream:
+                        self.receipt(chunk)
+                        if self.raw_usage is not None:
+                            break
+
+                await settle_received(asyncio.create_task(remaining_receipts()))
             await self.raw_stream.aclose()
         await super().close()
 

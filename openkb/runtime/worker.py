@@ -166,6 +166,7 @@ def _execute(
             resources=result.resources,
             error=result.message,
             changes=describe_ingest(result),
+            import_units=result.units,
             quality=result.quality,
             model_usage=result.model_usage,
             unfinished=result.unfinished,
@@ -215,6 +216,7 @@ def _execute(
             resources=accepted.resources,
             error=accepted.message,
             changes=describe_ingest(accepted),
+            import_units=accepted.units,
             unfinished=accepted.unfinished,
         )
     if isinstance(request, SavePage):
@@ -432,6 +434,7 @@ def _execute(
             unfinished=result.unfinished,
             revision=result.input_version,
             changes=describe_ingest(result),
+            import_units=result.units,
         )
     if isinstance(request, (AskQuestion, ContinueConversation)):
         import asyncio

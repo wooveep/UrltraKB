@@ -30,6 +30,7 @@ class ModelCall:
     send_error: BaseException | None = None
     raw_usage_available: bool | None = None
     image_digests: set[str] | None = None
+    cleanup_deadline: float | None = None
 
     def observe_images(self, request):
         import json
@@ -63,6 +64,7 @@ class ModelCall:
             or uuid.uuid4().hex
         )
         self.sent_ids.append(identity)
+        finish_request(identity, scope=self.scope, terminal=False, send_status="sent")
         return identity
 
     def finish(self, response=None, *, state="completed"):
@@ -73,11 +75,30 @@ class ModelCall:
             None if self.sent_ids else response,
             state=state,
             scope=self.scope,
+            business_state=state,
         )
 
     def received(self, identity, response):
         raw = _response(response)
         self.raw_usage_available = isinstance(raw, dict) and raw.get("usage") is not None
+        if raw is None and response.is_stream_consumed:
+            import json
+
+            for line in response.text.splitlines():
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    event = json.loads(line[5:])
+                except ValueError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                receipt = event.get("message", event)
+                if isinstance(receipt, dict) and receipt.get("usage") is not None:
+                    self.raw_usage_available = True
+                    finish_request(
+                        identity, receipt, scope=self.scope, observation="transport", terminal=False
+                    )
         finish_request(
             identity,
             raw,
@@ -91,6 +112,33 @@ class ModelCall:
 _CALL: ContextVar[ModelCall | None] = ContextVar("openkb_usage_model_call", default=None)
 _GUARD = threading.Lock()
 _INSTALLED = False
+
+
+async def settle_received(task):
+    """Drain only an already-sent response, sharing a 250 ms cleanup deadline."""
+    import asyncio
+
+    call = _CALL.get()
+    loop = asyncio.get_running_loop()
+    if call and call.sent_ids:
+        if call.cleanup_deadline is None:
+            call.cleanup_deadline = loop.time() + 0.25
+        while not task.done() and (remaining := call.cleanup_deadline - loop.time()) > 0:
+            try:
+                await asyncio.wait({task}, timeout=remaining)
+            except asyncio.CancelledError:
+                continue  # Repeated stop requests cannot abandon cleanup or the KB lease.
+    if not task.done():
+        task.cancel()
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            break
+    if task.done() and not task.cancelled():
+        task.exception()  # Consume cleanup errors; preserve the original terminal cause.
 
 
 def _response(response):
@@ -155,6 +203,8 @@ def install_send_observer():
             return response
 
         async def asend(client, request, *args, **kwargs):
+            import asyncio
+
             call = _CALL.get()
             if call is not None:
                 call.check_credentials(request.headers)
@@ -163,15 +213,40 @@ def install_send_observer():
             identity = call.sending()
             call.observe_images(request)
             kwargs["follow_redirects"] = False
-            try:
+
+            async def receive():
                 response = await async_send(client, request, *args, **kwargs)
+                call.received(identity, response)
+                return response
+
+            pending = asyncio.create_task(receive())
+            try:
+                return await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                await settle_received(pending)
+                if pending.done() and not pending.cancelled() and pending.exception() is None:
+                    response = pending.result()
+                    if not response.is_stream_consumed:
+
+                        async def receive_body():
+                            await response.aread()
+                            call.received(identity, response)
+
+                        await settle_received(asyncio.create_task(receive_body()))
+                    await response.aclose()
+                finish_request(
+                    identity,
+                    state="cancelled",
+                    scope=call.scope,
+                    observation="transport",
+                    business_state="cancelled",
+                )
+                raise
             except BaseException as exc:
                 finish_request(
                     identity, state=_failure_state(exc), scope=call.scope, observation="transport"
                 )
                 raise
-            call.received(identity, response)
-            return response
 
         httpx.Client.send, httpx.AsyncClient.send = send, asend
         _INSTALLED = True
@@ -203,7 +278,10 @@ def observe_model_call(
         prompt_version=prompt_version,
         policy_fingerprint=fingerprint,
     )
-    identity = begin_request(model, stage, scope=scope, **metadata) or uuid.uuid4().hex
+    identity = (
+        begin_request(model, stage, scope=scope, send_status="not_sent", **metadata)
+        or uuid.uuid4().hex
+    )
     call = ModelCall(
         scope,
         model,

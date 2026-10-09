@@ -582,8 +582,14 @@ class CompletionExecutor:
         finally:
             self._slots.release()
 
-    async def wait_response(self, awaitable):
-        task = asyncio.ensure_future(awaitable)
+    async def wait_response(self, awaitable, *, on_response=None):
+        async def receive():
+            result = await awaitable
+            if on_response is not None:
+                on_response(result)
+            return result
+
+        task = asyncio.create_task(receive())
         try:
             while not task.done():
                 self.policy.check()
@@ -591,8 +597,11 @@ class CompletionExecutor:
             return await task
         finally:
             if not task.done():
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                from openkb.llm_usage_transport import settle_received
+
+                if on_response is None:
+                    task.cancel()
+                await settle_received(task)
 
     async def acomplete(self, role: str, request: ModelRequest) -> CompletionResult:
         self.policy.check()

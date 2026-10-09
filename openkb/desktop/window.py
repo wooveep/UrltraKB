@@ -641,6 +641,8 @@ class Workbench(QMainWindow):
                 pass  # A concurrent summary cleanup can remove selected rows.
 
     def _poll_tasks(self):
+        from openkb.desktop.task_status import task_progress
+
         tasks = self.manager.tasks()
         running = sum(task.state not in TERMINAL for task in tasks)
         attention = sum(
@@ -666,7 +668,7 @@ class Workbench(QMainWindow):
                 + (f" · {quality_count} 项质量提示" if quality_count else ""),
                 f"成功 {task.succeeded} · 跳过 {task.skipped} · "
                 f"失败 {task.failed} · 未处理 {task.unfinished}",
-                task.error or _STAGES.get(task.stage, task.stage),
+                task_progress(task, _STAGES.get(task.stage, task.stage)),
             ]
             for column, value in enumerate(values):
                 item = self.task_table.item(row, column)

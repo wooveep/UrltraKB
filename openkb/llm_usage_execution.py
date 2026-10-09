@@ -99,6 +99,36 @@ def bind_source_execution(source_id: str) -> None:
                 _write_execution(path, record, source_ids=sorted((*record.source_ids, source_id)))
 
 
+def bind_model_task(task_id: str) -> None:
+    scope = _SCOPE.get()
+    if scope:
+        path = scope.kb_dir / ".openkb/usage/executions" / f"{scope.execution_id}.json"
+        with atomic_record_lock(scope.kb_dir / ".openkb/usage/ledger.lock"):
+            _write_execution(path, _read_execution(path), model_task_id=task_id)
+
+
+def model_task_receipts(kb_dir: Path, execution_ids) -> list[dict]:
+    from openkb.model_task import read_task
+
+    identities = set()
+    for identity in execution_ids:
+        path = kb_dir / ".openkb/usage/executions" / f"{identity}.json"
+        if path.is_file() and (task_id := _read_execution(path).model_task_id):
+            identities.add(task_id)
+    return [
+        {
+            "task_id": task.task_id,
+            "parent_task_id": task.parent_task_id,
+            "actual_sends": task.used,
+            "limit": task.policy.get("max_calls", 1000),
+            "stages": task.stages,
+            "deadline_at": task.deadline_at,
+        }
+        for identity in sorted(identities)
+        for task in [read_task(kb_dir, identity)]
+    ]
+
+
 def _native_source_id(identity):
     # Legacy hashes acquire a catalog identity during admission; do not bind the hash.
     return (
@@ -256,6 +286,7 @@ def _execution_receipt(kb_dir: Path, ids):
     cumulative = merge_usage_receipts(kb_dir, receipts)
     return {
         "execution_ids": sorted(ids),
+        "model_tasks": model_task_receipts(kb_dir, ids),
         "source_ids": sorted(sources),
         "ledger": str(kb_dir / ".openkb/usage"),
         "current": current,

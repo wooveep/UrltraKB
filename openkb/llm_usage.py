@@ -46,6 +46,8 @@ class UsageRequest(BaseModel):
     ended_at: str | None = None
     state: Literal["started", "completed", "failed", "cancelled"] = "started"
     observation: Literal["call", "transport"] = "call"
+    send_status: Literal["unknown", "not_sent", "sent"] = "unknown"
+    business_state: Literal["completed", "failed", "cancelled"] | None = None
     provider_request_id: str | None = None
     input_total: int | None = Field(default=None, ge=0)
     output_total: int | None = Field(default=None, ge=0)
@@ -181,6 +183,8 @@ def finish_request(
     scope: UsageScope | None = None,
     observation: str | None = None,
     terminal: bool = True,
+    send_status: str | None = None,
+    business_state: str | None = None,
 ) -> None:
     scope = scope or _SCOPE.get()
     if identity is None or scope is None:
@@ -188,6 +192,14 @@ def finish_request(
     path = _path(scope.kb_dir, identity)
     with atomic_record_lock(scope.kb_dir / ".openkb/usage/ledger.lock"):
         record = UsageRequest.model_validate_json(path.read_text("utf-8"))
+        provider_id = _field(response, "id")
+        if (
+            isinstance(provider_id, str)
+            and record.provider_request_id is not None
+            and record.provider_request_id != provider_id
+        ):
+            logger.warning("Ignored conflicting provider identity for usage request %s", identity)
+            return
         usage = normalize_usage(_field(response, "usage"))
         updates: dict[str, Any] = {}
         # Late/repeated callbacks can improve unknown fields, never erase known usage.
@@ -198,7 +210,10 @@ def finish_request(
             updates.update(state=state, ended_at=_now())
         if observation is not None:
             updates["observation"] = observation
-        provider_id = _field(response, "id")
+        if send_status is not None:
+            updates["send_status"] = send_status
+        if business_state is not None and record.business_state != "cancelled":
+            updates["business_state"] = business_state
         if isinstance(provider_id, str):
             updates["provider_request_id"] = provider_id
         merged = record.model_dump() | updates
@@ -258,12 +273,17 @@ def aggregate_usage(
     return {
         **totals,
         "requests": len(records),
+        "actual_sends": sum(r.send_status == "sent" for r in records),
+        "unsent_attempts": sum(r.send_status == "not_sent" for r in records),
+        "send_unknown": sum(r.send_status == "unknown" for r in records),
         "total_known": totals["input_total"] + totals["output_total"],
         "unknown_requests": sum(r.usage_status != "known" for r in records),
         "in_flight_requests": sum(r.state == "started" for r in records),
         "unknown_fields": missing,
         "collection_complete": all(r.observation == "transport" for r in records),
-        "usage_complete": all(r.usage_status == "known" for r in records),
+        "usage_complete": all(
+            r.usage_status == "known" or r.send_status == "not_sent" for r in records
+        ),
         "request_ids": [r.request_attempt_id for r in records],
         "stages": {
             stage: {
@@ -306,6 +326,8 @@ def mark_source(kb_dir: Path, source_id: str) -> None:
 
 
 def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=None) -> dict:
+    from openkb.llm_usage_execution import model_task_receipts
+
     scope = _SCOPE.get()
     executions = [scope.execution_id] if scope and scope.kb_dir == kb_dir.resolve() else []
     current = aggregate_usage(kb_dir, execution_ids=executions, request_ids=request_ids)
@@ -317,6 +339,7 @@ def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=Non
     )
     return {
         "execution_ids": executions,
+        "model_tasks": model_task_receipts(kb_dir, executions),
         "source_ids": [source_id] if source_id else [],
         "ledger": str(kb_dir / ".openkb/usage"),
         "current": current,
@@ -328,6 +351,8 @@ def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=Non
 
 
 def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
+    from openkb.llm_usage_execution import model_task_receipts
+
     receipts = [receipt for receipt in receipts if receipt]
     if not receipts:
         return None
@@ -336,10 +361,10 @@ def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
     historical_ids = {
         r.request_attempt_id for r in read_requests(kb_dir) if r.source_id in source_ids
     }
+    executions = {identity for receipt in receipts for identity in receipt["execution_ids"]}
     return {
-        "execution_ids": sorted(
-            {identity for receipt in receipts for identity in receipt["execution_ids"]}
-        ),
+        "execution_ids": sorted(executions),
+        "model_tasks": model_task_receipts(kb_dir, executions),
         "source_ids": sorted(source_ids),
         "ledger": str(kb_dir / ".openkb/usage"),
         "current": aggregate_usage(kb_dir, request_ids=ids),
@@ -363,6 +388,16 @@ def describe_model_usage(receipt: dict | None) -> tuple[str, ...]:
             f"已知输出 {value['output_total']}，已知合计 {value['total_known']} tokens；"
             f"请求 {value['requests']}，用量未知 {value['unknown_requests']}，"
             f"在途 {value['in_flight_requests']}"
+        )
+        if value.get("actual_sends") is not None:
+            lines.append(
+                f"实际发送（{label}）：{value['actual_sends']}；"
+                f"发送状态未知：{value.get('send_unknown', 0)}；"
+                + ("计量已确认" if value["usage_complete"] else "计量未完整确认")
+            )
+    for task in receipt.get("model_tasks", []):
+        lines.append(
+            f"模型任务累计发送：{task['actual_sends']} / {task['limit']}；任务：{task['task_id']}"
         )
     if receipt["history_status"] == "execution_only":
         lines.append("累计范围：本次执行尚未关联来源")

@@ -40,8 +40,15 @@ class UnitResult:
     quality_known: bool | None = None
     answer_outcome: str | None = None
     scope_candidates: tuple[dict, ...] = ()
+    import_units: tuple = ()
 
     def __post_init__(self) -> None:
+        from openkb.ingest_result import ImportUnitOutcome
+
+        if not isinstance(self.import_units, tuple) or not all(
+            isinstance(unit, ImportUnitOutcome) for unit in self.import_units
+        ):
+            raise ValueError("Invalid import unit outcomes")
         if self.answer_outcome not in {
             None,
             "answered",
@@ -91,6 +98,10 @@ class UnitResult:
 
     @classmethod
     def from_summary(cls, value: dict[str, Any]) -> UnitResult:
+        from pydantic import TypeAdapter
+
+        from openkb.ingest_result import ImportUnitOutcome
+
         if any(not isinstance(value.get(key, []), list) for key in ("changes", "unfinished")):
             raise ValueError("Invalid result facts")
         if not isinstance(value.get("resources", []), list) or not isinstance(
@@ -115,6 +126,9 @@ class UnitResult:
             quality_known=value.get("quality_known"),
             answer_outcome=value.get("answer_outcome"),
             scope_candidates=tuple(value.get("scope_candidates", ())),
+            import_units=TypeAdapter(tuple[ImportUnitOutcome, ...]).validate_python(
+                value.get("import_units", [])
+            ),
         )
 
 

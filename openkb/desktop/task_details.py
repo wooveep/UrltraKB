@@ -23,6 +23,7 @@ def show_task_details(task, parent):
     ]
     if task.retry_of:
         lines.append(f"重试来源：{task.retry_of}（独立的新任务）")
+    from openkb.ingest_result import describe_units
     from openkb.llm_usage import describe_model_usage
 
     lines.extend(describe_model_usage(task.model_usage))
@@ -31,6 +32,7 @@ def show_task_details(task, parent):
         if result.error:
             lines.append(result.error)
         lines.extend(result.changes)
+        lines.extend(describe_units(result.import_units))
         lines.extend(f"未完成：{stage}" for stage in result.unfinished)
         lines.extend(f"质量检查：{note}" for note in result.quality)
         if result.quality_known is False:

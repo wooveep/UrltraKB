@@ -76,5 +76,8 @@ class ExecutionContext:
             self.snapshot.activate(),
             self.executor.activate(),
         ):
+            from openkb.llm_usage_execution import bind_model_task
+
+            bind_model_task(self.model_task.record.task_id)
             self.check_stop()
             yield LlmCredentialBundle(**self.snapshot.values()["credentials"])

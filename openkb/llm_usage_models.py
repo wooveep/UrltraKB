@@ -19,6 +19,7 @@ class UsageExecution(_UsageModel):
     operation: str = Field(min_length=1)
     state: Literal["started", "completed", "interrupted"]
     task_id: Identity | None = None
+    model_task_id: Identity | None = None
     pending_intent_id: Identity | None = None
     pending_attempt_id: Identity | None = None
     source_ids: list[Identity] = Field(default_factory=list)
@@ -49,6 +50,9 @@ class UsageAggregate(_UsageModel):
     reasoning_output: Count
     total_known: Count
     requests: Count
+    actual_sends: Count | None = None
+    unsent_attempts: Count | None = None
+    send_unknown: Count | None = None
     unknown_requests: Count
     in_flight_requests: Count
     unknown_fields: dict[
@@ -88,6 +92,7 @@ class UsageReceipt(_UsageModel):
     current: UsageAggregate
     cumulative: UsageAggregate
     history_status: Literal["recorded", "unrecorded", "partially_recorded", "execution_only"]
+    model_tasks: list[dict] = Field(default_factory=list)
 
 
 def validate_receipt(value: dict | None) -> dict | None:
