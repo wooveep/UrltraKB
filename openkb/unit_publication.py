@@ -269,7 +269,12 @@ def record_unit_failure(
             else "failed",
             "stage": stage,
             "error_type": type(error).__name__,
-            "message": f"{stage}: {failure_reason(error)} ({type(error).__name__})",
+            "message": (
+                "Index complete; compilation incomplete. Retry this source to reuse its index. "
+                if "indexing" in state.completed_stages
+                else ""
+            )
+            + f"{stage}: {failure_reason(error)} ({type(error).__name__})",
             "quality": error.quality if isinstance(error, CompilationIncomplete) else state.quality,
             "unfinished": error.unfinished
             if isinstance(error, CompilationIncomplete)

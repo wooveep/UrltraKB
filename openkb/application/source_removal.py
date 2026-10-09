@@ -104,9 +104,16 @@ def withdraw_source(kb_dir: Path, preview):
         record_path(kb_dir, "sources", source.source_id): changed,
         **source_change_heads(kb_dir, changed, "withdrawn"),
     }
-    with mutation_scope(kb_dir, list(records), operation="withdraw-source"):
+    from openkb.index_checkpoint import checkpoint_root
+
+    checkpoints = checkpoint_root(kb_dir, source.source_id)
+    with mutation_scope(kb_dir, [*records, checkpoints], operation="withdraw-source"):
         for path, record in records.items():
             write_record(path, record)
+        if checkpoints.exists():
+            import shutil
+
+            shutil.rmtree(checkpoints)
     references = list_artifact_references(kb_dir)
     result = RemoveResult(
         status="removed",

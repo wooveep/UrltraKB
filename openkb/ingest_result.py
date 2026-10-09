@@ -31,6 +31,8 @@ class ImportUnitOutcome:
     model_usage: dict | None = None
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    completed_stages: tuple[str, ...] = ()
+    recovery_point: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,9 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
             lines.append(f"Diagnostic: {unit.error_type or ''}; {unit.message or ''}")
         if unit.proposal_id:
             lines.append(f"Pending proposal: {unit.proposal_id}")
+        if unit.recovery_point and unit.status not in {"completed", "empty", "retired"}:
+            lines.append("Index complete; compilation incomplete. Retry this source to continue.")
+            lines.append(f"Recovery point: {unit.recovery_point}")
         if unit.block_count is not None:
             lines.append(f"Content blocks: {unit.block_count}")
         if unit.length_class:

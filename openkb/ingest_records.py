@@ -54,6 +54,8 @@ class UnitPublication(Record):
     message: str | None = None
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    completed_stages: tuple[str, ...] = ()
+    recovery_point: RelativePath | None = None
 
 
 class RefreshReason(Record):

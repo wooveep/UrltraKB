@@ -98,6 +98,8 @@ def result_from_publication(
         key=unit.key,
         quality=state.quality,
         unfinished=state.unfinished,
+        completed_stages=state.completed_stages,
+        recovery_point=state.recovery_point,
         doc_name=unit.doc_name,
         name=unit_name(kb_dir, unit, state.target_revision_id, admission.source.name),
         **processing_details(kb_dir, state, manifest),
@@ -457,14 +459,43 @@ def process_import_unit(
                         index_input = converted.source_path.with_suffix(".okbi")
                     if index_input is None:
                         raise ValueError("Normalized input is missing")
-                    indexed = index_long_document(
-                        index_input,
+                    from openkb.index_checkpoint import reusable_index
+
+                    indexed = reusable_index(
                         kb_dir,
-                        doc_name=unit.doc_name,
-                        scope=view.scope,
-                        storage_path=working / "index",
+                        admission,
+                        revision,
+                        normalized,
+                        index_input,
+                        working,
+                        lambda: index_long_document(
+                            index_input,
+                            kb_dir,
+                            doc_name=unit.doc_name,
+                            scope=view.scope,
+                            storage_path=working / "index",
+                        ),
                     )
                     index_ref = indexed.doc_id
+                    from openkb.index_checkpoint import checkpoint_root
+
+                    checkpoint = checkpoint_root(kb_dir, admission.source.source_id) / (
+                        revision.unit_revision_id + "/checkpoint.json"
+                    )
+                    state = state.model_copy(
+                        update={
+                            "completed_stages": ("conversion", "indexing"),
+                            "recovery_point": checkpoint.relative_to(kb_dir).as_posix(),
+                        }
+                    )
+                    if on_event:
+                        on_event(
+                            {
+                                "stage": "indexed",
+                                "source": admission.source.name,
+                                "recovery_point": state.recovery_point,
+                            }
+                        )
                     compile_document = partial(
                         compile_long_doc,
                         unit.doc_name,
