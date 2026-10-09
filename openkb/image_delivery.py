@@ -61,8 +61,10 @@ class ImageDeliveries:
         with self._guard:
             for identity in identities:
                 occurrence, receipt = self._records[identity]
-                if observed is None or (
-                    digests is not None and receipt["content_digest"] not in digests
+                if (
+                    observed is None
+                    or (not request_ids and observed.send_error is not None)
+                    or (digests is not None and receipt["content_digest"] not in digests)
                 ):
                     status, delivery, reason = "failed", "not_sent", "image_not_sent"
                 elif response_status is not None and response_status >= 400:

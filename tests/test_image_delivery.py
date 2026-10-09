@@ -145,7 +145,7 @@ async def test_question_returns_image_receipts_even_without_a_following_send(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "ending", ["retry", "reject", "cancel", "length_without_usage", "unobserved"]
+    "ending", ["retry", "reject", "cancel", "length_without_usage", "unobserved", "credentials"]
 )
 async def test_image_delivery_keeps_request_failures_and_unknowns(
     kb_dir, model_service, monkeypatch, ending
@@ -161,7 +161,11 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(
     pages(kb_dir, ["# Figure\nImage"], ["sources/figure.png"])
     executor = CompletionExecutor(
         RoleBindings(
-            "openai/gpt-4o-mini", LlmCredentialBundle(api_key="fixture", base_url=model_service.url)
+            "openai/gpt-4o-mini",
+            LlmCredentialBundle(
+                api_key="" if ending == "credentials" else "fixture",
+                base_url=model_service.url,
+            ),
         ),
         ModelCallPolicy(retries=1 if ending == "retry" else 0, backoff=0),
     )
@@ -185,6 +189,8 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(
     if ending in {"retry", "length_without_usage"}:
         model_service.replies.append((200, response(reason="length", usage=False)))
     started = threading.Event()
+    if ending == "credentials":
+        monkeypatch.setenv("OPENAI_API_KEY", "uncaptured-fixture")
     if ending == "unobserved":
         from litellm import ModelResponse
 
@@ -208,6 +214,11 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+    elif ending == "credentials":
+        from litellm.exceptions import AuthenticationError
+
+        with pytest.raises(AuthenticationError):
+            await task
     elif ending == "reject":
         from litellm.exceptions import ServiceUnavailableError
 
@@ -221,6 +232,7 @@ async def test_image_delivery_keeps_request_failures_and_unknowns(
         "reject": "failed",
         "cancel": "delivery_unknown",
         "unobserved": "delivery_unknown",
+        "credentials": "failed",
     }.get(ending, "pixels_delivered")
     assert image["status"] == expected
     assert len(image["attempts"]) == (2 if ending == "retry" else 1)
