@@ -44,12 +44,23 @@ def read_task(kb_dir: Path, task_id: str) -> ModelTask:
 
 
 class TaskJournal:
-    def __init__(self, kb_dir, executor, *, resume=None, policy=None, execution_task_id=None):
+    def __init__(
+        self,
+        kb_dir,
+        executor,
+        *,
+        resume=None,
+        policy=None,
+        execution_task_id=None,
+        parent_execution_task_id=None,
+    ):
         self.root, self.executor = kb_dir, executor
         policy = dict(policy or {})
         policy.setdefault("max_calls", executor.policy.max_calls)
         if execution_task_id:
             resume = execution_task(kb_dir, execution_task_id) or resume
+        if not resume and parent_execution_task_id:
+            resume = execution_task(kb_dir, parent_execution_task_id)
         previous = read_task(kb_dir, resume) if resume else None
         bindings = executor.bindings.public_identity()
         deadline = executor.policy.deadline

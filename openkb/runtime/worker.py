@@ -488,6 +488,7 @@ def run_unit(
     connection: Any,
     events: Any,
     prepared_dir: Path | None = None,
+    retry_of: str | None = None,
 ) -> None:
     # Imports stay inside the spawn child. No Qt, Click initialization or SDK
     # configuration runs in the task manager's process.
@@ -506,6 +507,7 @@ def run_unit(
         cancelled=channel.stopped.is_set,
         on_event=channel.event,
         on_snapshot=channel.snapshot,
+        parent_usage_task_id=retry_of,
     )
     try:
         try:

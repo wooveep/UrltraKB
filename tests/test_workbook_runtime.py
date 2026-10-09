@@ -79,8 +79,9 @@ def test_partial_workbook_task_can_retry_without_repeating_completed_sheets(kb_d
     try:
         task = manager.submit(kb_dir, [ImportFile(str(three_sheets))])
         first = manager.wait(task, timeout=30)
-        assert first.state == "partial", first
-        assert first.results[0].status == "partial"
+        assert first.state == "failed", first
+        assert first.results[0].status == "failed"
+        assert calls["GAMMA_SHEET"] == 0  # Nonretryable provider failure stops later sheets.
         before = calls.copy()
         failing.clear()
         preview = preview_retry(manager, task)
@@ -88,7 +89,10 @@ def test_partial_workbook_task_can_retry_without_repeating_completed_sheets(kb_d
         resumed = manager.wait(retry_task(manager, preview), timeout=30)
         assert resumed.state == "completed", resumed
         assert calls["ALPHA_SHEET"] == before["ALPHA_SHEET"]
-        assert calls["GAMMA_SHEET"] == before["GAMMA_SHEET"]
+        assert calls["GAMMA_SHEET"] > before["GAMMA_SHEET"]
+        journals = list((kb_dir / ".openkb/model-tasks").glob("*.json"))
+        assert len(journals) == 1
+        assert json.loads(journals[0].read_text())["used"] == sum(calls.values())
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)

@@ -330,6 +330,7 @@ class TaskManager:
                 child,
                 events,
                 prepared_dir,
+                task.view.retry_of,
             ),
             name=f"openkb-unit-{identity.task_id[:8]}-{identity.unit_id}",
         )

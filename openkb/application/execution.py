@@ -24,6 +24,7 @@ class ExecutionContext:
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
     usage_task_id: str | None = None
+    parent_usage_task_id: str | None = None
     executor: CompletionExecutor | None = field(default=None, repr=False)
     resume_model_task_id: str | None = None
     model_task: TaskJournal | None = field(default=None, repr=False)
@@ -67,6 +68,7 @@ class ExecutionContext:
                 resume=self.resume_model_task_id,
                 policy=self.snapshot.values()["effective"].get("model_policy", {}),
                 execution_task_id=self.usage_task_id,
+                parent_execution_task_id=self.parent_usage_task_id,
             )
         from openkb.llm_usage_execution import import_usage_execution
 

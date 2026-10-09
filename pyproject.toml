@@ -108,6 +108,8 @@ exclude = ["/openkb/web"]
 # Ship reproducible application/build sources, not maintainer-local workspace
 # state or retired bundles that may remain in an upgraded source checkout.
 [tool.hatch.build.targets.sdist]
+# Ignored scratch symlinks must not claim vendor directory identities during traversal.
+skip-excluded-dirs = true
 include = [
     "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
     "/vendor/PageIndex", "/vendor/ChatIndex", "/vendor/ConDB", "/vendor/LiteLLM",

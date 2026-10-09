@@ -40,7 +40,8 @@ def test_spawned_batch_preserves_one_total_budget(kb_dir, monkeypatch):
     monkeypatch.setattr("openkb.runtime.tasks.run_unit", _budget_worker)
     manager = TaskManager(history_dir=kb_dir / "task-history")
     try:
-        result = manager.wait(manager.submit(kb_dir, sources), timeout=40)
+        task_id = manager.submit(kb_dir, sources)
+        result = manager.wait(task_id, timeout=40)
         records = [
             ModelTask.model_validate_json(p.read_text())
             for p in (kb_dir / ".openkb/model-tasks").glob("*.json")
@@ -50,6 +51,12 @@ def test_spawned_batch_preserves_one_total_budget(kb_dir, monkeypatch):
         assert result.succeeded == 2
         assert len(result.results) == 3
         assert result.state == "stopped"
+        resumed = manager.wait(manager.submit(kb_dir, sources[2:], retry_of=task_id), timeout=20)
+        assert resumed.state == "stopped" and resumed.succeeded == 0
+        record = ModelTask.model_validate_json(
+            next((kb_dir / ".openkb/model-tasks").glob("*.json")).read_text()
+        )
+        assert record.used == 5 and len(record.execution_task_ids) == 2
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
