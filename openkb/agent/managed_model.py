@@ -165,6 +165,20 @@ class ManagedAgentModel(Model):
             "client",
         ):
             extras.pop(key, None)
+        captured = self.executor.bindings.generation_options("answer")
+        fields = {
+            key: captured[key] for key in ("temperature", "top_p", "max_tokens") if key in captured
+        }
+        for key in fields:
+            extras.pop(key, None)
+        if "reasoning_effort" in captured:
+            from openai.types.shared import Reasoning
+
+            fields["reasoning"] = Reasoning(effort=captured["reasoning_effort"])
+            extras.pop("reasoning_effort", None)
+        if captured:
+            extras["drop_params"] = False
+        settings = replace(settings, **fields)
         request = ModelRequest(
             [{"role": "user", "content": ""}],
             operation="answer",
@@ -180,6 +194,12 @@ class ManagedAgentModel(Model):
                 "num_retries": 0,
                 "max_retries": 0,
                 **({"timeout": transport["timeout"]} if "timeout" in transport else {}),
+                **(
+                    {"allowed_openai_params": transport["allowed_openai_params"]}
+                    if "allowed_openai_params" in transport
+                    else {}
+                ),
+                **({"extra_body": transport["extra_body"]} if "extra_body" in transport else {}),
             },
             extra_headers=transport.get("extra_headers"),
             include_usage=True,

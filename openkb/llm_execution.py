@@ -93,7 +93,11 @@ class RoleBindings:
         conversation_model: str | None = None,
         retrieval_model: str | None = None,
         model_table: dict | None = None,
+        generation: dict | None = None,
     ):
+        from openkb.config_validation import validate_role_generation
+
+        generation = validate_role_generation(generation)
         models = {role: model for role in ROLES}
         if conversation_model is not None:
             models["conversation_index"] = conversation_model
@@ -111,7 +115,12 @@ class RoleBindings:
             self,
             "_payload",
             json.dumps(
-                {"models": models, "credentials": asdict(bundle), "model_table": model_table}
+                {
+                    "models": models,
+                    "credentials": asdict(bundle),
+                    "model_table": model_table,
+                    "generation": generation,
+                }
             ),
         )
 
@@ -119,6 +128,10 @@ class RoleBindings:
         if role not in ROLES:
             raise ValueError(f"Unknown model role: {role}")
         return json.loads(self._payload)["models"][role]
+
+    def generation_options(self, role: str) -> dict:
+        self.model(role)
+        return json.loads(self._payload)["generation"].get(role, {})
 
     def credentials(self) -> LlmCredentialBundle:
         return LlmCredentialBundle(**json.loads(self._payload)["credentials"])
@@ -157,6 +170,7 @@ class RoleBindings:
         return {
             "models": values["models"],
             "model_table": values["model_table"],
+            "role_generation": values["generation"],
             "timeout": values["credentials"]["timeout"],
         }
 
@@ -268,6 +282,12 @@ class ModelRequest:
                 raise ValueError(f"Invalid generation option: {name}")
         if "seed" in options and type(options["seed"]) is not int:
             raise ValueError("Invalid generation option: seed")
+        if "reasoning_effort" in options and (
+            not isinstance(options["reasoning_effort"], str)
+            or options["reasoning_effort"]
+            not in {"none", "minimal", "low", "medium", "high", "xhigh"}
+        ):
+            raise ValueError("Invalid generation option: reasoning_effort")
         for name in ("parallel_tool_calls", "drop_params"):
             if name in options and type(options[name]) is not bool:
                 raise ValueError(f"Invalid generation option: {name}")
@@ -483,6 +503,7 @@ class CompletionExecutor:
         payload = request.payload()
         messages = payload["messages"]
         model = self.bindings.model(role)
+        captured_options = self.bindings.generation_options(role)
         # Cache segments are provider hints, never application cache hits.
         if "anthropic" in model or "claude" in model:
             for i in payload["cache_segments"]:
@@ -498,8 +519,25 @@ class CompletionExecutor:
             "base_url": bundle.base_url,
             "num_retries": 0,
             "max_retries": 0,
+            **({"drop_params": False} if captured_options else {}),
+            **captured_options,
             **payload["options"],
         }
+        if (
+            "reasoning_effort" in captured_options
+            and bundle.base_url
+            and model.startswith("openai/")
+        ):
+            # An explicit compatible-gateway experiment must reach HTTP even
+            # when LiteLLM's public model table cannot describe that gateway.
+            kwargs["allowed_openai_params"] = ["reasoning_effort"]
+        if "reasoning_effort" in captured_options and model.startswith("deepseek/"):
+            # LiteLLM currently maps low to thinking=enabled and omits none.
+            # Preserve the explicitly captured API parameter at serialization.
+            kwargs["extra_body"] = {"reasoning_effort": captured_options["reasoning_effort"]}
+            kwargs.pop("reasoning_effort", None)
+        if captured_options:
+            kwargs["drop_params"] = False
         if payload["tools"] is not None:
             kwargs["tools"] = payload["tools"]
         headers = audit_step_headers(bundle.extra_headers, request.stage)
@@ -693,6 +731,8 @@ def raise_if_terminal(error: BaseException) -> None:
 def executor_from_snapshot(snapshot, cancelled: Callable[[], bool]) -> CompletionExecutor:
     values = snapshot.values()
     config = values["effective"]
+    from openkb.config_validation import validate_model_policy
+
     options = validate_model_policy(config)
     deadline_seconds = options.pop("deadline_seconds", None)
     policy = ModelCallPolicy(
@@ -713,40 +753,9 @@ def executor_from_snapshot(snapshot, cancelled: Callable[[], bool]) -> Completio
         conversation_model=config.get("conversation_model"),
         retrieval_model=config.get("retrieval_model"),
         model_table=values.get("model_table"),
+        generation=config.get("role_generation"),
     )
     return CompletionExecutor(bindings, policy)
-
-
-def validate_model_policy(config: dict) -> dict:
-    """Validate the task configuration without capturing a deadline or credentials."""
-    for name in ("conversation_model", "retrieval_model"):
-        if config.get(name) is not None and (
-            not isinstance(config[name], str) or not config[name].strip()
-        ):
-            raise ValueError(f"Configuration field '{name}' must be nonempty")
-    raw = config.get("model_policy")
-    allowed = {
-        "max_calls",
-        "concurrency",
-        "retries",
-        "backoff",
-        "deadline_seconds",
-        "retrieval_tokens",
-        "retrieval_repair_tokens",
-        "retrieval_repairs",
-        "compile_reserve_calls",
-        "compile_repair_calls",
-    }
-    if raw is not None and (not isinstance(raw, dict) or raw.keys() - allowed):
-        raise ValueError("Configuration field 'model_policy' is invalid")
-    options = dict(raw or {})
-    seconds = options.pop("deadline_seconds", None)
-    if seconds is not None and (
-        type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0
-    ):
-        raise ValueError("model_policy.deadline_seconds must be finite and positive")
-    ModelCallPolicy(**options)
-    return {**options, "deadline_seconds": seconds}
 
 
 def compiler_executor(model: str, bundle, options: dict) -> CompletionExecutor:

@@ -22,6 +22,66 @@ def executor_for(service, **policy):
     )
 
 
+@pytest.mark.parametrize("effort", ["low", "none"])
+@pytest.mark.asyncio
+async def test_captured_role_options_reach_real_transports(kb_dir, model_service, effort):
+    from agents import RunConfig, Runner
+    from test_managed_agent import agent_for
+
+    from openkb.application.execution import ExecutionContext
+    from openkb.context.condb_llm import ConDBLLMAdapter
+    from openkb.locks import atomic_write_text, kb_ingest_lock
+
+    atomic_write_text(
+        kb_dir / ".env", f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n"
+    )
+    config = "model: deepseek/deepseek-flash\nlanguage: en\nrole_generation:\n"
+    config += f"  knowledge_retrieval:\n    reasoning_effort: {effort}\n    max_tokens: 4096\n"
+    config += "  answer:\n    max_tokens: 7000\n"
+    atomic_write_text(kb_dir / ".openkb/config.yaml", config)
+    model_service.replies.extend([(200, response())] * 3)
+    context = ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        frozen = context.executor.fingerprint
+        atomic_write_text(
+            kb_dir / ".openkb/config.yaml", config.replace(f"effort: {effort}", "effort: high")
+        )
+        ConDBLLMAdapter(context.executor, "knowledge_retrieval").chat(
+            [{"role": "user", "content": "rank"}]
+        )
+        context.executor.complete("compile", request())
+        result = await Runner.run(
+            agent_for(context.executor), "hello", run_config=RunConfig(tracing_disabled=True)
+        )
+        assert result.final_output == "ok"
+        assert context.executor.policy.retrieval_tokens == 1024
+    retrieval, compile_request, answer = model_service.requests
+    assert retrieval["reasoning_effort"] == effort and retrieval["max_tokens"] == 4096
+    assert "reasoning_effort" not in compile_request and "reasoning_effort" not in answer
+    assert answer["max_tokens"] == 7000
+    other = ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb"), other.begin(kb_dir):
+        assert other.executor.fingerprint != frozen
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": {}},
+        {"knowledge_retrieval": {"drop_params": True}},
+        {"knowledge_retrieval": {"reasoning_effort": "invalid"}},
+        {"knowledge_retrieval": {"max_tokens": 8192}},
+    ],
+)
+def test_invalid_role_options_fail_before_execution(options):
+    from openkb.config_validation import validate_runtime_config
+
+    with pytest.raises(ValueError, match="role_generation"):
+        validate_runtime_config(
+            {"model": "openai/gpt-4o-mini", "language": "en", "role_generation": options}
+        )
+
+
 def request(**values):
     from openkb.llm_execution import ModelRequest
 

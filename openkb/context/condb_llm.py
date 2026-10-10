@@ -64,12 +64,13 @@ class ConDBLLMAdapter:
             else "Locate past user intent. Navigation summaries only locate user turns; "
             "they do not certify what the user said or supply knowledge-base facts."
         )
+        role_options = self.executor.bindings.generation_options(self.role)
         with self.executor.retrieval_slot():
             for attempt in range(2):
                 output = (
                     self.executor.policy.retrieval_repair_tokens
                     if attempt
-                    else self.executor.policy.retrieval_tokens
+                    else role_options.get("max_tokens", self.executor.policy.retrieval_tokens)
                 )
                 request = ModelRequest(
                     _build_messages(messages, purpose + ("\n\n" + system if system else "")),
@@ -77,7 +78,7 @@ class ConDBLLMAdapter:
                     stage="beam",
                     prompt_version="condb-beam-v2",
                     tools=_tools_to_openai(tools) if tools else None,
-                    generation_options={"max_tokens": output, "drop_params": False},
+                    generation_options={**role_options, "max_tokens": output, "drop_params": False},
                     cache_segments=[0] if cache_key else [],
                 )
                 measure = self.executor.question_capacity

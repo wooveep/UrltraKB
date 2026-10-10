@@ -1,6 +1,7 @@
 """Agents SDK retries and tools share the task policy at the HTTP boundary."""
 
 import asyncio
+import json
 import threading
 
 import pytest
@@ -21,6 +22,70 @@ def agent_for(executor, tools=()):
         tools=list(tools),
         model_settings=ModelSettings(retry=model.retry_settings(), include_usage=True),
     )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.asyncio
+async def test_reasoning_tool_roundtrip_uses_provider_protocol_without_visible_reasoning(
+    model_service, stream
+):
+    from openkb.config import LlmCredentialBundle
+    from openkb.llm_execution import CompletionExecutor, RoleBindings
+
+    @function_tool
+    def read_original() -> str:
+        """Read a retained original."""
+        return "The original states 35 under load."
+
+    message = {
+        "role": "assistant",
+        "content": None,
+        "reasoning_content": "private protocol reasoning",
+        "tool_calls": [
+            {
+                "id": "original-1",
+                "type": "function",
+                "function": {"name": "read_original", "arguments": "{}"},
+            }
+        ],
+    }
+    final = {"role": "assistant", "content": "35 under load."}
+    for value, reason in [(message, "tool_calls"), (final, "stop")]:
+        model_service.replies.append(
+            (200, streamed_response(value, reason) if stream else response(value, reason=reason))
+        )
+    executor = CompletionExecutor(
+        RoleBindings(
+            "openai/deepseek-v4",
+            LlmCredentialBundle(api_key="fixture", base_url=model_service.url),
+            generation={"answer": {"reasoning_effort": "low"}},
+        )
+    )
+    if stream:
+        from openkb.agent.query import iter_agent_response_events
+
+        events = [
+            event
+            async for event in iter_agent_response_events(
+                agent_for(executor, [read_original]),
+                "Read the source",
+                run_config=RunConfig(tracing_disabled=True),
+            )
+        ]
+        assert events[-1]["data"]["answer"] == "35 under load."
+        public = [event for event in events if event["event"] != "final"]
+        assert "private protocol reasoning" not in json.dumps(public)
+    else:
+        run = await Runner.run(
+            agent_for(executor, [read_original]),
+            "Read the source",
+            run_config=RunConfig(tracing_disabled=True),
+        )
+        assert run.final_output == "35 under load."
+    second = model_service.requests[1]
+    assert second["reasoning_effort"] == "low"
+    assistant = next(m for m in second["messages"] if m.get("tool_calls"))
+    assert assistant["reasoning_content"] == "private protocol reasoning"
 
 
 @pytest.mark.asyncio
