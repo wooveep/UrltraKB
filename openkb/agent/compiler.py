@@ -126,8 +126,8 @@ Rules:
   or (b) likely to recur across sources. Do NOT page proper nouns mentioned
   only in passing. Roughly 5-15 entities per document is typical; fewer for
   sparse documents.
-- Prefer "update" over "create" for any concept or entity already listed above.
-- Do NOT create a concept/entity that overlaps an existing one — use "update".
+- Use "update" for an existing page when this source contributes new or revised
+  information. Use "related" when only navigation is needed; leave unrelated pages alone.
 - Do NOT create concepts that are just the document topic itself.
 - "related" is lightweight cross-linking only, no content rewrite.
 
@@ -162,7 +162,8 @@ Return a JSON object with two keys:
   independence, guarantees or unchanged properties between the linked topics.
   Add a labelled synthesis only when it explains the recorded statements;
   do not fill sections with general background or lists of unspecified rules.
-  Link [[summaries/{doc_name}]] and use the whitelist above.
+  Use the whitelist for source-supported links in prose. The application
+  appends document and related-page navigation.
 
 Return ONLY valid JSON, no fences.
 """
@@ -195,7 +196,9 @@ Return ONLY valid JSON, no fences.
 """
 
 _ENTITY_PAGE_USER = """\
-Write the entity page for: {title} (type: {type})
+Write the entity page for: {title}
+The plan proposes type "{type}". Confirm the type using the original object's
+description; use "other" when the original does not establish a supported type.
 
 This entity relates to the document "{doc_name}" summarized above.
 
@@ -205,14 +208,16 @@ Return a JSON object with three keys:
 - "content": A Markdown page identifying the entity and reporting the relevant
   original statements and supported derivations. Keep a sparse source's page
   short. Related links establish no additional effects or guarantees. Omit
-  external background and irrelevant unspecified rules. Link related pages
-  and [[summaries/{doc_name}]] using the whitelist above.
+  external background and irrelevant unspecified rules. Preserve source-supported
+  relationships in prose using the whitelist. The application appends navigation.
 
 Return ONLY valid JSON, no fences.
 """
 
 _ENTITY_UPDATE_USER = """\
-Update the entity page for: {title} (type: {type})
+Update the entity page for: {title}
+The plan proposes type "{type}". Confirm the type from original object descriptions;
+use "other" when a supported type is not established.
 
 Current content of this page:
 {existing_content}
@@ -241,26 +246,6 @@ Return ONLY valid JSON, no fences.
 # ``.openkb/config.yaml`` override the default enum everywhere at once. The
 # token is a plain string (not a ``{}`` placeholder) so it does not collide with
 # the ``{{ }}`` JSON braces these templates feed to ``str.format``.
-
-_SUMMARY_REWRITE_USER = """\
-Task: Organize the draft summary and update its links using the whitelist.
-The original document remains authoritative; concept-page explanations must
-not become new source facts.
-
-STRICT rules:
-- Preserve source-supported claims, findings, conditions and units. Correct
-  unsupported draft claims against the original, without importing new claims
-  from generated concepts or adding external advice.
-- For [[wikilinks]], follow the whitelist message above: keep valid links, \
-replace targets not in the whitelist with plain text, do not invent new \
-wikilink targets.
-- You MAY upgrade plain-text mentions to [[wikilinks]] when the concept \
-appears in the whitelist — this is encouraged.
-- Keep the headings, paragraph structure, and approximately the same length \
-as the draft.
-
-Return ONLY the rewritten Markdown content (no JSON, no fences, no frontmatter).
-"""
 
 _LONG_DOC_SUMMARY_USER = """\
 This is a PageIndex summary for long document "{doc_name}" (doc_id: {doc_id}):
@@ -1643,9 +1628,8 @@ async def _compile_concepts(
     Uses ``_CONCEPTS_PLAN_USER`` to get a plan with create/update/related
     actions, then executes each action type accordingly. Concept bodies are
     generated in memory, scrubbed of unresolved wikilinks, and only then
-    written to disk. When ``rewrite_summary=True`` (short-doc path), the
-    summary is rewritten by the LLM after concepts are finalized so its
-    wikilinks reflect the actual concept pages on disk.
+    written to disk. When ``rewrite_summary=True`` (short-doc path), the first summary is
+    retained and its navigation links are assembled after page generation.
     """
     source_file = f"summaries/{doc_name}.md"
 
@@ -1870,7 +1854,7 @@ async def _compile_concepts(
         originals = source_windows.prepare(ent, long=doc_type == "pageindex")
         if doc_type == "pageindex" and not originals.has_original:
             brief, content = originals.navigation_page(title, doc_name)
-            return name, content, brief, etype
+            return name, content, brief, "other"
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1894,7 +1878,7 @@ async def _compile_concepts(
                 bundle=bundle,
             )
         brief, content, obj = _page_fields(raw)
-        etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
+        etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
         _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
@@ -1937,7 +1921,7 @@ async def _compile_concepts(
                 bundle=bundle,
             )
         brief, content, obj = _page_fields(raw)
-        etype_out = obj.get("type") if obj and obj.get("type") in valid_types else etype
+        etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
         _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
@@ -2063,77 +2047,9 @@ async def _compile_concepts(
             )
         pending_writes[i] = (name, cleaned, is_update, brief)
 
-    # --- Optional Step 3a: LLM rewrite the summary with full whitelist ---
-    # Only for the short-doc path. The long-doc path leaves the indexer-
-    # written summary untouched.
-    #
-    # The rewrite call is best-effort: on any failure (API error, empty
-    # response, exception) we fall back to the v1 summary stripped against
-    # the full whitelist, so the summary is always written and never wiped.
+    # Navigation is assembled below; keep the first summary's statements intact.
     if rewrite_summary:
-        candidate: str | None = None
-        try:
-            # No max_tokens cap — matches the v1 summary call. The rewrite
-            # prompt asks the model to keep length within ±20% of the v1.
-            rewrite_raw = _llm_call(
-                model,
-                [
-                    system_msg,
-                    doc_msg,  # cached (BP1)
-                    summary_msg,  # cached (BP2) — contains the v1 summary text
-                    known_targets_msg,  # cached (BP3) — whitelist
-                    {"role": "user", "content": _SUMMARY_REWRITE_USER},
-                ],
-                "summary-rewrite",
-                bundle=bundle,
-            )
-            candidate = rewrite_raw.strip()
-            # Strip frontmatter if the model added one anyway.
-            cand_parts = frontmatter.split(candidate)
-            if cand_parts is not None:
-                candidate = cand_parts[1].lstrip("\n")
-            # Safety net: strip any wikilink the rewrite emitted that is
-            # not in the whitelist.
-            candidate, summary_ghosts = strip_ghost_wikilinks(candidate, known_targets)
-            if summary_ghosts:
-                logger.info(
-                    "stripped %d ghost wikilink(s) from summary %s: %s",
-                    len(summary_ghosts),
-                    doc_name,
-                    summary_ghosts[:5],
-                )
-        except Exception as exc:
-            raise_if_terminal(exc)
-            logger.warning(
-                "summary-rewrite failed for %s: %s. Falling back to v1.",
-                doc_name,
-                exc,
-            )
-            candidate = None
-
-        if candidate:
-            final_summary = candidate
-        else:
-            report_compile_issue("summary_rewrite_fallback")
-            # Rewrite produced no content (empty response or exception).
-            # Strip the v1 summary against the same whitelist so the
-            # fallback doesn't reintroduce ghost links.
-            if candidate is not None:
-                logger.warning(
-                    "summary-rewrite returned empty for %s; using v1 fallback.",
-                    doc_name,
-                )
-            final_summary, fallback_ghosts = strip_ghost_wikilinks(
-                summary,
-                known_targets,
-            )
-            if fallback_ghosts:
-                logger.info(
-                    "stripped %d ghost wikilink(s) from v1 fallback summary %s: %s",
-                    len(fallback_ghosts),
-                    doc_name,
-                    fallback_ghosts[:5],
-                )
+        final_summary, _ = strip_ghost_wikilinks(summary, known_targets)
         _write_summary(wiki_dir, doc_name, final_summary, description=doc_brief)
 
     # --- Write concept pages to disk ---
@@ -2232,9 +2148,8 @@ async def compile_short_doc(
 
     # --- Step 1: Generate summary (v1, held in memory) ---
     # The summary is NOT written to disk yet — it's used as cache context
-    # for the plan + concept-generation calls, then rewritten into a final
-    # v2 (with a whitelist of known wikilink targets) inside
-    # _compile_concepts before being written to disk.
+    # for the plan + concept-generation calls, then saved with validated links inside
+    # _compile_concepts before publication.
     summary_raw = _llm_call(
         model,
         [system_msg, doc_msg],

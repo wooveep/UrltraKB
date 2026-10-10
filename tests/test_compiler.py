@@ -1208,7 +1208,8 @@ class TestCompileShortDoc:
         summary_text = summary_path.read_text()
         assert 'full_text: "sources/test-doc.md"' in summary_text
         assert 'type: "Summary"' in summary_text
-        # Summary body comes from the rewrite step
+        # The original body stays intact and navigation is appended by code.
+        assert "This document discusses transformers." in summary_text
         assert "[[concepts/transformer]]" in summary_text
 
         # Verify concept written
@@ -1247,13 +1248,7 @@ class TestCompileShortDoc:
 
 
 class TestCompileShortDocFallbacks:
-    """Regression tests for the summary-rewrite resilience path.
-
-    The rewrite call can fail (API error, empty response, parse error).
-    In every failure mode the v1 summary should be written to disk —
-    stripped against the current whitelist so it doesn't reintroduce
-    ghost wikilinks — never an empty file or missing file.
-    """
+    """The first summary survives without an extra send and invalid links are removed."""
 
     @staticmethod
     def _setup_kb(tmp_path):
@@ -1271,7 +1266,7 @@ class TestCompileShortDocFallbacks:
         return wiki, source_path
 
     @pytest.mark.asyncio
-    async def test_rewrite_empty_response_falls_back_to_v1(self, tmp_path):
+    async def test_summary_uses_first_response_and_filters_links(self, tmp_path):
         wiki, source_path = self._setup_kb(tmp_path)
 
         v1_summary_content = (
@@ -1306,6 +1301,7 @@ class TestCompileShortDocFallbacks:
             )
             mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_response]))
             await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+            assert mock_litellm.completion.call_count == 2
 
         summary_path = wiki / "summaries" / "doc.md"
         assert summary_path.exists()
@@ -1317,7 +1313,7 @@ class TestCompileShortDocFallbacks:
         assert "ghost" in text  # but plain text remains
 
     @pytest.mark.asyncio
-    async def test_rewrite_exception_falls_back_to_v1(self, tmp_path):
+    async def test_summary_does_not_require_a_third_response(self, tmp_path):
         wiki, source_path = self._setup_kb(tmp_path)
 
         v1_summary_content = "# Summary\n\nUses [[concepts/transformer]] mechanism."
@@ -1359,6 +1355,7 @@ class TestCompileShortDocFallbacks:
             mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_response]))
             # Must NOT raise out of compile_short_doc
             await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+            assert mock_litellm.completion.call_count == 2
 
         summary_path = wiki / "summaries" / "doc.md"
         assert summary_path.exists()
@@ -1536,16 +1533,8 @@ class TestCacheControl:
             "known_targets message in concept call must carry a cache_control marker"
         )
 
-        # Step 4 (summary rewrite): same three breakpoints reused — this is
-        # the whole point of the BP3 design, the whitelist is cached not
-        # re-billed per call.
-        rewrite_call = captured_sync_calls[2]
-        assert self._has_cache_breakpoint(rewrite_call[1])  # BP1
-        assert self._has_cache_breakpoint(rewrite_call[2])  # BP2
-        assert rewrite_call[3]["role"] == "user"
-        assert self._has_cache_breakpoint(rewrite_call[3]), (  # BP3
-            "known_targets message in summary-rewrite call must carry a cache_control marker"
-        )
+        # The summary and plan are the only synchronous sends; links use code.
+        assert len(captured_sync_calls) == 2
 
     @pytest.mark.asyncio
     async def test_long_doc_marks_doc_message(self, tmp_path):

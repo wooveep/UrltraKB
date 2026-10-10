@@ -52,6 +52,65 @@ def test_short_update_rereads_prior_originals(kb_dir, monkeypatch):
     assert "coverage" in str(update)
 
 
+def test_short_import_preserves_summary_and_assembles_navigation(kb_dir, monkeypatch):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+
+    sends = []
+    first = "# Capacity\n\nModel K supports 36 slots under the recorded condition."
+
+    def response(**kwargs):
+        sends.append(kwargs["messages"])
+        prompt = str(kwargs["messages"])
+        if "Based on the summary above" in prompt:
+            result = {"concepts": {"create": [{"name": "capacity"}]}}
+        elif "Write a summary page" in prompt:
+            result = {"description": "Capacity condition", "content": first}
+        else:
+            result = {"description": "Capacity", "content": "# Capacity\n\nRecorded condition."}
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.completion", response)
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    source = kb_dir / "capacity.txt"
+    source.write_text(first)
+    assert import_document(kb_dir, source).status == "added"
+    body = frontmatter.split((kb_dir / "wiki/summaries/capacity.md").read_text())[1]
+    assert body.lstrip().startswith(first)
+    assert "- [[concepts/capacity]]" in body
+    assert len(sends) == 3
+
+
+def test_entity_type_requires_generation_confirmation(kb_dir, monkeypatch):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+
+    source = kb_dir / "component.txt"
+    source.write_text("River Valve is a flow-control component.")
+    compile_boundary(
+        monkeypatch,
+        {
+            "entities": {
+                "create": [{"name": "river-valve", "title": "River Valve", "type": "organization"}]
+            }
+        },
+        [],
+    )
+    assert import_document(kb_dir, source).status == "added"
+    page = frontmatter.parse((kb_dir / "wiki/entities/river-valve.md").read_text())
+    assert page["type"] == "Other"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [False, True])
 async def test_long_block_compile_receives_only_selected_frozen_image(

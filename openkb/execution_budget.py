@@ -122,7 +122,6 @@ def admit_compile_plan(plan, *, rewrite_summary: bool):
     if executor is None:
         return
     count = sum(len(group.create) + len(group.update) for group in (plan.concepts, plan.entities))
-    has_actions = count or plan.concepts.related or plan.entities.related
-    minimum = count + int(bool(has_actions) and rewrite_summary)
+    minimum = count
     repairs = min(count, executor.policy.compile_repair_calls)
     executor.budget.require("compile", minimum + repairs)
