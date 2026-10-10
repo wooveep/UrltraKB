@@ -469,6 +469,7 @@ async def _llm_call_page_async(
     page_update=None,
     read_current=None,
     numeric_sources=None,
+    initial_response: str | None = None,
     **kwargs,
 ) -> str:
     """Validate each page and repair only that response, at most once."""
@@ -477,13 +478,17 @@ async def _llm_call_page_async(
     correction = []
     for attempt in range(2):
         try:
-            raw = await _llm_call_async(
-                model,
-                messages + correction,
-                step_name,
-                raise_on_truncation=True,
-                bundle=bundle,
-                **kwargs,
+            raw = (
+                initial_response
+                if attempt == 0 and initial_response is not None
+                else await _llm_call_async(
+                    model,
+                    messages + correction,
+                    step_name,
+                    raise_on_truncation=True,
+                    bundle=bundle,
+                    **kwargs,
+                )
             )
             if page_update is not None:
                 raw = json.dumps(page_update.apply(raw, current=read_current()), ensure_ascii=False)
@@ -507,7 +512,7 @@ async def _llm_call_page_async(
                 raise
             if attempt:
                 report_compile_issue(code)
-                raise ValueError(f"{step_name}: {error}") from error
+                raise PageResponseError(code, f"{step_name}: {error}") from error
             correction = [
                 {
                     "role": "user",
@@ -2161,20 +2166,31 @@ async def compile_short_doc(
     # The summary is NOT written to disk yet — it's used as cache context
     # for the plan + concept-generation calls, then saved with validated links inside
     # _compile_concepts before publication.
-    summary_raw = _llm_call(
-        model,
-        [system_msg, doc_msg],
-        "summary",
-        response_format=_JSON_RESPONSE_FORMAT,
-        bundle=bundle,
-    )
+    from openkb.agent.page_response import PageResponseError
+    from openkb.compilation_report import CompilationIncomplete
+
     try:
-        summary_parsed = _parse_json(summary_raw)
-        doc_brief = summary_parsed.get("description", "")
-        summary = summary_parsed.get("content", summary_raw)
-    except (json.JSONDecodeError, ValueError):
-        doc_brief = ""
-        summary = summary_raw
+        summary_raw = _llm_call(
+            model,
+            [system_msg, doc_msg],
+            "summary",
+            response_format=_JSON_RESPONSE_FORMAT,
+            raise_on_truncation=True,
+            bundle=bundle,
+        )
+        summary_raw = await _llm_call_page_async(
+            model,
+            [system_msg, doc_msg],
+            "summary",
+            response_format=_JSON_RESPONSE_FORMAT,
+            initial_response=summary_raw,
+            bundle=bundle,
+        )
+    except (PageResponseError, TruncatedResponseError) as error:
+        code = getattr(error, "code", "page_truncated_response")
+        report_compile_issue(code, "summary")
+        raise CompilationIncomplete((code,), ("summary",), str(error)) from error
+    doc_brief, summary, _ = _page_fields(summary_raw)
 
     # --- Steps 2-4: Concept plan → generate/update → summary rewrite → index ---
     try:

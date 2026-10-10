@@ -183,6 +183,47 @@ def test_short_import_preserves_summary_and_assembles_navigation(kb_dir, monkeyp
     assert len(sends) == 3
 
 
+@pytest.mark.parametrize("repaired", [False, True])
+def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, monkeypatch, repaired):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+
+    summaries = []
+    content = "# Capacity\n\nModel K has 36 slots under supervision."
+
+    def response(**kwargs):
+        if "Based on the summary above" in str(kwargs["messages"]):
+            raw = json.dumps({"concepts": {}, "entities": {}})
+        else:
+            summaries.append(kwargs["messages"])
+            raw = json.dumps({"description": "Capacity", "content": content})
+            if not repaired or len(summaries) == 1:
+                raw += '\n{"type": "json_object"}'
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=raw), finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.completion", response)
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    source = kb_dir / "capacity.txt"
+    source.write_text(content)
+    result = import_document(kb_dir, source)
+    assert len(summaries) == 2
+    summary = kb_dir / "wiki/summaries/capacity.md"
+    if repaired:
+        assert result.status == "added", result
+        assert "page_response_repaired" in result.quality
+        assert frontmatter.split(summary.read_text())[1].strip() == content
+    else:
+        assert result.status == "failed", result
+        assert "page_multiple_objects" in result.quality
+        assert not summary.exists()
+
+
 def test_entity_type_requires_generation_confirmation(kb_dir, monkeypatch):
     from openkb import frontmatter
     from openkb.application.documents import import_document
