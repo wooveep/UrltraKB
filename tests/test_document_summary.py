@@ -67,6 +67,8 @@ async def test_empty_topic_plan_still_summarizes_every_original_unit(
     assert all(fact in saved for fact in facts)
     assert "[[concepts/missing]]" not in saved
     metadata = frontmatter.parse(saved)
+    assert metadata["description"] == "操作要求"
+    assert next(line for line in saved.splitlines() if line.startswith("# ")) == "# 操作要求"
     assert metadata["full_text"] == f"sources/handbook.{suffix}"
     assert metadata["custom_field"] == "retained"
     assert metadata["unit_kind"] == source_kind
@@ -323,3 +325,71 @@ async def test_planner_knows_when_document_descriptions_are_a_partial_prefix(kb_
     plan = next(messages for messages in requests if "Based on the summary above" in str(messages))
     assert "Descriptions are a partial prefix" in str(plan)
     assert all(body in summary.read_text() for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_published_summary_title_and_description_cover_every_original_batch(
+    kb_dir, monkeypatch
+):
+    from openkb import frontmatter
+    from openkb.agent.compiler import compile_long_doc
+
+    wiki = kb_dir / "wiki"
+    source = wiki / "sources/manual.json"
+    source.write_text(
+        json.dumps(
+            [
+                {"page": page, "unit_kind": "page", "content": "Original instructions. " * 800}
+                for page in (1, 2, 3)
+            ]
+        )
+    )
+    original_bytes = source.read_bytes()
+    summary = wiki / "summaries/manual.md"
+    summary.write_text(
+        "---\ntype: Summary\nfull_text: sources/manual.json\n"
+        "custom_field: retained\n---\nOld knowledge."
+    )
+    descriptions, bodies, requests = [], [], []
+
+    def response(**kwargs):
+        requests.append(kwargs["messages"])
+        if "Based on the summary above" in str(kwargs["messages"]):
+            result = {}
+        else:
+            batch = json.loads(kwargs["messages"][1]["content"].split("\n", 1)[1])
+            pages = sorted({span["page"] for span in batch["page_spans"]})
+            descriptions.append(
+                f"This batch covers physical pages {pages}; other pages are outside this batch."
+            )
+            bodies.append(
+                f"# Physical pages {pages}\n\nOriginal instructions retained for this batch."
+            )
+            result = {"description": descriptions[-1], "content": bodies[-1]}
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    monkeypatch.setattr("litellm.completion", response)
+    await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=[])
+    assert len(bodies) > 1
+    saved = summary.read_text()
+    metadata = frontmatter.parse(saved)
+    assert all(description in metadata["description"] for description in descriptions)
+    assert metadata["description"].startswith(f"Document knowledge covers all {len(bodies)}")
+    assert next(line for line in saved.splitlines() if line.startswith("# ")) == "# manual"
+    for index, body in enumerate(bodies, 1):
+        assert f"## Original-source batch {index} of {len(bodies)}\n\n{body}" in saved
+    assert len(requests) == len(bodies) + 1  # Assembly does not make a recompression call.
+    assert metadata["full_text"] == "sources/manual.json"
+    assert metadata["custom_field"] == "retained"
+    assert source.read_bytes() == original_bytes

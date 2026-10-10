@@ -129,6 +129,14 @@ async def build_document_summary(
             "No nonempty text.",
             (),
         )
-    return SummaryDraft(
-        "\n\n".join(bodies), descriptions[0], "\n".join(descriptions), tuple(ranges)
+    if len(batches) == 1:
+        return SummaryDraft(bodies[0], descriptions[0], descriptions[0], tuple(ranges))
+    count = len(batches)
+    description = f"Document knowledge covers all {count} original-source batches.\n" + "\n".join(
+        f"Batch {index}/{count}: {text}" for index, text in enumerate(descriptions, 1)
     )
+    markdown = f"# {windows.doc_name}\n\n" + "\n\n".join(
+        f"## Original-source batch {index} of {count}\n\n{body}"
+        for index, body in enumerate(bodies, 1)
+    )
+    return SummaryDraft(markdown, description, "\n".join(descriptions), tuple(ranges))
