@@ -90,3 +90,31 @@ def test_serialized_budget_is_enforced_with_explicit_continuation():
         assert page["coverage"] == "partial"
         offset = page["continuation"]
     assert "".join(parts) == content
+
+
+def test_continuation_context_uses_original_text_coordinates():
+    text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
+    source = {"content": text, "source_spans": [[150, 150 + len(text)]]}
+    result = project_evidence(source, offset=text.index("| Unit |"))
+    heading, table = result["display_context"]
+    assert heading["source_spans"] == [[150, 163]]
+    assert table["source_spans"] == [[164, 197]]
+    assert result["source_spans"][0][0] == 150 + text.index("| Unit |")
+
+
+def test_continuation_context_uses_physical_page_coordinates():
+    from openkb.source_pages import read_page_selection
+
+    text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
+    source = read_page_selection(
+        [
+            {"page": 1, "unit_kind": "page", "content": "Unrelated first page."},
+            {"page": 2, "unit_kind": "page", "content": text},
+        ],
+        "2",
+    )
+    result = project_evidence(source, offset=source["content"].index("| Unit |"))
+    heading, table = result["display_context"]
+    assert heading["page_spans"] == [{"page": 2, "start": 0, "end": 13}]
+    assert table["page_spans"] == [{"page": 2, "start": 14, "end": 47}]
+    assert "source_spans" not in heading and "source_spans" not in table

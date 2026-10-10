@@ -44,12 +44,27 @@ def _segments(source: dict) -> list[tuple[int, int, int, int]]:
     return result
 
 
-def _window(source: dict, start: int, end: int) -> dict:
-    spans = [
-        [a + max(start, left) - left, a + min(end, right) - left]
-        for left, right, a, _ in _segments(source)
-        if left < end and right > start
-    ]
+def _coordinates(source: dict, start: int, end: int) -> dict:
+    if "_page_segments" in source:
+        return {
+            "page_spans": [
+                {"page": page, "start": max(start, left) - left, "end": min(end, right) - left}
+                for left, right, page in source["_page_segments"]
+                if left < end and right > start
+            ]
+        }
+    return {
+        "source_spans": [
+            [a + max(start, left) - left, a + min(end, right) - left]
+            for left, right, a, _ in _segments(source)
+            if left < end and right > start
+        ]
+    }
+
+
+def _window(source: dict, start: int, end: int, layout=None) -> dict:
+    coordinates = _coordinates(source, start, end)
+    spans = coordinates.get("source_spans", [])
     origins = [
         origin
         for a, b in spans
@@ -57,18 +72,12 @@ def _window(source: dict, start: int, end: int) -> dict:
     ]
     result = {
         "content": source["content"][start:end],
-        "source_spans": spans,
+        **coordinates,
         "unit_kind": source.get("unit_kind", "text"),
         "coverage": "complete" if start == 0 and end == len(source["content"]) else "partial",
         "continuation": end if end < len(source["content"]) else None,
     }
     if "_page_segments" in source:
-        result["page_spans"] = [
-            {"page": page, "start": max(start, left) - left, "end": min(end, right) - left}
-            for left, right, page in source["_page_segments"]
-            if left < end and right > start
-        ]
-        result.pop("source_spans", None)
         result["units"] = [
             {
                 key: value
@@ -79,7 +88,7 @@ def _window(source: dict, start: int, end: int) -> dict:
             if any(span["page"] == unit["page"] for span in result["page_spans"])
         ]
         result.pop("origins", None)
-    context = _display_context(source["content"], start)
+    context = _display_context(source, start, layout)
     if context:
         result["display_context"] = context
     for key in ("char_range", "cell_range", "block_range", "diagnostics", "assets"):
@@ -151,8 +160,11 @@ def _window(source: dict, start: int, end: int) -> dict:
     return result
 
 
-def _display_context(text: str, offset: int) -> list[dict]:
-    tokens, lines = markdown_layout(text)
+def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
+    if offset == 0:
+        return []
+    text = source["content"]
+    tokens, lines = layout or markdown_layout(text)
     headings: list[tuple[int, int, int]] = []
     context: list[dict] = []
     for index, token in enumerate(tokens):
@@ -168,11 +180,11 @@ def _display_context(text: str, offset: int) -> list[dict]:
                 {
                     "kind": "table_header",
                     "text": text[start:header],
-                    "source_spans": [[start, header]],
+                    **_coordinates(source, start, header),
                 }
             )
     return [
-        {"kind": "heading_path", "text": text[a:b], "source_spans": [[a, b]]}
+        {"kind": "heading_path", "text": text[a:b], **_coordinates(source, a, b)}
         for _, a, b in headings
     ] + context
 
@@ -188,7 +200,8 @@ def project_evidence(
     text = source["content"]
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ValueError("Continuation is outside this evidence selection")
-    result = _window(source, offset, len(text))
+    layout = markdown_layout(text) if offset else None
+    result = _window(source, offset, len(text), layout)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)
     if fits(result):
         return result
@@ -199,7 +212,8 @@ def project_evidence(
             for left, right, c, d in _segments(source):
                 if a < d and b > c:
                     protected.append((left + max(a, c) - c, min(right, left + b - c)))
-    tokens, lines = markdown_layout(text)
+    layout = layout or markdown_layout(text)
+    tokens, lines = layout
     ends = sorted(
         {
             lines[token.map[1]]
@@ -214,7 +228,7 @@ def project_evidence(
     low, high, best = 0, len(ends) - 1, None
     while low <= high:
         middle = (low + high) // 2
-        candidate = _window(source, offset, ends[middle])
+        candidate = _window(source, offset, ends[middle], layout)
         if fits(candidate):
             best, low = candidate, middle + 1
         else:
