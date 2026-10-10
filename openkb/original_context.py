@@ -18,6 +18,8 @@ def _bounds(raw, location, selected):
 
     if selected is not None:
         if isinstance(raw, list):
+            if "page_spans" in selected:
+                return [(p["page"], p["start"], p["end"]) for p in selected["page_spans"]]
             return [(p["page"], 0, len(p["content"])) for p in selected.get("units", [])]
         return [(1, a, b) for a, b in selected.get("source_spans", [])]
     if isinstance(raw, list):

@@ -13,7 +13,7 @@ from openkb.application.query_views import QuerySelection, read_selected_file
 from openkb.lifecycle import current_generation
 from openkb.source_navigation import published_navigation
 
-PROJECTION_VERSION = "openkb-knowledge-forest-v1"
+PROJECTION_VERSION = "openkb-knowledge-forest-v2"
 
 
 def fingerprint(value) -> str:
@@ -193,7 +193,27 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                     "is_dir": True,
                     "children": nodes,
                 }
-    return {"title": "Knowledge navigation", "is_dir": True, "children": documents}
+    return {
+        "title": "Knowledge navigation",
+        "is_dir": True,
+        "children": {key: _compact_navigation(doc) for key, doc in documents.items()},
+    }
+
+
+def _compact_navigation(node: dict) -> dict:
+    """Keep every result locator and ancestor title, dropping unary structure only."""
+    node = dict(node)
+    if "children" in node:
+        node["children"] = {
+            key: _compact_navigation(child) for key, child in node["children"].items()
+        }
+    while node.get("is_dir") and not node.get("source_ref") and len(node.get("children", {})) == 1:
+        child = next(iter(node["children"].values()))
+        title = node["title"] + " / " + child["title"]
+        node = {**node, **child, "title": title, "rel_path": title}
+        if not child.get("children"):
+            node.pop("children", None)
+    return node
 
 
 def _text_nodes(raw: dict, reference: dict) -> dict:

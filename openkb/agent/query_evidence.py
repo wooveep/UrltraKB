@@ -135,7 +135,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         path = resolve_read_path(view, path)
         return read_query_page(selection, path, view_id=view.view_id, strict=True)
 
-    def read_pages(doc_name, pages, tool, part=None):
+    def read_pages(doc_name, pages, tool, part=None, offset=0):
         source = require_reader(sources, doc_name, tool)
         view = _selected(selection)
         from openkb.source_pages import read_page_selection, select_page_part
@@ -149,13 +149,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
                 "Requested pages are outside the recorded range.",
                 source["reading_action"],
             )
-        content = (
-            view.provenance + "\nContent nature: original page extraction; OCR is transcription, "
-            "and generated image interpretations are not source text.\n\n" + selected["content"]
-        )
+        payload = _original_payload(selected, offset)
+        content = view.provenance + "\n\n" + json.dumps(payload, ensure_ascii=False)
         content += "\nSource context: " + json.dumps(
             original_context(
-                source, raw, {"pages": pages, **({"part": part} if part else {})}, selected=selected
+                source, raw, {"pages": pages, **({"part": part} if part else {})}, selected=payload
             ),
             ensure_ascii=False,
         )
@@ -166,17 +164,22 @@ def restrict_query_agent(agent, selection: QuerySelection):
         return content
 
     @function_tool(failure_error_function=_read_error)
-    def get_page_content(doc_name: str, pages: str) -> str:
+    def get_page_content(doc_name: str, pages: str, offset: int = 0) -> str:
         """Read recorded physical pages, using a page range such as 1-3.
 
         Image references are not read pixels. Use the returned image actions when relevant.
+        Use offset=0 initially, then repeat the same range with continuation.
         """
-        return read_pages(doc_name, pages, "get_page_content")
+        return read_pages(doc_name, pages, "get_page_content", offset=offset)
 
     @function_tool(failure_error_function=_read_error)
-    def get_slide_content(doc_name: str, slides: str, part: Literal["all", "body", "notes"]) -> str:
+    def get_slide_content(
+        doc_name: str, slides: str, part: Literal["all", "body", "notes"], offset: int = 0
+    ) -> str:
         """Read recorded slides with their complete content, visible body, or speaker notes."""
-        return read_pages(doc_name, slides, "get_slide_content", None if part == "all" else part)
+        return read_pages(
+            doc_name, slides, "get_slide_content", None if part == "all" else part, offset
+        )
 
     @function_tool(failure_error_function=_read_error)
     def get_text_content(doc_name: str, chars: str, offset: int = 0) -> str:

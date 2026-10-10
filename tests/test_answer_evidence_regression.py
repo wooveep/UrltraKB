@@ -110,7 +110,7 @@ def test_bound_reader_schemas_only_accept_business_arguments(kb_dir):
     expected = {
         "search_knowledge": {"query"},
         "read_file": {"path"},
-        "get_page_content": {"doc_name", "pages"},
+        "get_page_content": {"doc_name", "pages", "offset"},
         "get_text_content": {"doc_name", "chars", "offset"},
         "get_block_content": {"doc_name", "blocks", "offset"},
         "get_cell_content": {"doc_name", "cells", "offset"},
@@ -152,11 +152,11 @@ def test_application_rejects_ambiguous_reading_collections(kb_dir):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_pages_require_only_the_native_page_selector(kb_dir):
+async def test_ordinary_pages_use_native_selector_and_continuation(kb_dir):
     source(kb_dir)
     agent = agent_for(kb_dir)
     tool = next(tool for tool in agent.tools if tool.name == "get_page_content")
-    assert set(tool.params_json_schema["required"]) == {"doc_name", "pages"}
+    assert set(tool.params_json_schema["required"]) == {"doc_name", "pages", "offset"}
     assert "Physical page 1" in await invoke(agent, tool.name, doc_name="manual", pages="1")
 
 

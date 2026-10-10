@@ -5,8 +5,8 @@ text, while continuation is an offset in this selection's displayed content.
 """
 
 import json
-import re
 
+from openkb.content_blocks import markdown_layout
 from openkb.text_source import clip_text_origins
 
 MAX_PAYLOAD_CHARS = 48000
@@ -62,6 +62,26 @@ def _window(source: dict, start: int, end: int) -> dict:
         "coverage": "complete" if start == 0 and end == len(source["content"]) else "partial",
         "continuation": end if end < len(source["content"]) else None,
     }
+    if "_page_segments" in source:
+        result["page_spans"] = [
+            {"page": page, "start": max(start, left) - left, "end": min(end, right) - left}
+            for left, right, page in source["_page_segments"]
+            if left < end and right > start
+        ]
+        result.pop("source_spans", None)
+        result["units"] = [
+            {
+                key: value
+                for key, value in unit.items()
+                if key not in {"content", "parts", "origin_locators"}
+            }
+            for unit in source.get("units", [])
+            if any(span["page"] == unit["page"] for span in result["page_spans"])
+        ]
+        result.pop("origins", None)
+    context = _display_context(source["content"], start)
+    if context:
+        result["display_context"] = context
     for key in ("char_range", "cell_range", "block_range", "diagnostics", "assets"):
         if source.get(key):
             result[key] = source[key]
@@ -94,7 +114,7 @@ def _window(source: dict, start: int, end: int) -> dict:
                 item["value_complete"] = False
             cells.append(item)
         result["cells"] = cells
-    else:
+    elif "_page_segments" not in source:
         result["origins"] = _clean(
             [
                 {key: value for key, value in origin.items() if key not in {"csv"}}
@@ -131,7 +151,35 @@ def _window(source: dict, start: int, end: int) -> dict:
     return result
 
 
-def project_evidence(source: dict, *, offset: int = 0, budget: int = MAX_PAYLOAD_CHARS) -> dict:
+def _display_context(text: str, offset: int) -> list[dict]:
+    tokens, lines = markdown_layout(text)
+    headings: list[tuple[int, int, int]] = []
+    context: list[dict] = []
+    for index, token in enumerate(tokens):
+        if not token.map or lines[token.map[0]] >= offset:
+            continue
+        start, end = (lines[n] for n in token.map)
+        if token.type == "heading_open":
+            level = int(token.tag[1:])
+            headings = [item for item in headings if item[0] < level] + [(level, start, end)]
+        if token.type == "table_open" and start < offset < end:
+            header = lines[min(token.map[0] + 2, len(lines) - 1)]
+            context.append(
+                {
+                    "kind": "table_header",
+                    "text": text[start:header],
+                    "source_spans": [[start, header]],
+                }
+            )
+    return [
+        {"kind": "heading_path", "text": text[a:b], "source_spans": [[a, b]]}
+        for _, a, b in headings
+    ] + context
+
+
+def project_evidence(
+    source: dict, *, offset: int = 0, budget: int = MAX_PAYLOAD_CHARS, fits=None
+) -> dict:
     """Paginate after serialization, at paragraph boundaries outside cell values.
 
     An indivisible oversized cell/paragraph returns an explicit gap; it is never
@@ -141,7 +189,8 @@ def project_evidence(source: dict, *, offset: int = 0, budget: int = MAX_PAYLOAD
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ValueError("Continuation is outside this evidence selection")
     result = _window(source, offset, len(text))
-    if len(json.dumps(result, ensure_ascii=False)) <= budget:
+    fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)
+    if fits(result):
         return result
     protected = []
     for origin in source.get("origin_locators", []):
@@ -150,14 +199,23 @@ def project_evidence(source: dict, *, offset: int = 0, budget: int = MAX_PAYLOAD
             for left, right, c, d in _segments(source):
                 if a < d and b > c:
                     protected.append((left + max(a, c) - c, min(right, left + b - c)))
-    ends = [m.end() for m in re.finditer(r"\n\s*\n", text) if m.end() > offset]
+    tokens, lines = markdown_layout(text)
+    ends = sorted(
+        {
+            lines[token.map[1]]
+            for token in tokens
+            if token.map
+            and (token.level == 0 or token.type == "tr_open")
+            and lines[token.map[1]] > offset
+        }
+    )
     ends = [end for end in ends if not any(a < end < b for a, b in protected)]
     ends.append(len(text))
     low, high, best = 0, len(ends) - 1, None
     while low <= high:
         middle = (low + high) // 2
         candidate = _window(source, offset, ends[middle])
-        if len(json.dumps(candidate, ensure_ascii=False)) <= budget:
+        if fits(candidate):
             best, low = candidate, middle + 1
         else:
             high = middle - 1

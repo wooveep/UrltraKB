@@ -17,11 +17,12 @@ class ReaderFailure(ValueError):
         super().__init__(message)
 
 
-def native_source(view: QueryView, path: str) -> dict:
+def native_source(view: QueryView, path: str, *, data: bytes | None = None) -> dict:
     """Validate the retained representation; file extensions alone confer no capability."""
     name = PurePosixPath(path).name
     doc = name.removesuffix(".content.json").removesuffix(".json").removesuffix(".md")
-    data = read_selected_file(view, path)
+    if data is None:
+        data = read_selected_file(view, path)
     actions = {}
     ranges: dict[str, object] = {}
     if path.endswith(".content.json"):
@@ -67,7 +68,7 @@ def native_source(view: QueryView, path: str) -> dict:
         coordinate = "slides" if slides else "pages"
         preferred = "get_slide_content" if slides else "get_page_content"
         ranges[coordinate] = f"1-{source['pages']}"
-        actions[preferred] = {"doc_name": doc, coordinate: "1"}
+        actions[preferred] = {"doc_name": doc, coordinate: "1", "offset": 0}
         if slides:
             actions[preferred]["part"] = "all"
     else:

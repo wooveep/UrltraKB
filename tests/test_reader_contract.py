@@ -21,7 +21,7 @@ async def test_final_page_and_slide_schemas_have_no_nullable_part(kb_dir, slides
     assert ("get_page_content" not in names) if slides else ("get_slide_content" not in names)
     tool = next(tool for tool in agent.tools if tool.name == name)
     assert set(tool.params_json_schema["properties"]) == (
-        {"doc_name", "slides", "part"} if slides else {"doc_name", "pages"}
+        {"doc_name", "slides", "part", "offset"} if slides else {"doc_name", "pages", "offset"}
     )
     args = (
         {"doc_name": "manual", "slides": "1", "part": "all"}

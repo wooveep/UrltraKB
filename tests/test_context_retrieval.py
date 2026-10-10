@@ -12,6 +12,80 @@ from test_vendor_sdk import response, streamed_response
 pytest_plugins = ("test_vendor_sdk",)
 
 
+def test_retrieval_fits_complementary_originals_and_reduces_navigation(kb_dir, model_service):
+    from openkb.config_state import capture_config
+    from openkb.context.knowledge import KnowledgeRetrieval
+    from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+    from openkb.model_tokenizer import question_measure
+
+    paragraphs = [
+        f"Step {n}: preserve the complete condition and explanation. " * 15 for n in range(80)
+    ]
+    atomic_write_json(
+        kb_dir / "wiki/sources/alpha.json",
+        [{"page": 1, "unit_kind": "page", "content": "\n\n".join(paragraphs)}],
+    )
+    atomic_write_text(
+        kb_dir / "wiki/sources/beta.md", "Beta requires the complementary second step."
+    )
+    executor = executor_for(model_service)
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        executor.question_capacity = question_measure(capture_config(kb_dir))
+    search = KnowledgeRetrieval(selection(kb_dir), executor)
+
+    def rank(request):
+        return rank_reply(re.findall(r"- id: (\S+)", request["messages"][-1]["content"]))
+
+    model_service.replies.extend([(200, rank)] * 3)
+    result = search.search("Give the complete steps for Alpha and Beta")
+    assert result["status"] == "completed", result
+    assert len(model_service.requests) == 1
+    hits = {hit["doc_name"]: hit for hit in result["hits"]}
+    assert hits["alpha"]["content"]
+    assert paragraphs[0] in hits["alpha"]["content"]
+    assert hits["alpha"]["coverage"] == "partial"
+    assert hits["alpha"]["continuation"] > 0
+    assert (
+        hits["alpha"]["continuation_action"]["arguments"]["offset"] == hits["alpha"]["continuation"]
+    )
+    assert hits["beta"]["content"] == "Beta requires the complementary second step."
+    assert result["question_context_tokens"] <= 6000
+    repeated = search.search("Give the complete steps for Alpha and Beta")
+    assert repeated["cache_hit"]
+    assert len(model_service.requests) == 1
+    assert all(hit["coverage"] == "already_returned" for hit in repeated["hits"])
+
+
+def test_token_projection_preserves_table_rows_headers_and_continuation():
+    from openkb.agent.evidence_payload import project_evidence
+    from openkb.model_tokenizer import TokenMeasure
+
+    measure = TokenMeasure(
+        {"unknown_reason": None, "input_limit": 65536, "measurement_model": "gpt-4o-mini"}
+    )
+    text = (
+        "# Operation under load\n\n| Object | Condition | Value |\n| --- | --- | --- |\n"
+        + "".join(f"| Unit {n} | full load only | {n + 17} ms |\n" for n in range(100))
+    )
+    source = {"content": text, "source_spans": [[0, len(text)]]}
+    offset, pieces = 0, []
+    while True:
+        hit = project_evidence(
+            source, offset=offset, fits=lambda payload: measure.payload_tokens(payload) <= 700
+        )
+        assert hit["content"]
+        assert measure.payload_tokens(hit) <= 700
+        assert "| Object | Condition | Value |" in hit["content"] + str(
+            hit.get("display_context", "")
+        )
+        pieces.append(hit["content"])
+        if hit["continuation"] is None:
+            break
+        assert hit["continuation"] > offset
+        offset = hit["continuation"]
+    assert "".join(pieces) == text
+
+
 def rank_reply(ids):
     return response(
         {
@@ -188,20 +262,15 @@ def test_knowledge_projection_retrieves_multiple_sources_and_invalidates_changed
         rows = db.execute(
             "SELECT node_id, attrs_json FROM nodes WHERE tree_id=?", (projection.tree_id,)
         ).fetchall()
-    directories = [
-        i
-        for i, a in rows
-        if json.loads(a or "{}").get("is_dir") and json.loads(a or "{}").get("doc_name")
-    ]
     leaves = [i for i, a in rows if json.loads(a or "{}").get("source_ref")]
-    model_service.replies.extend([(200, rank_reply(directories)), (200, rank_reply(leaves))])
+    model_service.replies.append((200, rank_reply(leaves)))
     result = search.search("Compare slots")
     assert result["status"] == "completed", result
     assert {hit["doc_name"] for hit in result["hits"]} == {"alpha", "beta"}
     assert "Alpha requires 12 slots." in json.dumps(result)
     assert "Beta recommends 24 slots." in json.dumps(result)
     assert search.search("Compare slots")["cache_hit"] is True
-    assert len(model_service.requests) == 2
+    assert len(model_service.requests) == 1
     (kb_dir / "wiki/sources/alpha.md").write_text("Changed after selection")
     stale = search.search("Compare slots")
     assert stale["status"] == "evidence_rejected"
@@ -267,16 +336,14 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
             {"role": "assistant", "content": "Alpha requires 12; Beta recommends 24."}
         )
 
-    model_service.replies.extend(
-        (200, reply) for reply in [search_call, rank, rank, search_call, answer]
-    )
+    model_service.replies.extend((200, reply) for reply in [search_call, rank, search_call, answer])
     context = ExecutionContext()
     result = await ask_question(kb_dir, query, context=context)
     assert result.status == "completed", result
     assert result.answer == "Alpha requires 12; Beta recommends 24."
-    assert context.executor.stage_calls == {"retrieval": 2, "answer": 3}
+    assert context.executor.stage_calls == {"retrieval": 1, "answer": 3}
     receipts = read_requests(kb_dir)
-    assert len(receipts) == 5
+    assert len(receipts) == 4
     assert {r.operation for r in receipts} == {"knowledge_retrieval", "answer"}
 
 
@@ -322,13 +389,13 @@ def test_projection_keeps_selected_publication_identity_after_source_update(kb_d
     old_refs = [
         leaf["source_ref"]
         for doc in old["children"].values()
-        for leaf in doc["children"].values()
+        for leaf in [doc, *doc.get("children", {}).values()]
         if leaf.get("source_ref", {}).get("doc_name") == "alpha"
     ]
     new_refs = [
         leaf["source_ref"]
         for doc in new["children"].values()
-        for leaf in doc["children"].values()
+        for leaf in [doc, *doc.get("children", {}).values()]
         if leaf.get("source_ref", {}).get("doc_name") == "alpha"
     ]
     assert old_refs and new_refs

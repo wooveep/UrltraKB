@@ -34,6 +34,12 @@ def select_page_part(source: dict, part: str | None) -> dict:
             }
         )
     label = "正文" if part == "body" else "演讲备注"
+    segments, cursor = [], 0
+    for page in units:
+        prefix = f"[Physical page {page['page']} · {label}]\n\n"
+        start = cursor + len(prefix)
+        segments.append((start, start + len(page["content"]), page["page"]))
+        cursor = start + len(page["content"]) + len("\n\n---\n\n")
     return {
         **source,
         "part": part,
@@ -42,6 +48,7 @@ def select_page_part(source: dict, part: str | None) -> dict:
         "content": "\n\n---\n\n".join(
             f"[Physical page {page['page']} · {label}]\n\n{page['content']}" for page in units
         ),
+        "_page_segments": segments,
     }
 
 
@@ -85,18 +92,25 @@ def read_page_selection(raw: Any, specification: str | None = None) -> dict:
         requested = numbers
     selected = [page for page in raw if page["page"] in requested]
     missing = sorted(set(requested) - set(numbers))
-    parts = []
+    parts: list[str] = []
+    segments: list[tuple[int, int, int]] = []
+    cursor = 0
     for page in selected:
         label = "Physical page" if physical else "Page"
         body = page["content"]
         block = f"[{label} {page['page']}]\n\n"
         if page.get("printed_page_label"):
             block += f"Printed label: {page['printed_page_label']}\n\n"
+        if parts:
+            cursor += len("\n\n---\n\n")
+        left = cursor + len(block)
+        segments.append((left, left + len(body), page["page"]))
         block += body or "[No extracted text or images]"
         paths = ", ".join(image["path"] for image in page.get("images", []))
         if paths:
             block += f"\n[Images: {paths}]"
         parts.append(block)
+        cursor += len(block)
     diagnostics = [] if complete else ["Physical-page coverage and extraction policy are unknown."]
     if missing:
         diagnostics.append(
@@ -114,4 +128,5 @@ def read_page_selection(raw: Any, specification: str | None = None) -> dict:
         "diagnostics": diagnostics,
         "units": selected,
         "origin_locators": [item for page in selected for item in page.get("origin_locators", [])],
+        "_page_segments": segments,
     }

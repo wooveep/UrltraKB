@@ -82,24 +82,67 @@ class KnowledgeRetrieval:
             measure = self.executor.question_capacity
             if measure is None:
                 raise ValueError("Knowledge context requires captured model capacity")
-            for reference in refs:
-                hit = self._read(reference)
-                identity = fingerprint(reference)
+            # A navigation title is not a distinct evidence identity.
+            refs = list(
+                {
+                    fingerprint(
+                        {
+                            k: reference.get(k)
+                            for k in (
+                                "path",
+                                "source_revision_id",
+                                "content_digest",
+                                "unit_revision_id",
+                                "native_location",
+                            )
+                        }
+                    ): reference
+                    for reference in refs
+                }.values()
+            )
+            verified = {}
+            for number, reference in enumerate(refs):
+                self.executor.policy.check()
+                path = reference["path"]
+                view = self.selection.views[0]
+                if view.files.get(path) != reference["content_digest"] or (
+                    view.source_revisions_by_path.get(path) != reference["source_revision_id"]
+                ):
+                    raise ValueError("Candidate belongs to a different source revision")
+                if path not in verified:
+                    verified[path] = read_selected_file(view, path)
+                identity = fingerprint(
+                    {
+                        k: reference.get(k)
+                        for k in (
+                            "path",
+                            "source_revision_id",
+                            "content_digest",
+                            "unit_revision_id",
+                            "native_location",
+                        )
+                    }
+                )
                 if identity in allocation["returned"]:
+                    from openkb.source_reading import native_source, reading_action
+
                     hit = {
                         **reference,
                         "coverage": "already_returned",
-                        "reading_action": hit["reading_action"],
+                        "reading_action": reading_action(
+                            native_source(view, path, data=verified[path]),
+                            reference["native_location"],
+                        ),
                     }
+                else:
+                    # Reserve a share for each complementary candidate; unused space
+                    # naturally becomes available to the remaining candidates.
+                    hit = self._read(
+                        reference,
+                        data=verified[path],
+                        token_budget=remaining // (len(refs) - number),
+                    )
                 tokens = measure.payload_tokens(hit)
-                if tokens > remaining:
-                    hit = {
-                        **reference,
-                        "coverage": "unread",
-                        "content": "",
-                        "reading_action": hit["reading_action"],
-                    }
-                    tokens = measure.payload_tokens(hit)
                 if tokens <= remaining:
                     hits.append(hit)
                     remaining -= tokens
@@ -150,7 +193,11 @@ class KnowledgeRetrieval:
                 "stage_sends": self.executor.stage_calls,
             }
 
-    def _read(self, reference: dict) -> dict:
+    def _read(
+        self, reference: dict, *, data: bytes | None = None, token_budget: int | None = None
+    ) -> dict:
+        from openkb.agent.evidence_payload import project_evidence
+        from openkb.original_context import original_context
         from openkb.source_reading import native_source, reading_action
 
         view = self.selection.views[0]
@@ -159,61 +206,61 @@ class KnowledgeRetrieval:
             view.source_revisions_by_path.get(path) != reference["source_revision_id"]
         ):
             raise ValueError("Candidate belongs to a different source revision")
-        data = read_selected_file(view, path)
+        if data is None:
+            data = read_selected_file(view, path)
         location = reference["native_location"]
-        source = native_source(view, path)
+        source = native_source(view, path, data=data)
         raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
         if path.endswith(".content.json"):
-            from openkb.agent.evidence_payload import project_evidence
+            assert isinstance(raw, dict)
             from openkb.block_package import read_block_selection
             from openkb.text_source import read_text_selection
             from openkb.workbooks.selection import select_cells
 
-            raw = json.loads(data)
             if "blocks" in location:
                 selected = read_block_selection(raw, location["blocks"])
             else:
                 selected = read_text_selection(raw, location.get("chars"))
                 if "cells" in location:
                     selected = select_cells(selected, location["cells"])
-            selected = project_evidence(selected, budget=20000)
         elif path.endswith(".json"):
             from openkb.source_pages import read_page_selection
 
-            # Read bounded whole pages; preserve the full candidate range as a follow-up action.
-            raw = json.loads(data)
             selected = read_page_selection(raw, location["pages"])
             if selected["diagnostics"]:
                 raise ValueError("Candidate native pages are outside the frozen source")
-            units, content = [], ""
-            for unit in selected["units"][:4]:
-                piece = f"[Physical page {unit['page']}]\n{unit['content']}\n"
-                if len(content) + len(piece) > 20000:
-                    break
-                content += piece
-                units.append(unit)
-            selected = {
-                "content": content,
-                "units": units,
-                "coverage": "partial",
-            }
         else:
-            text = data.decode("utf-8")
-            selected = {
-                "content": text if len(text) <= 20000 else "",
-                "coverage": "complete" if len(text) <= 20000 else "unread",
-                "source_spans": [[0, len(text)]] if len(text) <= 20000 else [],
-            }
-        from openkb.original_context import original_context
+            a, b = map(int, location["chars"].split(":"))
+            selected = {"content": raw[a:b], "source_spans": [[a, b]]}
 
-        if self.images and "units" in selected:
-            selected["image_coverage"] = self.images.listed(source, selected["units"])
-        return {
-            **reference,
-            **selected,
-            "source_context": original_context(source, raw, location, selected=selected),
-            "reading_action": reading_action(native_source(view, path), location),
-            "content_kind": "original_source",
-            "interpretation": "Original extraction; generated navigation and image interpretations "
-            "are separate content",
-        }
+        action = reading_action(source, location)
+
+        def assemble(window):
+            result = {
+                **reference,
+                **window,
+                "source_context": original_context(source, raw, location, selected=window),
+                "reading_action": action,
+                "content_kind": "original_source",
+                "interpretation": "Original extraction; generated navigation and image "
+                "interpretations are separate content",
+                "range_complete": window.get("coverage") == "complete",
+            }
+            if window.get("continuation") is not None:
+                result["continuation_action"] = reading_action(
+                    source, {**location, "offset": window["continuation"]}
+                )
+            if self.images and "units" in window:
+                result["image_coverage"] = self.images.listed(source, window["units"])
+            return result
+
+        measure = self.executor.question_capacity
+        fits = None
+        if token_budget is not None:
+            if measure is None:
+                raise ValueError("Knowledge context requires captured model capacity")
+
+            def fits(window):
+                return measure.payload_tokens(assemble(window)) <= token_budget
+
+        return assemble(project_evidence(selected, fits=fits))
