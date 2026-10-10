@@ -30,13 +30,18 @@ def test_oversized_pdf_compile_window_keeps_paragraphs_and_native_continuation(k
     assert window["reading_action"]["continuation"]["offset"] == window["continuation"]
 
 
-def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(kb_dir, monkeypatch):
-    from openkb.agent.compile_plan import request_compile_plan
+@pytest.mark.parametrize("unread_suffix", [False, True])
+def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(
+    kb_dir, monkeypatch, unread_suffix
+):
+    from openkb.agent.compile_plan import CompilePlanError, request_compile_plan
     from openkb.agent.source_windows import CompileSourceWindows
     from openkb.source_pages import read_page_selection
 
     first = "Irrigation valve startup requires a precheck.\n\n"
     suffix = "Winter needs trained supervision.\n"
+    if unread_suffix:
+        suffix = "Winter needs trained supervision. " * 100
     body = first + "Unrelated operating context.\n\n" * 100 + suffix
     raw = [{"page": 1, "unit_kind": "page", "content": body}]
     (kb_dir / "wiki/sources/current.json").write_text(json.dumps(raw))
@@ -64,14 +69,22 @@ def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(kb_dir, monkeyp
             }
         )
 
-    plan = request_compile_plan(
-        request,
-        json.loads,
-        existing={"concepts": {"valve"}, "entities": set()},
-        entity_types=frozenset({"other"}),
-        sanitize=lambda name: name,
-        validate_updates=lambda plan: windows.validate_updates(plan, long=True),
-    )
+    def get_plan():
+        return request_compile_plan(
+            request,
+            json.loads,
+            existing={"concepts": {"valve"}, "entities": set()},
+            entity_types=frozenset({"other"}),
+            sanitize=lambda name: name,
+            validate_updates=lambda plan: windows.validate_updates(plan, long=True),
+        )
+
+    if unread_suffix:
+        with pytest.raises(CompilePlanError):
+            get_plan()
+        assert len(requests) == 2
+        return
+    plan = get_plan()
     assert len(requests) == 2
     context = windows.prepare(plan.concepts.update[0], "concepts/valve.md", long=True)
     content = "\n".join(w["content"] for w in context.windows)
@@ -125,6 +138,43 @@ def test_compile_text_reader_applies_the_returned_selection_offset(kb_dir):
     )
     assert context.windows[0]["content"] == text[offset:]
     assert context.windows[0]["source_spans"] == [[offset, len(text)]]
+
+
+def test_pdf_compile_projection_keeps_pixels_for_returned_pages_only(kb_dir, monkeypatch):
+    from PIL import Image
+
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    wiki = kb_dir / "wiki"
+    (wiki / "sources/images").mkdir(exist_ok=True)
+    for name in ("first", "later"):
+        Image.new("RGB", (2, 2), "white").save(wiki / f"sources/images/{name}.png")
+    (wiki / "sources/current.json").write_text(
+        json.dumps(
+            [
+                {
+                    "page": 1,
+                    "unit_kind": "page",
+                    "content": "Recorded setup.\n",
+                    "images": [{"path": "sources/images/first.png"}],
+                },
+                {
+                    "page": 2,
+                    "unit_kind": "page",
+                    "content": "Long indivisible paragraph. " * 100,
+                    "images": [{"path": "sources/images/later.png"}],
+                },
+            ]
+        )
+    )
+    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    context = CompileSourceWindows(wiki, "current").prepare(
+        {"name": "setup", "reading_locations": {"pages": "1-2"}},
+        long=True,
+    )
+    assert [image["path"] for image in context.windows[0]["images"]] == ["sources/images/first.png"]
+    pixels = [part for part in context.message["content"] if part["type"] == "image_url"]
+    assert len(pixels) == 1
 
 
 @pytest.mark.parametrize(

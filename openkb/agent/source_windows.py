@@ -157,7 +157,8 @@ class CompileSourceWindows:
                 context = self.prepare(item, page, long=True)
                 current = [w for w in context.windows if w["source_role"] == "current"]
                 truncated = bool(current and type(current[-1].get("continuation")) is int)
-                if not context.has_current_original or truncated:
+                fresh_read = bool(current and current[-1]["content"].strip())
+                if not fresh_read or truncated:
                     self._unresolved_updates.add(page)
                     if truncated and page not in self._partial_updates:
                         self._partial_updates[page] = tuple(current)
@@ -376,6 +377,9 @@ class CompileSourceWindows:
             result.update(projected)
             result.update(
                 native_location=location,
+                images=[
+                    image for unit in projected.get("units", []) for image in unit.get("images", [])
+                ],
                 range_complete=projected.get("continuation") is None and bool(projected["content"]),
                 coverage="complete"
                 if selected["page_range"] == [p["page"] for p in raw]
