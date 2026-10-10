@@ -82,10 +82,39 @@ class KnowledgeRetrieval:
             measure = self.executor.question_capacity
             if measure is None:
                 raise ValueError("Knowledge context requires captured model capacity")
-            # A navigation title is not a distinct evidence identity.
-            refs = list(
-                {
-                    fingerprint(
+            from openkb.application.execution import activity, current_execution
+
+            with activity("reading"):
+                # A navigation title is not a distinct evidence identity.
+                refs = list(
+                    {
+                        fingerprint(
+                            {
+                                k: reference.get(k)
+                                for k in (
+                                    "path",
+                                    "source_revision_id",
+                                    "content_digest",
+                                    "unit_revision_id",
+                                    "native_location",
+                                )
+                            }
+                        ): reference
+                        for reference in refs
+                    }.values()
+                )
+                verified = {}
+                for number, reference in enumerate(refs):
+                    self.executor.policy.check()
+                    path = reference["path"]
+                    view = self.selection.views[0]
+                    if view.files.get(path) != reference["content_digest"] or (
+                        view.source_revisions_by_path.get(path) != reference["source_revision_id"]
+                    ):
+                        raise ValueError("Candidate belongs to a different source revision")
+                    if path not in verified:
+                        verified[path] = read_selected_file(view, path)
+                    identity = fingerprint(
                         {
                             k: reference.get(k)
                             for k in (
@@ -96,59 +125,35 @@ class KnowledgeRetrieval:
                                 "native_location",
                             )
                         }
-                    ): reference
-                    for reference in refs
-                }.values()
-            )
-            verified = {}
-            for number, reference in enumerate(refs):
-                self.executor.policy.check()
-                path = reference["path"]
-                view = self.selection.views[0]
-                if view.files.get(path) != reference["content_digest"] or (
-                    view.source_revisions_by_path.get(path) != reference["source_revision_id"]
-                ):
-                    raise ValueError("Candidate belongs to a different source revision")
-                if path not in verified:
-                    verified[path] = read_selected_file(view, path)
-                identity = fingerprint(
-                    {
-                        k: reference.get(k)
-                        for k in (
-                            "path",
-                            "source_revision_id",
-                            "content_digest",
-                            "unit_revision_id",
-                            "native_location",
-                        )
-                    }
-                )
-                if identity in allocation["returned"]:
-                    from openkb.source_reading import native_source, reading_action
-
-                    hit = {
-                        **reference,
-                        "coverage": "already_returned",
-                        "reading_action": reading_action(
-                            native_source(view, path, data=verified[path]),
-                            reference["native_location"],
-                        ),
-                    }
-                else:
-                    # Reserve a share for each complementary candidate; unused space
-                    # naturally becomes available to the remaining candidates.
-                    hit = self._read(
-                        reference,
-                        data=verified[path],
-                        token_budget=remaining // (len(refs) - number),
                     )
-                tokens = measure.payload_tokens(hit)
-                if tokens <= remaining:
-                    hits.append(hit)
-                    remaining -= tokens
-                    allocation["tokens"] += tokens
-                    if hit.get("content"):
-                        allocation["returned"].add(identity)
+                    if identity in allocation["returned"]:
+                        from openkb.source_reading import native_source, reading_action
+
+                        hit = {
+                            **reference,
+                            "coverage": "already_returned",
+                            "reading_action": reading_action(
+                                native_source(view, path, data=verified[path]),
+                                reference["native_location"],
+                            ),
+                        }
+                    else:
+                        # Reserve a share for each complementary candidate; unused space
+                        # naturally becomes available to the remaining candidates.
+                        hit = self._read(
+                            reference,
+                            data=verified[path],
+                            token_budget=remaining // (len(refs) - number),
+                        )
+                    tokens = measure.payload_tokens(hit)
+                    if tokens <= remaining:
+                        hits.append(hit)
+                        remaining -= tokens
+                        allocation["tokens"] += tokens
+                        if hit.get("content"):
+                            allocation["returned"].add(identity)
+                if execution := current_execution():
+                    execution.record_reads({"hits": hits})
             return {
                 "status": "completed",
                 "hits": hits,

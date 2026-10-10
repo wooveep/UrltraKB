@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator
+from threading import RLock
+from time import monotonic
+from typing import TYPE_CHECKING, Any, Callable, Iterator
+from uuid import uuid4
 
 from openkb.config import LlmCredentialBundle
 from openkb.config_state import ConfigSnapshot, capture_config
@@ -28,6 +34,97 @@ class ExecutionContext:
     executor: CompletionExecutor | None = field(default=None, repr=False)
     resume_model_task_id: str | None = None
     model_task: TaskJournal | None = field(default=None, repr=False)
+    activity_attempt_id: str = field(default_factory=lambda: uuid4().hex)
+    _activity_task_id: str = field(default_factory=lambda: uuid4().hex, repr=False)
+    _event_guard: RLock = field(default_factory=RLock, repr=False)
+    _read_sources: set[str] = field(default_factory=set, repr=False)
+    _read_units: set[tuple] = field(default_factory=set, repr=False)
+    tool_activities: dict[str, dict] = field(default_factory=dict, repr=False)
+
+    def record_reads(self, payload: dict) -> None:
+        """Count only original content actually returned, without disclosing names."""
+        with self._event_guard:
+            for hit in payload.get("hits", [payload]):
+                if not hit.get("content") or hit.get("content_kind") != "original_source":
+                    continue
+                source = hit.get("source_context", {})
+                identity = source.get("content_digest") or hit.get("content_digest")
+                if not identity:
+                    continue
+                identity = hashlib.sha256(
+                    json.dumps(
+                        [
+                            identity,
+                            source.get("source_revision_id"),
+                            source.get("source_path", hit.get("path")),
+                        ]
+                    ).encode()
+                ).hexdigest()
+                self._read_sources.add(identity)
+                units: list[tuple] = (
+                    [("page", p["page"]) for p in hit.get("page_spans", [])]
+                    or [("block", b["ordinal"]) for b in hit.get("blocks", [])]
+                    or [("cell", c["coordinate"]) for c in hit.get("cells", [])]
+                    or [("text",)]
+                )
+                self._read_units.update((identity, *unit) for unit in units)
+
+    @contextmanager
+    def activity(self, stage: str, *, tool_call_id: str | None = None) -> Iterator[dict]:
+        parent = _PARENT_ACTIVITY.get()
+        data: dict[str, Any] = {
+            "task_id": self.usage_task_id or self._activity_task_id,
+            "attempt_id": self.activity_attempt_id,
+            "activity_id": uuid4().hex,
+            "parent_activity_id": parent,
+            "stage": stage,
+            "status": "started",
+        }
+        if tool_call_id:
+            data = {**self.tool_metadata(tool_call_id, stage), "status": "started"}
+        began = monotonic()
+        with self._event_guard:
+            self.on_event({"event": "activity", "data": dict(data)})
+        _PARENT_ACTIVITY.set(data["activity_id"])
+        try:
+            yield data
+            if data["status"] == "started":
+                data["status"] = "completed"
+        except BaseException as error:
+            data["status"] = (
+                "cancelled"
+                if isinstance(error, (LockCancelled, GeneratorExit))
+                or type(error).__name__ == "CancelledError"
+                else "failed"
+            )
+            data["reason_code"] = type(error).__name__
+            raise
+        finally:
+            _PARENT_ACTIVITY.set(parent)
+            with self._event_guard:
+                data.update(
+                    elapsed_seconds=round(monotonic() - began, 3),
+                    source_count=len(self._read_sources),
+                    unit_count=len(self._read_units),
+                )
+                if tool_call_id:
+                    self.tool_activities[tool_call_id] = dict(data)
+                self.on_event({"event": "activity", "data": dict(data)})
+
+    def tool_metadata(self, call_id: str, stage: str) -> dict:
+        with self._event_guard:
+            return dict(
+                self.tool_activities.setdefault(
+                    call_id,
+                    {
+                        "task_id": self.usage_task_id or self._activity_task_id,
+                        "attempt_id": self.activity_attempt_id,
+                        "activity_id": uuid4().hex,
+                        "parent_activity_id": _PARENT_ACTIVITY.get(),
+                        "stage": stage,
+                    },
+                )
+            )
 
     def bind_model_input(self, source_id: str, revision_id: str) -> None:
         if self.model_task is not None:
@@ -49,7 +146,10 @@ class ExecutionContext:
 
         require_current_kb(kb_dir)
         if self.snapshot is None:
-            self.snapshot = capture_config(kb_dir, cancelled=self.cancelled, on_wait=self.waiting)
+            with self.activity("preparing"):
+                self.snapshot = capture_config(
+                    kb_dir, cancelled=self.cancelled, on_wait=self.waiting
+                )
             # The worker's control channel acknowledges this before any
             # business work, so later batch units cannot silently re-resolve.
             self.on_snapshot(self.snapshot)
@@ -78,6 +178,7 @@ class ExecutionContext:
             ),
             self.snapshot.activate(),
             self.executor.activate(),
+            _activate_context(self),
         ):
             from openkb.llm_usage_execution import bind_model_task
 
@@ -90,3 +191,30 @@ class ExecutionContext:
                 images = self.executor.image_deliveries.finish()
                 if images and images != previous_images:
                     self.on_event({"event": "image_coverage", "data": {"images": list(images)}})
+
+
+_ACTIVE_CONTEXT: ContextVar[ExecutionContext | None] = ContextVar("openkb_execution", default=None)
+_PARENT_ACTIVITY: ContextVar[str | None] = ContextVar("openkb_parent_activity", default=None)
+
+
+@contextmanager
+def _activate_context(context):
+    token = _ACTIVE_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _ACTIVE_CONTEXT.reset(token)
+
+
+def current_execution() -> ExecutionContext | None:
+    return _ACTIVE_CONTEXT.get()
+
+
+@contextmanager
+def activity(stage: str, *, tool_call_id: str | None = None):
+    context = current_execution()
+    if context is None:
+        yield {}
+    else:
+        with context.activity(stage, tool_call_id=tool_call_id) as data:
+            yield data

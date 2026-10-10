@@ -214,57 +214,63 @@ class ManagedAgentModel(Model):
         args, kwargs, request = self._arguments(args, kwargs)
         logical = self._logical.get() or uuid.uuid4().hex
         self._logical.set(logical)
-        async with self.executor.slot():
-            with self.executor.attempt("answer", request, logical) as observed:
-                inner = _ReceiptModel(self.executor, observed)
-                try:
-                    response = await self.executor.wait_response(
-                        inner.get_response(*args, **kwargs)
-                    )
-                    response.openkb_usage = inner.public_usage()
-                    response.openkb_image_digests = observed.image_digests
-                    observed.finish()
-                    self.executor.policy.check()
-                    self._logical.set(None)
-                    return response
-                finally:
+        from openkb.application.execution import activity
+
+        with activity("answering"):
+            async with self.executor.slot():
+                with self.executor.attempt("answer", request, logical) as observed:
+                    inner = _ReceiptModel(self.executor, observed)
                     try:
-                        await inner.close()
-                    finally:
-                        self.executor.image_deliveries.settle(
-                            self.executor.image_deliveries.capture(
-                                kwargs.get("input", args[1] if len(args) > 1 else None)
-                            ),
-                            observed,
-                            accepted=inner.response_accepted,
+                        response = await self.executor.wait_response(
+                            inner.get_response(*args, **kwargs)
                         )
+                        response.openkb_usage = inner.public_usage()
+                        response.openkb_image_digests = observed.image_digests
+                        observed.finish()
+                        self.executor.policy.check()
+                        self._logical.set(None)
+                        return response
+                    finally:
+                        try:
+                            await inner.close()
+                        finally:
+                            self.executor.image_deliveries.settle(
+                                self.executor.image_deliveries.capture(
+                                    kwargs.get("input", args[1] if len(args) > 1 else None)
+                                ),
+                                observed,
+                                accepted=inner.response_accepted,
+                            )
 
     async def stream_response(self, *args, **kwargs):
         args, kwargs, request = self._arguments(args, kwargs)
         logical = self._logical.get() or uuid.uuid4().hex
         self._logical.set(logical)
-        async with self.executor.slot():
-            with self.executor.attempt("answer", request, logical) as observed:
-                inner = _ReceiptModel(self.executor, observed)
-                stream = inner.stream_response(*args, **kwargs)
-                try:
-                    async for event in stream:
-                        self.executor.policy.check()
-                        if event.type == "response.completed":
-                            event.response.openkb_usage = inner.public_usage()
-                            event.response.openkb_image_digests = observed.image_digests
-                        yield event
-                    observed.finish()
-                    self._logical.set(None)
-                finally:
+        from openkb.application.execution import activity
+
+        with activity("answering"):
+            async with self.executor.slot():
+                with self.executor.attempt("answer", request, logical) as observed:
+                    inner = _ReceiptModel(self.executor, observed)
+                    stream = inner.stream_response(*args, **kwargs)
                     try:
-                        await stream.aclose()
-                        await inner.close()
+                        async for event in stream:
+                            self.executor.policy.check()
+                            if event.type == "response.completed":
+                                event.response.openkb_usage = inner.public_usage()
+                                event.response.openkb_image_digests = observed.image_digests
+                            yield event
+                        observed.finish()
+                        self._logical.set(None)
                     finally:
-                        self.executor.image_deliveries.settle(
-                            self.executor.image_deliveries.capture(
-                                kwargs.get("input", args[1] if len(args) > 1 else None)
-                            ),
-                            observed,
-                            accepted=inner.response_accepted,
-                        )
+                        try:
+                            await stream.aclose()
+                            await inner.close()
+                        finally:
+                            self.executor.image_deliveries.settle(
+                                self.executor.image_deliveries.capture(
+                                    kwargs.get("input", args[1] if len(args) > 1 else None)
+                                ),
+                                observed,
+                                accepted=inner.response_accepted,
+                            )

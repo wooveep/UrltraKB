@@ -53,7 +53,7 @@ def verify_baseline(window, kb, root, wait):
     task = TaskView(
         "c" * 32, str(kb), "ContinueConversation", "running", "answering", 1, (), False, False
     )
-    assert task_status(task) == "正在查阅知识库并整理回答"
+    assert task_status(task) == "正在组织答案，等待模型响应"
     window.shell.navigate("对话")
     window.conversation_notice.set_task(task)
     window.conversation_notice.show()

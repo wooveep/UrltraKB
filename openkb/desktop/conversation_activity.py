@@ -7,7 +7,10 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel, QProgressBar, QVBoxLayout, QWidget
 
 STAGES = {
-    "answering": "正在查阅知识库并整理回答",
+    "preparing": "正在准备上下文",
+    "retrieving": "正在检索资料",
+    "reading": "正在阅读原文",
+    "answering": "正在组织答案，等待模型响应",
     "saving": "正在保存回答",
 }
 
@@ -17,7 +20,7 @@ def task_status(task):
         return {
             "queued": "已排队，等待执行",
             "waiting": "等待知识库可用",
-            "stopping": "正在安全停止",
+            "stopping": "正在安全停止，等待资源清理",
         }[task.state]
     return STAGES.get(task.stage, "正在处理问题")
 
@@ -39,6 +42,7 @@ class ConversationActivity(QWidget):
         super().__init__()
         self._task = None
         self._started = monotonic()
+        self._pulse = 0
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
@@ -46,7 +50,7 @@ class ConversationActivity(QWidget):
         self.label.setWordWrap(True)
         self.label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.label)
-        self.steps = QLabel("基于 Wiki 知识与长文索引回答 · 完成后保存到对话历史")
+        self.steps = QLabel()
         self.steps.setWordWrap(True)
         self.steps.setObjectName("muted")
         layout.addWidget(self.steps)
@@ -56,7 +60,7 @@ class ConversationActivity(QWidget):
         self.bar.setFixedHeight(5)
         layout.addWidget(self.bar)
         self.timer = QTimer(self)
-        self.timer.setInterval(1000)
+        self.timer.setInterval(300)
         self.timer.timeout.connect(self.tick)
         self.setText("")
 
@@ -83,6 +87,24 @@ class ConversationActivity(QWidget):
         seconds = max(0, int(seconds))
         elapsed = f"{seconds // 60} 分 {seconds % 60:02d} 秒" if seconds >= 60 else f"{seconds} 秒"
         self.label.setText(task_status(self._task) + " · 已用时 " + elapsed)
+        self._pulse = (self._pulse + 1) % 4
+        active = {a["stage"] for a in self._task.activities}
+        labels = {
+            "preparing": "准备上下文",
+            "retrieving": "检索资料",
+            "reading": "阅读原文",
+            "answering": "组织答案",
+            "saving": "保存",
+        }
+        self.steps.setText(
+            " → ".join(
+                ("● " if stage in active else "✓ " if stage in self._task.completed_stages else "")
+                + label
+                + ("·" * self._pulse if stage in active else "")
+                for stage, label in labels.items()
+            )
+            + f"\n已读取 {self._task.source_count} 份资料 · {self._task.unit_count} 个原生单元"
+        )
         self.setAccessibleName(self.label.text())
 
     def setText(self, text):

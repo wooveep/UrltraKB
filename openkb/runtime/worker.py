@@ -38,6 +38,7 @@ class WorkerChannel:
         self.parent_gone = threading.Event()
         self.acknowledged = threading.Event()
         self.sequence = 0
+        self.event_guard = threading.Lock()
         self.truncated = False
         self.reader = threading.Thread(target=self._read_control, daemon=True)
         self.reader.start()
@@ -75,13 +76,14 @@ class WorkerChannel:
     def event(self, value: dict) -> None:
         if value.get("stage") == "waiting":
             raise WaitingForLease()
-        self.sequence += 1
-        try:
-            self.events.put_nowait(
-                {"identity": asdict(self.identity), "sequence": self.sequence, "data": value}
-            )
-        except queue.Full:
-            self.truncated = True
+        with self.event_guard:
+            self.sequence += 1
+            try:
+                self.events.put_nowait(
+                    {"identity": asdict(self.identity), "sequence": self.sequence, "data": value}
+                )
+            except queue.Full:
+                self.truncated = True
 
 
 def _import_status(status: str) -> str:

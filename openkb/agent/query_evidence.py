@@ -322,25 +322,64 @@ def restrict_query_agent(agent, selection: QuerySelection):
             invoke = tool.on_invoke_tool
 
             async def read(context, arguments):
-                result = await invoke(context, arguments)
-                if not executor.reserve_tool_output(result, minimum_tokens=0):
-                    from openkb.source_reading import ReaderFailure
+                from openkb.application.execution import activity, current_execution
 
-                    return _read_error(
-                        context,
-                        ReaderFailure(
-                            "context_capacity",
-                            "Reader result exceeds the remaining context; "
-                            "request a narrower native range.",
-                        ),
-                    )
-                return result
+                stage = (
+                    "retrieving"
+                    if tool.name in {"search_knowledge", "search_originals"}
+                    else "reading"
+                )
+                with activity(stage, tool_call_id=getattr(context, "tool_call_id", None)) as data:
+                    result = await invoke(context, arguments)
+                    try:
+                        body, marker, source_context = str(result).partition("\nSource context: ")
+                        payload = json.loads(body.split("\n\n", 1)[-1])
+                        if not isinstance(payload, dict):
+                            payload = {}
+                        if marker:
+                            payload["source_context"] = json.loads(
+                                source_context.split("\nImage coverage:", 1)[0]
+                            )
+                    except (ValueError, TypeError):
+                        payload = {}
+                    if payload.get("status") == "error":
+                        data["status"] = "failed"
+                        data["reason_code"] = payload.get("reason_code", "read_failed")
+                    if tool.name != "get_image" and not executor.reserve_tool_output(
+                        result, minimum_tokens=0
+                    ):
+                        from openkb.source_reading import ReaderFailure
+
+                        data["status"] = "failed"
+                        data["reason_code"] = "context_capacity"
+                        return _read_error(
+                            context,
+                            ReaderFailure(
+                                "context_capacity",
+                                "Reader result exceeds the remaining context; "
+                                "request a narrower native range.",
+                            ),
+                        )
+                    if execution := current_execution():
+                        if tool.name == "read_file" and not payload:
+                            path = json.loads(arguments).get("path", "")
+                            if path.startswith("sources/"):
+                                from openkb.application.query_views import resolve_read_path
+
+                                path = resolve_read_path(_selected(selection), path)
+                                payload = {
+                                    "content": result,
+                                    "content_kind": "original_source",
+                                    "content_digest": _selected(selection).files[path],
+                                    "path": path,
+                                }
+                        execution.record_reads(payload)
+                    return result
 
             tool.on_invoke_tool = read
 
         for tool in selected_tools:
-            if tool.name != "get_image":  # Image delivery reserves before updating coverage.
-                bounded(tool)
+            bounded(tool)
     base_instructions, marker, previous = (agent.instructions or "").partition(
         "\n\n# Reading this knowledge base"
     )

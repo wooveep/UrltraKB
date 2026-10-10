@@ -150,8 +150,14 @@ class TaskView:
     retry_of: str | None = None
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
+    activities: tuple[dict, ...] = ()
+    completed_stages: tuple[str, ...] = ()
+    source_count: int = 0
+    unit_count: int = 0
 
     def __post_init__(self) -> None:
+        if any(type(n) is not int or n < 0 for n in (self.source_count, self.unit_count)):
+            raise ValueError("Invalid reading counts")
         validate_receipt(self.model_usage)
         if self.usage is not None:
             TokenUsage.from_dict(self.usage)
@@ -199,6 +205,8 @@ class TaskView:
     def from_summary(cls, value: dict[str, Any]) -> TaskView:
         value = dict(value)
         value["results"] = tuple(UnitResult.from_summary(row) for row in value["results"])
+        value["activities"] = ()  # Restored summaries never claim a live activity.
+        value["completed_stages"] = tuple(value.get("completed_stages", ()))
         if value["state"] not in TERMINAL:
             value.update(state="interrupted", stage="interrupted", error="Previous run interrupted")
         return cls(**value)

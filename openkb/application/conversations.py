@@ -102,35 +102,41 @@ async def ask_question(
         root / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
     ):
         with context.begin(root) as bundle:
-            assert context.executor is not None
-            context.executor.begin_question()
-            from openkb.agent.query import (
-                build_query_agent,
-                build_run_config_from_bundle,
-                iter_agent_response_events,
-            )
-
-            config = (await asyncio.to_thread(resolve_effective_config, root))[0]
-            from openkb.application.query_views import resolve_query_views
-
-            selection = resolve_query_views(root, question, scope=query_scope)
-            model = config["model"]
-            agent = build_query_agent(str(scope.wiki_dir), model, config["language"], bundle)
-            from openkb.model_tokenizer import ContextCapacityError, question_measure
-
-            try:
-                context.executor.question_capacity = question_measure(context.snapshot)
-                context.executor.question_capacity.require_current(question)
-            except ContextCapacityError as error:
-                return AnswerResult(
-                    "blocked", "", error=str(error), unfinished=("prepare context",)
+            with context.activity("preparing") as preparation:
+                assert context.executor is not None
+                context.executor.begin_question()
+                from openkb.agent.query import (
+                    build_query_agent,
+                    build_run_config_from_bundle,
+                    iter_agent_response_events,
                 )
+
+                config = (await asyncio.to_thread(resolve_effective_config, root))[0]
+                from openkb.application.query_views import resolve_query_views
+
+                selection = resolve_query_views(root, question, scope=query_scope)
+                model = config["model"]
+                agent = build_query_agent(str(scope.wiki_dir), model, config["language"], bundle)
+                from openkb.model_tokenizer import ContextCapacityError, question_measure
+
+                try:
+                    context.executor.question_capacity = question_measure(context.snapshot)
+                    context.executor.question_capacity.require_current(question)
+                except ContextCapacityError as error:
+                    preparation["status"] = "failed"
+                    return AnswerResult(
+                        "blocked", "", error=str(error), unfinished=("prepare context",)
+                    )
+                from openkb.agent.query_evidence import restrict_query_agent
+
+                agent = restrict_query_agent(agent, selection)
             context.on_event({"stage": "answering"})
             stream = iter_agent_response_events(
                 agent,
                 question,
                 run_config=build_run_config_from_bundle(model, bundle),
                 selection=selection,
+                readers_bound=True,
             )
             parts = []
             path = None
@@ -143,13 +149,14 @@ async def ask_question(
                             context.check_stop()
                             answer = event["data"]["answer"]
                             unfinished_stage = "save answer"
-                            path = (
-                                save_exploration(root, question, answer, scope=scope)
-                                if save
-                                else None
-                            )
-                            unfinished_stage = "record question log"
-                            append_log(scope.wiki_dir, "query", question, scope=scope)
+                            with context.activity("saving"):
+                                path = (
+                                    save_exploration(root, question, answer, scope=scope)
+                                    if save
+                                    else None
+                                )
+                                unfinished_stage = "record question log"
+                                append_log(scope.wiki_dir, "query", question, scope=scope)
                             return AnswerResult(
                                 "completed",
                                 answer,
@@ -224,83 +231,86 @@ async def continue_conversation(
                 session = load_session(root, new_session_id)
             session.require_view(scope.view_id)
             with context.begin(root) as bundle:
-                assert context.executor is not None
-                executor = context.executor
-                executor.begin_question()
-                previous_usage = session.token_usage
-                from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
-                from openkb.agent.query import build_run_config_from_bundle
+                with context.activity("preparing") as preparation:
+                    assert context.executor is not None
+                    executor = context.executor
+                    executor.begin_question()
+                    previous_usage = session.token_usage
+                    from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
+                    from openkb.agent.query import build_run_config_from_bundle
 
-                if not session.model:
-                    config = (await asyncio.to_thread(resolve_effective_config, root))[0]
-                    session.model, session.language = config["model"], config["language"]
-                    if session._version is not None:
-                        # A recovered queued submission already exists on disk.
-                        # Bind its first execution before the iterator reloads it.
-                        session.save()
-                attempt_id = session.begin_attempt(
-                    message, identity=attempt_id, submission_order=submission_order
-                )
-                from openkb.model_tokenizer import ContextCapacityError, question_measure
-
-                try:
-                    executor.question_capacity = question_measure(context.snapshot)
-                    executor.question_capacity.require_current(message)
-                except Exception as error:
-                    usage = _settle_usage(session, previous_usage)
-                    return AnswerResult(
-                        "blocked"
-                        if isinstance(error, (ContextCapacityError, RecoveryRequired))
-                        else "stopped"
-                        if isinstance(error, LockCancelled)
-                        else "failed",
-                        "",
-                        session_id=session.id,
-                        turn_count=session.turn_count,
-                        resources=(str(session.path),),
-                        error=str(error)
-                        if isinstance(error, ContextCapacityError)
-                        else f"Context preparation did not complete ({type(error).__name__})",
-                        unfinished=("prepare context",),
-                        usage=usage,
+                    if not session.model:
+                        config = (await asyncio.to_thread(resolve_effective_config, root))[0]
+                        session.model, session.language = config["model"], config["language"]
+                        if session._version is not None:
+                            # A recovered queued submission already exists on disk.
+                            # Bind its first execution before the iterator reloads it.
+                            session.save()
+                    attempt_id = session.begin_attempt(
+                        message, identity=attempt_id, submission_order=submission_order
                     )
-                agent = await asyncio.to_thread(
-                    build_chat_session_agent, root, session, bundle, scope=scope
-                )
-                from openkb.agent.query_evidence import restrict_query_agent
-                from openkb.application.query_views import resolve_query_views
-                from openkb.context.preparation import prepare_conversation_input
-                from openkb.context.workers import run_blocking
+                    from openkb.model_tokenizer import ContextCapacityError, question_measure
 
-                selection = resolve_query_views(root, message, scope=query_scope)
-                agent = restrict_query_agent(agent, selection)
-                try:
-                    prepared = await run_blocking(
-                        lambda: prepare_conversation_input(
-                            session, message, executor, agent=agent, selection=selection
+                    try:
+                        executor.question_capacity = question_measure(context.snapshot)
+                        executor.question_capacity.require_current(message)
+                    except Exception as error:
+                        preparation["status"] = "failed"
+                        usage = _settle_usage(session, previous_usage)
+                        return AnswerResult(
+                            "blocked"
+                            if isinstance(error, (ContextCapacityError, RecoveryRequired))
+                            else "stopped"
+                            if isinstance(error, LockCancelled)
+                            else "failed",
+                            "",
+                            session_id=session.id,
+                            turn_count=session.turn_count,
+                            resources=(str(session.path),),
+                            error=str(error)
+                            if isinstance(error, ContextCapacityError)
+                            else f"Context preparation did not complete ({type(error).__name__})",
+                            unfinished=("prepare context",),
+                            usage=usage,
                         )
+                    agent = await asyncio.to_thread(
+                        build_chat_session_agent, root, session, bundle, scope=scope
                     )
-                except asyncio.CancelledError:
-                    _settle_usage(session, previous_usage)
-                    raise
-                except Exception as error:
-                    usage = _settle_usage(session, previous_usage)
-                    return AnswerResult(
-                        "blocked"
-                        if isinstance(error, (ContextCapacityError, RecoveryRequired))
-                        else "stopped"
-                        if isinstance(error, LockCancelled)
-                        else "failed",
-                        "",
-                        session_id=session.id,
-                        turn_count=session.turn_count,
-                        resources=(str(session.path),),
-                        error=str(error)
-                        if isinstance(error, ContextCapacityError)
-                        else f"Context preparation did not complete ({type(error).__name__})",
-                        unfinished=("prepare context",),
-                        usage=usage,
-                    )
+                    from openkb.agent.query_evidence import restrict_query_agent
+                    from openkb.application.query_views import resolve_query_views
+                    from openkb.context.preparation import prepare_conversation_input
+                    from openkb.context.workers import run_blocking
+
+                    selection = resolve_query_views(root, message, scope=query_scope)
+                    agent = restrict_query_agent(agent, selection)
+                    try:
+                        prepared = await run_blocking(
+                            lambda: prepare_conversation_input(
+                                session, message, executor, agent=agent, selection=selection
+                            )
+                        )
+                    except asyncio.CancelledError:
+                        _settle_usage(session, previous_usage)
+                        raise
+                    except Exception as error:
+                        preparation["status"] = "failed"
+                        usage = _settle_usage(session, previous_usage)
+                        return AnswerResult(
+                            "blocked"
+                            if isinstance(error, (ContextCapacityError, RecoveryRequired))
+                            else "stopped"
+                            if isinstance(error, LockCancelled)
+                            else "failed",
+                            "",
+                            session_id=session.id,
+                            turn_count=session.turn_count,
+                            resources=(str(session.path),),
+                            error=str(error)
+                            if isinstance(error, ContextCapacityError)
+                            else f"Context preparation did not complete ({type(error).__name__})",
+                            unfinished=("prepare context",),
+                            usage=usage,
+                        )
                 context.on_event({"stage": "context_preparation", "context": prepared.diagnostics})
                 context.on_event({"stage": "answering", "session_id": session.id})
                 stream = iter_chat_turn_events(

@@ -337,7 +337,8 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
         )
 
     model_service.replies.extend((200, reply) for reply in [search_call, rank, search_call, answer])
-    context = ExecutionContext()
+    events = []
+    context = ExecutionContext(on_event=events.append)
     result = await ask_question(kb_dir, query, context=context)
     assert result.status == "completed", result
     assert result.answer == "Alpha requires 12; Beta recommends 24."
@@ -345,6 +346,24 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     receipts = read_requests(kb_dir)
     assert len(receipts) == 4
     assert {r.operation for r in receipts} == {"knowledge_retrieval", "answer"}
+    activities = [e["data"] for e in events if e.get("event") == "activity"]
+    assert {a["stage"] for a in activities} >= {
+        "preparing",
+        "retrieving",
+        "reading",
+        "answering",
+        "saving",
+    }
+    starts = {a["activity_id"]: a for a in activities if a["status"] == "started"}
+    finishes = {a["activity_id"]: a for a in activities if a["status"] != "started"}
+    assert starts.keys() == finishes.keys()
+    for identity, start in starts.items():
+        assert start["task_id"] and start["attempt_id"]
+        assert start["parent_activity_id"] is None or start["parent_activity_id"] in starts
+        assert finishes[identity]["elapsed_seconds"] >= 0
+    assert any(a.get("source_count") == 2 and a.get("unit_count") == 2 for a in activities)
+    assert "Alpha requires" not in json.dumps(activities)
+    assert str(kb_dir) not in json.dumps(activities)
 
 
 def test_projection_keeps_selected_publication_identity_after_source_update(kb_dir, model_service):

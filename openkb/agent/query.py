@@ -226,7 +226,25 @@ async def iter_agent_response_events(
                     call_id = _resolve_tool_call_id(raw_item)
                     if call_id:
                         pending_calls[call_id] = (name, arguments)
-                    yield {"event": "tool_call", "data": {"name": name, "arguments": arguments}}
+                    from openkb.application.execution import current_execution
+
+                    execution = current_execution()
+                    metadata = (
+                        execution.tool_metadata(
+                            call_id, "retrieving" if name.startswith("search_") else "reading"
+                        )
+                        if execution and call_id
+                        else {}
+                    )
+                    yield {
+                        "event": "tool_call",
+                        "data": {
+                            "name": name,
+                            "arguments": arguments,
+                            "tool_call_id": call_id,
+                            **metadata,
+                        },
+                    }
                 elif item.type == "tool_call_output_item":
                     raw_item = item.raw_item
                     call_id = _resolve_tool_call_id(raw_item)
@@ -235,6 +253,16 @@ async def iter_agent_response_events(
                         if isinstance(call_id, str)
                         else ("", "")
                     )
+                    from openkb.application.execution import current_execution
+
+                    execution = current_execution()
+                    metadata = (
+                        execution.tool_activities.get(call_id, {}) if execution and call_id else {}
+                    )
+                    yield {
+                        "event": "tool_done",
+                        "data": {"name": name, "tool_call_id": call_id, **metadata},
+                    }
                     payload = artifact_event_from_write(
                         name, arguments, str(getattr(item, "output", "") or "")
                     )

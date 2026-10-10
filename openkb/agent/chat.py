@@ -909,15 +909,18 @@ async def iter_chat_turn_events(
                 from openkb.llm_execution import check_model_stop
 
                 check_model_stop()
-                session.record_turn(
-                    user_input,
-                    answer,
-                    data["history"],
-                    trace=trace,
-                    attempt_id=attempt_id,
-                    usage=None if usage_recorded else data.get("usage"),
-                    answer_outcome=data.get("answer_outcome"),
-                )
+                from openkb.application.execution import activity
+
+                with activity("saving"):
+                    session.record_turn(
+                        user_input,
+                        answer,
+                        data["history"],
+                        trace=trace,
+                        attempt_id=attempt_id,
+                        usage=None if usage_recorded else data.get("usage"),
+                        answer_outcome=data.get("answer_outcome"),
+                    )
                 yield {
                     "event": "final",
                     "data": {

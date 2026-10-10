@@ -65,7 +65,9 @@ class ConDBLLMAdapter:
             "they do not certify what the user said or supply knowledge-base facts."
         )
         role_options = self.executor.bindings.generation_options(self.role)
-        with self.executor.retrieval_slot():
+        from openkb.application.execution import activity
+
+        with activity("retrieving"), self.executor.retrieval_slot():
             for attempt in range(2):
                 output = (
                     self.executor.policy.retrieval_repair_tokens

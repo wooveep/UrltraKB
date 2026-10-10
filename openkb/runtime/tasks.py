@@ -401,6 +401,8 @@ class TaskManager:
                 break
             if event.get("identity") != asdict(attempt.identity):
                 continue
+            if event["sequence"] <= attempt.last_sequence:
+                continue
             truncated = task.view.text_truncated or event["sequence"] != attempt.last_sequence + 1
             attempt.last_sequence = event["sequence"]
             data = event["data"]
@@ -408,7 +410,25 @@ class TaskManager:
             text = task.view.text
             usage = task.view.usage
             model_usage = task.view.model_usage
-            if data.get("event") in {"answer_start", "tool_call"}:
+            activities = {item["activity_id"]: item for item in task.view.activities}
+            completed = set(task.view.completed_stages)
+            source_count, unit_count = task.view.source_count, task.view.unit_count
+            if data.get("event") == "activity":
+                detail = data["data"]
+                if detail["status"] == "started":
+                    activities[detail["activity_id"]] = detail
+                elif detail["activity_id"] in activities:
+                    activities.pop(detail["activity_id"])
+                    if detail["status"] == "completed":
+                        completed.add(detail["stage"])
+                    source_count = max(source_count, detail.get("source_count", 0))
+                    unit_count = max(unit_count, detail.get("unit_count", 0))
+            priority = {"answering": 1, "preparing": 2, "retrieving": 3, "reading": 4, "saving": 5}
+            if activities:
+                stage = max(activities.values(), key=lambda item: priority.get(item["stage"], 0))[
+                    "stage"
+                ]
+            if data.get("event") == "answer_start":
                 text = ""
             if data.get("event") == "usage":
                 from openkb.agent.token_usage import TokenUsage
@@ -433,6 +453,10 @@ class TaskManager:
                 text_truncated=truncated,
                 usage=usage,
                 model_usage=model_usage,
+                activities=tuple(activities.values()),
+                completed_stages=tuple(sorted(completed)),
+                source_count=source_count,
+                unit_count=unit_count,
             )
 
     def _finish(self, task: _Task, attempt: _Attempt) -> None:
@@ -443,7 +467,7 @@ class TaskManager:
         attempt.events.join_thread()
         attempt.process.close()
         del self._active[task.view.id]
-        self._update(task, processes_reaped=True)
+        self._update(task, processes_reaped=True, activities=())
         if attempt.deferred and exitcode == 0:
             if task.view.stop_requested:
                 self._update(task, state="stopped", stage="stopped")
