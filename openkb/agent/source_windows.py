@@ -113,6 +113,24 @@ class CompileSourceWindows:
         self._frozen: dict[str, bytes] = {}
         self._searches: dict = {}
         self._unresolved_updates: set[str] = set()
+        self._numeric_text: dict[str, str] = {}
+
+    def numeric_sources(self, context: PageOriginalContext, *, long: bool) -> list[str]:
+        """Supply only original text; generated navigation is never a numeric reference."""
+        texts = [window["content"] for window in context.windows if window["content"]]
+        if not long and (path := self._path()):
+            if path not in self._numeric_text:
+                data = self._read(path)
+                raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
+                self._numeric_text[path] = (
+                    raw
+                    if isinstance(raw, str)
+                    else raw["text"]
+                    if isinstance(raw, dict)
+                    else "\n".join(page.get("content", "") for page in raw)
+                )
+            texts.insert(0, self._numeric_text[path])
+        return texts
 
     def validate_updates(self, plan, *, long: bool) -> str | None:
         """Diagnose editing intent before page generation, within the planner's retry."""

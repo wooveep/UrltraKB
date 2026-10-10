@@ -214,6 +214,42 @@ def test_import_update_keeps_prior_conditions_and_adds_all_new_sections(kb_dir, 
     assert "Maintenance: 48 hours." in body
 
 
+def test_import_blocks_proven_numeric_conflict_after_one_page_repair(kb_dir, monkeypatch):
+    from openkb.application.documents import import_document
+
+    table = (
+        "# Limits\n\n| Object | Attribute | Condition | Value |\n"
+        "| --- | --- | --- | --- |\n| River Valve | Latency | Winter | {} |\n"
+    )
+    page_sends = []
+    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "latency"}]}}, [])
+
+    async def response(**kwargs):
+        page_sends.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {"description": "Latency", "content": table.format("24 ms")}
+                        )
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    monkeypatch.setattr("litellm.acompletion", response)
+    source = kb_dir / "latency.txt"
+    source.write_text(table.format("12 ms"))
+    result = import_document(kb_dir, source)
+    assert result.status == "failed"
+    assert "page_numeric_conflict" in result.quality
+    assert not (kb_dir / "wiki/concepts/latency.md").exists()
+    assert len(page_sends) == 2
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [False, True])
 async def test_long_block_compile_receives_only_selected_frozen_image(

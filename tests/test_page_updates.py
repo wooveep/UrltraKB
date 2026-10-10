@@ -146,3 +146,57 @@ async def test_compiler_patch_repair_is_bounded_at_transport(monkeypatch, stale)
         assert "Winter rule." in result["content"]
         assert "New supported condition." in result["content"]
         assert len(sends) == 2
+
+
+@pytest.mark.parametrize(
+    "value,status",
+    [("0.012 s", "checked_numeric_subset"), ("24 ms", "conflict"), ("12 kg", "conflict")],
+)
+def test_numeric_table_check_binds_object_attribute_unit_and_condition(value, status):
+    from openkb.agent.page_updates import check_numeric_subset
+
+    table = (
+        "# Limits\n\n| Object | Attribute | Condition | Value |\n"
+        "| --- | --- | --- | --- |\n| River Valve | Latency | Winter | {} |\n"
+    )
+    result = check_numeric_subset(table.format(value), [table.format("12 ms")])
+    assert result["status"] == status
+
+
+@pytest.mark.parametrize(
+    "equation,status",
+    [
+        ("7 * 5 = 35", "checked_numeric_subset"),
+        ("7 * 5 = 34", "conflict"),
+        ("1 / 3 = 0.33", "not_applicable"),
+        ("__import__('os').system('false') = 0", "not_applicable"),
+    ],
+)
+def test_numeric_check_allows_derived_values_and_limits_arithmetic(equation, status):
+    from openkb.agent.page_updates import check_numeric_subset
+
+    assert check_numeric_subset(equation, ["Inputs are seven and five."])["status"] == status
+
+
+def test_numeric_check_leaves_ambiguous_bindings_and_unchanged_old_content_alone():
+    from openkb.agent.page_updates import check_numeric_subset
+
+    template = "Object: 42\nCondition: Winter\nLatency: {}\n"
+    assert (
+        check_numeric_subset(
+            template.format("24 ms"), [template.format("12 ms"), template.format("36 ms")]
+        )["status"]
+        == "not_applicable"
+    )
+    assert (
+        check_numeric_subset(
+            template.format("24 ms"), [template.format("12 ms")], previous=template.format("24 ms")
+        )["status"]
+        == "not_applicable"
+    )
+    assert (
+        check_numeric_subset(
+            "The recommended policy may improve capacity.", [template.format("12 ms")]
+        )["status"]
+        == "not_applicable"
+    )

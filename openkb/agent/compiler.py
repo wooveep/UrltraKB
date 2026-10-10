@@ -468,6 +468,7 @@ async def _llm_call_page_async(
     evidence=None,
     page_update=None,
     read_current=None,
+    numeric_sources=None,
     **kwargs,
 ) -> str:
     """Validate each page and repair only that response, at most once."""
@@ -487,6 +488,14 @@ async def _llm_call_page_async(
             if page_update is not None:
                 raw = json.dumps(page_update.apply(raw, current=read_current()), ensure_ascii=False)
             _, content, _ = _page_fields(raw)
+            if numeric_sources is not None and page_update is None:
+                from openkb.agent.page_updates import check_numeric_subset
+
+                numeric = check_numeric_subset(content, numeric_sources)
+                if numeric["status"] == "conflict":
+                    raise PageResponseError(
+                        "page_numeric_conflict", json.dumps(numeric["conflicts"])
+                    )
             if evidence is not None:
                 evidence.validate(content)
             if attempt:
@@ -1798,6 +1807,9 @@ async def _compile_concepts(
                 f"concept: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                numeric_sources=source_windows.numeric_sources(
+                    originals, long=doc_type == "pageindex"
+                ),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1815,11 +1827,15 @@ async def _compile_concepts(
             existing_content = ex_parts[1] if ex_parts is not None else raw_text
         else:
             raise FileNotFoundError("Existing page disappeared before update")
-        patch = PageUpdate(raw_text, known_targets=known_targets)
         originals = source_windows.prepare(
             concept, f"concepts/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
         originals.require_update(f"concepts/{_sanitize_concept_name(name)}.md")
+        patch = PageUpdate(
+            raw_text,
+            known_targets=known_targets,
+            originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
+        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
@@ -1878,6 +1894,9 @@ async def _compile_concepts(
                 f"entity: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                numeric_sources=source_windows.numeric_sources(
+                    originals, long=doc_type == "pageindex"
+                ),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
@@ -1897,11 +1916,15 @@ async def _compile_concepts(
             existing_content = ex_parts[1] if ex_parts is not None else raw_text
         else:
             raise FileNotFoundError("Existing page disappeared before update")
-        patch = PageUpdate(raw_text, known_targets=known_targets)
         originals = source_windows.prepare(
             ent, f"entities/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
         originals.require_update(f"entities/{_sanitize_concept_name(name)}.md")
+        patch = PageUpdate(
+            raw_text,
+            known_targets=known_targets,
+            originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
+        )
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,

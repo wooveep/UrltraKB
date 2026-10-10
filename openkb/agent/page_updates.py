@@ -1,16 +1,201 @@
 """Temporary Markdown block edits; this module computes pages and performs no I/O."""
 
+import ast
 import hashlib
 import json
+import re
+from decimal import Decimal, Inexact, localcontext
 
 from openkb import frontmatter
 from openkb.agent.page_response import PageResponseError, parse_page
 from openkb.content_blocks import markdown_layout
 
+_UNITS = {
+    "ms": ("time", Decimal("0.001")),
+    "s": ("time", Decimal(1)),
+    "秒": ("time", Decimal(1)),
+    "min": ("time", Decimal(60)),
+    "h": ("time", Decimal(3600)),
+    "小时": ("time", Decimal(3600)),
+    "g": ("mass", Decimal("0.001")),
+    "kg": ("mass", Decimal(1)),
+    "mL": ("volume", Decimal("0.001")),
+    "L": ("volume", Decimal(1)),
+    "升": ("volume", Decimal(1)),
+}
+_OBJECT_HEADERS = {"object", "对象", "id", "name", "名称", "model", "型号"}
+_CONDITION_HEADERS = {"condition", "条件", "适用条件", "scope", "适用范围"}
+_BINDING_HEADERS = _OBJECT_HEADERS | _CONDITION_HEADERS | {"attribute", "属性", "version", "版本"}
+
+
+def _quantity(text: str, header: str = "") -> tuple[str, Decimal] | None:
+    match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)\s*([^\d\s]*)", text.strip())
+    if not match:
+        return None
+    unit = match[2]
+    if not unit and (hint := re.search(r"[（(]([^（）()]+)[）)]$", header)):
+        unit = hint[1]
+    if unit and unit not in _UNITS:
+        return None
+    dimension, factor = _UNITS.get(unit, ("", Decimal(1)))
+    return dimension, Decimal(match[1]) * factor
+
+
+def _numeric_facts(text: str) -> list[tuple[tuple, tuple[str, Decimal]]]:
+    tokens, _ = markdown_layout(text)
+    headings: list[tuple[int, str]] = []
+    facts = []
+    position = 0
+    while position < len(tokens):
+        token = tokens[position]
+        if token.type == "heading_open":
+            level = int(token.tag[1:])
+            headings = [h for h in headings if h[0] < level]
+            headings.append((level, tokens[position + 1].content))
+        scope = tuple(title for _, title in headings)
+        if token.type == "table_open":
+            rows: list[list[str]] = []
+            for following in tokens[position + 1 :]:
+                if following.type == "table_close":
+                    break
+                if following.type == "tr_open":
+                    rows.append([])
+                elif following.type == "inline" and rows:
+                    rows[-1].append(following.content.strip())
+            if rows:
+                headers = rows[0]
+                for row in rows[1:]:
+                    if len(row) != len(headers):
+                        continue
+                    values = [
+                        None if header.casefold() in _BINDING_HEADERS else _quantity(value, header)
+                        for header, value in zip(headers, row)
+                    ]
+                    bindings = tuple(
+                        sorted(
+                            (header, value)
+                            for header, value, quantity in zip(headers, row, values)
+                            if quantity is None
+                        )
+                    )
+                    labels = {header.casefold() for header, _ in bindings}
+                    if not labels & _OBJECT_HEADERS or not labels & _CONDITION_HEADERS:
+                        continue
+                    for header, quantity in zip(headers, values):
+                        if quantity is not None:
+                            facts.append((("table", scope, bindings, header), quantity))
+        elif token.type == "inline" and token.level == 1:
+            pairs = []
+            for line in token.content.splitlines():
+                if match := re.fullmatch(r"([^:：|]+)[:：]\s*(.+)", line):
+                    pairs.append((match[1].strip(), match[2].strip()))
+            bindings = tuple(
+                sorted(
+                    (key, value)
+                    for key, value in pairs
+                    if key.casefold() in _BINDING_HEADERS or _quantity(value) is None
+                )
+            )
+            labels = {key.casefold() for key, _ in bindings}
+            if labels & _OBJECT_HEADERS and labels & _CONDITION_HEADERS:
+                facts.extend(
+                    (("kv", scope, bindings, key), quantity)
+                    for key, value in pairs
+                    if key.casefold() not in _BINDING_HEADERS
+                    and (quantity := _quantity(value)) is not None
+                )
+        position += 1
+    return facts
+
+
+def _arithmetic(expression: str) -> Decimal | None:
+    if len(expression) > 120:
+        return None
+    try:
+        tree = ast.parse(expression.strip(), mode="eval")
+        if len(list(ast.walk(tree))) > 64:
+            return None
+
+        def value(node) -> Decimal:
+            if isinstance(node, ast.Constant) and type(node.value) in {int, float}:
+                literal = ast.get_source_segment(expression.strip(), node)
+                if literal is None:
+                    raise ValueError("Missing numeric literal")
+                return Decimal(literal)
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                number = value(node.operand)
+                return -number if isinstance(node.op, ast.USub) else number
+            if isinstance(node, ast.BinOp):
+                left, right = value(node.left), value(node.right)
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                if isinstance(node.op, ast.Sub):
+                    return left - right
+                if isinstance(node.op, ast.Mult):
+                    return left * right
+                if isinstance(node.op, ast.Div):
+                    return left / right
+                if isinstance(node.op, ast.Pow) and right == int(right) and abs(right) <= 12:
+                    return left ** int(right)
+            raise ValueError("Unsupported arithmetic expression")
+
+        with localcontext() as context:
+            context.prec = 80
+            context.traps[Inexact] = True
+            return value(tree.body)
+    except (ValueError, SyntaxError, ArithmeticError):
+        return None
+
+
+def check_numeric_subset(candidate: str, originals: list[str], *, previous: str = "") -> dict:
+    """Only compare unambiguous structured bindings; unmatched prose remains unchecked."""
+    reference: dict[tuple, set[tuple[str, Decimal]]] = {}
+    for original in originals:
+        for key, value in _numeric_facts(original):
+            reference.setdefault(key, set()).add(value)
+    old = dict(_numeric_facts(previous))
+    conflicts, checked = [], 0
+    for key, value in _numeric_facts(candidate):
+        values = reference.get(key, set())
+        if old.get(key) == value or len(values) != 1:
+            continue
+        expected = next(iter(values))
+        if value[0] != expected[0] and (not value[0] or not expected[0]):
+            continue  # An implicit/unknown unit cannot prove a dimension conflict.
+        checked += 1
+        if value != expected:
+            conflicts.append({"attribute": key[-1], "reason": "structured_value_conflict"})
+    for line in candidate.splitlines():
+        equation = re.fullmatch(r"\s*([0-9.eE\s()+*/-]+)\s*=\s*([+-]?\d+(?:\.\d+)?)\s*", line)
+        if not equation or line in previous.splitlines():
+            continue
+        result = _arithmetic(equation[1])
+        if result is None:
+            continue
+        checked += 1
+        if result != Decimal(equation[2]):
+            conflicts.append({"reason": "arithmetic_conflict", "expression": equation[1].strip()})
+    return {
+        "status": "conflict"
+        if conflicts
+        else "checked_numeric_subset"
+        if checked
+        else "not_applicable",
+        "checked": checked,
+        "conflicts": conflicts,
+    }
+
 
 class PageUpdate:
-    def __init__(self, original: str, *, known_targets: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        original: str,
+        *,
+        known_targets: set[str] | None = None,
+        originals: list[str] | None = None,
+    ) -> None:
         self.original = original
+        self.originals = originals
         self.known_targets = known_targets
         self.digest = hashlib.sha256(original.encode("utf-8")).hexdigest()
         parts = frontmatter.split(original)
@@ -125,6 +310,10 @@ class PageUpdate:
             "description": obj.get("description", self.request()["description"]),
             "content": "".join(chunks),
         }
+        if self.originals is not None:
+            numeric = check_numeric_subset(page["content"], self.originals, previous=self.body)
+            if numeric["status"] == "conflict":
+                raise PageResponseError("page_numeric_conflict", json.dumps(numeric["conflicts"]))
         if "type" in obj:
             page["type"] = obj["type"]
         return parse_page(json.dumps(page, ensure_ascii=False))
