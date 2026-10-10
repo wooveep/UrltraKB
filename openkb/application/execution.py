@@ -44,10 +44,15 @@ class ExecutionContext:
     def record_reads(self, payload: dict) -> None:
         """Count only original content actually returned, without disclosing names."""
         with self._event_guard:
-            for hit in payload.get("hits", [payload]):
+            hits = payload.get("hits", [payload])
+            for hit in hits if isinstance(hits, list) else []:
+                if not isinstance(hit, dict):
+                    continue
                 if not hit.get("content") or hit.get("content_kind") != "original_source":
                     continue
                 source = hit.get("source_context", {})
+                if not isinstance(source, dict):
+                    continue
                 identity = source.get("content_digest") or hit.get("content_digest")
                 if not identity:
                     continue

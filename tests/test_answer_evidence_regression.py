@@ -41,6 +41,27 @@ async def invoke(agent, name, **arguments):
 
 
 @pytest.mark.asyncio
+async def test_file_activity_observes_metadata_without_parsing_original_json(kb_dir):
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+
+    original = '{"status":"error","hits":[7]}'
+    (kb_dir / "wiki/sources/note.md").write_text(original)
+    events = []
+    context = ExecutionContext(on_event=events.append)
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        result = await invoke(agent_for(kb_dir), "read_file", path="sources/note")
+    assert result.endswith(original)
+    completed = [
+        e["data"]
+        for e in events
+        if e.get("event") == "activity" and e["data"]["stage"] == "reading"
+    ][-1]
+    assert completed["status"] == "completed"
+    assert completed["source_count"] == completed["unit_count"] == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["部署条件", "Capacity", "operating conditions"])
 async def test_sdk_reads_same_directory_markdown_alias(kb_dir, name):
     page = kb_dir / "wiki/concepts" / f"{name}.md"

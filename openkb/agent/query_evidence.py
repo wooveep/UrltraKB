@@ -333,10 +333,14 @@ def restrict_query_agent(agent, selection: QuerySelection):
                     result = await invoke(context, arguments)
                     try:
                         body, marker, source_context = str(result).partition("\nSource context: ")
-                        payload = json.loads(body.split("\n\n", 1)[-1])
+                        # Markdown is authored content, not a reader payload. Only its
+                        # whole-result error envelope is JSON; never parse the body.
+                        payload = json.loads(
+                            str(result) if tool.name == "read_file" else body.split("\n\n", 1)[-1]
+                        )
                         if not isinstance(payload, dict):
                             payload = {}
-                        if marker:
+                        if marker and tool.name != "read_file":
                             payload["source_context"] = json.loads(
                                 source_context.split("\nImage coverage:", 1)[0]
                             )
@@ -361,7 +365,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
                             ),
                         )
                     if execution := current_execution():
-                        if tool.name == "read_file" and not payload:
+                        if tool.name == "read_file" and payload.get("status") != "error":
                             path = json.loads(arguments).get("path", "")
                             if path.startswith("sources/"):
                                 from openkb.application.query_views import resolve_read_path
