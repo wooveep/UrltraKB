@@ -62,6 +62,36 @@ def test_patch_rejects_uncertain_targets_and_changed_pages(bad):
         update.apply(json.dumps(response), current="Human edit." if bad == "stale" else original)
 
 
+def test_untouched_duplicate_numeric_bindings_survive_an_unrelated_insert():
+    from openkb.agent.page_updates import PageUpdate
+
+    table = (
+        "| Object | Condition | Latency |\n| --- | --- | --- |\n"
+        "| Valve | Winter | 24 ms |\n| Valve | Winter | 36 ms |\n"
+    )
+    original = table + "\nRetained clarification.\n"
+    update = PageUpdate(
+        original, originals=[table.replace("24 ms", "12 ms").replace("36 ms", "12 ms")]
+    )
+    data = update.request()
+    result = update.apply(
+        json.dumps(
+            {
+                "base_sha256": data["base_sha256"],
+                "edits": [
+                    {
+                        "block_id": data["blocks"][-1]["id"],
+                        "operation": "insert_after",
+                        "content": "\nNew source clarification.\n",
+                    }
+                ],
+            }
+        ),
+        current=original,
+    )
+    assert result["content"] == original + "\nNew source clarification.\n"
+
+
 def test_link_filtering_only_changes_new_edits():
     from openkb.agent.page_updates import PageUpdate
 

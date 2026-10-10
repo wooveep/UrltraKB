@@ -37,7 +37,7 @@ def patch_page_response(messages, response):
     return response
 
 
-def compile_boundary(monkeypatch, plan, requests):
+def compile_boundary(monkeypatch, plan, requests, page_reply=None):
     def response(**kwargs):
         messages = kwargs["messages"]
         prompt = str(messages)
@@ -45,7 +45,10 @@ def compile_boundary(monkeypatch, plan, requests):
             result = plan(messages) if callable(plan) else plan
         else:
             requests.append(messages)
-            result = {"description": "Recorded section", "content": "# Record\n\nSection facts."}
+            result = page_reply or {
+                "description": "Recorded section",
+                "content": "# Record\n\nSection facts.",
+            }
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -82,6 +85,63 @@ def test_short_update_rereads_prior_originals(kb_dir, monkeypatch):
     assert "For Model A, 12 slots are recommended." in str(update)
     assert "For Model B, 24 slots are required." in str(update)
     assert "coverage" in str(update)
+
+
+def test_content_only_entity_update_preserves_confirmed_type(kb_dir, monkeypatch):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+
+    previous, current = kb_dir / "old.txt", kb_dir / "new.txt"
+    previous.write_text("River Research is an organization.")
+    current.write_text("River Research has a new recorded location.")
+    compile_boundary(
+        monkeypatch,
+        {"entities": {"create": [{"name": "river-research", "type": "organization"}]}},
+        [],
+        page_reply={
+            "description": "Organization",
+            "content": "# River Research\n\nAn organization.",
+            "type": "organization",
+        },
+    )
+    assert import_document(kb_dir, previous).status == "added"
+    page = kb_dir / "wiki/entities/river-research.md"
+    assert frontmatter.parse(page.read_text())["type"] == "Organization"
+    compile_boundary(monkeypatch, {"entities": {"update": [{"name": "river-research"}]}}, [])
+    assert import_document(kb_dir, current).status == "added"
+    assert frontmatter.parse(page.read_text())["type"] == "Organization"
+
+
+def test_navigation_only_import_keeps_fact_provenance_and_survives_removal(kb_dir, monkeypatch):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+    from openkb.application.removal import run_remove_for_api
+    from openkb.knowledge_evidence import page_evidence
+    from openkb.knowledge_scope import live_scope
+
+    previous, current = kb_dir / "old.txt", kb_dir / "new.txt"
+    previous.write_text("Recorded orchard operating conditions.")
+    current.write_text("A document that points readers to the orchard topic.")
+    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "orchard"}]}}, [])
+    assert import_document(kb_dir, previous).status == "added"
+    page = kb_dir / "wiki/concepts/orchard.md"
+    before = page.read_bytes()
+    evidence = page_evidence(live_scope(kb_dir), "concepts/orchard.md")
+    compile_boundary(monkeypatch, {"concepts": {"related": ["orchard"]}}, [])
+    assert import_document(kb_dir, current).status == "added"
+    assert page.read_bytes() == before
+    assert "[[concepts/orchard]]" in (kb_dir / "wiki/summaries/new.md").read_text()
+    assert frontmatter.parse(page.read_text())["sources"] == ["summaries/old.md"]
+    assert (
+        page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
+        == (evidence["source_revision_ids"])
+    )
+    assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
+    assert page.read_bytes() == before
+    assert (
+        page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
+        == (evidence["source_revision_ids"])
+    )
 
 
 def test_short_import_preserves_summary_and_assembles_navigation(kb_dir, monkeypatch):

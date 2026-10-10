@@ -10,7 +10,6 @@ import pytest
 from openkb.agent.compile_plan import CompilePlanError
 from openkb.agent.compiler import (
     _ENTITY_TYPE_LIST,
-    _add_related_link,
     _backlink_concepts,
     _backlink_entities,
     _backlink_summary,
@@ -1050,69 +1049,6 @@ class TestBacklinkConcepts:
         assert text.count("## Related Documents") == 1
 
 
-class TestAddRelatedLink:
-    def test_adds_see_also_link(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        concepts = wiki / "concepts"
-        concepts.mkdir(parents=True)
-        (concepts / "attention.md").write_text(
-            "---\nsources: [paper1.pdf]\n---\n\n# Attention\n\nSome content.",
-            encoding="utf-8",
-        )
-        _add_related_link(wiki, "attention", "new-doc", "paper2.pdf")
-        text = (concepts / "attention.md").read_text()
-        assert "[[summaries/new-doc]]" in text
-        assert "paper2.pdf" in text
-
-    def test_skips_if_already_linked(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        concepts = wiki / "concepts"
-        concepts.mkdir(parents=True)
-        (concepts / "attention.md").write_text(
-            "---\nsources: [paper1.pdf]\n---\n\n# Attention\n\nSee also: [[summaries/new-doc]]",
-            encoding="utf-8",
-        )
-        _add_related_link(wiki, "attention", "new-doc", "paper1.pdf")
-        text = (concepts / "attention.md").read_text()
-        assert text.count("[[summaries/new-doc]]") == 1
-
-    def test_skips_if_file_missing(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        wiki.mkdir()
-        # Should not raise
-        _add_related_link(wiki, "nonexistent", "doc", "file.pdf")
-
-    def test_frontmatter_without_space_after_colon_still_merges(self, tmp_path):
-        """sources:[a] (no space after colon) must still prepend new source."""
-        wiki = tmp_path / "wiki"
-        concepts = wiki / "concepts"
-        concepts.mkdir(parents=True)
-        (concepts / "attention.md").write_text(
-            "---\nsources:[paper1.pdf]\n---\n\n# Attention\n",
-            encoding="utf-8",
-        )
-        _add_related_link(wiki, "attention", "new-doc", "paper2.pdf")
-        text = (concepts / "attention.md").read_text()
-        assert "paper2.pdf" in text
-        assert "paper1.pdf" in text
-        assert "[[summaries/new-doc]]" in text
-
-    def test_frontmatter_without_sources_line_gets_one_inserted(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        concepts = wiki / "concepts"
-        concepts.mkdir(parents=True)
-        (concepts / "attention.md").write_text(
-            "---\nbrief: Focus mechanism\n---\n\n# Attention\n",
-            encoding="utf-8",
-        )
-        _add_related_link(wiki, "attention", "new-doc", "paper.pdf")
-        text = (concepts / "attention.md").read_text()
-        assert 'sources: ["paper.pdf"]' in text
-        # Brief was not touched (existing line preserved); only sources was inserted.
-        assert "brief: Focus mechanism" in text
-        assert "[[summaries/new-doc]]" in text
-
-
 def _mock_completion(responses: list[str]):
     """Create a mock for litellm.completion that returns responses in order."""
     call_count = {"n": 0}
@@ -2005,6 +1941,8 @@ class TestCompileConceptsPlan:
         doc_msg = {"role": "user", "content": "Document content."}
         summary = "Summary."
 
+        (wiki / "summaries/test-doc.md").write_text(summary)
+
         with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
             mock_litellm.acompletion = AsyncMock()
@@ -2021,10 +1959,10 @@ class TestCompileConceptsPlan:
             # acompletion should never be called — related is code-only
             mock_litellm.acompletion.assert_not_called()
 
-        # Verify link added to transformer page
+        # Pure navigation is attached to the new summary, preserving the old basis.
         transformer_text = (wiki / "concepts" / "transformer.md").read_text()
-        assert "[[summaries/test-doc]]" in transformer_text
-        assert "summaries/test-doc.md" in transformer_text
+        assert "summaries/test-doc" not in transformer_text
+        assert "[[concepts/transformer]]" in (wiki / "summaries/test-doc.md").read_text()
 
     @pytest.mark.asyncio
     async def test_fallback_list_format(self, tmp_path):

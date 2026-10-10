@@ -1243,38 +1243,6 @@ def _remove_source_from_frontmatter(text: str, source_file: str) -> tuple[str, b
     return text, False
 
 
-def _add_related_link(
-    wiki_dir: Path,
-    slug: str,
-    doc_name: str,
-    source_file: str,
-    page_dir: str = "concepts",
-) -> bool:
-    """Add a cross-reference link to an existing page (no LLM call).
-
-    Works for any page directory (``concepts`` or ``entities``). Returns True
-    when the page exists (whether or not a link was added), so callers can
-    track which related slugs are real pages. The standalone ``See also:``
-    paragraph it writes is symmetric with ``remove_doc_from_pages``' cleanup.
-    """
-    check_model_stop()
-    path = wiki_dir / page_dir / f"{slug}.md"
-    if not path.exists():
-        return False
-
-    text = path.read_text(encoding="utf-8")
-    link = f"[[summaries/{doc_name}]]"
-    if link in text:
-        return True
-
-    if source_file not in text:
-        text = _prepend_source_to_frontmatter(text, source_file)
-
-    text += f"\n\nSee also: {link}"
-    atomic_write_text(path, text)
-    return True
-
-
 def _backlink_summary_pages(
     wiki_dir: Path,
     doc_name: str,
@@ -1381,7 +1349,7 @@ def _remove_doc_from_pages(
     - Remove any ``- [[summaries/{doc_name}]]`` entries from the
       ``## Related Documents`` section.
     - Remove any standalone ``See also: [[summaries/{doc_name}]]`` lines
-      (left by ``_add_related_link``).
+      (left by earlier compilers).
     - If the ``sources:`` list becomes empty AND ``keep_empty`` is False,
       delete the page entirely.
 
@@ -1418,7 +1386,7 @@ def _remove_doc_from_pages(
             new_text = "\n".join(lines)
 
         # Drop standalone "See also: [[summaries/{doc_name}]]" lines.
-        # The dominant form (written by ``_add_related_link``) is a
+        # The legacy form is a
         # paragraph: preceded by a blank line and trailed by either a
         # newline or end-of-string. The first regex matches that shape
         # exactly, preserving one trailing newline so paragraph spacing
@@ -1952,7 +1920,9 @@ async def _compile_concepts(
                 read_current=lambda: epath.read_bytes().decode("utf-8"),
             )
         brief, content, obj = _page_fields(raw)
-        etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
+        previous_type = str(frontmatter.parse(raw_text).get("type", "other")).lower()
+        proposed_type = obj.get("type", previous_type)
+        etype_out = proposed_type if proposed_type in valid_types else "other"
         _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
@@ -2110,29 +2080,25 @@ async def _compile_concepts(
 
     # --- Step 3b: Process related items (code only, no LLM) ---
     sanitized_related = [_sanitize_concept_name(s) for s in related_items]
-    for slug in sanitized_related:
-        _add_related_link(wiki_dir, slug, doc_name, source_file)
 
     # --- Step 3c: Backlink — summary ↔ concepts (code only) ---
     all_concept_slugs = concept_names + sanitized_related
     if all_concept_slugs:
         _backlink_summary(wiki_dir, doc_name, all_concept_slugs)
-        _backlink_concepts(wiki_dir, doc_name, all_concept_slugs)
+        _backlink_concepts(wiki_dir, doc_name, concept_names)
 
     # --- Step 3d: Process entity related items + backlinks (code only) ---
-    # Reuse _add_related_link (page_dir="entities") so related-entity
-    # cross-refs are written in the same "See also:" form the concept path
-    # uses — and torn down symmetrically by _remove_doc_from_pages.
+    # Pure navigation belongs to the new summary; it contributes no facts to old pages.
     entity_related_slugs = [
         slug
         for slug in (_sanitize_concept_name(s) for s in entity_related)
-        if _add_related_link(wiki_dir, slug, doc_name, source_file, page_dir="entities")
+        if (wiki_dir / "entities" / f"{slug}.md").is_file()
     ]
 
     entity_backlink_slugs = entity_names + entity_related_slugs
     if entity_backlink_slugs:
         _backlink_summary_entities(wiki_dir, doc_name, entity_backlink_slugs)
-        _backlink_entities(wiki_dir, doc_name, entity_backlink_slugs)
+        _backlink_entities(wiki_dir, doc_name, entity_names)
 
     # --- Step 4: Update index (code only) ---
     _update_index(

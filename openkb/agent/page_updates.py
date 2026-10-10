@@ -153,11 +153,13 @@ def check_numeric_subset(candidate: str, originals: list[str], *, previous: str 
     for original in originals:
         for key, value in _numeric_facts(original):
             reference.setdefault(key, set()).add(value)
-    old = dict(_numeric_facts(previous))
+    old: dict[tuple, set[tuple[str, Decimal]]] = {}
+    for key, value in _numeric_facts(previous):
+        old.setdefault(key, set()).add(value)
     conflicts, checked = [], 0
     for key, value in _numeric_facts(candidate):
         values = reference.get(key, set())
-        if old.get(key) == value or len(values) != 1:
+        if value in old.get(key, set()) or len(values) != 1:
             continue
         expected = next(iter(values))
         if value[0] != expected[0] and (not value[0] or not expected[0]):
