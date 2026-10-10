@@ -8,6 +8,125 @@ from test_compile_windows import compile_boundary
 pytest_plugins = ("test_pdf_readback",)
 
 
+def test_oversized_pdf_compile_window_keeps_paragraphs_and_native_continuation(kb_dir, monkeypatch):
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    first = "Irrigation valve startup requires a precheck.\n\n"
+    body = first + "Unrelated recorded operating context.\n\n" * 100 + "Winter needs supervision.\n"
+    (kb_dir / "wiki/sources/current.json").write_text(
+        json.dumps([{"page": 1, "unit_kind": "page", "content": body}])
+    )
+    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    context = CompileSourceWindows(kb_dir / "wiki", "current").prepare(
+        {"name": "valve", "reading_locations": {"pages": "1"}}, long=True
+    )
+    context.require_update("entities/valve.md")
+    window = context.windows[0]
+    assert first in window["content"]
+    assert window["page_spans"][0]["page"] == 1
+    assert window["page_spans"][0]["start"] == 0
+    assert type(window["continuation"]) is int
+    assert not window["range_complete"]
+    assert window["reading_action"]["continuation"]["offset"] == window["continuation"]
+
+
+def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(kb_dir, monkeypatch):
+    from openkb.agent.compile_plan import request_compile_plan
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.source_pages import read_page_selection
+
+    first = "Irrigation valve startup requires a precheck.\n\n"
+    suffix = "Winter needs trained supervision.\n"
+    body = first + "Unrelated operating context.\n\n" * 100 + suffix
+    raw = [{"page": 1, "unit_kind": "page", "content": body}]
+    (kb_dir / "wiki/sources/current.json").write_text(json.dumps(raw))
+    (kb_dir / "wiki/concepts/valve.md").write_text("# Valve\n\nRetained conditions.")
+    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    windows = CompileSourceWindows(kb_dir / "wiki", "current")
+    requests = []
+    offset = read_page_selection(raw, "1")["content"].index(suffix)
+
+    def request(correction):
+        requests.append(correction)
+        return json.dumps(
+            {
+                "concepts": {
+                    "update": [
+                        {
+                            "name": "valve",
+                            "reading_locations": {
+                                "pages": "1",
+                                **({"offset": offset} if correction else {}),
+                            },
+                        }
+                    ]
+                }
+            }
+        )
+
+    plan = request_compile_plan(
+        request,
+        json.loads,
+        existing={"concepts": {"valve"}, "entities": set()},
+        entity_types=frozenset({"other"}),
+        sanitize=lambda name: name,
+        validate_updates=lambda plan: windows.validate_updates(plan, long=True),
+    )
+    assert len(requests) == 2
+    context = windows.prepare(plan.concepts.update[0], "concepts/valve.md", long=True)
+    content = "\n".join(w["content"] for w in context.windows)
+    assert first in content and suffix in content
+    native = [span for window in context.windows for span in window.get("page_spans", [])]
+    assert any(span["page"] == 1 and span["start"] == 0 for span in native)
+    assert any(span["page"] == 1 and span["start"] == body.index(suffix) for span in native)
+
+
+def test_compile_matching_uses_aliases_from_the_retained_page(kb_dir):
+    from openkb.agent.compile_plan import normalize_plan
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    wiki = kb_dir / "wiki"
+    (wiki / "sources/current.json").write_text(
+        json.dumps(
+            [
+                {
+                    "page": 1,
+                    "unit_kind": "page",
+                    "content": "RY-7 starts only during the supervised maintenance window.",
+                }
+            ]
+        )
+    )
+    (wiki / "concepts/orchard-regulator.md").write_text(
+        "---\naliases: [RY-7]\n---\n# Orchard regulator\n\nRetained conditions."
+    )
+    plan = normalize_plan(
+        {"concepts": {"update": [{"name": "orchard-regulator"}]}},
+        existing={"concepts": {"orchard-regulator"}, "entities": set()},
+        entity_types=frozenset({"other"}),
+        sanitize=lambda name: name,
+    )
+    windows = CompileSourceWindows(wiki, "current")
+    assert windows.validate_updates(plan, long=True) is None
+    context = windows.prepare(plan.concepts.update[0], "concepts/orchard-regulator.md", long=True)
+    context.require_update("concepts/orchard-regulator.md")
+    assert "supervised maintenance" in context.windows[0]["content"]
+
+
+def test_compile_text_reader_applies_the_returned_selection_offset(kb_dir):
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    text = "# Prior conditions\n\nRecorded setup.\n\n# Winter\n\nSupervision is required.\n"
+    offset = text.index("# Winter")
+    (kb_dir / "wiki/sources/current.md").write_text(text)
+    context = CompileSourceWindows(kb_dir / "wiki", "current").prepare(
+        {"name": "valve", "reading_locations": {"chars": f"0:{len(text)}", "offset": offset}},
+        long=True,
+    )
+    assert context.windows[0]["content"] == text[offset:]
+    assert context.windows[0]["source_spans"] == [[offset, len(text)]]
+
+
 @pytest.mark.parametrize(
     "subject,title",
     [("River Valve", "RIVER VALVE"), ("灌溉阀组", "灌溉阀组"), ("Straße", "STRASSE")],
@@ -118,7 +237,7 @@ def test_partial_prior_window_has_scoped_update_policy_and_continuation(kb_dir, 
             [{"page": 1, "unit_kind": "page", "content": "# Irrigation\nOld default is false."}]
         )
     )
-    (wiki / "sources/old.md").write_text("Supported arithmetic: 3 * 4 = 12.\n" * 1000)
+    (wiki / "sources/old.md").write_text("Supported arithmetic: 3 * 4 = 12.\n\n" * 1000)
     (wiki / "concepts/topic.md").write_text(
         "---\nsources: [sources/old.md]\n---\nSupported orchard conditions."
     )

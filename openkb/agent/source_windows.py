@@ -17,7 +17,10 @@ For long-document pages, optionally include reading_locations with node_ids
 (existing navigation IDs), pages (physical ordinals), blocks (native ordinals),
 cells (worksheet A1 range), or chars (0-based START:END). Give only relevant
 page-level locations, not per-claim evidence. The application validates and
-reads bounded windows. Without a relevant original window, propose only a
+reads bounded windows. To resume a partial selection, repeat its exact native
+range and use its returned offset (a reader selection offset, not a physical-page
+character coordinate). Alternatively choose a narrower relevant page range.
+Without a relevant original window, propose only a
 navigation brief, not specific values, commands or operating rules.
 Use an update only for a new or revised contribution from the current source;
 an existing inventory entry alone does not establish an editing need. Confirm
@@ -69,6 +72,7 @@ def validate_reading_locations(value: object) -> dict:
         "blocks",
         "cells",
         "chars",
+        "offset",
     }:
         raise ValueError("reading_locations requires native ranges or existing node_ids")
     if "node_ids" in value:
@@ -79,7 +83,13 @@ def validate_reading_locations(value: object) -> dict:
             or any(not isinstance(n, str) or not n for n in ids)
         ):
             raise ValueError("reading_locations.node_ids requires 1-6 navigation IDs")
-    for key in set(value) - {"node_ids"}:
+    if "offset" in value and (
+        type(value["offset"]) is not int
+        or value["offset"] < 0
+        or not set(value) & {"pages", "blocks", "cells", "chars"}
+    ):
+        raise ValueError("reading_locations.offset requires a nonnegative reader offset and range")
+    for key in set(value) - {"node_ids", "offset"}:
         if key in {"pages", "blocks"} and isinstance(value[key], list):
             numbers = value[key]
             if (
@@ -113,6 +123,7 @@ class CompileSourceWindows:
         self._frozen: dict[str, bytes] = {}
         self._searches: dict = {}
         self._unresolved_updates: set[str] = set()
+        self._partial_updates: dict[str, tuple[dict, ...]] = {}
         self._numeric_text: dict[str, str] = {}
 
     def numeric_sources(self, context: PageOriginalContext, *, long: bool) -> list[str]:
@@ -143,9 +154,13 @@ class CompileSourceWindows:
             for item in group.update:
                 page = f"{kind}/{item['name']}.md"
                 remaining.add(page)
-                context = self.prepare(item, long=True)
-                if not context.has_current_original:
+                context = self.prepare(item, page, long=True)
+                current = [w for w in context.windows if w["source_role"] == "current"]
+                truncated = bool(current and type(current[-1].get("continuation")) is int)
+                if not context.has_current_original or truncated:
                     self._unresolved_updates.add(page)
+                    if truncated and page not in self._partial_updates:
+                        self._partial_updates[page] = tuple(current)
                     metadata = frontmatter.parse(self._read(page).decode("utf-8"))
                     unresolved.append(
                         {
@@ -153,6 +168,12 @@ class CompileSourceWindows:
                             "proposal": item,
                             "existing_description": metadata.get("description", ""),
                             "windows": context.windows,
+                            "diagnostic": (
+                                "Read a narrower relevant range or resume the exact "
+                                "selection before updating."
+                            )
+                            if truncated
+                            else "Relevant current originals have not been located.",
                         }
                     )
             for name in group.related:
@@ -324,33 +345,42 @@ class CompileSourceWindows:
                 selected = read_text_selection(raw, location.get("chars"))
                 if "cells" in location:
                     selected = select_cells(selected, location["cells"])
-            projected = project_evidence(selected, budget=remaining)
+            projected = project_evidence(
+                selected, offset=location.get("offset", 0), budget=remaining
+            )
             result.update(projected)
             result["native_location"] = location or {"chars": f"0:{len(raw['text'])}"}
         elif path.endswith(".json"):
+            from openkb.agent.evidence_payload import project_evidence
             from openkb.source_pages import read_page_selection
 
             raw = json.loads(data)
-            if set(location) - {"pages"}:
+            if set(location) - {"pages", "offset"}:
                 raise PageResponseError("page_invalid_evidence", "Use this source's physical pages")
             if "pages" not in location:
                 return {**result, "diagnostics": ["No relevant original pages located"]}
             selected = read_page_selection(raw, location["pages"])
             if selected["diagnostics"]:
                 raise PageResponseError("page_invalid_evidence", str(selected["diagnostics"]))
-            content, numbers, images = "", [], []
-            for unit in selected["units"][:MAX_EVIDENCE_UNITS]:
-                piece = f"[Physical page {unit['page']}]\n{unit['content']}\n"
-                if len(content) + len(piece) > remaining:
-                    break
-                content += piece
-                numbers.append(unit["page"])
-                images.extend(unit.get("images", []))
+            projected = project_evidence(
+                selected,
+                offset=location.get("offset", 0),
+                fits=lambda payload: len(payload["content"]) <= remaining,
+            )
+            if type(projected.get("continuation")) is int and not location.get("offset"):
+                # Keep capacity for a complementary current-source suffix during
+                # the existing plan repair, rather than fill it with one prefix.
+                projected = project_evidence(
+                    selected, fits=lambda p: len(p["content"]) <= remaining // 2
+                )
+            result.update(projected)
             result.update(
-                content=content,
-                images=images,
-                native_location={"physical pages": numbers},
-                coverage="complete" if numbers == [p["page"] for p in raw] else "partial",
+                native_location=location,
+                range_complete=projected.get("continuation") is None and bool(projected["content"]),
+                coverage="complete"
+                if selected["page_range"] == [p["page"] for p in raw]
+                and projected["coverage"] == "complete"
+                else "partial",
             )
         else:
             text = data.decode("utf-8")
@@ -359,28 +389,31 @@ class CompileSourceWindows:
                 start, end = map(int, location["chars"].split(":"))
                 if not 0 <= start < end <= len(text):
                     raise PageResponseError("page_invalid_evidence", "Invalid original text range")
-            # Keep complete paragraphs and make any uncovered suffix explicit.
-            paragraphs, content = text[start:end].splitlines(keepends=True), ""
-            for paragraph in paragraphs:
-                if len(content) + len(paragraph) > remaining:
-                    break
-                content += paragraph
+            from openkb.agent.evidence_payload import project_evidence
+
+            selected = {"content": text[start:end], "source_spans": [[start, end]]}
+            projected = project_evidence(
+                selected,
+                offset=location.get("offset", 0),
+                fits=lambda payload: len(payload["content"]) <= remaining,
+            )
+            result.update(projected)
             result.update(
-                content=content,
-                native_location={"chars": f"{start}:{start + len(content)}"},
-                coverage="complete" if content == text else "partial",
-                range_complete=len(content) == end - start,
-                continuation=(
-                    {"chars": f"{start + len(content)}:{end}"}
-                    if len(content) < end - start
-                    else None
-                ),
+                native_location={"chars": f"{start}:{end}", **location},
+                range_complete=projected.get("continuation") is None and bool(projected["content"]),
+                coverage="complete" if projected["content"] == text else "partial",
             )
         return result
 
     def prepare(
         self, item: dict, previous_page: str | None = None, *, long: bool = False
     ) -> PageOriginalContext:
+        if previous_page and (self.wiki / previous_page).is_file():
+            metadata = frontmatter.parse(self._read(previous_page).decode("utf-8"))
+            aliases = metadata.get("aliases", [])
+            if not isinstance(aliases, list) or any(not isinstance(a, str) for a in aliases):
+                raise ValueError("Existing page aliases must be a list of names")
+            item = {**item, "aliases": aliases}
         paths: dict[str, dict] = {}
         if long and (path := self._path()):
             paths[path] = self._locations(item)
@@ -392,13 +425,27 @@ class CompileSourceWindows:
 
                     previous = published_navigation(self.kb_dir, self.view_id, Path(path).stem)
                     location = self._locations(
-                        {"name": item["name"], "title": item.get("title", "")},
+                        {
+                            "name": item["name"],
+                            "title": item.get("title", ""),
+                            "aliases": item.get("aliases", []),
+                        },
                         path=path,
                         navigation=previous.get("structure", []),
                     )
                 paths.setdefault(path, location)
         windows: list[dict] = []
-        remaining = MAX_EVIDENCE_CHARS
+        for prefix in self._partial_updates.get(previous_page or "", ()):
+            location = paths.get(prefix["path"], {})
+            native = prefix["native_location"]
+            if (
+                {k: v for k, v in location.items() if k != "offset"}
+                == {k: v for k, v in native.items() if k != "offset"}
+                and type(prefix.get("continuation")) is int
+                and location.get("offset", 0) >= prefix["continuation"]
+            ):
+                windows.append(prefix)
+        remaining = MAX_EVIDENCE_CHARS - sum(len(w["content"]) for w in windows)
         for path, location in paths.items():
             window: dict
             if not remaining:
@@ -421,7 +468,11 @@ class CompileSourceWindows:
             window["reading_action"] = {
                 "source_path": path,
                 "native_location": location,
-                "continuation": window.get("continuation"),
+                "continuation": (
+                    {**location, "offset": window["continuation"]}
+                    if type(window.get("continuation")) is int
+                    else window.get("continuation")
+                ),
                 "instruction": "Locate or extend this source window before "
                 "reassessing uncovered claims",
             }
