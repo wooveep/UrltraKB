@@ -87,7 +87,7 @@ def test_lost_notification_does_not_repeat_committed_model_work(kb_dir, pdf_sour
     from openkb.application.documents import import_document
 
     def lost_notification(event):
-        if event["stage"] == "committed":
+        if event.get("stage") == "committed":
             raise BrokenPipeError("observer disappeared")
 
     first = import_document(kb_dir, pdf_source, on_event=lost_notification)
@@ -245,7 +245,7 @@ def test_cancelled_body_records_stopped_and_can_be_explicitly_retried(
     from openkb.locks import LockCancelled
 
     def cancel(event):
-        if event["stage"] == "converting":
+        if event.get("stage") == "converting":
             raise LockCancelled("User cancelled the import")
 
     with pytest.raises(LockCancelled):

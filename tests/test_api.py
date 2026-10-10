@@ -127,7 +127,7 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events_from_sse(response.text)
-    assert [event["event"] for event in events] == [
+    assert [event["event"] for event in events if event["event"] != "activity"] == [
         "start",
         "progress",
         "delta",
@@ -135,6 +135,11 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
         "final",
         "done",
     ]
+    activities = [event["data"] for event in events if event["event"] == "activity"]
+    started = {event["activity_id"] for event in activities if event["status"] == "started"}
+    completed = {event["activity_id"] for event in activities if event["status"] == "completed"}
+    assert started == completed and started
+    assert {event["stage"] for event in activities} == {"preparing", "saving"}
     assert events[-2]["data"]["answer"] == "A knowledge base."
 
 
@@ -142,20 +147,21 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
     """The shared query execution uses the global model when the KB is silent."""
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    from openkb.agent.query import build_query_agent
     from openkb.config import save_global_config
 
     save_global_config({"model": "global-model"})
 
     captured = {}
 
-    def fake_agent(wiki_dir, model, *args, **kwargs):
+    def capture_agent(wiki_dir, model, *args, **kwargs):
         captured["model"] = model
-        return object()
+        return build_query_agent(wiki_dir, model, *args, **kwargs)
 
     async def fake_events(*args, **kwargs):
         yield {"event": "final", "data": {"answer": "ok", "history": []}}
 
-    monkeypatch.setattr("openkb.agent.query.build_query_agent", fake_agent)
+    monkeypatch.setattr("openkb.agent.query.build_query_agent", capture_agent)
     monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -1693,6 +1699,8 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
     """The query endpoint must pass the KB's key in the bundle, not via os.environ."""
     import os
 
+    from openkb.agent.query import build_query_agent
+
     monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
     monkeypatch.setenv("LLM_API_KEY", "server-key")
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -1700,15 +1708,15 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
 
     captured = {}
 
-    def fake_agent(wiki_dir, model, language, bundle):
+    def capture_agent(wiki_dir, model, language, bundle):
         captured["bundle_key"] = bundle.api_key if bundle else None
         captured["env_key"] = os.environ.get("LLM_API_KEY")
-        return object()
+        return build_query_agent(wiki_dir, model, language, bundle)
 
     async def fake_events(*args, **kwargs):
         yield {"event": "final", "data": {"answer": "answer", "history": []}}
 
-    monkeypatch.setattr("openkb.agent.query.build_query_agent", fake_agent)
+    monkeypatch.setattr("openkb.agent.query.build_query_agent", capture_agent)
     monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
 
     client = TestClient(create_app())

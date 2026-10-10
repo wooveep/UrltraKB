@@ -165,7 +165,7 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
             assert release.wait(10)
 
     def waiting(event):
-        if event["stage"] == "waiting":
+        if event.get("stage") == "waiting":
             figure.write_bytes(b"latest")
             release.set()
 
@@ -218,7 +218,7 @@ def test_watched_source_replaced_with_external_symlink_while_waiting_never_start
             assert release.wait(10)
 
     def waiting(event):
-        if event["stage"] == "waiting":
+        if event.get("stage") == "waiting":
             source.unlink()
             source.symlink_to(outside)
             release.set()
