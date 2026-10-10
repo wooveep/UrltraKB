@@ -5,14 +5,21 @@ import re
 from pathlib import Path
 
 from openkb.application.query_views import QuerySelection, read_selected_file
+from openkb.source_search import SourceSearch, search_units
 
 
 def search_originals(
-    selection: QuerySelection, terms: list[str], *, view_id: str = "", doc_name: str = ""
+    selection: QuerySelection,
+    terms: list[str],
+    *,
+    view_id: str = "",
+    doc_name: str = "",
+    indexes: dict | None = None,
 ) -> dict:
     if not 1 <= len(terms) <= 6 or any(not t.strip() or len(t) > 80 for t in terms):
         raise ValueError("Use 1-6 short literal subject/configuration terms")
     needles = tuple(dict.fromkeys(t.casefold().strip() for t in terms))
+    indexes = {} if indexes is None else indexes
     hits = []
     found_document = not doc_name
     for view in selection.views:
@@ -38,12 +45,14 @@ def search_originals(
             from openkb.source_reading import native_source, reading_action
 
             source = native_source(view, path)
-            raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
-            for locator, body in _units(raw):
-                folded = body.casefold()
-                found = [t for t in needles if t in folded]
-                if not found:
-                    continue
+            identity = (view.view_id, path, view.files[path])
+            if identity not in indexes:
+                raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
+                indexes[identity] = SourceSearch(raw)
+            index = indexes[identity]
+            raw = index.raw
+            for hit in search_units(index, list(needles), literal_only=True):
+                locator, body, found = hit["location"], hit["text"], hit["matched_terms"]
                 from openkb.original_context import original_context
 
                 positions = sorted(
@@ -54,7 +63,7 @@ def search_originals(
                     }
                 )
                 seen_scopes = set()
-                for first in positions:
+                for first in positions or [0]:
                     context = original_context(source, raw, locator, match_offset=first)
                     scope = json.dumps(
                         context["regions"][0]["headings"] if context["regions"] else []
@@ -88,20 +97,3 @@ def search_originals(
             "page images may contain the answer."
         ),
     }
-
-
-def _units(raw):
-    if isinstance(raw, list):
-        for page in raw:
-            yield {"pages": str(page["page"])}, page.get("content", "")
-    elif isinstance(raw, dict):
-        if raw.get("blocks"):
-            for block in raw["blocks"]:
-                yield (
-                    {"blocks": str(block["ordinal"])},
-                    "".join(raw["text"][a:b] for a, b in block["source_spans"]),
-                )
-        else:
-            yield {"chars": f"0:{len(raw['text'])}"}, raw["text"]
-    else:
-        yield {"path_read": True}, raw

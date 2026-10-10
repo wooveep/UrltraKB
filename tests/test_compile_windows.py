@@ -13,7 +13,7 @@ def compile_boundary(monkeypatch, plan, requests):
         messages = kwargs["messages"]
         prompt = str(messages)
         if "Based on the summary above" in prompt:
-            result = plan
+            result = plan(messages) if callable(plan) else plan
         else:
             requests.append(messages)
             result = {"description": "Recorded section", "content": "# Record\n\nSection facts."}

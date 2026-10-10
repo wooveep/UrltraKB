@@ -1714,6 +1714,9 @@ async def _compile_concepts(
             bundle=bundle,
         ),
         _parse_json,
+        validate_updates=lambda plan: source_windows.validate_updates(
+            plan, long=doc_type == "pageindex"
+        ),
         existing={
             kind: {path.stem for path in (wiki_dir / kind).glob("*.md")}
             for kind in ("concepts", "entities")

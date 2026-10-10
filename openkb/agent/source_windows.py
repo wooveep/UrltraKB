@@ -19,6 +19,9 @@ cells (worksheet A1 range), or chars (0-based START:END). Give only relevant
 page-level locations, not per-claim evidence. The application validates and
 reads bounded windows. Without a relevant original window, propose only a
 navigation brief, not specific values, commands or operating rules.
+Use an update only for a new or revised contribution from the current source;
+an existing inventory entry alone does not establish an editing need. Confirm
+the relevant original location, or withdraw an unnecessary editing proposal.
 Examples: "reading_locations": {"pages": "2,4-6"}, or
 "reading_locations": {"node_ids": ["0001"]}. Pages/blocks may also be an
 array of 1-6 unique positive ordinals. Cells/chars must be range strings.
@@ -108,6 +111,60 @@ class CompileSourceWindows:
         self.navigation = navigation_nodes(navigation or [])
         self.kb_dir, self.view_id = kb_dir, view_id
         self._frozen: dict[str, bytes] = {}
+        self._searches: dict = {}
+        self._unresolved_updates: set[str] = set()
+
+    def validate_updates(self, plan, *, long: bool) -> str | None:
+        """Diagnose editing intent before page generation, within the planner's retry."""
+        if not long:
+            return None
+        unresolved = []
+        remaining: set[str] = set()
+        for kind in ("concepts", "entities"):
+            group = getattr(plan, kind)
+            for item in group.update:
+                page = f"{kind}/{item['name']}.md"
+                remaining.add(page)
+                context = self.prepare(item, long=True)
+                if not context.has_current_original:
+                    self._unresolved_updates.add(page)
+                    metadata = frontmatter.parse(self._read(page).decode("utf-8"))
+                    unresolved.append(
+                        {
+                            "page": page,
+                            "proposal": item,
+                            "existing_description": metadata.get("description", ""),
+                            "windows": context.windows,
+                        }
+                    )
+            for name in group.related:
+                page = f"{kind}/{name}.md"
+                if page in self._unresolved_updates:
+                    remaining.add(page)
+                    unresolved.append(
+                        {
+                            "page": page,
+                            "diagnostic": (
+                                "An unresolved update cannot become a new source "
+                                "contribution via related."
+                            ),
+                        }
+                    )
+        if unresolved:
+            return (
+                "Confirm current-source editing intent for unresolved updates. "
+                "Return a corrected complete concepts/entities plan. Supply relevant native "
+                "reading_locations for necessary updates, or withdraw unnecessary proposals "
+                "by omitting them. Keep all necessary new knowledge and valid proposals. "
+                "No-match diagnostics do not establish that the source lacks knowledge. "
+                "Unresolved necessary updates remain blocked. Diagnostics:\n"
+                + json.dumps(unresolved, ensure_ascii=False)
+            )
+        from openkb.compilation_report import report_compile_issue
+
+        if self._unresolved_updates - remaining:
+            report_compile_issue("compile_plan_update_withdrawn")
+        return None
 
     def _read(self, path: str) -> bytes:
         target = (self.wiki / path).resolve()
@@ -159,6 +216,30 @@ class CompileSourceWindows:
         if any(n not in nodes for n in requested):
             raise PageResponseError("page_invalid_evidence", "Unknown navigation node")
         if not advice:
+            from openkb.source_search import SourceSearch, search_units
+
+            source_path = path or self._path()
+            terms = [
+                item.get("title", ""),
+                item["name"].replace("-", " "),
+                item.get("brief", ""),
+                *item.get("aliases", []),
+            ]
+            if source_path:
+                if source_path not in self._searches:
+                    data = self._read(source_path)
+                    raw = (
+                        json.loads(data) if source_path.endswith(".json") else data.decode("utf-8")
+                    )
+                    self._searches[source_path] = SourceSearch(raw)
+                hits = search_units(self._searches[source_path], terms)
+                locations = [hit["location"] for hit in hits[:MAX_EVIDENCE_UNITS]]
+                if locations:
+                    for key in ("pages", "blocks"):
+                        if key in locations[0]:
+                            return {key: ",".join(dict.fromkeys(loc[key] for loc in locations))}
+                    spans = [tuple(map(int, loc["chars"].split(":"))) for loc in locations]
+                    return {"chars": f"{min(a for a, _ in spans)}:{max(b for _, b in spans)}"}
             words = set(
                 re.findall(
                     r"[\w]+",
@@ -183,7 +264,9 @@ class CompileSourceWindows:
             ]
             scored.sort(key=lambda pair: pair[0], reverse=True)
             if scored and scored[0][0]:
-                requested = [str(scored[0][1].get("node_id"))]
+                requested = [str(node.get("node_id")) for score, node in scored if score > 0][
+                    :MAX_EVIDENCE_UNITS
+                ]
         if requested and not any(k in advice for k in ("pages", "blocks", "cells", "chars")):
             numbers: set[int] = set()
             for identity in requested:
@@ -253,16 +336,27 @@ class CompileSourceWindows:
             )
         else:
             text = data.decode("utf-8")
+            start, end = 0, len(text)
+            if "chars" in location:
+                start, end = map(int, location["chars"].split(":"))
+                if not 0 <= start < end <= len(text):
+                    raise PageResponseError("page_invalid_evidence", "Invalid original text range")
             # Keep complete paragraphs and make any uncovered suffix explicit.
-            paragraphs, content = text.splitlines(keepends=True), ""
+            paragraphs, content = text[start:end].splitlines(keepends=True), ""
             for paragraph in paragraphs:
                 if len(content) + len(paragraph) > remaining:
                     break
                 content += paragraph
             result.update(
                 content=content,
-                native_location={"chars": f"0:{len(content)}"},
+                native_location={"chars": f"{start}:{start + len(content)}"},
                 coverage="complete" if content == text else "partial",
+                range_complete=len(content) == end - start,
+                continuation=(
+                    {"chars": f"{start + len(content)}:{end}"}
+                    if len(content) < end - start
+                    else None
+                ),
             )
         return result
 

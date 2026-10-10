@@ -99,6 +99,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
     images = ImageCoverage(_selected(selection), executor=executor) if selection.views else None
     retrieval = KnowledgeRetrieval(selection, executor, images=images) if executor else None
+    original_indexes: dict = {}
 
     @function_tool(failure_error_function=_read_error)
     async def search_knowledge(query: str) -> str:
@@ -252,7 +253,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
         """
         from openkb.agent.evidence_search import search_originals as search
 
-        return json.dumps(search(selection, terms, doc_name=doc_name), ensure_ascii=False)
+        return json.dumps(
+            search(selection, terms, doc_name=doc_name, indexes=original_indexes),
+            ensure_ascii=False,
+        )
 
     @function_tool(failure_error_function=_read_error)
     def get_image(image_path: str) -> list[ToolOutputImage | ToolOutputText]:

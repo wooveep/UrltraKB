@@ -144,7 +144,11 @@ def normalize_plan(
 
 
 def request_compile_plan(
-    request: Callable[[str | None], str], parse: Callable, **options
+    request: Callable[[str | None], str],
+    parse: Callable,
+    *,
+    validate_updates: Callable[[CompilePlan], str | None] | None = None,
+    **options,
 ) -> CompilePlan:
     correction = None
     for attempt in range(2):
@@ -167,6 +171,14 @@ def request_compile_plan(
                 "Preserve valid proposals. Previous output:\n" + raw[:8000]
             )
         else:
+            diagnostic = validate_updates(plan) if validate_updates else None
+            if diagnostic:
+                if attempt:
+                    code = "page_update_originals_unread"
+                    report_compile_issue(code, "concepts", "entities")
+                    raise CompilePlanError(diagnostic, code)
+                correction = diagnostic + "\nPrevious plan:\n" + raw[:8000]
+                continue
             if attempt:
                 report_compile_issue("compile_plan_repaired")
             elif plan.normalized:
