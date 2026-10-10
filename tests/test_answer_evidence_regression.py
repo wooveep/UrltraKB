@@ -40,6 +40,56 @@ async def invoke(agent, name, **arguments):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["部署条件", "Capacity", "operating conditions"])
+async def test_sdk_reads_same_directory_markdown_alias(kb_dir, name):
+    page = kb_dir / "wiki/concepts" / f"{name}.md"
+    page.write_text("A known operating condition.")
+    agent = agent_for(kb_dir)
+    result = await invoke(agent, "read_file", path=f"concepts/{name}")
+    assert "A known operating condition." in result
+    assert '"content_kind": "derived_concept"' in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "concepts/missing",
+        "entities/Capacity",
+        "concepts/capacity",
+        "/concepts/Capacity",
+        "concepts/../concepts/Capacity",
+        "../wiki/concepts/Capacity",
+    ],
+)
+async def test_sdk_markdown_alias_does_not_guess_or_escape(kb_dir, path):
+    (kb_dir / "wiki/concepts/Capacity.md").write_text("Private operating condition.")
+    result = json.loads(await invoke(agent_for(kb_dir), "read_file", path=path))
+    assert result["status"] == "error"
+    assert result["reading_action"]["arguments"] == {"path": "index.md"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["bytes", "symlink", "missing"])
+async def test_sdk_alias_keeps_snapshot_and_filesystem_checks(kb_dir, change):
+    page = kb_dir / "wiki/concepts/Capacity.md"
+    page.write_text("Selected fact.")
+    agent = agent_for(kb_dir)
+    if change == "bytes":
+        page.write_text("Changed fact.")
+    else:
+        page.unlink()
+        if change == "symlink":
+            outside = kb_dir / "outside.md"
+            outside.write_text("Private fact.")
+            page.symlink_to(outside)
+    result = json.loads(await invoke(agent, "read_file", path="concepts/Capacity"))
+    assert result["status"] == "error"
+    if change == "bytes":
+        assert result["reason_code"] == "stale_snapshot"
+
+
 def source(kb_dir, *, slides=False, images=()):
     parts = {"body": "Visible body", "notes": "Speaker notes"}
     data = [

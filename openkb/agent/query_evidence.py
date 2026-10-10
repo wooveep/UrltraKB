@@ -129,8 +129,10 @@ def restrict_query_agent(agent, selection: QuerySelection):
         if path == "index.md":
             return selection_catalog(selection)
         view = _selected(selection)
-        read_selected_file(view, path)
-        return read_query_page(selection, path, view_id=view.view_id)
+        from openkb.application.query_views import resolve_read_path
+
+        path = resolve_read_path(view, path)
+        return read_query_page(selection, path, view_id=view.view_id, strict=True)
 
     def read_pages(doc_name, pages, tool, part=None):
         source = require_reader(sources, doc_name, tool)

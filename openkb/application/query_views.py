@@ -310,6 +310,21 @@ def resolve_query_views(
         return QuerySelection(root, selected, missing)
 
 
+def resolve_read_path(view: QueryView, path: str) -> str:
+    """Resolve only an exact, same-directory Markdown alias in the frozen inventory."""
+    if Path(path).is_absolute() or any(part in {"", ".", ".."} for part in path.split("/")):
+        raise ValueError("Access denied: use a relative path from index.md.")
+    if path in view.files:
+        return path
+    if (
+        path.split("/", 1)[0] in {"sources", "summaries", "concepts", "entities"}
+        and not path.endswith(".md")
+        and path + ".md" in view.files
+    ):
+        return path + ".md"
+    raise ValueError("Document not found in this reading snapshot. Read index.md for exact paths.")
+
+
 def read_selected_file(view: QueryView, path: str) -> bytes:
     """Read and verify the exact bytes bound to this request, including catalog inputs."""
     import hashlib
@@ -328,7 +343,9 @@ def read_selected_file(view: QueryView, path: str) -> bytes:
     return data
 
 
-def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> str:
+def read_query_page(
+    selection: QuerySelection, path: str, *, view_id: str, strict: bool = False
+) -> str:
     """A caller can only read the evidence captured in this selection."""
     view = next((view for view in selection.views if view.view_id == view_id), None)
     if view is None:
@@ -336,6 +353,8 @@ def read_query_page(selection: QuerySelection, path: str, *, view_id: str) -> st
     try:
         data = read_selected_file(view, path)
     except ValueError as error:
+        if strict:
+            raise
         return "No permitted evidence for this page. " + str(error)
     if path.endswith(".md"):
         from openkb.knowledge_evidence import page_evidence
