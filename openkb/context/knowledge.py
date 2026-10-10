@@ -13,6 +13,21 @@ from openkb.context.projection import ensure_projection, fingerprint, open_runti
 from openkb.llm_execution import CompletionExecutor, StageBudgetExceeded, raise_if_terminal
 
 
+def _source_selection_identity(reference: dict) -> str:
+    return fingerprint(
+        {
+            key: reference.get(key)
+            for key in (
+                "path",
+                "source_revision_id",
+                "content_digest",
+                "unit_revision_id",
+                "native_location",
+            )
+        }
+    )
+
+
 class KnowledgeRetrieval:
     def __init__(self, selection: QuerySelection, executor: CompletionExecutor, *, images=None):
         self.selection, self.executor = selection, executor
@@ -88,19 +103,7 @@ class KnowledgeRetrieval:
                 # A navigation title is not a distinct evidence identity.
                 refs = list(
                     {
-                        fingerprint(
-                            {
-                                k: reference.get(k)
-                                for k in (
-                                    "path",
-                                    "source_revision_id",
-                                    "content_digest",
-                                    "unit_revision_id",
-                                    "native_location",
-                                )
-                            }
-                        ): reference
-                        for reference in refs
+                        _source_selection_identity(reference): reference for reference in refs
                     }.values()
                 )
                 verified = {}
@@ -114,18 +117,7 @@ class KnowledgeRetrieval:
                         raise ValueError("Candidate belongs to a different source revision")
                     if path not in verified:
                         verified[path] = read_selected_file(view, path)
-                    identity = fingerprint(
-                        {
-                            k: reference.get(k)
-                            for k in (
-                                "path",
-                                "source_revision_id",
-                                "content_digest",
-                                "unit_revision_id",
-                                "native_location",
-                            )
-                        }
-                    )
+                    identity = _source_selection_identity(reference)
                     if identity in allocation["returned"]:
                         from openkb.source_reading import native_source, reading_action
 
