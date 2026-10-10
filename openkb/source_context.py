@@ -33,35 +33,36 @@ Preserve unrelated supported content, source conditions, supported calculations 
 labelled synthesis; changed sources retain their old basis and pending refresh status.
 """
 
-ANSWER_SOURCE_RULES = (
-    """
+ANSWER_SOURCE_RULES = """
 Original sources establish document facts. Summaries, concepts, entities and navigation
-are generated aids, even when they have valid source links. Before concluding specific
-values, specifications, API parameters, commands, prices or operating conditions,
-read the associated original locations. Read relevant images when extracted text is
-insufficient. OCR is a transcription; generated visual descriptions and interpretations
-are separate model output, not image text or source guarantees.
-Use source-supported arithmetic and unit conversions, and provide fillable values with
-their units when requested. Preserve conflicting conditions and identify the sources.
-Search misses and partial reading do not prove absence; distinguish no matches from
-an explicit source statement. State evidence limits only where the question needs them.
-Answer directly and sufficiently without adding unsupported guarantees or defaults.
-Keep independent source statements and their conditions separate. A condition that
-mentions one change does not establish that other properties stay unchanged. Do not
-add "still", "unaffected" or invariant claims unless the source supports that relation.
+are generated aids, even when they have valid source links. Read the associated originals
+for specific values, specifications, API parameters, commands, prices and conditions.
+Identify the necessary parts of the user's question and answer each supported part.
+When a necessary part lacks evidence, read its particular condition, section or other
+source within the shared budget. Follow continuation actions for unread ranges; a title
+match or complete returned range does not establish semantic coverage of the question.
+Continue until the necessary parts are supported or a specific local gap remains. Limit
+that gap to the affected conclusion and retain the other supported parts of the answer.
+Explain reasons, steps, comparisons, calculations or examples when the question needs
+them. Preserve useful synthesis and conditional advice, distinguishing document facts
+from analysis or reliable background where the distinction matters. Respect a request
+to use documents only. Give source-supported arithmetic with inputs, units and derivation;
+label necessary assumptions and hypothetical examples. Provide fillable values when asked.
+Keep facts and conditions within their original heading, object, operation and revision;
+read adjacent context when section ancestry is uncertain. Preserve conflicting statements
+and identify their sources. Match the source's strength: a recommendation remains a
+recommendation, and a condition describing one change supports only the stated relation.
+Use explicit source support for guarantees, defaults, unchanged properties and negative
+rules. Distinguish a search miss, unread material, a particular entry's omission and an
+explicit statement of non-support; partial reading alone does not establish absence.
+Read relevant images when extracted text is insufficient. OCR is a transcription;
+generated visual interpretations are separate model output. An unread or failed image
+remains unknown independently of other images on the same page.
 Historical user context explains intent, preferences and corrections; it does not prove
 knowledge-base facts. Historical assistant text is not evidence.
 If a reference such as "the second method" cannot be resolved from real user statements,
 ask the user to identify it. Do not reconstruct omitted assistant answers or guess.
 """
-    + """
-Keep fields and conditions within their original heading, object, operation and source revision.
-Unconfirmed section ancestry requires adjacent reading before combining conditions. Answer directly
-when evidence is sufficient. Limit negative claims to actual coverage: distinguish not searched,
-not read, a specific entry not explaining a fact, and an explicit statement of non-support.
-An unread or failed image remains unknown independently of other images on the same page.
-"""
-)
 
 
 def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tuple[str, ...]:

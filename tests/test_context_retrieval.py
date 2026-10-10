@@ -366,6 +366,94 @@ async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, m
     assert str(kb_dir) not in json.dumps(activities)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language,reverse", [("en", False), ("zh", True)])
+async def test_one_answer_loop_retains_comparison_calculation_and_local_unknown(
+    kb_dir, model_service, language, reverse
+):
+    from agents import set_tracing_disabled
+
+    from openkb.application.conversations import ask_question
+    from openkb.locks import atomic_write_text
+
+    set_tracing_disabled(True)
+    atomic_write_text(
+        kb_dir / ".openkb/config.yaml",
+        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n",
+    )
+    atomic_write_text(
+        kb_dir / ".env", f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n"
+    )
+    documents = [
+        ("alpha", "# Alpha\n\nAt full load Alpha has 12 slots. Offline mode is unsupported."),
+        ("beta", "# Beta\n\nBeta has 24 slots at full load. Drain sessions before maintenance."),
+    ]
+    for name, text in reversed(documents) if reverse else documents:
+        atomic_write_text(kb_dir / f"wiki/sources/{name}.md", text)
+    question = {
+        "en": "Compare capacity and maintenance, calculate the ratio, and advise. "
+        "What is the price?",
+        "zh": "比较容量和维护步骤，计算容量比并给建议，价格是多少？",
+    }[language]
+
+    def call(name, arguments):
+        return streamed_response(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"read-{len(model_service.requests)}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(arguments)},
+                    }
+                ],
+            },
+            "tool_calls",
+        )
+
+    def rank(request):
+        content = request["messages"][-1]["content"]
+        ids = re.findall(r"- id: (\S+)", content)
+        return rank_reply(ids[:1])
+
+    def read_missing(request):
+        tool = next(m["content"] for m in request["messages"] if m["role"] == "tool")
+        assert "Alpha has 12 slots" in tool and "Beta has 24" not in tool
+        return call("read_file", {"path": "sources/beta"})
+
+    expected = {
+        "en": "At full load Alpha has 12 slots and Beta 24: 24/12 = 2. "
+        "Beta requires draining sessions before maintenance; Alpha does not support offline "
+        "mode. For twice the stated capacity choose Beta, subject to your operating needs. "
+        "The retrieved sources do not give a price; this leaves the capacity comparison intact.",
+        "zh": "满载时 Alpha 有 12 个槽位，Beta 有 24 个，24/12 = 2。Beta 维护前要排空会话；"
+        "Alpha 明确不支持离线模式。若目标是上述两倍容量，可按运行需求选择 Beta。"
+        "已读原文没有提供价格，价格缺口不影响这个容量比较。",
+    }[language]
+
+    def answer(request):
+        tools = [m["content"] for m in request["messages"] if m["role"] == "tool"]
+        assert len(tools) == 2
+        assert "Beta has 24 slots" in tools[-1] and "Drain sessions" in tools[-1]
+        return streamed_response({"role": "assistant", "content": expected})
+
+    model_service.replies.extend(
+        (200, reply)
+        for reply in [
+            lambda _: call("search_knowledge", {"query": question}),
+            rank,
+            read_missing,
+            answer,
+        ]
+    )
+    result = await ask_question(kb_dir, question)
+    assert result.status == "completed", result
+    assert result.answer == expected
+    assert len(model_service.requests) == 4
+
+
 def test_projection_keeps_selected_publication_identity_after_source_update(kb_dir, model_service):
     import pymupdf
 

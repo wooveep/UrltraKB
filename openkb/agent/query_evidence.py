@@ -292,8 +292,8 @@ def restrict_query_agent(agent, selection: QuerySelection):
         "Generated navigation only locates evidence; it does not certify its statements. "
         "Use read_file(index.md) for the document and concept index. "
         "Execute the reading_action returned by the catalog or retrieval using its exact "
-        "tool and arguments. Only registered tools apply to this source collection. "
-        "Distinguish conflicting statements using the documents themselves and cite them."
+        "tool and arguments, or its continuation_action to read the next range. "
+        "Only registered tools apply to this source collection. Cite the originals used."
         + ANSWER_SOURCE_RULES
         + "\n# End knowledge-base reading\n"
     )

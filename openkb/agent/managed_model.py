@@ -183,7 +183,7 @@ class ManagedAgentModel(Model):
             [{"role": "user", "content": ""}],
             operation="answer",
             stage="agent",
-            prompt_version="agent-v1",
+            prompt_version="agent-coverage-v2",
             generation_options=extras,
         )
         transport = self.executor._kwargs("answer", request)
