@@ -2170,30 +2170,30 @@ async def compile_short_doc(
     from openkb.compilation_report import CompilationIncomplete
 
     try:
-        summary_raw = _llm_call(
-            model,
-            [system_msg, doc_msg],
-            "summary",
-            response_format=_JSON_RESPONSE_FORMAT,
-            raise_on_truncation=True,
-            bundle=bundle,
-        )
-        summary_raw = await _llm_call_page_async(
-            model,
-            [system_msg, doc_msg],
-            "summary",
-            response_format=_JSON_RESPONSE_FORMAT,
-            initial_response=summary_raw,
-            bundle=bundle,
-        )
-    except (PageResponseError, TruncatedResponseError) as error:
-        code = getattr(error, "code", "page_truncated_response")
-        report_compile_issue(code, "summary")
-        raise CompilationIncomplete((code,), ("summary",), str(error)) from error
-    doc_brief, summary, _ = _page_fields(summary_raw)
+        try:
+            summary_raw = _llm_call(
+                model,
+                [system_msg, doc_msg],
+                "summary",
+                response_format=_JSON_RESPONSE_FORMAT,
+                raise_on_truncation=True,
+                bundle=bundle,
+            )
+            summary_raw = await _llm_call_page_async(
+                model,
+                [system_msg, doc_msg],
+                "summary",
+                response_format=_JSON_RESPONSE_FORMAT,
+                initial_response=summary_raw,
+                bundle=bundle,
+            )
+        except (PageResponseError, TruncatedResponseError) as error:
+            code = getattr(error, "code", "page_truncated_response")
+            report_compile_issue(code, "summary")
+            raise CompilationIncomplete((code,), ("summary",), str(error)) from error
+        doc_brief, summary, _ = _page_fields(summary_raw)
 
-    # --- Steps 2-4: Concept plan → generate/update → summary rewrite → index ---
-    try:
+        # --- Steps 2-4: Concept plan → generate/update → summary → index ---
         await _compile_concepts(
             wiki_dir,
             kb_dir,

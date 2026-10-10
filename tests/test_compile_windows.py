@@ -224,6 +224,47 @@ def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, monke
         assert not summary.exists()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_summary_repair_releases_sdk_client_on_failure(kb_dir, monkeypatch, cancelled):
+    import asyncio
+
+    import httpx
+    import litellm
+
+    from openkb.agent.compiler import compile_short_doc
+    from openkb.compilation_report import CompilationIncomplete
+
+    raw = '{"content": "# Summary\\n\\nSupported facts."}\n{"type": "json_object"}'
+    reply = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=raw), finish_reason="stop")],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    monkeypatch.setattr(litellm, "completion", lambda **kwargs: reply)
+    client = httpx.AsyncClient()
+    monkeypatch.setitem(
+        litellm.in_memory_llm_clients_cache.cache_dict,
+        "summary-repair-test-client",
+        SimpleNamespace(client=client),
+    )
+
+    async def response(**kwargs):
+        if cancelled:
+            raise asyncio.CancelledError
+        return reply
+
+    monkeypatch.setattr(litellm, "acompletion", response)
+    source = kb_dir / "wiki/sources/summary-failure.md"
+    source.write_text("# Source\n\nSupported facts.")
+    try:
+        with pytest.raises(asyncio.CancelledError if cancelled else CompilationIncomplete):
+            await compile_short_doc("summary-failure", source, kb_dir, "gpt-4o")
+        assert client.is_closed
+        assert not (kb_dir / "wiki/summaries/summary-failure.md").exists()
+    finally:
+        await client.aclose()
+
+
 def test_entity_type_requires_generation_confirmation(kb_dir, monkeypatch):
     from openkb import frontmatter
     from openkb.application.documents import import_document
