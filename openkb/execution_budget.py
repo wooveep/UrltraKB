@@ -125,3 +125,11 @@ def admit_compile_plan(plan, *, rewrite_summary: bool):
     minimum = count
     repairs = min(count, executor.policy.compile_repair_calls)
     executor.budget.require("compile", minimum + repairs)
+
+
+def admit_document_summary(batch_count: int) -> None:
+    """All basic summary sends and one plan must fit before sending any batch."""
+    from openkb.llm_execution import active_executor
+
+    if executor := active_executor():
+        executor.budget.require("compile", batch_count + 1)

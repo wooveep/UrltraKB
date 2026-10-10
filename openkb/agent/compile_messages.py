@@ -1,0 +1,87 @@
+"""Pure page request assembly; planning history stays outside the writing context."""
+
+from openkb.text_source import clip_text_origins
+
+_PAGE_WRITING = """Organize the supplied originals completely for this page's topic.
+Retain facts, conditions and necessary explanations, with verifiable calculations,
+comparisons and supported synthesis and their premises. Use the supplied original
+labels and native positions; generated labels and the proposed page name help locate
+the topic. Keep uncertainty local to an interpretation supported only by conjecture.
+The previous page is an editable draft. The same source basis applies to the title,
+description and entity type as to the body.
+"""
+
+
+def render_original_window(window: dict, selection: dict) -> dict:
+    """Group only actually projected cell observations into sparse physical rows."""
+    observations = []
+    for start, end in window.get("source_spans", []):
+        observations.extend(clip_text_origins(selection.get("origin_locators", []), start, end))
+    groups: dict[str, dict[int, dict[int, dict]]] = {"worksheet_rows": {}, "csv_rows": {}}
+    for origin in observations:
+        location = origin.get("sheet_cell")
+        csv_cell = origin.get("csv")
+        if location:
+            cell = location["cell"]
+        elif csv_cell:
+            cell = csv_cell
+        else:
+            continue
+        row, column = cell.get("row"), cell.get("column")
+        if type(row) is not int or type(column) is not int:
+            continue
+        rows = groups["worksheet_rows" if location else "csv_rows"]
+        item = rows.setdefault(row, {}).setdefault(
+            column,
+            {"column": column, "observations": []}
+            | ({"coordinate": cell["coordinate"]} if "coordinate" in cell else {}),
+        )
+        observation = {
+            **cell,
+            "span": origin["normalized_span"],
+            "original_span": origin["original_span"],
+            "kind": origin["kind"],
+        }
+        if (location or cell).get("value_complete") is False:
+            observation["value_complete"] = False
+            for key in ("value", "display", "formula", "cached"):
+                observation.pop(key, None)
+        if observation not in item["observations"]:
+            item["observations"].append(observation)
+    if not any(groups.values()):
+        return window
+    return {
+        **{k: v for k, v in window.items() if k != "cells"},
+        **{
+            kind: [
+                {"row": row, "cells": [cells[column] for column in sorted(cells)]}
+                for row, cells in sorted(rows.items())
+            ]
+            for kind, rows in groups.items()
+            if rows
+        },
+    }
+
+
+def build_page_messages(
+    *,
+    system_message: dict,
+    current_original: dict | None,
+    original_context: dict,
+    known_targets_message: dict,
+    task_message: dict,
+    update_message: dict | None = None,
+) -> list[dict]:
+    messages = [system_message]
+    if current_original is not None:
+        messages.append(current_original)
+    messages.append(original_context)
+    if update_message is not None:
+        messages.append(update_message)
+    messages.extend(
+        [
+            known_targets_message,
+            {**task_message, "content": task_message["content"] + "\n" + _PAGE_WRITING},
+        ]
+    )
+    return messages

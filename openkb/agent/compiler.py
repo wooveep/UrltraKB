@@ -26,10 +26,13 @@ import threading
 import time
 import unicodedata
 from pathlib import Path
+from typing import Callable, overload
 
 import litellm
 
 from openkb import frontmatter
+from openkb.agent.compile_messages import build_page_messages
+from openkb.agent.page_updates import PageUpdate, UnchangedPage
 from openkb.compilation_report import report_compile_issue
 from openkb.config import (
     DEFAULT_ENTITY_TYPES,
@@ -113,7 +116,10 @@ Return a JSON object with two top-level keys, "concepts" and "entities".
 
 "concepts" is an object with:
 1. "create" — new concepts. Array of {{"name": "concept-slug", "title": "Title"}}
-2. "update" — existing concepts with significant new info. Same shape.
+2. "update" — existing concepts with significant new info. Add a "brief" describing
+   this source's proposed addition or revision and its key conditions, for example
+   {{"name": "service-recovery", "title": "Service recovery",
+     "brief": "Add the pre-recovery checks and the condition for using a spare copy"}}.
 3. "related" — existing concept slugs to cross-link only. Array of strings.
 
 "entities" is an object with the same three keys, but create/update objects
@@ -127,7 +133,9 @@ Rules:
   only in passing. Roughly 5-15 entities per document is typical; fewer for
   sparse documents.
 - Use "update" for an existing page when this source contributes new or revised
-  information. Use "related" when only navigation is needed; leave unrelated pages alone.
+  information, with that contribution in brief. The proposal will be checked against
+  originals during generation; an inventory entry alone does not require editing.
+  Use "related" when only navigation is needed; leave unrelated pages alone.
 - Do NOT create concepts that are just the document topic itself.
 - "related" is lightweight cross-linking only, no content rewrite.
 
@@ -151,7 +159,7 @@ or entity that is not in the whitelist, write it as plain text without brackets.
 _CONCEPT_PAGE_USER = """\
 Write the concept page for: {title}
 
-This concept relates to the document "{doc_name}" summarized above.
+This concept relates to the original document "{doc_name}" supplied above.
 {update_instruction}
 
 Return a JSON object with two keys:
@@ -175,7 +183,9 @@ Integrate the new information from document "{doc_name}" using the temporary
 editable blocks below. Preserve supported content and separate source conditions
 outside the supplied original contexts. Correct demonstrably unsupported content
 within the covered scope. Missing windows do not contradict old facts.
-Return the block-edit JSON described below; navigation is assembled by code.
+Proposed contribution (to assess against originals): {brief}
+Return the updated or unchanged JSON described in the editable-block message;
+navigation is assembled by code.
 """
 
 _ENTITY_PAGE_USER = """\
@@ -183,7 +193,7 @@ Write the entity page for: {title}
 The plan proposes type "{type}". Confirm the type using the original object's
 description; use "other" when the original does not establish a supported type.
 
-This entity relates to the document "{doc_name}" summarized above.
+This entity relates to the original document "{doc_name}" supplied above.
 
 Return a JSON object with three keys:
 - "description": A single sentence (under 100 chars) identifying this entity
@@ -205,7 +215,9 @@ blocks below. The plan proposes type "{type}"; confirm it against original
 object descriptions and use "other" when a supported type is not established.
 Retain separate source conditions and unread material. Correct unsupported
 content only within the supplied original scope. Return the block-edit JSON
-described below; source-supported relationships remain prose and navigation
+described in the editable-block message, or explicit unchanged when no edit is needed.
+Proposed contribution (to assess against originals): {brief}
+Source-supported relationships remain prose and navigation
 is assembled by code.
 """
 
@@ -216,19 +228,6 @@ is assembled by code.
 # ``.openkb/config.yaml`` override the default enum everywhere at once. The
 # token is a plain string (not a ``{}`` placeholder) so it does not collide with
 # the ``{{ }}`` JSON braces these templates feed to ``str.format``.
-
-_LONG_DOC_SUMMARY_USER = """\
-This is a PageIndex summary for long document "{doc_name}" (doc_id: {doc_id}):
-
-{content}
-
-Write a concise navigation overview of the themes and sections in this tree.
-The tree summaries are generated navigation, not original evidence for values,
-requirements or procedures. Do not add concrete specifications or guarantees
-here. Page generation will read bounded original windows separately.
-
-Return ONLY the Markdown content (no frontmatter, no code fences).
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +381,7 @@ def _llm_call(
     raise_on_truncation: bool = False,
     *,
     bundle=None,
+    prompt_version: str = "compiler-shared-v3",
     **kwargs,
 ) -> str:
     """Single LLM call with animated progress and debug logging."""
@@ -393,7 +393,7 @@ def _llm_call(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-shared-v3",
+        prompt_version=prompt_version,
         generation_options=kwargs,
     )
     spinner = _Spinner(step_name)
@@ -426,6 +426,7 @@ async def _llm_call_async(
     raise_on_truncation: bool = False,
     *,
     bundle=None,
+    prompt_version: str = "compiler-shared-v3",
     **kwargs,
 ) -> str:
     """Async LLM call with timing output and debug logging."""
@@ -437,7 +438,7 @@ async def _llm_call_async(
         messages,
         operation="compile",
         stage=step_name,
-        prompt_version="compiler-shared-v3",
+        prompt_version=prompt_version,
         generation_options=kwargs,
     )
     t0 = time.time()
@@ -459,6 +460,28 @@ async def _llm_call_async(
     return content.strip()
 
 
+@overload
+async def _llm_call_page_async(
+    model: str,
+    messages: list[dict],
+    step_name: str,
+    *,
+    page_update: PageUpdate,
+    **kwargs,
+) -> str | UnchangedPage: ...
+
+
+@overload
+async def _llm_call_page_async(
+    model: str,
+    messages: list[dict],
+    step_name: str,
+    *,
+    page_update: None = None,
+    **kwargs,
+) -> str: ...
+
+
 async def _llm_call_page_async(
     model: str,
     messages: list[dict],
@@ -466,12 +489,12 @@ async def _llm_call_page_async(
     *,
     bundle=None,
     evidence=None,
-    page_update=None,
-    read_current=None,
+    page_update: PageUpdate | None = None,
+    read_current: Callable[[], str] | None = None,
     numeric_sources=None,
     initial_response: str | None = None,
     **kwargs,
-) -> str:
+) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
     from openkb.agent.page_response import PageResponseError
 
@@ -491,8 +514,20 @@ async def _llm_call_page_async(
                 )
             )
             if page_update is not None:
-                raw = json.dumps(page_update.apply(raw, current=read_current()), ensure_ascii=False)
-            _, content, _ = _page_fields(raw)
+                if read_current is None:
+                    raise ValueError("A page update requires its current page reader")
+                result = page_update.apply(raw, current=read_current())
+                if isinstance(result, UnchangedPage):
+                    if attempt:
+                        report_compile_issue("page_response_repaired")
+                    return result
+                raw = json.dumps(result, ensure_ascii=False)
+            _, content, obj = _page_fields(raw)
+            if page_update is None and obj and obj.get("status") == "unchanged":
+                raise PageResponseError(
+                    "page_unchanged_not_allowed",
+                    "New pages and summaries require knowledge content",
+                )
             if numeric_sources is not None and page_update is None:
                 from openkb.agent.page_updates import check_numeric_subset
 
@@ -519,7 +554,8 @@ async def _llm_call_page_async(
                     "content": (
                         f"The page response failed validation ({code}): {error}. "
                         + (
-                            "Return one block-edit object using the temporary anchors and base_sha256. "
+                            "Return one updated block-edit object or explicit unchanged result "
+                            "with a reason, using the captured base_sha256. "
                             if page_update
                             else "Return exactly one JSON object with string description and nonempty content. "
                         )
@@ -975,7 +1011,13 @@ def _remove_section_entry(lines: list[str], heading: str, link: str) -> bool:
 
 
 def _write_summary(
-    wiki_dir: Path, doc_name: str, summary: str, doc_type: str = "short", description: str = ""
+    wiki_dir: Path,
+    doc_name: str,
+    summary: str,
+    doc_type: str = "short",
+    description: str = "",
+    *,
+    full_text: str | None = None,
 ) -> None:
     """Write summary page with frontmatter."""
     check_model_stop()
@@ -985,6 +1027,26 @@ def _write_summary(
         summary = summary.lstrip("\n")
     summaries_dir = wiki_dir / "summaries"
     summaries_dir.mkdir(parents=True, exist_ok=True)
+    target = summaries_dir / f"{doc_name}.md"
+    if doc_type != "short" and full_text is not None:
+        original = (wiki_dir / full_text).resolve()
+        if (
+            not full_text.startswith("sources/")
+            or not original.is_relative_to((wiki_dir / "sources").resolve())
+            or not original.is_file()
+        ):
+            raise ValueError("Summary pointer must identify this document's retained original")
+        retained = frontmatter.split(target.read_text("utf-8")) if target.exists() else None
+        block = retained[0] if retained else "---\n---\n"
+        for key, value in (
+            ("type", "Summary"),
+            ("doc_type", doc_type),
+            ("full_text", full_text),
+            ("description", description),
+        ):
+            block = _set_fm_line(block, key, value)
+        atomic_write_text(target, block + "\n" + summary)
+        return
     ext = "md" if doc_type == "short" else "json"
     fm_lines = [_yaml_kv_line("type", "Summary")]
     if description:
@@ -1575,6 +1637,8 @@ def _update_index(
 # Public API
 # ---------------------------------------------------------------------------
 
+MAX_DOCUMENT_PLANNING_CHARS = 12000
+
 DEFAULT_COMPILE_CONCURRENCY = 5
 
 
@@ -1600,6 +1664,7 @@ async def _compile_concepts(
     entity_types: list[str] | None = None,
     bundle=None,
     source_windows=None,
+    current_original: dict | None = None,
 ) -> None:
     """Shared Steps 2-4: concepts plan → generate/update → index.
 
@@ -1622,13 +1687,19 @@ async def _compile_concepts(
     concept_briefs = _read_concept_briefs(wiki_dir)
     entity_briefs = _read_entity_briefs(wiki_dir)
 
-    # Second cache breakpoint: end of the assistant summary message. Covers
-    # (system + doc + summary) for the plan call and every concept call.
+    # The generated summary belongs to planning only.
     summary_msg = {"role": "assistant", "content": _cached_text(summary)}
 
     from openkb.agent.source_windows import READING_PLAN_INSTRUCTION, CompileSourceWindows
 
     source_windows = source_windows or CompileSourceWindows(wiki_dir, doc_name, kb_dir=kb_dir)
+    if current_original is None and doc_type == "short":
+        current_original = source_windows.current_original_message()
+    if current_original is not None:
+        current_original = {
+            **current_original,
+            "content": _cached_text(current_original["content"]),
+        }
     plan_messages = [
         system_msg,
         doc_msg,
@@ -1663,7 +1734,14 @@ async def _compile_concepts(
                 doc_name,
                 ghosts[:5],
             )
-        _write_summary(wiki_dir, doc_name, cleaned, description=doc_brief)
+        _write_summary(
+            wiki_dir,
+            doc_name,
+            cleaned,
+            doc_type=doc_type,
+            description=doc_brief,
+            full_text=source_windows.original_path if doc_type != "short" else None,
+        )
 
     from openkb.agent.compile_plan import request_compile_plan
 
@@ -1762,13 +1840,12 @@ async def _compile_concepts(
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
-                [
-                    system_msg,
-                    doc_msg,  # cached (BP1)
-                    summary_msg,  # cached (BP2)
-                    known_targets_msg,  # cached (BP3) — whitelist
-                    originals.message,
-                    {
+                build_page_messages(
+                    system_message=system_msg,
+                    current_original=current_original,
+                    original_context=originals.message,
+                    known_targets_message=known_targets_msg,
+                    task_message={
                         "role": "user",
                         "content": _CONCEPT_PAGE_USER.format(
                             title=title,
@@ -1776,10 +1853,11 @@ async def _compile_concepts(
                             update_instruction="",
                         ),
                     },
-                ],
+                ),
                 f"concept: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                prompt_version="compiler-page-originals-v4",
                 numeric_sources=source_windows.numeric_sources(
                     originals, long=doc_type == "pageindex"
                 ),
@@ -1788,7 +1866,7 @@ async def _compile_concepts(
         _require_nonempty_content(content, name)
         return name, content, False, brief
 
-    async def _gen_update(concept: dict) -> tuple[str, str, bool, str]:
+    async def _gen_update(concept: dict) -> tuple[str, str | UnchangedPage, bool, str]:
         from openkb.agent.page_updates import PageUpdate
 
         name = concept["name"]
@@ -1812,28 +1890,33 @@ async def _compile_concepts(
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
-                [
-                    system_msg,
-                    doc_msg,  # cached (BP1)
-                    summary_msg,  # cached (BP2)
-                    known_targets_msg,  # cached (BP3) — whitelist
-                    originals.message,
-                    patch.message(),
-                    {
+                build_page_messages(
+                    system_message=system_msg,
+                    current_original=current_original,
+                    original_context=originals.message,
+                    known_targets_message=known_targets_msg,
+                    update_message=patch.message(),
+                    task_message={
                         "role": "user",
                         "content": _CONCEPT_UPDATE_USER.format(
                             title=title,
                             doc_name=doc_name,
                             existing_content=existing_content,
+                            brief=concept.get(
+                                "brief", "Assess the contribution in supplied originals."
+                            ),
                         ),
                     },
-                ],
+                ),
                 f"update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                prompt_version="compiler-page-originals-v4",
                 page_update=patch,
                 read_current=lambda: concept_path.read_bytes().decode("utf-8"),
             )
+        if isinstance(raw, UnchangedPage):
+            return name, raw, True, ""
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
         return name, content, True, brief
@@ -1849,13 +1932,12 @@ async def _compile_concepts(
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
-                [
-                    system_msg,
-                    doc_msg,  # cached (BP1)
-                    summary_msg,  # cached (BP2)
-                    known_targets_msg,  # cached (BP3) — whitelist
-                    originals.message,
-                    {
+                build_page_messages(
+                    system_message=system_msg,
+                    current_original=current_original,
+                    original_context=originals.message,
+                    known_targets_message=known_targets_msg,
+                    task_message={
                         "role": "user",
                         "content": _ENTITY_PAGE_USER.format(
                             title=title,
@@ -1863,10 +1945,11 @@ async def _compile_concepts(
                             doc_name=doc_name,
                         ).replace("__ENTITY_TYPES__", types_str),
                     },
-                ],
+                ),
                 f"entity: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                prompt_version="compiler-page-originals-v4",
                 numeric_sources=source_windows.numeric_sources(
                     originals, long=doc_type == "pageindex"
                 ),
@@ -1876,7 +1959,7 @@ async def _compile_concepts(
         _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
 
-    async def _gen_entity_update(ent: dict) -> tuple[str, str, str, str]:
+    async def _gen_entity_update(ent: dict) -> tuple[str, str | UnchangedPage, str, str]:
         from openkb.agent.page_updates import PageUpdate
 
         name = ent["name"]
@@ -1901,29 +1984,34 @@ async def _compile_concepts(
         async with semaphore:
             raw = await _llm_call_page_async(
                 model,
-                [
-                    system_msg,
-                    doc_msg,  # cached (BP1)
-                    summary_msg,  # cached (BP2)
-                    known_targets_msg,  # cached (BP3) — whitelist
-                    originals.message,
-                    patch.message(),
-                    {
+                build_page_messages(
+                    system_message=system_msg,
+                    current_original=current_original,
+                    original_context=originals.message,
+                    known_targets_message=known_targets_msg,
+                    update_message=patch.message(),
+                    task_message={
                         "role": "user",
                         "content": _ENTITY_UPDATE_USER.format(
                             title=title,
                             type=etype,
                             doc_name=doc_name,
                             existing_content=existing_content,
+                            brief=ent.get(
+                                "brief", "Assess the contribution in supplied originals."
+                            ),
                         ).replace("__ENTITY_TYPES__", types_str),
                     },
-                ],
+                ),
                 f"entity-update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                prompt_version="compiler-page-originals-v4",
                 page_update=patch,
                 read_current=lambda: epath.read_bytes().decode("utf-8"),
             )
+        if isinstance(raw, UnchangedPage):
+            return name, raw, "", ""
         brief, content, obj = _page_fields(raw)
         previous_type = str(frontmatter.parse(raw_text).get("type", "other")).lower()
         proposed_type = obj.get("type", previous_type)
@@ -1971,6 +2059,7 @@ async def _compile_concepts(
 
     if tasks:
         failure_types: list[str] = []
+        unchanged = 0
         for r in results:
             if isinstance(r, BaseException):
                 raise_if_terminal(r)
@@ -1979,6 +2068,11 @@ async def _compile_concepts(
                 failure_types.append(type(r).__name__)
                 continue
             name, page_content, is_update, brief = r
+            if isinstance(page_content, UnchangedPage):
+                unchanged += 1
+                report_compile_issue("page_update_unchanged")
+                logger.info("Concept %s unchanged: %s", name, page_content.reason)
+                continue
             pending_writes.append((name, page_content, is_update, brief))
             safe_name = _sanitize_concept_name(name)
             concept_names.append(safe_name)
@@ -1988,7 +2082,10 @@ async def _compile_concepts(
         # Include exception type names inline so the stdout line is
         # self-contained — per-failure WARNINGs go to stderr.
         written = len(pending_writes)
-        if written < total:
+        logger.info(
+            "Concept results: %d written, %d unchanged, %d planned", written, unchanged, total
+        )
+        if written + unchanged < total:
             report_compile_issue("concept_generation_incomplete", "concepts")
             reason = ", ".join(sorted(set(failure_types))) if failure_types else "see log (stderr)"
             sys.stdout.write(
@@ -1999,6 +2096,7 @@ async def _compile_concepts(
 
     if entity_tasks:
         entity_failure_types: list[str] = []
+        unchanged = 0
         for r in entity_results:
             if isinstance(r, BaseException):
                 raise_if_terminal(r)
@@ -2007,10 +2105,18 @@ async def _compile_concepts(
                 entity_failure_types.append(type(r).__name__)
                 continue
             name, page_content, brief, etype = r
+            if isinstance(page_content, UnchangedPage):
+                unchanged += 1
+                report_compile_issue("page_update_unchanged")
+                logger.info("Entity %s unchanged: %s", name, page_content.reason)
+                continue
             entity_pending.append((name, page_content, brief, etype))
 
         ewritten = len(entity_pending)
-        if ewritten < etotal:
+        logger.info(
+            "Entity results: %d written, %d unchanged, %d planned", ewritten, unchanged, etotal
+        )
+        if ewritten + unchanged < etotal:
             report_compile_issue("entity_generation_incomplete", "entities")
             reason = (
                 ", ".join(sorted(set(entity_failure_types)))
@@ -2069,7 +2175,14 @@ async def _compile_concepts(
     # Navigation is assembled below; keep the first summary's statements intact.
     if rewrite_summary:
         final_summary, _ = strip_ghost_wikilinks(summary, known_targets)
-        _write_summary(wiki_dir, doc_name, final_summary, description=doc_brief)
+        _write_summary(
+            wiki_dir,
+            doc_name,
+            final_summary,
+            doc_type=doc_type,
+            description=doc_brief,
+            full_text=source_windows.original_path if doc_type != "short" else None,
+        )
 
     # --- Write concept pages to disk ---
     for name, page_content, is_update, brief in pending_writes:
@@ -2157,15 +2270,20 @@ async def compile_short_doc(
     schema_md = get_agents_md(wiki_dir)
     content = source_path.read_bytes().decode("utf-8")
 
-    # Base context A: system + document. cache_control marker on the doc
-    # message creates a cache breakpoint that covers (system + doc) for
-    # every downstream call (summary, concepts-plan, every concept page).
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    selected_scope = resolve_scope(kb_dir, scope, writable=True)
+    windows = CompileSourceWindows(
+        wiki_dir, doc_name, kb_dir=kb_dir, view_id=selected_scope.view_id
+    )
+    current_original = windows.current_original_message(content)
+    # Summary and planning reuse this prefix. Page writing receives a separate
+    # original message without the summary task.
     system_msg, doc_msg = short_document_messages(doc_name, content, schema_md, language)
 
     # --- Step 1: Generate summary (v1, held in memory) ---
-    # The summary is NOT written to disk yet — it's used as cache context
-    # for the plan + concept-generation calls, then saved with validated links inside
-    # _compile_concepts before publication.
+    # Planning uses this draft; page writing receives the fixed originals.
+    # Validated links are assembled before publication.
     from openkb.agent.page_response import PageResponseError
     from openkb.compilation_report import CompilationIncomplete
 
@@ -2208,6 +2326,8 @@ async def compile_short_doc(
             rewrite_summary=True,
             entity_types=entity_types,
             bundle=bundle,
+            source_windows=windows,
+            current_original=current_original,
         )
     finally:
         # Close per-loop litellm async clients before asyncio.run tears this
@@ -2228,37 +2348,30 @@ async def compile_long_doc(
     scope: KnowledgeScope | None = None,
     navigation: list[dict] | None = None,
 ) -> None:
-    """Compile a long (PageIndex) document's concepts and index.
-
-    The summary page is already written by the indexer. This function
-    generates concept pages and updates the index.
-    """
+    """Build document knowledge from every original range, then organize topic pages."""
+    from openkb.agent.document_summary import (
+        PROMPT_VERSION,
+        SYSTEM_TEMPLATE,
+        build_document_summary,
+        summary_capacity,
+    )
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.compilation_report import CompilationIncomplete
     from openkb.config import resolve_effective_config
+    from openkb.config_state import active_values
+    from openkb.llm_execution import active_executor
+    from openkb.source_navigation import stored_navigation
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-    language: str = config.get("language", "en")
-    entity_types = resolve_entity_types(config)
-
-    wiki_dir = resolve_scope(kb_dir, scope, writable=True).wiki_dir
+    captured = active_values(kb_dir)
+    executor = active_executor()
+    language = config.get("language", "en")
+    selected_scope = resolve_scope(kb_dir, scope, writable=True)
+    wiki_dir = selected_scope.wiki_dir
+    if summary_path.resolve() != (wiki_dir / "summaries" / f"{doc_name}.md").resolve():
+        raise ValueError("Summary must belong to the selected document and knowledge scope")
     schema_md = get_agents_md(wiki_dir)
-    summary_content = summary_path.read_text(encoding="utf-8")
-
-    # Backfill OKF fields on the indexer-written summary. Idempotent: set
-    # description before type so that when both keys are missing the prepends
-    # leave `type` first (canonical order); only rewrite when content changed.
-    fm_parts = frontmatter.split(summary_content)
-    if fm_parts is not None:
-        fm_block, body = fm_parts
-        if doc_description:
-            fm_block = _set_fm_line(fm_block, "description", doc_description)
-        fm_block = _set_fm_line(fm_block, "type", "Summary")
-        updated = fm_block + body
-        if updated != summary_content:
-            summary_content = updated
-            atomic_write_text(summary_path, summary_content)
-
-    # Base context A. cache_control marker on the doc message creates a
-    # cache breakpoint covering (system + doc) for every concept call.
     system_msg = {
         "role": "system",
         "content": _SYSTEM_TEMPLATE.format(
@@ -2266,54 +2379,88 @@ async def compile_long_doc(
             language=language,
         ),
     }
-    doc_msg = {
-        "role": "user",
-        "content": _cached_text(
-            _LONG_DOC_SUMMARY_USER.format(
-                doc_name=doc_name,
-                doc_id=doc_id,
-                content=summary_content,
-            )
-        ),
-    }
-
-    # --- Step 1: Generate overview ---
-    overview = _llm_call(model, [system_msg, doc_msg], "overview", bundle=bundle)
-
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.source_navigation import stored_navigation
-
-    if navigation is None:
-        index_root = wiki_dir.parent / "index"
-        if not index_root.exists():
-            index_root = kb_dir / ".openkb"
-        navigation = stored_navigation(index_root, doc_id)
-    windows = CompileSourceWindows(
-        wiki_dir,
-        doc_name,
-        navigation=navigation,
-        kb_dir=kb_dir,
-        view_id=resolve_scope(kb_dir, scope).view_id,
-    )
-
-    # --- Steps 2-4: Concept plan → generate/update → index ---
     try:
+        if navigation is None:
+            index_root = wiki_dir.parent / "index"
+            if not index_root.exists():
+                index_root = kb_dir / ".openkb"
+            navigation = stored_navigation(index_root, doc_id)
+        windows = CompileSourceWindows(
+            wiki_dir, doc_name, navigation=navigation, kb_dir=kb_dir, view_id=selected_scope.view_id
+        )
+        credentials = executor.bindings.credentials() if executor else bundle
+        fits = summary_capacity(
+            {**config, "model": executor.bindings.model("compile") if executor else model},
+            custom_endpoint=bool(credentials and credentials.base_url),
+            tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
+            generation_options=executor.bindings.generation_options("compile")
+            if executor
+            else None,
+        )
+
+        async def generate(messages: list[dict], stage: str, originals: list[str]) -> str:
+            return await _llm_call_page_async(
+                model,
+                messages,
+                stage,
+                response_format=_JSON_RESPONSE_FORMAT,
+                bundle=bundle,
+                numeric_sources=originals,
+                prompt_version=PROMPT_VERSION,
+            )
+
+        try:
+            draft = await build_document_summary(
+                windows,
+                system_message={
+                    "role": "system",
+                    "content": SYSTEM_TEMPLATE.format(language=language),
+                },
+                generate=generate,
+                fits=fits,
+            )
+        except PageResponseError as error:
+            report_compile_issue(error.code, "summary")
+            raise CompilationIncomplete((error.code,), ("summary",), str(error)) from error
+        summary_body, _ = strip_ghost_wikilinks(
+            draft.markdown, list_existing_wiki_targets(wiki_dir) | {f"summaries/{doc_name}"}
+        )
+        _write_summary(
+            wiki_dir,
+            doc_name,
+            summary_body,
+            doc_type="pageindex",
+            description=draft.description or doc_description,
+            full_text=windows.original_path,
+        )
+        navigation_text = json.dumps(
+            [{k: v for k, v in node.items() if k != "nodes"} for node in windows.navigation],
+            ensure_ascii=False,
+        )
+        planning = navigation_text[:MAX_DOCUMENT_PLANNING_CHARS]
+        if len(navigation_text) > len(planning):
+            planning += "\nNavigation is a partial prefix; read originals for unrepresented topics."
+        doc_msg = {
+            "role": "user",
+            "content": (
+                f"Generated navigation for document {doc_name} (doc_id: {doc_id}); "
+                "these labels and summaries are planning aids, not original evidence.\n" + planning
+            ),
+        }
         await _compile_concepts(
             wiki_dir,
             kb_dir,
             model,
             system_msg,
             doc_msg,
-            overview,
+            draft.planning_overview[:MAX_DOCUMENT_PLANNING_CHARS],
             doc_name,
             max_concurrency,
-            doc_brief=doc_description,
+            doc_brief=draft.description or doc_description,
             doc_type="pageindex",
-            entity_types=entity_types,
+            entity_types=resolve_entity_types(config),
             bundle=bundle,
             source_windows=windows,
         )
     finally:
-        # Close per-loop litellm async clients before asyncio.run tears this
-        # loop down, to avoid the CLOSE-WAIT/FD leak across a long ingest.
         await _close_async_llm_clients()

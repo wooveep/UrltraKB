@@ -68,7 +68,7 @@ def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, 
     ],
 )
 def test_text_formats_reuse_block_index_and_exact_revision_reads(
-    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected
+    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_schema
 ):
     import litellm
     from click.testing import CliRunner
@@ -98,7 +98,7 @@ def test_text_formats_reuse_block_index_and_exact_revision_reads(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4096}}
         ),
     )
     path = tmp_path / f"sample.{extension}"
@@ -172,7 +172,7 @@ def test_watched_csv_does_not_reimport_its_managed_normalization(kb_dir, pdf_mod
 
 
 def test_csv_generated_column_labels_cannot_anchor_original_sections(
-    kb_dir, tmp_path, block_model, monkeypatch
+    kb_dir, tmp_path, block_model, monkeypatch, wide_schema
 ):
     import litellm
 
@@ -198,7 +198,7 @@ def test_csv_generated_column_labels_cannot_anchor_original_sections(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4096}}
         ),
     )
     path = tmp_path / "labels.csv"
@@ -252,7 +252,7 @@ def test_large_csv_cell_keeps_exact_value_without_repeating_it_in_range_reads(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 2400}}
         ),
     )
     value = (Path(__file__).parent / "fixtures/content-blocks.md").read_text("utf-8")

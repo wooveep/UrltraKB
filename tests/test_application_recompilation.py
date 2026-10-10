@@ -21,7 +21,7 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
     original = "---\nsources: [raw/paper.pdf]\n---\n# Previous paper\n"
     summary.write_text(original)
     (kb_dir / "wiki/sources/paper.json").write_text(
-        json.dumps([{"page": 1, "text": "Retained PDF content"}])
+        json.dumps([{"page": 1, "unit_kind": "page", "content": "Retained PDF content"}])
     )
 
     def unavailable(**kwargs):
@@ -30,6 +30,11 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
         raise ConnectionError("private provider detail")
 
     monkeypatch.setattr(litellm, "completion", unavailable)
+
+    async def unavailable_async(**kwargs):
+        return unavailable(**kwargs)
+
+    monkeypatch.setattr(litellm, "acompletion", unavailable_async)
     result = asyncio.run(recompile_document(kb_dir, "long-hash"))
     assert result.status == "failed"
     assert result.error_type == "ConnectionError"

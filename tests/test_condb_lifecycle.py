@@ -20,7 +20,7 @@ def prepare(kb):
             kb=str(kb),
             config={
                 "model": "gpt-4o",
-                "model_capacity": {"max_input_tokens": 1},
+                "model_capacity": {"max_input_tokens": 1100},
             },
         ),
     )

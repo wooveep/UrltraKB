@@ -432,10 +432,16 @@ def test_recompile_refresh_schema_noop_when_agents_missing(kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_compile_long_doc_backfills_summary_frontmatter(tmp_path):
+def test_compile_long_doc_backfills_summary_frontmatter(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     wiki = tmp_path / "wiki"
     (wiki / "summaries").mkdir(parents=True)
     (wiki / "concepts").mkdir(parents=True)
+    (wiki / "sources").mkdir(parents=True)
+    (wiki / "sources/long.json").write_text(
+        json.dumps([{"page": 1, "unit_kind": "page", "content": "A retained long report."}])
+    )
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "config.yaml").write_text(
         "model: gpt-4o-mini\nlanguage: en\n", encoding="utf-8"
@@ -445,23 +451,61 @@ def test_compile_long_doc_backfills_summary_frontmatter(tmp_path):
         "---\ndoc_type: pageindex\nfull_text: sources/long.json\n---\n\n# Long\n",
         encoding="utf-8",
     )
-    with (
-        patch.object(compiler, "_llm_call", return_value="overview"),
-        patch.object(compiler, "_compile_concepts", new=AsyncMock()),
-        patch.object(compiler, "_close_async_llm_clients", new=AsyncMock()),
-    ):
-        asyncio.run(
-            compiler.compile_long_doc(
-                "long",
-                summary_path,
-                "doc-1",
-                tmp_path,
-                "gpt-4o-mini",
-                doc_description="A long report.",
-            )
+
+    def completion(**kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "create": [],
+                                "update": [],
+                                "related": [],
+                                "entities": {"create": [], "update": [], "related": []},
+                            }
+                        )
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=None,
         )
+
+    async def acompletion(**kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "description": "A long report.",
+                                "content": "# Long\n\nA retained long report.",
+                            }
+                        )
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=None,
+        )
+
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
+    asyncio.run(
+        compiler.compile_long_doc(
+            "long",
+            summary_path,
+            "doc-1",
+            tmp_path,
+            "gpt-4o-mini",
+            doc_description="A long report.",
+            navigation=[],
+        )
+    )
     text = summary_path.read_text(encoding="utf-8")
     assert 'type: "Summary"' in text
     assert 'description: "A long report."' in text
-    # canonical order: type before description
-    assert text.index("type:") < text.index("description:")
+    from openkb import frontmatter
+
+    assert frontmatter.parse(text)["full_text"] == "sources/long.json"

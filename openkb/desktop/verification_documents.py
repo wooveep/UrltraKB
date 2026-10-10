@@ -54,5 +54,6 @@ def verify_long_pdf(kb: Path, pdf: Path) -> str:
     metadata = frontmatter.parse(content)
     assert metadata["doc_type"] == "pageindex"
     assert metadata["full_text"] == f"sources/{entry['doc_name']}.json"
-    assert all(node["title"] in content for node in structure)
+    body = frontmatter.split(content)
+    assert body and body[1].strip(), "Document knowledge must have a readable body"
     return f"summaries/{entry['doc_name']}"

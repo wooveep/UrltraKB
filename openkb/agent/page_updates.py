@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from decimal import Decimal, Inexact, localcontext
 
 from openkb import frontmatter
@@ -188,6 +189,12 @@ def check_numeric_subset(candidate: str, originals: list[str], *, previous: str 
     }
 
 
+@dataclass(frozen=True)
+class UnchangedPage:
+    base_sha256: str
+    reason: str
+
+
 class PageUpdate:
     def __init__(
         self,
@@ -229,8 +236,13 @@ class PageUpdate:
             "role": "user",
             "content": "Temporary editable page blocks:\n"
             + json.dumps(self.request(), ensure_ascii=False)
-            + "\n\nReturn one JSON object with base_sha256, description, optional type, "
-            "and edits. Each edit has block_id, operation (replace, insert_before, "
+            + "\n\nReturn one JSON object. For changes use status=updated, base_sha256, "
+            "description, optional type, and nonempty edits. If the supplied originals "
+            "show that the proposed contribution is already covered or needs only navigation, "
+            "use only status=unchanged, base_sha256 and a nonempty reason explaining this "
+            "decision for the proposed contribution. Unread necessary content cannot establish "
+            "unchanged. The captured page is an editable draft, not verified evidence. "
+            "Each edit has block_id, operation (replace, insert_before, "
             "insert_after, delete), and content (omit content for delete). Include "
             "complete Markdown paragraphs with their required separators. Incorporate "
             "all necessary new knowledge across any number of blocks. Use the supplied "
@@ -240,7 +252,7 @@ class PageUpdate:
             "The application retains every unedited byte and appends navigation.",
         }
 
-    def apply(self, response: str, *, current: str) -> dict:
+    def apply(self, response: str, *, current: str) -> dict | UnchangedPage:
         if current != self.original:
             raise PageResponseError(
                 "page_update_stale", "The captured page changed during generation"
@@ -251,12 +263,32 @@ class PageUpdate:
             raise PageResponseError(
                 "page_update_invalid", "Return a valid block-edit JSON object"
             ) from error
-        if not isinstance(obj, dict) or set(obj) - {"base_sha256", "description", "type", "edits"}:
-            raise PageResponseError("page_update_invalid", "Use the declared block-edit fields")
+        if not isinstance(obj, dict):
+            raise PageResponseError("page_update_invalid", "Use a declared update result object")
         if obj.get("base_sha256") != self.digest:
             raise PageResponseError(
                 "page_update_invalid", "base_sha256 must match the captured page"
             )
+        status = obj.get("status", "updated")
+        if status == "unchanged":
+            reason = obj.get("reason")
+            if (
+                set(obj) != {"status", "base_sha256", "reason"}
+                or not isinstance(reason, str)
+                or not reason.strip()
+            ):
+                raise PageResponseError(
+                    "page_update_invalid", "unchanged requires only status, base_sha256 and reason"
+                )
+            return UnchangedPage(self.digest, reason)
+        if status != "updated" or set(obj) - {
+            "status",
+            "base_sha256",
+            "description",
+            "type",
+            "edits",
+        }:
+            raise PageResponseError("page_update_invalid", "Use the declared block-edit fields")
         for key in ("description", "type"):
             if key in obj and not isinstance(obj[key], str):
                 raise PageResponseError("page_update_invalid", f"{key} must be a string")

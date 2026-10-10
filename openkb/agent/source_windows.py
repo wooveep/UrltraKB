@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from openkb import frontmatter
 from openkb.agent.compile_evidence import MAX_EVIDENCE_CHARS, MAX_EVIDENCE_UNITS
+from openkb.agent.compile_messages import render_original_window
 from openkb.agent.page_response import PageResponseError
 
 READING_PLAN_INSTRUCTION = """
@@ -23,6 +25,7 @@ character coordinate). Alternatively choose a narrower relevant page range.
 Without a relevant original window, propose only a
 navigation brief, not specific values, commands or operating rules.
 Use an update only for a new or revised contribution from the current source;
+use brief to describe that proposed contribution and its conditions.
 an existing inventory entry alone does not establish an editing need. Confirm
 the relevant original location, or withdraw an unnecessary editing proposal.
 Examples: "reading_locations": {"pages": "2,4-6"}, or
@@ -122,6 +125,8 @@ class CompileSourceWindows:
         self.kb_dir, self.view_id = kb_dir, view_id
         self._frozen: dict[str, bytes] = {}
         self._searches: dict = {}
+        self._parsed: dict[str, object] = {}
+        self._selections: dict[str, tuple[dict, dict]] = {}
         self._unresolved_updates: set[str] = set()
         self._partial_updates: dict[str, tuple[dict, ...]] = {}
         self._numeric_text: dict[str, str] = {}
@@ -142,6 +147,39 @@ class CompileSourceWindows:
                 )
             texts.insert(0, self._numeric_text[path])
         return texts
+
+    def current_original_message(self, text: str | None = None) -> dict | None:
+        """Provide the frozen short original independently of the summary task."""
+        path = self._path()
+        if path is None:
+            return None
+        from openkb.agent.evidence_payload import project_evidence
+
+        selected, location = self._document_selection(path)
+        markdown = f"sources/{self.doc_name}.md"
+        # Native page/block readers add display labels. Verify the captured
+        # normalization bytes, rather than comparing those labels with Markdown.
+        normalized = (
+            self._source(markdown) if (self.wiki / markdown).is_file() else self._source(path)
+        )
+        normalized = normalized.get("text") if isinstance(normalized, dict) else normalized
+        if text is not None and normalized != text:
+            raise PageResponseError(
+                "page_evidence_changed", "Current original differs from frozen text"
+            )
+        projected = render_original_window(
+            project_evidence(selected, fits=lambda payload: True), selected
+        )
+        window = {
+            "path": path,
+            "sha256": hashlib.sha256(self._read(path)).hexdigest(),
+            "native_location": location,
+            **projected,
+        }
+        return {
+            "role": "user",
+            "content": f"Current original: {path}\n" + json.dumps(window, ensure_ascii=False),
+        }
 
     def validate_updates(self, plan, *, long: bool) -> str | None:
         """Diagnose editing intent before page generation, within the planner's retry."""
@@ -177,25 +215,13 @@ class CompileSourceWindows:
                             else "Relevant current originals have not been located.",
                         }
                     )
-            for name in group.related:
-                page = f"{kind}/{name}.md"
-                if page in self._unresolved_updates:
-                    remaining.add(page)
-                    unresolved.append(
-                        {
-                            "page": page,
-                            "diagnostic": (
-                                "An unresolved update cannot become a new source "
-                                "contribution via related."
-                            ),
-                        }
-                    )
         if unresolved:
             return (
                 "Confirm current-source editing intent for unresolved updates. "
                 "Return a corrected complete concepts/entities plan. Supply relevant native "
                 "reading_locations for necessary updates, or withdraw unnecessary proposals "
-                "by omitting them. Keep all necessary new knowledge and valid proposals. "
+                "by omitting them or choosing related for pure navigation. Keep all necessary "
+                "new knowledge and valid proposals. Describe the proposed increment in brief. "
                 "No-match diagnostics do not establish that the source lacks knowledge. "
                 "Unresolved necessary updates remain blocked. Diagnostics:\n"
                 + json.dumps(unresolved, ensure_ascii=False)
@@ -213,6 +239,113 @@ class CompileSourceWindows:
         if path not in self._frozen:
             self._frozen[path] = target.read_bytes()
         return self._frozen[path]
+
+    def _source(self, path: str):
+        if path not in self._parsed:
+            data = self._read(path)
+            self._parsed[path] = (
+                json.loads(data) if path.endswith(".json") else data.decode("utf-8")
+            )
+        return self._parsed[path]
+
+    @property
+    def original_path(self) -> str:
+        path = self._path()
+        if path is None:
+            raise PageResponseError(
+                "document_summary_original_unread", "Current original is missing"
+            )
+        return path
+
+    def _document_selection(self, path: str) -> tuple[dict, dict]:
+        if path in self._selections:
+            return self._selections[path]
+        raw = self._source(path)
+        if path.endswith(".content.json"):
+            from openkb.block_package import read_block_selection
+            from openkb.text_source import read_text_selection
+
+            selected = read_block_selection(raw) if raw.get("blocks") else read_text_selection(raw)
+            location = (
+                {"blocks": ",".join(map(str, selected["block_range"]))}
+                if raw.get("blocks")
+                else {"chars": f"0:{len(raw['text'])}"}
+            )
+        elif path.endswith(".json"):
+            from openkb.source_pages import read_page_selection
+
+            selected = read_page_selection(raw)
+            location = {"pages": ",".join(map(str, selected["page_range"]))}
+        else:
+            selected = {"content": raw, "source_spans": [[0, len(raw)]]}
+            location = {"chars": f"0:{len(raw)}"}
+        self._selections[path] = selected, location
+        return selected, location
+
+    def iter_document_windows(self, *, fits: Callable[[dict], bool]) -> Iterator[dict]:
+        """Read the entire fixed document using actual reader selection offsets."""
+        from openkb.agent.evidence_payload import preceding_evidence, project_evidence
+        from openkb.content_blocks import markdown_layout
+        from openkb.source_search import original_units
+
+        path = self.original_path
+        raw = self._source(path)
+        selected, location = self._document_selection(path)
+        # Only known blank originals can be skipped, after validating their readers.
+        if not any(text.strip() for _, text in original_units(raw)):
+            return
+        digest = hashlib.sha256(self._read(path)).hexdigest()
+        layout = markdown_layout(selected["content"])
+        offset = 0
+        while offset < len(selected["content"]):
+            from openkb.llm_execution import check_model_stop
+
+            check_model_stop()
+            context = (
+                [
+                    render_original_window(
+                        preceding_evidence(
+                            selected, offset, min(1200, MAX_EVIDENCE_CHARS // 8), layout=layout
+                        ),
+                        selected,
+                    )
+                ]
+                if offset
+                else []
+            )
+            identity = {
+                "path": path,
+                "sha256": digest,
+                "source_role": "current",
+                "selection_offset": offset,
+                "supplementary_context": context,
+            }
+            projected = project_evidence(
+                selected,
+                offset=offset,
+                fits=lambda payload: len(payload["content"]) <= MAX_EVIDENCE_CHARS
+                and len(json.dumps(payload, ensure_ascii=False)) <= MAX_EVIDENCE_CHARS * 2
+                and fits({**identity, **render_original_window(payload, selected)}),
+                allow_partial=True,
+                layout=layout,
+            )
+            if not projected["content"]:
+                raise PageResponseError(
+                    "document_summary_capacity_exceeded", "Original window made no progress"
+                )
+            continuation = projected.get("continuation")
+            if continuation is not None and (
+                type(continuation) is not int
+                or continuation != offset + len(projected["content"])
+                or not offset < continuation <= len(selected["content"])
+            ):
+                raise PageResponseError("document_summary_reader_invalid", "Invalid continuation")
+            if continuation is None and offset + len(projected["content"]) != len(
+                selected["content"]
+            ):
+                raise PageResponseError("document_summary_reader_invalid", "Original tail unread")
+            yield {**identity, **render_original_window(projected, selected)}
+            offset = len(selected["content"]) if continuation is None else continuation
 
     def _originals(self, page: str) -> list[str]:
         pending, seen, sources = [page], set(), []
@@ -267,10 +400,7 @@ class CompileSourceWindows:
             ]
             if source_path:
                 if source_path not in self._searches:
-                    data = self._read(source_path)
-                    raw = (
-                        json.loads(data) if source_path.endswith(".json") else data.decode("utf-8")
-                    )
+                    raw = self._source(source_path)
                     self._searches[source_path] = SourceSearch(raw)
                 hits = search_units(self._searches[source_path], terms)
                 locations = [hit["location"] for hit in hits[:MAX_EVIDENCE_UNITS]]
@@ -335,7 +465,7 @@ class CompileSourceWindows:
             from openkb.text_source import read_text_selection
             from openkb.workbooks.selection import select_cells
 
-            raw = json.loads(data)
+            raw = self._source(path)
             if "pages" in location:
                 raise PageResponseError(
                     "page_invalid_evidence", "This source has no physical pages"
@@ -355,7 +485,7 @@ class CompileSourceWindows:
             from openkb.agent.evidence_payload import project_evidence
             from openkb.source_pages import read_page_selection
 
-            raw = json.loads(data)
+            raw = self._source(path)
             if set(location) - {"pages", "offset"}:
                 raise PageResponseError("page_invalid_evidence", "Use this source's physical pages")
             if "pages" not in location:
@@ -407,7 +537,7 @@ class CompileSourceWindows:
                 range_complete=projected.get("continuation") is None and bool(projected["content"]),
                 coverage="complete" if projected["content"] == text else "partial",
             )
-        return result
+        return render_original_window(result, selected)
 
     def prepare(
         self, item: dict, previous_page: str | None = None, *, long: bool = False
@@ -491,8 +621,8 @@ class CompileSourceWindows:
             {
                 "type": "text",
                 "text": (
-                    "Current short-document original is supplied in full in the earlier "
-                    "document message. The windows below supplement it with linked sources.\n"
+                    "Current short-document original is supplied in full in its dedicated "
+                    "original message. The windows below supplement it with linked sources.\n"
                     if not long
                     else ""
                 )

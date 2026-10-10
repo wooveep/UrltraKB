@@ -389,7 +389,7 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
             kb=str(kb_dir),
             config={
                 "model": "gpt-4o",
-                "model_capacity": {"max_input_tokens": 1},
+                "model_capacity": {"max_input_tokens": 1100},
             },
         ),
     )

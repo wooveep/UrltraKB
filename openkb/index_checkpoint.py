@@ -68,23 +68,28 @@ def _navigation(nodes):
     ]
 
 
-def _identity(normalized, index_input, executor):
+def _identities(normalized, index_input, executor):
     policy = json.loads(normalized.fingerprint)
-    return hashlib.sha256(
-        json.dumps(
-            {
-                "source_revision": normalized.source_revision_id,
-                "input": HashRegistry.hash_file(index_input),
-                "policy": {
-                    key: policy.get(key)
-                    for key in ("index_model", "index_policy", "index_sdk", "index_endpoint")
-                },
-                "sdk": {name: version(name) for name in ("pageindex", "pageindex-condb")},
-                "connection": executor.bindings.public_identity() if executor else None,
-            },
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
+    payload = {
+        "source_revision": normalized.source_revision_id,
+        "input": HashRegistry.hash_file(index_input),
+        "policy": {
+            key: policy.get(key)
+            for key in ("index_model", "index_policy", "index_sdk", "index_endpoint")
+        },
+        "sdk": {name: version(name) for name in ("pageindex", "pageindex-condb")},
+        "connection": executor.bindings.public_identity() if executor else None,
+    }
+    identities = [hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()]
+    connection = payload["connection"]
+    # Earlier receipts omitted generation options. Only absent options have the
+    # same request meaning; every other policy and byte digest remains required.
+    if connection is not None and connection.get("role_generation") == {}:
+        payload["connection"] = {
+            key: value for key, value in connection.items() if key != "role_generation"
+        }
+        identities.append(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+    return tuple(identities)
 
 
 def reusable_index(kb_dir, admission, revision, normalized, index_input, working, build):
@@ -95,14 +100,14 @@ def reusable_index(kb_dir, admission, revision, normalized, index_input, working
     current = read_source(kb_dir, admission.source.source_id)
     if current.removed or current.target_revision_id != normalized.source_revision_id:
         raise ValueError("Index checkpoint source is no longer current")
-    identity = _identity(normalized, index_input, active_executor())
+    identities = _identities(normalized, index_input, active_executor())
     directory = checkpoint_root(kb_dir, current.source_id) / revision.unit_revision_id
     contained_paths(kb_dir, [directory])
     marker, data = directory / "checkpoint.json", directory / "data"
     if marker.exists():
         saved = IndexCheckpoint.model_validate_json(marker.read_text("utf-8"))
         if (
-            saved.identity != identity
+            saved.identity not in identities
             or saved.source_id != current.source_id
             or saved.source_revision_id != normalized.source_revision_id
             or saved.unit_revision_id != revision.unit_revision_id
@@ -157,7 +162,7 @@ def reusable_index(kb_dir, admission, revision, normalized, index_input, working
             source_id=current.source_id,
             source_revision_id=normalized.source_revision_id,
             unit_revision_id=revision.unit_revision_id,
-            identity=identity,
+            identity=identities[0],
             document_id=indexed.doc_id,
             description=indexed.description,
             tree=indexed.tree,

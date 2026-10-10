@@ -433,7 +433,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
             config={
                 "model": "gpt-4o",
                 **(
-                    {"model_capacity": {"max_input_tokens": 1, "tokenizer_model": "gpt-4o"}}
+                    {"model_capacity": {"max_input_tokens": 1100, "tokenizer_model": "gpt-4o"}}
                     if segmented
                     else {}
                 ),

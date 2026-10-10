@@ -17,7 +17,7 @@ def test_ordinary_retry_keeps_the_saved_processing_policy(kb_dir, tmp_path, pdf_
     first = import_document(kb_dir, path)
     apply_kb_config_patch(
         kb_dir,
-        KbConfigPatchRequest(kb=str(kb_dir), config={"model_capacity": {"max_input_tokens": 1}}),
+        KbConfigPatchRequest(kb=str(kb_dir), config={"model_capacity": {"max_input_tokens": 1100}}),
     )
     retried = import_document(kb_dir, path)
     assert retried.status == "skipped", retried.message

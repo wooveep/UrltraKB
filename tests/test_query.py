@@ -77,11 +77,11 @@ class TestRunQuery:
         assert "How does attention work?" in captured["message"]
 
 
-def test_query_strategy_mentions_entities():
+def test_query_strategy_mentions_entities(tmp_path):
     """Task 10: query agent must direct who/what questions to entities/."""
     from openkb.agent import query as query_mod
 
-    text = query_mod._QUERY_INSTRUCTIONS_TEMPLATE
+    text = query_mod.build_query_agent(str(tmp_path), "gpt-4o-mini").instructions
     assert "entities/" in text
 
 

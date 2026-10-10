@@ -186,10 +186,20 @@ def test_short_pdf_uses_only_known_execution_capacity(
         bundle=LlmCredentialBundle(api_key="fixture", base_url=endpoint),
         metadata=SourceMetadata(product="Capacity", applicable_versions=("1",), family="manual"),
     )
-    assert result.status == "added", result.message
-    source = read_document_source(kb_dir, result.source_id)
+    if status == "insufficient":
+        assert result.status == "failed"
+        assert "document_summary_capacity_exceeded" in result.message
+        source = read_document_source(kb_dir, result.source_id)
+        assert source["knowledge_revision_id"] is None
+        assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
+        assert result.model_usage["current"]["stages"].get("document-summary:1", 0) == 0
+        source = {**source, **source["target_processing"]}
+    else:
+        assert result.status == "added", result.message
+        source = read_document_source(kb_dir, result.source_id)
     assert (source["length_class"], source["execution_mode"]) == ("short", mode)
-    assert source["processing"]["capacity_status"] == status
+    processing = source.get("processing") or source["target_processing"]
+    assert processing["capacity_status"] == status
 
 
 def test_short_segmented_recompile_retains_decision_and_adapters(kb_dir, physical_pdf, pdf_model):
@@ -212,7 +222,7 @@ def test_short_segmented_recompile_retains_decision_and_adapters(kb_dir, physica
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
         ),
     )
     result = import_document(

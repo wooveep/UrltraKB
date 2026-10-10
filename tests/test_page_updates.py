@@ -5,6 +5,46 @@ import json
 import pytest
 
 
+def test_explicit_unchanged_result_keeps_the_captured_page():
+    from openkb.agent.page_updates import PageUpdate, UnchangedPage
+
+    original = "---\ntype: Concept\n---\n# Conditions\n\nOnly during winter.\n"
+    update = PageUpdate(original)
+    result = update.apply(
+        json.dumps(
+            {
+                "status": "unchanged",
+                "base_sha256": update.request()["base_sha256"],
+                "reason": "The supplied winter condition is already fully expressed.",
+            }
+        ),
+        current=original,
+    )
+    assert isinstance(result, UnchangedPage)
+    assert result.reason == "The supplied winter condition is already fully expressed."
+    assert result.base_sha256 == update.request()["base_sha256"]
+
+
+@pytest.mark.parametrize("bad", ["extra", "empty", "shape", "hash", "stale"])
+def test_unchanged_requires_a_valid_frozen_page_and_only_its_declared_fields(bad):
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "# Conditions\n\nOnly during winter.\n"
+    update = PageUpdate(original)
+    result = {"status": "unchanged", "base_sha256": update.digest, "reason": "Already covered."}
+    if bad == "extra":
+        result["edits"] = []
+    elif bad == "empty":
+        result["reason"] = "  "
+    elif bad == "shape":
+        result["reason"] = ["Already covered."]
+    elif bad == "hash":
+        result["base_sha256"] = "wrong"
+    with pytest.raises(PageResponseError):
+        update.apply(json.dumps(result), current="Human edit" if bad == "stale" else original)
+
+
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_patch_keeps_unedited_tables_fences_and_whitespace(newline):
     from openkb.agent.page_updates import PageUpdate

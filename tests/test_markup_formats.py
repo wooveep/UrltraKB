@@ -257,7 +257,7 @@ def test_markup_uses_frozen_blocks_and_original_anchors(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
         ),
     )
     path = tmp_path / f"small.{extension}"

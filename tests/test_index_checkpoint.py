@@ -9,6 +9,8 @@ pytest_plugins = ("block_fixtures",)
 
 @pytest.fixture
 def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch):
+    import litellm
+
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
@@ -18,17 +20,21 @@ def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch):
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
         ),
     )
     source = tmp_path / "gardening.md"
     source.write_text("hello gardeners\nPrune roses after flowering.")
 
-    async def no_capacity(*args, **kwargs):
-        raise ModelBudgetExceeded("compile plan exceeds the remaining task allowance")
+    original = litellm.acompletion
+
+    async def no_capacity(**kwargs):
+        if "Write independently readable knowledge" in str(kwargs["messages"]):
+            raise ModelBudgetExceeded("compile plan exceeds the remaining task allowance")
+        return await original(**kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr("openkb.agent.compiler.compile_long_doc", no_capacity)
+        patch.setattr("litellm.acompletion", no_capacity)
         with pytest.raises(ModelBudgetExceeded):
             import_document(kb_dir, source)
     admitted = list_sources(kb_dir)[0]
@@ -58,6 +64,67 @@ def test_complete_index_survives_rollback_and_is_reused_once(kb_dir, indexed_fai
     again = retry_source(kb_dir, source.source_id)
     assert again.status == "skipped"
     assert again.units[0].knowledge_revision_id == published
+
+
+@pytest.mark.parametrize("generation", [{}, {"compile": {"temperature": 0.2}}])
+def test_legacy_index_without_generation_options_remains_reusable(
+    kb_dir, indexed_failure, generation
+):
+    """A retained legacy receipt omits the newer, empty options field."""
+    import hashlib
+    from importlib.metadata import version
+
+    from openkb.application.execution import ExecutionContext
+    from openkb.application.source_retry import retry_source
+    from openkb.config import load_config, save_config
+    from openkb.ingest_records import UnitRevision
+    from openkb.locks import kb_ingest_lock
+    from openkb.normalization import normalization_id, read_normalization
+    from openkb.source_catalog import read_record
+    from openkb.unit_publication import list_source_units
+
+    source, requests = indexed_failure
+    unit = list_source_units(kb_dir, source.source_id)[0]
+    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
+    directory, saved = read_normalization(
+        kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
+    )
+    policy = json.loads(saved.fingerprint)
+    context = ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        connection = context.executor.bindings.public_identity()
+    connection.pop("role_generation")
+    assert saved.source_path is not None
+    input_path = (directory / saved.source_path).with_suffix(".okbi")
+    legacy = {
+        "source_revision": saved.source_revision_id,
+        "input": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "policy": {
+            key: policy[key]
+            for key in ("index_model", "index_policy", "index_sdk", "index_endpoint")
+        },
+        "sdk": {name: version(name) for name in ("pageindex", "pageindex-condb")},
+        "connection": connection,
+    }
+    marker_path = next((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    marker = json.loads(marker_path.read_text())
+    marker["identity"] = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+    marker_path.write_text(json.dumps(marker))
+    retained = marker_path.read_bytes()
+    with kb_ingest_lock(kb_dir / ".openkb"):
+        config_path = kb_dir / ".openkb/config.yaml"
+        save_config(config_path, {**load_config(config_path), "role_generation": generation})
+    context = ExecutionContext()
+    before = len(requests)
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        result = retry_source(kb_dir, source.source_id, context=context)
+    if generation:
+        assert result.status == "failed" and "identity changed" in result.message
+        assert len(requests) == before
+    else:
+        assert result.status == "added", result.message
+        assert not any("CONTENT BLOCK STRUCTURE" in request for request in requests[before:])
+    assert marker_path.read_bytes() == retained
 
 
 def test_unrelated_manual_page_does_not_invalidate_document_index(kb_dir, indexed_failure):

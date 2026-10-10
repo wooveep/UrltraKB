@@ -7,6 +7,20 @@ import pytest
 
 
 @pytest.fixture
+def wide_schema(kb_dir):
+    """A real large schema makes the first short request require segmentation.
+
+    Native locators need usable request capacity, so reader tests cannot force
+    this route with a one-token model limit.
+    """
+    from openkb.agent.compiler import get_agents_md
+
+    path = kb_dir / "wiki/AGENTS.md"
+    schema = get_agents_md(path.parent)
+    path.write_text(schema + "\n" + ("Retain original source coordinates and scope.\n" * 700))
+
+
+@pytest.fixture
 def block_model(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "fixture-key")
     requests = []

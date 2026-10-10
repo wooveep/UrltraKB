@@ -190,17 +190,24 @@ def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
 
 
 def project_evidence(
-    source: dict, *, offset: int = 0, budget: int = MAX_PAYLOAD_CHARS, fits=None
+    source: dict,
+    *,
+    offset: int = 0,
+    budget: int = MAX_PAYLOAD_CHARS,
+    fits=None,
+    allow_partial: bool = False,
+    layout=None,
 ) -> dict:
     """Paginate after serialization, at paragraph boundaries outside cell values.
 
-    An indivisible oversized cell/paragraph returns an explicit gap; it is never
-    silently shortened or represented as a complete value.
+    By default an indivisible oversized cell/paragraph returns an explicit gap.
+    Document-wide callers may opt into partial reads, with exact continuation
+    and incomplete value metadata. A cached layout avoids reparsing each batch.
     """
     text = source["content"]
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ValueError("Continuation is outside this evidence selection")
-    layout = markdown_layout(text) if offset else None
+    layout = layout or (markdown_layout(text) if offset else None)
     result = _window(source, offset, len(text), layout)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)
     if fits(result):
@@ -234,6 +241,19 @@ def project_evidence(
         else:
             high = middle - 1
     if best is None:
+        if allow_partial:
+            # Document-wide processing must consume indivisible paragraphs/cells too.
+            # _window clips native coordinates and marks partial cell values honestly.
+            low, high = offset + 1, len(text)
+            while low <= high:
+                middle = (low + high) // 2
+                candidate = _window(source, offset, middle, layout)
+                if fits(candidate):
+                    best, low = candidate, middle + 1
+                else:
+                    high = middle - 1
+            if best is not None:
+                return best
         return {
             "content": "",
             "coverage": "budget_exceeded",
@@ -244,3 +264,12 @@ def project_evidence(
             ],
         }
     return best
+
+
+def preceding_evidence(source: dict, offset: int, max_chars: int, *, layout=None) -> dict:
+    """Project preceding original context separately from the primary processed range."""
+    if type(offset) is not int or not 0 <= offset <= len(source["content"]) or max_chars <= 0:
+        raise ValueError("Invalid preceding original range")
+    context = _window(source, max(0, offset - max_chars), offset, layout)
+    context.pop("continuation", None)
+    return {**context, "primary": False}

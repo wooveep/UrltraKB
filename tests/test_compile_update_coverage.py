@@ -265,15 +265,20 @@ def test_no_current_long_window_keeps_existing_multisource_page(
     monkeypatch.setattr("litellm.completion", routed)
     monkeypatch.setattr("litellm.acompletion", asynchronous)
     result = import_document(kb_dir, physical_pdf)
-    if repair == "withdraw":
+    if repair in {"withdraw", "related"}:
         assert result.status == "added", result
         assert "compile_plan_update_withdrawn" in result.quality
     else:
         assert result.status == "failed", result
         assert "page_update_originals_unread" in result.quality
     assert (kb_dir / "wiki/concepts/orchard.md").read_bytes() == old
-    if repair != "withdraw":
+    if repair not in {"withdraw", "related"}:
         assert read_head(kb_dir) == head
+    if repair == "related":
+        assert (
+            "[[concepts/orchard]]"
+            in (kb_dir / "wiki/summaries" / f"{physical_pdf.stem}.md").read_text()
+        )
     assert len(planning) == 2
     assert not any("Update the concept page" in str(call) for call in calls)
 

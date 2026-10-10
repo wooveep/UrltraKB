@@ -87,6 +87,162 @@ def test_short_update_rereads_prior_originals(kb_dir, monkeypatch):
     assert "coverage" in str(update)
 
 
+@pytest.mark.parametrize("kind", ["concepts", "entities"])
+def test_unchanged_update_resolves_without_new_source_contribution(kb_dir, monkeypatch, kind):
+    import litellm
+
+    from openkb.application.documents import import_document
+    from openkb.application.removal import run_remove_for_api
+    from openkb.knowledge_evidence import page_evidence
+    from openkb.knowledge_scope import live_scope
+
+    original, duplicate = kb_dir / "old.txt", kb_dir / "new.txt"
+    original.write_text("River equipment requires supervision during winter.")
+    duplicate.write_text(
+        "River equipment requires supervision during winter. New setup is recorded."
+    )
+    item = {"name": "river-equipment", "type": "product"}
+    compile_boundary(monkeypatch, {kind: {"create": [item]}}, [])
+    assert import_document(kb_dir, original).status == "added"
+    page = kb_dir / f"wiki/{kind}/river-equipment.md"
+    before = page.read_bytes()
+    basis = page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")
+    requests = []
+    compile_boundary(
+        monkeypatch,
+        {
+            kind: {
+                "update": [{**item, "brief": "Check the winter supervision requirement."}],
+                "create": [{"name": "new-setup", "type": "other"}],
+            }
+        },
+        requests,
+    )
+    boundary = litellm.acompletion
+    update_requests = []
+
+    async def response(**kwargs):
+        for message in kwargs["messages"]:
+            content = message.get("content")
+            if isinstance(content, str) and content.startswith("Temporary editable page blocks:\n"):
+                update_requests.append(kwargs["messages"])
+                blocks = json.loads(content.split("\n", 1)[1].split("\n\n", 1)[0])
+                reply = {
+                    "status": "unchanged",
+                    "base_sha256": blocks["base_sha256"],
+                    "reason": "The winter requirement is already fully expressed.",
+                }
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
+                        )
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                )
+        return await boundary(**kwargs)
+
+    monkeypatch.setattr("litellm.acompletion", response)
+    result = import_document(kb_dir, duplicate)
+    assert result.status == "added", result
+    assert "page_update_unchanged" in result.quality
+    assert len(update_requests) == 1
+    assert "Check the winter supervision requirement." in str(update_requests)
+    assert page.read_bytes() == before
+    assert (kb_dir / f"wiki/{kind}/new-setup.md").exists()
+    retained = page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")
+    assert retained["source_revision_ids"] == basis["source_revision_ids"]
+    assert retained["refresh_reasons"] == basis["refresh_reasons"]
+    assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
+    assert page.read_bytes() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("long", [False, True])
+@pytest.mark.parametrize(
+    "kind,action", [(k, a) for k in ("concepts", "entities") for a in ("create", "update")]
+)
+async def test_page_transport_uses_originals_without_planning_history(
+    kb_dir, monkeypatch, long, kind, action
+):
+    from openkb.agent.compiler import compile_long_doc, compile_short_doc
+
+    wiki = kb_dir / "wiki"
+    original = "# Thermal controls\n\nOriginal fact: supervision is required below freezing.\n"
+    (wiki / "sources/prior.md").write_text("Prior condition: keep the safety interlock active.")
+    if action == "update":
+        (wiki / kind).mkdir(exist_ok=True)
+        (wiki / kind / "thermal-controls.md").write_text(
+            "---\nsources: [sources/prior.md]\n---\n# Thermal controls\n\n"
+            "Retained prior condition.\n"
+        )
+    suffix = "json" if long else "md"
+    source = wiki / f"sources/current.{suffix}"
+    source.write_text(
+        json.dumps([{"page": 1, "unit_kind": "page", "content": original}]) if long else original
+    )
+    summary = wiki / "summaries/current.md"
+    summary.write_text(f"---\nfull_text: sources/current.{suffix}\n---\nNavigation only.")
+    compile_boundary(
+        monkeypatch,
+        {
+            kind: {
+                action: [
+                    {
+                        "name": "thermal-controls",
+                        "title": "Thermal controls",
+                        "reading_locations": {"pages": "1"} if long else {},
+                        "type": "other",
+                    }
+                ]
+            }
+        },
+        [],
+        page_reply={"description": "Planning only", "content": "PLANNING_ONLY_INFERENCE"},
+    )
+    sends = []
+
+    async def response(**kwargs):
+        sends.append(kwargs["messages"])
+        raw = json.dumps({"description": "Thermal controls", "content": original})
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=patch_page_response(kwargs["messages"], raw)),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    monkeypatch.setattr("litellm.acompletion", response)
+    if long:
+        await compile_long_doc(
+            "current", summary, "current-id", kb_dir, "test-model", navigation=[]
+        )
+    else:
+        await compile_short_doc("current", source, kb_dir, "test-model")
+    page_sends = [
+        s
+        for s in sends
+        if any(
+            label in str(s)
+            for label in (
+                "Write the concept page",
+                "Update the concept page",
+                "Write the entity page",
+                "Update the entity page",
+            )
+        )
+    ]
+    assert len(page_sends) == 1
+    prompt = str(page_sends[0])
+    assert "PLANNING_ONLY_INFERENCE" not in prompt
+    assert "Original fact: supervision is required below freezing." in prompt
+    if action == "update":
+        assert "Prior condition: keep the safety interlock active." in prompt
+
+
 def test_content_only_entity_update_preserves_confirmed_type(kb_dir, monkeypatch):
     from openkb import frontmatter
     from openkb.application.documents import import_document
@@ -497,9 +653,51 @@ def test_long_import_reads_native_windows_without_requiring_suggestions(
     assert imported.status == "added", imported
     page = next(m for m in requests if "Write the concept page" in str(m))
     assert "Physical page three." in str(page)
-    assert "physical pages" in str(page)
+    assert '"unit_kind": "page"' in str(page)
     assert "coverage" in str(page)
     assert "sha256" in str(page)
+
+
+def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, monkeypatch):
+    from openpyxl import Workbook
+
+    from openkb.application.documents import import_document
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "设备清单"
+    sheet["A2"], sheet["C2"] = "泵甲", 17
+    sheet["A9"], sheet["C9"] = "泵乙", 23
+    sheet["F9"] = "=C9*2"
+    sheet.row_dimensions[9].hidden = True
+    sheet.merge_cells("A12:C12")
+    sheet["A12"] = "仅用于冬季"
+    source = kb_dir / "设备.xlsx"
+    book.save(source)
+    sends = []
+    compile_boundary(
+        monkeypatch, {"entities": {"create": [{"name": "pump", "type": "product"}]}}, sends
+    )
+    assert import_document(kb_dir, source).status == "added"
+    page = next(s for s in sends if "Write the entity page" in str(s))
+    original = next(
+        block["text"]
+        for m in page
+        if isinstance(m["content"], list)
+        for block in m["content"]
+        if block.get("text", "").startswith("Current original:")
+    )
+    payload = json.loads(original.split("\n", 1)[1])
+    rows = {r["row"]: r["cells"] for r in payload["worksheet_rows"]}
+    assert [c["coordinate"] for c in rows[2]] == ["A2", "C2"]
+    assert [c["coordinate"] for c in rows[9]] == ["A9", "C9", "F9"]
+    assert "泵甲" in str(rows[2]) and "泵乙" not in str(rows[2])
+    assert "泵乙" in str(rows[9]) and "泵甲" not in str(rows[9])
+    formula = rows[9][-1]["observations"][0]
+    assert formula["formula"] == "=C9*2"
+    assert formula["cache_status"] == "missing"
+    assert formula["hidden_row"] is True
+    assert len(rows) == 3
 
 
 def test_short_update_rereads_a_published_long_source(kb_dir, physical_pdf, pdf_model, monkeypatch):

@@ -1461,13 +1461,12 @@ class TestCacheControl:
             "assistant summary in plan call must carry a cache_control marker"
         )
 
-        # Step 3 (concept generation): BP1 + BP2 + new BP3 (known_targets msg).
+        # Page writing caches the explicit original and target list, without
+        # inheriting the summary response or its summary-writing task.
         assert captured_async_calls, "expected at least one async concept call"
         concept_call = captured_async_calls[0]
         assert self._has_cache_breakpoint(concept_call[1])
-        assert self._has_cache_breakpoint(concept_call[2])
-        # New: BP3 is the known_targets user message at index 3, sitting
-        # between summary_msg and the per-concept user prompt.
+        assert all(m["role"] != "assistant" for m in concept_call)
         assert concept_call[3]["role"] == "user"
         assert self._has_cache_breakpoint(concept_call[3]), (
             "known_targets message in concept call must carry a cache_control marker"
@@ -1486,7 +1485,11 @@ class TestCacheControl:
             encoding="utf-8",
         )
         sp = wiki / "summaries" / "big.md"
-        sp.write_text("PageIndex tree summary.", encoding="utf-8")
+        sp.write_text("---\nfull_text: sources/big.json\n---\nPageIndex tree summary.")
+        (wiki / "sources").mkdir()
+        (wiki / "sources/big.json").write_text(
+            json.dumps([{"page": 1, "content": "Original knowledge about caching."}])
+        )
         (tmp_path / ".openkb").mkdir()
 
         captured: list[list[dict]] = []
@@ -1496,17 +1499,18 @@ class TestCacheControl:
             captured.append(kwargs["messages"])
             mock_resp = MagicMock()
             mock_resp.choices = [MagicMock()]
-            # First call: overview (plain text); second: plan (JSON).
-            mock_resp.choices[0].message.content = (
-                "Overview text" if len(captured) == 1 else plan_response
-            )
+            mock_resp.choices[0].message.content = plan_response
             mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp
 
         with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
-            mock_litellm.acompletion = AsyncMock()
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=_mock_acompletion(
+                    [json.dumps({"description": "Caching", "content": "# Caching knowledge"})]
+                )
+            )
             await compile_long_doc(
                 "big",
                 sp,
@@ -1515,9 +1519,11 @@ class TestCacheControl:
                 "anthropic/claude-sonnet-4-5",
             )
 
-        overview_call = captured[0]
-        assert overview_call[1]["role"] == "user"
-        assert self._has_cache_breakpoint(overview_call[1])
+        plan_call = captured[0]
+        assert plan_call[1]["role"] == "user"
+        assert "Generated navigation" in plan_call[1]["content"]
+        assert self._has_cache_breakpoint(plan_call[2])
+        assert len(captured) == 1
 
 
 class TestCompileLongDoc:
@@ -1532,13 +1538,21 @@ class TestCompileLongDoc:
         )
         summary_path = wiki / "summaries" / "big-doc.md"
         summary_path.write_text("# Big Doc\n\nPageIndex summary tree.", encoding="utf-8")
+        (wiki / "sources").mkdir()
+        (wiki / "sources/big-doc.json").write_text(
+            json.dumps(
+                [{"page": 1, "unit_kind": "page", "content": "Deep Learning: a subfield of ML."}]
+            )
+        )
         openkb_dir = tmp_path / ".openkb"
         openkb_dir.mkdir()
         (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
         (tmp_path / "raw").mkdir()
         (tmp_path / "raw" / "big-doc.pdf").write_bytes(b"fake")
 
-        overview_response = "Overview of the big document."
+        summary_response = json.dumps(
+            {"description": "Deep learning", "content": "# Deep Learning\n\nA subfield of ML."}
+        )
         concepts_list_response = json.dumps(
             {
                 "create": [{"name": "deep-learning", "title": "Deep Learning"}],
@@ -1555,10 +1569,10 @@ class TestCompileLongDoc:
 
         with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([overview_response, concepts_list_response])
+                side_effect=_mock_completion([concepts_list_response])
             )
             mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_acompletion([concept_page_response])
+                side_effect=_mock_acompletion([summary_response, concept_page_response])
             )
             await compile_long_doc("big-doc", summary_path, "doc-123", tmp_path, "gpt-4o-mini")
 
