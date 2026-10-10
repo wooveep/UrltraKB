@@ -2440,6 +2440,11 @@ async def compile_long_doc(
         planning = navigation_text[:MAX_DOCUMENT_PLANNING_CHARS]
         if len(navigation_text) > len(planning):
             planning += "\nNavigation is a partial prefix; read originals for unrepresented topics."
+        overview = draft.planning_overview[:MAX_DOCUMENT_PLANNING_CHARS]
+        if len(draft.planning_overview) > len(overview):
+            overview += (
+                "\nDescriptions are a partial prefix; the document knowledge covers all batches."
+            )
         doc_msg = {
             "role": "user",
             "content": (
@@ -2453,7 +2458,7 @@ async def compile_long_doc(
             model,
             system_msg,
             doc_msg,
-            draft.planning_overview[:MAX_DOCUMENT_PLANNING_CHARS],
+            overview,
             doc_name,
             max_concurrency,
             doc_brief=draft.description or doc_description,

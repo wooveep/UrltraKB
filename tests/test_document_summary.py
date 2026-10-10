@@ -81,7 +81,7 @@ async def test_one_oversized_unit_reads_its_tail_with_native_continuation(
     from openkb.agent.compiler import compile_long_doc
 
     wiki = kb_dir / "wiki"
-    text = "前置条件 " + "连续的长段落记录；" * 160 + "末尾例外：只有安全联锁启用才允许操作。"
+    text = "前置条件 " + "连续的长段落记录；" * 5000 + "末尾例外：只有安全联锁启用才允许操作。"
     suffix = "json" if source_kind == "pages" else "md"
     (wiki / f"sources/manual.{suffix}").write_text(
         json.dumps([{"page": 1, "unit_kind": "page", "content": text}], ensure_ascii=False)
@@ -90,7 +90,6 @@ async def test_one_oversized_unit_reads_its_tail_with_native_continuation(
     )
     summary = wiki / "summaries/manual.md"
     summary.write_text(f"---\nfull_text: sources/manual.{suffix}\n---\nNavigation.")
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 700)
     ranges = []
 
     def response(**kwargs):
@@ -144,12 +143,11 @@ async def test_summary_admission_rejects_all_batches_before_first_send(
     from openkb.agent.compiler import compile_long_doc
     from openkb.llm_execution import ModelBudgetExceeded
 
-    text = "Recorded operating conditions.\n\n" * 90
+    text = "Recorded operating conditions.\n\n" * 1200
     (kb_dir / "wiki/sources/large.md").write_text(text)
     summary = kb_dir / "wiki/summaries/large.md"
     summary.write_text("---\nfull_text: sources/large.md\n---\nPrevious successful knowledge.")
     before = summary.read_bytes()
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 700)
     executor = executor_for(model_service, max_calls=2, retries=0)
     with executor.activate(), pytest.raises(ModelBudgetExceeded, match="compile"):
         await compile_long_doc("large", summary, "large-id", kb_dir, "test-model", navigation=[])
@@ -224,7 +222,7 @@ def test_failed_middle_summary_batch_keeps_the_published_knowledge_and_index(kb_
     source.write_text(
         json.dumps(
             [
-                {"page": i, "unit_kind": "page", "content": "Detailed original conditions. " * 25}
+                {"page": i, "unit_kind": "page", "content": "Detailed original conditions. " * 900}
                 for i in range(1, 4)
             ]
         )
@@ -237,7 +235,6 @@ def test_failed_middle_summary_batch_keeps_the_published_knowledge_and_index(kb_
         for p in (kb_dir / ".openkb").rglob("*large-id*")
         if p.is_file()
     }
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 700)
     sends = []
 
     async def unavailable_after_first(**kwargs):
@@ -268,8 +265,9 @@ def test_failed_middle_summary_batch_keeps_the_published_knowledge_and_index(kb_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("damaged", ['{"text": 42}', "[]", "null", "42", '"text"'])
 async def test_corrupt_rich_original_never_falls_back_to_navigation_or_markdown(
-    kb_dir, monkeypatch
+    kb_dir, monkeypatch, damaged
 ):
     from openkb.agent.compiler import compile_long_doc
     from openkb.compilation_report import CompilationIncomplete
@@ -277,7 +275,7 @@ async def test_corrupt_rich_original_never_falls_back_to_navigation_or_markdown(
     summary = kb_dir / "wiki/summaries/manual.md"
     summary.write_text("---\nfull_text: sources/manual.md\n---\nPrevious knowledge.")
     before = summary.read_bytes()
-    (kb_dir / "wiki/sources/manual.content.json").write_text('{"text": 42}')
+    (kb_dir / "wiki/sources/manual.content.json").write_text(damaged)
     (kb_dir / "wiki/sources/manual.md").write_text("A plausible original cannot hide map damage.")
 
     async def forbidden(**kwargs):
@@ -287,3 +285,41 @@ async def test_corrupt_rich_original_never_falls_back_to_navigation_or_markdown(
     with pytest.raises(CompilationIncomplete, match="document_summary_reader_invalid"):
         await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=[])
     assert summary.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_planner_knows_when_document_descriptions_are_a_partial_prefix(kb_dir, monkeypatch):
+    from openkb.agent.compiler import compile_long_doc
+
+    wiki = kb_dir / "wiki"
+    text = "Operating conditions must be inspected before dispatch.\n\n" * 1200
+    (wiki / "sources/manual.md").write_text(text)
+    summary = wiki / "summaries/manual.md"
+    summary.write_text("---\nfull_text: sources/manual.md\n---\nNavigation.")
+    requests, bodies = [], []
+
+    def response(**kwargs):
+        requests.append(kwargs["messages"])
+        if "Based on the summary above" in str(kwargs["messages"]):
+            result = {}
+        else:
+            bodies.append(f"# Batch {len(bodies) + 1}\n\nOriginal operating conditions retained.")
+            result = {"description": "Inspection conditions. " * 400, "content": bodies[-1]}
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    monkeypatch.setattr("litellm.completion", response)
+    await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=[])
+    plan = next(messages for messages in requests if "Based on the summary above" in str(messages))
+    assert "Descriptions are a partial prefix" in str(plan)
+    assert all(body in summary.read_text() for body in bodies)

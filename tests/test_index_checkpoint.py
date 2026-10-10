@@ -158,6 +158,42 @@ def test_corrupt_completed_index_is_not_reused_or_silently_rebuilt(kb_dir, index
     assert len(requests) == before
 
 
+@pytest.mark.parametrize("dirty", [False, True])
+def test_reading_a_sealed_checkpoint_does_not_make_it_unusable(kb_dir, indexed_failure, dirty):
+    import sqlite3
+
+    from openkb.application.source_retry import retry_source
+    from openkb.index_location import IndexLocation
+    from openkb.state import HashRegistry
+
+    source, requests = indexed_failure
+    marker_path = next((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    retained = marker_path.read_bytes()
+    marker = json.loads(retained)
+    location = IndexLocation.package(marker_path.parent / "data/index")
+    digest = HashRegistry.hash_file(location.database)
+    with sqlite3.connect(location.database.as_uri() + "?mode=ro", uri=True) as connection:
+        assert connection.execute(
+            "SELECT doc_id FROM okb_documents WHERE doc_id=?", (marker["document_id"],)
+        ).fetchone()
+    connection.close()
+    wal = location.database.with_name(location.database.name + "-wal")
+    assert wal.is_file() and wal.stat().st_size == 0
+    assert HashRegistry.hash_file(location.database) == digest
+    if dirty:
+        wal.write_bytes(b"Uncheckpointed writes must not be ignored")
+    before = len(requests)
+    result = retry_source(kb_dir, source.source_id)
+    if dirty:
+        assert result.status == "failed"
+        assert len(requests) == before
+    else:
+        assert result.status == "added", result.message
+        assert not any("CONTENT BLOCK STRUCTURE" in request for request in requests[before:])
+    assert HashRegistry.hash_file(location.database) == digest
+    assert marker_path.read_bytes() == retained
+
+
 def test_withdrawn_source_cannot_restore_an_index_checkpoint(kb_dir, indexed_failure):
     from openkb.application.removal import preview_removal, remove_document
     from openkb.application.source_retry import retry_source

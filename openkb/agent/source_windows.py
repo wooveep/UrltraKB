@@ -243,9 +243,10 @@ class CompileSourceWindows:
     def _source(self, path: str):
         if path not in self._parsed:
             data = self._read(path)
-            self._parsed[path] = (
-                json.loads(data) if path.endswith(".json") else data.decode("utf-8")
-            )
+            raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
+            if path.endswith(".content.json") and not isinstance(raw, dict):
+                raise ValueError("Native text source requires a JSON object")
+            self._parsed[path] = raw
         return self._parsed[path]
 
     @property
@@ -355,11 +356,14 @@ class CompileSourceWindows:
                 continue
             seen.add(path)
             if path.startswith("sources/") and path.endswith((".md", ".json")):
-                # Retain the richer native map where one exists.
-                mapped = path.removesuffix(".md") + ".content.json"
-                sources.append(
-                    mapped if path.endswith(".md") and (self.wiki / mapped).is_file() else path
+                # A normalization and its native map represent one original.
+                name = (
+                    path.removeprefix("sources/")
+                    .removesuffix(".content.json")
+                    .removesuffix(".json")
+                    .removesuffix(".md")
                 )
+                sources.append(self._path(name) or path)
                 continue
             metadata = frontmatter.parse(self._read(path).decode("utf-8"))
             links = metadata.get("sources", [])
@@ -372,9 +376,10 @@ class CompileSourceWindows:
                 pending.append(pointer)
         return sorted(set(sources))
 
-    def _path(self) -> str | None:
+    def _path(self, doc_name: str | None = None) -> str | None:
+        name = self.doc_name if doc_name is None else doc_name
         for suffix in (".content.json", ".json", ".md"):
-            path = f"sources/{self.doc_name}{suffix}"
+            path = f"sources/{name}{suffix}"
             if (self.wiki / path).is_file():
                 return path
         return None
@@ -553,6 +558,8 @@ class CompileSourceWindows:
             paths[path] = self._locations(item)
         if previous_page and (self.wiki / previous_page).is_file():
             for path in self._originals(previous_page):
+                if not long and path == self._path():
+                    continue  # The dedicated short-original message already contains it in full.
                 location = {}
                 if path.endswith(".json") and not path.endswith(".content.json") and self.kb_dir:
                     from openkb.source_navigation import published_navigation

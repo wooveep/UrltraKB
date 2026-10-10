@@ -113,7 +113,17 @@ def reusable_index(kb_dir, admission, revision, normalized, index_input, working
             or saved.unit_revision_id != revision.unit_revision_id
         ):
             raise ValueError("Index checkpoint input or processing identity changed")
-        if wiki_versions(kb_dir, data) != saved.files:
+        files = wiki_versions(kb_dir, data)
+        # SQLite readers can leave an empty WAL and a shared-memory cache beside
+        # a sealed database. They contain no published index content. Dirty WALs
+        # remain invalid, and every file in the saved manifest is still checked.
+        wal = data / "index/context.sqlite-wal"
+        if wal.is_file() and wal.stat().st_size:
+            raise ValueError("Index checkpoint has uncheckpointed database writes")
+        for name in ("index/context.sqlite-wal", "index/context.sqlite-shm"):
+            if name not in saved.files:
+                files.pop(name, None)
+        if files != saved.files:
             raise ValueError("Index checkpoint is damaged or incomplete")
         if _navigation(_validate_index(data / "index", saved.document_id)) != _navigation(
             saved.tree["structure"]

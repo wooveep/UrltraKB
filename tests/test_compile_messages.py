@@ -98,6 +98,60 @@ def test_partial_csv_page_input_does_not_refill_an_unread_value(kb_dir, monkeypa
     assert "RotorBeta" not in window_message
 
 
+@pytest.mark.parametrize("native", ["pages", "text"])
+def test_short_page_reads_each_current_original_only_once(kb_dir, monkeypatch, native):
+    import hashlib
+
+    from openkb.agent.compiler import compile_short_doc
+    from openkb.text_measurement import measure_markdown
+    from openkb.text_source import FrozenText, TextOrigin
+
+    wiki = kb_dir / "wiki"
+    text = "Model Alder needs supervision during winter."
+    source = wiki / "sources/current.md"
+    source.write_text(text)
+    rich = wiki / ("sources/current.json" if native == "pages" else "sources/current.content.json")
+    rich.write_text(
+        json.dumps([{"page": 1, "unit_kind": "page", "content": text}])
+        if native == "pages"
+        else FrozenText(
+            text=text,
+            original_characters=len(text),
+            original_digest=hashlib.sha256(source.read_bytes()).hexdigest(),
+            origins=(TextOrigin(normalized_span=(0, len(text)), original_span=(0, len(text))),),
+            assets={},
+            tokens=measure_markdown(text),
+        ).model_dump_json()
+    )
+    (wiki / "sources/prior.md").write_text("Model Birch requires a summer inspection.")
+    (wiki / "concepts/inspection.md").write_text(
+        "---\ntype: Concept\ndescription: Inspection\nsources: "
+        "[sources/current.md, " + str(rich.relative_to(wiki)) + ", sources/prior.md]\n---\n"
+        "# Inspection\n\nExisting inspection conditions."
+    )
+    requests = []
+    compile_boundary(monkeypatch, {"concepts": {"update": [{"name": "inspection"}]}}, requests)
+    asyncio.run(compile_short_doc("current", source, kb_dir, "test-model"))
+    page = next(r for r in requests if "Update the concept page" in str(r))
+    original = original_payload(page, "Current original:")
+    assert original["path"] == str(rich.relative_to(wiki))
+    contexts = next(
+        block["text"]
+        for message in page
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if "Original source windows (bounded, frozen):\n" in block.get("text", "")
+    )
+    windows = json.loads(
+        contexts.split("Original source windows (bounded, frozen):\n", 1)[1].split(
+            "\nPrior page basis", 1
+        )[0]
+    )
+    assert [w["path"] for w in windows] == ["sources/prior.md"]
+    assert windows[0]["source_role"] == "prior_linked_source"
+    assert "Model Birch" in windows[0]["content"]
+
+
 @pytest.mark.parametrize("stage", ["summary", "concept", "entity"])
 def test_unchanged_cannot_replace_new_knowledge_pages(kb_dir, monkeypatch, stage):
     from types import SimpleNamespace
