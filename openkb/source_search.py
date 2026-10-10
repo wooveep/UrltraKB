@@ -41,7 +41,7 @@ def original_units(raw: list[dict] | dict | str) -> Iterator[tuple[dict, str]]:
 
 
 class SourceSearch:
-    """Build the original-unit token index once, then reuse it across proposals."""
+    """Index original units once for both topic and arbitrary literal matching."""
 
     def __init__(self, raw: list[dict] | dict | str) -> None:
         self.raw = raw
@@ -56,9 +56,12 @@ class SourceSearch:
             for location, text in original_units(raw)
         )
         self.by_token: dict[str, set[int]] = {}
+        self.by_character: dict[str, set[int]] = {}
         for ordinal, unit in enumerate(self.units):
             for token in unit.tokens:
                 self.by_token.setdefault(token, set()).add(ordinal)
+            for character in set(unit.key):
+                self.by_character.setdefault(character, set()).add(ordinal)
 
 
 def search_units(
@@ -70,6 +73,12 @@ def search_units(
     candidates: set[int] = set()
     for token in tokens:
         candidates.update(index.by_token.get(token, ()))
+    # Literal search includes short fields, all scripts and substrings within words.
+    # A phrase's least common character gives a safe indexed candidate superset.
+    for phrase in phrases:
+        character_hits: list[set[int]] = [index.by_character.get(c, set()) for c in set(phrase)]
+        literal_hits: set[int] = min(character_hits, key=len)
+        candidates.update(literal_hits)
     ranked = []
     for ordinal in candidates:
         unit = index.units[ordinal]

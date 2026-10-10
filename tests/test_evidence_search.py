@@ -15,3 +15,18 @@ async def test_original_search_finds_compute_rule_before_external_ntp_rule(kb_di
     )
     assert result["hits"][0]["pages"] == "54"
     assert result["coverage"] == "search_hits_not_exhaustive"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("term", ["x", "Ω", "Настройки", "タイムアウト"])
+async def test_original_search_preserves_literal_matching_in_all_scripts(kb_dir, term):
+    (kb_dir / "wiki/sources/manual.json").write_text(
+        json.dumps(
+            [
+                {"page": 1, "unit_kind": "page", "content": "Unrelated setup."},
+                {"page": 2, "unit_kind": "page", "content": f"{term}: 10"},
+            ]
+        )
+    )
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=[term]))
+    assert result["hits"][0]["pages"] == "2"
