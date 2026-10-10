@@ -171,28 +171,11 @@ Return ONLY valid JSON, no fences.
 _CONCEPT_UPDATE_USER = """\
 Update the concept page for: {title}
 
-Current content of this page:
-{existing_content}
-
-New information from document "{doc_name}" (summarized above) should be \
-integrated into this page. Rewrite the full page incorporating the new \
-information naturally — do not just append. Reconsider old generated claims
-against the originals provided for this update. Retain supported statements
-with their separate source conditions; correct demonstrably unsupported content within
-the supplied ranges. Missing windows do not contradict old facts. Preserve supported
-content outside the covered scope without claiming it was reverified. Related
-links are navigation and do not establish effects or invariant properties.
-
-For [[wikilinks]] in the rewrite, follow the whitelist rules from the \
-message above: keep links whose target is in the whitelist, convert any \
-existing links whose target is NOT in the whitelist to plain text, and do \
-not invent new wikilink targets.
-
-Return a JSON object with two keys:
-- "description": A single sentence (under 100 chars) defining this concept (may differ from before)
-- "content": The rewritten full concept page in Markdown
-
-Return ONLY valid JSON, no fences.
+Integrate the new information from document "{doc_name}" using the temporary
+editable blocks below. Preserve supported content and separate source conditions
+outside the supplied original contexts. Correct demonstrably unsupported content
+within the covered scope. Missing windows do not contradict old facts.
+Return the block-edit JSON described below; navigation is assembled by code.
 """
 
 _ENTITY_PAGE_USER = """\
@@ -216,27 +199,14 @@ Return ONLY valid JSON, no fences.
 
 _ENTITY_UPDATE_USER = """\
 Update the entity page for: {title}
-The plan proposes type "{type}". Confirm the type from original object descriptions;
-use "other" when a supported type is not established.
 
-Current content of this page:
-{existing_content}
-
-Integrate the new facts about this entity from document "{doc_name}"
-(summarized above). Rewrite the full page — do not just append. Reconsider old
-generated claims against the supplied originals, retain separate conditions
-and correct unsupported content only within the supplied source scope. Unread old
-material is not counterevidence; preserve its conditions and pending refresh status.
-Related links establish no effects or invariant
-properties. Follow the whitelist rules from the message
-above for all [[wikilinks]].
-
-Return a JSON object with three keys:
-- "description": A single sentence (under 100 chars) identifying this entity
-- "type": one of __ENTITY_TYPES__
-- "content": The rewritten full entity page in Markdown
-
-Return ONLY valid JSON, no fences.
+Integrate new facts from document "{doc_name}" using the temporary editable
+blocks below. The plan proposes type "{type}"; confirm it against original
+object descriptions and use "other" when a supported type is not established.
+Retain separate source conditions and unread material. Correct unsupported
+content only within the supplied original scope. Return the block-edit JSON
+described below; source-supported relationships remain prose and navigation
+is assembled by code.
 """
 
 # NOTE: the prompt templates intentionally KEEP the literal ``__ENTITY_TYPES__``
@@ -490,7 +460,15 @@ async def _llm_call_async(
 
 
 async def _llm_call_page_async(
-    model: str, messages: list[dict], step_name: str, *, bundle=None, evidence=None, **kwargs
+    model: str,
+    messages: list[dict],
+    step_name: str,
+    *,
+    bundle=None,
+    evidence=None,
+    page_update=None,
+    read_current=None,
+    **kwargs,
 ) -> str:
     """Validate each page and repair only that response, at most once."""
     from openkb.agent.page_response import PageResponseError
@@ -506,6 +484,8 @@ async def _llm_call_page_async(
                 bundle=bundle,
                 **kwargs,
             )
+            if page_update is not None:
+                raw = json.dumps(page_update.apply(raw, current=read_current()), ensure_ascii=False)
             _, content, _ = _page_fields(raw)
             if evidence is not None:
                 evidence.validate(content)
@@ -514,6 +494,8 @@ async def _llm_call_page_async(
             return raw
         except (PageResponseError, TruncatedResponseError) as error:
             code = getattr(error, "code", "page_truncated_response")
+            if code == "page_update_stale":
+                raise
             if attempt:
                 report_compile_issue(code)
                 raise ValueError(f"{step_name}: {error}") from error
@@ -522,9 +504,14 @@ async def _llm_call_page_async(
                     "role": "user",
                     "content": (
                         f"The page response failed validation ({code}): {error}. "
-                        "Return exactly one JSON object with string description and nonempty content. "
-                        "Do not append a second object or note. Keep supported source facts only. "
-                        "If truncated, shorten the page while retaining complete statements."
+                        + (
+                            "Return one block-edit object using the temporary anchors and base_sha256. "
+                            if page_update
+                            else "Return exactly one JSON object with string description and nonempty content. "
+                        )
+                        + "Do not append a second object or note. Keep supported source facts only. "
+                        "If truncated, retain all necessary new information in complete edits "
+                        "or statements."
                     ),
                 }
             ]
@@ -1010,7 +997,14 @@ _parse_yaml_list_value = frontmatter.parse_list_value
 
 
 def _write_concept(
-    wiki_dir: Path, name: str, content: str, source_file: str, is_update: bool, brief: str = ""
+    wiki_dir: Path,
+    name: str,
+    content: str,
+    source_file: str,
+    is_update: bool,
+    brief: str = "",
+    *,
+    preserve_body: bool = False,
 ) -> None:
     """Write or update a concept page, managing the sources frontmatter."""
     check_model_stop()
@@ -1023,17 +1017,17 @@ def _write_concept(
         return
 
     if is_update and path.exists():
-        existing = path.read_text(encoding="utf-8")
+        existing = path.read_bytes().decode("utf-8")
         if source_file not in existing:
             existing = _prepend_source_to_frontmatter(existing, source_file)
         # Strip frontmatter from LLM content to avoid duplicate blocks
-        clean_parts = frontmatter.split(content)
+        clean_parts = None if preserve_body else frontmatter.split(content)
         clean = clean_parts[1].lstrip("\n") if clean_parts is not None else content
         # Replace body with LLM rewrite (prompt asks for full rewrite, not delta)
         ex_parts = frontmatter.split(existing)
         if ex_parts is not None:
             fm_block, _ = ex_parts
-            existing = fm_block + "\n" + clean
+            existing = fm_block + ("" if preserve_body else "\n") + clean
         else:
             # Malformed/absent frontmatter (opening ``---`` with no closing
             # delimiter, or no frontmatter at all): rebuild valid frontmatter
@@ -1090,6 +1084,8 @@ def _write_entity(
     brief: str = "",
     type_: str = "other",
     aliases: list[str] | None = None,
+    *,
+    preserve_body: bool = False,
 ) -> None:
     """Write or update an entity page in entities/, managing frontmatter.
 
@@ -1108,7 +1104,7 @@ def _write_entity(
         return
 
     # Strip any frontmatter the LLM body may carry.
-    clean_parts = frontmatter.split(content)
+    clean_parts = None if preserve_body else frontmatter.split(content)
     clean = clean_parts[1].lstrip("\n") if clean_parts is not None else content
 
     def _build_entity_frontmatter(sources: list[str]) -> str:
@@ -1121,7 +1117,7 @@ def _write_entity(
         return "---\n" + "\n".join(fm_lines) + "\n---\n\n"
 
     if is_update and path.exists():
-        existing = path.read_text(encoding="utf-8")
+        existing = path.read_bytes().decode("utf-8")
         if source_file not in existing:
             existing = _prepend_source_to_frontmatter(existing, source_file)
         ex_parts = frontmatter.split(existing)
@@ -1132,7 +1128,7 @@ def _write_entity(
             # Drop any legacy ``brief:`` key (migrated to ``description:``),
             # mirroring _write_concept's update path.
             fm_block = frontmatter.drop_line(fm_block, "brief")
-            existing = fm_block + "\n" + clean
+            existing = fm_block + ("" if preserve_body else "\n") + clean
         else:
             # Malformed/absent frontmatter (opening ``---`` with no closing
             # delimiter, or no frontmatter at all): rebuild valid frontmatter
@@ -1317,7 +1313,7 @@ def _backlink_pages(
         path = pages_dir / f"{slug}.md"
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8")
+        text = path.read_bytes().decode("utf-8")
         if link in text:
             continue
         lines = text.split("\n")
@@ -1398,7 +1394,7 @@ def _remove_doc_from_pages(
     deleted: list[str] = []
 
     for path in sorted(pages_dir.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
+        text = path.read_bytes().decode("utf-8")
         # Cheap filter: skip pages that don't reference the doc at all.
         if source_file not in text and bare_source not in text:
             continue
@@ -1808,15 +1804,18 @@ async def _compile_concepts(
         return name, content, False, brief
 
     async def _gen_update(concept: dict) -> tuple[str, str, bool, str]:
+        from openkb.agent.page_updates import PageUpdate
+
         name = concept["name"]
         title = concept.get("title", name)
         concept_path = wiki_dir / "concepts" / f"{_sanitize_concept_name(name)}.md"
         if concept_path.exists():
-            raw_text = concept_path.read_text(encoding="utf-8")
+            raw_text = concept_path.read_bytes().decode("utf-8")
             ex_parts = frontmatter.split(raw_text)
-            existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
+            existing_content = ex_parts[1] if ex_parts is not None else raw_text
         else:
-            existing_content = "(page not found — create from scratch)"
+            raise FileNotFoundError("Existing page disappeared before update")
+        patch = PageUpdate(raw_text, known_targets=known_targets)
         originals = source_windows.prepare(
             concept, f"concepts/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
@@ -1830,6 +1829,7 @@ async def _compile_concepts(
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
                     originals.message,
+                    patch.message(),
                     {
                         "role": "user",
                         "content": _CONCEPT_UPDATE_USER.format(
@@ -1842,6 +1842,8 @@ async def _compile_concepts(
                 f"update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                page_update=patch,
+                read_current=lambda: concept_path.read_bytes().decode("utf-8"),
             )
         brief, content, _ = _page_fields(raw)
         _require_nonempty_content(content, name)
@@ -1883,16 +1885,19 @@ async def _compile_concepts(
         return name, content, brief, etype_out
 
     async def _gen_entity_update(ent: dict) -> tuple[str, str, str, str]:
+        from openkb.agent.page_updates import PageUpdate
+
         name = ent["name"]
         title = ent.get("title", name)
         etype = ent.get("type", "other")
         epath = wiki_dir / "entities" / f"{_sanitize_concept_name(name)}.md"
         if epath.exists():
-            raw_text = epath.read_text(encoding="utf-8")
+            raw_text = epath.read_bytes().decode("utf-8")
             ex_parts = frontmatter.split(raw_text)
-            existing_content = ex_parts[1].strip() if ex_parts is not None else raw_text
+            existing_content = ex_parts[1] if ex_parts is not None else raw_text
         else:
-            existing_content = "(page not found — create from scratch)"
+            raise FileNotFoundError("Existing page disappeared before update")
+        patch = PageUpdate(raw_text, known_targets=known_targets)
         originals = source_windows.prepare(
             ent, f"entities/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
         )
@@ -1906,6 +1911,7 @@ async def _compile_concepts(
                     summary_msg,  # cached (BP2)
                     known_targets_msg,  # cached (BP3) — whitelist
                     originals.message,
+                    patch.message(),
                     {
                         "role": "user",
                         "content": _ENTITY_UPDATE_USER.format(
@@ -1919,6 +1925,8 @@ async def _compile_concepts(
                 f"entity-update: {name}",
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
+                page_update=patch,
+                read_current=lambda: epath.read_bytes().decode("utf-8"),
             )
         brief, content, obj = _page_fields(raw)
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
@@ -2019,7 +2027,11 @@ async def _compile_concepts(
 
     # Strip ghost wikilinks from entity bodies and write each page.
     for name, page_content, brief, etype in entity_pending:
-        cleaned, ghosts = strip_ghost_wikilinks(page_content, known_targets)
+        safe = _sanitize_concept_name(name)
+        is_update = (wiki_dir / "entities" / f"{safe}.md").exists()
+        cleaned, ghosts = (
+            (page_content, []) if is_update else strip_ghost_wikilinks(page_content, known_targets)
+        )
         if ghosts:
             logger.info(
                 "stripped %d ghost wikilink(s) from entity %s: %s",
@@ -2027,9 +2039,16 @@ async def _compile_concepts(
                 name,
                 ghosts[:5],
             )
-        safe = _sanitize_concept_name(name)
-        is_update = (wiki_dir / "entities" / f"{safe}.md").exists()
-        _write_entity(wiki_dir, name, cleaned, source_file, is_update, brief=brief, type_=etype)
+        _write_entity(
+            wiki_dir,
+            name,
+            cleaned,
+            source_file,
+            is_update,
+            brief=brief,
+            type_=etype,
+            preserve_body=is_update,
+        )
         entity_names.append(safe)
         entity_meta[safe] = (etype, brief)
 
@@ -2037,7 +2056,9 @@ async def _compile_concepts(
     # whitelist includes existing files + this round's planned slugs +
     # the summary for this document.
     for i, (name, page_content, is_update, brief) in enumerate(pending_writes):
-        cleaned, ghosts = strip_ghost_wikilinks(page_content, known_targets)
+        cleaned, ghosts = (
+            (page_content, []) if is_update else strip_ghost_wikilinks(page_content, known_targets)
+        )
         if ghosts:
             logger.info(
                 "stripped %d ghost wikilink(s) from concept %s: %s",
@@ -2061,6 +2082,7 @@ async def _compile_concepts(
             source_file,
             is_update,
             brief=brief,
+            preserve_body=is_update,
         )
 
     # --- Step 3b: Process related items (code only, no LLM) ---

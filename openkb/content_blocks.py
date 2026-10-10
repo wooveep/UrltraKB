@@ -38,8 +38,8 @@ class ContentBlock(Record):
         return self
 
 
-def split_blocks(text: str) -> tuple[ContentBlock, ...]:
-    """Pack natural Markdown blocks, cutting oversized blocks only at grapheme ends."""
+def markdown_layout(text: str) -> tuple[list[Token], list[int]]:
+    """CommonMark tokens with line offsets in the unchanged original text."""
     # CommonMark's line maps recognize CR/LF, not Python's broader splitlines
     # set (NEL, U+2028, U+2029, vertical tab). Keep offsets in the original bytes'
     # decoded code-point sequence even when CRLF normalizes inside the parser.
@@ -48,6 +48,12 @@ def split_blocks(text: str) -> tuple[ContentBlock, ...]:
     for line in lines:
         offsets.append(offsets[-1] + len(line))
     tokens = MarkdownIt("commonmark").enable("table").parse(text)
+    return tokens, offsets
+
+
+def split_blocks(text: str) -> tuple[ContentBlock, ...]:
+    """Pack natural Markdown blocks, cutting oversized blocks only at grapheme ends."""
+    tokens, offsets = markdown_layout(text)
     natural: dict[int, tuple[int, Token]] = {}
     structures: list[tuple[int, int, Token]] = []
     headings = []
@@ -106,7 +112,7 @@ def split_blocks(text: str) -> tuple[ContentBlock, ...]:
                         DisplayContext(kind="fence_close", text="\n" + token.markup + "\n")
                     )
             if token.type == "table_open" and a < start < b:
-                header_end = offsets[min(token.map[0] + 2, len(lines))]
+                header_end = offsets[min(token.map[0] + 2, len(offsets) - 1)]
                 context.append(
                     DisplayContext(
                         kind="table_header",

@@ -1,0 +1,148 @@
+"""Temporary page patches preserve everything outside the explicitly edited blocks."""
+
+import json
+
+import pytest
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_patch_keeps_unedited_tables_fences_and_whitespace(newline):
+    from openkb.agent.page_updates import PageUpdate
+
+    body = (
+        "\n# Valve\n\nCapacity: 12 litres.\n\n"
+        "| Condition | Mode |\n| --- | --- |\n| Winter | Closed |\n\n"
+        "```text\n## Not a heading\nvalue = 12\n```\n\nOther source: 72 hours.  \n"
+    )
+    body = body.replace("\n", newline)
+    original = "---\ntype: Concept\n---\n".replace("\n", newline) + body
+    update = PageUpdate(original)
+    request = update.request()
+    target = next(block["id"] for block in request["blocks"] if "Capacity:" in block["text"])
+    response = json.dumps(
+        {
+            "base_sha256": request["base_sha256"],
+            "description": "Capacity",
+            "edits": [
+                {
+                    "block_id": target,
+                    "operation": "replace",
+                    "content": "Capacity: 36 litres." + newline,
+                }
+            ],
+        }
+    )
+    result = update.apply(response, current=original)
+    assert result["content"] == body.replace("Capacity: 12 litres.", "Capacity: 36 litres.")
+    assert all(
+        "Not a heading" not in block["text"] or block["text"].startswith("```")
+        for block in request["blocks"]
+    )
+
+
+@pytest.mark.parametrize("bad", ["base", "block", "conflict", "operation", "stale"])
+def test_patch_rejects_uncertain_targets_and_changed_pages(bad):
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "# Conditions\n\nOnly during winter.\n"
+    update = PageUpdate(original)
+    data = update.request()
+    edit = {"block_id": data["blocks"][-1]["id"], "operation": "replace", "content": "New fact.\n"}
+    response = {"base_sha256": data["base_sha256"], "edits": [edit]}
+    if bad == "base":
+        response["base_sha256"] = "different-version"
+    elif bad == "block":
+        edit["block_id"] = "missing"
+    elif bad == "operation":
+        edit["operation"] = {}
+    elif bad == "conflict":
+        response["edits"].append({**edit, "operation": "delete"})
+    with pytest.raises(PageResponseError):
+        update.apply(json.dumps(response), current="Human edit." if bad == "stale" else original)
+
+
+def test_link_filtering_only_changes_new_edits():
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "# Context\n\nRetained [[concepts/old-target]] relationship.\n"
+    update = PageUpdate(original, known_targets={"concepts/allowed"})
+    data = update.request()
+    result = update.apply(
+        json.dumps(
+            {
+                "base_sha256": data["base_sha256"],
+                "edits": [
+                    {
+                        "block_id": data["blocks"][-1]["id"],
+                        "operation": "insert_after",
+                        "content": "\n\nNew [[concepts/invalid]] and [[concepts/allowed]].\n",
+                    }
+                ],
+            }
+        ),
+        current=original,
+    )
+    assert "Retained [[concepts/old-target]] relationship." in result["content"]
+    assert "New invalid and [[concepts/allowed]]." in result["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale", [False, True])
+async def test_compiler_patch_repair_is_bounded_at_transport(monkeypatch, stale):
+    from types import SimpleNamespace
+
+    from openkb.agent.compiler import _llm_call_page_async
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "# Conditions\n\nWinter rule.\n"
+    update = PageUpdate(original)
+    data = update.request()
+    sends = []
+
+    async def response(**kwargs):
+        sends.append(kwargs)
+        reply = {
+            "base_sha256": "bad" if len(sends) == 1 else data["base_sha256"],
+            "edits": [
+                {
+                    "block_id": data["blocks"][-1]["id"],
+                    "operation": "insert_after",
+                    "content": "\nNew supported condition.\n",
+                }
+            ],
+        }
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    monkeypatch.setattr("litellm.acompletion", response)
+    if stale:
+        with pytest.raises(PageResponseError, match="page_update_stale"):
+            await _llm_call_page_async(
+                "test-model",
+                [update.message()],
+                "update",
+                page_update=update,
+                read_current=lambda: "Human change.",
+            )
+        assert len(sends) == 1
+    else:
+        result = json.loads(
+            await _llm_call_page_async(
+                "test-model",
+                [update.message()],
+                "update",
+                page_update=update,
+                read_current=lambda: original,
+            )
+        )
+        assert "Winter rule." in result["content"]
+        assert "New supported condition." in result["content"]
+        assert len(sends) == 2

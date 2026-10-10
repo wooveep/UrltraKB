@@ -1135,11 +1135,15 @@ def _mock_acompletion(responses: list[str]):
     call_count = {"n": 0}
 
     async def side_effect(*args, **kwargs):
+        from test_compile_windows import patch_page_response
+
         idx = min(call_count["n"], len(responses) - 1)
         call_count["n"] += 1
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
-        mock_resp.choices[0].message.content = responses[idx]
+        mock_resp.choices[0].message.content = patch_page_response(
+            kwargs.get("messages", []), responses[idx]
+        )
         mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
         mock_resp.usage.prompt_tokens_details = None
         return mock_resp
@@ -1697,6 +1701,8 @@ class TestCompileConceptsPlan:
         call_order = {"n": 0}
 
         async def ordered_acompletion(*args, **kwargs):
+            from test_compile_windows import patch_page_response
+
             idx = call_order["n"]
             call_order["n"] += 1
             mock_resp = MagicMock()
@@ -1705,7 +1711,9 @@ class TestCompileConceptsPlan:
             if idx == 0:
                 mock_resp.choices[0].message.content = create_page_response
             else:
-                mock_resp.choices[0].message.content = update_page_response
+                mock_resp.choices[0].message.content = patch_page_response(
+                    kwargs["messages"], update_page_response
+                )
             mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
             mock_resp.usage.prompt_tokens_details = None
             return mock_resp

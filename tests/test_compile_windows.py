@@ -8,6 +8,35 @@ import pytest
 pytest_plugins = ("test_pdf_readback",)
 
 
+def patch_page_response(messages, response):
+    """Controlled provider replies follow the compiler's temporary edit protocol."""
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str) and content.startswith("Temporary editable page blocks:\n"):
+            data = json.loads(content.split("\n", 1)[1].split("\n\n", 1)[0])
+            try:
+                page = json.loads(response)
+            except ValueError:
+                return response
+            if not isinstance(page, dict) or not isinstance(page.get("content"), str):
+                return response
+            return json.dumps(
+                {
+                    "base_sha256": data["base_sha256"],
+                    "description": page.get("description", page.get("brief", "")),
+                    **({"type": page["type"]} if "type" in page else {}),
+                    "edits": [
+                        {
+                            "block_id": data["blocks"][-1]["id"],
+                            "operation": "insert_after",
+                            "content": "\n\n" + page["content"],
+                        }
+                    ],
+                }
+            )
+    return response
+
+
 def compile_boundary(monkeypatch, plan, requests):
     def response(**kwargs):
         messages = kwargs["messages"]
@@ -20,7 +49,10 @@ def compile_boundary(monkeypatch, plan, requests):
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=patch_page_response(messages, json.dumps(result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -109,6 +141,77 @@ def test_entity_type_requires_generation_confirmation(kb_dir, monkeypatch):
     assert import_document(kb_dir, source).status == "added"
     page = frontmatter.parse((kb_dir / "wiki/entities/river-valve.md").read_text())
     assert page["type"] == "Other"
+
+
+def test_import_update_keeps_prior_conditions_and_adds_all_new_sections(kb_dir, monkeypatch):
+    from openkb import frontmatter
+    from openkb.application.documents import import_document
+
+    old = (
+        "# Conditions\n\nModel A: 12 slots during winter.\n\n"
+        "| Object | Limit |\n| --- | --- |\n| Model C | 72 hours |\n"
+    )
+    updating = False
+
+    def response(**kwargs):
+        prompt = str(kwargs["messages"])
+        if "Based on the summary above" in prompt:
+            result = {"concepts": {("update" if updating else "create"): [{"name": "limits"}]}}
+        elif updating:
+            blocks = next(
+                (
+                    message["content"]
+                    for message in kwargs["messages"]
+                    if isinstance(message.get("content"), str)
+                    and message["content"].startswith("Temporary editable page blocks:\n")
+                ),
+                None,
+            )
+            if blocks:
+                data = json.loads(blocks.split("\n", 1)[1].split("\n\n", 1)[0])
+                result = {
+                    "base_sha256": data["base_sha256"],
+                    "description": "Conditions",
+                    "edits": [
+                        {
+                            "block_id": data["blocks"][-1]["id"],
+                            "operation": "insert_after",
+                            "content": "\n\nModel B: 36 slots.\n\nMaintenance: 48 hours.\n",
+                        }
+                    ],
+                }
+            else:
+                result = {
+                    "description": "Conditions",
+                    "content": "# Conditions\n\nModel B: 36 slots.",
+                }
+        else:
+            result = {"description": "Conditions", "content": old}
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.completion", response)
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    first = kb_dir / "winter.txt"
+    first.write_text(old)
+    assert import_document(kb_dir, first).status == "added"
+    updating = True
+    second = kb_dir / "irrigation.txt"
+    second.write_text("Model B: 36 slots.\nMaintenance: 48 hours.")
+    assert import_document(kb_dir, second).status == "added"
+    body = frontmatter.split((kb_dir / "wiki/concepts/limits.md").read_text())[1]
+    assert old in body
+    assert "Model B: 36 slots." in body
+    assert "Maintenance: 48 hours." in body
 
 
 @pytest.mark.asyncio
