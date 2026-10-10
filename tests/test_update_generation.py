@@ -9,6 +9,50 @@ pytest_plugins = ("test_vendor_sdk",)
 
 
 @pytest.mark.asyncio
+async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads(kb_dir):
+    from time import process_time
+
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_updates import PageUpdate
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.agent.update_generation import generate_page_update
+
+    wiki = kb_dir / "wiki"
+    source = "A complete requirement with indivisible source metadata.\n" * 600
+    (wiki / "sources/manual.md").write_text(source)
+    page = wiki / "concepts/rules.md"
+    page.write_text("---\ndescription: Rules\n---\n# Rules\n\nKeep the old rule.\n")
+    reader = CompileSourceWindows(wiki, "manual", kb_dir=kb_dir)
+    originals = reader.prepare(
+        {"name": "rules", "reading_locations": {"chars": f"0:{len(source)}"}},
+        "concepts/rules.md",
+        long=True,
+    )
+    before = page.read_bytes()
+    started = process_time()
+    with pytest.raises(PageResponseError, match="page_update_capacity_exceeded"):
+        await generate_page_update(
+            patch=PageUpdate(page.read_text()),
+            originals=originals,
+            windows=reader,
+            page_path=page,
+            model="unused",
+            bundle=None,
+            system_message={"role": "system", "content": "Compile"},
+            current_original=None,
+            known_targets_message={"role": "user", "content": "rules"},
+            task_message={"role": "user", "content": "Update the necessary rule"},
+            # The capacity seam represents indivisible evidence metadata that
+            # cannot fit, regardless of how little source body is included.
+            fits=lambda messages: "selection_length" not in json.dumps(messages),
+        )
+    # CPU time excludes scheduler/I/O delays. The eager path takes seconds to
+    # project thousands of suffixes; a failed first window needs milliseconds.
+    assert process_time() - started < 2.0
+    assert page.read_bytes() == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("resume", [False, True])
 async def test_large_necessary_update_merges_two_proposals_without_overwriting(
     kb_dir, model_service, resume

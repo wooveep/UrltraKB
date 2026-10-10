@@ -135,8 +135,17 @@ async def generate_page_update(
                 selections.setdefault((window["path"], digest(location)), (window, location))
             batch_windows = []
             for window, location in selections.values():
-                for part in windows.read_selection(window["path"], location, budget=budget):
-                    batch_windows.append({**part, "source_role": window["source_role"]})
+                for part in windows.iter_selection(window["path"], location, budget=budget):
+                    part = {**part, "source_role": window["source_role"]}
+                    batch_windows.append(part)
+                    if not fits(messages([part], scoped(groups[0]))):
+                        # This subdivision already fails. Retry the full frozen
+                        # selections before measuring every old-page combination.
+                        # The outer condition checks every group before admission.
+                        break
+                else:
+                    continue
+                break
         requests = []
         for group in groups:
             editable = scoped(group)

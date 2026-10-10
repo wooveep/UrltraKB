@@ -554,33 +554,39 @@ class CompileSourceWindows:
 
     def read_selection(self, path: str, location: dict, *, budget: int | None = None) -> list[dict]:
         """Consume one necessary native selection with exact, reader-owned continuation."""
+        return list(self.iter_selection(path, location, budget=budget))
+
+    def iter_selection(
+        self, path: str, location: dict, *, budget: int | None = None
+    ) -> Iterator[dict]:
+        """Project successive windows without eagerly materializing unread suffixes."""
         from openkb.llm_execution import check_model_stop
 
         if location.get("offset", 0) != 0:
             raise PageResponseError("page_invalid_continuation", "A selection must start at zero")
         budget = MAX_EVIDENCE_CHARS if budget is None else budget
-        offset, windows = 0, []
+        offset = 0
         while True:
             check_model_stop()
             window = self._window(path, {**location, "offset": offset}, budget)
-            windows.append(window)
             end = offset + len(window["content"])
             continuation = window.get("continuation")
             length = window.get("selection_length")
             if not window["content"]:
                 if offset:
                     raise PageResponseError("page_invalid_continuation", "Reader made no progress")
-                return windows
-            if continuation is None:
+            elif continuation is None:
                 if end != length:
                     raise PageResponseError("page_invalid_continuation", "Selection tail unread")
-                return windows
-            if (
+            elif (
                 type(length) is not int
                 or type(continuation) is not int
                 or not offset < continuation == end < length
             ):
                 raise PageResponseError("page_invalid_continuation", "Noncontiguous selection")
+            yield window
+            if not window["content"] or continuation is None:
+                return
             offset = continuation
 
     def prepare(
