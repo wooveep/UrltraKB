@@ -12,18 +12,73 @@ class PageResponseError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
-def parse_page(text: str) -> dict:
+def parse_summary(text: str, expected_sections: tuple[str, ...]) -> dict:
+    """Accept only the declared, complete JSON protocol; never invent missing bytes."""
+
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate field: {key}")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(text, object_pairs_hook=unique_fields)
+    except ValueError as error:
+        raise PageResponseError("summary_invalid_json", str(error)) from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"description", "sections"}
+        or not isinstance(value["description"], str)
+        or not value["description"].strip()
+        or not isinstance(value["sections"], list)
+    ):
+        raise PageResponseError("summary_invalid_shape", "Expected description and sections")
+    sections = {}
+    for section in value["sections"]:
+        if (
+            not isinstance(section, dict)
+            or set(section) != {"id", "content"}
+            or not isinstance(section["id"], str)
+            or section["id"] not in expected_sections
+            or section["id"] in sections
+            or not isinstance(section["content"], str)
+            or not section["content"].strip()
+        ):
+            raise PageResponseError(
+                "summary_invalid_sections", "Unknown, duplicate or empty section"
+            )
+        sections[section["id"]] = section
+    if not expected_sections or set(sections) != set(expected_sections):
+        raise PageResponseError(
+            "summary_invalid_sections", "Expected original sections are missing"
+        )
+    return {**value, "sections": [sections[key] for key in expected_sections]}
+
+
+def parse_page(text: str, *, strict: bool = False) -> dict:
     cleaned = text.strip()
     if not cleaned:
         raise PageResponseError("page_empty_response", "No page response was returned")
     if cleaned.startswith("```"):
+        if strict:
+            raise PageResponseError("summary_invalid_json", "Return JSON without code fences")
         cleaned = cleaned.partition("\n")[2].removesuffix("```").strip()
     try:
         parsed = json.loads(cleaned)
     except ValueError as error:
+        if strict:
+            raise PageResponseError("summary_invalid_json", str(error)) from error
         if "Unterminated string" in str(error):
             raise PageResponseError("page_truncated_json", "Unterminated JSON string") from error
         parsed = repair_json(cleaned, return_objects=True)
+    if strict and (
+        not isinstance(parsed, dict)
+        or set(parsed) != {"description", "content"}
+        or not isinstance(parsed.get("description"), str)
+    ):
+        raise PageResponseError("summary_invalid_shape", "Expected description and content")
     if isinstance(parsed, list):
         if len(parsed) > 1:
             raise PageResponseError(

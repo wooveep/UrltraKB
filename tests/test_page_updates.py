@@ -25,6 +25,22 @@ def test_explicit_unchanged_result_keeps_the_captured_page():
     assert result.base_sha256 == update.request()["base_sha256"]
 
 
+def test_metadata_only_update_preserves_body_and_validates_entity_type():
+    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "---\ntype: product\ndescription: Wrong object\n---\n# Device\n\nRetained body.\n"
+    update = PageUpdate(original, allowed_types=frozenset({"product", "other"}))
+    proposal = {"base_sha256": update.digest, "description": "Device conditions", "edits": []}
+    result = update.apply(json.dumps(proposal), current=original)
+    assert result["content"] == "# Device\n\nRetained body.\n"
+    assert result["description"] == "Device conditions"
+    with pytest.raises(PageResponseError, match="type"):
+        update.apply(json.dumps({**proposal, "type": "invented"}), current=original)
+    with pytest.raises(PageResponseError):
+        update.apply(json.dumps({**proposal, "description": "Wrong object"}), current=original)
+
+
 @pytest.mark.parametrize("bad", ["extra", "empty", "shape", "hash", "stale"])
 def test_unchanged_requires_a_valid_frozen_page_and_only_its_declared_fields(bad):
     from openkb.agent.page_response import PageResponseError

@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from compile_responses import summary_reply
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -46,7 +47,10 @@ async def test_empty_topic_plan_still_summarizes_every_original_unit(
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], reply))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -105,7 +109,10 @@ async def test_one_oversized_unit_reads_its_tail_with_native_continuation(
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -186,7 +193,10 @@ async def test_summary_capacity_measures_the_actual_full_request(kb_dir, monkeyp
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -248,7 +258,10 @@ def test_failed_middle_summary_batch_keeps_the_published_knowledge_and_index(kb_
                 SimpleNamespace(
                     message=SimpleNamespace(
                         content=json.dumps(
-                            {"description": "Conditions", "content": "# First batch knowledge"}
+                            summary_reply(
+                                kwargs["messages"],
+                                {"description": "Conditions", "content": "# First batch knowledge"},
+                            )
                         )
                     ),
                     finish_reason="stop",
@@ -310,7 +323,10 @@ async def test_planner_knows_when_document_descriptions_are_a_partial_prefix(kb_
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -369,7 +385,10 @@ async def test_published_summary_title_and_description_cover_every_original_batc
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -385,10 +404,11 @@ async def test_published_summary_title_and_description_cover_every_original_batc
     saved = summary.read_text()
     metadata = frontmatter.parse(saved)
     assert all(description in metadata["description"] for description in descriptions)
-    assert metadata["description"].startswith(f"Document knowledge covers all {len(bodies)}")
+    assert "Document knowledge covers all" not in metadata["description"]
     assert next(line for line in saved.splitlines() if line.startswith("# ")) == "# manual"
     for index, body in enumerate(bodies, 1):
-        assert f"## Original-source batch {index} of {len(bodies)}\n\n{body}" in saved
+        assert body in saved
+    assert "Original-source batch" not in saved
     assert len(requests) == len(bodies) + 1  # Assembly does not make a recompression call.
     assert metadata["full_text"] == "sources/manual.json"
     assert metadata["custom_field"] == "retained"

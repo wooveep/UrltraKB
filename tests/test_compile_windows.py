@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from compile_responses import summary_reply
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -34,7 +35,10 @@ def patch_page_response(messages, response):
                     ],
                 }
             )
-    return response
+    try:
+        return json.dumps(summary_reply(messages, json.loads(response)))
+    except ValueError:
+        return response
 
 
 def compile_boundary(monkeypatch, plan, requests, page_reply=None):
@@ -49,6 +53,8 @@ def compile_boundary(monkeypatch, plan, requests, page_reply=None):
                 "description": "Recorded section",
                 "content": "# Record\n\nSection facts.",
             }
+            if "Write a summary page for this document" in prompt:
+                result = {k: v for k, v in result.items() if k != "type"}
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -376,7 +382,7 @@ def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, monke
         assert frontmatter.split(summary.read_text())[1].strip() == content
     else:
         assert result.status == "failed", result
-        assert "page_multiple_objects" in result.quality
+        assert "summary_invalid_json" in result.quality
         assert not summary.exists()
 
 

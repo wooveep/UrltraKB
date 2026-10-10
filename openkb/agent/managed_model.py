@@ -106,6 +106,9 @@ class ManagedAgentModel(Model):
     def __init__(self, executor: CompletionExecutor):
         self.executor = executor
         self.model = executor.bindings.model("answer")
+        from openkb.agent.answer_finalization import AnswerFinisher
+
+        self.finisher: AnswerFinisher | None = None
         self._logical: ContextVar[str | None] = ContextVar("agent_logical_call", default=None)
         bundle = executor.bindings.credentials()
         self._adviser = LitellmModel(
@@ -136,9 +139,20 @@ class ManagedAgentModel(Model):
         def argument(name, index):
             return kwargs[name] if name in kwargs else args[index] if len(args) > index else None
 
-        tools = argument("tools", 3) or []
-        self.executor.check_capacity_input(
-            {
+        def set_argument(name, index, value):
+            if name in kwargs:
+                kwargs[name] = value
+            else:
+                args[index] = value
+
+        from openkb.agent.answer_finalization import FINAL_INSTRUCTION
+        from openkb.model_tokenizer import ContextCapacityError
+
+        if self.finisher:
+            self.finisher.prepare(retry=self._logical.get() is not None)
+
+        def capacity_payload():
+            return {
                 "instructions": argument("system_instructions", 0),
                 "input": argument("input", 1),
                 "tools": [
@@ -147,11 +161,35 @@ class ManagedAgentModel(Model):
                         "description": getattr(t, "description", ""),
                         "parameters": getattr(t, "params_json_schema", {}),
                     }
-                    for t in tools
+                    for t in (argument("tools", 3) or [])
                 ],
+                "final_instruction_reserve": (
+                    FINAL_INSTRUCTION + "\nExecution limit: context_capacity."
+                    if self.finisher and not self.finisher.reason
+                    else ""
+                ),
+                "generation": self.executor.bindings.generation_options("answer"),
             }
-        )
+
+        if self.finisher and not self.finisher.reason:
+            try:
+                self.executor.check_capacity_input(capacity_payload())
+            except ContextCapacityError:
+                self.finisher.finish("context_capacity")
+        if self.finisher and self.finisher.reason:
+            set_argument(
+                "system_instructions",
+                0,
+                (argument("system_instructions", 0) or "")
+                + "\n"
+                + FINAL_INSTRUCTION
+                + f"\nExecution limit: {self.finisher.reason}.",
+            )
+            set_argument("tools", 3, [])
+        self.executor.check_capacity_input(capacity_payload())
         settings = kwargs.get("model_settings") if "model_settings" in kwargs else args[2]
+        if self.finisher and self.finisher.reason:
+            settings = replace(settings, tool_choice="none", parallel_tool_calls=False)
         # Only validated generation extras can pass through this algorithm seam.
         extras = dict(settings.extra_args or {})
         for key in (
@@ -226,6 +264,8 @@ class ManagedAgentModel(Model):
                         )
                         response.openkb_usage = inner.public_usage()
                         response.openkb_image_digests = observed.image_digests
+                        if self.finisher:
+                            self.finisher.receive(response.output)
                         observed.finish()
                         self.executor.policy.check()
                         self._logical.set(None)
@@ -259,6 +299,8 @@ class ManagedAgentModel(Model):
                             if event.type == "response.completed":
                                 event.response.openkb_usage = inner.public_usage()
                                 event.response.openkb_image_digests = observed.image_digests
+                                if self.finisher:
+                                    self.finisher.receive(event.response.output)
                             yield event
                         observed.finish()
                         self._logical.set(None)

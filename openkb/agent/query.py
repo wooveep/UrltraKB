@@ -32,8 +32,10 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
 
 Use the bound knowledge-base reading workflow and its executable native source actions.
 Use summaries, concept and entity pages to locate the associated originals.
-Synthesize a clear, sufficiently detailed answer from the original source locations
-you actually read, citing the document facts used.
+Answer the requested parts with explanations, comparisons and calculations supported
+by the originals you actually read. State their objects, conditions and any assumptions
+used in derived estimates. Base recommendations on documented attributes and cite them.
+Read further for a necessary unanswered part; once those parts are addressed, finish.
 Before each tool call, output one short sentence explaining the reason.
 """
 
@@ -179,6 +181,14 @@ async def iter_agent_response_events(
         if not readers_bound:
             agent = restrict_query_agent(agent, selection)
 
+    from openkb.agent.answer_finalization import AnswerFinisher
+    from openkb.agent.managed_model import ManagedAgentModel
+
+    bound_model = getattr(run_config, "model", None) or agent.model
+    managed = bound_model if isinstance(bound_model, ManagedAgentModel) else None
+    finisher = AnswerFinisher(managed.executor, agent, max_turns) if managed else None
+    if managed:
+        managed.finisher = finisher
     result = (
         Runner.run_streamed(
             agent,
@@ -267,6 +277,10 @@ async def iter_agent_response_events(
 
     finally:
         await stream.aclose()
+        if finisher:
+            finisher.close()
+        if managed:
+            managed.finisher = None
 
     from openkb.agent.answer_text import visible_answer
 
@@ -276,8 +290,10 @@ async def iter_agent_response_events(
     from openkb.llm_execution import check_model_stop
 
     check_model_stop()
-    answer = visible_answer(final if isinstance(final, str) else "".join(collected))
-    answer_outcome = "answered"
+    if not isinstance(final, str) or not visible_answer(final).strip():
+        raise ValueError("The agent did not produce a valid final answer")
+    answer = visible_answer(final)
+    answer_outcome = "partial" if finisher and finisher.reason else "answered"
     history = result.to_input_list()
     yield {
         "event": "final",
@@ -286,6 +302,7 @@ async def iter_agent_response_events(
             "history": history,
             "usage": execution_usage(usage),
             "answer_outcome": answer_outcome,
+            "unfinished": finisher.unfinished if finisher else (),
             "evidence_audit": None,
             "scope_candidates": selection.candidates if selection else (),
         },

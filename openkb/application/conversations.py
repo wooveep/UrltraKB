@@ -163,6 +163,7 @@ async def ask_question(
                                 str(path) if path else None,
                                 usage=event["data"].get("usage"),
                                 answer_outcome=event["data"].get("answer_outcome"),
+                                unfinished=tuple(event["data"].get("unfinished", ())),
                                 scope_candidates=tuple(event["data"].get("scope_candidates", ())),
                                 resources=(str(path),) if path else (),
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
@@ -195,7 +196,9 @@ async def ask_question(
                 )
             from openkb.agent.token_usage import execution_usage
 
-            return AnswerResult("stopped", "".join(parts), usage=execution_usage())
+            return AnswerResult(
+                "stopped", "".join(parts), unfinished=(unfinished_stage,), usage=execution_usage()
+            )
 
 
 @track_import_usage
@@ -341,6 +344,7 @@ async def continue_conversation(
                                     usage=event["data"].get("usage", usage),
                                     context=prepared.diagnostics,
                                     answer_outcome=event["data"].get("answer_outcome"),
+                                    unfinished=tuple(event["data"].get("unfinished", ())),
                                     scope_candidates=tuple(
                                         event["data"].get("scope_candidates", ())
                                     ),

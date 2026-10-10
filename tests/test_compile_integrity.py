@@ -48,7 +48,7 @@ def test_group_arrays_preserve_all_concepts_and_entities(kb_dir, monkeypatch):
 
 
 @pytest.mark.parametrize("bad_plan", [{"concepts": 42}, {"unknown": []}])
-def test_failed_plan_is_persisted_and_public_retry_runs(
+def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
     kb_dir, three_sheets, pdf_model, monkeypatch, bad_plan
 ):
     from openkb.application.documents import import_document
@@ -79,10 +79,10 @@ def test_failed_plan_is_persisted_and_public_retry_runs(
     failing = False
     before = calls.copy()
     resumed = retry_worksheet(kb_dir, first.source_id, failed.unit_id)
-    assert resumed.status == "added", resumed
-    assert not resumed.unfinished
-    assert calls["concepts-plan"] == before["concepts-plan"] + 1
-    assert resumed.units[0].successful_revision_id == failed.target_revision_id
+    assert resumed.status == "failed", resumed
+    assert calls["concepts-plan"] == before["concepts-plan"]
+    assert resumed.units[0].successful_revision_id is None
+    assert "compile_repair_exhausted" in str(resumed)
     for name in ("Alpha", "Gamma"):
         unit = units[name]
         assert (

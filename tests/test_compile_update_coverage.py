@@ -34,7 +34,7 @@ def test_oversized_pdf_compile_window_keeps_paragraphs_and_native_continuation(k
 def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(
     kb_dir, monkeypatch, unread_suffix
 ):
-    from openkb.agent.compile_plan import CompilePlanError, request_compile_plan
+    from openkb.agent.compile_plan import request_compile_plan
     from openkb.agent.source_windows import CompileSourceWindows
     from openkb.source_pages import read_page_selection
 
@@ -79,19 +79,15 @@ def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(
             validate_updates=lambda plan: windows.validate_updates(plan, long=True),
         )
 
-    if unread_suffix:
-        with pytest.raises(CompilePlanError):
-            get_plan()
-        assert len(requests) == 2
-        return
     plan = get_plan()
-    assert len(requests) == 2
+    assert len(requests) == 1  # Ordinary continuation never requests a corrected model plan.
     context = windows.prepare(plan.concepts.update[0], "concepts/valve.md", long=True)
-    content = "\n".join(w["content"] for w in context.windows)
+    content = "".join(w["content"] for w in context.windows)
     assert first in content and suffix in content
     native = [span for window in context.windows for span in window.get("page_spans", [])]
     assert any(span["page"] == 1 and span["start"] == 0 for span in native)
-    assert any(span["page"] == 1 and span["start"] == body.index(suffix) for span in native)
+    assert all(left["end"] == right["start"] for left, right in zip(native, native[1:]))
+    assert native[-1]["end"] == len(body)
 
 
 def test_compile_matching_uses_aliases_from_the_retained_page(kb_dir):

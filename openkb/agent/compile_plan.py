@@ -148,10 +148,23 @@ def request_compile_plan(
     parse: Callable,
     *,
     validate_updates: Callable[[CompilePlan], str | None] | None = None,
+    checkpoints=None,
+    request_digest: str = "",
     **options,
 ) -> CompilePlan:
     correction = None
+    if checkpoints:
+        cached = checkpoints.load("plan", request_digest)
+        if cached is not None:
+            plan = normalize_plan(parse(cached), **options)
+            diagnostic = validate_updates(plan) if validate_updates else None
+            if diagnostic:
+                raise CompilePlanError(diagnostic, "page_update_originals_unread")
+            return plan
+        checkpoints.require_generation("plan", request_digest)
     for attempt in range(2):
+        if attempt and checkpoints:
+            checkpoints.claim_repair("plan", request_digest)
         raw = request(correction)
         parsing = True
         try:
@@ -183,5 +196,7 @@ def request_compile_plan(
                 report_compile_issue("compile_plan_repaired")
             elif plan.normalized:
                 report_compile_issue("compile_plan_normalized")
+            if checkpoints:
+                checkpoints.save("plan", request_digest, raw)
             return plan
     raise AssertionError("Unreachable plan retry state")

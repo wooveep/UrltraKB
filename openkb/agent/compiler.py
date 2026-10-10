@@ -493,10 +493,18 @@ async def _llm_call_page_async(
     read_current: Callable[[], str] | None = None,
     numeric_sources=None,
     initial_response: str | None = None,
+    response_protocol: str = "page-json",
+    expected_sections: tuple[str, ...] = (),
+    checkpoints=None,
+    checkpoint_key: str = "",
+    proposal_only: bool = False,
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
-    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_response import PageResponseError, parse_page, parse_summary
+
+    if response_protocol not in {"page-json", "markdown", "summary-json", "summary-page-json"}:
+        raise ValueError("Unknown page response protocol")
 
     correction = []
     for attempt in range(2):
@@ -521,8 +529,22 @@ async def _llm_call_page_async(
                     if attempt:
                         report_compile_issue("page_response_repaired")
                     return result
+                if proposal_only:
+                    if attempt:
+                        report_compile_issue("page_response_repaired")
+                    return raw
                 raw = json.dumps(result, ensure_ascii=False)
-            _, content, obj = _page_fields(raw)
+            if response_protocol == "summary-json":
+                decoded = parse_summary(raw, expected_sections)
+                content = "\n\n".join(section["content"] for section in decoded["sections"])
+                obj = None
+            elif response_protocol == "markdown":
+                content, obj = raw, None
+                if not content.strip():
+                    raise PageResponseError("page_empty_content", "The page content is empty")
+            else:
+                obj = parse_page(raw, strict=response_protocol == "summary-page-json")
+                content = obj["content"]
             if page_update is None and obj and obj.get("status") == "unchanged":
                 raise PageResponseError(
                     "page_unchanged_not_allowed",
@@ -548,6 +570,10 @@ async def _llm_call_page_async(
             if attempt:
                 report_compile_issue(code)
                 raise PageResponseError(code, f"{step_name}: {error}") from error
+            if checkpoints:
+                from openkb.compile_checkpoints import digest
+
+                checkpoints.claim_repair(checkpoint_key, digest(messages))
             correction = [
                 {
                     "role": "user",
@@ -557,7 +583,12 @@ async def _llm_call_page_async(
                             "Return one updated block-edit object or explicit unchanged result "
                             "with a reason, using the captured base_sha256. "
                             if page_update
-                            else "Return exactly one JSON object with string description and nonempty content. "
+                            else (
+                                "Return exactly one JSON object with description and sections. "
+                                f"Include these ids once each: {expected_sections}. "
+                                if response_protocol == "summary-json"
+                                else "Return exactly one JSON object with string description and nonempty content. "
+                            )
                         )
                         + "Do not append a second object or note. Keep supported source facts only. "
                         "If truncated, retain all necessary new information in complete edits "
@@ -1744,7 +1775,9 @@ async def _compile_concepts(
         )
 
     from openkb.agent.compile_plan import request_compile_plan
+    from openkb.compile_checkpoints import digest, document_checkpoints
 
+    checkpoints = document_checkpoints(kb_dir, source_windows.view_id, doc_name)
     plan = request_compile_plan(
         lambda correction: _llm_call(
             model,
@@ -1763,6 +1796,8 @@ async def _compile_concepts(
         },
         entity_types=valid_types,
         sanitize=_sanitize_concept_name,
+        checkpoints=checkpoints,
+        request_digest=digest([plan_messages, source_windows.original_identity()]),
     )
     from openkb.execution_budget import admit_compile_plan
 
@@ -1866,60 +1901,49 @@ async def _compile_concepts(
         _require_nonempty_content(content, name)
         return name, content, False, brief
 
-    async def _gen_update(concept: dict) -> tuple[str, str | UnchangedPage, bool, str]:
-        from openkb.agent.page_updates import PageUpdate
+    async def _gen_existing(item: dict, kind: str, template: str):
+        from openkb.agent.update_generation import generate_page_update
 
-        name = concept["name"]
-        title = concept.get("title", name)
-        concept_path = wiki_dir / "concepts" / f"{_sanitize_concept_name(name)}.md"
-        if concept_path.exists():
-            raw_text = concept_path.read_bytes().decode("utf-8")
-            ex_parts = frontmatter.split(raw_text)
-            existing_content = ex_parts[1] if ex_parts is not None else raw_text
-        else:
-            raise FileNotFoundError("Existing page disappeared before update")
-        originals = source_windows.prepare(
-            concept, f"concepts/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
-        )
-        originals.require_update(f"concepts/{_sanitize_concept_name(name)}.md")
+        name = item["name"]
+        relative = f"{kind}/{_sanitize_concept_name(name)}.md"
+        path = wiki_dir / relative
+        original = path.read_bytes().decode("utf-8")
+        originals = source_windows.prepare(item, relative, long=doc_type == "pageindex")
+        originals.require_update(relative)
         patch = PageUpdate(
-            raw_text,
+            original,
             known_targets=known_targets,
             originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
+            allowed_types=valid_types if kind == "entities" else None,
         )
         async with semaphore:
-            raw = await _llm_call_page_async(
-                model,
-                build_page_messages(
-                    system_message=system_msg,
-                    current_original=current_original,
-                    original_context=originals.message,
-                    known_targets_message=known_targets_msg,
-                    update_message=patch.message(),
-                    task_message={
-                        "role": "user",
-                        "content": _CONCEPT_UPDATE_USER.format(
-                            title=title,
-                            doc_name=doc_name,
-                            existing_content=existing_content,
-                            brief=concept.get(
-                                "brief", "Assess the contribution in supplied originals."
-                            ),
-                        ),
-                    },
-                ),
-                f"update: {name}",
-                response_format=_JSON_RESPONSE_FORMAT,
+            return await generate_page_update(
+                patch=patch,
+                originals=originals,
+                windows=source_windows,
+                page_path=path,
+                model=model,
                 bundle=bundle,
-                prompt_version="compiler-page-originals-v4",
-                page_update=patch,
-                read_current=lambda: concept_path.read_bytes().decode("utf-8"),
+                system_message=system_msg,
+                current_original=current_original,
+                known_targets_message=known_targets_msg,
+                task_message={
+                    "role": "user",
+                    "content": template.format(
+                        title=item.get("title", name),
+                        type=item.get("type", "other"),
+                        doc_name=doc_name,
+                        existing_content="See captured editable blocks.",
+                        brief=item.get("brief", "Assess the contribution in supplied originals."),
+                    ).replace("__ENTITY_TYPES__", types_str),
+                },
             )
-        if isinstance(raw, UnchangedPage):
-            return name, raw, True, ""
-        brief, content, _ = _page_fields(raw)
-        _require_nonempty_content(content, name)
-        return name, content, True, brief
+
+    async def _gen_update(concept: dict) -> tuple[str, str | UnchangedPage, bool, str]:
+        result = await _gen_existing(concept, "concepts", _CONCEPT_UPDATE_USER)
+        if isinstance(result, UnchangedPage):
+            return concept["name"], result, True, ""
+        return concept["name"], result["content"], True, result["description"]
 
     async def _gen_entity_create(ent: dict) -> tuple[str, str, str, str]:
         name = ent["name"]
@@ -1960,64 +1984,17 @@ async def _compile_concepts(
         return name, content, brief, etype_out
 
     async def _gen_entity_update(ent: dict) -> tuple[str, str | UnchangedPage, str, str]:
-        from openkb.agent.page_updates import PageUpdate
-
-        name = ent["name"]
-        title = ent.get("title", name)
-        etype = ent.get("type", "other")
-        epath = wiki_dir / "entities" / f"{_sanitize_concept_name(name)}.md"
-        if epath.exists():
-            raw_text = epath.read_bytes().decode("utf-8")
-            ex_parts = frontmatter.split(raw_text)
-            existing_content = ex_parts[1] if ex_parts is not None else raw_text
-        else:
-            raise FileNotFoundError("Existing page disappeared before update")
-        originals = source_windows.prepare(
-            ent, f"entities/{_sanitize_concept_name(name)}.md", long=doc_type == "pageindex"
+        result = await _gen_existing(ent, "entities", _ENTITY_UPDATE_USER)
+        if isinstance(result, UnchangedPage):
+            return ent["name"], result, "", ""
+        path = wiki_dir / "entities" / f"{_sanitize_concept_name(ent['name'])}.md"
+        previous_type = str(frontmatter.parse(path.read_text()).get("type", "other")).lower()
+        return (
+            ent["name"],
+            result["content"],
+            result["description"],
+            result.get("type", previous_type),
         )
-        originals.require_update(f"entities/{_sanitize_concept_name(name)}.md")
-        patch = PageUpdate(
-            raw_text,
-            known_targets=known_targets,
-            originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
-        )
-        async with semaphore:
-            raw = await _llm_call_page_async(
-                model,
-                build_page_messages(
-                    system_message=system_msg,
-                    current_original=current_original,
-                    original_context=originals.message,
-                    known_targets_message=known_targets_msg,
-                    update_message=patch.message(),
-                    task_message={
-                        "role": "user",
-                        "content": _ENTITY_UPDATE_USER.format(
-                            title=title,
-                            type=etype,
-                            doc_name=doc_name,
-                            existing_content=existing_content,
-                            brief=ent.get(
-                                "brief", "Assess the contribution in supplied originals."
-                            ),
-                        ).replace("__ENTITY_TYPES__", types_str),
-                    },
-                ),
-                f"entity-update: {name}",
-                response_format=_JSON_RESPONSE_FORMAT,
-                bundle=bundle,
-                prompt_version="compiler-page-originals-v4",
-                page_update=patch,
-                read_current=lambda: epath.read_bytes().decode("utf-8"),
-            )
-        if isinstance(raw, UnchangedPage):
-            return name, raw, "", ""
-        brief, content, obj = _page_fields(raw)
-        previous_type = str(frontmatter.parse(raw_text).get("type", "other")).lower()
-        proposed_type = obj.get("type", previous_type)
-        etype_out = proposed_type if proposed_type in valid_types else "other"
-        _require_nonempty_content(content, name, "entity")
-        return name, content, brief, etype_out
 
     tasks = []
     tasks.extend(_gen_create(c) for c in create_items)
@@ -2286,25 +2263,37 @@ async def compile_short_doc(
     # Validated links are assembled before publication.
     from openkb.agent.page_response import PageResponseError
     from openkb.compilation_report import CompilationIncomplete
+    from openkb.compile_checkpoints import digest, document_checkpoints
 
+    checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
+    signature = digest([system_msg, doc_msg])
     try:
         try:
-            summary_raw = _llm_call(
-                model,
-                [system_msg, doc_msg],
-                "summary",
-                response_format=_JSON_RESPONSE_FORMAT,
-                raise_on_truncation=True,
-                bundle=bundle,
-            )
-            summary_raw = await _llm_call_page_async(
-                model,
-                [system_msg, doc_msg],
-                "summary",
-                response_format=_JSON_RESPONSE_FORMAT,
-                initial_response=summary_raw,
-                bundle=bundle,
-            )
+            summary_raw = checkpoints.load("short-summary", signature) if checkpoints else None
+            if summary_raw is None:
+                if checkpoints:
+                    checkpoints.require_generation("short-summary", signature)
+                summary_raw = _llm_call(
+                    model,
+                    [system_msg, doc_msg],
+                    "summary",
+                    response_format=_JSON_RESPONSE_FORMAT,
+                    raise_on_truncation=True,
+                    bundle=bundle,
+                )
+                summary_raw = await _llm_call_page_async(
+                    model,
+                    [system_msg, doc_msg],
+                    "summary",
+                    response_format=_JSON_RESPONSE_FORMAT,
+                    initial_response=summary_raw,
+                    bundle=bundle,
+                    response_protocol="summary-page-json",
+                    checkpoints=checkpoints,
+                    checkpoint_key="short-summary",
+                )
+                if checkpoints:
+                    checkpoints.save("short-summary", signature, summary_raw)
         except (PageResponseError, TruncatedResponseError) as error:
             code = getattr(error, "code", "page_truncated_response")
             report_compile_issue(code, "summary")
@@ -2398,8 +2387,16 @@ async def compile_long_doc(
             else None,
         )
 
-        async def generate(messages: list[dict], stage: str, originals: list[str]) -> str:
-            return await _llm_call_page_async(
+        from openkb.compile_checkpoints import document_checkpoints
+
+        checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
+
+        async def generate(
+            messages: list[dict], stage: str, originals: list[str], sections: tuple[str, ...]
+        ) -> dict:
+            from openkb.agent.page_response import parse_summary
+
+            raw = await _llm_call_page_async(
                 model,
                 messages,
                 stage,
@@ -2407,7 +2404,12 @@ async def compile_long_doc(
                 bundle=bundle,
                 numeric_sources=originals,
                 prompt_version=PROMPT_VERSION,
+                response_protocol="summary-json",
+                expected_sections=sections,
+                checkpoints=checkpoints,
+                checkpoint_key=stage.replace("document-summary:", "summary:"),
             )
+            return parse_summary(raw, sections)
 
         try:
             draft = await build_document_summary(
@@ -2418,6 +2420,7 @@ async def compile_long_doc(
                 },
                 generate=generate,
                 fits=fits,
+                checkpoints=checkpoints,
             )
         except PageResponseError as error:
             report_compile_issue(error.code, "summary")

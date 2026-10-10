@@ -202,10 +202,16 @@ class PageUpdate:
         *,
         known_targets: set[str] | None = None,
         originals: list[str] | None = None,
+        allowed_types: frozenset[str] | None = None,
+        allowed_blocks: frozenset[str] | None = None,
+        allow_metadata: bool = True,
     ) -> None:
         self.original = original
         self.originals = originals
         self.known_targets = known_targets
+        self.allowed_types = allowed_types
+        self.allowed_blocks = allowed_blocks
+        self.allow_metadata = allow_metadata
         self.digest = hashlib.sha256(original.encode("utf-8")).hexdigest()
         parts = frontmatter.split(original)
         self.body = parts[1] if parts else original
@@ -228,6 +234,7 @@ class PageUpdate:
             "blocks": [
                 {"id": identity, "text": self.body[start:end]}
                 for identity, (start, end) in self.blocks.items()
+                if self.allowed_blocks is None or identity in self.allowed_blocks
             ],
         }
 
@@ -237,7 +244,10 @@ class PageUpdate:
             "content": "Temporary editable page blocks:\n"
             + json.dumps(self.request(), ensure_ascii=False)
             + "\n\nReturn one JSON object. For changes use status=updated, base_sha256, "
-            "description, optional type, and nonempty edits. If the supplied originals "
+            "optional description/type, and edits. Omit page metadata unless the supplied "
+            "originals establish its applicability to the whole page. Omission or the original "
+            "value proposes no metadata change. Metadata-only changes may use empty edits. "
+            "If the supplied originals "
             "show that the proposed contribution is already covered or needs only navigation, "
             "use only status=unchanged, base_sha256 and a nonempty reason explaining this "
             "decision for the proposed contribution. Unread necessary content cannot establish "
@@ -292,8 +302,21 @@ class PageUpdate:
         for key in ("description", "type"):
             if key in obj and not isinstance(obj[key], str):
                 raise PageResponseError("page_update_invalid", f"{key} must be a string")
+        if (
+            "type" in obj
+            and self.allowed_types is not None
+            and obj["type"] not in self.allowed_types
+        ):
+            raise PageResponseError("page_update_invalid", "type must belong to the allowed set")
         edits = obj.get("edits")
-        if not isinstance(edits, list) or not edits:
+        metadata_changed = any(
+            key in obj and obj[key] != self.request()[key] for key in ("description", "type")
+        )
+        if metadata_changed and not self.allow_metadata:
+            raise PageResponseError(
+                "page_update_invalid", "Metadata is outside this editing target"
+            )
+        if not isinstance(edits, list) or (not edits and not metadata_changed):
             raise PageResponseError("page_update_invalid", "A necessary update requires edits")
         by_block: dict[str, list[dict]] = {}
         for edit in edits:
@@ -302,6 +325,10 @@ class PageUpdate:
             identity, operation = edit.get("block_id"), edit.get("operation")
             if not isinstance(identity, str) or identity not in self.blocks:
                 raise PageResponseError("page_update_invalid", "Choose an existing block_id")
+            if self.allowed_blocks is not None and identity not in self.allowed_blocks:
+                raise PageResponseError(
+                    "page_update_invalid", "Target was not supplied for editing"
+                )
             if not isinstance(operation, str) or operation not in {
                 "replace",
                 "insert_before",

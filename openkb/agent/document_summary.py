@@ -5,13 +5,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from openkb.agent.page_response import page_fields
 from openkb.agent.source_windows import CompileSourceWindows
 from openkb.execution_budget import admit_document_summary
 from openkb.source_context import COMPILATION_FACT_RULES
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "compiler-document-knowledge-v1"
+PROMPT_VERSION = "compiler-document-sections-v2"
 SYSTEM_TEMPLATE = (
     "You are OpenKB's wiki compilation agent for document knowledge. "
     "Write independently readable knowledge in {language}.\n" + COMPILATION_FACT_RULES
@@ -54,13 +53,50 @@ Combine repetition while retaining conditions that change the conclusion. Keep
 original headings and native locations distinct from generated navigation labels.
 Preceding context supplies conditions, not extra primary ranges. Preserve unresolved
 cross-references and qualifications; this batch cannot establish what the whole
-document omits. Return one JSON object with a brief string description and nonempty
-Markdown content. Use the document's necessary level of detail, without a fixed
-item count or compression ratio. Return no frontmatter or code fences.
+document omits. Return one JSON object with a brief string description and sections:
+[{"id": "the supplied output section id", "content": "complete Markdown knowledge"}].
+Return every output_sections id exactly once, retaining its original requirements,
+conditions and useful explanation in the corresponding body, not only its heading.
+Use the document's necessary level of detail without a fixed compression ratio.
+Return no frontmatter or code fences.
 """
 
 
+def summary_sections(content: str) -> list[dict]:
+    """Group actual original headings or natural blocks, without generated navigation."""
+    from openkb.content_blocks import markdown_layout
+
+    tokens, offsets = markdown_layout(content)
+    headings = {offsets[t.map[0]] for t in tokens if t.type == "heading_open" and t.map}
+    # A parent heading immediately followed by a child heading is one section,
+    # not an invitation to invent a body for the parent heading alone.
+    body_starts = {
+        offsets[t.map[0]]
+        for t in tokens
+        if t.map and t.level == 0 and t.type not in {"heading_open", "heading_close", "inline"}
+    }
+    boundaries = [0]
+    for heading in sorted(headings):
+        if any(boundaries[-1] <= start < heading for start in body_starts):
+            boundaries.append(heading)
+    boundaries.append(len(content))
+    ends = sorted({offsets[t.map[1]] for t in tokens if t.map and t.level == 0})
+    ranges = []
+    for start, end in zip(boundaries, boundaries[1:]):
+        if not content[start:end].strip():
+            continue
+        cursor = start
+        for cut in ends:
+            if cursor < cut < end and cut - cursor >= 4000:
+                ranges.append((cursor, cut))
+                cursor = cut
+        if cursor < end:
+            ranges.append((cursor, end))
+    return [{"id": f"section-{i}", "start": a, "end": b} for i, (a, b) in enumerate(ranges, 1)]
+
+
 def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
+    window = {**window, "output_sections": summary_sections(window["content"])}
     return [
         system,
         {
@@ -83,8 +119,9 @@ async def build_document_summary(
     windows: CompileSourceWindows,
     *,
     system_message: dict,
-    generate: Callable[[list[dict], str, list[str]], Awaitable[str]],
+    generate: Callable[[list[dict], str, list[str], tuple[str, ...]], Awaitable[dict]],
     fits: Callable[[list[dict]], bool],
+    checkpoints=None,
 ) -> SummaryDraft:
     from openkb.agent.page_response import PageResponseError
     from openkb.llm_execution import raise_if_terminal
@@ -100,16 +137,40 @@ async def build_document_summary(
         if isinstance(error, PageResponseError):
             raise
         raise PageResponseError("document_summary_reader_invalid", str(error)) from error
-    admit_document_summary(len(batches))
+    from openkb.compile_checkpoints import digest
+
+    requests = [summary_messages(system_message, windows.doc_name, batch) for batch in batches]
+    cached = [
+        checkpoints.load(f"summary:{index}", digest(messages)) if checkpoints else None
+        for index, messages in enumerate(requests, 1)
+    ]
+    if missing := sum(result is None for result in cached):
+        admit_document_summary(missing)
     bodies, descriptions, ranges = [], [], []
     for index, batch in enumerate(batches, 1):
-        messages = summary_messages(system_message, windows.doc_name, batch)
-        raw = await generate(
-            messages,
-            f"document-summary:{index}",
-            [batch["content"], *[context["content"] for context in batch["supplementary_context"]]],
-        )
-        description, body, _ = page_fields(raw)
+        from openkb.llm_execution import check_model_stop
+
+        check_model_stop()
+        messages = requests[index - 1]
+        decoded = cached[index - 1]
+        if decoded is None:
+            if checkpoints:
+                checkpoints.require_generation(f"summary:{index}", digest(messages))
+            decoded = await generate(
+                messages,
+                f"document-summary:{index}",
+                [batch["content"], *[c["content"] for c in batch["supplementary_context"]]],
+                tuple(s["id"] for s in summary_sections(batch["content"])),
+            )
+            if checkpoints:
+                checkpoints.save(
+                    f"summary:{index}",
+                    digest(messages),
+                    decoded,
+                    metadata={**batch, "output_sections": summary_sections(batch["content"])},
+                )
+        description = decoded["description"]
+        body = "\n\n".join(section["content"] for section in decoded["sections"])
         bodies.append(body)
         descriptions.append(description)
         ranges.append(
@@ -131,12 +192,6 @@ async def build_document_summary(
         )
     if len(batches) == 1:
         return SummaryDraft(bodies[0], descriptions[0], descriptions[0], tuple(ranges))
-    count = len(batches)
-    description = f"Document knowledge covers all {count} original-source batches.\n" + "\n".join(
-        f"Batch {index}/{count}: {text}" for index, text in enumerate(descriptions, 1)
-    )
-    markdown = f"# {windows.doc_name}\n\n" + "\n\n".join(
-        f"## Original-source batch {index} of {count}\n\n{body}"
-        for index, body in enumerate(bodies, 1)
-    )
+    description = "\n".join(descriptions)
+    markdown = f"# {windows.doc_name}\n\n" + "\n\n".join(bodies)
     return SummaryDraft(markdown, description, "\n".join(descriptions), tuple(ranges))

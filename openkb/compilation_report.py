@@ -17,6 +17,7 @@ from typing import Iterator
 class CompileReport:
     quality: list[str] = field(default_factory=list)
     unfinished: list[str] = field(default_factory=list)
+    checkpoints: list[dict] = field(default_factory=list)
 
     def require_complete(self) -> None:
         if self.unfinished:
@@ -57,6 +58,13 @@ def report_compile_issue(code: str, *unfinished: str) -> None:
                 report.unfinished.append(stage)
 
 
+def report_compile_checkpoint(path: str, batch: str, state: str) -> None:
+    if report := _ACTIVE.get():
+        entry = {"path": path, "batch": batch, "state": state}
+        if entry not in report.checkpoints:
+            report.checkpoints.append(entry)
+
+
 @contextmanager
 def compilation_attempt() -> Iterator[CompileReport]:
     """Isolate an attempt; only its final outcome is merged into the enclosing receipt."""
@@ -67,6 +75,7 @@ def compilation_attempt() -> Iterator[CompileReport]:
             report.require_complete()
         except CompilationIncomplete:
             if parent is not None:
+                parent.checkpoints.extend(report.checkpoints)
                 parent.quality.extend(code for code in report.quality if code not in parent.quality)
                 parent.unfinished.extend(
                     stage for stage in report.unfinished if stage not in parent.unfinished
@@ -74,4 +83,5 @@ def compilation_attempt() -> Iterator[CompileReport]:
             raise
         else:
             if parent is not None:
+                parent.checkpoints.extend(report.checkpoints)
                 parent.quality.extend(code for code in report.quality if code not in parent.quality)

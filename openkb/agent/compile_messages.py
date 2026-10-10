@@ -9,6 +9,9 @@ labels and native positions; generated labels and the proposed page name help lo
 the topic. Keep uncertainty local to an interpretation supported only by conjecture.
 The previous page is an editable draft. The same source basis applies to the title,
 description and entity type as to the body.
+Organize each fact under its original object, version and applicable conditions.
+Interpret table records with all supplied column headers. For a comparison retain
+each object's own conditions; for a calculation show the given inputs and assumptions.
 """
 
 

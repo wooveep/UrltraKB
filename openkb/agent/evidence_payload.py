@@ -270,6 +270,21 @@ def preceding_evidence(source: dict, offset: int, max_chars: int, *, layout=None
     """Project preceding original context separately from the primary processed range."""
     if type(offset) is not int or not 0 <= offset <= len(source["content"]) or max_chars <= 0:
         raise ValueError("Invalid preceding original range")
-    context = _window(source, max(0, offset - max_chars), offset, layout)
+    tokens, offsets = layout or markdown_layout(source["content"])
+    floor = max(0, offset - max_chars)
+    starts = [offsets[t.map[0]] for t in tokens if t.map and t.level == 0]
+    start = next((n for n in starts if floor <= n < offset), floor)
+    context = _window(source, start, offset, (tokens, offsets))
+    context.pop("continuation", None)
+    return {**context, "primary": False}
+
+
+def following_evidence(source: dict, offset: int, max_chars: int, *, layout=None) -> dict:
+    """Keep an adjacent qualification visible before generating the preceding rule."""
+    tokens, offsets = layout or markdown_layout(source["content"])
+    ceiling = min(len(source["content"]), offset + max_chars)
+    ends = [offsets[t.map[1]] for t in tokens if t.map and t.level == 0]
+    end = max((n for n in ends if offset < n <= ceiling), default=ceiling)
+    context = _window(source, offset, end, (tokens, offsets))
     context.pop("continuation", None)
     return {**context, "primary": False}

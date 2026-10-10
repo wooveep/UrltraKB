@@ -40,12 +40,18 @@ class TaskBudget:
             }
 
     def _require(self, role: str, minimum: int):
-        from openkb.llm_execution import ModelBudgetExceeded, StageBudgetExceeded
+        from openkb.llm_execution import (
+            AnswerReserveReached,
+            ModelBudgetExceeded,
+            StageBudgetExceeded,
+        )
 
         self.policy.check()
         held = sum(count for name, count in self._reserved.items() if name != role)
         remaining = self.policy.max_calls - self._used - len(self._pending) - held
         if minimum > remaining:
+            if self._reserved.get("answer_finish") and minimum <= remaining + held:
+                raise AnswerReserveReached("Final-answer send is reserved; stop new model tools")
             raise ModelBudgetExceeded(
                 f"{role} needs at least {minimum} sends; {remaining} available "
                 f"({self._used}/{self.policy.max_calls} used, {held} reserved). "
@@ -121,7 +127,8 @@ def admit_compile_plan(plan, *, rewrite_summary: bool):
     executor = active_executor()
     if executor is None:
         return
-    count = sum(len(group.create) + len(group.update) for group in (plan.concepts, plan.entities))
+    # Updates admit their actual missing proposals after sizing and checkpoint validation.
+    count = sum(len(group.create) for group in (plan.concepts, plan.entities))
     minimum = count
     repairs = min(count, executor.policy.compile_repair_calls)
     executor.budget.require("compile", minimum + repairs)

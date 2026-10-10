@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+from compile_responses import summary_reply
 from test_compile_windows import compile_boundary
 
 
@@ -182,7 +183,10 @@ def test_unchanged_cannot_replace_new_knowledge_pages(kb_dir, monkeypatch, stage
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
+                    message=SimpleNamespace(
+                        content=json.dumps(summary_reply(kwargs["messages"], result))
+                    ),
+                    finish_reason="stop",
                 )
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),

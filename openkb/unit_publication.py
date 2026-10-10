@@ -516,4 +516,7 @@ def commit_unit_revision(
         write_record(attempt_path, completed)
         check_stop()
         check_import_target(kb_dir, admission.source, unit, completed, view)
+    from openkb.compile_checkpoints import cleanup_published_checkpoints
+
+    cleanup_published_checkpoints(kb_dir, state.view_id, unit.doc_name)
     return completed

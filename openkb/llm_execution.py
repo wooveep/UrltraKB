@@ -73,6 +73,10 @@ class StageBudgetExceeded(RuntimeError):
     """A bounded indexing/retrieval stage stops; the answer may use remaining task sends."""
 
 
+class AnswerReserveReached(StageBudgetExceeded):
+    """Only the protected final-answer send remains; ordinary tools must stop."""
+
+
 class ModelBudgetExceeded(RuntimeError):
     """No more requests may be sent during this execution."""
 

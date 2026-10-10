@@ -144,6 +144,22 @@ class KnowledgeRetrieval:
                         allocation["tokens"] += tokens
                         if hit.get("content"):
                             allocation["returned"].add(identity)
+                    else:
+                        from openkb.source_reading import native_source, reading_action
+
+                        # The automatic evidence allocation is exhausted, not the
+                        # source. Native actions still pass the whole-question
+                        # capacity gate at the query-tool boundary.
+                        hits.append(
+                            {
+                                "path": path,
+                                "coverage": "context_allocation_exhausted",
+                                "reading_action": reading_action(
+                                    native_source(view, path, data=verified[path]),
+                                    reference["native_location"],
+                                ),
+                            }
+                        )
                 if execution := current_execution():
                     execution.record_reads({"hits": hits})
             return {
@@ -160,6 +176,8 @@ class KnowledgeRetrieval:
             }
         except Exception as error:
             raise_if_terminal(error)
+            from openkb.llm_execution import AnswerReserveReached
+
             if key and isinstance(error, RetrievalFailure) and cached is None:
                 error.consumed_sends = self.executor.calls - before
                 self.executor.request_cache[key] = error
@@ -172,6 +190,8 @@ class KnowledgeRetrieval:
                 "hits": [],
                 "reason_code": error.code
                 if isinstance(error, RetrievalFailure)
+                else "answer_finish_reserved"
+                if isinstance(error, AnswerReserveReached)
                 else (
                     "retrieval_budget_exhausted"
                     if isinstance(error, StageBudgetExceeded)

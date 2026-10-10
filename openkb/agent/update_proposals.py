@@ -1,0 +1,86 @@
+"""Deterministic body and page-metadata proposals against one immutable page."""
+
+from dataclasses import dataclass
+
+from openkb.agent.page_updates import PageUpdate
+
+
+@dataclass(frozen=True)
+class UpdateProposal:
+    order: int
+    response: dict
+    complete_scope: bool = False
+
+
+@dataclass(frozen=True)
+class UpdateConflict:
+    blocks: tuple[str, ...]
+    batches: tuple[int, ...]
+    metadata: bool = False
+
+
+@dataclass(frozen=True)
+class MergedUpdate:
+    response: dict
+    conflicts: tuple[UpdateConflict, ...]
+
+
+def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> MergedUpdate:
+    """Collect every proposal before grouping conflicts; arrival order has no meaning."""
+    import json
+
+    ordered = sorted(proposals, key=lambda p: p.order)
+    if len({p.order for p in ordered}) != len(ordered):
+        raise ValueError("Proposal source order must be unique")
+    by_block: dict[str, list[tuple[int, dict]]] = {}
+    metadata: list[tuple[UpdateProposal, dict]] = []
+    base = update.request()
+    for proposal in ordered:
+        obj = proposal.response
+        update.apply(json.dumps(obj), current=update.original)
+        if obj.get("status") == "unchanged":
+            continue
+        for edit in obj["edits"]:
+            by_block.setdefault(edit["block_id"], []).append((proposal.order, edit))
+        changes = {
+            key: obj[key] for key in ("description", "type") if key in obj and obj[key] != base[key]
+        }
+        if changes:
+            metadata.append((proposal, changes))
+    response: dict = {"status": "updated", "base_sha256": update.digest, "edits": []}
+    grouped: dict[tuple[int, ...], list[str]] = {}
+    for block in update.blocks:
+        entries = by_block.get(block, [])
+        unique = []
+        for _, edit in entries:
+            if edit not in unique:
+                unique.append(edit)
+        owners = tuple(sorted({order for order, _ in entries}))
+        if (
+            len(owners) > 1
+            and len(unique) > 1
+            and any(edit["operation"] in {"replace", "delete"} for edit in unique)
+        ):
+            grouped.setdefault(owners, []).append(block)
+        else:
+            response["edits"].extend(unique)
+    conflicts = [UpdateConflict(tuple(blocks), owners) for owners, blocks in grouped.items()]
+    if metadata:
+        candidates = [changes for _, changes in metadata]
+        if any(not p.complete_scope for p, _ in metadata) or any(
+            candidate != candidates[0] for candidate in candidates[1:]
+        ):
+            owners = tuple(p.order for p in ordered)
+            same = next((c for c in conflicts if c.batches == owners), None)
+            if same:
+                conflicts.remove(same)
+            conflicts.append(UpdateConflict(same.blocks if same else (), owners, True))
+        else:
+            response.update(candidates[0])
+    if not response["edits"] and not metadata and not conflicts:
+        response = {
+            "status": "unchanged",
+            "base_sha256": update.digest,
+            "reason": "All necessary original batches report the contribution is covered.",
+        }
+    return MergedUpdate(response, tuple(sorted(conflicts, key=lambda c: (c.batches, c.blocks))))

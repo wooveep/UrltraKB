@@ -929,6 +929,7 @@ async def iter_chat_turn_events(
                         "turn_count": session.turn_count,
                         "usage": data.get("usage"),
                         "answer_outcome": data.get("answer_outcome"),
+                        "unfinished": data.get("unfinished", ()),
                         "scope_candidates": data.get("scope_candidates", ()),
                     },
                 }
