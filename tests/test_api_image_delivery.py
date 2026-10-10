@@ -56,7 +56,10 @@ def test_http_answer_retains_image_receipts(
     )
     assert response.status_code == (200 if max_calls == 2 else 500)
     payload = response.json()
+    if max_calls == 1:
+        assert not model_service.requests[0].get("tools")
+        assert not payload.get("image_coverage")  # No image tool was allowed to run.
+        assert isinstance(payload["detail"], str)
+        return
     assert payload["image_coverage"][0]["reason_code"] == "image_not_sent"
     assert payload["image_coverage"][0]["status"] == "failed"
-    if max_calls == 1:
-        assert isinstance(payload["detail"], str)

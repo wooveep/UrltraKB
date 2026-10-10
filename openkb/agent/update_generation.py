@@ -81,32 +81,10 @@ async def generate_page_update(
         )
 
     def messages(batch, editable, extra=""):
-        # Keep source conditions, prior revision attribution and images from the
-        # existing context, changing only the actual window list supplied here.
-        old = json.dumps(list(originals.windows), ensure_ascii=False)
-        new = json.dumps(batch, ensure_ascii=False)
-        images = {
-            entry["path"] for window in batch for entry in window.get("images", [])
-        } | {path for window in batch for path in window.get("assets", {})}
-        blocks, include_image = [], False
-        for block in originals.message["content"]:
-            if block.get("type") == "text":
-                text = block["text"]
-                if text.startswith("Original image: "):
-                    include_image = text.removeprefix("Original image: ") in images
-                    if not include_image:
-                        continue
-                blocks.append({**block, "text": text.replace(old, new)})
-            elif block.get("type") != "image_url" or include_image:
-                blocks.append(block)
-        context = {
-            **originals.message,
-            "content": blocks,
-        }
         return build_page_messages(
             system_message=system_message,
             current_original=current_original,
-            original_context=context,
+            original_context=originals.for_windows(batch),
             known_targets_message=known_targets_message,
             task_message={**task_message, "content": task_message["content"] + extra},
             update_message=editable.message(),
@@ -230,7 +208,10 @@ async def generate_page_update(
         UpdateProposal(
             i,
             await generate(batch, editable, f"{page_key}:batch:{i}"),
-            complete_scope=len(requests) == 1,
+            # Splitting the old editing view does not narrow original evidence.
+            # Identical metadata proposals can cover the page even when its
+            # independently editable old blocks needed several requests.
+            complete_scope=batch == list(originals.windows),
         )
         for i, (batch, editable) in enumerate(requests)
     ]

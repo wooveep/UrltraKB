@@ -136,6 +136,10 @@ async def test_question_returns_image_receipts_even_without_a_following_send(
     )
     assert result.status == ("completed" if max_calls == 2 else "failed")
     assert len(model_service.requests) == max_calls
+    if max_calls == 1:
+        assert not model_service.requests[0].get("tools")
+        assert not result.image_coverage  # Tool-disabled finish rejects the rogue call.
+        return
     assert result.image_coverage[0]["status"] == "failed"
     assert result.image_coverage[0]["reason_code"] == "image_not_sent"
     assert [

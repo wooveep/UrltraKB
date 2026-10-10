@@ -224,3 +224,36 @@ async def test_cancellation_after_original_read_never_saves_narration(kb_dir, mo
     assert len(model_service.requests) == 1
     assert not any(e.get("event") == "final" for e in events)
     assert not list((kb_dir / "wiki/explorations").glob("*.md"))
+
+
+@pytest.mark.asyncio
+async def test_long_conversation_preparation_preserves_the_only_answer_send(kb_dir, model_service):
+    from openkb.agent.chat_session import ChatSession
+    from openkb.application.conversations import continue_conversation
+    from openkb.application.execution import ExecutionContext
+
+    configure(kb_dir, model_service, 1)
+    session = ChatSession.new(kb_dir, "openai/gpt-4o-mini", "en")
+    for index in range(9):
+        session.record_turn(f"Preference {index}: " + "workspace " * 1100, "Display only.", [])
+    model_service.replies.append(
+        (
+            200,
+            streamed_response(
+                {
+                    "role": "assistant",
+                    "content": "Earlier preferences could not be recalled within this budget.",
+                }
+            ),
+        )
+    )
+    context = ExecutionContext()
+    result = await continue_conversation(
+        kb_dir, "Confirm my latest preference.", session_id=session.id, context=context
+    )
+    assert result.status == "completed", result.error
+    assert result.answer_outcome == "partial" and result.unfinished
+    assert len(model_service.requests) == context.executor.calls == 1
+    assert not model_service.requests[0].get("tools")
+    assert context.executor.budget.snapshot()["stages"] == {"answer": 1}
+    assert context.executor.budget.snapshot()["reserved"] == {}

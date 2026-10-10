@@ -1177,7 +1177,12 @@ class TestCompileShortDoc:
 
         with patch("openkb.llm_execution.litellm") as mock_litellm:
             mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion(["Plain summary text", "not valid json"])
+                side_effect=_mock_completion(
+                    [
+                        json.dumps({"description": "Summary", "content": "Plain summary text"}),
+                        "not valid json",
+                    ]
+                )
             )
             # Exhausted plan repair is a publication-blocking error.
             with pytest.raises(CompilePlanError):
@@ -1214,7 +1219,7 @@ class TestCompileShortDocFallbacks:
         )
         summary_response = json.dumps(
             {
-                "brief": "B",
+                "description": "B",
                 "content": v1_summary_content,
             }
         )
@@ -1259,7 +1264,7 @@ class TestCompileShortDocFallbacks:
         v1_summary_content = "# Summary\n\nUses [[concepts/transformer]] mechanism."
         summary_response = json.dumps(
             {
-                "brief": "B",
+                "description": "B",
                 "content": v1_summary_content,
             }
         )
@@ -1310,7 +1315,7 @@ class TestCompileShortDocFallbacks:
         v1_summary_content = "# Summary\n\nReferences [[concepts/nonexistent]] heavily."
         summary_response = json.dumps(
             {
-                "brief": "B",
+                "description": "B",
                 "content": v1_summary_content,
             }
         )
@@ -1334,7 +1339,7 @@ class TestCompileShortDocFallbacks:
         v1_summary_content = "# Summary\n\nMentions [[concepts/imaginary]] briefly."
         summary_response = json.dumps(
             {
-                "brief": "B",
+                "description": "B",
                 "content": v1_summary_content,
             }
         )
@@ -1361,7 +1366,7 @@ class TestCompileShortDocFallbacks:
     @pytest.mark.asyncio
     async def test_scalar_plan_blocks_publication(self, tmp_path):
         wiki, source_path = self._setup_kb(tmp_path)
-        summary = json.dumps({"content": "# Summary\n\nPlain body"})
+        summary = json.dumps({"description": "Summary", "content": "# Summary\n\nPlain body"})
         with patch("openkb.llm_execution.litellm") as llm:
             llm.completion = MagicMock(side_effect=_mock_completion([summary, "42", "42"]))
             with pytest.raises(CompilePlanError):
@@ -1399,7 +1404,7 @@ class TestCacheControl:
         src.write_text("Body text about caching.", encoding="utf-8")
         (tmp_path / ".openkb").mkdir()
 
-        summary_response = json.dumps({"brief": "B", "content": "summary body"})
+        summary_response = json.dumps({"description": "B", "content": "summary body"})
         plan_response = json.dumps(
             {
                 "create": [{"name": "topic", "title": "Topic"}],

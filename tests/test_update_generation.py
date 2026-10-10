@@ -183,3 +183,76 @@ async def test_resolved_conflict_is_restored_without_new_sends(kb_dir, model_ser
     final_request = json.dumps(model_service.requests[-1])
     assert "Winter exception." in final_request and "Summer exception." in final_request
     assert page.read_text() == original
+
+
+@pytest.mark.asyncio
+async def test_old_page_partition_does_not_force_a_redundant_metadata_conflict(
+    kb_dir, model_service
+):
+    from openkb.agent.page_updates import PageUpdate
+    from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.agent.update_generation import generate_page_update
+    from openkb.application.execution import ExecutionContext
+    from openkb.locks import kb_ingest_lock
+
+    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
+    (kb_dir / ".openkb/config.yaml").write_text(
+        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n"
+        "  retries: 0\n  max_calls: 10\n  compile_repair_calls: 0\n"
+    )
+    wiki = kb_dir / "wiki"
+    old = "---\ndescription: Model A rules\n---\n# Rules\n\n" + "\n\n".join(
+        f"Rule {i}: " + "ordinary requirement " * 110 for i in range(16)
+    )
+    page = wiki / "concepts/rules.md"
+    page.write_text(old)
+    source = "All rules on this page apply to Models A and B. No body rule needs changing."
+    (wiki / "sources/manual.md").write_text(source)
+    windows = CompileSourceWindows(wiki, "manual", kb_dir=kb_dir)
+    originals = windows.prepare(
+        {"name": "rules", "reading_locations": {"chars": f"0:{len(source)}"}},
+        "concepts/rules.md",
+        long=True,
+    )
+    patch = PageUpdate(old)
+    for _ in range(10):
+        model_service.replies.append(
+            (
+                200,
+                response(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "base_sha256": patch.digest,
+                                "edits": [],
+                                "description": "Models A and B rules",
+                            }
+                        ),
+                    }
+                ),
+            )
+        )
+    context = ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        result = await generate_page_update(
+            patch=patch,
+            originals=originals,
+            windows=windows,
+            page_path=page,
+            model="ignored",
+            bundle=None,
+            system_message={"role": "system", "content": "Compile"},
+            current_original=None,
+            known_targets_message={"role": "user", "content": "Rules"},
+            task_message={
+                "role": "user",
+                "content": "Apply the complete source's page scope correction.",
+            },
+            fits=lambda messages: len(json.dumps(messages)) < 20000,
+        )
+    assert result["description"] == "Models A and B rules"
+    assert page.read_text() == old
+    assert 1 < len(model_service.requests) < 10
+    assert all(source in json.dumps(r["messages"]) for r in model_service.requests)
+    assert not any("Resolve these conflicting" in json.dumps(r) for r in model_service.requests)

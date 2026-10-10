@@ -435,6 +435,8 @@ def test_recompile_refresh_schema_noop_when_agents_missing(kb_dir):
 def test_compile_long_doc_backfills_summary_frontmatter(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
+    from compile_responses import summary_reply
+
     wiki = tmp_path / "wiki"
     (wiki / "summaries").mkdir(parents=True)
     (wiki / "concepts").mkdir(parents=True)
@@ -478,10 +480,13 @@ def test_compile_long_doc_backfills_summary_frontmatter(tmp_path, monkeypatch):
                 SimpleNamespace(
                     message=SimpleNamespace(
                         content=json.dumps(
-                            {
-                                "description": "A long report.",
-                                "content": "# Long\n\nA retained long report.",
-                            }
+                            summary_reply(
+                                kwargs["messages"],
+                                {
+                                    "description": "A long report.",
+                                    "content": "# Long\n\nA retained long report.",
+                                },
+                            )
                         )
                     ),
                     finish_reason="stop",

@@ -493,6 +493,7 @@ async def _llm_call_page_async(
     read_current: Callable[[], str] | None = None,
     numeric_sources=None,
     initial_response: str | None = None,
+    initial_error: TruncatedResponseError | None = None,
     response_protocol: str = "page-json",
     expected_sections: tuple[str, ...] = (),
     checkpoints=None,
@@ -509,6 +510,8 @@ async def _llm_call_page_async(
     correction = []
     for attempt in range(2):
         try:
+            if attempt == 0 and initial_error is not None:
+                raise initial_error
             raw = (
                 initial_response
                 if attempt == 0 and initial_response is not None
@@ -2273,20 +2276,25 @@ async def compile_short_doc(
             if summary_raw is None:
                 if checkpoints:
                     checkpoints.require_generation("short-summary", signature)
-                summary_raw = _llm_call(
-                    model,
-                    [system_msg, doc_msg],
-                    "summary",
-                    response_format=_JSON_RESPONSE_FORMAT,
-                    raise_on_truncation=True,
-                    bundle=bundle,
-                )
+                initial_error = None
+                try:
+                    summary_raw = _llm_call(
+                        model,
+                        [system_msg, doc_msg],
+                        "summary",
+                        response_format=_JSON_RESPONSE_FORMAT,
+                        raise_on_truncation=True,
+                        bundle=bundle,
+                    )
+                except TruncatedResponseError as error:
+                    initial_error = error
                 summary_raw = await _llm_call_page_async(
                     model,
                     [system_msg, doc_msg],
                     "summary",
                     response_format=_JSON_RESPONSE_FORMAT,
                     initial_response=summary_raw,
+                    initial_error=initial_error,
                     bundle=bundle,
                     response_protocol="summary-page-json",
                     checkpoints=checkpoints,

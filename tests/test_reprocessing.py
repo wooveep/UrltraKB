@@ -271,18 +271,23 @@ def test_reprocessing_preserves_model_quality_and_unfinished_stages(
     first = import_document(kb_dir, path)
 
     def model(**kwargs):
+        from compile_responses import summary_reply
+
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
                         content=json.dumps(
-                            {
-                                "description": "Fixture",
-                                "content": "Body",
-                                "create": "invalid-plan-shape",
-                                "update": [],
-                                "related": [],
-                            }
+                            summary_reply(
+                                kwargs["messages"],
+                                {
+                                    "description": "Fixture",
+                                    "content": "Body",
+                                    "create": "invalid-plan-shape",
+                                    "update": [],
+                                    "related": [],
+                                },
+                            )
                         )
                     ),
                     finish_reason="stop",

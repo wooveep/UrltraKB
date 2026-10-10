@@ -6,12 +6,12 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
 from pathlib import Path
 
 from openkb import frontmatter
 from openkb.agent.compile_evidence import MAX_EVIDENCE_CHARS, MAX_EVIDENCE_UNITS
 from openkb.agent.compile_messages import render_original_window
+from openkb.agent.page_originals import PageOriginalContext as PageOriginalContext
 from openkb.agent.page_response import PageResponseError
 
 READING_PLAN_INSTRUCTION = """
@@ -29,34 +29,8 @@ an existing inventory entry alone does not establish an editing need. Confirm
 the relevant original location, or withdraw an unnecessary editing proposal.
 Examples: "reading_locations": {"pages": "2,4-6"}, or
 "reading_locations": {"node_ids": ["0001"]}. Pages/blocks may also be an
-array of 1-6 unique positive ordinals. Cells/chars must be range strings.
+array of unique positive ordinals. Cells/chars must be range strings.
 """
-
-
-@dataclass(frozen=True)
-class PageOriginalContext:
-    message: dict
-    has_original: bool
-    has_current_original: bool = False
-    windows: tuple[dict, ...] = ()
-
-    def require_update(self, page: str) -> None:
-        if not self.has_current_original:
-            from openkb.compilation_report import CompilationIncomplete, report_compile_issue
-
-            code = "page_update_originals_unread"
-            report_compile_issue(code, page)
-            raise CompilationIncomplete(
-                (code,), (page,), "Existing page retained; locate relevant current originals first"
-            )
-
-    def navigation_page(self, title: str, doc_name: str) -> tuple[str, str]:
-        return (
-            f"Navigation: {title}; original details have not been read",
-            f"# {title}\n\nNavigation entry for [[summaries/{doc_name}]]. "
-            "No relevant original window was located for this page. "
-            "Read the original source before using specific values or operating rules.\n",
-        )
 
 
 def navigation_nodes(structure: list[dict]) -> list[dict]:
@@ -308,12 +282,11 @@ class CompileSourceWindows:
             from openkb.llm_execution import check_model_stop
 
             check_model_stop()
+            context_chars = 1200
             context = (
                 [
                     render_original_window(
-                        preceding_evidence(
-                            selected, offset, min(1200, MAX_EVIDENCE_CHARS // 8), layout=layout
-                        ),
+                        preceding_evidence(selected, offset, context_chars, layout=layout),
                         selected,
                     )
                 ]
@@ -333,7 +306,8 @@ class CompileSourceWindows:
                 after = (
                     [
                         render_original_window(
-                            following_evidence(selected, end, 1200, layout=layout), selected
+                            following_evidence(selected, end, context_chars, layout=layout),
+                            selected,
                         )
                     ]
                     if end < len(selected["content"])
@@ -345,15 +319,26 @@ class CompileSourceWindows:
                     "supplementary_context": [*context, *after],
                 }
 
-            projected = project_evidence(
-                selected,
-                offset=offset,
-                fits=lambda payload: len(payload["content"]) <= MAX_EVIDENCE_CHARS
-                and len(json.dumps(payload, ensure_ascii=False)) <= MAX_EVIDENCE_CHARS * 2
-                and fits(with_context(payload)),
-                allow_partial=True,
-                layout=layout,
-            )
+            while True:
+                projected = project_evidence(
+                    selected,
+                    offset=offset,
+                    fits=lambda payload: len(payload["content"]) <= MAX_EVIDENCE_CHARS
+                    and len(json.dumps(payload, ensure_ascii=False)) <= MAX_EVIDENCE_CHARS * 2
+                    and fits(with_context(payload)),
+                    allow_partial=True,
+                    layout=layout,
+                )
+                if projected["content"] or context_chars <= 32:
+                    break
+                context_chars = max(32, context_chars // 2)
+                if offset:
+                    context = [
+                        render_original_window(
+                            preceding_evidence(selected, offset, context_chars, layout=layout),
+                            selected,
+                        )
+                    ]
             if not projected["content"]:
                 raise PageResponseError(
                     "document_summary_capacity_exceeded", "Original window made no progress"

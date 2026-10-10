@@ -5,6 +5,8 @@ import threading
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from compile_responses import summary_reply
+
 pytest_plugins = ("test_workbook_import",)
 
 
@@ -49,13 +51,16 @@ def test_partial_workbook_task_can_retry_without_repeating_completed_sheets(kb_d
                             "message": {
                                 "role": "assistant",
                                 "content": json.dumps(
-                                    {
-                                        "description": "Worksheet fixture",
-                                        "content": "Worksheet summary",
-                                        "create": [],
-                                        "update": [],
-                                        "related": [],
-                                    }
+                                    summary_reply(
+                                        body["messages"],
+                                        {
+                                            "description": "Worksheet fixture",
+                                            "content": "Worksheet summary",
+                                            "create": [],
+                                            "update": [],
+                                            "related": [],
+                                        },
+                                    )
                                 ),
                             },
                         }

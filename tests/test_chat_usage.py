@@ -65,7 +65,7 @@ async def test_sdk_response_usage_accumulates_all_requests(monkeypatch):
             self.is_complete = True
 
     monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: Run())
-    events = [e async for e in iter_agent_response_events(None, "question")]
+    events = [e async for e in iter_agent_response_events(SimpleNamespace(model=None), "question")]
     assert [e["event"] for e in events] == [
         "answer_start",
         "usage",

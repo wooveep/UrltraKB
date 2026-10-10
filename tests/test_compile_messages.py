@@ -199,7 +199,9 @@ def test_unchanged_cannot_replace_new_knowledge_pages(kb_dir, monkeypatch, stage
     monkeypatch.setattr("litellm.acompletion", asynchronous)
     result = import_document(kb_dir, source)
     assert result.status == "failed"
-    assert "page_unchanged_not_allowed" in result.quality
+    assert (
+        "summary_invalid_shape" if stage == "summary" else "page_unchanged_not_allowed"
+    ) in result.quality
     assert not (kb_dir / "wiki/summaries/instructions.md").exists()
     assert not (kb_dir / "wiki/concepts/reactor.md").exists()
     assert not (kb_dir / "wiki/entities/reactor.md").exists()

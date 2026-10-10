@@ -125,3 +125,38 @@ async def test_compiler_repairs_only_the_invalid_summary_and_keeps_protocol_off_
     assert "Premature" not in summary.read_text()
     assert "Disconnect load" in summary.read_text()
     assert "Only trained technicians" in summary.read_text()
+
+
+@pytest.mark.asyncio
+async def test_short_summary_length_signal_consumes_one_repair_before_planning(kb_dir, monkeypatch):
+    from openkb.agent.compiler import compile_short_doc
+
+    source = kb_dir / "wiki/sources/manual.md"
+    source.write_text("Disconnect load before rewiring.")
+    sent = []
+
+    def provider(**kwargs):
+        sent.append(kwargs)
+        if len(sent) == 1:
+            text, finish = '{"description":"Rules","content":"Disconnect', "length"
+        elif len(sent) == 2:
+            assert "page_truncated_response" in str(kwargs["messages"])
+            text, finish = (
+                json.dumps({"description": "Rules", "content": "Disconnect load before rewiring."}),
+                "stop",
+            )
+        else:
+            text, finish = "{}", "stop"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=text), finish_reason=finish)],
+            usage=None,
+        )
+
+    async def asynchronous(**kwargs):
+        return provider(**kwargs)
+
+    monkeypatch.setattr("litellm.completion", provider)
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    await compile_short_doc("manual", source, kb_dir, "gpt-4o-mini")
+    assert len(sent) == 3
+    assert "Disconnect load before rewiring." in (kb_dir / "wiki/summaries/manual.md").read_text()

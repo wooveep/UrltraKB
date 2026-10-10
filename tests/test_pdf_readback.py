@@ -72,6 +72,9 @@ def pdf_model(monkeypatch):
                 "update": [],
                 "related": [],
             }
+            from compile_responses import summary_reply
+
+            response = summary_reply(kwargs["messages"], response)
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(

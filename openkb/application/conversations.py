@@ -54,7 +54,11 @@ def _with_image_receipt(operation):
     async def run(*args, **kwargs):
         context = kwargs.get("context") or ExecutionContext()
         before = context.executor.image_deliveries if context.executor else None
-        result = await operation(*args, **{**kwargs, "context": context})
+        try:
+            result = await operation(*args, **{**kwargs, "context": context})
+        finally:
+            if context.executor:
+                context.executor.budget.release("answer_finish")
         after = context.executor.image_deliveries if context.executor else None
         return replace(
             result,
@@ -255,6 +259,9 @@ async def continue_conversation(
                     from openkb.model_tokenizer import ContextCapacityError, question_measure
 
                     try:
+                        # Index catch-up and recall share this task's sends with
+                        # the answer loop. Protect its final send before either.
+                        executor.budget.preserve("answer_finish", 1)
                         executor.question_capacity = question_measure(context.snapshot)
                         executor.question_capacity.require_current(message)
                     except Exception as error:

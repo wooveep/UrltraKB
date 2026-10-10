@@ -5,6 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from compile_responses import summary_reply
 
 from openkb.application.documents import import_document
 
@@ -401,7 +402,10 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
                         {
                             "index": 0,
                             "finish_reason": "stop",
-                            "message": {"role": "assistant", "content": json.dumps(content)},
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(summary_reply(body["messages"], content)),
+                            },
                         }
                     ],
                     "usage": {
