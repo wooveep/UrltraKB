@@ -1065,7 +1065,7 @@
     }
   },
   "current_v14": {
-    "recorded_at_utc": "2026-10-11T16:58:52.594701+00:00",
+    "recorded_at_utc": "2026-10-11T17:28:08.929908+00:00",
     "status": "engineering_passed_waiting_budget_decision",
     "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
     "code_freeze": {
@@ -1164,12 +1164,12 @@
         "sha256": "a8c8accc81bf75f2f7a45750712ba77cea8a2f01875da9e4874d4f96f25f0480"
       },
       "fixed_budget_plan": {
-        "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-fixed-budget.json",
-        "sha256": "e85f316e519961fba857aa596bc62a07e27808d455409afa39140391a5ab7806"
+        "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-fixed-budget-r2.json",
+        "sha256": "9c71ea8089699a0d37b5e0e8497737cc768df27765f30c9613231f742291e28b"
       },
       "readonly_preflight": {
-        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-preflight.json",
-        "sha256": "869c25a60aa258184af3a197ef37ae7ecc4fab46c96c9ad250405e37a7d55775"
+        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-r2-preflight.json",
+        "sha256": "b3e20b65c5f294a32395d3c214027d8a6e2b3b530da854c046da4c717a574109"
       },
       "budget_change": {
         "status": "awaiting_explicit_user_answer",
@@ -1183,7 +1183,24 @@
           "path": ".scratch/text-image-repair-20261011/review/build-v14-budget-feasibility-spec.json",
           "sha256": "ffd233ecde3cdd7829dd81c662f4deda35fc96dce36396b1a15f5dbb31fb8119"
         }
-      }
+      },
+      "previous_fixed_budget_plan": {
+        "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-fixed-budget.json",
+        "sha256": "e85f316e519961fba857aa596bc62a07e27808d455409afa39140391a5ab7806"
+      },
+      "previous_readonly_preflight": {
+        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-preflight.json",
+        "sha256": "869c25a60aa258184af3a197ef37ae7ecc4fab46c96c9ad250405e37a7d55775"
+      },
+      "previous_plan_independent_review": {
+        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-plan-standards.json",
+        "sha256": "7a17c643caf8ac1952ddf14fe58e6bd014123f6c013e892fbecc15106565b201"
+      },
+      "plan_independent_review": {
+        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-r2-plan-standards.json",
+        "sha256": "200b79586a636150df62470fcf81b421774a894a4ff49201e1479fb64bd48a03"
+      },
+      "narrative_correction": "Only five metadata/narrative fields changed; execution and scoring bindings are identical. G8 starts0 applies to initial v12 creation only. All834 existing task calls remain charged, plus separate371. Original plans and scoring addendum remain immutable."
     },
     "new_real_results": {
       "build_executed": false,
@@ -1204,6 +1221,25 @@
     "integration_receipt": {
       "path": ".scratch/text-image-repair-20261011/review/combined-main-integration-v14-receipt.json",
       "sha256": "adea2ab9267c649bf1d2dbea33749fca509f007e071c09c3d46916657e3e9d4b"
+    },
+    "main_integration_commit": "b5a9e2bba0e7317089e8f97151ce4e8b83d27817",
+    "reader_resume_method": {
+      "status": "approved_method_only",
+      "execution_qualified": false,
+      "independent_tests_passed": 32,
+      "local_sdk_requests": 96,
+      "full_agent_qa_cases": 45,
+      "persistent_chat_turns_in_local_compatibility_test": 3,
+      "real_model_executed": false,
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/review/reader-resume-method-independent-r2.json",
+        "sha256": "6da40856eb0ab085de852c3f8011aee14504adffd2ba92d54b91a1d9c238a0a4"
+      },
+      "approval": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-reader-resume-method-approval-r1.json",
+        "sha256": "21d9e28d04dadcd3af1265feab5b44055f0211bfaf7a907d93453d8fb9020799"
+      },
+      "claim_limit": "Method compatibility only; the exact completed final build plan and head must be bound before real reader/QA/chat acceptance."
     }
   }
 }
