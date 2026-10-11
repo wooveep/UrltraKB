@@ -84,6 +84,7 @@ def native_source(view: QueryView, path: str, *, data: bytes | None = None) -> d
         "reading_action": {"tool": preferred, "arguments": actions[preferred]},
         "source_revision_id": view.source_revisions_by_path.get(path),
         "content_digest": view.files[path],
+        **view.retained_source_status.get(path, {}),
     }
 
 

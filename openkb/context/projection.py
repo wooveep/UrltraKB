@@ -53,6 +53,7 @@ def selection_identity(selection: QuerySelection) -> dict:
                 "generation": v.head_generation,
                 "knowledge_revision_id": v.knowledge_revision_id,
                 "source_revisions": v.source_revisions_by_path,
+                "retained_source_status": v.retained_source_status,
                 "files": v.files,
             }
             for v in selection.views
@@ -139,6 +140,7 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                 "unit_revision_id": published.get("unit_revision_id"),
                 "knowledge_revision_id": published.get("knowledge_revision_id")
                 or view.knowledge_revision_id,
+                **view.retained_source_status.get(path, {}),
             }
             if path.endswith(".content.json"):
                 from openkb.text_source import read_text_selection

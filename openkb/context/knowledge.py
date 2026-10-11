@@ -259,8 +259,11 @@ class KnowledgeRetrieval:
                 "source_context": original_context(source, raw, location, selected=window),
                 "reading_action": action,
                 "content_kind": "original_source",
-                "interpretation": "Original extraction; generated navigation and image "
-                "interpretations are separate content",
+                "interpretation": source.get(
+                    "interpretation",
+                    "Original extraction; generated navigation and image "
+                    "interpretations are separate content",
+                ),
                 "range_complete": window.get("coverage") == "complete",
             }
             if window.get("continuation") is not None:

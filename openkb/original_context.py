@@ -119,6 +119,11 @@ def original_context(
         "source_path": source["path"],
         "source_revision_id": source["source_revision_id"],
         "content_digest": source["content_digest"],
+        **{
+            key: source[key]
+            for key in ("processing_status", "target_source_revision_id", "interpretation")
+            if key in source
+        },
         "native_location": location,
         "regions": regions[:8],
         "regions_omitted": max(0, len(regions) - 8),

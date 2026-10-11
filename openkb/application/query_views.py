@@ -29,6 +29,7 @@ class QueryView:
     product_id: str | None = None
     product_aliases: tuple[str, ...] = ()
     source_revisions_by_path: dict[str, str] = field(default_factory=dict)
+    retained_source_status: dict[str, dict] = field(default_factory=dict)
 
     @property
     def view_id(self) -> str:
@@ -176,16 +177,32 @@ def _pin_view(
 
     historical = bool(scope and scope.read_only)
     families = {identity: _input_family(kb_dir, identity, view.view_id) for identity in inputs}
-    allowed = tuple(
+    applicable = tuple(
         identity
         for identity in inputs
         if (not defaults or defaults.get(families[identity] or "", view.view_id) == view.view_id)
-        and (historical or effective_input(kb_dir, view.view_id, identity))
+    )
+    active = {
+        identity
+        for identity in applicable
+        if historical or effective_input(kb_dir, view.view_id, identity)
+    }
+    from openkb.retained_reprocessing import retained_reprocessing_input
+
+    retained = {
+        identity: status
+        for identity in applicable
+        if identity not in active
+        and (status := retained_reprocessing_input(kb_dir, view.view_id, identity))
+    }
+    allowed = tuple(
+        identity for identity in applicable if identity in active or identity in retained
     )
     if inputs and not allowed:
         return None
     sources = []
     source_revisions_by_path: dict[str, str] = {}
+    retained_source_status: dict[str, dict] = {}
     source_paths: set[str] = set()
     image_roots: list[str] = []
     image_revisions: dict[str, str] = {}
@@ -206,12 +223,21 @@ def _pin_view(
             (f"sources/{named.doc_name}{suffix}", unit.source_revision_id)
             for suffix in (".md", ".json", ".content.json")
         )
+        if identity in retained:
+            retained_source_status.update(
+                (f"sources/{named.doc_name}{suffix}", retained[identity])
+                for suffix in (".md", ".json", ".content.json")
+            )
         image_roots.append(f"sources/images/{named.doc_name}/")
         image_revisions[image_roots[-1]] = unit.source_revision_id
     files = wiki_versions(kb_dir, selected.wiki_dir)
     if not historical:
-        files = {name: digest for name, digest in files.items() if name not in head.needs_refresh}
-    if manifest and set(inputs) != set(allowed):
+        files = {
+            name: digest
+            for name, digest in files.items()
+            if name not in head.needs_refresh or name in retained_source_status
+        }
+    if manifest and set(inputs) != active:
         files = {
             name: digest
             for name, digest in files.items()
@@ -220,7 +246,7 @@ def _pin_view(
             or (
                 name in manifest.page_dependencies
                 and bool(manifest.page_dependencies[name])
-                and set(manifest.page_dependencies[name]).issubset(allowed)
+                and set(manifest.page_dependencies[name]).issubset(active)
             )
         }
     from openkb.view_records import Product
@@ -240,10 +266,15 @@ def _pin_view(
         tuple(sorted(set(sources))),
         files,
         head.generation,
-        validity="historical" if historical else "current",
+        validity="historical"
+        if historical
+        else "current_with_retained_originals"
+        if retained
+        else "current",
         product_id=view.product_id,
         product_aliases=product.aliases if product else (),
         source_revisions_by_path=source_revisions_by_path,
+        retained_source_status=retained_source_status,
     )
 
 
