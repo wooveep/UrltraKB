@@ -170,15 +170,19 @@ def test_image_only_presentation_retains_pdf_without_publishing_knowledge(
             product="Slides", applicable_versions=("1",), family="presentation"
         ),
     )
-    assert result.status == "failed", result.message
-    assert result.units[0].error_type == "PagePartsContractError"
-    assert "No content is available for text navigation" in result.message
+    assert result.status == "blocked", result.message
+    assert result.units[0].error_type == "NoReliableText"
+    assert "未生成知识" in result.message
     assert result.units[0].knowledge_revision_id is None
     assert result.model_usage["current"]["requests"] == 0
     saved = read_document_source(kb_dir, result.source_id)
     assert (kb_dir / saved["original_path"]).read_bytes() == original == path.read_bytes()
     assert saved["office"]["slides"][0]["body"] == ""
     assert saved["office"]["slides"][0]["notes"] == ""
+    assert saved["pages"] == 1
+    for part in ("body", "notes"):
+        selected = read_document_source(kb_dir, result.source_id, pages="1", part=part)
+        assert selected["units"][0]["parts"][part] == ""
     with pymupdf.open(kb_dir / saved["internal_pdf_path"]) as pdf:
         assert len(pdf) == 1 and pdf[0].get_images()
     if limit == 10:
@@ -210,7 +214,7 @@ def test_image_only_replacement_keeps_previous_knowledge_and_retains_new_pdf(
     frozen_slide_conversion(path)
     original = path.read_bytes()
     failed = import_document(kb_dir, path, metadata=metadata)
-    assert failed.status == "failed", failed.message
+    assert failed.status == "blocked", failed.message
     assert len(single_slide_model) == calls
     assert failed.model_usage["current"]["requests"] == 0
     current = read_document_source(kb_dir, first.source_id)
@@ -244,6 +248,14 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
     path = frozen_slide_conversion(tmp_path / "old-textless.pptx")
     # Simulate the prior full-compilation policy to retain an old successful snapshot.
     with monkeypatch.context() as old_policy:
+        from dataclasses import replace
+
+        from openkb.import_text import preflight_import_text
+
+        def old_preflight(*args, **kwargs):
+            return replace(preflight_import_text(*args, **kwargs), unavailable=None)
+
+        old_policy.setattr("openkb.import_text.preflight_import_text", old_preflight)
         old_policy.setattr("openkb.office.slide_content.require_slide_navigation", lambda _: None)
         first = import_document(
             kb_dir,
@@ -257,8 +269,8 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
     calls = len(single_slide_model)
     review = select_recompilation(kb_dir, first.source_id, confirmation=True)
     result = asyncio.run(recompile_document(kb_dir, first.source_id, version=review.version))
-    assert result.status == "failed", result.message
-    assert result.error_type == "PagePartsContractError"
+    assert result.status == "rejected", result.message
+    assert "未生成知识" in result.message
     assert len(single_slide_model) == calls
     current = read_document_source(kb_dir, first.source_id)
     assert current["knowledge_revision_id"] == before["knowledge_revision_id"]

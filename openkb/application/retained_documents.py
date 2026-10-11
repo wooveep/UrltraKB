@@ -7,9 +7,16 @@ from pathlib import Path
 from openkb.agent.page_figures import render_gallery
 from openkb.figure_assets import freeze_figures
 from openkb.import_text import TEXT_CHECK_POLICY
-from openkb.locks import atomic_write_json, atomic_write_text
+from openkb.locks import atomic_write_bytes, atomic_write_json, atomic_write_text
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import admit_source_revision, record_path, write_record
+from openkb.source_records import Record, RecordId
+
+
+class RetainedDocument(Record):
+    source_revision_id: RecordId
+    unit_revision_id: RecordId
+    observed_blank: bool
 
 
 def _retain_original_content(
@@ -34,15 +41,20 @@ def _retain_original_content(
         )
         return frozen.model_dump(mode="json"), not frozen.text.strip()
     pdf_path = prepared.path
+    office_path = None
     if extension in OFFICE_SOURCE_EXTENSIONS:
         from openkb.office.convert import convert_office
 
+        directory.mkdir(parents=True, exist_ok=True)
         pdf_path = directory / "display.pdf"
-        convert_office(kb_dir, prepared.path, pdf_path, check_stop=check_stop)
+        office_path = convert_office(kb_dir, prepared.path, pdf_path, check_stop=check_stop)
     elif extension in CNKI_SOURCE_EXTENSIONS:
         from openkb.cnki.convert import prepare_cnki
 
-        pdf_path, _ = prepare_cnki(kb_dir, prepared, check_stop=check_stop)
+        converted, provenance = prepare_cnki(kb_dir, prepared, check_stop=check_stop)
+        pdf_path = directory / "display.pdf"
+        atomic_write_bytes(pdf_path, converted.read_bytes())
+        atomic_write_bytes(pdf_path.with_suffix(".cnki.json"), provenance.read_bytes())
     elif extension != ".pdf":
         # No text is not proof that an unsupported display format is blank.
         return "", False
@@ -62,10 +74,22 @@ def _retain_original_content(
             and not list(page.annots() or ())
             for page in pdf
         )
-    return [
-        {"page": i, "content": "", "images": [{"path": p} for p in images.get(i, [])]}
+    pages = [
+        {
+            "page": i,
+            "unit_kind": "page",
+            "content": "",
+            "images": [{"path": p} for p in images.get(i, [])],
+        }
         for i in range(1, count + 1)
-    ], observed_blank
+    ]
+    if office_path:
+        from openkb.office.slide_content import attach_slides, read_slides
+
+        slides = read_slides(office_path)
+        if slides:
+            pages = attach_slides(pages, slides)
+    return pages, observed_blank
 
 
 def retain_without_knowledge(
@@ -78,6 +102,7 @@ def retain_without_knowledge(
     scope=None,
     check_stop=lambda: None,
     resource_policy=None,
+    fingerprint: str,
 ):
     from openkb.application.ingestion import result_from_publication
     from openkb.knowledge_scope import resolve_scope
@@ -93,7 +118,9 @@ def retain_without_knowledge(
         retain_only=True,
     )
     unit, revision = plan_import_units(
-        kb_dir, admission, json.dumps({"retained_only": TEXT_CHECK_POLICY})
+        kb_dir,
+        admission,
+        json.dumps({"retained_only": TEXT_CHECK_POLICY, "normalization": fingerprint}),
     )
     state, _ = begin_unit_attempt(
         kb_dir,
@@ -103,40 +130,67 @@ def retain_without_knowledge(
         view_id=selected.view_id,
         retry_confirmed=True,
     )
-    directory = kb_dir / ".openkb/retained-documents" / admission.revision.source_revision_id
+    directory = (
+        kb_dir
+        / ".openkb/retained-documents"
+        / admission.revision.source_revision_id
+        / revision.unit_revision_id
+    )
+    retained_target = directory.parent / "target.json"
     state_path = record_path(kb_dir, "publications", state.publication_id)
     attempt_path = record_path(kb_dir, "attempts", state.attempt_id)
     message = "资料已保存，未生成知识：没有可靠的原生文字；原件及可用原图供阅读。已有知识尚未刷新。"
     with mutation_scope(
-        kb_dir, [directory, state_path, attempt_path], operation="retain-without-knowledge"
+        kb_dir,
+        [directory, retained_target, state_path, attempt_path],
+        operation="retain-without-knowledge",
     ):
         check_stop()
-        raw, observed_blank = _retain_original_content(
-            kb_dir, prepared, admission, unit, directory, check_stop, resource_policy
-        )
+        entry = directory / "original-images.md"
+        receipt = directory / "retention.json"
+        if receipt.exists():
+            saved = RetainedDocument.model_validate_json(receipt.read_text("utf-8"))
+            read_retained_images(
+                kb_dir,
+                admission.revision.source_revision_id,
+                unit_revision_id=revision.unit_revision_id,
+            )
+            observed_blank = saved.observed_blank
+        else:
+            raw, observed_blank = _retain_original_content(
+                kb_dir, prepared, admission, unit, directory, check_stop, resource_policy
+            )
+            if observed_blank:
+                message = "资料已保存，未生成知识：原件页面为空白；未自动确认来源贡献为空。"
+            path = f"sources/{unit.doc_name}.json"
+            atomic_write_json(directory / path, raw)
+            figures = freeze_figures(
+                directory,
+                path,
+                raw,
+                {
+                    "source_revision_id": admission.revision.source_revision_id,
+                    "processing_revision_id": revision.unit_revision_id,
+                },
+            )
+            atomic_write_text(
+                entry,
+                render_gallery(
+                    directory,
+                    entry.name,
+                    message,
+                    [{"figure": f.model_dump(mode="json"), "historical": False} for f in figures],
+                ),
+            )
+            saved = RetainedDocument(
+                source_revision_id=admission.revision.source_revision_id,
+                unit_revision_id=revision.unit_revision_id,
+                observed_blank=observed_blank,
+            )
+            write_record(receipt, saved)
+        write_record(retained_target, saved)
         if observed_blank:
             message = "资料已保存，未生成知识：原件页面为空白；未自动确认来源贡献为空。"
-        path = f"sources/{unit.doc_name}.json"
-        atomic_write_json(directory / path, raw)
-        figures = freeze_figures(
-            directory,
-            path,
-            raw,
-            {
-                "source_revision_id": admission.revision.source_revision_id,
-                "processing_revision_id": revision.unit_revision_id,
-            },
-        )
-        entry = directory / "original-images.md"
-        atomic_write_text(
-            entry,
-            render_gallery(
-                directory,
-                entry.name,
-                message,
-                [{"figure": f.model_dump(mode="json"), "historical": False} for f in figures],
-            ),
-        )
         state = state.model_copy(
             update={
                 "status": "blocked",
@@ -155,28 +209,66 @@ def retain_without_knowledge(
     return replace(result, resources=(*result.resources, str(entry)), message=message)
 
 
-def read_retained_images(kb_dir: Path, source_revision_id: str, *, pages=None):
+def read_retained_images(
+    kb_dir: Path, source_revision_id: str, *, unit_revision_id: str, pages=None
+):
     """Use the same native source reader in desktop, CLI and HTTP, without compiling."""
     from openkb.agent.page_figures import split_gallery
     from openkb.figure_assets import FigureOccurrence
     from openkb.file_state import contained_paths
     from openkb.source_pages import read_page_selection
 
-    directory = kb_dir / ".openkb/retained-documents" / source_revision_id
+    root = kb_dir / ".openkb/retained-documents" / source_revision_id
+    directory = root / unit_revision_id
+    if not directory.is_dir():
+        target = root / "target.json"
+        if not target.exists():
+            return None
+        selected = RetainedDocument.model_validate_json(target.read_text("utf-8"))
+        if selected.source_revision_id != source_revision_id:
+            raise ValueError("Retained target belongs to another source revision")
+        directory = root / selected.unit_revision_id
     entry = directory / "original-images.md"
     contained_paths(kb_dir, [directory, entry])
-    if not entry.is_file():
-        return None
+    saved = RetainedDocument.model_validate_json((directory / "retention.json").read_text("utf-8"))
+    if saved.source_revision_id != source_revision_id or saved.unit_revision_id != directory.name:
+        raise ValueError("Retained images belong to another source or processing revision")
     paths = list((directory / "sources").glob("*.json"))
     if len(paths) != 1:
         raise ValueError("Retained figure source is incomplete")
     raw = json.loads(paths[0].read_text())
     body, entries = split_gallery(entry.read_text())
+    for record in entries:
+        figure = FigureOccurrence.model_validate(record["figure"])
+        if (
+            figure.source_revision_id != saved.source_revision_id
+            or figure.processing_revision_id != saved.unit_revision_id
+        ):
+            raise ValueError("Retained figure belongs to another processing revision")
     if not isinstance(raw, list):
         if pages is not None:
             raise ValueError("This original has no physical PDF pages")
-        return entry, {"content": entry.read_text(), "pages": None, "page_range": [], "units": []}
+        return entry, {
+            "content": render_gallery(directory, entry.name, body, entries),
+            "unit_revision_id": saved.unit_revision_id,
+            "pages": None,
+            "page_range": [],
+            "units": [],
+        }
     selection = read_page_selection(raw, pages)
+    pdf = directory / "display.pdf"
+    if pdf.is_file():
+        from openkb.conversion_artifacts import read_conversion_files
+
+        office, cnki = pdf.with_suffix(".office.json"), pdf.with_suffix(".cnki.json")
+        selection.update(
+            read_conversion_files(
+                kb_dir,
+                pdf,
+                office_path=office if office.is_file() else None,
+                cnki_path=cnki if cnki.is_file() else None,
+            )
+        )
     visible = []
     for record in entries:
         figure = FigureOccurrence.model_validate(record["figure"])
@@ -191,5 +283,6 @@ def read_retained_images(kb_dir: Path, source_revision_id: str, *, pages=None):
         )
     return entry, {
         **selection,
+        "unit_revision_id": saved.unit_revision_id,
         "content": render_gallery(directory, entry.name, body, visible),
     }

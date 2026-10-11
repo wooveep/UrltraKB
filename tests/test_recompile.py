@@ -166,7 +166,9 @@ def _seed_cloud(kb_dir: Path) -> None:
         "---\nsources: [pageindex-cloud:pi-cloud1]\n---\n# Cloud\n",
         encoding="utf-8",
     )
-    (kb_dir / "wiki" / "sources" / "cloud-h_c.json").write_text("[]", encoding="utf-8")
+    (kb_dir / "wiki" / "sources" / "cloud-h_c.json").write_text(
+        json.dumps([{"page": 1, "text": "Retained cloud document content"}]), encoding="utf-8"
+    )
     (kb_dir / "wiki" / "log.md").write_text("# Log\n\n", encoding="utf-8")
 
 

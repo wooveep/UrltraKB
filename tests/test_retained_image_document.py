@@ -88,6 +88,54 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
 pytest_plugins = ("test_vendor_sdk",)
 
 
+def test_retained_processing_preserves_prior_assets_when_resource_policy_changes(
+    kb_dir, model_service, monkeypatch
+):
+    from pathlib import Path
+
+    from figure_fixtures import png_bytes
+
+    from openkb.application.documents import import_document
+    from openkb.documents import read_document_source
+    from openkb.markdown_images import image_references
+
+    fetched = []
+
+    def fetch(request, **kwargs):
+        fetched.append(request.full_url)
+        response = io.BytesIO(png_bytes("blue"))
+        response.headers = {"Content-Type": "image/png"}
+        return response
+
+    monkeypatch.setattr("urllib.request.urlopen", fetch)
+    source = kb_dir / "remote-only.html"
+    source.write_text('<img src="https://example.test/figure.png" alt="Diagram">')
+    first = import_document(kb_dir, source, download_remote_assets=False)
+    old_entry = Path(first.resources[-1])
+    old_content = old_entry.read_bytes()
+    second = import_document(kb_dir, source, download_remote_assets=True)
+    assert first.source_revision_id == second.source_revision_id
+    assert first.units[0].target_revision_id != second.units[0].target_revision_id
+    assert old_entry.read_bytes() == old_content
+    viewed = read_document_source(kb_dir, first.source_id)
+    assert len(image_references(viewed["content"])) == 1
+    calls = len(fetched)
+    third = import_document(kb_dir, source, download_remote_assets=True)
+    assert third.units[0].target_revision_id == second.units[0].target_revision_id
+    assert len(fetched) == calls
+    assert old_entry.read_bytes() == old_content
+    source.write_text('<img src="https://example.test/figure.png" alt="Updated diagram">')
+    fourth = import_document(kb_dir, source, download_remote_assets=True)
+    assert fourth.source_revision_id != first.source_revision_id
+    historical = read_document_source(
+        kb_dir, first.source_id, source_revision_id=first.source_revision_id
+    )
+    assert len(image_references(historical["content"])) == 1
+    assert historical["unit_revision_id"] == second.units[0].target_revision_id
+    assert old_entry.read_bytes() == old_content
+    assert not model_service.requests
+
+
 @pytest.mark.parametrize("suffix", [".md", ".html"])
 def test_image_only_markup_retains_pixels_without_model_work(kb_dir, model_service, suffix):
     from openkb.application.documents import import_document

@@ -263,6 +263,14 @@ def import_prepared_source(
             scope=scope,
             check_stop=check_stop,
             resource_policy=resource_policy,
+            fingerprint=normalization_fingerprint(
+                kb_dir,
+                scope=scope,
+                bundle=bundle,
+                source_revision=admission.revision,
+                doc_name=admission.source.doc_name,
+                resource_policy=resource_policy,
+            ),
         )
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint

@@ -58,6 +58,9 @@ class ImportTextRejected(ValueError):
         if assessment.empty_html:
             super().__init__("HTML not imported: no readable body")
             return
+        if assessment.unavailable == "no_readable_text":
+            super().__init__("未生成知识：没有可靠的原生文字；已有原件和原图仍可阅读。")
+            return
         if assessment.extraction == "PDF text layer":
             reason = "无法可靠读取文本层"
             if assessment.findings:
@@ -286,7 +289,10 @@ def preflight_import_text(
         prepared.digest,
         extraction,
         findings,
-        unavailable="no_readable_text" if not any(text.strip() for _, text in parts) else None,
+        # Workbooks own per-sheet empty, objects-only and parse-failure outcomes.
+        unavailable="no_readable_text"
+        if extension not in {".xlsx", ".xls"} and not any(text.strip() for _, text in parts)
+        else None,
         empty_html=empty_html,
     )
     prepared.text_checks[cache_key] = assessment

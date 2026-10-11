@@ -25,18 +25,20 @@ pytest_plugins = ("test_pdf_readback",)
 
 
 def test_asset_event_reimports_its_markdown_source(kb_dir, pdf_model):
+    from figure_fixtures import png_bytes
+
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
 
     source = kb_dir / "raw/figure.md"
     image = kb_dir / "raw/figure.png"
-    source.write_text("![figure](figure.png)")
-    image.write_bytes(b"before")
+    source.write_text("A retained figure illustrates this source.\n\n![figure](figure.png)")
+    image.write_bytes(png_bytes("red"))
     first = import_document(kb_dir, source)
     registry = WatchRegistry()
     registry.start("test-kb", kb_dir, debounce=0.03)
     try:
-        image.write_bytes(b"after")
+        image.write_bytes(png_bytes("blue"))
         deadline = time.monotonic() + 7
         while time.monotonic() < deadline:
             saved = read_document_source(kb_dir, first.source_id)
@@ -48,7 +50,7 @@ def test_asset_event_reimports_its_markdown_source(kb_dir, pdf_model):
             kb_dir, first.source_id, source_revision_id=saved["target_source_revision_id"]
         )
         retained = kb_dir / saved["base_path"] / "images/figure/figure.png"
-        assert retained.read_bytes() == b"after"
+        assert retained.read_bytes() == png_bytes("blue")
     finally:
         registry.stop("test-kb")
 

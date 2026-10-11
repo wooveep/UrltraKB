@@ -501,7 +501,12 @@ def read_admitted_source(
             elif char_range is None and block_range is None:
                 from openkb.application.retained_documents import read_retained_images
 
-                retained = read_retained_images(root, target.source_revision_id, pages=page_range)
+                retained = read_retained_images(
+                    root,
+                    target.source_revision_id,
+                    unit_revision_id=state.target_revision_id,
+                    pages=page_range,
+                )
                 if retained:
                     base_path, selection = retained
                     content, pages = selection["content"], selection["pages"]
