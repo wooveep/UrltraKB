@@ -15,7 +15,11 @@ from openkb.agent.page_originals import PageOriginalContext as PageOriginalConte
 from openkb.agent.page_response import PageResponseError
 
 READING_PLAN_INSTRUCTION = """
-For long-document pages, optionally include reading_locations with node_ids
+For a long document with multiple navigation sections, every create or update
+must include reading_locations. Select the smallest original section(s) covering
+the proposed topic, including its prerequisites, conditions and procedure steps.
+A selected parent includes its descendant sections. A single-section document
+may omit reading_locations. Use node_ids
 (existing navigation IDs), pages (physical ordinals), blocks (native ordinals),
 cells (worksheet A1 range), or chars (0-based START:END). Give only relevant
 page-level locations, not per-claim evidence. The application validates and
@@ -193,9 +197,28 @@ class CompileSourceWindows:
         remaining: set[str] = set()
         for kind in ("concepts", "entities"):
             group = getattr(plan, kind)
+            unscoped = set()
+            if len(self.navigation) > 1:
+                for item in [*group.create, *group.update]:
+                    if not item.get("reading_locations"):
+                        page = f"{kind}/{item['name']}.md"
+                        unscoped.add(page)
+                        unresolved.append(
+                            {
+                                "page": page,
+                                "proposal": item,
+                                "diagnostic": "Select relevant native reading_locations for this "
+                                "multi-section document, including the proposed topic's "
+                                "prerequisites and conditions. Parent node_ids include "
+                                "descendants.",
+                            }
+                        )
             for item in group.update:
                 page = f"{kind}/{item['name']}.md"
                 remaining.add(page)
+                if page in unscoped:
+                    self._unresolved_updates.add(page)
+                    continue
                 context = self.prepare(item, page, long=True)
                 current = [w for w in context.windows if w["source_role"] == "current"]
                 truncated = bool(current and type(current[-1].get("continuation")) is int)
@@ -219,7 +242,8 @@ class CompileSourceWindows:
                     )
         if unresolved:
             return (
-                "Confirm current-source editing intent for unresolved updates. "
+                "Confirm native reading scope and current-source editing intent "
+                "for unresolved proposals. "
                 "Return a corrected complete concepts/entities plan. Supply relevant native "
                 "reading_locations for necessary updates, or withdraw unnecessary proposals "
                 "by omitting them or choosing related for pure navigation. Keep all necessary "

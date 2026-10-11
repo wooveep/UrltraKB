@@ -636,7 +636,7 @@ async def test_long_block_compile_receives_only_selected_frozen_image(
 
 
 @pytest.mark.parametrize("suggestions", [None, {"pages": "3"}, {"pages": [3]}, {"pages": "9"}])
-def test_long_import_reads_native_windows_without_requiring_suggestions(
+def test_long_import_reads_native_windows_from_confirmed_locations(
     kb_dir, physical_pdf, pdf_model, monkeypatch, suggestions
 ):
     from openkb.application.documents import import_document
@@ -654,7 +654,15 @@ def test_long_import_reads_native_windows_without_requiring_suggestions(
     item = {"name": "last-section", "title": "Last section"}
     if suggestions:
         item["reading_locations"] = suggestions
-    compile_boundary(monkeypatch, {"concepts": {"create": [item]}}, requests)
+    plan_requests = []
+
+    def plan(messages):
+        plan_requests.append(messages)
+        if suggestions is None and len(plan_requests) == 2:
+            return {"concepts": {"create": [{**item, "reading_locations": {"pages": "3"}}]}}
+        return {"concepts": {"create": [item]}}
+
+    compile_boundary(monkeypatch, plan, requests)
     compile_response = litellm.completion
 
     def routed(**kwargs):
@@ -674,6 +682,7 @@ def test_long_import_reads_native_windows_without_requiring_suggestions(
         assert not (kb_dir / "wiki/concepts/last-section.md").exists()
         return
     assert imported.status == "added", imported
+    assert len(plan_requests) == (2 if suggestions is None else 1)
     page = next(m for m in requests if "Write the concept page" in str(m))
     assert "Physical page three." in str(page)
     assert '"unit_kind": "page"' in str(page)
@@ -735,7 +744,11 @@ def test_short_update_rereads_a_published_long_source(kb_dir, physical_pdf, pdf_
 
     index_response = litellm.completion
     requests = []
-    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "last-section"}]}}, requests)
+    compile_boundary(
+        monkeypatch,
+        {"concepts": {"create": [{"name": "last-section", "reading_locations": {"pages": "3"}}]}},
+        requests,
+    )
     compile_response = litellm.completion
 
     def routed(**kwargs):

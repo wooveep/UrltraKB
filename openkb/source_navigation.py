@@ -17,6 +17,26 @@ def stored_navigation(index_root: Path, doc_id: str) -> list[dict]:
     return []
 
 
+def planning_navigation(structure: list[dict]) -> list[dict]:
+    """Expose the retained hierarchy without generated summaries or repeated subtrees."""
+    result: list[dict] = []
+
+    def visit(nodes: list[dict], parent_id: str | None = None) -> None:
+        for node in nodes:
+            entry = {
+                key: node[key]
+                for key in ("node_id", "title", "start_index", "end_index")
+                if key in node
+            }
+            if parent_id is not None:
+                entry["parent_node_id"] = parent_id
+            result.append(entry)
+            visit(node.get("nodes", []), node.get("node_id", parent_id))
+
+    visit(structure)
+    return result
+
+
 def published_navigation(
     kb_dir: Path,
     view_id: str,

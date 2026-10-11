@@ -2399,7 +2399,7 @@ async def compile_long_doc(
     from openkb.config import resolve_effective_config
     from openkb.config_state import active_values
     from openkb.llm_execution import active_executor
-    from openkb.source_navigation import stored_navigation
+    from openkb.source_navigation import planning_navigation, stored_navigation
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     captured = active_values(kb_dir)
@@ -2493,13 +2493,7 @@ async def compile_long_doc(
             description=draft.description or doc_description,
             full_text=windows.original_path,
         )
-        planning = json.dumps(
-            [
-                {k: node[k] for k in ("node_id", "title", "start_index", "end_index") if k in node}
-                for node in windows.navigation
-            ],
-            ensure_ascii=False,
-        )
+        planning = json.dumps(planning_navigation(navigation), ensure_ascii=False)
         overview = draft.planning_overview[:MAX_DOCUMENT_PLANNING_CHARS]
         if len(draft.planning_overview) > len(overview):
             overview += (
@@ -2509,7 +2503,8 @@ async def compile_long_doc(
             "role": "user",
             "content": (
                 f"Generated navigation for document {doc_name} (doc_id: {doc_id}); "
-                "these labels and summaries are planning aids, not original evidence.\n" + planning
+                "these labels are planning aids, not original evidence. "
+                "parent_node_id identifies the retained parent section.\n" + planning
             ),
         }
         await _compile_concepts(
