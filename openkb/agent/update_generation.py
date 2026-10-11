@@ -67,7 +67,9 @@ async def generate_page_update(
     checkpoints = document_checkpoints(windows.kb_dir, windows.view_id, windows.doc_name)
     page_key = f"page:{page_path.parent.name}/{page_path.name}:{patch.digest}"
     if checkpoints:
-        checkpoints.bind_page(f"{page_path.parent.name}/{page_path.name}", patch.digest)
+        checkpoints.bind_page(
+            f"{page_path.parent.name}/{page_path.name}", patch.digest, page_path=page_path
+        )
     all_blocks = tuple(patch.blocks)
 
     def scoped(blocks, *, metadata=True, ranges=None):

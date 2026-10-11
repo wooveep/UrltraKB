@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 pytest_plugins = ("block_fixtures",)
+pytestmark = pytest.mark.usefixtures("wide_schema")
 
 
 def test_short_text_can_use_blocks_and_recompile_its_retained_original(
@@ -19,7 +20,7 @@ def test_short_text_can_use_blocks_and_recompile_its_retained_original(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     source = tmp_path / "greeting.md"
@@ -77,7 +78,7 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     source = tmp_path / "portable.md"
@@ -193,7 +194,7 @@ def test_generated_section_labels_must_resolve_to_real_original_anchors(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / "anchors.md"
@@ -236,7 +237,7 @@ def test_unheaded_original_anchor_can_normalize_its_label_without_model_repair(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / "unheaded.md"
@@ -290,7 +291,7 @@ def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / "unicode.md"
@@ -350,7 +351,7 @@ def test_query_reads_content_blocks_with_pinned_original_ranges(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / "greeting.md"
@@ -460,7 +461,7 @@ def test_model_correction_cannot_choose_a_different_trusted_section_index(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / "correction.md"

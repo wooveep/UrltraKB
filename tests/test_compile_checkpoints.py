@@ -126,6 +126,74 @@ def test_changed_conditions_and_page_base_cannot_reuse_accepted_payload(tmp_path
         restarted.claim_conflict("conflict", "request")
 
 
+@pytest.mark.parametrize("human_edit", ["none", "before-prepare", "after-prepare"])
+@pytest.mark.parametrize("retained_projection", [False, True])
+def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_projection(
+    kb_dir, human_edit, retained_projection
+):
+    import hashlib
+
+    from PIL import Image
+
+    from openkb.agent.page_response import PageResponseError
+    from openkb.application.execution import ExecutionContext
+    from openkb.compile_checkpoints import CompileCheckpoints, document_checkpoints
+    from openkb.locks import kb_ingest_lock
+    from openkb.unit_publication import prepare_compile_view
+
+    images = kb_dir / "wiki/sources/images"
+    images.mkdir(exist_ok=True)
+    Image.new("RGB", (20, 10), "red").save(images / "figure.png")
+    (kb_dir / "wiki/sources/manual.md").write_text("# Install\n![Install](images/figure.png)\n")
+    relative = "concepts/device.md"
+    page = kb_dir / "wiki" / relative
+    page.write_text("---\nsources: [sources/manual.md]\n---\nKeep this rule. See `figure.png`.\n")
+    original = page.read_bytes()
+    old_digest = hashlib.sha256(original).hexdigest()
+    if retained_projection:
+        with kb_ingest_lock(kb_dir / ".openkb"), prepare_compile_view(kb_dir) as view:
+            old_digest = hashlib.sha256((view.scope.wiki_dir / relative).read_bytes()).hexdigest()
+
+    context = ExecutionContext()
+    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+        current = document_checkpoints(kb_dir, "legacy", "manual")
+        old = CompileCheckpoints(
+            kb_dir,
+            context.model_task.record,
+            current.identity,
+            {**current.conditions, "compiler_protocol": "accepted-results-v1"},
+        )
+        old.bind_page(relative, old_digest)
+        old.bind_page("concepts/other.md", "unchanged-other-page")
+        old.save("summary:1", "old-request", {"content": "Old draft"})
+        used = context.model_task.record.used
+        assert current.load("summary:1", "old-request") is None
+        # Saving a new-protocol result must not erase the retained base either.
+        current.save("summary:1", "new-request", {"content": "New draft"})
+        with pytest.raises(PageResponseError, match="page_update_stale"):
+            current.bind_page("concepts/other.md", "changed-other-page")
+        if human_edit == "before-prepare":
+            page.write_bytes(original + b"A human addition.\n")
+        with prepare_compile_view(kb_dir) as view:
+            projected = view.scope.wiki_dir / relative
+            assert b"figure-assets" in projected.read_bytes()
+            if human_edit == "after-prepare":
+                projected.write_bytes(projected.read_bytes() + b"A human addition.\n")
+            projected_digest = hashlib.sha256(projected.read_bytes()).hexdigest()
+            if human_edit == "none":
+                current.bind_page(relative, projected_digest, page_path=projected)
+                current.bind_page(relative, projected_digest, page_path=projected)
+            else:
+                with pytest.raises(PageResponseError, match="page_update_stale"):
+                    current.bind_page(relative, projected_digest, page_path=projected)
+        assert context.model_task.record.used == used
+        with pytest.raises(PageResponseError, match="page_update_stale"):
+            current.bind_page(relative, "later-human-change")
+        assert page.read_bytes() == original + (
+            b"A human addition.\n" if human_edit == "before-prepare" else b""
+        )
+
+
 def test_application_retry_restores_plan_and_summary_with_one_send_left(kb_dir, model_service):
     from openkb.application.documents import import_document
     from openkb.application.execution import ExecutionContext

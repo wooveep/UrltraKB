@@ -10,33 +10,24 @@ if TYPE_CHECKING:
     from openkb.application.query_views import QueryView
 
 COMPILATION_FACT_RULES = """
-Source fidelity applies to summaries, concepts, entities, updates and final rewrites.
-Compose the description and body from the supplied source claims. Organize each topic
-around its named subject, applicable condition and recorded facts or procedure; the
-available evidence determines the page's breadth. Preserve source names and document
-titles verbatim unless the source supplies an alternative name. A translated explanation
-may accompany the original name. Describe a document's relationship to another document
-or organization only as specifically as the source establishes it.
-Preserve units and the exact logical strength of conditions, including explicit exclusions:
-required, recommended, permitted, only within, and not applicable convey different facts.
-Navigation titles, node summaries and existing generated pages help locate originals;
-they do not establish facts. Source links identify associations, not factual verification.
-For every explanation or comparison, carry forward only the relationship established
-by those facts. Independently listed facts do not establish causation, unchanged
-properties or an unstated default. Treat a necessary but unanswered question as a local
-gap; add such a gap only when needed to interpret or use this page's actual subject.
-Ordinary arithmetic and unit conversions are allowed: show the derivation and any
-necessary assumptions, and keep derived conclusions within the calculated bounds.
-Preserve conflicting source statements separately.
-Distinguish source records from synthesis or interpretation where interpretation is
-useful. External advice or background must be separately labelled, and is normally
-omitted from document summaries. Do not add a list of irrelevant unknowns.
-When evidence is limited, narrow the page to supported content or a navigation brief.
-Existing generated assertions must be reconsidered against originals; do not inherit
-an unsupported inference or promote it into a source fact during an update. Reassessment
-is scoped to the originals actually read: missing windows do not refute old facts.
-Preserve unrelated supported content, source conditions, supported calculations and
-labelled synthesis; changed sources retain their old basis and pending refresh status.
+Compose summaries, concepts, entities and updates as source-grounded references.
+Organize description and body by named subject, applicable conditions and recorded
+facts or procedures. Let the evidence determine the page's breadth. Preserve original
+names and document titles unless sources supply aliases; translations may accompany
+them. Describe relationships only as specifically as the sources establish them.
+Navigation and generated pages locate originals; links do not verify their claims.
+Match the source's units, revision, scope and logical strength: requirements,
+recommendations, permissions and explicit exclusions are different facts. Independent
+facts do not establish causation, unchanged properties, guarantees or unstated defaults.
+Ordinary arithmetic and unit conversions are allowed: show premises and derivation;
+keep derived conclusions within the calculated bounds. Preserve conflicting source
+statements separately. Distinguish useful synthesis from recorded facts. Include a
+local evidence gap only when needed to interpret or use the page's actual subject.
+External advice requires a separate label and is normally omitted from summaries.
+Reassess existing generated assertions against the originals actually read; do not
+inherit unsupported inferences. Missing windows do not refute old facts. Preserve
+unrelated supported content, its conditions, calculations and labelled synthesis;
+changed sources retain their old basis and pending refresh status.
 """
 
 ANSWER_SOURCE_RULES = """

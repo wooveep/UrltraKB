@@ -8,10 +8,33 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from openkb.agent.page_response import PageResponseError
 from openkb.locks import atomic_record_lock, atomic_write_json
+
+_FIGURE_BASES: ContextVar[dict[Path, tuple[str, str]]] = ContextVar("figure_bases", default={})
+
+
+@contextmanager
+def figure_projection_bases(wiki: Path, original_pages: dict[str, str]):
+    """Bind the exact display-only projection to its unchanged pre-repair base."""
+    from openkb.state import HashRegistry
+
+    projected = {}
+    for relative, before in original_pages.items():
+        page = wiki / relative
+        if page.suffix == ".md" and page.is_file():
+            after = HashRegistry.hash_file(page)
+            if before != after:
+                projected[page.resolve()] = (before, after)
+    token = _FIGURE_BASES.set(projected)
+    try:
+        yield
+    finally:
+        _FIGURE_BASES.reset(token)
 
 
 def digest(value) -> str:
@@ -46,7 +69,7 @@ class CompileCheckpoints:
                 / "manifest.json"
             )
 
-    def _read(self, path: Path) -> dict:
+    def _read(self, path: Path, *, match_conditions: bool = True) -> dict:
         if not path.exists():
             return {}
         try:
@@ -58,7 +81,9 @@ class CompileCheckpoints:
                 or not isinstance(record.get("entries"), dict)
             ):
                 raise ValueError("Invalid checkpoint manifest")
-            if record["conditions"] != self.conditions:
+            if not isinstance(record.get("conditions"), dict):
+                raise ValueError("Invalid checkpoint conditions")
+            if match_conditions and record["conditions"] != self.conditions:
                 return {}
             return record
         except (ValueError, KeyError) as error:
@@ -92,26 +117,39 @@ class CompileCheckpoints:
             return None
 
     def _write_entry(self, key: str, entry: dict):
-        record = self._read(self.path) or {
+        record = self._read(self.path, match_conditions=False) or {
             "version": 1,
             "task_id": self.task_id,
             "identity": self.identity,
             "conditions": self.conditions,
             "entries": {},
         }
+        if record["conditions"] != self.conditions:
+            # Protocol changes invalidate generated payloads, never page identity.
+            record["entries"] = {
+                key: value for key, value in record["entries"].items() if key.startswith("base:")
+            }
+            record["conditions"] = self.conditions
         record["entries"][key] = entry
         atomic_write_json(self.path, record)
 
-    def bind_page(self, page: str, base_sha256: str):
+    def bind_page(self, page: str, base_sha256: str, *, page_path: Path | None = None):
         """A resumed update cannot reinterpret an externally changed page as its base."""
         from openkb.llm_execution import check_model_stop
 
+        projection = _FIGURE_BASES.get().get(page_path.resolve()) if page_path else None
+        allowed_bases = {base_sha256}
+        if projection and base_sha256 == projection[1]:
+            allowed_bases.add(projection[0])
+            base_sha256 = projection[0]
         key = f"base:{page}"
         with atomic_record_lock(self.directory / "checkpoint.lock"):
             check_model_stop()
             for path in (self.path, *self.ancestors):
-                previous = self._read(path).get("entries", {}).get(key)
-                if previous and previous.get("base_sha256") != base_sha256:
+                previous = self._read(path, match_conditions=False).get("entries", {}).get(key)
+                if previous is not None and not isinstance(previous, dict):
+                    raise PageResponseError("compile_checkpoint_invalid", "Invalid page base")
+                if previous and previous.get("base_sha256") not in allowed_bases:
                     raise PageResponseError("page_update_stale", "Retained update base changed")
             self._write_entry(key, {"state": "base", "base_sha256": base_sha256})
 
@@ -210,7 +248,8 @@ def document_checkpoints(kb_dir: Path | None, view_id: str, doc_name: str):
         journal.record,
         {"kb_generation": journal.record.kb_generation, "view_id": view_id, "document": doc_name},
         {
-            "compiler_protocol": "accepted-results-v1",
+            # Recompute pre-figure results while keeping page bases and task usage.
+            "compiler_protocol": "accepted-results-text-figures-v2",
             "bindings": executor.bindings.public_identity(),
             "endpoint_digest": digest(credentials.base_url),
             "revisions": revisions,

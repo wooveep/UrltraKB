@@ -10,7 +10,7 @@ from openkb.execution_budget import admit_document_summary
 from openkb.source_context import COMPILATION_FACT_RULES
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "compiler-document-sections-v3"
+PROMPT_VERSION = "compiler-document-sections-v4"
 SYSTEM_TEMPLATE = (
     "You are OpenKB's wiki compilation agent for document knowledge. "
     "Write independently readable knowledge in {language}.\n" + COMPILATION_FACT_RULES
@@ -61,8 +61,9 @@ interpretation. Preceding context supplies conditions, not extra primary ranges.
 Include explanations, comparisons and source-supported calculations with their
 premises. Each paragraph should explain or preserve the supplied section, without
 adding unrelated advice or expanding a local observation to the entire document.
-Return one JSON object with a brief string description and sections:
-[{"id": "the supplied output section id", "content": "complete Markdown knowledge"}].
+Return one JSON object in this complete shape:
+{"description": "brief document description", "sections":
+ [{"id": "the supplied output section id", "content": "complete Markdown knowledge"}]}.
 Return every output_sections id exactly once, retaining its original requirements,
 conditions and useful explanation in the corresponding body, not only its heading.
 Use the document's necessary level of detail without a fixed compression ratio.

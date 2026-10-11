@@ -101,7 +101,9 @@ def validate_ranges(value: dict, ranges: tuple[str, ...]) -> list[str]:
         or len(selected) != len(set(selected))
     ):
         raise PageResponseError(
-            "page_invalid_source_ranges", "source_ranges must select supplied frozen range IDs"
+            "page_invalid_source_ranges",
+            "source_ranges must be a nonempty JSON array of unique ID strings, not objects. "
+            "Select only supplied frozen range IDs: " + json.dumps(ranges),
         )
     return selected
 
@@ -122,8 +124,14 @@ class PageFigures:
             "content": "Figure source ranges:\n"
             + json.dumps(
                 {
-                    "protocol": "page-source-ranges-v1",
+                    "protocol": "page-source-ranges-v2",
                     "ranges": self.ranges,
+                    "source_ranges_schema": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "enum": self.ids},
+                    },
                     "instruction": (
                         "Return source_ranges alongside description/content or block edits, "
                         "selecting supplied IDs used by the FINAL body (only changed content "
