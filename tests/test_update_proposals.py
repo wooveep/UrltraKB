@@ -72,3 +72,58 @@ def test_one_local_metadata_candidate_still_needs_whole_page_context():
     assert merge_proposals(update, [UpdateProposal(0, response)]).conflicts
     complete = merge_proposals(update, [UpdateProposal(0, response, complete_scope=True)])
     assert not complete.conflicts and complete.response["description"] == "Only local scope"
+
+
+def test_conflict_resolves_all_edits_sharing_a_range_declaration():
+    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+
+    update = PageUpdate(
+        "# Device\n\nInstall.\n\nMaintenance.\n", source_ranges=("install-a", "install-b", "care")
+    )
+    first = {
+        "base_sha256": update.digest,
+        "source_ranges": ["install-a", "care"],
+        "edits": [
+            {"block_id": "b2", "operation": "replace", "content": "Install A."},
+            {"block_id": "b3", "operation": "replace", "content": "Maintenance details."},
+        ],
+    }
+    second = {
+        "base_sha256": update.digest,
+        "source_ranges": ["install-b"],
+        "edits": [{"block_id": "b2", "operation": "replace", "content": "Install B."}],
+    }
+    merged = merge_proposals(update, [UpdateProposal(0, first), UpdateProposal(1, second)])
+    assert merged.response["source_ranges"] == []
+    assert merged.response["edits"] == []
+    assert len(merged.conflicts) == 1
+    assert merged.conflicts[0].blocks == ("b2", "b3")
+    assert merged.conflicts[0].batches == (0, 1)
+
+
+def test_unrelated_range_conflicts_keep_separate_bounded_resolution_requests():
+    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+
+    update = PageUpdate("# Device\n\nInstall.\n\nCare.\n", source_ranges=("r0", "r1", "r2", "r3"))
+    proposals = [
+        UpdateProposal(
+            i,
+            {
+                "base_sha256": update.digest,
+                "source_ranges": [f"r{i}"],
+                "edits": [
+                    {
+                        "block_id": "b2" if i < 2 else "b3",
+                        "operation": "replace",
+                        "content": f"Choice {i}",
+                    }
+                ],
+            },
+        )
+        for i in range(4)
+    ]
+    merged = merge_proposals(update, proposals)
+    assert [(c.blocks, c.batches) for c in merged.conflicts] == [
+        (("b2",), (0, 1)),
+        (("b3",), (2, 3)),
+    ]

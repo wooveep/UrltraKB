@@ -136,7 +136,7 @@ def test_compile_text_reader_applies_the_returned_selection_offset(kb_dir):
     assert context.windows[0]["source_spans"] == [[offset, len(text)]]
 
 
-def test_pdf_compile_projection_keeps_pixels_for_returned_pages_only(kb_dir, monkeypatch):
+def test_pdf_compile_projection_returns_local_metadata_without_pixels(kb_dir, monkeypatch):
     from PIL import Image
 
     from openkb.agent.source_windows import CompileSourceWindows
@@ -170,7 +170,7 @@ def test_pdf_compile_projection_keeps_pixels_for_returned_pages_only(kb_dir, mon
     )
     assert [image["path"] for image in context.windows[0]["images"]] == ["sources/images/first.png"]
     pixels = [part for part in context.message["content"] if part["type"] == "image_url"]
-    assert len(pixels) == 1
+    assert pixels == []
 
 
 @pytest.mark.parametrize(

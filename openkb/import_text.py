@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from openkb.workbooks.records import WorkbookSnapshot
 
 TEXT_CHECK_POLICY = (
-    "extracted-text-v1:cjk-runs12:3runs:60chars:ratio45:html-body-v1:" + PDF_RECOGNITION_POLICY
+    "extracted-text-v2:cjk-runs12:3runs:60chars:ratio45:native-body-v2:" + PDF_RECOGNITION_POLICY
 )
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _RUN = re.compile(r"([\u3400-\u4dbf\u4e00-\u9fff])\1{11,}")
@@ -132,6 +132,21 @@ def _structured_text(value, location="body"):
             yield from _structured_text(item, f"{location}[{index}]")
 
 
+def _native_body(frozen, extension: str) -> str:
+    """Image captions/retention diagnostics alone cannot supply document knowledge."""
+    if extension not in {".md", ".markdown", ".html", ".htm"}:
+        return frozen.text
+    from openkb.markdown_images import apply_image_edits, image_references
+
+    body = "".join(
+        frozen.text[start:end]
+        for origin in frozen.origins
+        for start, end in [origin.normalized_span]
+        if origin.kind != "image_reference" and not (origin.html and origin.html.tag == "img")
+    )
+    return apply_image_edits(body, [(r.start, r.end, "") for r in image_references(body)])
+
+
 def require_normalized_text(path: Path) -> None:
     """Guard retained inputs before recompilation, including legacy tree text."""
     import json
@@ -224,7 +239,7 @@ def preflight_import_text(
                     if extension in {".html", ".htm"}
                     else None,
                 )
-                parts = [("body", frozen.text)]
+                parts = [("body", _native_body(frozen, extension))]
                 empty_html = extension in {".html", ".htm"} and not frozen.text.strip()
             elif extension in {".xlsx", ".xls"}:
                 from openkb.workbooks.xls import read_xls
@@ -267,15 +282,23 @@ def preflight_import_text(
         prepared.text_checks[cache_key] = assessment
         return assessment
     check_stop()
-    assessment = ImportTextAssessment(prepared.digest, extraction, findings, empty_html=empty_html)
+    assessment = ImportTextAssessment(
+        prepared.digest,
+        extraction,
+        findings,
+        unavailable="no_readable_text" if not any(text.strip() for _, text in parts) else None,
+        empty_html=empty_html,
+    )
     prepared.text_checks[cache_key] = assessment
     return assessment
 
 
 def retainable_without_text(assessment: ImportTextAssessment) -> bool:
-    """A readable PDF with unusable text can be preserved without knowledge generation."""
-    return assessment.extraction == "PDF text layer" and (
-        assessment.unavailable == "no_readable_text" or bool(assessment.findings)
+    """Successfully read originals with no usable text can retain their assets."""
+    return not assessment.empty_html and (
+        assessment.unavailable == "no_readable_text"
+        or assessment.extraction == "PDF text layer"
+        and bool(assessment.findings)
     )
 
 
@@ -291,6 +314,7 @@ def validate_text_preflight(
     if (
         assessment.findings
         or assessment.empty_html
+        or assessment.unavailable == "no_readable_text"
         or assessment.extraction == "PDF text layer"
         and assessment.unavailable
     ):

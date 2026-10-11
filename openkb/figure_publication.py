@@ -12,6 +12,30 @@ from openkb.locks import atomic_write_text
 from openkb.markdown_images import apply_image_edits, image_references
 
 
+def figure_independent_body(content: str) -> str:
+    """Changing a figure URL/gallery does not establish a newer factual source."""
+    body, _ = split_gallery(content)
+    return apply_image_edits(
+        body, [(r.start, r.end, r.relocated("original-figure")) for r in image_references(body)]
+    ).strip()
+
+
+def referenced_figure_inputs(wiki: Path, pages) -> set[str]:
+    """Keep originals for historical pictures without treating them as current facts."""
+    from openkb.figure_assets import FigureOccurrence
+
+    inputs = set()
+    for page in pages:
+        if not page.endswith(".md"):
+            continue
+        _, entries = split_gallery((wiki / page).read_text())
+        for entry in entries:
+            figure = FigureOccurrence.model_validate(entry["figure"])
+            if figure.processing_revision_id:
+                inputs.add(figure.processing_revision_id)
+    return inputs
+
+
 def mentioned_figures(content, figures):
     """Recognize retained filenames in prose, never interpret fenced code as figures."""
     from openkb.content_blocks import markdown_layout
@@ -58,6 +82,8 @@ def preserve_page_figures(kb_dir: Path, wiki: Path, inputs: dict, *, source_wiki
             return []
         seen.add(path)
         target = source_wiki / path
+        if not target.resolve().is_relative_to(source_wiki.resolve()):
+            raise PageResponseError("figure_invalid_source", "Source association escapes Wiki")
         if not target.is_file():
             return []
         if path.startswith("sources/"):
@@ -88,9 +114,11 @@ def preserve_page_figures(kb_dir: Path, wiki: Path, inputs: dict, *, source_wiki
             return catalogs[name]
         meta = frontmatter.parse(target.read_text("utf-8"))
         links = meta.get("sources", [])
-        if not isinstance(links, list):
+        if not isinstance(links, list) or any(not isinstance(link, str) for link in links):
             raise PageResponseError("figure_invalid_source", "Invalid page source list")
         if meta.get("full_text"):
+            if not isinstance(meta["full_text"], str):
+                raise PageResponseError("figure_invalid_source", "Invalid full_text pointer")
             links = [*links, meta["full_text"]]
         return [figure for link in links for figure in associated(link, seen)]
 

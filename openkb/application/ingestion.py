@@ -166,6 +166,7 @@ def import_prepared_source(
         validate_text_preflight,
     )
 
+    retain_only = False
     try:
         if (
             text_assessment is None
@@ -191,29 +192,20 @@ def import_prepared_source(
         from openkb.import_text import retainable_without_text
 
         if retainable_without_text(exc.assessment):
-            from openkb.application.retained_documents import retain_without_knowledge
-
-            return retain_without_knowledge(
-                kb_dir,
-                prepared,
-                exc.assessment,
-                admission=admission,
-                identity=origin_url,
-                scope=scope,
-                check_stop=check_stop,
+            retain_only = True
+        else:
+            return replace(
+                rejection_result(prepared, exc),
+                source_id=admission.source.source_id if admission else None,
+                source_revision_id=admission.revision.source_revision_id if admission else None,
             )
-
-        return replace(
-            rejection_result(prepared, exc),
-            source_id=admission.source.source_id if admission else None,
-            source_revision_id=admission.revision.source_revision_id if admission else None,
-        )
     admission = admission or admit_source_revision(
         kb_dir,
         prepared,
         identity=origin_url,
         check_stop=check_stop,
         text_assessment=text_assessment,
+        retain_only=retain_only,
     )
     if prepared.digest != admission.revision.digest:
         raise ValueError("Retained input no longer matches the source revision")
@@ -260,6 +252,18 @@ def import_prepared_source(
         from openkb.remote_assets import resolve_resource_policy
 
         resource_policy = resolve_resource_policy(kb_dir, download_remote_assets)
+    if retain_only:
+        from openkb.application.retained_documents import retain_without_knowledge
+
+        return retain_without_knowledge(
+            kb_dir,
+            prepared,
+            text_assessment,
+            admission=admission,
+            scope=scope,
+            check_stop=check_stop,
+            resource_policy=resource_policy,
+        )
     fingerprint = (
         read_normalization(kb_dir, review.normalization_id)[1].fingerprint
         if review

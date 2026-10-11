@@ -144,3 +144,41 @@ def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
     finally:
         reader.stop_rendering()
         reader.close()
+
+
+def test_display_only_repair_does_not_claim_current_factual_inputs(tmp_path):
+    from openkb.ingest_records import KnowledgeHead, KnowledgeRevision
+    from openkb.knowledge_evidence import publication_dependencies
+
+    wiki = tmp_path / "wiki"
+    figures = original_figures(wiki)
+    context = PageFigures(
+        wiki, ({"id": "all", "figures": [f.occurrence_id for f in figures]},), tuple(figures)
+    )
+    page = "concepts/guide.md"
+    old_input, new_input, revision = "a" * 32, "b" * 32, "c" * 32
+    old = tmp_path / ".openkb/knowledge/legacy/revisions" / revision
+    (old / "wiki/concepts").mkdir(parents=True)
+    body = "---\nsources: [sources/manual.md]\n---\nA recorded procedure."
+    (old / "wiki" / page).write_text(body)
+    (old / "manifest.json").write_text(
+        KnowledgeRevision(
+            knowledge_revision_id=revision,
+            view_id="legacy",
+            change_kind="manual",
+            base_revision_id=None,
+            generated_baselines={},
+            original_references=(),
+            input_revisions=(old_input,),
+            page_dependencies={page: (old_input,)},
+        ).model_dump_json()
+    )
+    (wiki / "concepts").mkdir()
+    (wiki / page).write_text(
+        context.decorate(page, {"content": body, "source_ranges": ["all"]})["content"]
+    )
+    head = KnowledgeHead(view_id="legacy", knowledge_revision_id=revision)
+    dependencies = publication_dependencies(
+        tmp_path, head, {page: "changed"}, {page: "old"}, [new_input], wiki=wiki
+    )
+    assert dependencies[page] == (old_input,)

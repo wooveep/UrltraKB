@@ -14,7 +14,7 @@ def test_markdown_asset_change_is_a_new_watch_input(kb_dir, pdf_model):
     from openkb.application.documents import import_document
 
     source = kb_dir / "raw/note.md"
-    source.write_text("![figure](figure.png)")
+    source.write_text("Recorded setup.\n![figure](figure.png)")
     sink = TaskSink()
     watch = NativeWatch(kb_dir, sink, debounce=0.03, scan_interval=0.02)
     try:

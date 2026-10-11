@@ -41,9 +41,11 @@ class ImageCoverage:
                         "source_revision_id": source["source_revision_id"],
                         "location_listed": True,
                         "status": "unread",
+                        "interpreted": False,
                         "interpretation": "Original retained; not interpreted by the text model.",
                     },
                 )
+                self.receipts.list_location(record)
                 listed.append(dict(record))
         return {
             "occurrences": listed,

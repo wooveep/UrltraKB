@@ -63,6 +63,7 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     import sqlite3
     from pathlib import Path
 
+    from figure_fixtures import png_bytes
     from pageindex import IndexConfig
 
     from openkb.application.documents import import_document
@@ -81,7 +82,8 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     )
     source = tmp_path / "portable.md"
     source.write_bytes(b"hello world\r\n\r\n![image](kept.png)\r\n")
-    (tmp_path / "kept.png").write_bytes(b"fixed-picture-bytes")
+    picture = png_bytes()
+    (tmp_path / "kept.png").write_bytes(picture)
     result = import_document(kb_dir, source)
     assert result.status == "added", result.message
     saved = read_document_source(kb_dir, result.source_id)
@@ -111,7 +113,7 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
         assert before["structure"][0]["anchor"]["excerpt"] == "hello"
         assert before["structure"][0]["text"] == saved["content"]
         asset = next(iter(blocks[0]["assets"].values()))
-        assert Path(asset["path"]).read_bytes() == b"fixed-picture-bytes"
+        assert Path(asset["path"]).read_bytes() == picture
         requests = len(block_model)
         with sqlite3.connect(moved / "context.sqlite") as db:
             db.execute(

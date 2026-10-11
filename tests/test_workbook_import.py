@@ -82,16 +82,23 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
 
     import litellm
 
+    from openkb.agent.compiler import get_agents_md
     from openkb.application.documents import import_document
     from openkb.application.recompilation import recompile_document, select_recompilation
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
 
+    schema = kb_dir / "wiki/AGENTS.md"
+    schema.write_text(get_agents_md(schema.parent) + "\n" + "Keep native cell coordinates.\n" * 500)
+
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            # The full summary protocol plus cell provenance must fit. The Wiki
+            # schema still forces the short source through segmented execution.
+            kb=str(kb_dir),
+            config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1500}},
         ),
     )
     original = litellm.completion

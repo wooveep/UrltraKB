@@ -37,8 +37,10 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
 
     path = physical_pdf
     if kind == "markdown":
+        from figure_fixtures import png_bytes
+
         path = tmp_path / "assets.md"
-        (tmp_path / "image.png").write_bytes(b"retained image")
+        (tmp_path / "image.png").write_bytes(png_bytes())
         path.write_text("Stable input\n![image](image.png)", encoding="utf-8")
     first = import_document(kb_dir, path)
     before = read_document_source(kb_dir, first.source_id)

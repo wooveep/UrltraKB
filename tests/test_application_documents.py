@@ -105,20 +105,22 @@ def test_import_freezes_relative_images_at_the_business_boundary(
     kb_dir, tmp_path, monkeypatch, extension
 ):
     import litellm
+    from figure_fixtures import png_bytes
 
     from openkb.application.documents import import_document
     from openkb.application.execution import ExecutionContext
 
     source = tmp_path / f"中文 图解{extension}"
     figure = tmp_path / "图.png"
-    figure.write_bytes(b"original image")
+    picture = png_bytes()
+    figure.write_bytes(picture)
     source.write_text("# 图解\n![first](图.png)\n![again](图.png)\n![missing](later.png)")
     original = source.read_bytes()
 
     def after_start(snapshot):
         source.write_text("changed source")
-        figure.write_bytes(b"changed image")
-        (tmp_path / "later.png").write_bytes(b"created after start")
+        figure.write_bytes(png_bytes("blue"))
+        (tmp_path / "later.png").write_bytes(png_bytes("green"))
 
     values = iter(
         [
@@ -139,24 +141,25 @@ def test_import_freezes_relative_images_at_the_business_boundary(
     saved = read_document_source(kb_dir, result.source_id)
     assert (kb_dir / saved["original_path"]).read_bytes() == original
     images = list((kb_dir / saved["base_path"] / "images").rglob("*.png"))
-    assert len(images) == 1 and images[0].read_bytes() == b"original image"
+    assert len(images) == 1 and images[0].read_bytes() == picture
     converted = saved["content"]
-    assert converted.count("%E5%9B%BE.png)") == 2 and "![missing](later.png)" in converted
+    assert converted.count("%E5%9B%BE.png)") == 2 and "原图未保存" in converted
 
 
 def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp_path, monkeypatch):
     import threading
 
     import litellm
+    from figure_fixtures import png_bytes
 
     from openkb.application.documents import import_document
     from openkb.application.execution import ExecutionContext
     from openkb.locks import kb_ingest_lock
 
     source = tmp_path / "notes.md"
-    source.write_text("![figure](figure.png)")
+    source.write_text("Recorded setup.\n![figure](figure.png)")
     figure = tmp_path / "figure.png"
-    figure.write_bytes(b"old")
+    figure.write_bytes(png_bytes())
     acquired, release = threading.Event(), threading.Event()
 
     def hold():
@@ -166,7 +169,7 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
 
     def waiting(event):
         if event.get("stage") == "waiting":
-            figure.write_bytes(b"latest")
+            figure.write_bytes(png_bytes("blue"))
             release.set()
 
     values = iter(
@@ -193,7 +196,9 @@ def test_import_refreshes_images_changed_while_waiting_for_the_lease(kb_dir, tmp
         holder.join(10)
     assert result.status == "added"
     saved = read_document_source(kb_dir, result.source_id)
-    assert next((kb_dir / saved["base_path"] / "images").rglob("*.png")).read_bytes() == b"latest"
+    assert next((kb_dir / saved["base_path"] / "images").rglob("*.png")).read_bytes() == png_bytes(
+        "blue"
+    )
 
 
 def test_watched_source_replaced_with_external_symlink_while_waiting_never_starts(kb_dir, tmp_path):

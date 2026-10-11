@@ -173,6 +173,7 @@ def freeze_markdown(
         prepared=prepared.images,
         edits=edits,
         references=references,
+        issues=image_issues,
     )
     if original.startswith("\ufeff"):
         edits.append((0, 1, ""))

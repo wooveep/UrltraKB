@@ -1,6 +1,7 @@
 """HTML/XML normalize once and retain original structure, resources and policy."""
 
 import pytest
+from figure_fixtures import png_bytes
 
 pytest_plugins = ("test_pdf_readback", "block_fixtures")
 
@@ -64,7 +65,7 @@ def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path
     from openkb.documents import read_document_source
 
     image = tmp_path / "local.png"
-    image.write_bytes(b"local figure")
+    image.write_bytes(png_bytes())
     embedded = base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg"/>').decode()
     original = (
         "<!doctype html><html><head><title>Metadata</title><style>p{color:red}</style></head>"
@@ -388,7 +389,7 @@ def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, p
     path = kb_dir / "raw/diagram.html"
     path.write_text('<p>Diagram <img src="figure.png"></p>', encoding="utf-8")
     figure = kb_dir / "raw/figure.png"
-    figure.write_bytes(b"first figure")
+    figure.write_bytes(png_bytes())
     metadata = SourceMetadata(product="Example", applicable_versions=("1",), family="Guide")
     sink = TaskSink()
     watch = NativeWatch(kb_dir, sink, debounce=0.03, scan_interval=0.02)
@@ -397,7 +398,7 @@ def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, p
         first = import_document(kb_dir, path, metadata=metadata)
         assert first.status == "added", first.message
         sink.finish("0", revision=first.input_version)
-        figure.write_bytes(b"second figure")
+        figure.write_bytes(png_bytes("blue"))
         eventually(lambda: len(sink.items) == 2)
         second = import_document(kb_dir, path, metadata=metadata)
         assert second.status == "added", second.message

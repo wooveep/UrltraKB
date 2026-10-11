@@ -182,9 +182,8 @@ async def test_ordinary_pages_use_native_selector_and_continuation(kb_dir):
 
 
 @pytest.mark.asyncio
-async def test_selected_page_returns_image_location_for_explicit_read(kb_dir):
+async def test_selected_page_returns_image_location_without_an_image_tool(kb_dir):
     import pymupdf
-    from agents import ToolOutputImage
 
     path = "sources/diagram.png"
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 64, 64), False)
@@ -194,27 +193,28 @@ async def test_selected_page_returns_image_location_for_explicit_read(kb_dir):
     agent = agent_for(kb_dir)
     result = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     assert isinstance(result, str)
-    assert path in result and "not read" in result and "get_image" in result
+    assert path in result and '"interpreted": false' in result
     assert "data:image" not in result
-    image = await invoke(agent, "get_image", image_path=path)
-    assert isinstance(image[1], ToolOutputImage)
-    assert image[1].image_url.startswith("data:image/png;base64,")
+    assert "get_image" not in {tool.name for tool in agent.tools}
 
 
 @pytest.mark.asyncio
-async def test_image_changes_have_actionable_feedback(kb_dir):
+async def test_image_changes_have_actionable_feedback_in_the_storage_reader(kb_dir):
+    from openkb.agent.tools import read_wiki_image
+    from openkb.state import HashRegistry
+
     path = "sources/images/diagram.png"
     image = kb_dir / "wiki" / path
     image.write_bytes(b"original")
-    agent = agent_for(kb_dir)
+    digest = HashRegistry.hash_file(image)
     image.write_bytes(b"changed")
-    result = await invoke(agent, "get_image", image_path=path)
-    assert json.loads(result)["reason_code"] == "stale_snapshot"
-    assert "changed after selection" in json.loads(result)["message"]
+    result = read_wiki_image(path, str(kb_dir / "wiki"), expected_digest=digest)
+    assert result["type"] == "text"
+    assert "changed after selection" in result["text"]
     image.unlink()
-    missing = await invoke(agent, "get_image", image_path=path)
-    assert json.loads(missing)["reason_code"] == "content_not_found"
-    assert "missing" in json.loads(missing)["message"]
+    missing = read_wiki_image(path, str(kb_dir / "wiki"), expected_digest=digest)
+    assert missing["type"] == "text"
+    assert "not found" in missing["text"]
 
 
 @pytest.mark.asyncio

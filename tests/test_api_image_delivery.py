@@ -1,4 +1,4 @@
-"""HTTP query and chat expose the shared application's final image receipts."""
+"""HTTP query and chat expose original figure metadata without a pixel tool."""
 
 import pytest
 from PIL import Image
@@ -11,7 +11,7 @@ pytest_plugins = ("test_vendor_sdk",)
 
 @pytest.mark.parametrize("endpoint", ["query", "chat"])
 @pytest.mark.parametrize("max_calls", [1, 2])
-def test_http_answer_retains_image_receipts(
+def test_http_answer_retains_text_only_image_coverage(
     kb_dir, model_service, monkeypatch, endpoint, max_calls
 ):
     from agents import set_tracing_disabled
@@ -29,7 +29,10 @@ def test_http_answer_retains_image_receipts(
     call = {
         "id": "figure",
         "type": "function",
-        "function": {"name": "get_image", "arguments": '{"image_path":"sources/figure.png"}'},
+        "function": {
+            "name": "get_page_content",
+            "arguments": '{"doc_name":"manual","pages":"1","offset":0}',
+        },
     }
     model_service.replies.append(
         (
@@ -61,5 +64,13 @@ def test_http_answer_retains_image_receipts(
         assert not payload.get("image_coverage")  # No image tool was allowed to run.
         assert isinstance(payload["detail"], str)
         return
-    assert payload["image_coverage"][0]["reason_code"] == "image_not_sent"
-    assert payload["image_coverage"][0]["status"] == "failed"
+    assert payload["image_coverage"][0]["interpreted"] is False
+    assert payload["image_coverage"][0]["status"] == "unread"
+    import json
+
+    assert "data:image" not in json.dumps(model_service.requests)
+    assert all(
+        t["function"]["name"] != "get_image"
+        for request in model_service.requests
+        for t in request.get("tools", [])
+    )

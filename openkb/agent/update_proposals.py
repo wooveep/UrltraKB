@@ -80,6 +80,43 @@ def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> Merg
         else:
             response.update(candidates[0])
             contributing.update(p.order for p, _ in metadata)
+    if conflicts and update.source_ranges is not None:
+        # Ranges describe a whole proposal, not individual edits. Resolve every
+        # edit coupled to a disputed proposal before accepting any of its ranges.
+        components = {}
+        for seed in conflicts:
+            disputed_owners = set(seed.batches)
+            blocks = set(seed.blocks)
+            resolve_metadata = seed.metadata
+            while True:
+                previous = (set(disputed_owners), set(blocks), resolve_metadata)
+                for conflict in conflicts:
+                    if disputed_owners.intersection(conflict.batches):
+                        disputed_owners.update(conflict.batches)
+                        blocks.update(conflict.blocks)
+                        resolve_metadata |= conflict.metadata
+                for block, entries in by_block.items():
+                    related = {order for order, _ in entries}
+                    if disputed_owners & related:
+                        blocks.add(block)
+                        disputed_owners.update(related)
+                metadata_owners = {p.order for p, _ in metadata}
+                if disputed_owners & metadata_owners:
+                    resolve_metadata = True
+                    disputed_owners.update(metadata_owners)
+                if previous == (disputed_owners, blocks, resolve_metadata):
+                    break
+            response["edits"] = [e for e in response["edits"] if e["block_id"] not in blocks]
+            if resolve_metadata:
+                for key in ("description", "type"):
+                    response.pop(key, None)
+            contributing.difference_update(disputed_owners)
+            components[tuple(sorted(disputed_owners))] = UpdateConflict(
+                tuple(b for b in update.blocks if b in blocks),
+                tuple(sorted(disputed_owners)),
+                resolve_metadata,
+            )
+        conflicts = list(components.values())
     if update.source_ranges is not None:
         response["source_ranges"] = sorted(
             {

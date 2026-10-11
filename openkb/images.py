@@ -334,6 +334,7 @@ def copy_relative_images(
     prepared: dict[str, PreparedImage] | None = None,
     edits: list[tuple[int, int, str]] | None = None,
     references=None,
+    issues: list[str] | None = None,
 ) -> str:
     """Copy locally-referenced images into the KB images directory and rewrite links.
 
@@ -362,10 +363,29 @@ def copy_relative_images(
             continue
         rel_path = reference.source
         src = paths.get(rel_path)
+        frozen = prepared[rel_path].path if prepared is not None and src is not None else src
+        if issues is not None:
+            try:
+                from openkb.figure_assets import asset_path
+
+                if frozen is None or not frozen.is_file():
+                    raise ValueError("Original image was not acquired")
+                asset_path(frozen.read_bytes())
+            except (OSError, ValueError) as error:
+                issues.append(f"Image not retained: {rel_path[:160]} ({type(error).__name__})")
+                replacements.append(
+                    (
+                        reference.start,
+                        reference.end,
+                        "about:invalid#original-image"
+                        if reference.html
+                        else "[原图未保存：来源图片缺失或损坏；请查看保留原件]",
+                    )
+                )
+                continue
         if src is None:
             logger.warning("Image path escapes source dir: %s; skipping.", rel_path)
             continue
-        frozen = prepared[rel_path].path if prepared is not None else src
         if frozen is None or not frozen.is_file():
             logger.warning("Relative image not found: %s; leaving original link.", src)
             continue

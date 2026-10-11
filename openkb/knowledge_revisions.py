@@ -35,10 +35,15 @@ def manual_knowledge_change(scope: KnowledgeScope) -> Iterator[None]:
 
         # A manual edit does not verify a new source; preserve existing page provenance.
         dependencies = publication_dependencies(kb, head, pages, pages, head.inputs.values())
+        from openkb.figure_publication import referenced_figure_inputs
+
         originals = set()
-        for revision_id in set(head.inputs.values()) | {
-            identity for values in dependencies.values() for identity in values
-        }:
+        referenced = (
+            set(head.inputs.values())
+            | {identity for values in dependencies.values() for identity in values}
+            | referenced_figure_inputs(scope.wiki_dir, pages)
+        )
+        for revision_id in referenced:
             unit = read_record(kb, "unit-revisions", revision_id, UnitRevision)
             source = read_source_revision(kb, unit.source_revision_id)
             originals.add(source.original)

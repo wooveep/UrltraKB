@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from PIL import Image
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from openkb.agent.page_response import PageResponseError
 from openkb.compile_checkpoints import digest
@@ -29,6 +29,31 @@ class FigureOccurrence(Record):
     asset_path: RelativePath
     asset_digest: Digest
     caption: str = ""
+
+    @model_validator(mode="after")
+    def native_location(self):
+        if set(self.location) == {"page"} and self.location["page"] >= 1:
+            return self
+        if (
+            set(self.location) == {"start", "end"}
+            and 0 <= self.location["start"] < self.location["end"]
+        ):
+            return self
+        raise ValueError("Figure location requires a positive page or nonempty character span")
+
+
+def validate_figure_source(raw):
+    """Use the native readers' shape checks before deriving figure positions."""
+    if isinstance(raw, list):
+        from openkb.source_pages import read_page_selection
+
+        read_page_selection(raw)
+    elif isinstance(raw, dict):
+        from openkb.text_source import FrozenText
+
+        FrozenText.model_validate_json(json.dumps(raw))
+    elif not isinstance(raw, str):
+        raise ValueError("Expected native pages or a frozen text source")
 
 
 def asset_path(data: bytes) -> str:
@@ -99,6 +124,12 @@ def freeze_figures(
 ) -> list[FigureOccurrence]:
     """Repair only references to existing assets; never re-extract or edit frozen text."""
     source_digest = hashlib.sha256((wiki / source_path).read_bytes()).hexdigest()
+    validate_figure_source(raw)
+    if isinstance(raw, dict) and raw["normalization_policy"].startswith(
+        ("txt-unicode-", "csv-", "xml-")
+    ):
+        # These formats preserve literal syntax; a Markdown-shaped example is text.
+        return []
     destination = destination or wiki
     units = (
         raw

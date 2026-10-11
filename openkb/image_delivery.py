@@ -9,7 +9,13 @@ import uuid
 class ImageDeliveries:
     def __init__(self) -> None:
         self._records: dict[str, tuple[dict, dict]] = {}
+        self._locations: dict[str, dict] = {}
         self._guard = threading.RLock()
+
+    def list_location(self, occurrence: dict) -> None:
+        """Retain a reader location without creating an image delivery attempt."""
+        with self._guard:
+            self._locations[occurrence["occurrence_id"]] = copy.deepcopy(occurrence)
 
     def prepare(self, occurrence: dict) -> dict:
         with self._guard:
@@ -107,4 +113,7 @@ class ImageDeliveries:
 
     def snapshot(self) -> tuple[dict, ...]:
         with self._guard:
-            return tuple(copy.deepcopy(receipt) for _, receipt in self._records.values())
+            return tuple(
+                copy.deepcopy(receipt)
+                for receipt in [*self._locations.values(), *(r for _, r in self._records.values())]
+            )

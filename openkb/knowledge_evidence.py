@@ -38,7 +38,7 @@ def validated_input(
     return unit, source, annotation
 
 
-def publication_dependencies(kb_dir, head, pages, before, inputs):
+def publication_dependencies(kb_dir, head, pages, before, inputs, *, wiki=None):
     dependencies = {page: tuple(sorted(inputs)) for page in pages if page.endswith(".md")}
     if head.knowledge_revision_id:
         directory = (
@@ -48,7 +48,14 @@ def publication_dependencies(kb_dir, head, pages, before, inputs):
         if previous.view_id != head.view_id or previous.knowledge_revision_id != directory.name:
             raise ValueError("Knowledge evidence belongs to another snapshot")
         for page in dependencies:
-            if page in previous.page_dependencies and (pages[page] == before.get(page)):
+            same = pages[page] == before.get(page)
+            if not same and wiki and (directory / "wiki" / page).is_file():
+                from openkb.figure_publication import figure_independent_body
+
+                same = figure_independent_body(
+                    (wiki / page).read_text()
+                ) == figure_independent_body((directory / "wiki" / page).read_text())
+            if page in previous.page_dependencies and same:
                 dependencies[page] = previous.page_dependencies[page]
     return dependencies
 

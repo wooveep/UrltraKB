@@ -114,7 +114,12 @@ class CompileSourceWindows:
                 .removesuffix(".json")
                 .removesuffix(".md")
             )
-            identity = source_identity(self.kb_dir, name)
+            inputs = None
+            if self.kb_dir is not None and name != self.doc_name:
+                from openkb.unit_publication import read_head
+
+                inputs = read_head(self.kb_dir, self.view_id).inputs
+            identity = source_identity(self.kb_dir, name, inputs=inputs)
             identity["source_digest"] = hashlib.sha256(self._read(path)).hexdigest()
             figures = freeze_figures(
                 self.wiki,
@@ -381,7 +386,11 @@ class CompileSourceWindows:
                 selected["content"]
             ):
                 raise PageResponseError("document_summary_reader_invalid", "Original tail unread")
-            yield with_context(projected)
+            window = with_context(projected)
+            # Native blank pages or whitespace tails retain their coordinates in
+            # the reader, but contain no section for the model to summarize.
+            if window["content"].strip():
+                yield window
             offset = len(selected["content"]) if continuation is None else continuation
 
     def _originals(self, page: str) -> list[str]:

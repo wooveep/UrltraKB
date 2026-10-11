@@ -110,7 +110,9 @@ def test_continuation_failure_is_not_silently_deduplicated(monkeypatch, mode):
 
 
 @pytest.mark.parametrize("kind", ["corrupt", "scan", "blank"])
-def test_unreadable_pdf_never_admits_source(kb_dir, tmp_path, monkeypatch, kind):
+def test_unreadable_pdf_distinguishes_corruption_from_retained_no_text(
+    kb_dir, tmp_path, monkeypatch, kind
+):
     import pymupdf
 
     from openkb.application.documents import import_document
@@ -131,9 +133,14 @@ def test_unreadable_pdf_never_admits_source(kb_dir, tmp_path, monkeypatch, kind)
         "litellm.completion", lambda **kw: pytest.fail("PDF rejection called model")
     )
     result = import_document(kb_dir, path)
-    assert result.status == "rejected" and result.message.startswith("PDF导入识别异常")
-    assert not list_sources(kb_dir) and result.source_id is None
-    assert "pdf_recognition_anomaly" in result.quality
+    if kind == "corrupt":
+        assert result.status == "rejected" and result.message.startswith("PDF导入识别异常")
+        assert not list_sources(kb_dir) and result.source_id is None
+        assert "pdf_recognition_anomaly" in result.quality
+    else:
+        assert result.status == "blocked" and "资料已保存，未生成知识" in result.message
+        assert len(list_sources(kb_dir)) == 1 and result.source_id
+        assert ("blank_original" if kind == "blank" else "no_reliable_text") in result.quality
 
 
 def test_valid_hidden_text_and_blank_page_are_preserved(tmp_path):

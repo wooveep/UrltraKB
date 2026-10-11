@@ -21,7 +21,10 @@ def split_gallery(content: str) -> tuple[str, list[dict]]:
     gallery, marker, after = tail.partition(END)
     if not marker or START in after:
         raise PageResponseError("figure_invalid_gallery", "Invalid saved figure gallery")
-    line = gallery.strip().splitlines()[0]
+    lines = gallery.strip().splitlines()
+    if not lines:
+        raise PageResponseError("figure_invalid_gallery", "Empty saved figure gallery")
+    line = lines[0]
     if not line.startswith("<!-- records: ") or not line.endswith(" -->"):
         raise PageResponseError("figure_invalid_gallery", "Missing saved occurrence records")
     try:
@@ -73,14 +76,17 @@ def render_gallery(wiki: Path, page: str, body: str, entries: list[dict]) -> str
                 .replace("]", "\\]")
                 .replace("\n", " ")
             )
+            provenance = (
+                f"source_revision_id: `{figure.source_revision_id}`；"
+                f"processing_revision_id: `{figure.processing_revision_id}`"
+                if figure.source_revision_id and figure.processing_revision_id
+                else f"来源版本 ID 未记录；source_sha256: `{figure.source_digest}`"
+            )
             lines.extend(
                 [
                     "",
                     f"![{caption}]({relative_figure(wiki, page, figure.asset_path)})",
-                    f"出处：`{figure.source_path}`，{location}；source_revision_id: "
-                    f"`{figure.source_revision_id or figure.source_digest}`；"
-                    "processing_revision_id: "
-                    f"`{figure.processing_revision_id or figure.source_digest}`。",
+                    f"出处：`{figure.source_path}`，{location}；{provenance}。",
                 ]
             )
     return "\n".join([*lines, END, ""])
@@ -208,7 +214,9 @@ def source_ranges(
 ) -> tuple[dict, ...]:
     """Expose native pages or heading-bounded character ranges without clipping text."""
     from openkb.agent.document_summary import summary_sections
+    from openkb.figure_assets import validate_figure_source
 
+    validate_figure_source(raw)
     if isinstance(raw, list):
         parts = [(p.get("content", ""), {"page": p["page"]}) for p in raw]
     else:

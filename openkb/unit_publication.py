@@ -362,7 +362,7 @@ def publish_unit_revision(
     from openkb.knowledge_evidence import publication_dependencies
 
     dependencies = publication_dependencies(
-        kb_dir, view.head, generated, view.base_pages, inputs.values()
+        kb_dir, view.head, generated, view.base_pages, inputs.values(), wiki=view.scope.wiki_dir
     )
     baselines = dict(view.head.generated_baselines)
     for name in changed:
@@ -374,6 +374,9 @@ def publish_unit_revision(
     referenced_inputs = set(inputs.values()) | {
         identity for values in dependencies.values() for identity in values
     }
+    from openkb.figure_publication import referenced_figure_inputs
+
+    referenced_inputs.update(referenced_figure_inputs(view.scope.wiki_dir, generated))
     for input_id in referenced_inputs:
         input_revision = read_record(kb_dir, "unit-revisions", input_id, UnitRevision)
         source_revision = read_source_revision(kb_dir, input_revision.source_revision_id)
