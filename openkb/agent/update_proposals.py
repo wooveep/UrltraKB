@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from openkb.agent.page_updates import PageUpdate
+from openkb.agent.page_updates import PageUpdate, UnchangedPage
 
 
 @dataclass(frozen=True)
@@ -37,13 +37,15 @@ def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> Merg
     base = update.request()
     for proposal in ordered:
         obj = proposal.response
-        update.apply(json.dumps(obj), current=update.original)
-        if obj.get("status") == "unchanged":
+        accepted = update.apply(json.dumps(obj), current=update.original)
+        if isinstance(accepted, UnchangedPage):
             continue
         for edit in obj["edits"]:
             by_block.setdefault(edit["block_id"], []).append((proposal.order, edit))
         changes = {
-            key: obj[key] for key in ("description", "type") if key in obj and obj[key] != base[key]
+            key: accepted[key]
+            for key in ("description", "type")
+            if key in accepted and accepted[key] != base[key]
         }
         if changes:
             metadata.append((proposal, changes))

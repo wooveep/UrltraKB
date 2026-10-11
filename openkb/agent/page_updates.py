@@ -239,6 +239,11 @@ class PageUpdate:
             "base_sha256": self.digest,
             "description": frontmatter.parse(self.original).get("description", ""),
             "type": frontmatter.parse(self.original).get("type", ""),
+            **(
+                {"allowed_types": sorted(self.allowed_types)}
+                if self.allowed_types is not None
+                else {}
+            ),
             "blocks": [
                 {"id": identity, "text": self.body[start:end]}
                 for identity, (start, end) in self.blocks.items()
@@ -315,12 +320,19 @@ class PageUpdate:
         for key in ("description", "type"):
             if key in obj and not isinstance(obj[key], str):
                 raise PageResponseError("page_update_invalid", f"{key} must be a string")
-        if (
-            "type" in obj
-            and self.allowed_types is not None
-            and obj["type"] not in self.allowed_types
-        ):
-            raise PageResponseError("page_update_invalid", "type must belong to the allowed set")
+        if "type" in obj and self.allowed_types is not None:
+            # Published frontmatter uses title case; configuration uses lower case.
+            # Echoing the captured value is not a page-wide metadata contribution.
+            value = obj["type"].strip().lower()
+            if value == self.request()["type"].strip().lower():
+                obj.pop("type")
+            elif value in self.allowed_types:
+                obj["type"] = value
+            else:
+                raise PageResponseError(
+                    "page_update_invalid",
+                    f"type must belong to the allowed set: {sorted(self.allowed_types)}",
+                )
         edits = obj.get("edits")
         metadata_changed = any(
             key in obj and obj[key] != self.request()[key] for key in ("description", "type")

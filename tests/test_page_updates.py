@@ -41,6 +41,25 @@ def test_metadata_only_update_preserves_body_and_validates_entity_type():
         update.apply(json.dumps({**proposal, "description": "Wrong object"}), current=original)
 
 
+@pytest.mark.parametrize("returned_type", ["Work", "work", "Other"])
+def test_updates_use_the_same_type_vocabulary_as_published_frontmatter(returned_type):
+    from openkb.agent.page_updates import PageUpdate
+
+    original = "---\ntype: Work\ndescription: Manual\n---\n# Manual\n\nOld rule.\n"
+    patch = PageUpdate(original, allowed_types=frozenset({"work", "other"}))
+    response = {
+        "base_sha256": patch.digest,
+        "type": returned_type,
+        "edits": [{"block_id": "b2", "operation": "replace", "content": "New rule.\n"}],
+    }
+    result = patch.apply(json.dumps(response), current=original)
+    assert result["content"] == "# Manual\n\nNew rule.\n"
+    assert result.get("type", patch.request()["type"]).lower() == returned_type.lower()
+    if returned_type.lower() == "work":
+        assert "type" not in result
+    assert patch.request()["allowed_types"] == ["other", "work"]
+
+
 @pytest.mark.parametrize("bad", ["extra", "empty", "shape", "hash", "stale"])
 def test_unchanged_requires_a_valid_frozen_page_and_only_its_declared_fields(bad):
     from openkb.agent.page_response import PageResponseError

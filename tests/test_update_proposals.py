@@ -74,6 +74,48 @@ def test_one_local_metadata_candidate_still_needs_whole_page_context():
     assert not complete.conflicts and complete.response["description"] == "Only local scope"
 
 
+def test_equivalent_type_echo_does_not_create_a_page_metadata_conflict():
+    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+
+    update = PageUpdate(
+        "---\ntype: Work\n---\n# Manual\n\nOld rule.\n",
+        allowed_types=frozenset({"work", "other"}),
+    )
+    response = {
+        "base_sha256": update.digest,
+        "type": "work",
+        "edits": [{"block_id": "b2", "operation": "replace", "content": "New rule.\n"}],
+    }
+    merged = merge_proposals(update, [UpdateProposal(0, response)])
+    assert not merged.conflicts
+    assert "type" not in merged.response
+    assert update.apply(json.dumps(merged.response), current=update.original)["content"].endswith(
+        "New rule.\n"
+    )
+    assert response["type"] == "work"  # Saved model response remains the audit evidence.
+
+
+def test_same_type_change_in_different_case_merges_without_an_extra_request():
+    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+
+    update = PageUpdate(
+        "---\ntype: Work\n---\n# Manual\n\nOld rule.\n",
+        allowed_types=frozenset({"work", "other"}),
+    )
+    proposals = [
+        UpdateProposal(
+            order,
+            {"base_sha256": update.digest, "type": value, "edits": []},
+            complete_scope=True,
+        )
+        for order, value in enumerate(["Other", "other"])
+    ]
+    merged = merge_proposals(update, proposals)
+    assert not merged.conflicts
+    assert merged.response["type"] == "other"
+    assert merged == merge_proposals(update, list(reversed(proposals)))
+
+
 def test_conflict_resolves_all_edits_sharing_a_range_declaration():
     from openkb.agent.update_proposals import UpdateProposal, merge_proposals
 

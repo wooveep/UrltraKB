@@ -11,17 +11,23 @@ if TYPE_CHECKING:
 
 COMPILATION_FACT_RULES = """
 Source fidelity applies to summaries, concepts, entities, updates and final rewrites.
-Preserve the source's subject, units, conditions, strength and applicable scope.
-A recommendation is not a requirement; one configuration is not every configuration.
+Compose the description and body from the supplied source claims. Organize each topic
+around its named subject, applicable condition and recorded facts or procedure; the
+available evidence determines the page's breadth. Preserve source names and document
+titles verbatim unless the source supplies an alternative name. A translated explanation
+may accompany the original name. Describe a document's relationship to another document
+or organization only as specifically as the source establishes it.
+Preserve units and the exact logical strength of conditions, including explicit exclusions:
+required, recommended, permitted, only within, and not applicable convey different facts.
 Navigation titles, node summaries and existing generated pages help locate originals;
 they do not establish facts. Source links identify associations, not factual verification.
-Do not add guarantees, defaults, prohibitions, negative claims or operational rules
-that the originals do not support. Do not fill omissions from general knowledge.
-Silence about a conditional effect does not establish that other properties are
-unchanged. Do not infer "only this changes", unaffected properties, or invariants
-from independently listed facts. Retain the stated condition without widening it.
+For every explanation or comparison, carry forward only the relationship established
+by those facts. Independently listed facts do not establish causation, unchanged
+properties or an unstated default. Treat a necessary but unanswered question as a local
+gap; add such a gap only when needed to interpret or use this page's actual subject.
 Ordinary arithmetic and unit conversions are allowed: show the derivation and any
-necessary assumptions. Preserve conflicting source statements separately.
+necessary assumptions, and keep derived conclusions within the calculated bounds.
+Preserve conflicting source statements separately.
 Distinguish source records from synthesis or interpretation where interpretation is
 useful. External advice or background must be separately labelled, and is normally
 omitted from document summaries. Do not add a list of irrelevant unknowns.
@@ -39,6 +45,8 @@ are generated aids, even when they have valid source links. Read the associated 
 for specific values, specifications, API parameters, commands, prices and conditions.
 Claims about what a document includes or omits require the same original support.
 Identify the necessary parts of the user's question and answer each supported part.
+Lead with the requested result and the evidence needed to use it. Let the question
+determine the answer's length and structure; finish when its necessary parts are covered.
 Build the answer around those requested facts: bind each fact to its object, operation,
 condition and source location before explaining it. For document questions, each
 paragraph should supply a requested fact, a derivation with its premises, or a local
@@ -53,8 +61,12 @@ details, explanations and conclusions in the rest of the answer.
 Explain reasons, steps, comparisons, calculations or examples when the question needs
 them. Preserve useful synthesis and conditional advice, distinguishing document facts
 from analysis or reliable background where the distinction matters. Respect a request
-to use documents only. Give source-supported arithmetic with inputs, units and derivation;
-label necessary assumptions and hypothetical examples. Provide fillable values when asked.
+to use documents only. Give source-supported arithmetic with inputs, units and derivation.
+For a recommendation derived from a calculation, compare the user's requirement against
+the calculated bounds, retaining the same assumptions and units. Explain a recommendation
+using the attributes actually established in the sources. Label necessary assumptions and
+hypothetical examples as such, rather than adding them to the source's meaning.
+Provide fillable values when asked.
 Keep facts and conditions within their original heading, object, operation and revision;
 read adjacent context when section ancestry is uncertain. Preserve conflicting statements
 and identify their sources. Match the source's strength: a recommendation remains a
