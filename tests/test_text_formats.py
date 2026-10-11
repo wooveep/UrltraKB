@@ -68,7 +68,7 @@ def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, 
     ],
 )
 def test_text_formats_reuse_block_index_and_exact_revision_reads(
-    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_schema
+    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_short_prompt
 ):
     import litellm
     from click.testing import CliRunner
@@ -172,7 +172,7 @@ def test_watched_csv_does_not_reimport_its_managed_normalization(kb_dir, pdf_mod
 
 
 def test_csv_generated_column_labels_cannot_anchor_original_sections(
-    kb_dir, tmp_path, block_model, monkeypatch, wide_schema
+    kb_dir, tmp_path, block_model, monkeypatch, wide_short_prompt
 ):
     import litellm
 

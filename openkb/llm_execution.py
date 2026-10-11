@@ -379,6 +379,7 @@ class CompletionExecutor:
         self.image_deliveries = ImageDeliveries()
         self.request_cache: dict[str, Any] = {}
         self.question_capacity: TokenMeasure | None = None
+        self.compile_capacity: TokenMeasure | None = None
         self._answer_input_tokens = 0
         self._tool_output_tokens = 0
         self._retrieval_slots = threading.BoundedSemaphore(1)
@@ -559,6 +560,10 @@ class CompletionExecutor:
             timeout = min(timeout, remaining) if timeout is not None else remaining
         if timeout is not None:
             kwargs["timeout"] = timeout
+        if role == "compile" and self.compile_capacity is not None:
+            from openkb.execution_capacity import require_compile_capacity
+
+            require_compile_capacity(self.compile_capacity, kwargs)
         return kwargs
 
     @contextmanager
@@ -598,9 +603,11 @@ class CompletionExecutor:
         ):
             yield observed
 
-    def _result(self, response, observed, logical_id: str) -> CompletionResult:
+    def _result(self, response, observed, logical_id: str, on_response=None) -> CompletionResult:
         if observed is not None:
             observed.finish(response)
+        if on_response is not None:
+            on_response(response)
         self.policy.check()  # Retain spent usage, then discard a late result.
         choice = response.choices[0]
         content = choice.message.content or ""
@@ -625,7 +632,7 @@ class CompletionExecutor:
     def _delay(self, retry: int) -> float:
         return min(self.policy.backoff * 2**retry, 10)
 
-    def complete(self, role: str, request: ModelRequest) -> CompletionResult:
+    def complete(self, role: str, request: ModelRequest, *, on_response=None) -> CompletionResult:
         self.policy.check()
         self.check_capacity_input(request.payload(), role=role)
         while not self._slots.acquire(timeout=0.05):
@@ -637,7 +644,7 @@ class CompletionExecutor:
                 try:
                     with self.attempt(role, request, logical_id) as observed:
                         response = litellm.completion(**self._kwargs(role, request))
-                        return self._result(response, observed, logical_id)
+                        return self._result(response, observed, logical_id, on_response)
                 except Exception as exc:
                     self.policy.check()
                     if (
@@ -675,7 +682,9 @@ class CompletionExecutor:
                     task.cancel()
                 await settle_received(task)
 
-    async def acomplete(self, role: str, request: ModelRequest) -> CompletionResult:
+    async def acomplete(
+        self, role: str, request: ModelRequest, *, on_response=None
+    ) -> CompletionResult:
         self.policy.check()
         self.check_capacity_input(request.payload(), role=role)
         while not self._slots.acquire(blocking=False):
@@ -690,7 +699,7 @@ class CompletionExecutor:
                         response = await self.wait_response(
                             litellm.acompletion(**self._kwargs(role, request))
                         )
-                        return self._result(response, observed, logical_id)
+                        return self._result(response, observed, logical_id, on_response)
                 except Exception as exc:
                     self.policy.check()
                     if (
@@ -765,7 +774,11 @@ def executor_from_snapshot(snapshot, cancelled: Callable[[], bool]) -> Completio
         model_table=values.get("model_table"),
         generation=config.get("role_generation"),
     )
-    return CompletionExecutor(bindings, policy)
+    from openkb.execution_capacity import compile_measure
+
+    executor = CompletionExecutor(bindings, policy)
+    executor.compile_capacity = compile_measure(snapshot, bindings.model("compile"))
+    return executor
 
 
 def compiler_executor(model: str, bundle, options: dict) -> CompletionExecutor:

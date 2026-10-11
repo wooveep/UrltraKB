@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-pytest_plugins = ("test_office_import",)
+pytest_plugins = ("test_office_import", "block_fixtures")
 
 
 @pytest.fixture
@@ -74,7 +74,7 @@ def test_one_sheet_failure_keeps_other_publications_and_retry_skips_them(
 
 
 def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
-    kb_dir, three_sheets, pdf_model, monkeypatch
+    kb_dir, three_sheets, pdf_model, monkeypatch, wide_short_prompt
 ):
     import asyncio
     import json
@@ -82,23 +82,19 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
 
     import litellm
 
-    from openkb.agent.compiler import get_agents_md
     from openkb.application.documents import import_document
     from openkb.application.recompilation import recompile_document, select_recompilation
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
 
-    schema = kb_dir / "wiki/AGENTS.md"
-    schema.write_text(get_agents_md(schema.parent) + "\n" + "Keep native cell coordinates.\n" * 500)
-
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            # The full summary protocol plus cell provenance must fit. The Wiki
-            # schema still forces the short source through segmented execution.
+            # Planning and cell provenance fit; the wide short prompt selects
+            # segmented execution without making the shared schema unusable.
             kb=str(kb_dir),
-            config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1500}},
+            config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}},
         ),
     )
     original = litellm.completion

@@ -229,7 +229,7 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     ],
 )
 def test_markup_uses_frozen_blocks_and_original_anchors(
-    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_schema
+    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_short_prompt
 ):
     import json
 

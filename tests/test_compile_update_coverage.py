@@ -204,7 +204,10 @@ def test_long_update_finds_complementary_originals_without_navigation_match(kb_d
     context.require_update("entities/valve.md")
     assert "36 litres" in str(context.message)
     assert "only available during irrigation" in str(context.message)
-    assert "Unrelated general introduction" not in str(context.message)
+    # With only one native section, its conditions may continue beyond a search
+    # hit. The full section (including its introduction) is the evidence window.
+    assert "Unrelated general introduction" in str(context.message)
+    assert context.windows[0]["native_location"]["pages"] == "1-3"
 
 
 @pytest.mark.parametrize("repair", ["retain", "withdraw", "related", "format_then_update"])

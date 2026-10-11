@@ -160,6 +160,17 @@ def _window(source: dict, start: int, end: int, layout=None) -> dict:
     return result
 
 
+def slice_evidence(source: dict, start: int, end: int, *, layout=None) -> dict:
+    """Retain native positions and partial-value metadata for one exact subrange."""
+    if (
+        type(start) is not int
+        or type(end) is not int
+        or not 0 <= start < end <= len(source["content"])
+    ):
+        raise ValueError("Evidence subrange is outside its original selection")
+    return _window(source, start, end, layout)
+
+
 def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
     if offset == 0:
         return []

@@ -172,7 +172,6 @@ def test_short_pdf_uses_only_known_execution_capacity(
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.config import LlmCredentialBundle
     from openkb.documents import read_document_source
     from openkb.view_records import SourceMetadata
 
@@ -180,10 +179,14 @@ def test_short_pdf_uses_only_known_execution_capacity(
         kb_dir,
         KbConfigPatchRequest(kb=str(kb_dir), config={"model": model, "model_capacity": capacity}),
     )
+    # Application sends use the captured task binding, so the tested endpoint
+    # must be present in that snapshot as well as in the conversion preflight.
+    (kb_dir / ".env").write_text(
+        "LLM_API_KEY=fixture\n" + (f"OPENAI_API_BASE={endpoint}\n" if endpoint else "")
+    )
     result = import_document(
         kb_dir,
         physical_pdf,
-        bundle=LlmCredentialBundle(api_key="fixture", base_url=endpoint),
         metadata=SourceMetadata(product="Capacity", applicable_versions=("1",), family="manual"),
     )
     if status == "insufficient":
@@ -203,7 +206,7 @@ def test_short_pdf_uses_only_known_execution_capacity(
 
 
 def test_short_segmented_recompile_retains_decision_and_adapters(
-    kb_dir, physical_pdf, pdf_model, wide_schema
+    kb_dir, physical_pdf, pdf_model, wide_short_prompt
 ):
     import asyncio
     import json

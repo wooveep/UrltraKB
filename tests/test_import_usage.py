@@ -357,7 +357,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
     from openkb.config import LlmCredentialBundle
 
     if segmented:
-        request.getfixturevalue("wide_schema")
+        request.getfixturevalue("wide_short_prompt")
     sent = []
 
     class Provider(BaseHTTPRequestHandler):

@@ -73,6 +73,44 @@ def capacity_policy(
     }
 
 
+def compile_measure(snapshot, model: str):
+    """Capture the compile input measure once; unknown capacity remains explicit."""
+    from openkb.model_tokenizer import TokenMeasure
+
+    values = snapshot.values()
+    policy = capacity_policy(
+        {**values["effective"], "model": model},
+        custom_endpoint=bool(values["credentials"]["base_url"]),
+        tokenizer_snapshot=values.get("tokenizer_asset"),
+    )
+    return None if policy["unknown_reason"] else TokenMeasure(policy)
+
+
+def require_compile_capacity(measure, kwargs: dict) -> None:
+    """Measure the assembled SDK input, including repair text and generation options."""
+    from openkb.model_tokenizer import ContextCapacityError
+
+    transport = {
+        "model",
+        "api_key",
+        "base_url",
+        "num_retries",
+        "max_retries",
+        "timeout",
+        "extra_headers",
+        "drop_params",
+        "allowed_openai_params",
+    }
+    payload = {k: v for k, v in kwargs.items() if k not in transport}
+    # OpenAI-compatible SDKs merge extra_body into the HTTP JSON object. Count
+    # those fields once in their wire shape, as the window admission does.
+    payload.update(payload.pop("extra_body", {}))
+    if measure.payload_tokens(payload) > measure.input_limit:
+        raise ContextCapacityError(
+            "Complete compile request exceeds captured model capacity; original input is retained"
+        )
+
+
 def select_execution_mode(
     kb_dir: Path,
     processing: ProcessingDecision,

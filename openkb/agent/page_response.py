@@ -12,6 +12,37 @@ class PageResponseError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
+def page_repair_message(
+    code: str,
+    detail: str,
+    *,
+    page_update: bool = False,
+    response_protocol: str = "page-json",
+    expected_sections: tuple[str, ...] = (),
+) -> dict:
+    """The same bounded response correction is measured and sent without alteration."""
+    return {
+        "role": "user",
+        "content": (
+            f"The page response failed validation ({code}): {detail}. "
+            + (
+                "Return one updated block-edit object or explicit unchanged result "
+                "with a reason, using the captured base_sha256. "
+                if page_update
+                else (
+                    "Return exactly one JSON object with description and sections. "
+                    f"Include these ids once each: {expected_sections}. "
+                    if response_protocol == "summary-json"
+                    else "Return exactly one JSON object with string description "
+                    "and nonempty content. "
+                )
+            )
+            + "Do not append a second object or note. Keep supported source facts only. "
+            "If truncated, retain all necessary new information in complete edits or statements."
+        ),
+    }
+
+
 def parse_summary(text: str, expected_sections: tuple[str, ...]) -> dict:
     """Accept only the declared, complete JSON protocol; never invent missing bytes."""
 

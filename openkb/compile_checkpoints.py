@@ -183,6 +183,23 @@ class CompileCheckpoints:
                 "compile_repair_exhausted", "The retained response repair was already consumed"
             )
 
+    def failure_code(self, key: str, request_digest: str) -> str | None:
+        _, entry = self._entry(key, request_digest)
+        return entry.get("failure_code")
+
+    def record_failure(self, key: str, request_digest: str, code: str):
+        """Persist an observed response outcome even when cancellation is pending.
+
+        This consumes no send or repair opportunity. In particular, a stopped
+        summary can recover its length failure without repeating the parent.
+        """
+        with atomic_record_lock(self.directory / "checkpoint.lock"):
+            _, previous = self._entry(key, request_digest)
+            self._write_entry(
+                key,
+                {**previous, "request_digest": request_digest, "failure_code": code},
+            )
+
     def claim_repair(self, key: str, request_digest: str):
         from openkb.llm_execution import check_model_stop
 

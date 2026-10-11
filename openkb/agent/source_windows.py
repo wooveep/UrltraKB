@@ -393,6 +393,15 @@ class CompileSourceWindows:
                 yield window
             offset = len(selected["content"]) if continuation is None else continuation
 
+    def split_document_window(self, window: dict) -> list[dict]:
+        from openkb.agent.source_window_ranges import split_document_window
+
+        identity = self.original_identity()
+        if any(window.get(key) != value for key, value in identity.items()):
+            raise PageResponseError("document_summary_reader_invalid", "Split source changed")
+        selected, _ = self._document_selection(self.original_path)
+        return split_document_window(selected, window)
+
     def _originals(self, page: str) -> list[str]:
         pending, seen, sources = [page], set(), []
         while pending:
@@ -457,7 +466,11 @@ class CompileSourceWindows:
                 if locations:
                     for key in ("pages", "blocks"):
                         if key in locations[0]:
-                            return {key: ",".join(dict.fromkeys(loc[key] for loc in locations))}
+                            from openkb.agent.source_window_ranges import (
+                                expand_navigation_locations,
+                            )
+
+                            return {key: expand_navigation_locations(locations, key, navigation)}
                     spans = [tuple(map(int, loc["chars"].split(":"))) for loc in locations]
                     return {"chars": f"{min(a for a, _ in spans)}:{max(b for _, b in spans)}"}
             words = set(
@@ -593,15 +606,15 @@ class CompileSourceWindows:
         return list(self.iter_selection(path, location, budget=budget))
 
     def iter_selection(
-        self, path: str, location: dict, *, budget: int | None = None
+        self, path: str, location: dict, *, budget: int | None = None, allow_suffix: bool = False
     ) -> Iterator[dict]:
         """Project successive windows without eagerly materializing unread suffixes."""
         from openkb.llm_execution import check_model_stop
 
-        if location.get("offset", 0) != 0:
+        if location.get("offset", 0) != 0 and not allow_suffix:
             raise PageResponseError("page_invalid_continuation", "A selection must start at zero")
         budget = MAX_EVIDENCE_CHARS if budget is None else budget
-        offset = 0
+        offset = location.get("offset", 0)
         while True:
             check_model_stop()
             window = self._window(path, {**location, "offset": offset}, budget)
@@ -662,8 +675,8 @@ class CompileSourceWindows:
             self.figure_source(path)
             try:
                 selected_windows = (
-                    self.read_selection(path, location)
-                    if previous_page
+                    list(self.iter_selection(path, location, allow_suffix=previous_page is None))
+                    if previous_page or long
                     else [self._window(path, location, remaining)]
                     if remaining
                     else [{"path": path, "coverage": "unread", "content": ""}]

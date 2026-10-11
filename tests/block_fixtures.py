@@ -7,20 +7,23 @@ import pytest
 
 
 @pytest.fixture
-def wide_schema(kb_dir, monkeypatch):
-    """A real large schema makes the first short request require segmentation.
+def wide_short_prompt(monkeypatch):
+    """Make the first short request require segmentation at its message seam.
 
     Native locators need usable request capacity, so reader tests cannot force
-    this route with a one-token model limit.
+    this route with a one-token model limit. Keep the later planning schema
+    usable too: an oversized shared schema cannot succeed in either route.
     """
-    from openkb.agent.compiler import get_agents_md
+    from openkb.agent import compiler
 
-    path = kb_dir / "wiki/AGENTS.md"
-    schema = get_agents_md(path.parent)
-    schema += "\n" + ("Retain original source coordinates and scope.\n" * 700)
-    path.write_text(schema)
-    # Product views receive the same real schema when created during import.
-    monkeypatch.setattr("openkb.application.views.AGENTS_MD", schema)
+    original = compiler.short_document_messages
+
+    def messages(*args, **kwargs):
+        return original(*args, **kwargs) + [
+            {"role": "user", "content": "Full-document test instruction.\n" * 2000}
+        ]
+
+    monkeypatch.setattr(compiler, "short_document_messages", messages)
 
 
 @pytest.fixture

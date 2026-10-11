@@ -428,6 +428,7 @@ async def _llm_call_async(
     *,
     bundle=None,
     prompt_version: str = "compiler-shared-v3",
+    on_response=None,
     **kwargs,
 ) -> str:
     """Async LLM call with timing output and debug logging."""
@@ -443,7 +444,7 @@ async def _llm_call_async(
         generation_options=kwargs,
     )
     t0 = time.time()
-    result = await executor.acomplete("compile", request)
+    result = await executor.acomplete("compile", request, on_response=on_response)
     response = result.response
     content = response.choices[0].message.content or ""
     truncated = _warn_if_truncated(response, step_name, kwargs.get("max_tokens"))
@@ -504,7 +505,12 @@ async def _llm_call_page_async(
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
-    from openkb.agent.page_response import PageResponseError, parse_page, parse_summary
+    from openkb.agent.page_response import (
+        PageResponseError,
+        page_repair_message,
+        parse_page,
+        parse_summary,
+    )
 
     if response_protocol not in {"page-json", "markdown", "summary-json", "summary-page-json"}:
         raise ValueError("Unknown page response protocol")
@@ -513,6 +519,13 @@ async def _llm_call_page_async(
         messages = [*messages, figure_context.message()]
 
     correction = []
+
+    def observe_repair_response(response):
+        if checkpoints and getattr(response.choices[0], "finish_reason", None) == "length":
+            from openkb.compile_checkpoints import digest
+
+            checkpoints.record_failure(checkpoint_key, digest(messages), "page_truncated_response")
+
     for attempt in range(2):
         try:
             if attempt == 0 and initial_error is not None:
@@ -526,6 +539,7 @@ async def _llm_call_page_async(
                     step_name,
                     raise_on_truncation=True,
                     bundle=bundle,
+                    on_response=observe_repair_response if attempt else None,
                     **kwargs,
                 )
             )
@@ -580,6 +594,10 @@ async def _llm_call_page_async(
             if code == "page_update_stale":
                 raise
             if attempt:
+                if checkpoints:
+                    from openkb.compile_checkpoints import digest
+
+                    checkpoints.record_failure(checkpoint_key, digest(messages), code)
                 report_compile_issue(code)
                 raise PageResponseError(code, f"{step_name}: {error}") from error
             if checkpoints:
@@ -587,26 +605,13 @@ async def _llm_call_page_async(
 
                 checkpoints.claim_repair(checkpoint_key, digest(messages))
             correction = [
-                {
-                    "role": "user",
-                    "content": (
-                        f"The page response failed validation ({code}): {error}. "
-                        + (
-                            "Return one updated block-edit object or explicit unchanged result "
-                            "with a reason, using the captured base_sha256. "
-                            if page_update
-                            else (
-                                "Return exactly one JSON object with description and sections. "
-                                f"Include these ids once each: {expected_sections}. "
-                                if response_protocol == "summary-json"
-                                else "Return exactly one JSON object with string description and nonempty content. "
-                            )
-                        )
-                        + "Do not append a second object or note. Keep supported source facts only. "
-                        "If truncated, retain all necessary new information in complete edits "
-                        "or statements."
-                    ),
-                }
+                page_repair_message(
+                    code,
+                    str(error),
+                    page_update=page_update is not None,
+                    response_protocol=response_protocol,
+                    expected_sections=expected_sections,
+                )
             ]
     raise AssertionError("Unreachable page retry state")
 
@@ -2484,13 +2489,13 @@ async def compile_long_doc(
             description=draft.description or doc_description,
             full_text=windows.original_path,
         )
-        navigation_text = json.dumps(
-            [{k: v for k, v in node.items() if k != "nodes"} for node in windows.navigation],
+        planning = json.dumps(
+            [
+                {k: node[k] for k in ("node_id", "title", "start_index", "end_index") if k in node}
+                for node in windows.navigation
+            ],
             ensure_ascii=False,
         )
-        planning = navigation_text[:MAX_DOCUMENT_PLANNING_CHARS]
-        if len(navigation_text) > len(planning):
-            planning += "\nNavigation is a partial prefix; read originals for unrepresented topics."
         overview = draft.planning_overview[:MAX_DOCUMENT_PLANNING_CHARS]
         if len(draft.planning_overview) > len(overview):
             overview += (

@@ -81,3 +81,77 @@ def test_arbitrary_suffix_cannot_certify_the_same_necessary_selection(kb_dir):
             "concepts/limits.md",
             long=True,
         )
+
+
+def test_search_hit_reads_the_indexed_section_tail_and_shared_boundary(kb_dir):
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    wiki = kb_dir / "wiki"
+    pages = [
+        {"page": 1, "unit_kind": "page", "content": "Aster authentication conditions."},
+        {"page": 2, "unit_kind": "page", "content": "Aster authentication renewal."},
+        {
+            "page": 3,
+            "unit_kind": "page",
+            "content": "Open the returned address after checking the token.",
+        },
+        {"page": 4, "unit_kind": "page", "content": "Unrelated maintenance."},
+    ]
+    (wiki / "sources/manual.json").write_text(json.dumps(pages))
+    nodes = [
+        {"node_id": "root", "start_index": 1, "end_index": 4},
+        {"node_id": "login", "start_index": 1, "end_index": 2},
+        {"node_id": "renewal", "start_index": 2, "end_index": 3},
+    ]
+    windows = CompileSourceWindows(wiki, "manual", navigation=nodes)
+    context = windows.prepare({"name": "aster-authentication"}, long=True)
+    body = "".join(w["content"] for w in context.windows)
+    assert "Open the returned address" in body
+    assert "Unrelated maintenance" not in body
+    explicit = windows.prepare(
+        {"name": "aster-authentication", "reading_locations": {"pages": "2"}}, long=True
+    )
+    assert "Open the returned address" not in str(explicit.windows)
+
+
+def test_new_long_page_consumes_the_whole_selected_range(kb_dir):
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    original = "Initial condition.\n\n" + "Recorded detail.\n\n" * 2000 + "Required tail."
+    wiki = kb_dir / "wiki"
+    (wiki / "sources/manual.md").write_text(original)
+    context = CompileSourceWindows(wiki, "manual").prepare(
+        {"name": "new-topic", "reading_locations": {"chars": f"0:{len(original)}"}},
+        long=True,
+    )
+    assert "".join(w["content"] for w in context.windows) == original
+    assert len(context.windows) > 1
+
+
+def test_one_native_section_keeps_its_tail_even_when_it_spans_the_document(kb_dir):
+    from openkb.agent.source_windows import CompileSourceWindows
+
+    (kb_dir / "wiki/sources/manual.json").write_text(
+        json.dumps(
+            [
+                {"page": 1, "unit_kind": "page", "content": "Authentication starts here."},
+                {"page": 2, "unit_kind": "page", "content": "Check the returned token."},
+                {"page": 3, "unit_kind": "page", "content": "Then open the returned address."},
+            ]
+        )
+    )
+    context = CompileSourceWindows(
+        kb_dir / "wiki",
+        "manual",
+        navigation=[
+            {
+                "node_id": "authentication",
+                "title": "Authentication",
+                "start_index": 1,
+                "end_index": 3,
+            },
+        ],
+    ).prepare({"name": "authentication"}, long=True)
+    body = "".join(w["content"] for w in context.windows)
+    assert "Check the returned token." in body
+    assert "Then open the returned address." in body

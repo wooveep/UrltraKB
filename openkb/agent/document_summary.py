@@ -10,7 +10,7 @@ from openkb.execution_budget import admit_document_summary
 from openkb.source_context import COMPILATION_FACT_RULES
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "compiler-document-sections-v4"
+PROMPT_VERSION = "compiler-document-sections-v5"
 SYSTEM_TEMPLATE = (
     "You are OpenKB's wiki compilation agent for document knowledge. "
     "Write independently readable knowledge in {language}.\n" + COMPILATION_FACT_RULES
@@ -106,7 +106,11 @@ def summary_sections(content: str) -> list[dict]:
 
 
 def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
-    window = {**window, "output_sections": summary_sections(window["content"])}
+    window = {
+        **window,
+        "summary_protocol": PROMPT_VERSION,
+        "output_sections": summary_sections(window["content"]),
+    }
     return [
         system,
         {
@@ -125,6 +129,15 @@ class SummaryDraft:
     ranges: tuple[dict, ...]
 
 
+@dataclass
+class _SummaryRequest:
+    key: str
+    window: dict
+    messages: list[dict]
+    accepted: dict | None
+    can_split: bool
+
+
 async def build_document_summary(
     windows: CompileSourceWindows,
     *,
@@ -133,15 +146,26 @@ async def build_document_summary(
     fits: Callable[[list[dict]], bool],
     checkpoints=None,
 ) -> SummaryDraft:
-    from openkb.agent.page_response import PageResponseError
+    from openkb.agent.page_response import PageResponseError, page_repair_message
     from openkb.llm_execution import raise_if_terminal
 
-    try:
-        batches = list(
-            windows.iter_document_windows(
-                fits=lambda window: fits(summary_messages(system_message, windows.doc_name, window))
-            )
+    def request_fits(window: dict, key: str) -> bool:
+        messages = summary_messages(system_message, windows.doc_name, window)
+        correction = page_repair_message(
+            "page_truncated_response",
+            f"LLM [document-summary:{key}] hit the length limit; "
+            "skipping to avoid a truncated page",
+            response_protocol="summary-json",
+            expected_sections=tuple(s["id"] for s in summary_sections(window["content"])),
         )
+        return fits(messages) and fits([*messages, correction])
+
+    batches: list[dict] = []
+    try:
+        for window in windows.iter_document_windows(
+            fits=lambda window: request_fits(window, str(len(batches) + 1))
+        ):
+            batches.append(window)
     except (ValueError, OSError) as error:
         raise_if_terminal(error)
         if isinstance(error, PageResponseError):
@@ -149,32 +173,86 @@ async def build_document_summary(
         raise PageResponseError("document_summary_reader_invalid", str(error)) from error
     from openkb.compile_checkpoints import digest
 
-    requests = [summary_messages(system_message, windows.doc_name, batch) for batch in batches]
-    cached = [
-        checkpoints.load(f"summary:{index}", digest(messages)) if checkpoints else None
-        for index, messages in enumerate(requests, 1)
-    ]
-    if missing := sum(result is None for result in cached):
+    def request(key: str, batch: dict, *, can_split: bool) -> _SummaryRequest:
+        messages = summary_messages(system_message, windows.doc_name, batch)
+        cached = checkpoints.load(f"summary:{key}", digest(messages)) if checkpoints else None
+        return _SummaryRequest(key, batch, messages, cached, can_split)
+
+    def children(parent: _SummaryRequest) -> list[_SummaryRequest]:
+        divided = [
+            request(f"{parent.key}.{i}", batch, can_split=False)
+            for i, batch in enumerate(windows.split_document_window(parent.window), 1)
+        ]
+        if not all(request_fits(child.window, child.key) for child in divided):
+            raise PageResponseError(
+                "document_summary_capacity_exceeded", "Split request does not fit"
+            )
+        return divided
+
+    requests = []
+    for index, batch in enumerate(batches, 1):
+        parent = request(str(index), batch, can_split=True)
+        marker = (
+            checkpoints.load(f"summary-split:{index}", digest(parent.messages))
+            if checkpoints and parent.accepted is None
+            else None
+        )
+        truncated = (
+            checkpoints
+            and parent.accepted is None
+            and checkpoints.failure_code(f"summary:{index}", digest(parent.messages))
+            == "page_truncated_response"
+        )
+        if marker is not None or truncated:
+            divided = children(parent)
+            child_digests = [digest(child.messages) for child in divided]
+            if marker is not None and marker != child_digests:
+                raise PageResponseError("compile_checkpoint_invalid", "Summary split changed")
+            if marker is None:
+                checkpoints.save(f"summary-split:{index}", digest(parent.messages), child_digests)
+            requests.extend(divided)
+        else:
+            requests.append(parent)
+    if missing := sum(r.accepted is None for r in requests):
         admit_document_summary(missing)
     bodies, descriptions, ranges = [], [], []
-    for index, batch in enumerate(batches, 1):
+    cursor = 0
+    while cursor < len(requests):
         from openkb.llm_execution import check_model_stop
 
         check_model_stop()
-        messages = requests[index - 1]
-        decoded = cached[index - 1]
+        current = requests[cursor]
+        batch, messages = current.window, current.messages
+        decoded = current.accepted
         if decoded is None:
             if checkpoints:
-                checkpoints.require_generation(f"summary:{index}", digest(messages))
-            decoded = await generate(
-                messages,
-                f"document-summary:{index}",
-                [batch["content"], *[c["content"] for c in batch["supplementary_context"]]],
-                tuple(s["id"] for s in summary_sections(batch["content"])),
-            )
+                checkpoints.require_generation(f"summary:{current.key}", digest(messages))
+            try:
+                decoded = await generate(
+                    messages,
+                    f"document-summary:{current.key}",
+                    [batch["content"], *[c["content"] for c in batch["supplementary_context"]]],
+                    tuple(s["id"] for s in summary_sections(batch["content"])),
+                )
+            except PageResponseError as error:
+                if error.code != "page_truncated_response" or not current.can_split:
+                    raise
+                divided = children(current)
+                if checkpoints:
+                    checkpoints.save(
+                        f"summary-split:{current.key}",
+                        digest(messages),
+                        [digest(child.messages) for child in divided],
+                    )
+                requests[cursor : cursor + 1] = divided
+                # The existing task ledger owns every send, including the failed
+                # parent and each child's one repair. Reserve no fresh allowance.
+                admit_document_summary(sum(r.accepted is None for r in requests[cursor:]))
+                logger.info("Split truncated document summary batch %s once", current.key)
+                continue
             if checkpoints:
                 checkpoints.save(
-                    f"summary:{index}",
+                    f"summary:{current.key}",
                     digest(messages),
                     decoded,
                     metadata={**batch, "output_sections": summary_sections(batch["content"])},
@@ -190,6 +268,7 @@ async def build_document_summary(
                 if key in batch
             }
         )
+        cursor += 1
     logger.info(
         "Document summary: %d original batches included for %s", len(bodies), windows.doc_name
     )
@@ -200,7 +279,7 @@ async def build_document_summary(
             "No nonempty text.",
             (),
         )
-    if len(batches) == 1:
+    if len(bodies) == 1:
         return SummaryDraft(bodies[0], descriptions[0], descriptions[0], tuple(ranges))
     description = "\n".join(descriptions)
     markdown = f"# {windows.doc_name}\n\n" + "\n\n".join(bodies)

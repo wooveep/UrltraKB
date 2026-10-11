@@ -8,7 +8,7 @@ pytest_plugins = ("block_fixtures",)
 
 
 @pytest.fixture
-def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch, wide_schema):
+def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch, wide_short_prompt):
     import litellm
 
     from openkb.application.documents import import_document

@@ -10,6 +10,56 @@ pytest_plugins = ("test_vendor_sdk",)
 
 
 @pytest.mark.asyncio
+async def test_planner_receives_all_native_nodes_without_cached_text(kb_dir, monkeypatch):
+    from openkb.agent.compiler import compile_long_doc
+
+    (kb_dir / "wiki/sources/manual.md").write_text("A complete operating condition.")
+    summary = kb_dir / "wiki/summaries/manual.md"
+    planning = []
+
+    def response(**kwargs):
+        messages = kwargs["messages"]
+        if "Based on the summary above" in str(messages):
+            planning.extend(messages)
+            reply = {}
+        else:
+            reply = summary_reply(messages, {"description": "Rules", "content": "Rules."})
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
+                )
+            ],
+            usage=None,
+        )
+
+    async def asynchronous(**kwargs):
+        return response(**kwargs)
+
+    monkeypatch.setattr("litellm.completion", response)
+    monkeypatch.setattr("litellm.acompletion", asynchronous)
+    nodes = [
+        {
+            "node_id": "first",
+            "title": "First topic",
+            "start_index": 1,
+            "end_index": 1,
+            "text": "CACHED_ORIGINAL_TEXT " * 2000,
+            "summary": "A generated label.",
+        },
+        {"node_id": "tail", "title": "Last topic", "start_index": 2, "end_index": 3},
+    ]
+    await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=nodes)
+    navigation = next(
+        m["content"] for m in planning if m["content"].startswith("Generated navigation")
+    )
+    records = json.loads(navigation.split("\n", 1)[1])
+    assert [n["node_id"] for n in records] == ["first", "tail"]
+    assert records[1]["end_index"] == 3
+    assert "CACHED_ORIGINAL_TEXT" not in navigation
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source_kind", ["pages", "text"])
 async def test_empty_topic_plan_still_summarizes_every_original_unit(
     kb_dir, monkeypatch, source_kind

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 pytest_plugins = ("block_fixtures",)
-pytestmark = pytest.mark.usefixtures("wide_schema")
+pytestmark = pytest.mark.usefixtures("wide_short_prompt")
 
 
 def test_short_text_can_use_blocks_and_recompile_its_retained_original(
@@ -305,7 +305,7 @@ def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
 
 @pytest.mark.parametrize("part,context", [("code", "fence_open"), ("table", "table_header")])
 def test_nested_structures_keep_display_context_when_their_original_spans_split(
-    kb_dir, tmp_path, block_model, part, context, wide_schema
+    kb_dir, tmp_path, block_model, part, context, wide_short_prompt
 ):
     from openkb.application.documents import import_document
     from openkb.application.settings import apply_kb_config_patch

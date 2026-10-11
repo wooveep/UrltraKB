@@ -13,7 +13,7 @@ from openkb.index_location import IndexLocation
 from openkb.knowledge_scope import legacy_scope
 
 pytest_plugins = ("block_fixtures", "test_pdf_readback")
-pytestmark = pytest.mark.usefixtures("wide_schema")
+pytestmark = pytest.mark.usefixtures("wide_short_prompt")
 
 
 def prepare(kb):
