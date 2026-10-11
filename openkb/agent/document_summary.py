@@ -10,7 +10,7 @@ from openkb.execution_budget import admit_document_summary
 from openkb.source_context import COMPILATION_FACT_RULES
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "compiler-document-sections-v2"
+PROMPT_VERSION = "compiler-document-sections-v3"
 SYSTEM_TEMPLATE = (
     "You are OpenKB's wiki compilation agent for document knowledge. "
     "Write independently readable knowledge in {language}.\n" + COMPILATION_FACT_RULES
@@ -43,22 +43,31 @@ def summary_capacity(
     )
 
 
-_SUMMARY_TASK = """Write independently readable knowledge from this original batch.
-Retain everything that affects understanding, decisions or operation: objects,
-requirements, steps, prerequisites, exceptions, values and their scope. Include
-useful explanations, comparisons, verifiable calculations or examples supported
-by these originals, with their premises. A requirement stated only once still
-belongs in this document summary even if no concept or entity page will cover it.
-Combine repetition while retaining conditions that change the conclusion. Keep
-original headings and native locations distinct from generated navigation labels.
-Preceding context supplies conditions, not extra primary ranges. Preserve unresolved
-cross-references and qualifications; this batch cannot establish what the whole
-document omits. Return one JSON object with a brief string description and sections:
+_SUMMARY_TASK = """Turn each supplied original section into a usable reference section.
+For each operation or object, carry its applicability and prerequisites together
+with its steps, parameters, alternatives, exceptions and results. Cover requirements
+stated only once, including those without a planned concept page. Combine repetition
+within the same scope; retain separate variants when their conditions differ.
+
+Use explanatory prose for meaning, and verbatim fenced excerpts for command or
+configuration syntax: preserve every token, prefix and comment marker in each quoted
+line. A quoted template remains a template. When extraction has split a command or
+lost table alignment, retain the readable fragment and identify that specific
+structural gap; a reconstructed executable command or column assignment needs
+explicit support. Reproduce reliably aligned tables with their object and condition
+headers. Keep page/section boundaries and cross-references visible where they affect
+interpretation. Preceding context supplies conditions, not extra primary ranges.
+
+Include explanations, comparisons and source-supported calculations with their
+premises. Each paragraph should explain or preserve the supplied section, without
+adding unrelated advice or expanding a local observation to the entire document.
+Return one JSON object with a brief string description and sections:
 [{"id": "the supplied output section id", "content": "complete Markdown knowledge"}].
 Return every output_sections id exactly once, retaining its original requirements,
 conditions and useful explanation in the corresponding body, not only its heading.
 Use the document's necessary level of detail without a fixed compression ratio.
-Return no frontmatter or code fences.
+Return JSON without an outer code fence or frontmatter. Markdown code fences inside
+section content are appropriate for exact technical excerpts.
 """
 
 

@@ -34,4 +34,10 @@ def summary_reply(messages, reply):
                 for index, section in enumerate(batch["output_sections"])
             ],
         }
+    if isinstance(reply, dict) and "content" in reply:
+        for message in messages:
+            text = message.get("content")
+            if isinstance(text, str) and text.startswith("Figure source ranges:\n"):
+                choices = json.loads(text.split("\n", 1)[1])["ranges"]
+                return {**reply, "source_ranges": [r["id"] for r in choices]}
     return reply

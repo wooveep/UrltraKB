@@ -29,7 +29,7 @@ def test_normal_repetition_remains_readable(kb_dir, tmp_path, block_model):
     assert result.source_id is not None
 
 
-def test_pdf_is_rejected_before_segmented_indexing(kb_dir, tmp_path, block_model):
+def test_unreliable_pdf_is_retained_before_segmented_indexing(kb_dir, tmp_path, block_model):
     import pymupdf
 
     path = tmp_path / "unreadable.pdf"
@@ -39,10 +39,10 @@ def test_pdf_is_rejected_before_segmented_indexing(kb_dir, tmp_path, block_model
             page.insert_textbox((40, 40, 550, 400), ("参" * 24 + "技术\n") * 4, fontname="china-s")
         pdf.save(path)
     result = import_document(kb_dir, path)
-    assert result.status == "rejected"
-    assert result.message.startswith("PDF导入识别异常：文本层出现异常重复字符")
-    assert "Office" in result.message and "重新导出" in result.message
-    assert not list_sources(kb_dir) and not block_model
+    assert result.status == "blocked"
+    assert "资料已保存，未生成知识" in result.message
+    assert len(list_sources(kb_dir)) == 1 and not block_model
+    assert result.model_usage["current"]["requests"] == 0
 
 
 def test_workbook_cells_are_checked_before_source_admission(kb_dir, tmp_path, block_model):

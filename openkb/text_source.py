@@ -156,8 +156,14 @@ def freeze_markdown(
         original = prepared.path.read_bytes().decode("utf-8")
     images = wiki / "sources/images" / doc_name
     edits: list[tuple[int, int, str]] = list(additional_image_edits or [])
+    image_issues: list[str] = []
     extract_base64_images(
-        original, f"{doc_name}/embedded", images / "embedded", edits=edits, references=references
+        original,
+        f"{doc_name}/embedded",
+        images / "embedded",
+        edits=edits,
+        references=references,
+        issues=image_issues,
     )
     copy_relative_images(
         original,
@@ -211,7 +217,7 @@ def freeze_markdown(
     from openkb.markdown_images import image_references
 
     rewritten = {(start, end) for start, end, _ in edits}
-    diagnostics = tuple(
+    diagnostics = tuple(image_issues) + tuple(
         f"Image not retained: {reference.source[:160]}"
         for reference in (references if references is not None else image_references(original))
         if (reference.start, reference.end) not in rewritten

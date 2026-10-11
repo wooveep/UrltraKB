@@ -92,10 +92,9 @@ async def test_reasoning_tool_roundtrip_uses_provider_protocol_without_visible_r
 @pytest.mark.parametrize(
     "model,delivered", [("openai/gpt-4o-mini", True), ("deepseek/deepseek-flash", False)]
 )
-async def test_image_receipt_observes_actual_provider_payload(model_service, model, delivered):
+async def test_all_main_model_providers_reject_images(model_service, model, delivered):
     from openkb.config import LlmCredentialBundle
     from openkb.llm_execution import CompletionExecutor, RoleBindings
-    from openkb.llm_images import image_digest, request_image_digests
 
     image = (
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
@@ -105,22 +104,22 @@ async def test_image_receipt_observes_actual_provider_payload(model_service, mod
     executor = CompletionExecutor(
         RoleBindings(model, LlmCredentialBundle(api_key="fixture", base_url=model_service.url))
     )
-    run = await Runner.run(
-        agent_for(executor),
-        [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Read the image."},
-                    {"type": "input_image", "image_url": image},
-                ],
-            }
-        ],
-        run_config=RunConfig(tracing_disabled=True),
-    )
-    expected = {image_digest(image)} if delivered else set()
-    assert request_image_digests(model_service.requests[0]["messages"]) == expected
-    assert run.raw_responses[0].openkb_image_digests == expected
+    with pytest.raises(ValueError, match="text-only"):
+        await Runner.run(
+            agent_for(executor),
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Read the image."},
+                        {"type": "input_image", "image_url": image},
+                    ],
+                }
+            ],
+            run_config=RunConfig(tracing_disabled=True),
+        )
+    assert not model_service.requests
+    assert executor.calls == 0
 
 
 @pytest.mark.parametrize("stream", [False, True])

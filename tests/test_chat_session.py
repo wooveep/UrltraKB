@@ -49,7 +49,7 @@ def test_record_turn_replaces_data_image_with_text_reference(tmp_path):
     assert output_part["type"] == "input_text"
     assert "data:image/png;base64,AAAA" not in session.path.read_text(encoding="utf-8")
     assert "sources/images/doc/figure-1.png" in output_part["text"]
-    assert "Call get_image again" in output_part["text"]
+    assert "not interpreted by the current text model" in output_part["text"]
 
 
 def test_load_session_sanitizes_image_history_in_current_format(tmp_path):

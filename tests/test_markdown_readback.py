@@ -1,6 +1,7 @@
 """Markdown input, publication and reading share frozen Unicode coordinates."""
 
 import pytest
+from PIL import Image
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -14,7 +15,7 @@ def test_markdown_html_and_embedded_images_share_a_safe_asset_namespace(
     from openkb.documents import read_document_source
 
     image = tmp_path / "embedded"
-    image.write_bytes(b"local")
+    Image.new("RGB", (40, 40), "red").save(image, format="PNG")
     encoded = base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg"/>').decode()
     text = (
         f"![inline](data:image/svg+xml;base64,{encoded})\r\n\r\n"
@@ -39,7 +40,8 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_m
     folder = tmp_path / "inputs"
     folder.mkdir()
     image = folder / "pixel.png"
-    image.write_bytes(b"fixed-image-bytes")
+    Image.new("RGB", (40, 40), "blue").save(image)
+    original_pixels = image.read_bytes()
     original = (
         "前言 e\u0301。\r\n\r\n# 标题\r\n```py\r\nx = 1\r\n```\r\n\r\n"
         "| A | B |\r\n| - | - |\r\n| 1 | 2 |\r\n![图](pixel.png)\r\n"
@@ -66,16 +68,14 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_m
         kb_dir, result.source_id, source_revision_id=result.source_revision_id
     )
     assert again["content"] == expected
-    assert (
-        kb_dir / again["base_path"] / "images/note/pixel.png"
-    ).read_bytes() == b"fixed-image-bytes"
+    assert (kb_dir / again["base_path"] / "images/note/pixel.png").read_bytes() == original_pixels
 
 
 def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, pdf_model):
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
 
-    (tmp_path / "图 (1).png").write_bytes(b"image")
+    Image.new("RGB", (40, 40), "green").save(tmp_path / "图 (1).png")
     original = (
         "`![example](missing.png)`\r\n\r\n```md\r\n![example](missing.png)\r\n```\r\n"
         '\r\n> ![图][ref]\r\n\r\n[ref]: <图 (1).png> "标题"\r\n'

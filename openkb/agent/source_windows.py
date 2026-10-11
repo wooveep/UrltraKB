@@ -102,6 +102,33 @@ class CompileSourceWindows:
         self._selections: dict[str, tuple[dict, dict]] = {}
         self._unresolved_updates: set[str] = set()
         self._numeric_text: dict[str, str] = {}
+        self._figure_sources: dict[str, tuple] = {}
+
+    def figure_source(self, path: str):
+        from openkb.figure_assets import freeze_figures, source_identity
+
+        if path not in self._figure_sources:
+            name = (
+                Path(path)
+                .name.removesuffix(".content.json")
+                .removesuffix(".json")
+                .removesuffix(".md")
+            )
+            identity = source_identity(self.kb_dir, name)
+            identity["source_digest"] = hashlib.sha256(self._read(path)).hexdigest()
+            figures = freeze_figures(
+                self.wiki,
+                path,
+                self._source(path),
+                {k: v for k, v in identity.items() if k != "source_digest"},
+            )
+            self._figure_sources[path] = (identity, figures)
+        return self._figure_sources[path]
+
+    def page_figures(self, windows=(), *, long=False):
+        from openkb.agent.page_figures import page_figure_context
+
+        return page_figure_context(self, windows, long=long)
 
     def numeric_sources(self, context: PageOriginalContext, *, long: bool) -> list[str]:
         """Supply only original text; generated navigation is never a numeric reference."""
@@ -623,6 +650,7 @@ class CompileSourceWindows:
         windows: list[dict] = []
         remaining = MAX_EVIDENCE_CHARS
         for path, location in paths.items():
+            self.figure_source(path)
             try:
                 selected_windows = (
                     self.read_selection(path, location)
@@ -696,56 +724,6 @@ class CompileSourceWindows:
                 + "Keep OCR transcriptions separate from generated visual interpretations.",
             }
         ]
-        from openkb.agent.tools import read_wiki_image
-        from openkb.markdown_images import image_references
-
-        seen: set[str] = set()
-        for window in windows:
-            entries = list(window.get("images", []))
-            assets = window.get("assets", {})
-            for reference in image_references(window["content"]):
-                if path := reference.local_path:
-                    if path not in assets:
-                        path = f"sources/{path}"
-                    if path in assets:
-                        entries.append({"path": path, "digest": assets[path]})
-            for entry in entries:
-                image_path = entry["path"]
-                if image_path in seen:
-                    continue
-                if len(seen) >= 4:
-                    blocks.append(
-                        {
-                            "type": "text",
-                            "text": f"Original image unread (image limit): {image_path}",
-                        }
-                    )
-                    continue
-                seen.add(image_path)
-                data = self._read(image_path)
-                digest = hashlib.sha256(data).hexdigest()
-                if entry.get("digest") and entry["digest"] != digest:
-                    raise PageResponseError(
-                        "page_evidence_changed", "Frozen original image changed"
-                    )
-                if len(data) <= 5_000_000:
-                    image = read_wiki_image(image_path, str(self.wiki), expected_digest=digest)
-                    if image["type"] == "image":
-                        blocks.extend(
-                            [
-                                {"type": "text", "text": f"Original image: {image_path}"},
-                                {"type": "image_url", "image_url": {"url": image["image_url"]}},
-                            ]
-                        )
-                    else:
-                        raise PageResponseError("page_invalid_evidence", image["text"])
-                else:
-                    blocks.append(
-                        {
-                            "type": "text",
-                            "text": f"Original image unread (size limit): {image_path}",
-                        }
-                    )
         return PageOriginalContext(
             {"role": "user", "content": blocks},
             any(w["content"].strip() for w in windows),

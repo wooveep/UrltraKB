@@ -3,7 +3,7 @@
 import json
 from typing import Literal
 
-from agents import ToolOutputImage, ToolOutputText, function_tool
+from agents import function_tool
 
 from openkb.application.query_views import (
     QuerySelection,
@@ -167,7 +167,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
     def get_page_content(doc_name: str, pages: str, offset: int = 0) -> str:
         """Read recorded physical pages, using a page range such as 1-3.
 
-        Image references are not read pixels. Use the returned image actions when relevant.
+        Image references locate preserved originals for the reader; images are not interpreted.
         Use offset=0 initially, then repeat the same range with continuation.
         """
         return read_pages(doc_name, pages, "get_page_content", offset=offset)
@@ -261,13 +261,6 @@ def restrict_query_agent(agent, selection: QuerySelection):
             ensure_ascii=False,
         )
 
-    @function_tool(failure_error_function=_read_error)
-    def get_image(image_path: str) -> list[ToolOutputImage | ToolOutputText]:
-        """View a retained image using its occurrence action; returns identity and pixels."""
-        if images is None:
-            raise ValueError("No source collection is bound")
-        return images.read(image_path)
-
     readers = {
         "read_file",
         "get_page_content",
@@ -311,11 +304,6 @@ def restrict_query_agent(agent, selection: QuerySelection):
     ]
     if sources:
         selected_tools.append(search_originals)
-    if selection.views and any(
-        name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
-        for name in selection.views[0].files
-    ):
-        selected_tools.append(get_image)
     if executor:
 
         def bounded(tool):
@@ -349,9 +337,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
                     if payload.get("status") == "error":
                         data["status"] = "failed"
                         data["reason_code"] = payload.get("reason_code", "read_failed")
-                    if tool.name != "get_image" and not executor.reserve_tool_output(
-                        result, minimum_tokens=0
-                    ):
+                    if not executor.reserve_tool_output(result, minimum_tokens=0):
                         from openkb.source_reading import ReaderFailure
 
                         data["status"] = "failed"

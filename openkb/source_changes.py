@@ -264,3 +264,6 @@ def retain_pending_pages(kb_dir: Path, wiki: Path, head: KnowledgeHead) -> None:
     for page in head.needs_refresh:
         if not (wiki / page).exists() and (live / page).is_file():
             _copy_file_atomic(live / page, wiki / page)
+            from openkb.figure_publication import preserve_page_figures
+
+            preserve_page_figures(kb_dir, wiki, head.inputs, source_wiki=live, pages=[page])

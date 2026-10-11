@@ -48,6 +48,7 @@ def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> Merg
         if changes:
             metadata.append((proposal, changes))
     response: dict = {"status": "updated", "base_sha256": update.digest, "edits": []}
+    contributing: set[int] = set()
     grouped: dict[tuple[int, ...], list[str]] = {}
     for block in update.blocks:
         entries = by_block.get(block, [])
@@ -64,6 +65,7 @@ def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> Merg
             grouped.setdefault(owners, []).append(block)
         else:
             response["edits"].extend(unique)
+            contributing.update(owners)
     conflicts = [UpdateConflict(tuple(blocks), owners) for owners, blocks in grouped.items()]
     if metadata:
         candidates = [changes for _, changes in metadata]
@@ -77,6 +79,16 @@ def merge_proposals(update: PageUpdate, proposals: list[UpdateProposal]) -> Merg
             conflicts.append(UpdateConflict(same.blocks if same else (), owners, True))
         else:
             response.update(candidates[0])
+            contributing.update(p.order for p, _ in metadata)
+    if update.source_ranges is not None:
+        response["source_ranges"] = sorted(
+            {
+                r
+                for p in ordered
+                if p.order in contributing
+                for r in p.response.get("source_ranges", [])
+            }
+        )
     if not response["edits"] and not metadata and not conflicts:
         response = {
             "status": "unchanged",

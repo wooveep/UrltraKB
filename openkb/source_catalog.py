@@ -168,6 +168,7 @@ def admit_source_revision(
     reprocessing_request: str | None = None,
     reprocessing_policy: str | None = None,
     text_assessment=None,
+    retain_only: bool = False,
 ) -> Admission:
     """Commit original, related assets, target revision and discovery as one unit."""
     root = kb_dir.resolve()
@@ -176,7 +177,7 @@ def admit_source_revision(
     text_assessment = text_assessment or preflight_import_text(
         root, prepared, check_stop=check_stop
     )
-    validate_text_preflight(prepared, text_assessment)
+    validate_text_preflight(prepared, text_assessment, retain_only=retain_only)
     identity = identity or _portable_path(prepared.identity, root)
     with kb_ingest_lock(root / ".openkb"):
         check_stop()

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import io
+
+from PIL import Image
 
 from openkb.images import copy_relative_images, extract_base64_images
 
@@ -15,8 +18,14 @@ def _make_b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
 
-FAKE_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8  # minimal fake PNG bytes
-FAKE_JPG = b"\xff\xd8\xff" + b"\x00" * 8  # minimal fake JPEG bytes
+def _image_bytes(format):
+    stream = io.BytesIO()
+    Image.new("RGB", (40, 40), "red").save(stream, format=format)
+    return stream.getvalue()
+
+
+FAKE_PNG = _image_bytes("PNG")
+FAKE_JPG = _image_bytes("JPEG")
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +70,7 @@ class TestExtractBase64Images:
         assert (images_dir / "img_001.png").exists()
         assert (images_dir / "img_002.jpeg").exists()
 
-    def test_invalid_base64_leaves_original(self, tmp_path, caplog):
+    def test_invalid_base64_reports_gap_without_forwarding_payload(self, tmp_path, caplog):
         images_dir = tmp_path / "images" / "doc"
         images_dir.mkdir(parents=True)
         bad = "NOT_VALID_BASE64!!!"
@@ -69,13 +78,16 @@ class TestExtractBase64Images:
         import logging
 
         with caplog.at_level(logging.WARNING, logger="openkb.images"):
-            result = extract_base64_images(md, "doc", images_dir)
-        assert result == md  # unchanged
+            issues = []
+            result = extract_base64_images(md, "doc", images_dir, issues=issues)
+        assert bad not in result
+        assert "原图未保存" in result
+        assert len(issues) == 1
         # No files created
         assert list(images_dir.iterdir()) == []
 
     def test_mixed_valid_invalid_base64(self, tmp_path, caplog):
-        """Valid image extracted; invalid image left in place."""
+        """Keep usable figures and report a local gap for invalid payloads."""
         images_dir = tmp_path / "images" / "doc"
         images_dir.mkdir(parents=True)
         b64 = _make_b64(FAKE_PNG)
@@ -86,7 +98,8 @@ class TestExtractBase64Images:
         with caplog.at_level(logging.WARNING, logger="openkb.images"):
             result = extract_base64_images(md, "doc", images_dir)
         assert "![good](images/doc/img_001.png)" in result
-        assert f"data:image/png;base64,{bad}" in result
+        assert bad not in result
+        assert "原图未保存" in result
 
 
 # ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ def _image_history_placeholder(image_path: str | None) -> dict[str, str]:
     text = _IMAGE_HISTORY_NOTE
     if image_path:
         text += f" Source path: {image_path}."
-    text += " Call get_image again if you need to inspect it."
+    text += " Original retained for the reader, not interpreted by the current text model."
     return {"type": "input_text", "text": text}
 
 
@@ -81,16 +81,22 @@ def _sanitize_history_value(value: Any, image_path: str | None = None) -> Any:
     if not isinstance(value, dict):
         return value
 
-    if value.get("type") == "input_image":
-        image_url = value.get("image_url")
-        if isinstance(image_url, str) and image_url.startswith("data:"):
-            return _image_history_placeholder(image_path)
+    from openkb.llm_images import is_image_block
+
+    if is_image_block(value):
+        return _image_history_placeholder(image_path)
+    if (
+        value.get("type") == "input_text"
+        and isinstance(value.get("text"), str)
+        and value["text"].startswith(_IMAGE_HISTORY_NOTE)
+    ):
+        return _image_history_placeholder(image_path)
 
     return {key: _sanitize_history_value(item, image_path) for key, item in value.items()}
 
 
 def sanitize_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Strip large image payloads from model history while keeping a re-fetch hint."""
+    """Project saved images to text while keeping provenance and tool-call associations."""
     image_paths_by_call_id: dict[str, str] = {}
     sanitized: list[dict[str, Any]] = []
 

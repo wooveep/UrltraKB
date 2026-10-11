@@ -62,7 +62,21 @@ def html_image_references(text: str):
     """HTML uses its own src grammar even when indented or containing Markdown text."""
     from openkb.markdown_images import ImageReference
 
+    captions = []
+
+    class Captions(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() == "img":
+                values = dict(attrs)
+                if values.get("src") is not None:
+                    captions.append((values.get("alt") or "", values.get("title") or ""))
+
+    parser = Captions(convert_charrefs=True)
+    parser.feed(text)
+    parser.close()
     return [
-        ImageReference(a, b, source, "", "", True)
-        for a, b, source in html_image_sources(text, resolve_base=True)
+        ImageReference(a, b, source, alt, title, True)
+        for (a, b, source), (alt, title) in zip(
+            html_image_sources(text, resolve_base=True), captions, strict=True
+        )
     ]

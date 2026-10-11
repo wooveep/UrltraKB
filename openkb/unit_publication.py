@@ -237,6 +237,9 @@ def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[Comp
     try:
         with mutation_scope(kb_dir, [stage], operation="prepare-compile-view"):
             copy_tree(live.wiki_dir, view.scope.wiki_dir)
+            from openkb.figure_publication import preserve_page_figures
+
+            preserve_page_figures(kb_dir, view.scope.wiki_dir, view.head.inputs)
             from openkb.source_changes import filter_compile_context
 
             filter_compile_context(kb_dir, view.scope.wiki_dir, view.head)

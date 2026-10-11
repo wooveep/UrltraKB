@@ -70,7 +70,7 @@ async def generate_page_update(
         checkpoints.bind_page(f"{page_path.parent.name}/{page_path.name}", patch.digest)
     all_blocks = tuple(patch.blocks)
 
-    def scoped(blocks, *, metadata=True):
+    def scoped(blocks, *, metadata=True, ranges=None):
         return PageUpdate(
             patch.original,
             known_targets=patch.known_targets,
@@ -78,10 +78,12 @@ async def generate_page_update(
             allowed_types=patch.allowed_types,
             allowed_blocks=frozenset(blocks),
             allow_metadata=metadata,
+            source_ranges=ranges if ranges is not None else patch.source_ranges,
         )
 
     def messages(batch, editable, extra=""):
-        return build_page_messages(
+        check_model_stop()
+        result = build_page_messages(
             system_message=system_message,
             current_original=current_original,
             original_context=originals.for_windows(batch),
@@ -89,6 +91,9 @@ async def generate_page_update(
             task_message={**task_message, "content": task_message["content"] + extra},
             update_message=editable.message(),
         )
+        if patch.source_ranges is not None:
+            result.append(windows.page_figures(batch, long=current_original is None).message())
+        return result
 
     def capacity_error():
         return PageResponseError(
@@ -157,15 +162,48 @@ async def generate_page_update(
                 packed.append(window)
             requests.append((packed, editable))
 
+    combined_figures = None
+    if patch.source_ranges is not None:
+        from openkb.agent.page_figures import PageFigures
+
+        contexts = [
+            windows.page_figures(batch, long=current_original is None) for batch, _ in requests
+        ]
+        combined_figures = PageFigures(
+            windows.wiki,
+            tuple({r["id"]: r for context in contexts for r in context.ranges}.values()),
+            tuple({f.occurrence_id: f for context in contexts for f in context.figures}.values()),
+        )
+        patch.source_ranges = combined_figures.ids
+
+    def for_batch(batch, editable):
+        if patch.source_ranges is not None:
+            return scoped(
+                all_blocks if editable.allowed_blocks is None else editable.allowed_blocks,
+                metadata=editable.allow_metadata,
+                ranges=windows.page_figures(batch, long=current_original is None).ids,
+            )
+        return editable
+
+    def accepted(key, signature, editable):
+        value = checkpoints.load(key, signature) if checkpoints else None
+        if value is not None:
+            try:
+                editable.apply(json.dumps(value), current=patch.original)
+            except PageResponseError:
+                return None
+        return value
+
     async def generate(batch, editable, key, extra=""):
         check_model_stop()
+        editable = for_batch(batch, editable)
         if page_path.read_bytes().decode("utf-8") != patch.original:
             raise PageResponseError("page_update_stale", "Captured page changed")
         request = messages(batch, editable, extra)
         if not fits(request):
             raise capacity_error()
         signature = digest(request)
-        value = checkpoints.load(key, signature) if checkpoints else None
+        value = accepted(key, signature, editable)
         if value is None:
             if checkpoints:
                 checkpoints.require_generation(key, signature)
@@ -205,8 +243,7 @@ async def generate_page_update(
         return value
 
     missing = sum(
-        checkpoints is None
-        or checkpoints.load(f"{page_key}:batch:{i}", digest(messages(b, p))) is None
+        accepted(f"{page_key}:batch:{i}", digest(messages(b, p)), for_batch(b, p)) is None
         for i, (b, p) in enumerate(requests)
     )
     if missing and (executor := active_executor()):
@@ -255,13 +292,21 @@ async def generate_page_update(
             )
         conflict_key = f"{page_key}:conflict:{index}"
         if (
-            checkpoints is None
-            or checkpoints.load(conflict_key, digest(messages(selected, editable, extra))) is None
+            accepted(
+                conflict_key,
+                digest(messages(selected, editable, extra)),
+                for_batch(selected, editable),
+            )
+            is None
         ) and (executor := active_executor()):
             executor.budget.require("compile", 1 + min(1, executor.policy.compile_repair_calls))
         resolved = await generate(selected, editable, conflict_key, extra)
         if resolved.get("status") != "unchanged":
             result.setdefault("edits", []).extend(resolved["edits"])
+            if patch.source_ranges is not None:
+                result["source_ranges"] = sorted(
+                    set(result.get("source_ranges", [])) | set(resolved["source_ranges"])
+                )
             if conflict.metadata:
                 result.update({k: resolved[k] for k in ("description", "type") if k in resolved})
     if not result.get("edits") and not any(k in result for k in ("description", "type")):
@@ -271,4 +316,13 @@ async def generate_page_update(
             "reason": "The complete necessary contribution is already covered.",
         }
     check_model_stop()
-    return patch.apply(json.dumps(result), current=page_path.read_bytes().decode("utf-8"))
+    applied = patch.apply(json.dumps(result), current=page_path.read_bytes().decode("utf-8"))
+    if isinstance(applied, UnchangedPage) or patch.source_ranges is None:
+        return applied
+    assert combined_figures is not None
+    return combined_figures.decorate(
+        page_path.relative_to(windows.wiki).as_posix(),
+        applied,
+        previous=patch.original,
+        replaced=any(e["operation"] in {"replace", "delete"} for e in result["edits"]),
+    )

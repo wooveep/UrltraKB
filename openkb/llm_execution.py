@@ -422,6 +422,9 @@ class CompletionExecutor:
         self._stop_requested.set()
 
     def check_capacity_input(self, payload, *, role="answer") -> None:
+        from openkb.llm_images import require_text_input
+
+        require_text_input(payload)
         measure = self.question_capacity
         tokens = measure.payload_tokens(payload) if measure is not None else 0
         if role == "answer":
@@ -506,6 +509,9 @@ class CompletionExecutor:
         bundle = self.bindings.credentials()
         payload = request.payload()
         messages = payload["messages"]
+        from openkb.llm_images import require_text_input
+
+        require_text_input(messages)
         model = self.bindings.model(role)
         captured_options = self.bindings.generation_options(role)
         # Cache segments are provider hints, never application cache hits.

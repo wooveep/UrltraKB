@@ -1,8 +1,8 @@
 """Conservative extraction checks, before source admission or model work.
 
 These rules report observed text facts. They neither infer a document's cause of
-damage nor rewrite the text. HTML needs a readable static body; original PDFs
-without usable text are rejected before source admission.
+damage nor rewrite the text. HTML needs a readable static body. PDFs without
+usable text can retain their originals and images, without generating knowledge.
 """
 
 from __future__ import annotations
@@ -272,11 +272,22 @@ def preflight_import_text(
     return assessment
 
 
-def validate_text_preflight(prepared: PreparedInput, assessment: ImportTextAssessment) -> None:
+def retainable_without_text(assessment: ImportTextAssessment) -> bool:
+    """A readable PDF with unusable text can be preserved without knowledge generation."""
+    return assessment.extraction == "PDF text layer" and (
+        assessment.unavailable == "no_readable_text" or bool(assessment.findings)
+    )
+
+
+def validate_text_preflight(
+    prepared: PreparedInput, assessment: ImportTextAssessment, *, retain_only=False
+) -> None:
     if assessment.digest != prepared.digest or assessment.policy != TEXT_CHECK_POLICY:
         raise ValueError("Text assessment does not match this frozen input and check policy")
     if HashRegistry.hash_file(prepared.path) != assessment.digest:
         raise ValueError("Text preflight input changed after extraction")
+    if retain_only and retainable_without_text(assessment):
+        return
     if (
         assessment.findings
         or assessment.empty_html

@@ -6,7 +6,7 @@ in ``openkb.agent.query``. The differences:
 * System prompt comes from ``openkb/prompts/skill_create.md`` and is
   interpolated with the user's intent and the target skill name.
 * Tools are scoped: the same deep-retrieval primitives the query agent
-  uses (``list``, ``read``, ``get_page_content``, ``get_image``), plus
+  uses (``list``, ``read``, ``get_page_content``), plus
   one write tool restricted to the target skill directory.
 * The runner verifies that ``SKILL.md`` was written before declaring
   success — an agent that gets confused and never writes the required
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
+from agents import Agent, Runner, function_tool
 from agents.model_settings import ModelSettings
 
 from openkb.config import LlmCredentialBundle, resolve_model_settings
@@ -30,9 +30,6 @@ from openkb.skill.tools import (
 )
 from openkb.skill.tools import (
     list_wiki_dir as _list_wiki_dir_impl,
-)
-from openkb.skill.tools import (
-    read_skill_image as _read_image_impl,
 )
 from openkb.skill.tools import (
     read_wiki_file_for_skill as _read_wiki_file_impl,
@@ -107,24 +104,6 @@ def build_skill_create_agent(
         return _get_page_content_impl(doc_name, pages, wiki_root)
 
     @function_tool
-    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
-        """View an image from the wiki.
-
-        Use when a wiki page references a figure, chart, or diagram you
-        need to see in order to distil it correctly into the skill.
-
-        Args:
-            image_path: Image path as it appears in the content — either
-                wiki-root-relative (``"sources/images/doc/p1_img1.png"``)
-                or note-relative as used in sources/ .md pages
-                (``"images/doc/p1_img1.png"``).
-        """
-        result = _read_image_impl(image_path, wiki_root)
-        if result["type"] == "image":
-            return ToolOutputImage(image_url=result["image_url"])
-        return ToolOutputText(text=result["text"])
-
-    @function_tool
     async def query_wiki(question: str) -> str:
         """Semantic search over the wiki — narrow follow-ups only.
 
@@ -184,7 +163,6 @@ def build_skill_create_agent(
             list_wiki_dir,
             read_wiki_file,
             get_page_content,
-            get_image,
             query_wiki,
             write_skill_file,
             done,

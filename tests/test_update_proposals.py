@@ -8,15 +8,19 @@ from openkb.agent.page_updates import PageUpdate
 def test_disjoint_and_identical_proposals_merge_in_source_order():
     from openkb.agent.update_proposals import UpdateProposal, merge_proposals
 
-    update = PageUpdate("# Device\n\nWinter rule.\n\nSummer rule.\n")
+    update = PageUpdate(
+        "# Device\n\nWinter rule.\n\nSummer rule.\n", source_ranges=("winter", "summer")
+    )
     a = {
         "base_sha256": update.digest,
+        "source_ranges": ["winter"],
         "edits": [
             {"block_id": "b2", "operation": "replace", "content": "Winter rule plus exception.\n"}
         ],
     }
     b = {
         "base_sha256": update.digest,
+        "source_ranges": ["summer"],
         "edits": [
             {"block_id": "b3", "operation": "insert_after", "content": "\nNew summer condition.\n"}
         ],
@@ -26,6 +30,7 @@ def test_disjoint_and_identical_proposals_merge_in_source_order():
     second = merge_proposals(update, list(reversed(proposals)))
     assert first == second and not first.conflicts
     result = update.apply(json.dumps(first.response), current=update.original)
+    assert result["source_ranges"] == ["summer", "winter"]
     assert result["content"] == (
         "# Device\n\nWinter rule plus exception.\n\nSummer rule.\n\nNew summer condition.\n"
     )

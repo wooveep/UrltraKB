@@ -205,6 +205,7 @@ class PageUpdate:
         allowed_types: frozenset[str] | None = None,
         allowed_blocks: frozenset[str] | None = None,
         allow_metadata: bool = True,
+        source_ranges: tuple[str, ...] | None = None,
     ) -> None:
         self.original = original
         self.originals = originals
@@ -212,9 +213,16 @@ class PageUpdate:
         self.allowed_types = allowed_types
         self.allowed_blocks = allowed_blocks
         self.allow_metadata = allow_metadata
+        self.source_ranges = source_ranges
         self.digest = hashlib.sha256(original.encode("utf-8")).hexdigest()
         parts = frontmatter.split(original)
         self.body = parts[1] if parts else original
+        if source_ranges is not None:
+            from openkb.agent.page_figures import split_gallery
+
+            # The application preserves versioned galleries after applying body edits.
+            # Their serialized records are not editable Markdown blocks.
+            self.body, _ = split_gallery(self.body)
         tokens, offsets = markdown_layout(self.body)
         spans = sorted(
             {
@@ -297,8 +305,13 @@ class PageUpdate:
             "description",
             "type",
             "edits",
+            "source_ranges",
         }:
             raise PageResponseError("page_update_invalid", "Use the declared block-edit fields")
+        if self.source_ranges is not None:
+            from openkb.agent.page_figures import validate_ranges
+
+            validate_ranges(obj, self.source_ranges)
         for key in ("description", "type"):
             if key in obj and not isinstance(obj[key], str):
                 raise PageResponseError("page_update_invalid", f"{key} must be a string")
@@ -371,6 +384,8 @@ class PageUpdate:
             "description": obj.get("description", self.request()["description"]),
             "content": "".join(chunks),
         }
+        if self.source_ranges is not None:
+            page["source_ranges"] = obj["source_ranges"]
         if self.originals is not None:
             numeric = check_numeric_subset(page["content"], self.originals, previous=self.body)
             if numeric["status"] == "conflict":

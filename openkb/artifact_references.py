@@ -94,6 +94,7 @@ def list_artifact_references(
                 directory, _ = read_normalization(root, path.stem)
                 retain_tree(directory)
             retain_tree(root / "wiki")
+            retain_tree(root / ".openkb/retained-documents")
             for path in (root / ".openkb/knowledge").glob("*/head.json"):
                 retain_tree(live_scope(root, path.parent.name).wiki_dir)
         except (OSError, ValueError, TypeError):

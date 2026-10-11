@@ -7,7 +7,7 @@ from urllib.parse import quote, unquote, urlsplit
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import html_inline, image
 
-from openkb.html_images import html_image_sources
+from openkb.html_images import html_image_references
 
 
 @dataclass(frozen=True)
@@ -65,8 +65,8 @@ def image_references(text: str) -> list[ImageReference]:
         references: list[tuple[int, int, str, str, str, bool]] = []
         if block.type == "html_block":
             references.extend(
-                (start, end, src, "", "", True)
-                for start, end, src in html_image_sources(block.content)
+                (ref.start, ref.end, ref.source, ref.alt, ref.title, True)
+                for ref in html_image_references(block.content)
             )
         for token in block.children or []:
             if token.type == "image":
@@ -84,8 +84,8 @@ def image_references(text: str) -> list[ImageReference]:
             elif token.type == "html_inline":
                 base = token.meta["original_markup_span"][0]
                 references.extend(
-                    (base + start, base + end, src, "", "", True)
-                    for start, end, src in html_image_sources(token.content)
+                    (base + ref.start, base + ref.end, ref.source, ref.alt, ref.title, True)
+                    for ref in html_image_references(token.content)
                 )
         if not references:
             continue

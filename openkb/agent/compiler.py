@@ -164,14 +164,15 @@ This concept relates to the original document "{doc_name}" supplied above.
 
 Return a JSON object with two keys:
 - "description": A single sentence (under 100 chars) describing this topic as documented
-- "content": A Markdown page of the relevant original statements and supported
-  derivations. A short page is sufficient when the source is sparse. Preserve
-  conditions exactly. Related links are navigation: they do not imply effects,
-  independence, guarantees or unchanged properties between the linked topics.
-  Add a labelled synthesis only when it explains the recorded statements;
-  do not fill sections with general background or lists of unspecified rules.
-  Use the whitelist for source-supported links in prose. The application
-  appends document and related-page navigation.
+- "content": A reference page covering this topic's relevant original sections.
+  Organize by operation or object: keep prerequisites and applicable variants with
+  their steps, parameter values, exceptions and results. Include the conditions
+  needed to use each operation, even when mentioned only once or on an adjacent
+  page. Quote technical syntax verbatim in fenced excerpts; preserve prefixes,
+  comment markers and the difference between a template and an executable command.
+  Explain supported relationships and derivations with their premises. Keep sparse
+  sources concise. Links provide navigation; the application appends source and
+  related-page links. Use the whitelist for supported relationships in prose.
 
 Return ONLY valid JSON, no fences.
 """
@@ -499,6 +500,7 @@ async def _llm_call_page_async(
     checkpoints=None,
     checkpoint_key: str = "",
     proposal_only: bool = False,
+    figure_context=None,
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
@@ -506,6 +508,9 @@ async def _llm_call_page_async(
 
     if response_protocol not in {"page-json", "markdown", "summary-json", "summary-page-json"}:
         raise ValueError("Unknown page response protocol")
+
+    if figure_context is not None:
+        messages = [*messages, figure_context.message()]
 
     correction = []
     for attempt in range(2):
@@ -548,6 +553,10 @@ async def _llm_call_page_async(
             else:
                 obj = parse_page(raw, strict=response_protocol == "summary-page-json")
                 content = obj["content"]
+            if figure_context is not None and obj is not None:
+                from openkb.agent.page_figures import validate_ranges
+
+                validate_ranges(obj, figure_context.ids)
             if page_update is None and obj and obj.get("status") == "unchanged":
                 raise PageResponseError(
                     "page_unchanged_not_allowed",
@@ -1722,7 +1731,9 @@ async def _compile_concepts(
     entity_briefs = _read_entity_briefs(wiki_dir)
 
     # The generated summary belongs to planning only.
-    summary_msg = {"role": "assistant", "content": _cached_text(summary)}
+    from openkb.agent.page_figures import split_gallery
+
+    summary_msg = {"role": "assistant", "content": _cached_text(split_gallery(summary)[0])}
 
     from openkb.agent.source_windows import READING_PLAN_INSTRUCTION, CompileSourceWindows
 
@@ -1872,6 +1883,7 @@ async def _compile_concepts(
         name = concept["name"]
         title = concept.get("title", name)
         originals = source_windows.prepare(concept, long=doc_type == "pageindex")
+        figures = source_windows.page_figures(originals.windows, long=doc_type == "pageindex")
         if doc_type == "pageindex" and not originals.has_original:
             brief, content = originals.navigation_page(title, doc_name)
             return name, content, False, brief
@@ -1893,6 +1905,7 @@ async def _compile_concepts(
                     },
                 ),
                 f"concept: {name}",
+                figure_context=figures if figures.figures else None,
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
                 prompt_version="compiler-page-originals-v4",
@@ -1900,7 +1913,9 @@ async def _compile_concepts(
                     originals, long=doc_type == "pageindex"
                 ),
             )
-        brief, content, _ = _page_fields(raw)
+        obj = _parse_page_json(raw)
+        obj = figures.decorate(f"concepts/{_sanitize_concept_name(name)}.md", obj)
+        brief, content = obj.get("description", ""), obj["content"]
         _require_nonempty_content(content, name)
         return name, content, False, brief
 
@@ -1913,11 +1928,15 @@ async def _compile_concepts(
         original = path.read_bytes().decode("utf-8")
         originals = source_windows.prepare(item, relative, long=doc_type == "pageindex")
         originals.require_update(relative)
+        from openkb.agent.page_figures import START
+
+        figures = source_windows.page_figures(originals.windows, long=doc_type == "pageindex")
         patch = PageUpdate(
             original,
             known_targets=known_targets,
             originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
             allowed_types=valid_types if kind == "entities" else None,
+            source_ranges=figures.ids if figures.figures or START in original else None,
         )
         async with semaphore:
             return await generate_page_update(
@@ -1953,6 +1972,7 @@ async def _compile_concepts(
         title = ent.get("title", name)
         etype = ent.get("type", "other")
         originals = source_windows.prepare(ent, long=doc_type == "pageindex")
+        figures = source_windows.page_figures(originals.windows, long=doc_type == "pageindex")
         if doc_type == "pageindex" and not originals.has_original:
             brief, content = originals.navigation_page(title, doc_name)
             return name, content, brief, "other"
@@ -1974,6 +1994,7 @@ async def _compile_concepts(
                     },
                 ),
                 f"entity: {name}",
+                figure_context=figures if figures.figures else None,
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
                 prompt_version="compiler-page-originals-v4",
@@ -1982,6 +2003,9 @@ async def _compile_concepts(
                 ),
             )
         brief, content, obj = _page_fields(raw)
+        obj = figures.decorate(f"entities/{_sanitize_concept_name(name)}.md", obj or {})
+        assert obj is not None
+        content = obj["content"]
         etype_out = obj.get("type") if obj and obj.get("type") in valid_types else "other"
         _require_nonempty_content(content, name, "entity")
         return name, content, brief, etype_out
@@ -2307,6 +2331,14 @@ async def compile_short_doc(
             report_compile_issue(code, "summary")
             raise CompilationIncomplete((code,), ("summary",), str(error)) from error
         doc_brief, summary, _ = _page_fields(summary_raw)
+        figures = windows.page_figures()
+        summary = figures.decorate(
+            f"summaries/{doc_name}.md",
+            {
+                "content": summary,
+                "source_ranges": list(figures.ids),
+            },
+        )["content"]
 
         # --- Steps 2-4: Concept plan → generate/update → summary → index ---
         await _compile_concepts(
@@ -2436,6 +2468,14 @@ async def compile_long_doc(
         summary_body, _ = strip_ghost_wikilinks(
             draft.markdown, list_existing_wiki_targets(wiki_dir) | {f"summaries/{doc_name}"}
         )
+        figures = windows.page_figures(long=False)
+        summary_body = figures.decorate(
+            f"summaries/{doc_name}.md",
+            {
+                "content": summary_body,
+                "source_ranges": list(figures.ids),
+            },
+        )["content"]
         _write_summary(
             wiki_dir,
             doc_name,

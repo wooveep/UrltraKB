@@ -12,22 +12,14 @@ class PageOriginalContext:
     windows: tuple[dict, ...] = ()
 
     def for_windows(self, windows: list[dict]) -> dict:
-        """Render one selected batch with exactly its available original images."""
+        """Render one selected batch with exactly its text and figure occurrence records."""
         old = json.dumps(list(self.windows), ensure_ascii=False)
         new = json.dumps(windows, ensure_ascii=False)
-        images = {entry["path"] for window in windows for entry in window.get("images", [])}
-        images.update(path for window in windows for path in window.get("assets", {}))
-        blocks, include_image = [], False
-        for block in self.message["content"]:
-            if block.get("type") == "text":
-                text = block["text"]
-                if text.startswith("Original image: "):
-                    include_image = text.removeprefix("Original image: ") in images
-                    if not include_image:
-                        continue
-                blocks.append({**block, "text": text.replace(old, new)})
-            elif block.get("type") != "image_url" or include_image:
-                blocks.append(block)
+        blocks = [
+            {**block, "text": block["text"].replace(old, new)}
+            for block in self.message["content"]
+            if block.get("type") == "text"
+        ]
         return {**self.message, "content": blocks}
 
     def require_update(self, page: str) -> None:

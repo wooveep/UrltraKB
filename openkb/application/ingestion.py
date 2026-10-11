@@ -188,6 +188,21 @@ def import_prepared_source(
     except ImportTextRejected as exc:
         from dataclasses import replace
 
+        from openkb.import_text import retainable_without_text
+
+        if retainable_without_text(exc.assessment):
+            from openkb.application.retained_documents import retain_without_knowledge
+
+            return retain_without_knowledge(
+                kb_dir,
+                prepared,
+                exc.assessment,
+                admission=admission,
+                identity=origin_url,
+                scope=scope,
+                check_stop=check_stop,
+            )
+
         return replace(
             rejection_result(prepared, exc),
             source_id=admission.source.source_id if admission else None,

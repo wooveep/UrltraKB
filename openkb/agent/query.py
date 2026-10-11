@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, Literal
 
-from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
+from agents import Agent, Runner, function_tool
 
 from openkb.agent.query_evidence import evidence_answer, restrict_query_agent
 from openkb.agent.streaming import settled_stream
@@ -15,7 +15,6 @@ from openkb.agent.tools import (
     artifact_event_from_write,
     get_wiki_page_content,
     read_wiki_file,
-    read_wiki_image,
     write_kb_file,
 )
 from openkb.application.query_views import QuerySelection, resolve_query_views
@@ -73,24 +72,6 @@ def build_query_agent(
         """
         return get_wiki_page_content(doc_name, pages, wiki_root, part)
 
-    @function_tool
-    def get_image(image_path: str) -> ToolOutputImage | ToolOutputText:
-        """View an image from the wiki.
-
-        Use when a question asks about a specific figure, chart, or diagram
-        you'd need to see to answer accurately.
-
-        Args:
-            image_path: Image path as it appears in the content — either
-                wiki-root-relative ('sources/images/doc/p1_img1.png') or
-                note-relative as used in sources/ .md pages
-                ('images/doc/p1_img1.png').
-        """
-        result = read_wiki_image(image_path, wiki_root)
-        if result["type"] == "image":
-            return ToolOutputImage(image_url=result["image_url"])
-        return ToolOutputText(text=result["text"])
-
     from agents.model_settings import ModelSettings
 
     if bundle is not None:
@@ -115,7 +96,7 @@ def build_query_agent(
     return Agent(
         name="wiki-query",
         instructions=instructions,
-        tools=[read_file, get_page_content, get_image],
+        tools=[read_file, get_page_content],
         model=managed or f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )

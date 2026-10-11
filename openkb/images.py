@@ -11,6 +11,7 @@ from urllib.parse import unquote_to_bytes
 
 import pymupdf
 
+from openkb.locks import atomic_write_bytes
 from openkb.markdown_images import apply_image_edits, image_references
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ def extract_pdf_images(pdf_path: Path, doc_name: str, images_dir: Path) -> dict[
                     img_counter += 1
                     filename = f"p{page_num}_img{img_counter}.png"
                     save_path = images_dir / filename
-                    pix.save(str(save_path))
+                    atomic_write_bytes(save_path, pix.tobytes("png"))
                     pix = None
                 except Exception:
                     logger.warning("Failed to save image block on page %d", page_num)
@@ -141,7 +142,7 @@ def convert_pdf_to_pages(
                             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
                         img_counter += 1
                         filename = f"p{page_num}_img{img_counter}.png"
-                        (images_dir / filename).write_bytes(pix.tobytes("png"))
+                        atomic_write_bytes(images_dir / filename, pix.tobytes("png"))
                         pix = None
                         img_path = f"sources/images/{doc_name}/{filename}"
                         parts.append(f"\n![image]({img_path})\n")
@@ -216,7 +217,7 @@ def convert_pdf_with_images(
                             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
                         img_counter += 1
                         filename = f"p{page_num}_img{img_counter}.png"
-                        (images_dir / filename).write_bytes(pix.tobytes("png"))
+                        atomic_write_bytes(images_dir / filename, pix.tobytes("png"))
                         pix = None
                         parts.append(f"\n{md_image_ref('image', doc_name, filename)}\n")
                         image_path = f"sources/images/{doc_name}/{filename}"
@@ -249,13 +250,14 @@ def extract_base64_images(
     *,
     edits: list[tuple[int, int, str]] | None = None,
     references=None,
+    issues: list[str] | None = None,
 ) -> str:
     """Decode base64-embedded images, save to disk, and rewrite markdown links.
 
     For each ``![alt](data:image/ext;base64,DATA)`` match:
     - Decode base64 bytes → save to ``images_dir/img_NNN.ext``
     - Replace the link with ``![alt](images/{doc_name}/img_NNN.ext)``
-    - On decode failure: log a warning and leave the original text unchanged.
+    - On decode failure: retain an explicit asset gap, never send encoded data as text.
     """
     counter = 0
     replacements = []
@@ -265,10 +267,9 @@ def extract_base64_images(
         if data is None:
             continue
         alt, ext, parameters, payload = reference.alt, data.group(1), data.group(2), data.group(3)
-        if not re.fullmatch(r"[a-zA-Z0-9.+-]+", ext):
-            logger.warning("Invalid data-image media type; leaving original reference")
-            continue
         try:
+            if not re.fullmatch(r"[a-zA-Z0-9.+-]+", ext):
+                raise ValueError("Invalid data-image media type")
             image_bytes = (
                 base64.b64decode(payload, validate=True)
                 if "base64" in parameters.lower().split(";")
@@ -276,12 +277,26 @@ def extract_base64_images(
             )
             if not image_bytes:
                 raise ValueError("Empty data image")
+            from openkb.figure_assets import asset_path
+
+            asset_path(image_bytes)
         except Exception:
             logger.warning(
-                "Failed to decode base64 image (alt=%r, ext=%r); leaving original.",
+                "Failed to decode base64 image (alt=%r, ext=%r); original retained separately.",
                 alt,
                 ext,
             )
+            replacements.append(
+                (
+                    reference.start,
+                    reference.end,
+                    "about:invalid#original-image"
+                    if reference.html
+                    else "[原图未保存：内嵌图片数据无效；请查看保留原件]",
+                )
+            )
+            if issues is not None:
+                issues.append(f"Invalid embedded image at {reference.start}:{reference.end}")
             continue
 
         counter += 1
@@ -289,8 +304,6 @@ def extract_base64_images(
         filename = f"img_{counter:03d}.{ext}"
         dest = images_dir / filename
         images_dir.mkdir(parents=True, exist_ok=True)
-        from openkb.locks import atomic_write_bytes
-
         atomic_write_bytes(dest, image_bytes)
 
         new_ref = reference.relocated(f"images/{doc_name}/{filename}")

@@ -25,6 +25,25 @@ def patch_page_response(messages, response):
                 {
                     "base_sha256": data["base_sha256"],
                     "description": page.get("description", page.get("brief", "")),
+                    **(
+                        {
+                            "source_ranges": next(
+                                [
+                                    r["id"]
+                                    for r in json.loads(m["content"].split("\n", 1)[1])["ranges"]
+                                ]
+                                for m in messages
+                                if isinstance(m.get("content"), str)
+                                and m["content"].startswith("Figure source ranges:\n")
+                            )
+                        }
+                        if any(
+                            isinstance(m.get("content"), str)
+                            and m["content"].startswith("Figure source ranges:\n")
+                            for m in messages
+                        )
+                        else {}
+                    ),
                     **({"type": page["type"]} if "type" in page else {}),
                     "edits": [
                         {
@@ -611,11 +630,9 @@ async def test_long_block_compile_receives_only_selected_frozen_image(
         doc_type="pageindex",
         source_windows=CompileSourceWindows(wiki, "manual"),
     )
-    import hashlib
-
-    assert request_image_digests(requests) == {
-        hashlib.sha256((tmp_path / "first.png").read_bytes()).hexdigest()
-    }
+    assert request_image_digests(requests) == set()
+    assert "first.png" in str(requests)
+    assert "data:image/" not in str(requests)
 
 
 @pytest.mark.parametrize("suggestions", [None, {"pages": "3"}, {"pages": [3]}, {"pages": "9"}])
