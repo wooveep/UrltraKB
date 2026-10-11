@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+import pytest
+
 from openkb.application.documents import import_document
 from openkb.application.settings import apply_kb_config_patch
 from openkb.application.settings_data import KbConfigPatchRequest
@@ -11,6 +13,7 @@ from openkb.index_location import IndexLocation
 from openkb.knowledge_scope import legacy_scope
 
 pytest_plugins = ("block_fixtures", "test_pdf_readback")
+pytestmark = pytest.mark.usefixtures("wide_schema")
 
 
 def prepare(kb):
@@ -20,7 +23,7 @@ def prepare(kb):
             kb=str(kb),
             config={
                 "model": "gpt-4o",
-                "model_capacity": {"max_input_tokens": 1100},
+                "model_capacity": {"max_input_tokens": 4000},
             },
         ),
     )

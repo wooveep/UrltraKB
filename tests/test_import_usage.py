@@ -350,12 +350,14 @@ def test_two_kbs_are_isolated_and_task_history_recovers_without_new_requests(kb_
 @pytest.mark.parametrize("segmented", [False, True])
 @pytest.mark.parametrize("reported_usage", [True, False])
 def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
-    kb_dir, tmp_path, monkeypatch, segmented, reported_usage
+    kb_dir, tmp_path, monkeypatch, segmented, reported_usage, request
 ):
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.config import LlmCredentialBundle
 
+    if segmented:
+        request.getfixturevalue("wide_schema")
     sent = []
 
     class Provider(BaseHTTPRequestHandler):
@@ -437,7 +439,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
             config={
                 "model": "gpt-4o",
                 **(
-                    {"model_capacity": {"max_input_tokens": 1100, "tokenizer_model": "gpt-4o"}}
+                    {"model_capacity": {"max_input_tokens": 4000, "tokenizer_model": "gpt-4o"}}
                     if segmented
                     else {}
                 ),

@@ -2,7 +2,7 @@
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback",)
+pytest_plugins = ("test_pdf_readback", "block_fixtures")
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +202,9 @@ def test_short_pdf_uses_only_known_execution_capacity(
     assert processing["capacity_status"] == status
 
 
-def test_short_segmented_recompile_retains_decision_and_adapters(kb_dir, physical_pdf, pdf_model):
+def test_short_segmented_recompile_retains_decision_and_adapters(
+    kb_dir, physical_pdf, pdf_model, wide_schema
+):
     import asyncio
     import json
 
@@ -222,7 +224,7 @@ def test_short_segmented_recompile_retains_decision_and_adapters(kb_dir, physica
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     result = import_document(

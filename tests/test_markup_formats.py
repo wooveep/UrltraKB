@@ -229,7 +229,7 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     ],
 )
 def test_markup_uses_frozen_blocks_and_original_anchors(
-    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected
+    kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_schema
 ):
     import json
 
@@ -258,7 +258,7 @@ def test_markup_uses_frozen_blocks_and_original_anchors(
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     path = tmp_path / f"small.{extension}"

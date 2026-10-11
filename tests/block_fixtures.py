@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.fixture
-def wide_schema(kb_dir):
+def wide_schema(kb_dir, monkeypatch):
     """A real large schema makes the first short request require segmentation.
 
     Native locators need usable request capacity, so reader tests cannot force
@@ -17,7 +17,10 @@ def wide_schema(kb_dir):
 
     path = kb_dir / "wiki/AGENTS.md"
     schema = get_agents_md(path.parent)
-    path.write_text(schema + "\n" + ("Retain original source coordinates and scope.\n" * 700))
+    schema += "\n" + ("Retain original source coordinates and scope.\n" * 700)
+    path.write_text(schema)
+    # Product views receive the same real schema when created during import.
+    monkeypatch.setattr("openkb.application.views.AGENTS_MD", schema)
 
 
 @pytest.fixture
