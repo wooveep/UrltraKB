@@ -1,7 +1,9 @@
 """Published page figures retain native positions and portable content identities."""
 
 import json
+import re
 
+import pytest
 from PIL import Image
 from test_compile_windows import compile_boundary
 
@@ -106,6 +108,50 @@ def test_invalid_final_range_blocks_the_entire_candidate(kb_dir, monkeypatch):
     assert len(attempts) == 2
     assert not (kb_dir / "wiki/concepts/good.md").exists()
     assert not (kb_dir / "wiki/summaries/invalid.md").exists()
+
+
+@pytest.mark.parametrize("kind", ["concept", "entity"])
+def test_creation_and_repair_contracts_allow_required_figure_ranges(kb_dir, monkeypatch, kind):
+    """A field-count restriction must not contradict the required range extension."""
+    import litellm
+
+    from openkb.application.documents import import_document
+
+    source = kb_dir / "procedure.md"
+    Image.new("RGB", (40, 40), "red").save(kb_dir / "original.png")
+    source.write_text("# Reactor\nDisconnect before maintenance.\n![Original](original.png)")
+    collection = "concepts" if kind == "concept" else "entities"
+    item = {"name": "reactor", **({"type": "product"} if kind == "entity" else {})}
+    planned = {collection: {"create": [item]}}
+    compile_boundary(monkeypatch, planned, [])
+    previous = litellm.acompletion
+    requests = []
+
+    async def omit_range_once(**kwargs):
+        response = await previous(**kwargs)
+        if f"Write the {kind} page" in str(kwargs["messages"]):
+            requests.append(kwargs["messages"])
+            if len(requests) == 1:
+                value = json.loads(response.choices[0].message.content)
+                value.pop("source_ranges")
+                response.choices[0].message.content = json.dumps(value)
+        return response
+
+    monkeypatch.setattr(litellm, "acompletion", omit_range_once)
+    assert import_document(kb_dir, source).status == "added"
+    assert len(requests) == 2
+    for messages in requests:
+        prompt = next(m["content"] for m in messages if f"Write the {kind} page" in str(m))
+        assert not re.search(r"object with (two|three|[0-9]+) keys", prompt)
+        declaration = next(
+            m["content"] for m in messages if str(m["content"]).startswith("Figure source ranges:")
+        )
+        assert json.loads(declaration.split("\n", 1)[1])["source_ranges_schema"]["minItems"] == 1
+    correction = requests[1][-1]["content"]
+    assert "source_ranges" in correction
+    assert "other required fields" in correction
+    assert "type" in correction
+    assert (kb_dir / f"wiki/{collection}/reactor.md").exists()
 
 
 def test_invalid_embedded_image_keeps_original_and_text_without_sending_payload(

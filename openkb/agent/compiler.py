@@ -162,8 +162,10 @@ Write the concept page for: {title}
 This concept relates to the original document "{doc_name}" supplied above.
 {update_instruction}
 
-Return a JSON object with two keys:
+Return one JSON object containing these page fields and any required source_ranges:
 - "description": A single sentence (under 100 chars) describing this topic as documented
+- "source_ranges": When requested, the supplied range IDs used by the final body,
+  in the same object as description and content
 - "content": A reference page covering this topic's relevant original sections.
   Organize by operation or object: keep prerequisites and applicable variants with
   their steps, parameter values, exceptions and results. Include the conditions
@@ -196,9 +198,11 @@ description; use "other" when the original does not establish a supported type.
 
 This entity relates to the original document "{doc_name}" supplied above.
 
-Return a JSON object with three keys:
+Return one JSON object containing these page fields and any required source_ranges:
 - "description": A single sentence (under 100 chars) identifying this entity
 - "type": one of __ENTITY_TYPES__
+- "source_ranges": When requested, the supplied range IDs used by the final body,
+  in the same object as description, type and content
 - "content": A Markdown page identifying the entity and reporting the relevant
   original statements and supported derivations. Keep a sparse source's page
   short. Related links establish no additional effects or guarantees. Omit

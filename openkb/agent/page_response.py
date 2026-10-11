@@ -34,7 +34,8 @@ def page_repair_message(
                     f"Include these ids once each: {expected_sections}. "
                     if response_protocol == "summary-json"
                     else "Return exactly one JSON object with string description "
-                    "and nonempty content. "
+                    "and nonempty content, retaining the other required fields from the "
+                    "original request (including type and source_ranges when requested). "
                 )
             )
             + "Do not append a second object or note. Keep supported source facts only. "
