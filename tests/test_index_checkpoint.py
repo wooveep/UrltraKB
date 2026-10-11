@@ -8,7 +8,7 @@ pytest_plugins = ("block_fixtures",)
 
 
 @pytest.fixture
-def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch):
+def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch, wide_schema):
     import litellm
 
     from openkb.application.documents import import_document
@@ -20,7 +20,7 @@ def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch):
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}}
+            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
         ),
     )
     source = tmp_path / "gardening.md"
