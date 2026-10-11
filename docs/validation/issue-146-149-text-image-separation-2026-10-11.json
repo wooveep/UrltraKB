@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "status": "combined_v14_engineering_passed_resume_method_pending",
+  "status": "combined_v14_engineering_passed_waiting_budget_decision",
   "recorded_at": "2026-10-11T16:30:33.384647+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
   "current_candidate_code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
@@ -1066,7 +1066,7 @@
   },
   "current_v14": {
     "recorded_at_utc": "2026-10-11T16:58:52.594701+00:00",
-    "status": "engineering_passed_resume_method_pending",
+    "status": "engineering_passed_waiting_budget_decision",
     "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
     "code_freeze": {
       "path": ".scratch/text-image-repair-20261011/code-freeze-final-v14.json",
@@ -1139,7 +1139,7 @@
       "models_executed": false
     },
     "continuation": {
-      "method_status": "r3_under_independent_review",
+      "method_status": "approved_r6_method_only",
       "rejected_method": {
         "path": ".scratch/text-image-repair-20261011/review/combined-resume-method-r2-standards.json",
         "sha256": "b04ffb81d696da3a1453bd3509a944011c63bd096976cbf073c58b18787a4df3"
@@ -1158,7 +1158,32 @@
       "historical_usage": 1205,
       "cumulative_limit": 1500,
       "remaining_calls": 295,
-      "budget_changed": false
+      "budget_changed": false,
+      "method_review": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-resume-method-r6-standards.json",
+        "sha256": "a8c8accc81bf75f2f7a45750712ba77cea8a2f01875da9e4874d4f96f25f0480"
+      },
+      "fixed_budget_plan": {
+        "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-fixed-budget.json",
+        "sha256": "e85f316e519961fba857aa596bc62a07e27808d455409afa39140391a5ab7806"
+      },
+      "readonly_preflight": {
+        "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-preflight.json",
+        "sha256": "869c25a60aa258184af3a197ef37ae7ecc4fab46c96c9ad250405e37a7d55775"
+      },
+      "budget_change": {
+        "status": "awaiting_explicit_user_answer",
+        "old_cumulative_limit": 1500,
+        "proposed_cumulative_limit": 3500,
+        "already_used": 1205,
+        "proposed_remaining_max": 2295,
+        "old_unknown_responses_still_charged": 1,
+        "no_actual_change": true,
+        "feasibility_review": {
+          "path": ".scratch/text-image-repair-20261011/review/build-v14-budget-feasibility-spec.json",
+          "sha256": "ffd233ecde3cdd7829dd81c662f4deda35fc96dce36396b1a15f5dbb31fb8119"
+        }
+      }
     },
     "new_real_results": {
       "build_executed": false,
@@ -1175,6 +1200,10 @@
     "metadata_review": {
       "path": ".scratch/text-image-repair-20261011/review/physical-parent-root-metadata-spec-receipt-v14.json",
       "sha256": "d1ab04388ad41f0b975722187ec1b651e4314e157644b7be8347995c92a003d1"
+    },
+    "integration_receipt": {
+      "path": ".scratch/text-image-repair-20261011/review/combined-main-integration-v14-receipt.json",
+      "sha256": "adea2ab9267c649bf1d2dbea33749fca509f007e071c09c3d46916657e3e9d4b"
     }
   }
 }
