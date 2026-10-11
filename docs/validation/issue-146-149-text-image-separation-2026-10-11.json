@@ -1065,7 +1065,7 @@
     }
   },
   "current_v14": {
-    "recorded_at_utc": "2026-10-11T23:24:14.814867+00:00",
+    "recorded_at_utc": "2026-10-11T23:35:33.485527+00:00",
     "status": "authorized_3500_real_build_running",
     "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
     "code_freeze": {
@@ -1297,13 +1297,28 @@
       "claim_limit": "Method compatibility only; the exact completed final build plan and head must be bound before real reader/QA/chat acceptance."
     },
     "evaluation_budget_work": {
-      "status": "new_method_under_independent_review",
-      "reason": "User authorized build-only expansion. Keep original1129 policy in disposable QA/chat clones; never inherit build3129 silently.",
-      "assessment": {
-        "path": ".scratch/text-image-repair-20261011/review/evaluation-budget-method-assessment-r1.json",
-        "sha256": "e65240b68d9ebe87d4bf46bac81408194a5133b9d4ab6b27b3ec74c49b5c7763"
+      "status": "method_approved_two_axes_real_evaluation_pending",
+      "restored_evaluation_limit": 1129,
+      "build_limit_unchanged": 3129,
+      "source_build_ledger_preserved": true,
+      "spec": {
+        "path": ".scratch/text-image-repair-20261011/review/evaluation-budget-spec-r2.json",
+        "sha256": "403fdf7eac9b063d38121496f48c3123427fd28969e3d0934168b5fc4ee022e5"
       },
-      "actual_qa_or_chat_started": false
+      "spec_tests_passed": 36,
+      "standards": {
+        "path": ".scratch/text-image-repair-20261011/review/evaluation-budget-method-r1-standards.json",
+        "sha256": "440e4afdc68e06e78892ccd1dacabca4dd8048a1f6448f1cb7eb49e1b281b29f"
+      },
+      "standards_tests_passed": 51,
+      "local_qa_cases": 45,
+      "local_persistent_turns": 3,
+      "local_successful_sdk_calls": 102,
+      "local_failed_sdk_calls": 1,
+      "local_actual_condb_retrieval_calls": 6,
+      "real_candidate_executed": false,
+      "baseline_executed": false,
+      "scope": "Method tests use local HTTP fixtures. Exact completed build/head binding is required before real45 Agent answers and12 persisted turns."
     }
   }
 }
