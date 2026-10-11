@@ -84,7 +84,17 @@ def normalization_fingerprint(
 
             selected = resource_policy or resolve_resource_policy(kb_dir)
             text_policy["resources"] = {"policy": REMOTE_POLICY, **selected.model_dump(mode="json")}
-    from openkb.inputs import OFFICE_SOURCE_EXTENSIONS
+    from openkb.inputs import CNKI_SOURCE_EXTENSIONS, OFFICE_SOURCE_EXTENSIONS
+
+    pdf_policy = {}
+    if source_revision is None or f".{source_revision.source_format}" in {
+        ".pdf",
+        *OFFICE_SOURCE_EXTENSIONS,
+        *CNKI_SOURCE_EXTENSIONS,
+    }:
+        from openkb.pdf_layout import PDF_LAYOUT_POLICY
+
+        pdf_policy["pdf_layout_policy"] = PDF_LAYOUT_POLICY
 
     office_policy: dict = {}
     if source_revision and source_revision.source_format in {
@@ -151,6 +161,7 @@ def normalization_fingerprint(
             ).hexdigest(),
             **text_policy,
             **office_policy,
+            **pdf_policy,
         },
         sort_keys=True,
     )

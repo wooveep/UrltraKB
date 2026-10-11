@@ -13,6 +13,7 @@ import pymupdf
 
 from openkb.locks import atomic_write_bytes
 from openkb.markdown_images import apply_image_edits, image_references
+from openkb.pdf_layout import native_pdf_blocks
 
 if TYPE_CHECKING:
     from openkb.inputs import PreparedImage
@@ -120,7 +121,7 @@ def convert_pdf_to_pages(
             parts: list[str] = []
             page_images: list[dict] = []
 
-            for block in page.get_text("dict")["blocks"]:
+            for block in native_pdf_blocks(page):
                 if block["type"] == 0:  # text block
                     lines = []
                     for line in block["lines"]:
@@ -195,7 +196,7 @@ def convert_pdf_with_images(
             page_images = []
             image_refs = {}
 
-            for block in page.get_text("dict")["blocks"]:
+            for block in native_pdf_blocks(page):
                 if block["type"] == 0:  # text block
                     lines = []
                     for line in block["lines"]:
