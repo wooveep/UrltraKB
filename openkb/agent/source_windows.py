@@ -502,8 +502,9 @@ class CompileSourceWindows:
                 ]
         if requested and not any(k in advice for k in ("pages", "blocks", "cells", "chars")):
             numbers: set[int] = set()
-            for identity in requested:
-                node = nodes[identity]
+            # A node's own span can end at its first child heading. Selecting
+            # the named section also selects the descendants' native spans.
+            for node in navigation_nodes([nodes[identity] for identity in requested]):
                 start, end = node.get("start_index"), node.get("end_index")
                 if type(start) is not int or type(end) is not int or not 1 <= start <= end:
                     raise PageResponseError("page_invalid_evidence", "Invalid navigation range")
