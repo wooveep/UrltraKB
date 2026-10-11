@@ -7,14 +7,12 @@ from dataclasses import asdict
 import click
 
 
-def _selection(ctx, *, required=True):
+def _selection(ctx):
     from openkb.cli import _require_kb_root as _root
     from openkb.cli import _selected_scope
 
     root = _root(ctx)
     scope = _selected_scope(ctx, root)
-    if required and scope is None:
-        raise click.ClickException("Choose the knowledge view with --view")
     return root, scope
 
 
@@ -55,7 +53,7 @@ def empty(ctx, source_id, generation):
     """Explicitly confirm that this source revision makes no current contribution."""
     from openkb.application.refresh import confirm_empty_source
 
-    root, scope = _selection(ctx, required=False)
+    root, scope = _selection(ctx)
     _emit(confirm_empty_source(root, source_id, generation=generation, scope=scope))
 
 
@@ -64,7 +62,7 @@ def empty(ctx, source_id, generation):
 def proposals(ctx):
     from openkb.application.refresh import list_refresh_proposals
 
-    root, scope = _selection(ctx, required=False)
+    root, scope = _selection(ctx)
     click.echo(json.dumps(list_refresh_proposals(root, scope=scope), ensure_ascii=False))
 
 
@@ -74,7 +72,7 @@ def proposals(ctx):
 def show(ctx, proposal_id):
     from openkb.application.refresh import read_refresh_proposal
 
-    root, scope = _selection(ctx, required=False)
+    root, scope = _selection(ctx)
     click.echo(
         json.dumps(read_refresh_proposal(root, proposal_id, scope=scope), ensure_ascii=False)
     )
@@ -87,7 +85,7 @@ def show(ctx, proposal_id):
 def accept(ctx, proposal_id, version):
     from openkb.application.refresh import accept_refresh_proposal
 
-    root, scope = _selection(ctx, required=False)
+    root, scope = _selection(ctx)
     _emit(accept_refresh_proposal(root, proposal_id, version=version, scope=scope))
 
 
@@ -118,7 +116,7 @@ def read_history(ctx, knowledge_revision_id, page):
 def references(ctx):
     from openkb.artifact_references import list_artifact_references
 
-    root, _ = _selection(ctx, required=False)
+    root, _ = _selection(ctx)
     found = list_artifact_references(root)
     click.echo(
         json.dumps(
@@ -139,5 +137,5 @@ def cleanup(ctx, paths):
     """Delete selected managed artifacts only if a complete inventory proves no references."""
     from openkb.application.refresh import cleanup_unreferenced_artifacts
 
-    root, _ = _selection(ctx, required=False)
+    root, _ = _selection(ctx)
     click.echo(json.dumps(cleanup_unreferenced_artifacts(root, list(paths)), ensure_ascii=False))

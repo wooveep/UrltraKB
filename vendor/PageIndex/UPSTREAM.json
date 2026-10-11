@@ -153,7 +153,7 @@
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
       "pageindex/backend/local.py": "5d61956a8de180eb5d7d1d8e3492e10d16d43cd34439093ddd3e332510abf14b",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
-      "pageindex/index/page_index.py": "f131176a7a0867c77434b54219d5d88522538314073d26e45b6bdcf47aa7531b",
+      "pageindex/index/page_index.py": "42d2136f1f154722015efb76a8f9c4abbdb6e717bab25d6c5856e979ab837595",
       "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
       "pageindex/index/utils.py": "67d1cfbdc3e4b649eff1d5e26277321a3c860d2aa35060bf5c7d62db3504e034",
       "pageindex/index/page_index_md.py": "ba4a3cfbfb3f8cb55d6d10b56a24a853fd89f920cac69f0d1317cf3240194ccb",
@@ -163,7 +163,7 @@
       "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d"
     },
     "added": {
-      "README.urltrakb.md": "b8d7aab1dbb7fc89fb1d54948609d5ddcd71a50e4132fe59d4be9267b7c64fe1",
+      "README.urltrakb.md": "8b9c7f12fc8a908e82b9429e1bbb733e6fb80ca49ab70ef2f57815cdc84cbc1c",
       "pageindex/_urltrakb_source.json": "de9f54f61c71226f61596c1479e0a421759a7d7c4752e1e3513e2c7261cad443",
       "pageindex/llm.py": "54d5b095a4467dbaab9ce16ab76edb803faf21045ad7fbf46defbc0ffaba3c22",
       "pageindex/default_llm.py": "f95550d10ffc1b05bacdcb990ab267b6a4c0cf5f329cf8f99879406105965d24",
@@ -172,7 +172,7 @@
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
       "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed",
-      "pageindex/index/physical_sections.py": "5e9cc40c8966b523f93f63713416f1c80ab6b956712f4e3d405185d56a5a5414"
+      "pageindex/index/physical_sections.py": "c6e0ab460eeb08129217bf39b782b31cb436aaec0792f57cc31c8fa6d404bfd2"
     },
     "deleted": [
       "cookbook/README.md",

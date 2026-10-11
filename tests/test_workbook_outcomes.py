@@ -12,10 +12,11 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
     from openkb.application.documents import import_document
     from openkb.application.sources import source_inventory
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Worksheets", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     if empty_inventory:
         import re
         from zipfile import ZipFile
@@ -30,7 +31,10 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
                 archive.writestr(name, value)
     else:
         three_sheets.write_bytes(b"invalid workbook")
-    failed = import_document(kb_dir, three_sheets, metadata=metadata)
+    failed = import_document(
+        kb_dir,
+        three_sheets,
+    )
     assert failed.status == "failed"
     read = read_document_source(kb_dir, first.source_id, unit_id=first.units[0].unit_id)
     assert read["status"] == "failed" and "inventory" in read["message"].lower()

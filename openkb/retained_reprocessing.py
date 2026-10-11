@@ -16,16 +16,14 @@ def _same_original(left: SourceRevision, right: SourceRevision) -> bool:
 def retained_reprocessing_input(kb_dir: Path, view_id: str, identity: str) -> dict | None:
     """Allow only frozen native reading, never restore current contribution status."""
     from openkb.knowledge_evidence import validated_input
-    from openkb.source_changes import source_view
     from openkb.state import HashRegistry
 
-    _, frozen, _ = validated_input(kb_dir, identity, view_id)
+    _, frozen = validated_input(kb_dir, identity, view_id)
     source = read_source(kb_dir, frozen.source_id)
     if (
         source.removed
         or source.contribution_empty
         or identity in source.excluded_inputs
-        or source_view(kb_dir, source) != view_id
         or source.target_revision_id == frozen.source_revision_id
     ):
         return None

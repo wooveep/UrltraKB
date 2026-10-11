@@ -7,7 +7,6 @@ from pathlib import Path
 from openkb.application.execution import ExecutionContext
 from openkb.application.recompilation import _version
 from openkb.application.retained_inputs import artifact_availability, frozen_source_input
-from openkb.application.sources import source_view_id
 from openkb.config import resolve_effective_config
 from openkb.ingest_records import UnitRevision
 from openkb.inputs import CNKI_SOURCE_EXTENSIONS, OFFICE_SOURCE_EXTENSIONS
@@ -26,7 +25,6 @@ from openkb.source_catalog import (
     read_source_revision,
 )
 from openkb.unit_publication import list_source_units, read_unit_publication
-from openkb.view_records import VersionAnnotation
 
 
 class ReprocessingConflict(ValueError):
@@ -87,10 +85,10 @@ def preview_reprocessing(
         source = admission.source
         source_id = source.source_id
         revision = admission.revision
-        view_id = source_view_id(root, source)
+        view_id = "legacy"
         scope = resolve_scope(root, scope) if scope else live_scope(root, view_id)
         blockers = []
-        if source.removed or scope.read_only or scope.view_id != view_id:
+        if source.removed or scope.read_only:
             blockers.append("Choose the current source in its live knowledge view")
         if revision.original_kind != "original":
             blockers.append(
@@ -161,29 +159,6 @@ def preview_reprocessing(
                     "proposal_id": publication.proposal_id if publication else None,
                 }
             )
-        from openkb.application.version_review import VersionReview
-        from openkb.source_catalog import record_path
-
-        review_path = record_path(root, "version-reviews", revision.source_revision_id)
-        review = (
-            read_record(root, "version-reviews", revision.source_revision_id, VersionReview)
-            if review_path.exists()
-            else None
-        )
-        annotation = (
-            read_record(root, "annotations", source.annotation_id, VersionAnnotation)
-            if source.annotation_id
-            else None
-        )
-        correction_applied = (
-            review is not None
-            and review.status == "ready"
-            and review.correction_id is not None
-            and annotation is not None
-            and annotation.metadata == review.metadata
-        )
-        if review and review.status in {"blocked", "ready", "cancelled"} and not correction_applied:
-            blockers.append("Resolve the version clarification before reprocessing this source")
         intent = admission.discovery_intent
         config, origins = resolve_effective_config(root)
         value = {
@@ -200,14 +175,12 @@ def preview_reprocessing(
             "range_note": "Read all worksheets again; retain failed units' old results"
             if revision.source_format in {"xls", "xlsx"}
             else "Process the complete frozen document",
-            "version_impact": {
+            "publication_impact": {
                 "view_id": view_id,
-                "metadata": annotation.metadata.model_dump(mode="json") if annotation else None,
-                "review_status": review.status if review else None,
                 "superseded_proposals": [
                     unit["proposal_id"] for unit in units if unit["proposal_id"]
                 ],
-                "note": "Retain version annotation; manual edits still require proposal acceptance",
+                "note": "Retain original snapshots; manual edits still require proposal acceptance",
             },
             "discovery": {
                 "will_schedule": revision.source_format in discovery_hosts(CURRENT_POLICY),
@@ -279,9 +252,10 @@ def _execute_reprocessing(root, source_id, version, scope, context, credentials)
     admission = read_admission(root, existing) if existing else None
     frozen = admission.revision if admission else None
     if version and existing and frozen and frozen.reprocessing_request == version:
-        selected = resolve_scope(root, scope, writable=True) if scope else None
-        if existing.removed or selected and selected.view_id != source_view_id(root, existing):
-            raise ReprocessingConflict("Source view changed; preview again before reprocessing")
+        if scope:
+            resolve_scope(root, scope, writable=True)
+        if existing.removed:
+            raise ReprocessingConflict("Source was removed; preview again before reprocessing")
         return import_prepared_source(
             root,
             frozen_source_input(root, existing, frozen),

@@ -46,9 +46,8 @@ async def recompile_source(
     from openkb.agent import compiler
 
     source = read_source(kb_dir, source_id)
-    from openkb.application.sources import source_view_id
 
-    scope = scope or live_scope(kb_dir, source_view_id(kb_dir, source))
+    scope = scope or live_scope(kb_dir, "legacy")
     units = list_source_units(kb_dir, source_id)
     if source.removed or not units:
         return IngestResult(

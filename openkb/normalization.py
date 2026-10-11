@@ -1,4 +1,4 @@
-"""Retain a conversion independently of version clarification and model work."""
+"""Retain a conversion independently of model work."""
 
 import hashlib
 import json

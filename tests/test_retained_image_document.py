@@ -161,15 +161,12 @@ def test_image_only_markup_retains_pixels_without_model_work(kb_dir, model_servi
     assert not list((kb_dir / "wiki/summaries").glob("*.md"))
 
 
-def test_retention_keeps_explicit_version_and_remote_asset_policy(
-    kb_dir, model_service, monkeypatch
-):
+def test_retention_keeps_remote_asset_policy(kb_dir, model_service, monkeypatch):
     from figure_fixtures import png_bytes
 
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
     from openkb.markdown_images import image_references
-    from openkb.view_records import SourceMetadata
 
     fetched = []
 
@@ -186,12 +183,11 @@ def test_retention_keeps_explicit_version_and_remote_asset_policy(
         kb_dir,
         source,
         download_remote_assets=True,
-        metadata=SourceMetadata(product="Device", applicable_versions=("1",)),
     )
     assert result.status == "blocked", result.message
     viewed = read_document_source(kb_dir, result.source_id)
-    assert viewed["view_id"] != "legacy"
-    assert viewed["version_metadata"]["product"] == "Device"
+    assert viewed["view_id"] == "legacy"
+    assert "version_metadata" not in viewed
     assert fetched == ["https://example.test/figure.png"]
     assert len(image_references(viewed["content"])) == 1
     assert not model_service.requests

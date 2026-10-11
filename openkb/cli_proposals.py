@@ -30,9 +30,7 @@ def proposals():
 @click.pass_context
 def list_pending(ctx):
     for item in list_proposals(_root(ctx), scope=_scope(ctx)):
-        click.echo(
-            f"{item.proposal_id}  view={item.view_id}  source={item.source_id}  {item.status}"
-        )
+        click.echo(f"{item.proposal_id}  source={item.source_id}  {item.status}")
 
 
 @proposals.command("show")
@@ -40,9 +38,7 @@ def list_pending(ctx):
 @click.pass_context
 def show(ctx, proposal_id):
     item = read_proposal(_root(ctx), proposal_id, scope=_scope(ctx))
-    click.echo(
-        f"Proposal {item.proposal_id}\nView: {item.view_id}\nVersion: {item.version}\n{item.diff}"
-    )
+    click.echo(f"Proposal {item.proposal_id}\nVersion: {item.version}\n{item.diff}")
 
 
 @proposals.command("accept")

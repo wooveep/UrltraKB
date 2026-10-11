@@ -60,16 +60,7 @@ def record_path(kb_dir: Path, collection: str, identity: str) -> Path:
         "unit-revisions",
         "publications",
         "attempts",
-        "products",
-        "product-confirmations",
-        "identity-repairs",
-        "families",
-        "family-defaults",
-        "annotations",
-        "views",
         "normalizations",
-        "version-reviews",
-        "metadata-corrections",
     }:
         raise ValueError("Unknown source catalog collection")
     path = kb_dir / ".openkb/catalog" / collection / f"{identity}.json"
@@ -92,15 +83,7 @@ def read_record(kb_dir: Path, collection: str, identity: str, model: type[R]) ->
         "unit-revisions": "unit_revision_id",
         "publications": "publication_id",
         "attempts": "attempt_id",
-        "products": "product_id",
-        "identity-repairs": "repair_id",
-        "families": "family_id",
-        "family-defaults": "family_id",
-        "annotations": "annotation_id",
-        "views": "view_id",
         "normalizations": "normalization_id",
-        "version-reviews": "review_id",
-        "metadata-corrections": "correction_id",
     }[collection]
     if getattr(record, field) != identity:
         raise ValueError("Catalog record identity does not match its filename")
@@ -246,8 +229,6 @@ def admit_source_revision(
             target_revision_id=revision_id,
             target_generation=(known.target_generation + 1 if known else 1),
             legacy_hash=legacy_hash or (known.legacy_hash if known else None),
-            annotation_id=known.annotation_id if known else None,
-            family_id=known.family_id if known else None,
             excluded_inputs=known.excluded_inputs if known else {},
         )
         decoding = None

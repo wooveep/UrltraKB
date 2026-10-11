@@ -416,6 +416,15 @@ class TestNormalizeTarget:
 
 
 class TestStripGhostWikilinks:
+    def test_keeps_literal_shell_conditions_and_cleans_actual_links(self):
+        source = (
+            'Before [[unfinished\n\n```sh\nif [[ -n "$VALUE" ]]; then\n    run_check\nfi\n```\n\n'
+            "    [[literal_example]]\n\nSee [[concepts/missing]].\n"
+        )
+        out, ghosts = strip_ghost_wikilinks(source, set())
+        assert out == source.replace("[[concepts/missing]]", "missing")
+        assert ghosts == ["concepts/missing"]
+
     def test_keeps_direct_match(self):
         out, ghosts = strip_ghost_wikilinks(
             "See [[concepts/attention]] for details.",

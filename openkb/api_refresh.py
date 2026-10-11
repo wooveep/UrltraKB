@@ -16,7 +16,7 @@ refresh_router = APIRouter(dependencies=[Depends(require_bearer_token)])
 
 class RefreshRequest(BaseModel):
     kb: str = "default"
-    view_id: ViewId
+    view_id: ViewId = "legacy"
 
 
 class EmptyRequest(RefreshRequest):
@@ -38,13 +38,13 @@ async def _selected(kb, view_id):
 
 
 @refresh_router.get("/api/v1/refresh/status")
-async def status(kb: str, view_id: ViewId):
+async def status(kb: str, view_id: ViewId = "legacy"):
     root, scope = await _selected(kb, view_id)
     return await asyncio.to_thread(application.refresh_status, root, scope=scope)
 
 
 @refresh_router.get("/api/v1/refresh/history")
-async def history(kb: str, view_id: ViewId):
+async def history(kb: str, view_id: ViewId = "legacy"):
     root, scope = await _selected(kb, view_id)
     return await asyncio.to_thread(application.list_knowledge_history, root, scope=scope)
 
@@ -86,7 +86,7 @@ async def empty(request: EmptyRequest):
 
 
 @refresh_router.get("/api/v1/refresh/proposals")
-async def proposals(kb: str, view_id: ViewId):
+async def proposals(kb: str, view_id: ViewId = "legacy"):
     root, scope = await _selected(kb, view_id)
     return await asyncio.to_thread(application.list_refresh_proposals, root, scope=scope)
 

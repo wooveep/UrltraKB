@@ -1,4 +1,4 @@
-"""Prevent unsupported writers from mutating versioned source knowledge."""
+"""Prevent unsupported writers from mutating the source and publication catalog."""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from pydantic import Field
 from openkb.file_state import contained_paths
 from openkb.source_records import Record
 
-WRITER_VERSION = 2
+WRITER_VERSION = 3
 
 
 class UnsupportedCatalogWriter(ValueError):
@@ -21,9 +21,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "worksheet-units-v1",
         "worksheet-lifecycle-v1",
         "durable-import-dispatch-v1",
-        "knowledge-views-v1",
-        "version-review-v1",
-        "query-views-v1",
+        "shared-knowledge-v1",
         "knowledge-refresh-v1",
         "frozen-normalization-v1",
         "multi-format-sources-v1",

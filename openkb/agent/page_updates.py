@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal, Inexact, localcontext
 
@@ -27,6 +28,15 @@ _UNITS = {
 _OBJECT_HEADERS = {"object", "对象", "id", "name", "名称", "model", "型号"}
 _CONDITION_HEADERS = {"condition", "条件", "适用条件", "scope", "适用范围"}
 _BINDING_HEADERS = _OBJECT_HEADERS | _CONDITION_HEADERS | {"attribute", "属性", "version", "版本"}
+
+
+def _literal_blocks(parts: list[str]) -> Counter[str]:
+    return Counter(
+        token.content
+        for part in parts
+        for token in markdown_layout(part)[0]
+        if token.type in {"fence", "code_block"}
+    )
 
 
 def _quantity(text: str, header: str = "") -> tuple[str, Decimal] | None:
@@ -396,6 +406,11 @@ class PageUpdate:
             "description": obj.get("description", self.request()["description"]),
             "content": "".join(chunks),
         }
+        if _literal_blocks(chunks) != _literal_blocks([page["content"]]):
+            raise PageResponseError(
+                "page_literal_conflict",
+                "Page assembly changed a literal block; keep complete Markdown separators",
+            )
         if self.source_ranges is not None:
             page["source_ranges"] = obj["source_ranges"]
         if self.originals is not None:

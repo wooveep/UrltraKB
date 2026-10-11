@@ -72,12 +72,14 @@ section content are appropriate for exact technical excerpts.
 """
 
 
-def summary_sections(content: str) -> list[dict]:
+def summary_sections(content: str, *, native_pages: bool = False) -> list[dict]:
     """Group actual original headings or natural blocks, without generated navigation."""
     from openkb.content_blocks import markdown_layout
 
     tokens, offsets = markdown_layout(content)
-    headings = {offsets[t.map[0]] for t in tokens if t.type == "heading_open" and t.map}
+    headings = {
+        offsets[t.map[0]] for t in tokens if not native_pages and t.type == "heading_open" and t.map
+    }
     # A parent heading immediately followed by a child heading is one section,
     # not an invitation to invent a body for the parent heading alone.
     body_starts = {
@@ -105,20 +107,32 @@ def summary_sections(content: str) -> list[dict]:
     return [{"id": f"section-{i}", "start": a, "end": b} for i, (a, b) in enumerate(ranges, 1)]
 
 
+def window_sections(window: dict) -> list[dict]:
+    return summary_sections(window["content"], native_pages="page_spans" in window)
+
+
 def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
+    from openkb.agent.source_excerpts import SourceExcerpts
+
+    excerpts = SourceExcerpts(
+        [window["content"], *[item["content"] for item in window["supplementary_context"]]]
+    )
     window = {
         **window,
         "summary_protocol": PROMPT_VERSION,
-        "output_sections": summary_sections(window["content"]),
+        "output_sections": window_sections(window),
     }
-    return [
-        system,
-        {
-            "role": "user",
-            "content": f"Original document: {doc_name}\n" + json.dumps(window, ensure_ascii=False),
-        },
-        {"role": "user", "content": _SUMMARY_TASK},
-    ]
+    return excerpts.messages(
+        [
+            system,
+            {
+                "role": "user",
+                "content": f"Original document: {doc_name}\n"
+                + json.dumps(window, ensure_ascii=False, separators=(",", ":")),
+            },
+            {"role": "user", "content": _SUMMARY_TASK},
+        ]
+    )
 
 
 @dataclass(frozen=True)
@@ -156,7 +170,7 @@ async def build_document_summary(
             f"LLM [document-summary:{key}] hit the length limit; "
             "skipping to avoid a truncated page",
             response_protocol="summary-json",
-            expected_sections=tuple(s["id"] for s in summary_sections(window["content"])),
+            expected_sections=tuple(s["id"] for s in window_sections(window)),
         )
         return fits(messages) and fits([*messages, correction])
 
@@ -232,7 +246,7 @@ async def build_document_summary(
                     messages,
                     f"document-summary:{current.key}",
                     [batch["content"], *[c["content"] for c in batch["supplementary_context"]]],
-                    tuple(s["id"] for s in summary_sections(batch["content"])),
+                    tuple(s["id"] for s in window_sections(batch)),
                 )
             except PageResponseError as error:
                 if error.code != "page_truncated_response" or not current.can_split:
@@ -255,7 +269,7 @@ async def build_document_summary(
                     f"summary:{current.key}",
                     digest(messages),
                     decoded,
-                    metadata={**batch, "output_sections": summary_sections(batch["content"])},
+                    metadata={**batch, "output_sections": window_sections(batch)},
                 )
         description = decoded["description"]
         body = "\n\n".join(section["content"] for section in decoded["sections"])

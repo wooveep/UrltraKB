@@ -384,23 +384,27 @@ def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, p
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
     from openkb.runtime.watch import NativeWatch
-    from openkb.view_records import SourceMetadata
 
     path = kb_dir / "raw/diagram.html"
     path.write_text('<p>Diagram <img src="figure.png"></p>', encoding="utf-8")
     figure = kb_dir / "raw/figure.png"
     figure.write_bytes(png_bytes())
-    metadata = SourceMetadata(product="Example", applicable_versions=("1",), family="Guide")
     sink = TaskSink()
     watch = NativeWatch(kb_dir, sink, debounce=0.03, scan_interval=0.02)
     try:
         eventually(lambda: len(sink.items) == 1)
-        first = import_document(kb_dir, path, metadata=metadata)
+        first = import_document(
+            kb_dir,
+            path,
+        )
         assert first.status == "added", first.message
         sink.finish("0", revision=first.input_version)
         figure.write_bytes(png_bytes("blue"))
         eventually(lambda: len(sink.items) == 2)
-        second = import_document(kb_dir, path, metadata=metadata)
+        second = import_document(
+            kb_dir,
+            path,
+        )
         assert second.status == "added", second.message
         sink.finish("1", revision=second.input_version)
         before = read_document_source(

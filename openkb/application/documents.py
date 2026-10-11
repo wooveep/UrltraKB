@@ -25,7 +25,6 @@ from openkb.llm_usage_execution import track_import_usage
 from openkb.locks import kb_ingest_lock
 from openkb.log import append_log
 from openkb.mutation import RecoveryRequired, publish_staged_tree
-from openkb.view_records import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +144,6 @@ def add_single_file(
     prepared: PreparedInput | None = None,
     origin_url: str | None = None,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
 ) -> Literal["added", "skipped", "failed", "blocked", "partial", "stopped", "rejected"]:
     """Compatibility projection of the shared import use case's status."""
@@ -160,7 +158,6 @@ def add_single_file(
         prepared=prepared,
         origin_url=origin_url,
         scope=scope,
-        metadata=metadata,
         download_remote_assets=download_remote_assets,
     )
     for line in describe_ingest(result):
@@ -412,7 +409,6 @@ def _add_for_api(
     context: ExecutionContext | None = None,
     source_root: Path | None = None,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
 ) -> AddFileResult:
     """Run the locked add pipeline and return a structured result for the API.
@@ -427,7 +423,6 @@ def _add_for_api(
         context=context,
         source_root=source_root,
         scope=scope,
-        metadata=metadata,
         download_remote_assets=download_remote_assets,
     )
     status_str = result.status
@@ -469,7 +464,6 @@ def import_document(
     prepared: PreparedInput | None = None,
     report=logger.info,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
 ) -> DocumentResult:
     """Process one complete item and report only resources actually retained."""
@@ -551,7 +545,6 @@ def import_document(
                         on_event=on_event or context.on_event,
                         origin_url=origin_url,
                         report=report,
-                        metadata=metadata,
                         scope=requested_scope,
                         download_remote_assets=download_remote_assets,
                     )

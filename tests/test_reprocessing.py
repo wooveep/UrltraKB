@@ -2,8 +2,6 @@
 
 import pytest
 
-from openkb.view_records import SourceMetadata
-
 pytest_plugins = ("test_workbook_import",)
 
 
@@ -415,7 +413,7 @@ def test_reprocessing_preserves_manual_edits_as_a_proposal(kb_dir, tmp_path, pdf
     result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
     assert result.status == "blocked" and result.units[0].proposal_id
     assert "Human knowledge" in read_page(kb_dir, summary, scope=scope).body
-    assert preview_reprocessing(kb_dir, first.source_id)["version_impact"][
+    assert preview_reprocessing(kb_dir, first.source_id)["publication_impact"][
         "superseded_proposals"
     ] == [result.units[0].proposal_id]
 
@@ -463,9 +461,14 @@ def test_request_resume_rejects_foreign_source_revision(kb_dir, tmp_path, pdf_mo
     b = tmp_path / "beta.md"
     a.write_text("Alpha genuine evidence", encoding="utf-8")
     b.write_text("Beta unrelated evidence", encoding="utf-8")
-    metadata = SourceMetadata(product="Fixture", applicable_versions=("1",))
-    first = import_document(kb_dir, a, metadata=metadata)
-    other = import_document(kb_dir, b, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        a,
+    )
+    other = import_document(
+        kb_dir,
+        b,
+    )
     preview = preview_reprocessing(kb_dir, other.source_id)
     other_new = reprocess_source(kb_dir, other.source_id, version=preview["version"])
     assert other_new.status == "added", other_new

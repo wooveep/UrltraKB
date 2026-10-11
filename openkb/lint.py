@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from openkb import frontmatter
+from openkb.content_blocks import markdown_layout
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import atomic_write_text
 from openkb.schema import PAGE_CONTENT_DIRS
@@ -26,6 +27,23 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 # Files to exclude from lint scanning (schema, logs, etc.)
 _EXCLUDED_FILES = {"AGENTS.md", "SCHEMA.md", "log.md"}
+
+
+def _wikilink_matches(text: str) -> list[re.Match[str]]:
+    """Locate links outside literal Markdown blocks, without rewriting source bytes."""
+    if "[[" not in text:
+        return []
+    tokens, offsets = markdown_layout(text)
+    literal_ranges = [
+        (offsets[token.map[0]], offsets[token.map[1]])
+        for token in tokens
+        if token.map and token.type in {"fence", "code_block"}
+    ]
+    return [
+        match
+        for match in _WIKILINK_RE.finditer(text)
+        if not any(start < match.end() and match.start() < end for start, end in literal_ranges)
+    ]
 
 
 def _normalize_target(target: str) -> str:
@@ -124,7 +142,13 @@ def strip_ghost_wikilinks(
         stem = target.rsplit("/", 1)[-1]
         return stem.replace("-", " ").replace("_", " ")
 
-    cleaned = _WIKILINK_RE.sub(_repl, content)
+    chunks: list[str] = []
+    cursor = 0
+    for match in _wikilink_matches(content):
+        chunks.extend((content[cursor : match.start()], _repl(match)))
+        cursor = match.end()
+    chunks.append(content[cursor:])
+    cleaned = "".join(chunks)
     return cleaned, ghosts
 
 
@@ -157,7 +181,7 @@ def _extract_wikilinks(text: str) -> list[str]:
 
     Handles ``[[target|display text]]`` alias syntax — only the target is returned.
     """
-    raw = _WIKILINK_RE.findall(text)
+    raw = [match.group(1) for match in _wikilink_matches(text)]
     return [link.split("|")[0].strip() for link in raw]
 
 

@@ -39,7 +39,6 @@ class UnitResult:
     context: dict | None = None
     quality_known: bool | None = None
     answer_outcome: str | None = None
-    scope_candidates: tuple[dict, ...] = ()
     import_units: tuple = ()
 
     def __post_init__(self) -> None:
@@ -54,7 +53,6 @@ class UnitResult:
             "answered",
             "partial",
             "insufficient_evidence",
-            "scope_unresolved",
             "evidence_rejected",
         }:
             raise ValueError("Invalid answer outcome")
@@ -125,7 +123,6 @@ class UnitResult:
             context=value.get("context"),
             quality_known=value.get("quality_known"),
             answer_outcome=value.get("answer_outcome"),
-            scope_candidates=tuple(value.get("scope_candidates", ())),
             import_units=TypeAdapter(tuple[ImportUnitOutcome, ...]).validate_python(
                 value.get("import_units", [])
             ),

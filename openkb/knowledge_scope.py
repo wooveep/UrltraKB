@@ -22,21 +22,14 @@ class KnowledgeScope:
             raise ValueError("Invalid page path: wiki escapes its knowledge base")
         relative = wiki.relative_to(root).parts
         managed = (
-            (
-                len(relative) == 4
-                and relative[:2] in {(".openkb", "staging"), (".openkb", "proposals")}
-                and relative[-1] == "wiki"
-            )
-            or (
-                len(relative) == 6
-                and relative[:3] == (".openkb", "knowledge", self.view_id)
-                and relative[3] == "revisions"
-                and relative[-1] == "wiki"
-            )
-            or (
-                relative == (".openkb", "knowledge", self.view_id, "wiki")
-                and self.view_id != "legacy"
-            )
+            len(relative) == 4
+            and relative[:2] in {(".openkb", "staging"), (".openkb", "proposals")}
+            and relative[-1] == "wiki"
+        ) or (
+            len(relative) == 6
+            and relative[:3] == (".openkb", "knowledge", self.view_id)
+            and relative[3] == "revisions"
+            and relative[-1] == "wiki"
         )
         if not managed and not (self.view_id == "legacy" and wiki == root / "wiki"):
             raise ValueError("Invalid knowledge view directory")
@@ -58,14 +51,13 @@ def legacy_scope(kb_dir: Path) -> KnowledgeScope:
 
 def live_scope(kb_dir: Path, view_id: str = "legacy") -> KnowledgeScope:
     root = kb_dir.expanduser().resolve()
-    wiki = root / "wiki" if view_id == "legacy" else root / ".openkb/knowledge" / view_id / "wiki"
-    return KnowledgeScope(root, wiki, view_id)
+    return KnowledgeScope(root, root / "wiki", view_id)
 
 
 def resolve_scope(
     kb_dir: Path, scope: KnowledgeScope | None = None, *, writable: bool = False
 ) -> KnowledgeScope:
-    """Adapt old callers once; scoped calls must belong to the same real KB."""
+    """Bind live or historical knowledge to the same real KB."""
     selected = scope if scope is not None else legacy_scope(kb_dir)
     if selected.kb_dir != kb_dir.expanduser().resolve():
         raise ValueError("Knowledge scope belongs to a different knowledge base")

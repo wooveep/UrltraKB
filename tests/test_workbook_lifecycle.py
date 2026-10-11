@@ -11,16 +11,20 @@ def test_xls_rename_and_reorder_use_the_same_identity_reconciliation(kb_dir, tmp
 
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     fixtures = Path(__file__).parent / "fixtures/office"
     workbook = tmp_path / "workbook.xls"
     copyfile(fixtures / "typed-sheets.xls", workbook)
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, workbook, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        workbook,
+    )
     original = {unit.name: unit.unit_id for unit in first.units}
     copyfile(fixtures / "renamed-sheets.xls", workbook)
-    second = import_document(kb_dir, workbook, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        workbook,
+    )
     assert {unit.name: unit.unit_id for unit in second.units} == {
         "Renamed Alpha": original["Alpha"],
         "Beta": original["Beta"],
@@ -38,16 +42,20 @@ def test_rename_and_reorder_keep_sheet_identity_without_using_table_position(
 
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     original = {unit.name: unit.unit_id for unit in first.units}
     book = load_workbook(three_sheets)
     book["Alpha"].title = "Renamed Alpha"
     book.move_sheet("Gamma", offset=-2)
     book.save(three_sheets)
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     assert second.status == "added", second.message
     current = {unit.name: unit.unit_id for unit in second.units}
     assert current == {
@@ -70,17 +78,21 @@ def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
     from openkb.application.sources import source_inventory
     from openkb.application.views import view_scope
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     units = {unit.name: unit for unit in first.units}
     book = load_workbook(three_sheets)
     book["Alpha"]["A1"] = "ALPHA_NEW_REVISION"
     book["Beta"]["A1"] = None
     del book["Gamma"]
     book.save(three_sheets)
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     assert second.status == "added", second.message
     assert {unit.name: unit.status for unit in second.units} == {
         "Alpha": "completed",
@@ -106,9 +118,8 @@ def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
     )
 
 
-@pytest.mark.parametrize("new_version", [False, True])
 def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
-    kb_dir, three_sheets, pdf_model, tmp_path, new_version
+    kb_dir, three_sheets, pdf_model, tmp_path
 ):
     from zipfile import ZipFile
 
@@ -119,10 +130,11 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     from openkb.application.documents import import_document
     from openkb.application.sources import source_inventory
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     original = {unit.name: unit for unit in first.units}
     book = load_workbook(three_sheets)
     book["Alpha"]["A1"] = "ALPHA_NEW"
@@ -137,9 +149,10 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     with ZipFile(three_sheets, "w") as archive:
         for name, body in parts.items():
             archive.writestr(name, body)
-    if new_version:
-        metadata = metadata.model_copy(update={"applicable_versions": ("2",)})
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     assert second.status == "partial", second.message
     inventory = source_inventory(kb_dir)[0]
     units = {unit["name"]: unit for unit in inventory["units"]}
@@ -147,40 +160,10 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     assert units["Gamma"]["content_state"] == "parse_failed"
     for name in ("Beta", "Gamma"):
         assert units[name]["status"] == "failed"
-        assert units[name]["successful_source_revision_id"] == (
-            None if new_version else first.source_revision_id
-        )
-    if not new_version:
-        old = read_document_source(kb_dir, first.source_id, unit_id=original["Gamma"].unit_id)
-        assert old["source_revision_id"] == first.source_revision_id
-        assert "GAMMA_SHEET" in old["content"]
-
-
-def test_empty_new_version_does_not_withdraw_old_view(kb_dir, three_sheets, pdf_model):
-    from openpyxl import load_workbook
-
-    from openkb.application.documents import import_document
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
-
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
-    book = load_workbook(three_sheets)
-    for sheet in book:
-        sheet["A1"] = None
-    book.save(three_sheets)
-    second = import_document(
-        kb_dir, three_sheets, metadata=metadata.model_copy(update={"applicable_versions": ("2",)})
-    )
-    assert all(unit.status == "empty" for unit in second.units)
-    old = read_document_source(
-        kb_dir,
-        first.source_id,
-        unit_id=first.units[0].unit_id,
-        scope=view_scope(kb_dir, first.units[0].view_id),
-    )
-    assert old["source_revision_id"] == first.source_revision_id and old["validity"] == "current"
+        assert units[name]["successful_source_revision_id"] == first.source_revision_id
+    old = read_document_source(kb_dir, first.source_id, unit_id=original["Gamma"].unit_id)
+    assert old["source_revision_id"] == first.source_revision_id
+    assert "GAMMA_SHEET" in old["content"]
 
 
 def test_workbook_removal_preview_names_owned_sheets(kb_dir, three_sheets, pdf_model):
@@ -204,10 +187,11 @@ def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
     from openkb.application.views import view_scope
     from openkb.documents import read_document_source
     from openkb.mutation import MutationSnapshot
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     beta = next(unit for unit in first.units if unit.name == "Beta")
     book = load_workbook(three_sheets)
     if deleted:
@@ -223,7 +207,10 @@ def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
         commit(snapshot)
 
     monkeypatch.setattr(MutationSnapshot, "mark_committed", fail_retirement)
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     assert second.status == "partial"
     old = read_document_source(kb_dir, first.source_id, unit_id=beta.unit_id)
     assert old["status"] == "failed" and old["validity"] == "needs_refresh"
@@ -244,10 +231,11 @@ def test_all_renamed_and_reordered_cannot_inherit_another_sheets_history(
     from openpyxl import load_workbook
 
     from openkb.application.documents import import_document
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     original = {unit.unit_id for unit in first.units}
     book = load_workbook(three_sheets)
     for sheet in book:
@@ -255,54 +243,31 @@ def test_all_renamed_and_reordered_cannot_inherit_another_sheets_history(
             sheet.title = "New " + sheet.title
     book.move_sheet("New Gamma", offset=-1 if keep_anchor else -2)
     book.save(three_sheets)
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     current = {unit.unit_id for unit in second.units if unit.name.startswith("New ")}
     assert len(current) == (2 if keep_anchor else 3) and not current & original
 
 
-def test_empty_sheet_clarification_finishes(kb_dir, three_sheets, pdf_model):
-    from openpyxl import Workbook
-
-    from openkb.application.documents import import_document
-    from openkb.application.version_review import (
-        list_version_reviews,
-        resume_version_review,
-        supplement_version_reviews,
-    )
-    from openkb.view_records import SourceMetadata
-
-    metadata = SourceMetadata(product="Fixture", family="Workbook")
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
-    assert first.status == "added"
-    empty = three_sheets.with_name("empty.xlsx")
-    Workbook().save(empty)
-    second = import_document(kb_dir, empty, metadata=metadata)
-    assert second.status == "blocked"
-    pending = list_version_reviews(kb_dir)
-    assert len(pending) == 1
-    supplement_version_reviews(
-        kb_dir, {pending[0].review_id: SourceMetadata(applicable_versions=("2",))}
-    )
-    resumed = resume_version_review(kb_dir, pending[0].review_id)
-    assert resumed.status == "added"
-    assert list_version_reviews(kb_dir) == ()
-
-
-def test_deleted_new_view_sheet_is_withdrawn(kb_dir, three_sheets, pdf_model):
+def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets, pdf_model):
     from openpyxl import load_workbook
 
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        three_sheets,
+    )
     gamma = next(u for u in first.units if u.name == "Gamma")
     book = load_workbook(three_sheets)
     del book["Gamma"]
     book.save(three_sheets)
     second = import_document(
-        kb_dir, three_sheets, metadata=metadata.model_copy(update={"applicable_versions": ("2",)})
+        kb_dir,
+        three_sheets,
     )
     read = read_document_source(kb_dir, first.source_id, unit_id=gamma.unit_id)
     assert read["target_source_revision_id"] == second.source_revision_id
@@ -319,10 +284,11 @@ def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_she
 
     from openkb.application.documents import import_document
     from openkb.application.sources import source_inventory
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", family="Workbook", applicable_versions=("1",))
-    import_document(kb_dir, three_sheets, metadata=metadata)
+    import_document(
+        kb_dir,
+        three_sheets,
+    )
     book = load_workbook(three_sheets)
     book["Alpha"]["A1"] = None
     book.save(three_sheets)
@@ -348,6 +314,9 @@ def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_she
     with ZipFile(three_sheets, "w") as archive:
         for name, body in parts.items():
             archive.writestr(name, body)
-    second = import_document(kb_dir, three_sheets, metadata=metadata)
+    second = import_document(
+        kb_dir,
+        three_sheets,
+    )
     alpha = next(unit for unit in second.units if unit.name == "Alpha")
     assert alpha.status != "empty", (alpha, source_inventory(kb_dir))

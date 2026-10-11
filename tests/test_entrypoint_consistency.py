@@ -53,7 +53,7 @@ def test_question_wording_never_requires_product_alias_confirmation(
             assert not result.json().get("scope_candidates")
     else:
         result = asyncio.run(ask_question(kb_dir, question))
-        assert result.answer_outcome == "answered" and not result.scope_candidates
+        assert result.answer_outcome == "answered"
         body = result.answer
     assert "The answer is 42." in body
 
@@ -198,14 +198,14 @@ def test_query_saves_only_final_answer_and_keeps_previous_copy(
     assert all("Let me search." not in p.read_text() for p in files)
 
 
-def test_cli_resume_selects_latest_in_selected_view(kb_dir, monkeypatch):
+def test_cli_resume_selects_latest_shared_session(kb_dir, monkeypatch):
     from openkb.agent.chat_session import ChatSession
 
     cli = importlib.import_module("openkb.cli")
-    own = ChatSession.new(kb_dir, "model", "en", identity="a-own", view_id="legacy")
-    foreign = ChatSession.new(kb_dir, "model", "en", identity="z-foreign", view_id="a" * 32)
-    own.save()
-    foreign.save()
+    previous = ChatSession.new(kb_dir, "model", "en", identity="a-previous")
+    current = ChatSession.new(kb_dir, "model", "en", identity="z-current")
+    previous.save()
+    current.save()
     selected = []
 
     async def run_chat(root, session, **kwargs):
@@ -213,11 +213,9 @@ def test_cli_resume_selects_latest_in_selected_view(kb_dir, monkeypatch):
 
     monkeypatch.setattr("openkb.agent.chat.run_chat", run_chat)
     monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
-    result = CliRunner().invoke(
-        cli.cli, ["--kb-dir", str(kb_dir), "--view", "legacy", "chat", "--resume"]
-    )
+    result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "chat", "--resume"])
     assert result.exit_code == 0, result.output
-    assert selected == [own.id]
+    assert selected == [current.id]
 
 
 @pytest.mark.parametrize("entry", ["api", "desktop"])
@@ -289,30 +287,30 @@ def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model
     assert saved.answer_outcomes == ["answered"]
 
 
-def test_api_session_operations_respect_the_selected_view(kb_dir, monkeypatch):
+def test_api_session_operations_use_shared_sessions(kb_dir, monkeypatch):
     from openkb.agent.chat_session import ChatSession
 
-    own = ChatSession.new(kb_dir, "model", "en", view_id="legacy")
-    foreign = ChatSession.new(kb_dir, "model", "en", view_id="a" * 32)
+    own = ChatSession.new(kb_dir, "model", "en")
     own.save()
-    foreign.save()
     with api_client(kb_dir, monkeypatch) as client:
         listed = client.post("/api/v1/chat/sessions", json={"kb": "audit"})
         assert [item["id"] for item in listed.json()["sessions"]] == [own.id]
-        for operation in ("load", "delete"):
-            result = client.post(
-                f"/api/v1/chat/sessions/{operation}",
-                json={"kb": "audit", "session_id": foreign.id},
-            )
-            assert result.status_code == 409, result.text
-        assert foreign.path.exists()
+        loaded = client.post(
+            "/api/v1/chat/sessions/load", json={"kb": "audit", "session_id": own.id}
+        )
+        assert loaded.status_code == 200, loaded.text
+        invalid = client.post(
+            "/api/v1/chat/sessions/load",
+            json={"kb": "audit", "session_id": own.id, "view_id": "a" * 32},
+        )
+        assert invalid.status_code == 422
+        assert own.path.exists()
         result = client.post(
-            "/api/v1/chat/sessions/delete",
-            json={"kb": "audit", "session_id": foreign.id, "view_id": foreign.view_id},
+            "/api/v1/chat/sessions/delete", json={"kb": "audit", "session_id": own.id}
         )
         assert result.status_code == 200, result.text
         assert result.json()["deleted"] is True
-        assert not foreign.path.exists()
+        assert not own.path.exists()
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])

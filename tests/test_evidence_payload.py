@@ -114,7 +114,6 @@ def test_continuation_context_uses_physical_page_coordinates():
         "2",
     )
     result = project_evidence(source, offset=source["content"].index("| Unit |"))
-    heading, table = result["display_context"]
-    assert heading["page_spans"] == [{"page": 2, "start": 0, "end": 13}]
+    (table,) = result["display_context"]
     assert table["page_spans"] == [{"page": 2, "start": 14, "end": 47}]
-    assert "source_spans" not in heading and "source_spans" not in table
+    assert "source_spans" not in table

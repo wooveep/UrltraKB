@@ -28,6 +28,9 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
                 'answer': 'yes' if policy.valid(item, start_index, len(page_list)) else 'no'}
     if 'physical_index' not in item or item['physical_index'] is None:
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
+    if boundary and boundary.is_parent_root(item, page_list, start_index):
+        return {'list_index': item.get('list_index'), 'answer': 'yes', 'title': title,
+                'page_number': item['physical_index']}
     anchor = unique_heading(item, page_list, start_index)
     if anchor and (boundary is None or boundary.proves_membership(anchor)):
         return {'list_index': item.get('list_index'), 'title': title,
@@ -965,17 +968,23 @@ async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorr
 
     while current_incorrect:
         print(f"Fixing {len(current_incorrect)} incorrect results")
-        before = copy.deepcopy(current_toc) if getattr(policy, 'unit_kind', None) == 'block' else None
+        before = copy.deepcopy(current_toc) if not policy or getattr(policy, 'unit_kind', None) == 'block' else None
+        failed_before = {item['list_index'] for item in current_incorrect}
         
         current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
                 
         fix_attempt += 1
         if before is not None and current_incorrect and before == current_toc:
-            reasons = [policy.validate_entry(current_toc[item['list_index']], start_index, len(page_list))
-                       for item in current_incorrect]
-            if logger:
-                logger.info({'block_correction_stop': 'no_progress', 'reasons': reasons})
-            raise BlockContractError(f"Unverified content-block anchors: correction made no progress: {reasons}")
+            if policy:
+                reasons = [policy.validate_entry(current_toc[item['list_index']], start_index, len(page_list))
+                           for item in current_incorrect]
+                if logger:
+                    logger.info({'block_correction_stop': 'no_progress', 'reasons': reasons})
+                raise BlockContractError(f"Unverified content-block anchors: correction made no progress: {reasons}")
+            if failed_before == {item['list_index'] for item in current_incorrect}:
+                if logger:
+                    logger.info({'physical_correction_stop': 'no_progress'})
+                break
         if fix_attempt >= max_attempts:
             if logger:
                 logger.info("Maximum fix attempts reached")
@@ -1145,7 +1154,8 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
     if node['end_index'] - node['start_index'] > opt.max_page_num_each_node and token_num >= opt.max_token_num_each_node:
         print('large node:', node['title'], 'start_index:', node['start_index'], 'end_index:', node['end_index'], 'token_num:', token_num)
 
-        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger, boundary=SectionBoundary.from_node(node), **({'policy': policy} if policy else {}))
+        boundary = SectionBoundary.from_node(node)
+        node_toc_tree = await meta_processor(node_page_list, mode='process_no_toc', start_index=node['start_index'], opt=opt, logger=logger, boundary=boundary, **({'policy': policy} if policy else {}))
         node_toc_tree = await check_title_appearance_in_start_concurrent(node_toc_tree, page_list, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
         
         # Filter out items with None physical_index before post_processing
@@ -1162,9 +1172,13 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
             # A generated label may vary on an unchanged single section. No
             # smaller range was found; keep this leaf instead of recursing forever.
             return node
+        elif policy and valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
+            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], policy=policy)
         
-        elif valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
-            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], **({"policy": policy} if policy else {}))
+        elif not policy and valid_node_toc_items and boundary.is_parent_root(valid_node_toc_items[0], node_page_list, node['start_index']):
+            if len(valid_node_toc_items) == 1:
+                return node
+            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'])
         else:
             node['nodes'] = post_processing(valid_node_toc_items, node['end_index'], **({"policy": policy} if policy else {}))
         

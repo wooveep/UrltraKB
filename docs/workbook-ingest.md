@@ -28,11 +28,11 @@ read removes full cell values from clipped metadata.
 Cell ranges are finite, inclusive A1 ranges, may be disjoint, and select only
 stored content. Frozen normalized character spans remain the common indexing
 coordinate; worksheet/cell locators map those spans to original evidence.
-Historical views list the names and units of their own publication snapshot.
+Historical reads list the names and units of their own publication snapshot.
 
 Verification: real three-sheet XLSX imports, per-sheet model failure and retry,
 sparse typed/formula fixtures, API/CLI reads, retained-input single-sheet retry,
-segmented indexing/offline recompile, pinned-history reads and version-wait resume.
+segmented indexing/offline recompile, pinned-history reads and retained-input retries.
 A spawned runtime worker uses a local model-boundary HTTP fixture to verify partial
 task status and retry. Qt offscreen checks cover table rendering and cell selection.
 
@@ -43,11 +43,10 @@ and layout evidence also preserves its identity. Ambiguous replacements receive
 fresh identities. Every mapping records its basis and previous revision.
 
 Confirmed empty sheets and sheets absent from a reliable inventory retire their
-contribution to the current applicable version. Retirement and per-unit refresh
+contribution to the shared knowledge base. Retirement and per-unit refresh
 reasons commit together; history remains readable. Objects without extracted cells,
 per-sheet parser failures and a failed whole-workbook inventory cannot prove
-emptiness. They retain previous successful evidence within the same view and show
-the new failed target; a different applicable version never inherits that success.
+emptiness. They retain previous successful evidence and show the new failed target.
 Removal previews enumerate owned sheets. Retrying skips already completed or
 retired targets. The desktop sheet table distinguishes empty, deleted, objects-only
 and parse-failed outcomes.

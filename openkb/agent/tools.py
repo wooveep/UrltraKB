@@ -123,7 +123,17 @@ def get_wiki_page_content(
     result = select_page_part(result, part or None)
     if not result["page_range"]:
         return f"No content found for pages {pages} in {doc_name}."
-    return result["content"] + "\n\n"
+    images = [
+        {"page": unit["page"], "images": unit["images"]}
+        for unit in result["units"]
+        if unit.get("images")
+    ]
+    metadata = (
+        "\n\nSelected-page image references (metadata):\n" + _json.dumps(images, ensure_ascii=False)
+        if images
+        else ""
+    )
+    return result["content"] + metadata + "\n\n"
 
 
 _MIME_TYPES = {

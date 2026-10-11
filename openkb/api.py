@@ -284,7 +284,7 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        selected = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
+        selected = await resolve_api_scope(kb_dir, request.view_id)
         if request.stream:
             return StreamingResponse(
                 _stream_query(request, kb_dir, fastapi_request), media_type="text/event-stream"
@@ -304,7 +304,6 @@ def create_app() -> FastAPI:
             image_coverage=result.image_coverage,
             saved_path=result.saved_path,
             answer_outcome=result.answer_outcome,
-            scope_candidates=result.scope_candidates,
         )
 
     @app.post("/api/v1/chat", response_model=ChatResponse)
@@ -314,7 +313,7 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        selected = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
+        selected = await resolve_api_scope(kb_dir, request.view_id)
         from openkb.application.conversations import continue_conversation
         from openkb.application.sessions import load_conversation
 
@@ -356,7 +355,6 @@ def create_app() -> FastAPI:
             model_usage=result.model_usage,
             image_coverage=result.image_coverage,
             answer_outcome=result.answer_outcome,
-            scope_candidates=result.scope_candidates,
         )
 
     @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)

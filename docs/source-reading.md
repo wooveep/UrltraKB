@@ -16,13 +16,14 @@
 CLI 返回包含正文、修订和覆盖信息的 JSON：
 
 ```sh
-openkb --kb-dir /path/to/kb --view VIEW_ID source SOURCE_ID --pages 2-3
-openkb --kb-dir /path/to/kb --view VIEW_ID source SOURCE_ID \
+openkb --kb-dir /path/to/kb source SOURCE_ID --pages 2-3
+openkb --kb-dir /path/to/kb source SOURCE_ID \
   --knowledge-revision KNOWLEDGE_REVISION_ID --pages 3
 ```
 
 API `POST /api/v1/document/source` 接受 `kb`、`hash`（来源 ID）、`view_id`、
-`source_revision_id`、`knowledge_revision_id` 和可选 `pages`。无 `pages` 读取全文。
+`source_revision_id`、`knowledge_revision_id` 和可选 `pages`。`view_id` 可省略，
+仅接受共享知识库的内部标识 `legacy`。无 `pages` 读取全文。
 响应的 `page_range` 是实际返回的页号，`pages` 是已验证的物理总页数；请求范围内
 没有记录的页在 `diagnostics` 中列出，不会凭空补正文。旧库缺少页序或处理依据时
 `coverage` 为 `unknown`、物理总页数为空，保留已有页号而不猜测缺失页。
@@ -47,5 +48,5 @@ openkb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
 ```
 
 API 对应可选字段为 `chars: "0:120"`；桌面原文窗口提供相同范围输入。
-问答来源工具 `get_text_content` 返回相同字符范围和原文件映射，且受当前版本证据范围限制。
-重编译复用冻结输入和分类；watch 对本地图片的更改和缺失状态也生成新的输入版本。
+问答来源工具 `get_text_content` 返回相同字符范围和原文件映射，且受所选知识快照的证据范围限制。
+重编译复用冻结输入和分类；watch 对本地图片的更改和缺失状态也生成新的内容修订。

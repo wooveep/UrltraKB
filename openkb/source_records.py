@@ -9,7 +9,7 @@ from openkb.pending.policies import CURRENT_POLICY
 
 RecordId = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-ViewId = Annotated[str, Field(pattern=r"^(legacy|[a-f0-9]{32})$")]
+ViewId = Annotated[str, Field(pattern=r"^legacy$")]
 DocName = Annotated[str, Field(pattern=r"^[^./\\][^/\\]*$")]
 
 
@@ -60,8 +60,6 @@ class Source(Record):
     contribution_empty: bool = False
     excluded_inputs: dict[RecordId, Literal["empty", "withdrawn"]] = Field(default_factory=dict)
     legacy_hash: str | None = None
-    annotation_id: RecordId | None = None
-    family_id: RecordId | None = None
 
 
 class FrozenAsset(Record):

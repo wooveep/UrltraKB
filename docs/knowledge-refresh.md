@@ -7,24 +7,23 @@ actually produced them. Their text and frozen originals remain readable.
 
 Current questions and subsequent compilations exclude pending pages and inactive
 inputs. A historical read identifies the actual knowledge and source revisions.
-Importing a different product applicability leaves the earlier view independent.
-An explicit family default remains saved even when its view has no current evidence.
-Empty and withdrawn inputs remain excluded even after a later import of the same
-source into another view.
+Empty and withdrawn input revisions remain excluded after a later import of the
+same source. New content revisions may contribute to the shared knowledge base
+without restoring the excluded revisions.
 
-Select a view from `openkb views list`, then use:
+Refresh the shared knowledge base:
 
 ```sh
-openkb --view VIEW refresh status
-openkb --view VIEW refresh run
-openkb --view VIEW refresh proposals
-openkb --view VIEW refresh show PROPOSAL
-openkb --view VIEW refresh accept PROPOSAL --version REVIEWED_VERSION
-openkb --view VIEW refresh history
-openkb --view VIEW refresh read-history KNOWLEDGE_REVISION summaries/PAGE
+openkb refresh status
+openkb refresh run
+openkb refresh proposals
+openkb refresh show PROPOSAL
+openkb refresh accept PROPOSAL --version REVIEWED_VERSION
+openkb refresh history
+openkb refresh read-history KNOWLEDGE_REVISION summaries/PAGE
 ```
 
-Refresh rebuilds generated knowledge from that view's successful, currently valid
+Refresh rebuilds generated knowledge from the knowledge base’s successful, currently valid
 retained inputs. It does not parse the originals again. Finish a failed or pending
 source import before refreshing. Withdrawn or explicitly empty contributions are
 excluded. If no input remains, generated current pages retire while snapshots stay.
@@ -41,7 +40,7 @@ reviewed source revision contributes no current knowledge. `openkb list` shows i
 generation. The operation rejects a changed source. Import and recompilation do not
 silently clear remaining refresh reasons.
 
-In the desktop Documents panel, **待刷新知识** opens the view status, refresh action,
+In the desktop Documents panel, **待刷新知识** opens the knowledge status, refresh action,
 saved differences and **阅读历史知识**. **确认所选资料贡献为空** binds confirmation to
 the inspected revision. Reading a pending page displays its validity and actual
 source revisions in the source panel.
@@ -49,7 +48,7 @@ source revisions in the source panel.
 HTTP clients use `GET /api/v1/refresh/status`, `POST /api/v1/refresh`,
 `POST /api/v1/refresh/empty`, `GET /api/v1/refresh/proposals`,
 `POST /api/v1/refresh/proposal`, `POST /api/v1/refresh/accept`, and
-`GET /api/v1/refresh/history`. Requests select `kb` and `view_id`; empty confirmation
+`GET /api/v1/refresh/history`. Requests select `kb`; the optional internal `view_id` can only be `legacy`. Empty confirmation
 also supplies `source_id` and `generation`, and acceptance supplies `proposal_id`
 and the reviewed `version`. `POST /api/v1/page` accepts `knowledge_revision_id` for
 an immutable historical read. Page responses include validity and actual revisions.

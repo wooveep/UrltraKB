@@ -298,7 +298,6 @@ def aggregate_usage(
 
 def mark_source(kb_dir: Path, source_id: str) -> None:
     from openkb.source_catalog import read_source
-    from openkb.source_changes import source_view
     from openkb.unit_publication import list_source_units, read_unit_publication
 
     path = kb_dir / ".openkb/usage/sources" / f"{source_id}.json"
@@ -309,9 +308,7 @@ def mark_source(kb_dir: Path, source_id: str) -> None:
     for unit in list_source_units(kb_dir, source_id):
         try:
             historical |= bool(
-                read_unit_publication(
-                    kb_dir, unit.unit_id, source_view(kb_dir, source)
-                ).knowledge_revision_id
+                read_unit_publication(kb_dir, unit.unit_id, "legacy").knowledge_revision_id
             )
         except FileNotFoundError:
             pass

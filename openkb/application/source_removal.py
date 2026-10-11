@@ -5,11 +5,11 @@ import json
 from pathlib import Path
 
 from openkb.artifact_references import list_artifact_references
-from openkb.knowledge_scope import KnowledgeScope, live_scope
+from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.mutation import mutation_scope
 from openkb.source_catalog import list_sources, record_path, write_record
-from openkb.source_changes import exclude_source_inputs, source_change_heads, source_view
-from openkb.unit_publication import list_source_units, read_head
+from openkb.source_changes import exclude_source_inputs, source_change_heads
+from openkb.unit_publication import list_source_units
 
 
 def unmapped_removal_matches(kb_dir: Path, registry, identifier: str):
@@ -23,28 +23,18 @@ def unmapped_removal_matches(kb_dir: Path, registry, identifier: str):
 def preview_source_removal(kb_dir: Path, identifier: str, scope: KnowledgeScope | None):
     from openkb.application.removal import RemovalPreview, RemoveAction, RemovePlan
 
+    view = resolve_scope(kb_dir, scope)
     matches = [
         source
         for source in list_sources(kb_dir)
         if not source.removed
         and identifier in {source.source_id, source.doc_name, source.name, source.legacy_hash}
     ]
-    if scope:
-        matches = [
-            source
-            for source in matches
-            if any(
-                unit.unit_id in read_head(kb_dir, scope.view_id).inputs
-                for unit in list_source_units(kb_dir, source.source_id)
-            )
-            or source_view(kb_dir, source) == scope.view_id
-        ]
     if not matches:
         return None
     if len(matches) > 1:
         return RemovalPreview("multiple", candidates=tuple(s.source_id for s in matches))
     source = matches[0]
-    view = scope or live_scope(kb_dir, source_view(kb_dir, source))
     changed = exclude_source_inputs(kb_dir, source, "withdrawn").model_copy(
         update={"removed": True, "target_generation": source.target_generation + 1}
     )

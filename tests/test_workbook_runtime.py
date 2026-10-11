@@ -104,27 +104,3 @@ def test_partial_workbook_task_can_retry_without_repeating_completed_sheets(kb_d
         server.shutdown()
         server.server_close()
         thread.join(5)
-
-
-def test_workbook_waiting_for_version_keeps_task_blocked(kb_dir, three_sheets, pdf_model):
-    import shutil
-
-    from openkb.application.documents import import_document
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
-    from openkb.view_records import SourceMetadata
-
-    metadata = SourceMetadata(product="Fixture", family="Worksheets")
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
-    assert first.status == "added"
-    copied = three_sheets.with_name("waiting.xlsx")
-    shutil.copyfile(three_sheets, copied)
-    manager = TaskManager(history_dir=kb_dir / "history")
-    try:
-        task = manager.submit(kb_dir, [ImportFile(str(copied), metadata=metadata)])
-        outcome = manager.wait(task, timeout=30)
-        assert outcome.state == "blocked", outcome
-        assert outcome.results[0].status == "blocked"
-    finally:
-        manager.shutdown(stop=True)
-        assert manager.join(10)

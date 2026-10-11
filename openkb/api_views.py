@@ -15,18 +15,7 @@ class ViewRequest(BaseModel):
     view_id: ViewId | None = None
 
 
-async def resolve_api_scope(
-    root: Path, view_id: str | None, source_name: str | None = None
-) -> KnowledgeScope | None:
-    if source_name:
-        from openkb.application.query_choices import source_query_scope
-
-        if view_id:
-            raise HTTPException(status_code=400, detail="Select either a source or a view")
-        try:
-            return await asyncio.to_thread(source_query_scope, root, source_name)
-        except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+async def resolve_api_scope(root: Path, view_id: str | None) -> KnowledgeScope | None:
     if view_id is None:
         return None
     try:

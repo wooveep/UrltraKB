@@ -155,7 +155,7 @@ def confirm_empty_source(
     from openkb.mutation import mutation_scope
     from openkb.refresh_publication import RefreshResult
     from openkb.source_catalog import read_source, record_path, write_record
-    from openkb.source_changes import source_change_heads, source_view
+    from openkb.source_changes import source_change_heads
 
     kb_dir = kb_dir.resolve()
     if scope is not None:
@@ -163,16 +163,14 @@ def confirm_empty_source(
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".openkb", cancelled=context.cancelled, on_wait=context.waiting):
         source = read_source(kb_dir, source_id)
-        view_id = source_view(kb_dir, source)
-        if scope and (scope.read_only or scope.view_id != view_id):
-            raise ValueError("Empty confirmation belongs to another live view")
+        view_id = "legacy"
         if source.removed or source.target_generation != generation:
             return RefreshResult(
                 "conflict", view_id, message="Source changed; review the current source first"
             )
         from openkb.source_changes import exclude_source_inputs
 
-        changed = exclude_source_inputs(kb_dir, source, "empty", view_id=view_id).model_copy(
+        changed = exclude_source_inputs(kb_dir, source, "empty").model_copy(
             update={"contribution_empty": True, "target_generation": generation + 1}
         )
         records = {
@@ -214,7 +212,7 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
         try:
             from openkb.source_changes import unpublished_legacy_inputs
 
-            if scope.view_id == "legacy" and (missing := unpublished_legacy_inputs(kb_dir)):
+            if missing := unpublished_legacy_inputs(kb_dir):
                 return RefreshResult(
                     "blocked",
                     scope.view_id,
@@ -233,7 +231,6 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
                 }
                 from openkb.ingest_records import UnitRevision
                 from openkb.source_catalog import read_record
-                from openkb.source_changes import source_view
                 from openkb.workbooks.progress import workbook_progress
 
                 actual = {
@@ -243,11 +240,7 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
                 sources = list_sources(kb_dir)
                 pending_sources = []
                 for source in sources:
-                    if (
-                        source_view(kb_dir, source) != scope.view_id
-                        or source.removed
-                        or source.contribution_empty
-                    ):
+                    if source.removed or source.contribution_empty:
                         continue
                     progress = workbook_progress(kb_dir, source, scope.view_id)
                     if progress is not None and not progress.finished:

@@ -139,9 +139,14 @@ def test_raw_watcher_excludes_managed_and_hidden_outputs(kb_dir):
 
 
 @pytest.mark.parametrize(
-    "change", [{"minimum_writer_version": 999}, {"required_capabilities": ["future-inputs"]}]
+    "change",
+    [
+        {"minimum_writer_version": 999},
+        {"required_capabilities": ["future-inputs"]},
+        {"required_capabilities": ["version-review-v1"]},
+    ],
 )
-def test_future_catalog_blocks_settings_and_cancel_signals_but_allows_read(
+def test_unsupported_catalog_blocks_settings_and_cancel_signals_but_allows_read(
     kb_dir, tmp_path, pdf_model, change
 ):
     from openkb.application.documents import import_document

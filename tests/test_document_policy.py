@@ -76,7 +76,6 @@ def test_pdf_default_boundary(kb_dir, physical_pdf, pdf_model, page_count, lengt
 
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     with pymupdf.open(physical_pdf) as pdf:
         for _ in range(page_count - 3):
@@ -86,7 +85,6 @@ def test_pdf_default_boundary(kb_dir, physical_pdf, pdf_model, page_count, lengt
     result = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(product="Boundary", applicable_versions=("1",), family="manual"),
     )
     assert result.status == "added", result.message
     source = read_document_source(kb_dir, result.source_id)
@@ -173,7 +171,6 @@ def test_short_pdf_uses_only_known_execution_capacity(
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     apply_kb_config_patch(
         kb_dir,
@@ -187,7 +184,6 @@ def test_short_pdf_uses_only_known_execution_capacity(
     result = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(product="Capacity", applicable_versions=("1",), family="manual"),
     )
     if status == "insufficient":
         assert result.status == "failed"
@@ -222,7 +218,6 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
     from openkb.cli import cli
     from openkb.documents import read_document_source
     from openkb.ingest_result import describe_ingest
-    from openkb.view_records import SourceMetadata
 
     apply_kb_config_patch(
         kb_dir,
@@ -233,7 +228,6 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
     result = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(product="Capacity", applicable_versions=("1",), family="manual"),
     )
     before = read_document_source(kb_dir, result.source_id)
     assert "short / segmented" in "\n".join(describe_ingest(result))

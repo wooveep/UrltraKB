@@ -45,13 +45,38 @@ def test_unrelated_documents_share_the_ordinary_wiki(kb_dir, import_note):
     assert (kb_dir / "wiki/sources/budget.md").is_file()
 
 
-def test_ordinary_import_does_not_infer_a_product_from_its_title(import_note, monkeypatch):
-    def unexpected(*args, **kwargs):
-        raise AssertionError("Ordinary import must not classify product/manual versions")
+@pytest.mark.parametrize("explicit_scope", [False, True])
+@pytest.mark.parametrize("title", ["Atlas V1.2 Installation Manual", "Atlas V1.2 Research Report"])
+def test_titles_never_create_product_catalogs_or_gate_import(
+    kb_dir, import_note, explicit_scope, title
+):
+    from openkb.application.documents import import_document
+    from openkb.documents import read_document_source
+    from openkb.knowledge_scope import live_scope
+    from openkb.source_catalog import read_source
 
-    monkeypatch.setattr("openkb.version_evidence.source_title_candidates", unexpected)
-    result = import_note("field-notes-v2.pdf", "Field notes\nEdition 2\nPlanting observations.")
-    assert result.status == "added"
+    scope = live_scope(kb_dir) if explicit_scope else None
+    first = import_note("notes.pdf", title + "\nA documented observation.", scope=scope)
+    second = import_note("other.pdf", title + "\nAnother independent observation.", scope=scope)
+    assert first.status == second.status == "added"
+    assert first.units[0].view_id == second.units[0].view_id == "legacy"
+    source = read_source(kb_dir, first.source_id)
+    assert not {"annotation_id", "family_id"} & source.model_dump().keys()
+    assert "version_metadata" not in read_document_source(kb_dir, first.source_id)
+    for collection in (
+        "products",
+        "families",
+        "annotations",
+        "views",
+        "version-reviews",
+        "metadata-corrections",
+        "family-defaults",
+    ):
+        assert not (kb_dir / ".openkb/catalog" / collection).exists()
+    retry = import_document(kb_dir, kb_dir / "notes.pdf", scope=scope)
+    assert retry.status == "skipped"
+    assert retry.source_revision_id == first.source_revision_id
+    assert retry.units[0].successful_revision_id == first.units[0].successful_revision_id
 
 
 def test_question_wording_does_not_gate_available_documents(kb_dir, import_note):
@@ -144,7 +169,7 @@ def test_question_never_filters_the_shared_sources(kb_dir, import_note, question
     first = import_note("garden-v1.pdf", "Seedlings need two litres of water.")
     second = import_note("garden-v2.pdf", "Seedlings need three litres of water.")
     selected = resolve_query_views(kb_dir, question)
-    assert len(selected.views) == 1 and not selected.missing and not selected.candidates
+    assert len(selected.views) == 1 and not selected.missing
     view = selected.views[0]
     assert set(view.source_revision_ids) == {first.source_revision_id, second.source_revision_id}
     for name, amount in (("garden-v1", "two"), ("garden-v2", "three")):
@@ -158,6 +183,7 @@ def test_product_version_management_is_not_a_public_workflow():
     from openkb.cli import cli
 
     assert "versions" not in cli.commands and "views" not in cli.commands
+    assert "view_id" not in {parameter.name for parameter in cli.params}
     paths = [route.path for route in create_app().routes if hasattr(route, "path")]
     assert not any(path.startswith(("/api/v1/version", "/api/v1/views")) for path in paths)
     options = {parameter.name for parameter in cli.commands["add"].params}

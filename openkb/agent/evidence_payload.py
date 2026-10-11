@@ -79,11 +79,7 @@ def _window(source: dict, start: int, end: int, layout=None) -> dict:
     }
     if "_page_segments" in source:
         result["units"] = [
-            {
-                key: value
-                for key, value in unit.items()
-                if key not in {"content", "parts", "origin_locators"}
-            }
+            _page_unit(unit, result["page_spans"])
             for unit in source.get("units", [])
             if any(span["page"] == unit["page"] for span in result["page_spans"])
         ]
@@ -160,6 +156,32 @@ def _window(source: dict, start: int, end: int, layout=None) -> dict:
     return result
 
 
+def _page_unit(unit: dict, spans: list[dict]) -> dict:
+    """Page inventory is not evidence that each figure belongs to an excerpt."""
+    from openkb.markdown_images import image_references
+
+    selected = [span for span in spans if span["page"] == unit["page"]]
+    complete = any(span["start"] == 0 and span["end"] == len(unit["content"]) for span in selected)
+    images = unit.get("images", [])
+    if not complete:
+        paths = {
+            ref.local_path
+            for ref in image_references(unit["content"])
+            if any(span["start"] <= ref.start and ref.end <= span["end"] for span in selected)
+        }
+        images = [item for item in images if item["path"] in paths]
+    return {
+        **{
+            key: value
+            for key, value in unit.items()
+            if key not in {"content", "parts", "origin_locators", "images"}
+        },
+        "text_coverage": "complete" if complete else "partial",
+        "images": images,
+        "omitted_page_images": len(unit.get("images", [])) - len(images),
+    }
+
+
 def slice_evidence(source: dict, start: int, end: int, *, layout=None) -> dict:
     """Retain native positions and partial-value metadata for one exact subrange."""
     if (
@@ -182,7 +204,9 @@ def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
         if not token.map or lines[token.map[0]] >= offset:
             continue
         start, end = (lines[n] for n in token.map)
-        if token.type == "heading_open":
+        # Extracted page text may contain literal shell/configuration comments.
+        # Markdown syntax alone does not establish a native page heading.
+        if token.type == "heading_open" and "_page_segments" not in source:
             level = int(token.tag[1:])
             headings = [item for item in headings if item[0] < level] + [(level, start, end)]
         if token.type == "table_open" and start < offset < end:

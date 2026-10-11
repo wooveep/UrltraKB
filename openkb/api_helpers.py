@@ -45,7 +45,6 @@ from openkb.config import (
     resolve_kb_alias,
 )
 from openkb.knowledge_scope import KnowledgeScope
-from openkb.view_records import SourceMetadata
 
 if TYPE_CHECKING:
     from openkb.application.conversations import AnswerResult
@@ -287,7 +286,6 @@ async def _run_add_uploads(
     *,
     bundle=None,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
 ) -> AddResponse:
     results = []
@@ -302,7 +300,6 @@ async def _run_add_uploads(
                     bundle=bundle,
                     context=context,
                     scope=scope,
-                    metadata=metadata,
                     download_remote_assets=download_remote_assets,
                 )
             )
@@ -318,7 +315,6 @@ async def _stream_add_uploads(
     *,
     bundle=None,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
 ) -> AsyncIterator[str]:
     results: list[AddFileItem] = []
@@ -344,7 +340,6 @@ async def _stream_add_uploads(
                     bundle=bundle,
                     context=context,
                     scope=scope,
-                    metadata=metadata,
                     download_remote_assets=download_remote_assets,
                     on_published=on_published,
                     cancelled=cancelled.is_set,
@@ -390,7 +385,6 @@ async def _add_saved_file(
     bundle=None,
     context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
-    metadata: SourceMetadata | None = None,
     download_remote_assets: bool | None = None,
     on_published: Callable[[Path], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
@@ -410,7 +404,6 @@ async def _add_saved_file(
                     bundle=bundle,
                     context=context,
                     scope=scope,
-                    metadata=metadata,
                     download_remote_assets=download_remote_assets,
                 )
                 item = AddFileItem(**result.__dict__)
@@ -451,7 +444,6 @@ async def _answer_stream(operation, fastapi_request: Request) -> AsyncGenerator[
                         "model_usage": result.model_usage,
                         "context": result.context,
                         "answer_outcome": result.answer_outcome,
-                        "scope_candidates": result.scope_candidates,
                     }
                     if result.session_id:
                         data.update(session_id=result.session_id, turn_count=result.turn_count)
@@ -474,7 +466,7 @@ async def _stream_query(
 ) -> AsyncIterator[str]:
     from openkb.application.conversations import ask_question
 
-    scope = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     yield _sse("start", {"endpoint": "query"})
     stream = _answer_stream(
         lambda context: ask_question(
@@ -494,7 +486,7 @@ async def _stream_chat(
 ) -> AsyncIterator[str]:
     from openkb.application.conversations import continue_conversation
 
-    scope = await resolve_api_scope(kb_dir, request.view_id, request.source_name)
+    scope = await resolve_api_scope(kb_dir, request.view_id)
     new_id = None if request.session_id else ChatSession.new(kb_dir, "", "").id
     yield _sse("start", {"endpoint": "chat", "session_id": request.session_id or new_id})
     stream = _answer_stream(

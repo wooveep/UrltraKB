@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from openkb.agent.compile_messages import build_page_messages
 from openkb.agent.page_response import PageResponseError
 from openkb.agent.page_updates import PageUpdate, UnchangedPage
+from openkb.agent.source_excerpts import SourceExcerpts
 from openkb.agent.update_proposals import UpdateProposal, merge_proposals
 from openkb.compile_checkpoints import digest, document_checkpoints
 from openkb.llm_execution import active_executor, check_model_stop
@@ -83,6 +85,13 @@ async def generate_page_update(
             source_ranges=ranges if ranges is not None else patch.source_ranges,
         )
 
+    def excerpts(batch):
+        return SourceExcerpts(
+            windows.numeric_sources(
+                replace(originals, windows=tuple(batch)), long=current_original is None
+            )
+        )
+
     def messages(batch, editable, extra=""):
         check_model_stop()
         result = build_page_messages(
@@ -95,7 +104,7 @@ async def generate_page_update(
         )
         if patch.source_ranges is not None:
             result.append(windows.page_figures(batch, long=current_original is None).message())
-        return result
+        return excerpts(batch).messages(result)
 
     def capacity_error():
         return PageResponseError(
@@ -223,6 +232,7 @@ async def generate_page_update(
                 proposal_only=True,
                 checkpoints=checkpoints,
                 checkpoint_key=key,
+                original_excerpts=excerpts(batch),
             )
             value = (
                 {"status": "unchanged", "base_sha256": result.base_sha256, "reason": result.reason}

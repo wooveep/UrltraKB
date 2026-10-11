@@ -37,7 +37,7 @@ def describe_preview(preview):
         )
     )
     lines.append("重新处理会保留来源记录；人工修改仍通过待接受差异确认。")
-    if preview["version_impact"].get("superseded_proposals"):
+    if preview["publication_impact"].get("superseded_proposals"):
         lines.append("所选资料尚有待接受差异；新处理将使这些旧建议过期，人工正文仍保留。")
     for unit in preview["units"]:
         lines.append(

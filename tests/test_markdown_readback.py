@@ -35,7 +35,6 @@ def test_markdown_html_and_embedded_images_share_a_safe_asset_namespace(
 def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_model):
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     folder = tmp_path / "inputs"
     folder.mkdir()
@@ -51,7 +50,6 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_m
     result = import_document(
         kb_dir,
         source,
-        metadata=SourceMetadata(product="Text", applicable_versions=("1",), family="manual"),
     )
     assert result.status == "added", result.message
     assert result.source_id is not None

@@ -6,10 +6,18 @@ import json
 def summary_reply(messages, reply):
     if isinstance(reply, dict) and "status" in reply:
         return reply  # Deliberate invalid protocol fixtures must stay invalid.
+    task_message = next(
+        (
+            message
+            for message in reversed(messages)
+            if not str(message.get("content", "")).startswith("Original excerpt catalog:\n")
+        ),
+        {},
+    )
     if (
         isinstance(reply, dict)
         and "content" in reply
-        and "Write a summary page for this document" in str(messages[-1].get("content"))
+        and "Write a summary page for this document" in str(task_message.get("content"))
     ):
         return {"description": reply.get("description", "Fixture"), "content": reply["content"]}
     for message in messages:

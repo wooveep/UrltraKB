@@ -18,7 +18,7 @@ openkb --kb-dir /path/to/kb reprocess SOURCE_ID --execute PREVIEW_VERSION
 ```
 
 The first command only reads the retained original and assets, runtime file
-availability, current and saved policies, worksheet scope, version implications,
+availability, current and saved policies, worksheet scope, publication implications,
 pending proposals, and extraction budgets. It performs no conversion or model
 calls. Office startup is checked during execution, after the runtime file check.
 The desktop **预览重新处理** action displays this same plan. HTTP clients use
@@ -41,8 +41,7 @@ another processing revision, even when the policy is unchanged.
 Each workbook reprocess reads a complete inventory using the confirmed reader
 policy. Failed sheets retain their previous successful knowledge. Manual edits
 still produce proposals; a new target makes older pending proposals stale.
-Pending or cancelled version clarifications must be resolved before a new
-request. Quality notes and unfinished compilation stages remain visible.
+Quality notes and unfinished compilation stages remain visible.
 
 Supported container formats create a separate durable extraction group with the
 reviewed budget and discovery policy. Existing groups and recovered sources
@@ -57,7 +56,6 @@ match its recorded digest. A normalized Markdown/JSON snapshot alone is not an
 original. Missing originals, assets, or required capabilities block the action.
 
 Explicit execution captures the old mixed knowledge as history, admits the
-verified original, and waits for version clarification before compiling new
-knowledge. Matching original and normalized bytes still create an `original`
-revision instead of reusing a `legacy_snapshot`. Old mixed pages are not silently
-assigned a product version or split into worksheets during library upgrades.
+verified original, and compiles it into the shared knowledge base. Matching original and normalized bytes still create an `original`
+revision instead of reusing a `legacy_snapshot`. Existing pages remain in their captured history; new worksheet units come from
+the explicit processing request.

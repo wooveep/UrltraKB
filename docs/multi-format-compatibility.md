@@ -1,7 +1,7 @@
 # Multi-format compatibility and verification
 
 Development issues #73–#99 share the source admission, unit publication,
-knowledge view, evidence, and pending-work contracts. CLI, HTTP, desktop tasks,
+knowledge publication, evidence, and pending-work contracts. CLI, HTTP, desktop tasks,
 and raw-directory watching use these application services.
 
 ## Source operations
@@ -14,10 +14,10 @@ and raw-directory watching use these application services.
 | Recompile saved processing | `recompile` | Recompile preview / execute | Recompile selected source / worksheet |
 | Change processing policy | `reprocess SOURCE_ID`, then `--execute VERSION` | Reprocess preview / execute | Preview reprocessing, then confirm |
 | Discover/import embedded files | `process-pending` | Pending process / retry | Pending work; idle dispatcher |
-| Review versions / proposals | `versions`, `proposals` | Version review / proposal routes | Version clarification / pending differences |
+| Review publication proposals | `proposals` | Proposal routes | Pending differences |
 
-Use the command's `--help` or the HTTP OpenAPI schema for range, view, and
-revision parameters. `pages` means physical PDF pages, `blocks` frozen text
+Use the command's `--help` or the HTTP OpenAPI schema for range and revision
+parameters. `pages` means physical PDF pages, `blocks` frozen text
 blocks, `chars` Unicode character positions, and `cells` worksheet coordinates.
 Unknown legacy measurements remain unknown. A workbook is one source with
 independently published worksheet units.
@@ -38,12 +38,12 @@ HTTP JSON/SSE and watch events retain the same structured outcomes.
 
 `.openkb/catalog/schema.json` records `schema_version`,
 `minimum_writer_version`, and `required_capabilities`. Record schema 1 and
-catalog writer protocol 2 are supported by this implementation. These numbers
+catalog writer protocol 3 are supported by this implementation. These numbers
 describe storage protocols, not the application package version.
 
 The authoritative capability list is `openkb.catalog_schema.SUPPORTED_CAPABILITIES`:
 source revisions, unit publication, worksheet units/lifecycle, durable import
-dispatch, knowledge views, version review, query views, knowledge refresh,
+dispatch, shared knowledge, knowledge refresh,
 frozen normalization, multi-format sources, explicit reprocessing, and embedded
 discovery v3. Native host policies are frozen per discovery intent; older
 intents retain their earlier policies.
@@ -91,7 +91,7 @@ their human operator has recorded the evidence and conclusion:
 
 | Issue | Human verification still required |
 | --- | --- |
-| #100 | Selected real-model PDF/Markdown samples: model/config/input identity, facts and conditions, version/source accuracy, calls, timing and failures. |
+| #100 | Selected real-model PDF/Markdown samples: model/config/input identity, facts and conditions, source/revision accuracy, calls, timing and failures. |
 | #101 | Final Windows 11 x64 archive on a clean standard-user machine: bundled Office/Python/UNO/fonts/CFB helper, native dependencies, offline and Chinese/space paths, read-only install, coexistence, cancellation, all format/host samples. |
 | #102 | Final Debian 13.6 x64 GNOME/X11 archive: actual x86-64-v2 and ELF dependencies, private runtime, clean/offline/path/permissions/coexistence cases, timeout/cancellation cleanup, real font rendering, all format/host samples. |
 

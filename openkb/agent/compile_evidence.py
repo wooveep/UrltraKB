@@ -24,25 +24,6 @@ Summaries and generated navigation titles are not original factual evidence.
 """
 
 
-def version_context(kb_dir: Path, scope) -> str:
-    from openkb.source_catalog import read_record
-    from openkb.view_records import KnowledgeView
-
-    view = (
-        read_record(kb_dir, "views", scope.view_id, KnowledgeView)
-        if scope.view_id != "legacy"
-        else KnowledgeView(view_id="legacy")
-    )
-    return (
-        "\nVerified applicability from the selected knowledge view: "
-        + json.dumps(
-            {"product": view.product, "verified_applicable_versions": view.applicable_versions},
-            ensure_ascii=False,
-        )
-        + ". Empty versions mean unconfirmed; filenames cannot override this metadata.\n"
-    )
-
-
 @dataclass(frozen=True)
 class CompileEvidence:
     locator: str

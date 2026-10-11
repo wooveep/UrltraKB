@@ -120,7 +120,6 @@ def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, fixed_mod
 
 def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
     from openkb.application.documents import import_document
-    from openkb.view_records import SourceMetadata
 
     page = kb_dir / "wiki/summaries/notes.md"
     page.write_text("Keep the existing human explanation.")
@@ -128,7 +127,6 @@ def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
         kb_dir,
         pdf_source,
         scope=legacy_scope(kb_dir),
-        metadata=SourceMetadata(product=None, applicable_versions=()),
     )
     assert result.status == "blocked"
     assert page.read_text() == "Keep the existing human explanation."

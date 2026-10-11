@@ -106,9 +106,6 @@ def read_page_selection(raw: Any, specification: str | None = None) -> dict:
         left = cursor + len(block)
         segments.append((left, left + len(body), page["page"]))
         block += body or "[No extracted text or images]"
-        paths = ", ".join(image["path"] for image in page.get("images", []))
-        if paths:
-            block += f"\n[Images: {paths}]"
         parts.append(block)
         cursor += len(block)
     diagnostics = [] if complete else ["Physical-page coverage and extraction policy are unknown."]

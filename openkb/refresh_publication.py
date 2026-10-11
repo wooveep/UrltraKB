@@ -204,7 +204,7 @@ def read_refresh_candidate(kb_dir: Path, identity: str) -> tuple[Path, RefreshPr
 
     originals = set()
     for unit_id, revision_id in proposal.inputs.items():
-        revision, frozen, _ = validated_input(kb_dir, revision_id, proposal.view_id)
+        revision, frozen = validated_input(kb_dir, revision_id, proposal.view_id)
         if revision.unit_id != unit_id or proposal.expected_head.inputs.get(unit_id) != revision_id:
             raise ValueError("Refresh candidate input does not match its expected head")
         originals.add(frozen.original)

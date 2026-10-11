@@ -10,18 +10,7 @@ from openkb.ingest_records import KnowledgeRevision, UnitPublication, UnitRevisi
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
 from openkb.locks import kb_read_lock
 from openkb.source_catalog import list_sources, read_record, read_source_revision
-from openkb.source_records import Source
 from openkb.unit_publication import list_source_units, read_unit_publication
-from openkb.view_records import VersionAnnotation
-
-
-def source_view_id(kb_dir: Path, source: Source) -> str:
-    if source.annotation_id is None:
-        return "legacy"
-    annotation = read_record(kb_dir, "annotations", source.annotation_id, VersionAnnotation)
-    if annotation.source_id != source.source_id:
-        raise ValueError("Version annotation belongs to another source")
-    return annotation.view_id
 
 
 def _publication(kb_dir: Path, unit_id: str, view_id: str = "legacy") -> UnitPublication | None:
@@ -140,44 +129,23 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                 continue
             revision = read_source_revision(root, source.target_revision_id)
             units = list_source_units(root, source.source_id)
-            view_id = scope.view_id if scope else source_view_id(root, source)
+            view_id = scope.view_id if scope else "legacy"
             if scope and scope.read_only:
                 units = tuple(unit for unit in units if _snapshot_source(root, scope, unit.unit_id))
-            elif scope and source_view_id(root, source) != view_id:
-                units = tuple(unit for unit in units if _publication(root, unit.unit_id, view_id))
             states = [
                 state for unit in units if (state := _publication(root, unit.unit_id, view_id))
             ]
-            if scope and not states and source_view_id(root, source) != view_id:
-                continue
             actual = _manifest(root, states[0]) if states else None
             if scope and scope.read_only:
                 actual = _snapshot_source(root, scope, units[0].unit_id) if units else None
                 if actual is None:
                     continue
-            annotation_id = source.annotation_id
-            family_id = source.family_id
-            if (
-                scope
-                and (actual or states)
-                and not (
-                    len(units) > 1
-                    and not scope.read_only
-                    and source_view_id(root, source) == view_id
-                )
-            ):
+            if scope and (actual or states) and not (len(units) > 1 and not scope.read_only):
                 input_id = actual[1].unit_revision_id if actual else states[0].target_revision_id
                 if input_id is None:
                     raise ValueError("Published source is missing its input revision")
                 used = read_record(root, "unit-revisions", input_id, UnitRevision)
                 revision = read_source_revision(root, used.source_revision_id)
-                annotation_id = used.annotation_id
-                annotation = (
-                    read_record(root, "annotations", annotation_id, VersionAnnotation)
-                    if annotation_id
-                    else None
-                )
-                family_id = annotation.family_id if annotation else None
                 if scope.read_only and actual:
                     states = [
                         UnitPublication.model_validate_json(
@@ -190,9 +158,7 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
             inventory_error = (
                 inventory_failure(
                     root,
-                    source.target_revision_id
-                    if source_view_id(root, source) == view_id
-                    else revision.source_revision_id,
+                    source.target_revision_id,
                 )
                 if not (scope and scope.read_only)
                 else None
@@ -227,9 +193,7 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     "hash": source.source_id,
                     "source_generation": source.target_generation,
                     "validity": source_validity(
-                        root,
                         source,
-                        view_id,
                         revision.source_revision_id,
                         historical=bool(scope and scope.read_only),
                         unit_revision_id=actual[1].unit_revision_id if actual else None,
@@ -238,8 +202,6 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
                     "legacy_hash": source.legacy_hash,
                     "source_revision_id": revision.source_revision_id,
                     "view_id": view_id,
-                    "annotation_id": annotation_id,
-                    "family_id": family_id,
                     "name": source.name,
                     "type": revision.source_format,
                     **processing_details(
@@ -374,10 +336,8 @@ def read_admitted_source(
                 if not (scope and scope.read_only) or _snapshot_source(root, scope, unit.unit_id)
             )
             unit = eligible[0] if eligible else None
-        view_id = scope.view_id if scope else source_view_id(root, source)
+        view_id = scope.view_id if scope else "legacy"
         state = _publication(root, unit.unit_id, view_id) if unit else None
-        if scope and state is None and source_view_id(root, source) != view_id:
-            return None
         target_id = (
             read_record(
                 root, "unit-revisions", state.target_revision_id, UnitRevision
@@ -385,7 +345,7 @@ def read_admitted_source(
             if state
             else source.target_revision_id
         )
-        if source_view_id(root, source) == view_id and not (scope and scope.read_only):
+        if not (scope and scope.read_only):
             target_id = source.target_revision_id
         target = read_source_revision(root, source_revision_id or target_id)
         if target.source_id != source.source_id:
@@ -423,16 +383,6 @@ def read_admitted_source(
         ):
             actual = None
             target = read_source_revision(root, target_id)
-        if scope and actual is None:
-            assigned = any(
-                annotation.source_id == source.source_id
-                and annotation.source_revision_id == target.source_revision_id
-                and annotation.view_id == scope.view_id
-                for path in (root / ".openkb/catalog/annotations").glob("*.json")
-                for annotation in [read_record(root, "annotations", path.stem, VersionAnnotation)]
-            )
-            if not assigned and not (scope.view_id == "legacy" and source.annotation_id is None):
-                return None
         content = (
             state.message
             if state and state.message
@@ -514,22 +464,10 @@ def read_admitted_source(
             value is not None for value in (page_range, char_range, block_range)
         ):
             raise PageRangeError("No retained source map is available for this range")
-        annotation_id = source.annotation_id
         if actual and actual[1].unit_revision_id:
             body_revision = read_record(
                 root, "unit-revisions", actual[1].unit_revision_id, UnitRevision
             )
-            annotation_id = body_revision.annotation_id
-        annotation = (
-            read_record(root, "annotations", annotation_id, VersionAnnotation)
-            if annotation_id
-            else None
-        )
-        metadata = (
-            annotation.metadata.model_dump(mode="json")
-            if annotation and annotation.source_revision_id == target.source_revision_id
-            else {}
-        )
         from openkb.conversion_artifacts import read_conversion_artifacts
         from openkb.source_changes import source_validity
         from openkb.workbooks.catalog import inventory_failure
@@ -565,9 +503,7 @@ def read_admitted_source(
             **conversion,
             "hash": source.source_id,
             "validity": source_validity(
-                root,
                 source,
-                view_id,
                 target.source_revision_id,
                 historical=bool(source_revision_id or (scope and scope.read_only)),
                 unit_revision_id=actual[1].unit_revision_id
@@ -578,7 +514,6 @@ def read_admitted_source(
             ),
             "source_id": source.source_id,
             "view_id": view_id,
-            "version_metadata": metadata,
             "original_kind": target.original_kind,
             "source_revision_id": target.source_revision_id,
             "unit_revision_id": actual[1].unit_revision_id if actual else None,

@@ -6,8 +6,6 @@ from types import SimpleNamespace
 import pymupdf
 import pytest
 
-from openkb.view_records import SourceMetadata
-
 pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 
 
@@ -185,33 +183,6 @@ def test_pending_recovered_cnki_shares_one_conversion(
     assert job["status"] == "completed"
 
 
-def test_version_confirmation_uses_the_retained_pdf(kb_dir, cnki_source, conversions, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.version_review import (
-        resume_version_review,
-        review_source_version,
-        supplement_version_reviews,
-    )
-    from openkb.documents import read_document_source
-
-    first = import_document(kb_dir, cnki_source)
-    assert first.status == "added", first.message
-    review = review_source_version(kb_dir, first.source_id)
-    supplement_version_reviews(
-        kb_dir,
-        {
-            review.review_id: SourceMetadata(
-                product="Confirmed research", family="paper", applicable_versions=("2",)
-            )
-        },
-    )
-    cnki_source.unlink()
-    resumed = resume_version_review(kb_dir, review.review_id)
-    assert resumed.status == "added", resumed.message
-    assert len(conversions) == 1
-    assert read_document_source(kb_dir, first.source_id)["cnki"]["internal_format"] == "KDH"
-
-
 def test_long_cnki_uses_the_same_physical_pdf_pipeline(
     kb_dir, physical_pdf, pdf_model, conversions, tmp_path
 ):
@@ -232,12 +203,10 @@ def test_long_cnki_uses_the_same_physical_pdf_pipeline(
     cnki = import_document(
         kb_dir,
         source,
-        metadata=SourceMetadata(product="CNKI", family="paper", applicable_versions=("1",)),
     )
     direct = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(product="Direct PDF", family="paper", applicable_versions=("1",)),
     )
     assert cnki.status == direct.status == "added", (cnki.message, direct.message)
     assert len(conversions) == 1

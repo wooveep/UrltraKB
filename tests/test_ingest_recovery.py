@@ -141,10 +141,11 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
 
     source = tmp_path / "note.md"
     source.write_text("# Previously retained source\n")
-    from openkb.view_records import SourceMetadata
 
-    metadata = SourceMetadata(product="Fixture", applicable_versions=("1",))
-    first = import_document(kb_dir, source, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        source,
+    )
     saved = read_document_source(kb_dir, first.source_id)
     old = live_scope(kb_dir, saved["view_id"]).wiki_dir / "sources/note.md"
     previous_body = old.read_text()
@@ -178,12 +179,18 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
         if marker_failure:
             patch.setattr(mutation, "atomic_write_json", fail_marker)
         with pytest.raises(RecoveryRequired):
-            import_document(kb_dir, source, metadata=metadata)
+            import_document(
+                kb_dir,
+                source,
+            )
     assert repair_marker(kb_dir).is_file() is not marker_failure
     assert list((kb_dir / ".openkb/journal").glob("*.json"))
     # Recoverable I/O on the next call must not silently clear the explicit repair gate.
     with pytest.raises(RecoveryRequired):
-        import_document(kb_dir, source, metadata=metadata)
+        import_document(
+            kb_dir,
+            source,
+        )
     from openkb.application.repair import repair_knowledge_base
 
     assert repair_knowledge_base(kb_dir).repaired

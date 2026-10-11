@@ -5,7 +5,6 @@ from pathlib import Path
 
 from openkb.application.execution import ExecutionContext
 from openkb.application.retained_inputs import frozen_source_input
-from openkb.application.sources import source_view_id
 from openkb.compilation_report import collect_compile_report
 from openkb.ingest_records import UnitRevision
 from openkb.ingest_result import IngestResult
@@ -39,8 +38,6 @@ def retry_source(
             )
         if scope:
             scope = resolve_scope(root, scope, writable=True)
-            if scope.view_id != source_view_id(root, source):
-                raise ValueError("Source belongs to another knowledge view")
         if unit_id:
             unit = next(
                 (item for item in list_source_units(root, source_id) if item.unit_id == unit_id),

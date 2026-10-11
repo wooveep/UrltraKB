@@ -16,7 +16,7 @@ import click
     "--part", type=click.Choice(["body", "notes"]), help="Read only slide body or speaker notes."
 )
 @click.option("--source-revision", help="Read this frozen source revision.")
-@click.option("--knowledge-revision", help="Read a historical knowledge revision in --view.")
+@click.option("--knowledge-revision", help="Read an immutable knowledge snapshot.")
 @click.pass_context
 def source(
     ctx, source_id, pages, chars, blocks, part, source_revision, knowledge_revision, unit_id, cells
@@ -31,9 +31,7 @@ def source(
     try:
         scope = _selected_scope(ctx, root)
         if knowledge_revision:
-            scope = view_scope(
-                root, ctx.obj.get("view_id") or "legacy", historical_revision=knowledge_revision
-            )
+            scope = view_scope(root, "legacy", historical_revision=knowledge_revision)
         result = read_document_source(
             root,
             source_id,

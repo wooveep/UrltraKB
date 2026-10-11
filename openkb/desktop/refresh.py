@@ -1,8 +1,7 @@
-"""Inspect refresh reasons, rebuild a selected view, and review protected changes."""
+"""Inspect refresh reasons, rebuild shared knowledge, and review protected changes."""
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -14,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 
 from openkb.application.refresh import list_refresh_proposals, refresh_status
-from openkb.application.views import view_scope
 from openkb.runtime.records import TERMINAL
 from openkb.runtime.requests import AcceptRefreshProposal, RefreshKnowledge
 
@@ -28,11 +26,6 @@ class RefreshDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(980, 740)
         layout = QVBoxLayout(self)
-        self.views = QComboBox()
-        self.views.addItem("当前知识库", "legacy")
-        self.views.hide()
-        self.views.currentIndexChanged.connect(self.reload)
-        layout.addWidget(self.views)
         self.status = QLabel("正在读取知识库…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -71,19 +64,13 @@ class RefreshDialog(QDialog):
         self.reload()
 
     def reload(self):
-        view_id = self.views.currentData()
-        if not view_id:
-            return
         self._generation += 1
         generation = self._generation
         self.accept_button.setEnabled(False)
         self.proposals.clear()
 
         def read():
-            scope = view_scope(self.kb, view_id)
-            return refresh_status(self.kb, scope=scope), list_refresh_proposals(
-                self.kb, scope=scope
-            )
+            return refresh_status(self.kb), list_refresh_proposals(self.kb)
 
         def loaded(value, error):
             if error:
@@ -121,15 +108,12 @@ class RefreshDialog(QDialog):
     def show_history(self):
         from openkb.desktop.knowledge_history import KnowledgeHistoryDialog
 
-        if self.views.currentData():
-            KnowledgeHistoryDialog(self.window, self.kb, self.views.currentData()).show()
+        KnowledgeHistoryDialog(self.window, self.kb, "legacy").show()
 
     def run(self):
-        if self._task or not self.views.currentData():
+        if self._task:
             return
-        self._task = self.window.manager.submit(
-            self.kb, [RefreshKnowledge(view_id=self.views.currentData())]
-        )
+        self._task = self.window.manager.submit(self.kb, [RefreshKnowledge()])
         self.run_button.setEnabled(False)
         self.status.setText("刷新任务已提交，可在主窗口查看进度或安全停止。")
 

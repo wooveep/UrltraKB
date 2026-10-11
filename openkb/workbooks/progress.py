@@ -60,10 +60,7 @@ def workbook_progress(kb_dir: Path, source: Source, view_id: str) -> WorkbookPro
         target = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
         if target.unit_id != unit.unit_id:
             raise ValueError("Worksheet revision belongs to another unit")
-        if (
-            target.source_revision_id != revision.source_revision_id
-            or target.annotation_id != source.annotation_id
-        ):
+        if target.source_revision_id != revision.source_revision_id:
             complete = False
             continue
         try:

@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from openkb.view_records import SourceMetadata
-
 
 @dataclass(frozen=True, kw_only=True)
 class ViewSelection:
@@ -75,7 +73,6 @@ class ContinueConversation(ViewSelection):
 class ImportFile(ViewSelection):
     source: str
     wait_for_stable: bool = False
-    metadata: SourceMetadata | None = field(default=None, kw_only=True)
     download_remote_assets: bool | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
@@ -109,7 +106,6 @@ class RemoveDocument(ViewSelection):
 @dataclass(frozen=True)
 class ImportUrl(ViewSelection):
     url: str = field(repr=False)
-    metadata: SourceMetadata | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -209,10 +205,7 @@ class GenerateGraph(ViewSelection):
 
 @dataclass(frozen=True)
 class RefreshKnowledge(ViewSelection):
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.view_id is None:
-            raise ValueError("Select a view to refresh")
+    pass
 
 
 @dataclass(frozen=True)

@@ -282,8 +282,6 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
         openkb_dir = kb_dir / ".openkb"
         hashes_file = openkb_dir / "hashes.json"
         hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
-        if scope and scope.view_id != "legacy":
-            hashes = {}
 
         documents = []
         for file_hash, meta in hashes.items():
@@ -335,16 +333,9 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
     """Return structured status for the knowledge base (REST ``/status``)."""
     with kb_read_lock(kb_dir / ".openkb"):
         from openkb.application.refresh import refresh_status
-        from openkb.application.views import list_views
-        from openkb.knowledge_scope import live_scope
 
-        pending = {
-            view.view_id: refresh_status(kb_dir, scope=live_scope(kb_dir, view.view_id))[
-                "needs_refresh"
-            ]
-            for view in list_views(kb_dir)
-            if scope is None or scope.view_id == view.view_id
-        }
+        selected = resolve_scope(kb_dir, scope)
+        pending = {selected.view_id: refresh_status(kb_dir, scope=selected)["needs_refresh"]}
         wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
         subdirs = ["sources", "summaries", "concepts", "entities", "reports"]
         directories = {}

@@ -16,9 +16,7 @@ def selection(kb_dir, versions=()):
         for p in wiki.rglob("*")
         if p.is_file()
     }
-    return QuerySelection(
-        kb_dir, (QueryView(legacy_scope(kb_dir), "Platform", versions, None, (), files, 0),)
-    )
+    return QuerySelection(kb_dir, (QueryView(legacy_scope(kb_dir), None, (), files, 0),))
 
 
 def agent_for(kb_dir):
@@ -236,6 +234,6 @@ async def test_derived_page_read_points_to_original_without_certifying_its_claim
 def test_answer_outcome_survives_runtime_receipt_readback():
     from openkb.runtime.records import UnitResult
 
-    result = UnitResult("completed", answer_outcome="scope_unresolved")
+    result = UnitResult("completed", answer_outcome="insufficient_evidence")
     # JSON is the actual persisted receipt boundary.
     assert UnitResult.from_summary(json.loads(json.dumps(result.summary()))) == result

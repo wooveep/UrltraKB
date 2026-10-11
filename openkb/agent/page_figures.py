@@ -275,11 +275,24 @@ def page_figure_context(sources, windows, *, long: bool) -> PageFigures:
         }
         basis = {"source_path": path, **identity, "location": location}
         pages = {p["page"] for p in window.get("page_spans", [])}
+        projected_images = (
+            {
+                (unit["page"], image["path"])
+                for unit in window["units"]
+                for image in unit.get("images", [])
+            }
+            if "units" in window
+            else None
+        )
         selected = [
             f
             for f in entries
             if (
                 f.location["page"] in pages
+                and (
+                    projected_images is None
+                    or (f.location["page"], f.original_path) in projected_images
+                )
                 if "page" in f.location
                 else any(a <= f.location["start"] < b for a, b in window.get("source_spans", []))
             )

@@ -35,7 +35,6 @@ class QueryRequest(ViewRequest):
     question: str = Field(..., min_length=1)
     stream: bool = True
     save: bool = False
-    source_name: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -43,13 +42,9 @@ class QueryResponse(BaseModel):
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
     image_coverage: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
-    scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     saved_path: str | None = None
     answer_outcome: (
-        Literal[
-            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
-        ]
-        | None
+        Literal["answered", "partial", "insufficient_evidence", "evidence_rejected"] | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
@@ -58,7 +53,6 @@ class ChatRequest(ViewRequest):
     message: str = Field(..., min_length=1)
     session_id: str | None = None
     stream: bool = True
-    source_name: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -69,12 +63,8 @@ class ChatResponse(BaseModel):
     model_usage: dict | None = None
     image_coverage: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     context: dict | None = None
-    scope_candidates: tuple[dict, ...] = Field(default=(), exclude_if=lambda value: not value)
     answer_outcome: (
-        Literal[
-            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
-        ]
-        | None
+        Literal["answered", "partial", "insufficient_evidence", "evidence_rejected"] | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
@@ -207,8 +197,6 @@ class DocumentItem(BaseModel):
     validity: str = "current"
     source_generation: int | None = None
     view_id: str = "legacy"
-    family_id: str | None = None
-    annotation_id: str | None = None
     hash: str
     name: str
     type: str
@@ -434,7 +422,6 @@ class DocumentSourceResponse(BaseModel):
     processing_fingerprint: str | None = None
     validity: str = "current"
     view_id: str = "legacy"
-    version_metadata: dict = Field(default_factory=dict)
     hash: str
     name: str
     doc_name: str

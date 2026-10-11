@@ -24,8 +24,8 @@ class InputRevision:
 
     The original name is useful for display but is not an identity. Two people
     can independently import identical files, and each source can later receive
-    different version annotations. A byte digest allows storage sharing without
-    asserting that those sources have the same meaning or release history.
+    independent content revisions. A byte digest allows storage sharing without
+    asserting that those sources have the same origin or editing history.
     """
 
     source_id: str
@@ -87,7 +87,7 @@ Its repeated copy does not count toward document length or become a second sourc
 
 | State | Reader behavior | Next action |
 | --- | --- | --- |
-| Admitted | Original and discovered resources are retained before model calls. | Validate version metadata and prepare processing units. |
+| Admitted | Original and discovered resources are retained before model calls. | Validate source records and prepare processing units. |
 | Pending | The requested input has not started compilation. | Schedule it under the knowledge base's existing write lease. |
 | Converting | Normalized text and source coordinates are being frozen. | Retain the complete conversion before indexing. |
 | Indexing | Content blocks are passed to the original content-based algorithm. | Validate section anchors and retain the complete tree. |
@@ -96,11 +96,10 @@ Its repeated copy does not count toward document length or become a second sourc
 | Failed | A previous successful body remains readable if one exists. | Inspect the recorded failure and explicitly retry the target. |
 | Interrupted | The process ended while an attempt was in progress. | Recover transactions before accepting another write. |
 | Stopped | A cancellation request was observed at a safe boundary. | Preserve completed units and leave pending work visible. |
-| Needs version | No version annotation can be chosen without human input. | Present the concrete candidate metadata for clarification. |
 | Proposal | Generated changes overlap with existing human edits. | Compare and explicitly accept the proposed replacement. |
 | Withdrawn | The source is excluded from automatic future evidence selections. | Retain its immutable history for explicit inspection. |
-| Empty selection | The user intentionally selected no applicable versions. | Preserve that choice when the same original is imported again. |
-| Historical | An explicit revision supplies its own frozen source and assets. | Label the evidence with the selected version and revision. |
+| Empty contribution | The user confirmed that this source contributes no current knowledge. | Keep its excluded inputs and immutable history after later imports. |
+| Historical | An explicit revision supplies its own frozen source and assets. | Label the evidence with the selected knowledge and source revisions. |
 | Refresh required | Published pages depend on an older target revision. | Rebuild from the recorded dependency set under a checked generation. |
 | Corrupt asset | An image no longer matches the retained digest. | Report the damaged input instead of silently fetching a replacement. |
 | Unknown legacy | A historical artifact predates the physical source map. | Expose its saved text without inventing source coordinates. |

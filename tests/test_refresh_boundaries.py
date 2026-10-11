@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from test_query_views import _import_rule
@@ -18,11 +19,22 @@ from openkb.application.removal import remove_document
 from openkb.application.views import view_scope
 
 
+def _refresh_model(monkeypatch):
+    replies = iter([{"description": "Current rule", "content": "TLS is optional."}, {}])
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        ),
+    )
+
+
 @pytest.mark.parametrize("operation", ["empty", "withdrawn"])
-def test_inactive_input_is_not_restored_by_import_in_another_view(kb_dir, monkeypatch, operation):
+def test_reimport_does_not_restore_excluded_input(kb_dir, monkeypatch, operation):
     from openkb.source_catalog import read_source
 
-    first = _import_rule(kb_dir, monkeypatch, "install", "1", "TLS is required.")
+    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     if operation == "empty":
         confirm_empty_source(
@@ -33,13 +45,17 @@ def test_inactive_input_is_not_restored_by_import_in_another_view(kb_dir, monkey
     else:
         remove_document(kb_dir, first.source_id)
     (kb_dir / "install.pdf").unlink()
-    second = _import_rule(kb_dir, monkeypatch, "install", "2", "TLS is optional.")
+    second = _import_rule(kb_dir, monkeypatch, "install", "TLS is optional.")
     assert first.source_id == second.source_id
-    assert not resolve_query_views(kb_dir, "WinStack V1 TLS?", scope=scope).views
-    assert resolve_query_views(kb_dir, "WinStack V2 TLS?").views
+    from openkb.source_changes import effective_input
+
+    assert not effective_input(kb_dir, "legacy", first.units[0].successful_revision_id)
+    assert effective_input(kb_dir, "legacy", second.units[0].successful_revision_id)
+    assert resolve_query_views(kb_dir, "What is the TLS rule?", scope=scope).has_evidence
+    _refresh_model(monkeypatch)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "completed", result.message
-    assert not (scope.wiki_dir / "summaries/install.md").exists()
+    assert "TLS is optional." in (scope.wiki_dir / "summaries/install.md").read_text()
 
 
 def test_cleanup_rejects_symbolic_link_ancestors(kb_dir):
@@ -75,49 +91,40 @@ def test_known_link_cannot_hide_another_unparsed_managed_reference(kb_dir):
 def test_refresh_rejects_candidate_with_foreign_ancestry(kb_dir, monkeypatch):
     from openkb.application.pages import save_page
 
-    first = _import_rule(kb_dir, monkeypatch, "install", "1", "TLS is required.")
-    second = _import_rule(kb_dir, monkeypatch, "operate", "2", "TLS is optional.")
+    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
+    _import_rule(kb_dir, monkeypatch, "operate", "TLS is optional.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     save_page(kb_dir, "summaries/install", "Manual knowledge", scope=scope)
     remove_document(kb_dir, first.source_id)
+    _refresh_model(monkeypatch)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "awaiting_confirmation"
     path = kb_dir / ".openkb/refresh-proposals" / result.proposal_id / "proposal.json"
     candidate = json.loads(path.read_text())
-    candidate["candidate_manifest"]["base_revision_id"] = second.units[0].knowledge_revision_id
+    candidate["candidate_manifest"]["base_revision_id"] = first.units[0].knowledge_revision_id
     path.write_text(json.dumps(candidate))
     with pytest.raises(ValueError):
         read_refresh_proposal(kb_dir, result.proposal_id)
 
 
-def test_page_rejects_dependency_belonging_to_another_view(kb_dir, monkeypatch):
-    from openkb.unit_publication import read_head
-
-    first = _import_rule(kb_dir, monkeypatch, "install", "1", "TLS is required.")
-    second = _import_rule(kb_dir, monkeypatch, "operate", "2", "TLS is optional.")
-    scope = view_scope(kb_dir, first.units[0].view_id)
-    foreign = tuple(read_head(kb_dir, second.units[0].view_id).inputs.values())
+def test_readers_reject_a_source_revision_assigned_to_another_unit(kb_dir, monkeypatch):
+    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
+    second = _import_rule(kb_dir, monkeypatch, "operate", "TLS is optional.")
     path = (
-        kb_dir
-        / ".openkb/knowledge"
-        / scope.view_id
-        / "revisions"
-        / first.units[0].knowledge_revision_id
-        / "manifest.json"
+        kb_dir / ".openkb/catalog/unit-revisions" / f"{first.units[0].successful_revision_id}.json"
     )
-    manifest = json.loads(path.read_text())
-    manifest["page_dependencies"]["summaries/install.md"] = foreign
-    path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError):
-        read_page(kb_dir, "summaries/install", scope=scope)
-    with pytest.raises(ValueError):
-        selection = resolve_query_views(kb_dir, "WinStack V1?", scope=scope)
-        read_query_page(selection, "summaries/install.md", view_id=scope.view_id)
+    revision = json.loads(path.read_text())
+    revision["source_revision_id"] = second.source_revision_id
+    path.write_text(json.dumps(revision))
+    with pytest.raises(ValueError, match="another source"):
+        read_page(kb_dir, "summaries/install")
+    with pytest.raises(ValueError, match="another source"):
+        resolve_query_views(kb_dir, "What is the TLS rule?")
 
 
 @pytest.mark.parametrize("path", ["./summaries/install", "summaries/../summaries/install"])
 def test_page_alias_cannot_hide_pending_evidence(kb_dir, monkeypatch, path):
-    first = _import_rule(kb_dir, monkeypatch, "install", "1", "TLS is required.")
+    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     remove_document(kb_dir, first.source_id)
     page = read_page(kb_dir, path, scope=scope)
@@ -130,7 +137,7 @@ def test_refresh_preserves_cancellation(kb_dir, monkeypatch):
     from openkb.application.execution import ExecutionContext
     from openkb.locks import LockCancelled
 
-    first = _import_rule(kb_dir, monkeypatch, "install", "1", "TLS is required.")
+    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     stopped = False
     completion = __import__("litellm").completion

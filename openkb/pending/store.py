@@ -93,7 +93,6 @@ def reconcile_job(kb_dir, kind, job):
         state = "stale"
     elif kind == "import" and job.source_id:
         from openkb.ingest_records import UnitRevision
-        from openkb.source_changes import source_view
         from openkb.unit_publication import list_source_units, read_unit_publication
         from openkb.workbooks.progress import workbook_progress
 
@@ -105,9 +104,7 @@ def reconcile_job(kb_dir, kind, job):
             states = []
             for unit in units:
                 try:
-                    publication = read_unit_publication(
-                        kb_dir, unit.unit_id, source_view(kb_dir, source)
-                    )
+                    publication = read_unit_publication(kb_dir, unit.unit_id, "legacy")
                 except FileNotFoundError:
                     continue  # Admission can commit before any unit attempt has started.
                 revision = read_record(
@@ -115,7 +112,7 @@ def reconcile_job(kb_dir, kind, job):
                 )
                 if revision.source_revision_id == job.source_revision_id:
                     states.append(publication.status)
-            progress = workbook_progress(kb_dir, source, source_view(kb_dir, source))
+            progress = workbook_progress(kb_dir, source, "legacy")
             complete = len(states) == len(units)
             if progress is not None:
                 complete = progress.complete

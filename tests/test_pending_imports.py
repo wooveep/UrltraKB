@@ -16,12 +16,10 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
     from openkb.application.removal import remove_document
     from openkb.documents import read_document_source
     from openkb.source_catalog import list_sources
-    from openkb.view_records import SourceMetadata
 
     parent = import_document(
         kb_dir,
         embedded_docx,
-        metadata=SourceMetadata(product="Container", family="Outer", applicable_versions=("9",)),
     )
     assert parent.status == "added" and parent.discovery_pending == 1, parent.message
     remove_document(kb_dir, parent.source_id)
@@ -34,7 +32,7 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
     )
     body = read_document_source(kb_dir, recovered.source_id)
     assert recovered.name == "Recovered.docx" and "First section hello" in body["content"]
-    assert body["version_metadata"]["product"] != "Container"
+    assert "version_metadata" not in body
     inventory = pending_status(kb_dir)
     receipt = next(job for job in inventory["jobs"] if job["kind"] == "import")["result"]
     assert receipt["quality_known"] is True and receipt["quality"] == []

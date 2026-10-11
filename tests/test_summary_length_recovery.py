@@ -224,7 +224,10 @@ async def test_summary_window_admits_its_length_repair_before_using_the_allowanc
     context = ExecutionContext()
     with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
         await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert model_service.requests[1]["messages"][:3] == model_service.requests[0]["messages"]
+    original_messages = model_service.requests[0]["messages"]
+    repair_messages = model_service.requests[1]["messages"]
+    assert len(repair_messages) == len(original_messages) + 1
+    assert repair_messages[:-1] == original_messages
     assert "failed validation (page_truncated_response)" in str(model_service.requests[1])
     assert context.executor.calls == len(model_service.requests)
     assert original.strip().splitlines()[-1] in summary.read_text()

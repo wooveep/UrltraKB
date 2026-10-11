@@ -366,7 +366,6 @@ class Conversations:
                 or {
                     "partial": "已回答有依据的部分，其余事项暂留缺口。",
                     "insufficient_evidence": "本次未获得足够的已核实证据。",
-                    "scope_unresolved": "请选择本次要使用的资料范围后重新提问。",
                     "evidence_rejected": "生成的结论未通过证据检查。",
                 }.get(chat.answer_outcome, "")
             )

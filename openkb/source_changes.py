@@ -7,34 +7,20 @@ from openkb.ingest_records import KnowledgeHead, KnowledgeRevision, RefreshReaso
 from openkb.source_catalog import read_record, read_source, read_source_revision
 from openkb.source_records import Source
 from openkb.unit_publication import read_head
-from openkb.view_records import VersionAnnotation
-
-
-def source_view(kb_dir: Path, source: Source) -> str:
-    if source.annotation_id:
-        annotation = read_record(kb_dir, "annotations", source.annotation_id, VersionAnnotation)
-        if annotation.source_id != source.source_id:
-            raise ValueError("Version annotation belongs to another source")
-        return annotation.view_id
-    return "legacy"
 
 
 def effective_input(kb_dir: Path, view_id: str, identity: str) -> bool:
     from openkb.knowledge_evidence import validated_input
 
-    _, frozen, _ = validated_input(kb_dir, identity, view_id)
+    _, frozen = validated_input(kb_dir, identity, view_id)
     source = read_source(kb_dir, frozen.source_id)
     if source.removed or identity in source.excluded_inputs:
         return False
-    if source_view(kb_dir, source) != view_id:
-        return True  # A separate applicability continues to use its own published input.
     return not source.contribution_empty and source.target_revision_id == frozen.source_revision_id
 
 
 def source_validity(
-    kb_dir: Path,
     source: Source,
-    view_id: str,
     source_revision_id: str,
     *,
     historical: bool = False,
@@ -46,11 +32,10 @@ def source_validity(
         return "withdrawn"
     if unit_revision_id is not None and unit_revision_id in source.excluded_inputs:
         return source.excluded_inputs[unit_revision_id]
-    if source_view(kb_dir, source) == view_id:
-        if source.contribution_empty:
-            return "empty"
-        if source_revision_id != source.target_revision_id:
-            return "needs_refresh"
+    if source.contribution_empty:
+        return "empty"
+    if source_revision_id != source.target_revision_id:
+        return "needs_refresh"
     return "current"
 
 
@@ -59,7 +44,6 @@ def exclude_source_inputs(
     source: Source,
     kind: Literal["empty", "withdrawn"],
     *,
-    view_id: str | None = None,
     unit_ids: set[str] | None = None,
 ) -> Source:
     """An exclusion belongs to an exact input; later imports cannot resurrect it."""
@@ -76,18 +60,7 @@ def exclude_source_inputs(
         frozen = read_source_revision(kb_dir, revision.source_revision_id)
         if frozen.source_id != source.source_id:
             raise ValueError("Excluded input belongs to another source")
-        annotation = (
-            read_record(kb_dir, "annotations", revision.annotation_id, VersionAnnotation)
-            if revision.annotation_id
-            else None
-        )
-        if annotation and (
-            annotation.source_id != source.source_id
-            or annotation.source_revision_id != revision.source_revision_id
-        ):
-            raise ValueError("Excluded annotation belongs to another input")
-        if view_id is None or (annotation.view_id if annotation else "legacy") == view_id:
-            excluded[revision.unit_revision_id] = kind
+        excluded[revision.unit_revision_id] = kind
     return source.model_copy(update={"excluded_inputs": excluded})
 
 
@@ -97,18 +70,12 @@ def source_change_heads(
     kind: Literal["updated", "withdrawn", "empty"],
     *,
     unit_ids: set[str] | None = None,
-    view_id: str | None = None,
 ) -> dict[Path, KnowledgeHead]:
     """No writes or model calls: caller commits these alongside the changed Source."""
     records = {}
-    for path in sorted((kb_dir / ".openkb/knowledge").glob("*/head.json")):
-        head = read_head(kb_dir, path.parent.name)
-        if view_id is not None and head.view_id != view_id:
-            continue
-        if kind != "withdrawn" and head.view_id != source_view(kb_dir, source):
-            continue
-        if not head.knowledge_revision_id:
-            continue
+    path = kb_dir / ".openkb/knowledge/legacy/head.json"
+    head = read_head(kb_dir)
+    if head.knowledge_revision_id:
         manifest = KnowledgeRevision.model_validate_json(
             (path.parent / "revisions" / head.knowledge_revision_id / "manifest.json").read_text()
         )
@@ -126,45 +93,51 @@ def source_change_heads(
                 kind == "updated" and identity in source.excluded_inputs
             ):
                 affected[identity] = (frozen.source_revision_id, unit.unit_id)
-        if not affected:
-            continue
-        pending = dict(head.needs_refresh)
-        for page, dependencies in manifest.page_dependencies.items():
-            if not page.startswith(
-                ("summaries/", "concepts/", "entities/", "reports/", "explorations/", "index.md")
-            ):
-                continue
-            stale = set(dependencies) & affected.keys()
-            if not stale:
-                continue
-            retained = tuple(
-                r
-                for r in pending.get(page, ())
-                if r.source_id != source.source_id
-                or unit_ids is not None
-                and r.unit_id not in unit_ids
-            )
-            pending[page] = retained + tuple(
-                RefreshReason(
-                    source_id=source.source_id,
-                    source_revision_id=affected[identity][0],
-                    unit_id=affected[identity][1],
-                    target_revision_id=source.target_revision_id,
-                    source_generation=source.target_generation,
-                    kind=kind,
+        if affected:
+            pending = dict(head.needs_refresh)
+            for page, dependencies in manifest.page_dependencies.items():
+                if not page.startswith(
+                    (
+                        "summaries/",
+                        "concepts/",
+                        "entities/",
+                        "reports/",
+                        "explorations/",
+                        "index.md",
+                    )
+                ):
+                    continue
+                stale = set(dependencies) & affected.keys()
+                if not stale:
+                    continue
+                retained = tuple(
+                    r
+                    for r in pending.get(page, ())
+                    if r.source_id != source.source_id
+                    or unit_ids is not None
+                    and r.unit_id not in unit_ids
                 )
-                for identity in sorted(stale)
+                pending[page] = retained + tuple(
+                    RefreshReason(
+                        source_id=source.source_id,
+                        source_revision_id=affected[identity][0],
+                        unit_id=affected[identity][1],
+                        target_revision_id=source.target_revision_id,
+                        source_generation=source.target_generation,
+                        kind=kind,
+                    )
+                    for identity in sorted(stale)
+                )
+            records[path] = head.model_copy(
+                update={"generation": head.generation + 1, "needs_refresh": pending}
             )
-        records[path] = head.model_copy(
-            update={"generation": head.generation + 1, "needs_refresh": pending}
-        )
     if (
         source.legacy_hash
         and source.legacy_hash in unpublished_legacy_inputs(kb_dir)
         and (kb_dir / ".openkb/catalog/sources" / f"{source.source_id}.json").exists()
     ):
         # Legacy pages have no trustworthy per-page dependencies. Preserve the
-        # body and conservatively mark the old view until its inputs are migrated.
+        # body and conservatively mark the shared wiki until its inputs are migrated.
         from openkb.unit_publication import wiki_versions
 
         path = kb_dir / ".openkb/knowledge/legacy/head.json"
@@ -206,35 +179,6 @@ def unpublished_legacy_inputs(kb_dir: Path) -> dict[str, str]:
         ):
             missing[identity] = meta.get("name") or identity
     return missing
-
-
-def rebind_source_heads(kb_dir: Path, source: Source, view_id: str) -> dict[Path, KnowledgeHead]:
-    """Changing applicability leaves the old view's own inputs valid."""
-    previous_view = source_view(kb_dir, source)
-    if previous_view == view_id:
-        return {}
-    head = read_head(kb_dir, previous_view)
-    pending = {
-        page: kept
-        for page, reasons in head.needs_refresh.items()
-        if (
-            kept := tuple(
-                reason
-                for reason in reasons
-                if not (
-                    reason.source_id == source.source_id
-                    and reason.kind == "updated"
-                    and reason.target_revision_id == source.target_revision_id
-                )
-            )
-        )
-    }
-    if pending == head.needs_refresh:
-        return {}
-    path = kb_dir / ".openkb/knowledge" / previous_view / "head.json"
-    return {
-        path: head.model_copy(update={"generation": head.generation + 1, "needs_refresh": pending})
-    }
 
 
 def filter_compile_context(kb_dir: Path, wiki: Path, head: KnowledgeHead) -> None:

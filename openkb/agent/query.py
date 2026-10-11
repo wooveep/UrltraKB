@@ -155,7 +155,6 @@ async def iter_agent_response_events(
                     "answer": answer,
                     "history": [*history, {"role": "assistant", "content": answer}],
                     "answer_outcome": "insufficient_evidence",
-                    "scope_candidates": (),
                 },
             }
             return
@@ -285,7 +284,6 @@ async def iter_agent_response_events(
             "answer_outcome": answer_outcome,
             "unfinished": finisher.unfinished if finisher else (),
             "evidence_audit": None,
-            "scope_candidates": selection.candidates if selection else (),
         },
     }
 

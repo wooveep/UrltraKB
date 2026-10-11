@@ -194,8 +194,11 @@ def _execute(
                 root, request.source_id, generation=request.generation, scope=scope, context=context
             )
         else:
-            assert scope is not None
-            refreshed = asyncio.run(refresh_knowledge_view(root, scope=scope, context=context))
+            refreshed = asyncio.run(
+                refresh_knowledge_view(
+                    root, scope=resolve_scope(root, scope, writable=True), context=context
+                )
+            )
         return UnitResult(
             refreshed.status
             if refreshed.status in {"completed", "failed", "stopped"}
@@ -414,7 +417,6 @@ def _execute(
                 context=context,
                 prepared_dir=prepared_dir,
                 scope=scope,
-                metadata=request.metadata,
             )
         else:
             result = import_document(
@@ -423,7 +425,6 @@ def _execute(
                 context=context,
                 scope=scope,
                 source_root=root / "raw" if request.wait_for_stable else None,
-                metadata=request.metadata,
                 download_remote_assets=request.download_remote_assets,
             )
         return UnitResult(
@@ -473,7 +474,6 @@ def _execute(
             turn_count=answer.turn_count,
             output=answer.answer,
             answer_outcome=answer.answer_outcome,
-            scope_candidates=answer.scope_candidates,
             usage=answer.usage,
             model_usage=answer.model_usage,
             context=answer.context,

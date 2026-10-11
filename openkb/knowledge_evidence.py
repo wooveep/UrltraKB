@@ -7,12 +7,11 @@ from openkb.knowledge_scope import KnowledgeScope
 from openkb.source_catalog import read_record
 from openkb.source_records import SourceRevision
 from openkb.unit_publication import read_head
-from openkb.view_records import VersionAnnotation
 
 
 def validated_input(
     kb_dir: Path, identity: str, view_id: str
-) -> tuple[UnitRevision, SourceRevision, VersionAnnotation | None]:
+) -> tuple[UnitRevision, SourceRevision]:
     """Validate immutable associations, without requiring the input to remain current."""
     unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
     named = read_record(kb_dir, "units", unit.unit_id, ImportUnit)
@@ -21,21 +20,12 @@ def validated_input(
     source = read_record(kb_dir, "source-revisions", unit.source_revision_id, SourceRevision)
     if named.source_id != source.source_id:
         raise ValueError("Knowledge input belongs to another source")
-    annotation = (
-        read_record(kb_dir, "annotations", unit.annotation_id, VersionAnnotation)
-        if unit.annotation_id
-        else None
-    )
-    if annotation is None:
-        if view_id != "legacy":
-            raise ValueError("Versioned knowledge input is missing its annotation")
-    elif (
-        annotation.source_revision_id != source.source_revision_id
-        or annotation.source_id != source.source_id
-        or annotation.view_id != view_id
-    ):
-        raise ValueError("Knowledge annotation belongs to another input or view")
-    return unit, source, annotation
+    from pydantic import TypeAdapter
+
+    from openkb.source_records import ViewId
+
+    TypeAdapter(ViewId).validate_python(view_id)
+    return unit, source
 
 
 def publication_dependencies(kb_dir, head, pages, before, inputs, *, wiki=None):

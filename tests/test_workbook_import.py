@@ -412,39 +412,3 @@ def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_
     source = read_document_source(kb_dir, first.source_id, unit_id=alpha.unit_id, scope=pinned)
     assert {unit["name"] for unit in source["available_units"]} == {"Alpha", "Beta", "Gamma"}
     assert source["sheet"]["name"] == "Alpha"
-
-
-def test_workbook_version_clarification_resumes_all_retained_sheets(
-    kb_dir, three_sheets, pdf_model
-):
-    import shutil
-
-    from openkb.application.documents import import_document
-    from openkb.application.version_review import (
-        list_version_reviews,
-        resume_version_review,
-        supplement_version_reviews,
-    )
-    from openkb.view_records import SourceMetadata
-
-    metadata = SourceMetadata(product="Fixture", family="Worksheets")
-    first = import_document(kb_dir, three_sheets, metadata=metadata)
-    second_path = three_sheets.with_name("another.xlsx")
-    shutil.copyfile(three_sheets, second_path)
-    second = import_document(kb_dir, second_path, metadata=metadata)
-    assert first.status == "added" and second.status == "blocked"
-    assert len(second.units) == 3
-    pending = list_version_reviews(kb_dir)
-    assert len(pending) == 1
-    second_path.unlink()
-    supplement_version_reviews(
-        kb_dir, {pending[0].review_id: SourceMetadata(applicable_versions=("2.0",))}
-    )
-    resumed = resume_version_review(kb_dir, pending[0].review_id)
-    assert resumed.status == "added", resumed.message
-    assert {unit.name for unit in resumed.units if unit.status == "completed"} == {
-        "Alpha",
-        "Beta",
-        "Gamma",
-    }
-    assert list_version_reviews(kb_dir) == ()

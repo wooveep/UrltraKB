@@ -30,7 +30,6 @@ from openkb.unit_publication import (
     publish_unit_revision,
     record_unit_failure,
 )
-from openkb.view_records import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +123,7 @@ def result_from_publication(
 
 
 def pending_counts(kb_dir, admission):
-    """Count persisted work even when body inventory or version clarification fails."""
+    """Count persisted work even when body inventory fails."""
     from openkb.pending.store import jobs
 
     pending_jobs = [
@@ -149,7 +148,6 @@ def import_prepared_source(
     on_event: Callable[[dict], None] | None = None,
     origin_url: str | None = None,
     report=logger.info,
-    metadata: SourceMetadata | None = None,
     scope: KnowledgeScope | None = None,
     admission: Admission | None = None,
     retry_confirmed: bool = False,
@@ -209,44 +207,10 @@ def import_prepared_source(
     )
     if prepared.digest != admission.revision.digest:
         raise ValueError("Retained input no longer matches the source revision")
-    from openkb.application.version_review import (
-        VersionReview,
-    )
-    from openkb.application.views import bind_source_view
-    from openkb.normalization import (
-        normalization_fingerprint,
-        read_normalization,
-    )
-    from openkb.version_metadata import assess_version
+    from openkb.knowledge_scope import resolve_scope
+    from openkb.normalization import normalization_fingerprint
 
-    review_path = record_path(kb_dir, "version-reviews", admission.revision.source_revision_id)
-    review = (
-        read_record(kb_dir, "version-reviews", admission.revision.source_revision_id, VersionReview)
-        if review_path.exists()
-        else None
-    )
-    if review and review.status == "cancelled":
-        return IngestResult(
-            admission.source.identity,
-            "blocked",
-            (str(kb_dir / admission.revision.original),),
-            source_id=admission.source.source_id,
-            source_revision_id=admission.revision.source_revision_id,
-            unfinished=("version_metadata",),
-            message="Version clarification was cancelled; no work resumed.",
-            **pending_counts(kb_dir, admission),
-        )
-    assessment = assess_version(
-        kb_dir, admission, metadata, scope=scope, candidates=review.candidates if review else None
-    )
-    admission, scope = bind_source_view(
-        kb_dir,
-        admission,
-        assessment.metadata,
-        scope=scope,
-        evidence=assessment.evidence,
-        candidates=assessment.candidates,
-    )
+    scope = resolve_scope(kb_dir, scope, writable=True)
     resource_policy = None
     if admission.revision.source_format in {"html", "htm"}:
         from openkb.remote_assets import resolve_resource_policy
@@ -272,18 +236,13 @@ def import_prepared_source(
                 resource_policy=resource_policy,
             ),
         )
-    fingerprint = (
-        read_normalization(kb_dir, review.normalization_id)[1].fingerprint
-        if review
-        else admission.revision.reprocessing_policy
-        or normalization_fingerprint(
-            kb_dir,
-            scope=scope,
-            bundle=bundle,
-            source_revision=admission.revision,
-            doc_name=admission.source.doc_name,
-            resource_policy=resource_policy,
-        )
+    fingerprint = admission.revision.reprocessing_policy or normalization_fingerprint(
+        kb_dir,
+        scope=scope,
+        bundle=bundle,
+        source_revision=admission.revision,
+        doc_name=admission.source.doc_name,
+        resource_policy=resource_policy,
     )
 
     if admission.revision.source_format in {"xlsx", "xls"}:
@@ -295,8 +254,6 @@ def import_prepared_source(
             admission=admission,
             fingerprint=fingerprint,
             unit_id=unit_id,
-            assessment=assessment,
-            review=review,
             scope=scope,
             bundle=bundle,
             context=context,
@@ -309,8 +266,6 @@ def import_prepared_source(
         prepared,
         admission=admission,
         fingerprint=fingerprint,
-        assessment=assessment,
-        review=review,
         scope=scope,
         bundle=bundle,
         context=context,
@@ -329,8 +284,6 @@ def process_import_unit(
     *,
     admission,
     fingerprint,
-    assessment,
-    review,
     scope,
     bundle=None,
     context=None,
@@ -346,7 +299,6 @@ def process_import_unit(
         compile_short_doc,
     )
     from openkb.application.documents import _run_compile_with_retry
-    from openkb.application.version_review import complete_version_review, save_version_wait
     from openkb.indexer import index_long_document
     from openkb.normalization import restore_normalization, retain_normalization
 
@@ -384,8 +336,6 @@ def process_import_unit(
         retry_confirmed=retry_confirmed,
     )
     if not runnable:
-        if review:
-            complete_version_review(kb_dir, review, admission, state)
         return result_from_publication(
             kb_dir,
             admission,
@@ -417,22 +367,10 @@ def process_import_unit(
             from openkb.office.slide_content import read_slides, require_slide_navigation
 
             require_slide_navigation(read_slides(directory / normalized.office_path))
-        if assessment.missing_fields:
-            state = save_version_wait(kb_dir, admission, normalized, state, assessment)
-            return result_from_publication(kb_dir, admission, state, status="blocked")
         if sheet and sheet.content_state == "empty":
             from openkb.workbooks.lifecycle import retire_sheet
 
             state = retire_sheet(kb_dir, admission, unit, state, "empty", check_stop=check_stop)
-            if review:
-                try:
-                    complete_version_review(kb_dir, review, admission, state)
-                except RecoveryRequired:
-                    raise
-                except Exception:
-                    logger.warning(
-                        "Worksheet retired but version review completion was not recorded"
-                    )
             return result_from_publication(kb_dir, admission, state, status="added")
         from openkb.llm_usage import usage_context
 
@@ -629,13 +567,6 @@ def process_import_unit(
             )
         except Exception:
             logger.warning("Import committed but its progress notification was not delivered")
-    if review and state.status in {"completed", "awaiting_confirmation"}:
-        try:
-            complete_version_review(kb_dir, review, admission, state)
-        except RecoveryRequired:
-            raise
-        except Exception:
-            logger.warning("Knowledge published; clarification completion will reconcile on retry")
     return result_from_publication(
         kb_dir, admission, state, status="added" if state.status == "completed" else "blocked"
     )

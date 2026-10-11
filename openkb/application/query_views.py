@@ -1,33 +1,24 @@
 """Resolve and pin permitted knowledge evidence before creating reading tools."""
 
-import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from openkb.application.views import list_views, view_scope
-from openkb.ingest_records import ImportUnit, KnowledgeRevision, UnitRevision
+from openkb.application.views import view_scope
+from openkb.ingest_records import ImportUnit, KnowledgeRevision
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
-from openkb.locks import kb_ingest_lock, kb_read_lock
-from openkb.mutation import mutation_scope
-from openkb.source_catalog import read_record, read_source_revision, record_path, write_record
+from openkb.locks import kb_read_lock
+from openkb.source_catalog import read_record
 from openkb.unit_publication import read_head, wiki_versions
-from openkb.version_labels import version_key as _version_key
-from openkb.view_records import DocumentFamily, FamilyDefault, KnowledgeView
 
 
 @dataclass(frozen=True)
 class QueryView:
     scope: KnowledgeScope
-    product: str | None
-    applicable_versions: tuple[str, ...]
     knowledge_revision_id: str | None
     source_revision_ids: tuple[str, ...]
     files: dict[str, str]
     head_generation: int
-    reference_only: bool = False
     validity: str = "current"
-    product_id: str | None = None
-    product_aliases: tuple[str, ...] = ()
     source_revisions_by_path: dict[str, str] = field(default_factory=dict)
     retained_source_status: dict[str, dict] = field(default_factory=dict)
 
@@ -48,7 +39,6 @@ class QuerySelection:
     kb_dir: Path
     views: tuple[QueryView, ...]
     missing: tuple[str, ...] = ()
-    candidates: tuple[dict, ...] = ()
 
     def __post_init__(self):
         if len(self.views) > 1:
@@ -63,103 +53,12 @@ class QuerySelection:
         )
 
 
-def _input_family(kb_dir: Path, identity: str, view_id: str) -> str | None:
-    from openkb.knowledge_evidence import validated_input
-
-    annotation = validated_input(kb_dir, identity, view_id)[2]
-    return annotation.family_id if annotation else None
-
-
-def _published_inputs(kb_dir: Path, view_id: str) -> set[str]:
-    inputs = set(read_head(kb_dir, view_id).inputs.values())
-    for path in (kb_dir / ".openkb/knowledge" / view_id / "revisions").glob("*/manifest.json"):
-        manifest = KnowledgeRevision.model_validate_json(path.read_text())
-        if manifest.view_id != view_id or manifest.knowledge_revision_id != path.parent.name:
-            raise ValueError("Knowledge snapshot belongs to another view")
-        inputs.update(manifest.input_revisions)
-    return inputs
-
-
-def list_family_defaults(kb_dir: Path) -> tuple[dict, ...]:
-    """Expose each series' explicit choice and its published version candidates."""
-    with kb_read_lock(kb_dir / ".openkb"):
-        families = [
-            read_record(kb_dir, "families", path.stem, DocumentFamily)
-            for path in sorted((kb_dir / ".openkb/catalog/families").glob("*.json"))
-        ]
-        views = list_views(kb_dir)
-        result = []
-        for family in families:
-            path = record_path(kb_dir, "family-defaults", family.family_id)
-            selected = (
-                read_record(kb_dir, "family-defaults", family.family_id, FamilyDefault)
-                if path.exists()
-                else None
-            )
-            available = tuple(
-                view
-                for view in views
-                if view.unknown_source_id is None
-                and view.view_id != "legacy"
-                and any(
-                    _input_family(kb_dir, identity, view.view_id) == family.family_id
-                    for identity in _published_inputs(kb_dir, view.view_id)
-                )
-            )
-            if (
-                selected
-                and selected.view_id is not None
-                and selected.view_id not in {view.view_id for view in available}
-            ):
-                raise ValueError("Stored default does not belong to its published document family")
-            result.append(
-                {
-                    "family_id": family.family_id,
-                    "purpose": family.purpose,
-                    "product_id": family.product_id,
-                    "view_id": selected.view_id if selected else None,
-                    "available_views": available,
-                }
-            )
-        return tuple(result)
-
-
-def select_default_view(kb_dir: Path, family_id: str, view_id: str | None) -> FamilyDefault:
-    """Only an explicit selection changes a family's default; imports never call this."""
-    from openkb.catalog_schema import CatalogSchema, catalog_schema_path
-
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        choices = next(
-            (item for item in list_family_defaults(kb_dir) if item["family_id"] == family_id), None
-        )
-        if choices is None or (
-            view_id is not None
-            and view_id not in {view.view_id for view in choices["available_views"]}
-        ):
-            raise ValueError("Default must be a published version belonging to this family")
-        choice = FamilyDefault(family_id=family_id, view_id=view_id)
-        path = record_path(kb_dir, "family-defaults", family_id)
-        schema = catalog_schema_path(kb_dir)
-        with mutation_scope(kb_dir, [path, schema], operation="select-default-version"):
-            write_record(path, choice)
-            write_record(schema, CatalogSchema())
-        return choice
-
-
-def _pin_view(
-    kb_dir: Path,
-    view: KnowledgeView,
-    scope: KnowledgeScope | None = None,
-    *,
-    defaults: dict[str, str] | None = None,
-) -> QueryView | None:
-    head = read_head(kb_dir, view.view_id)
-    if view.view_id != "legacy" and head.knowledge_revision_id is None:
-        return None
+def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | None:
+    head = read_head(kb_dir)
     selected = (
         scope
         if scope and scope.read_only
-        else view_scope(kb_dir, view.view_id, historical_revision=head.knowledge_revision_id)
+        else view_scope(kb_dir, "legacy", historical_revision=head.knowledge_revision_id)
     )
     manifest = (
         KnowledgeRevision.model_validate_json(
@@ -171,33 +70,23 @@ def _pin_view(
     if manifest and manifest.view_id != selected.view_id:
         raise ValueError("Knowledge snapshot belongs to another view")
     inputs = manifest.input_revisions if manifest else tuple(head.inputs.values())
-    if view.view_id != "legacy" and not inputs:
-        return None
     from openkb.source_changes import effective_input
 
     historical = bool(scope and scope.read_only)
-    families = {identity: _input_family(kb_dir, identity, view.view_id) for identity in inputs}
-    applicable = tuple(
-        identity
-        for identity in inputs
-        if (not defaults or defaults.get(families[identity] or "", view.view_id) == view.view_id)
-    )
     active = {
         identity
-        for identity in applicable
-        if historical or effective_input(kb_dir, view.view_id, identity)
+        for identity in inputs
+        if historical or effective_input(kb_dir, selected.view_id, identity)
     }
     from openkb.retained_reprocessing import retained_reprocessing_input
 
     retained = {
         identity: status
-        for identity in applicable
+        for identity in inputs
         if identity not in active
-        and (status := retained_reprocessing_input(kb_dir, view.view_id, identity))
+        and (status := retained_reprocessing_input(kb_dir, selected.view_id, identity))
     }
-    allowed = tuple(
-        identity for identity in applicable if identity in active or identity in retained
-    )
+    allowed = tuple(identity for identity in inputs if identity in active or identity in retained)
     if inputs and not allowed:
         return None
     sources = []
@@ -207,8 +96,10 @@ def _pin_view(
     image_roots: list[str] = []
     image_revisions: dict[str, str] = {}
     for identity in allowed:
-        unit = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
-        sources.append(read_source_revision(kb_dir, unit.source_revision_id).source_revision_id)
+        from openkb.knowledge_evidence import validated_input
+
+        unit, source = validated_input(kb_dir, identity, selected.view_id)
+        sources.append(source.source_revision_id)
         named = read_record(kb_dir, "units", unit.unit_id, ImportUnit)
         if selected.read_only:
             from openkb.application.sources import _snapshot_source
@@ -249,9 +140,6 @@ def _pin_view(
                 and set(manifest.page_dependencies[name]).issubset(active)
             )
         }
-    from openkb.view_records import Product
-
-    product = read_record(kb_dir, "products", view.product_id, Product) if view.product_id else None
     source_revisions_by_path.update(
         (name, revision)
         for name in files
@@ -260,8 +148,6 @@ def _pin_view(
     )
     return QueryView(
         selected,
-        view.product,
-        view.applicable_versions,
         manifest.knowledge_revision_id if manifest else head.knowledge_revision_id,
         tuple(sorted(set(sources))),
         files,
@@ -271,45 +157,9 @@ def _pin_view(
         else "current_with_retained_originals"
         if retained
         else "current",
-        product_id=view.product_id,
-        product_aliases=product.aliases if product else (),
         source_revisions_by_path=source_revisions_by_path,
         retained_source_status=retained_source_status,
     )
-
-
-def _requested_versions(question: str, labels: set[str]) -> set[str]:
-    values = re.findall(
-        r"(?:\bv(?=\d)|\bversions?\s*[:：]?\s*|版本\s*[:：]?\s*)"
-        r"([\"'‘“]?)([A-Za-z0-9][A-Za-z0-9_.-]*)",
-        question,
-        re.IGNORECASE,
-    )
-    known = {_version_key(label) for label in labels}
-    requested = {
-        _version_key(value)
-        for quoted, value in values
-        if quoted or any(char.isdigit() for char in value) or _version_key(value) in known
-    }
-    for label in labels:
-        if re.search(
-            r"(?:\bversions?\s*[:：]?\s*|版本\s*[:：]?\s*)[\"'‘“]?"
-            + re.escape(label)
-            + r"(?=$|[\s.,?!，。？！\"'’”])",
-            question,
-            re.IGNORECASE,
-        ):
-            requested.add(_version_key(label))
-    return requested
-
-
-def _resolve_product_candidates(
-    views: tuple[KnowledgeView, ...], question: str, products=()
-) -> tuple[set[str], tuple[str, ...]]:
-    from openkb.product_identity import resolve_product_question
-
-    result = resolve_product_question(views, question, products)
-    return set(result.product_ids), result.notes
 
 
 def resolve_query_views(
@@ -325,14 +175,8 @@ def resolve_query_views(
     if scope is not None:
         scope = resolve_scope(root, scope)
     with kb_read_lock(root / ".openkb"):
-        views = (
-            (KnowledgeView(view_id="legacy"),)
-            if scope is None
-            else tuple(view for view in list_views(root) if view.view_id == scope.view_id)
-        )
-        selected = tuple(
-            pinned for view in views if (pinned := _pin_view(root, view, scope)) is not None
-        )
+        pinned = _pin_view(root, scope)
+        selected = (pinned,) if pinned is not None else ()
         missing = (
             (f"No published documents in selected collection {scope.view_id}.",)
             if scope is not None and not selected

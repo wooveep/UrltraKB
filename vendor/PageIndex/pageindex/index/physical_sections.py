@@ -43,6 +43,13 @@ def heading_candidates(item, page_list, start_index=1):
             if parsed and compact(parsed[0]) == wanted:
                 result.append({'unit': number, 'range': [offset, offset + len(line.rstrip())],
                                'excerpt': line.strip(), 'section': parsed[1]})
+            # PDF extraction often puts a section number on its own line.
+            # Only join the immediately adjacent title, keeping its native span.
+            number_only = re.fullmatch(r'(\d+(?:\.\d+)*)(?:[.、)])?', line.strip())
+            if number_only and index + 1 < len(lines) and compact(lines[index + 1]) == wanted:
+                end = offset + len(line) + len(lines[index + 1].rstrip())
+                result.append({'unit': number, 'range': [offset, end],
+                               'excerpt': text[offset:end], 'section': number_only.group(1)})
             # A wrapped heading may cross the page boundary. Keep its start on
             # the first page and record the continuation, without altering text.
             if parsed and index == len(lines) - 1 and number - start_index + 1 < len(page_list):
@@ -69,6 +76,7 @@ class SectionBoundary:
     end: tuple[int, int]
     start_confirmed: bool = True
     end_confirmed: bool = True
+    structure: str | None = None
 
     def contains(self, anchor):
         position = (anchor['unit'], anchor['range'][0])
@@ -76,6 +84,45 @@ class SectionBoundary:
 
     def proves_membership(self, anchor):
         return self.start_confirmed and self.end_confirmed and self.contains(anchor)
+
+    def is_parent_root(self, item, page_list, start_index=1):
+        """Inherit a verified parent position; never treat it as its own child."""
+        if item.get('physical_index') != self.start[0]:
+            return False
+        parsed = heading(item['title'])
+        title = parsed[0] if parsed else item['title']
+        parent = heading(self.title)
+        if compact(title) != compact(parent[0] if parent else self.title):
+            return False
+        section = item.get('structure') or (parsed[1] if parsed else None)
+        if parsed and parsed[1] and section != parsed[1]:
+            return False
+        parent_section = self.structure or (parent[1] if parent else None)
+        if parent_section and section and parent_section != section:
+            return False
+        page = self.start[0] - start_index
+        if not 0 <= page < len(page_list):
+            return False
+        # A continuation may use the next page, but its heading must start on
+        # the verified parent page. An unrelated next-page title is not a root.
+        # Resolve the parent from its own evidence first. Filtering with an
+        # unverified child's anchor/number would let that child select itself.
+        candidates = [anchor for anchor in heading_candidates({'title': self.title}, page_list[page:page + 2], self.start[0])
+                      if anchor['unit'] == self.start[0]
+                      and (not parent_section or not anchor['section'] or anchor['section'] == parent_section)]
+        if self.start_confirmed:
+            candidates = [anchor for anchor in candidates
+                          if (anchor['unit'], anchor['range'][0]) == self.start]
+        # A page-only parent position may be refined only by a unique native
+        # title on that same verified page, never a match on a neighboring page.
+        if len(candidates) != 1:
+            return False
+        anchor = candidates[0]
+        if section and anchor['section'] and section != anchor['section']:
+            return False
+        claimed = item.get('anchor')
+        return claimed is None or all(claimed.get(key) == anchor.get(key)
+                                      for key in ('unit', 'range', 'continuation'))
 
     @classmethod
     def from_node(cls, node):
@@ -85,6 +132,7 @@ class SectionBoundary:
             (start['unit'], start['range'][0]) if start else (node['start_index'], 0),
             (end['unit'], end['range'][0]) if end else (node['end_index'] + 1, 0),
             bool(start), bool(end),
+            node.get('structure'),
         )
 
 

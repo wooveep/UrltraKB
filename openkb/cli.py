@@ -310,7 +310,6 @@ def add_single_file(
     context=None,
     scope: KnowledgeScope | None = None,
     origin_url: str | None = None,
-    metadata=None,
     download_remote_assets: bool | None = None,
 ):
     return document_use_cases.add_single_file(
@@ -322,7 +321,6 @@ def add_single_file(
         report=click.echo,
         scope=scope,
         origin_url=origin_url,
-        metadata=metadata,
         download_remote_assets=download_remote_assets,
     )
 
@@ -343,12 +341,7 @@ def add_single_file(
     help="Path to a KB root directory (overrides auto-detection).",
 )
 @click.pass_context
-@click.option(
-    "--view",
-    "view_id",
-    help="Explicit internal storage scope or exact source filename for diagnostics.",
-)
-def cli(ctx, verbose, kb_dir_override, view_id):
+def cli(ctx, verbose, kb_dir_override):
     """OpenKB — Karpathy's LLM Knowledge Base workflow, powered by PageIndex."""
     logging.basicConfig(
         format="%(name)s %(levelname)s: %(message)s",
@@ -357,7 +350,6 @@ def cli(ctx, verbose, kb_dir_override, view_id):
     if verbose:
         logging.getLogger("openkb").setLevel(logging.DEBUG)
     ctx.ensure_object(dict)
-    ctx.obj["view_id"] = view_id
     if kb_dir_override:
         ctx.obj["kb_dir_override"] = Path(kb_dir_override)
     else:
@@ -377,14 +369,9 @@ def _require_kb_root(ctx):
 
 
 def _selected_scope(ctx, kb_dir):
-    from openkb.application.views import view_scope
+    from openkb.knowledge_scope import live_scope
 
-    identity = ctx.obj.get("view_id")
-    if identity and identity != "legacy" and not re.fullmatch(r"[a-f0-9]{32}", identity):
-        from openkb.application.query_choices import source_query_scope
-
-        return source_query_scope(kb_dir, identity)
-    return view_scope(kb_dir, identity) if identity else None
+    return live_scope(kb_dir)
 
 
 def _with_kb_lock(*, exclusive: bool):
@@ -2054,7 +2041,6 @@ def _save_deck_iteration(kb_dir: Path, deck_name: str) -> Path | None:
     skill history. Returns the saved iteration path, or ``None`` if there's
     no current deck to save.
     """
-    import re
     from openkb.deck import deck_dir as _deck_dir, deck_workspace_dir as _deck_workspace_dir
 
     src = _deck_dir(kb_dir, deck_name)

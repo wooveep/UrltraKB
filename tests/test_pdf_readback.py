@@ -188,12 +188,10 @@ def test_managed_copy_preserves_existing_markdown_title_semantics(tmp_path, pdf_
 def test_reading_rejects_a_replaced_or_truncated_page_map(kb_dir, physical_pdf, pdf_model, damage):
     from openkb.application.documents import import_document
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     imported = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(product="Readback", applicable_versions=("1",), family="manual"),
     )
     assert imported.status == "added", imported.message
     unit = imported.units[0]
@@ -227,7 +225,6 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
     from openkb.application.documents import import_document
     from openkb.application.views import view_scope
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     config_path = kb_dir / ".openkb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
@@ -236,11 +233,6 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
     imported = import_document(
         kb_dir,
         physical_pdf,
-        metadata=SourceMetadata(
-            product="Readback",
-            applicable_versions=("1",),
-            family="manual",
-        ),
     )
     assert imported.status == "added", imported.message
     scope = view_scope(
@@ -267,8 +259,6 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
         [
             "--kb-dir",
             str(kb_dir),
-            "--view",
-            scope.view_id,
             "source",
             imported.source_id,
             "--pages",

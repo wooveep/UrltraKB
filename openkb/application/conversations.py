@@ -39,12 +39,8 @@ class AnswerResult:
     usage: dict[str, int | None] | None = None
     model_usage: dict | None = None
     context: dict | None = None
-    scope_candidates: tuple[dict, ...] = ()
     answer_outcome: (
-        Literal[
-            "answered", "partial", "insufficient_evidence", "scope_unresolved", "evidence_rejected"
-        ]
-        | None
+        Literal["answered", "partial", "insufficient_evidence", "evidence_rejected"] | None
     ) = None
     image_coverage: tuple[dict, ...] = ()
 
@@ -168,7 +164,6 @@ async def ask_question(
                                 usage=event["data"].get("usage"),
                                 answer_outcome=event["data"].get("answer_outcome"),
                                 unfinished=tuple(event["data"].get("unfinished", ())),
-                                scope_candidates=tuple(event["data"].get("scope_candidates", ())),
                                 resources=(str(path),) if path else (),
                                 changes=(f"created: {path.relative_to(root).as_posix()}",)
                                 if path
@@ -352,9 +347,6 @@ async def continue_conversation(
                                     context=prepared.diagnostics,
                                     answer_outcome=event["data"].get("answer_outcome"),
                                     unfinished=tuple(event["data"].get("unfinished", ())),
-                                    scope_candidates=tuple(
-                                        event["data"].get("scope_candidates", ())
-                                    ),
                                 )
                             if context.cancelled():
                                 break

@@ -34,9 +34,7 @@ def retire_sheet(
         or current.attempt_id != state.attempt_id
     ):
         raise ValueError("Worksheet target changed before retirement")
-    changed = exclude_source_inputs(
-        kb_dir, source, kind, view_id=state.view_id, unit_ids={unit.unit_id}
-    )
+    changed = exclude_source_inputs(kb_dir, source, kind, unit_ids={unit.unit_id})
     completed = state.model_copy(
         update={
             "status": "empty" if kind == "empty" else "retired",
@@ -54,9 +52,7 @@ def retire_sheet(
         record_path(kb_dir, "sources", source.source_id): changed,
         record_path(kb_dir, "publications", state.publication_id): completed,
         record_path(kb_dir, "attempts", state.attempt_id): completed,
-        **source_change_heads(
-            kb_dir, changed, kind, unit_ids={unit.unit_id}, view_id=state.view_id
-        ),
+        **source_change_heads(kb_dir, changed, kind, unit_ids={unit.unit_id}),
     }
     with mutation_scope(kb_dir, list(records), operation="retire-worksheet"):
         for path, record in records.items():

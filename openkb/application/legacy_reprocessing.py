@@ -45,7 +45,6 @@ def _original(kb_dir, identity, meta):
 
 def preview_legacy_reprocessing(kb_dir, identifier, source, *, scope=None):
     import json
-    import uuid
 
     from openkb.application.reprocessing import runtime_availability
     from openkb.config import resolve_effective_config
@@ -58,8 +57,8 @@ def preview_legacy_reprocessing(kb_dir, identifier, source, *, scope=None):
     if scope:
         scope = resolve_scope(kb_dir, scope)
     blockers = []
-    if source and source.removed or scope and (scope.read_only or scope.view_id != "legacy"):
-        blockers.append("Choose the current legacy source in the legacy view")
+    if source and source.removed or scope and scope.read_only:
+        blockers.append("Choose an active source in the current knowledge base")
     original = _original(kb_dir, identity, meta)
     if original is None:
         blockers.append("Legacy original is missing or its registered digest cannot be verified")
@@ -105,7 +104,7 @@ def preview_legacy_reprocessing(kb_dir, identifier, source, *, scope=None):
     current = json.loads(
         normalization_fingerprint(
             kb_dir,
-            scope=live_scope(kb_dir, uuid.uuid4().hex),
+            scope=live_scope(kb_dir),
             source_revision=LegacyPolicyInput(
                 identity, source_format, tuple(policy_assets), decoding
             ),
@@ -145,11 +144,9 @@ def preview_legacy_reprocessing(kb_dir, identifier, source, *, scope=None):
         ],
         "range": "all_worksheets" if source_format in {"xls", "xlsx"} else "body",
         "range_note": "Parse the original explicitly; retain legacy mixed knowledge as history",
-        "version_impact": {
+        "publication_impact": {
             "view_id": "legacy",
-            "metadata": None,
-            "review_status": None,
-            "note": "Keep legacy knowledge separate; clarify version before compilation",
+            "note": "Retain earlier knowledge snapshots and compile the frozen original",
         },
         "discovery": {
             "will_schedule": source_format in discovery_hosts(CURRENT_POLICY),
@@ -169,16 +166,10 @@ def reprocess_legacy(kb_dir, preview, context, credentials):
     import json
 
     from openkb.application.ingestion import import_prepared_source
-    from openkb.application.views import bind_source_view
     from openkb.legacy_sources import admit_legacy_snapshot
     from openkb.source_catalog import (
-        Admission,
         admit_source_revision,
-        read_record,
-        read_source_revision,
     )
-    from openkb.source_records import DiscoveryIntent
-    from openkb.view_records import SourceMetadata
 
     identity = preview["legacy_hash"]
     meta = HashRegistry(kb_dir / ".openkb/hashes.json").get(identity)
@@ -204,17 +195,6 @@ def reprocess_legacy(kb_dir, preview, context, credentials):
         except ImportTextRejected as exc:
             return rejection_result(prepared, exc)
         source = admit_legacy_snapshot(kb_dir, identity, meta)
-        frozen = read_source_revision(kb_dir, source.target_revision_id)
-        intent = read_record(
-            kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent
-        )
-        if source.annotation_id is None:
-            source = bind_source_view(
-                kb_dir,
-                Admission(source, frozen, intent),
-                SourceMetadata(),
-                scope=live_scope(kb_dir, "legacy"),
-            )[0].source
         admission = admit_source_revision(
             kb_dir,
             prepared,

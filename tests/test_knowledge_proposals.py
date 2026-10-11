@@ -98,16 +98,17 @@ def test_editing_after_review_keeps_the_proposal_and_current_page(kb_dir, pendin
     assert list_proposals(kb_dir)[0].proposal_id == pending_proposal
 
 
-def test_proposals_are_confined_to_the_selected_view(kb_dir, pending_proposal):
+def test_proposals_are_confined_to_the_knowledge_base(kb_dir, pending_proposal, tmp_path):
     from openkb.application.proposals import accept_proposal, list_proposals, read_proposal
     from openkb.knowledge_scope import live_scope
 
-    foreign = live_scope(kb_dir, "a" * 32)
+    foreign = live_scope(tmp_path / "foreign")
     opened = read_proposal(kb_dir, pending_proposal)
-    assert list_proposals(kb_dir, scope=foreign) == ()
-    with pytest.raises(ValueError, match="view"):
+    with pytest.raises(ValueError, match="different knowledge base"):
+        list_proposals(kb_dir, scope=foreign)
+    with pytest.raises(ValueError, match="different knowledge base"):
         read_proposal(kb_dir, pending_proposal, scope=foreign)
-    with pytest.raises(ValueError, match="view"):
+    with pytest.raises(ValueError, match="different knowledge base"):
         accept_proposal(kb_dir, pending_proposal, version=opened.version, scope=foreign)
     assert read_page(kb_dir, "summaries/guide").body == "Human explanation."
 

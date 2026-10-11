@@ -1,0 +1,1180 @@
+{
+  "schema_version": 2,
+  "status": "combined_v14_engineering_passed_resume_method_pending",
+  "recorded_at": "2026-10-11T16:30:33.384647+00:00",
+  "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
+  "current_candidate_code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
+  "baseline": {
+    "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
+    "executed": false,
+    "frozen_files": 15734,
+    "strict_pass": 39,
+    "strict_fail": 6,
+    "groups": 45,
+    "unique_questions": 30,
+    "common_pdf_groups": 27,
+    "api_format_difference_groups": 16,
+    "negative_groups": 2,
+    "supplemental_full_answer_pass": 38,
+    "original_historical_pass": 39,
+    "v8_finish_integrity": {
+      "matched": 15734,
+      "changed": 0,
+      "extra": 0,
+      "excluded_existing_env_files": 5,
+      "baseline_executed": false,
+      "evidence": {
+        "path": ".scratch/text-image-repair-20261011/baseline-integrity-finish-final-v8.json",
+        "sha256": "7b9ee0621edc82c45ee496a3fd588d7dce96e944ab05e920bd86b5dbe9d3f0b2"
+      }
+    }
+  },
+  "current_v8": {
+    "status": "FAILED_SEMANTIC_COMPARISON_REFRESH_INTERRUPTED",
+    "code": "2b60aa5a2cddeae49edee0ef7790cd882291b247",
+    "engineering": {
+      "pytest_passed": 2671,
+      "pytest_skipped": 53,
+      "pytest_warnings": 199,
+      "pytest_seconds": 562.5,
+      "ruff": "PASS",
+      "format_files": 637,
+      "mypy_files": 369,
+      "diff_check": "PASS"
+    },
+    "harness_assessment": {
+      "before_execution": true,
+      "independent_parent_tests_passed": 87,
+      "launcher_process_probes_passed": 6,
+      "initial_fixture_invocation": "77 PASS / 10 setup errors; fixed by explicitly loading the unchanged fixture plugin; retained failed log",
+      "candidate_execution_mode": "existing physical candidates after exact read-only archive",
+      "budget_used_before": {
+        "install": 105,
+        "corpus": 144
+      },
+      "corpus_continuation": "Proven failed-view whole-task budget, inputs initially empty; seven new bindings explicitly declared, not old per-source resume"
+    },
+    "synthetic": {
+      "shared_compile": {
+        "PASS": 39,
+        "FAIL": 6,
+        "UNKNOWN": 3,
+        "pages": 48
+      },
+      "independent_compile": {
+        "PASS": 57,
+        "FAIL": 11,
+        "UNKNOWN": 11,
+        "pages": 79
+      },
+      "independent_qa": {
+        "PASS": 26,
+        "FAIL": 4,
+        "UNKNOWN": 0,
+        "answers": 30,
+        "core_criteria": "30/30 PASS"
+      },
+      "payload": {
+        "sends": 319,
+        "requests": 319,
+        "responses": 319,
+        "image_findings": 0,
+        "scope": "seven terminal synthetic runs only",
+        "certifies_semantics": false
+      }
+    },
+    "material": {
+      "installation": "REPROCESS_PUBLISHED_REQUIRED_TARGET_REFRESH_AND_SEMANTICS_FAILED",
+      "corpus_reprocess": "FAILED_LAST_SOURCE_INDEX_BUDGET_SIX_FRESH_ONE_RETAINED",
+      "paired_qa": "TERMINAL_34_PASS_11_FAIL_BASELINE_38_PASS_7_FAIL",
+      "api_reader": "PASS_BOUNDED_RGBA_AND_SIX_SCREENSHOTS",
+      "installation_reader": "PASS_SCOPED_QT_RESOURCE_AND_SIX_SCREENSHOT_REVIEW",
+      "installation_full_refresh": "INTERRUPTED_SIGTERM_NOT_ACCEPTED"
+    },
+    "no_worse_than_initial_baseline": false,
+    "baseline_executed": false,
+    "evidence": {
+      "engineering-final-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/engineering-final-v8.json",
+        "sha256": "4b87695c552b5c7280b54bcb23024555e2b6005232dcbcf20291d9103ce3454c"
+      },
+      "harness-assessment-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/harness-assessment-v8.json",
+        "sha256": "71748b116b3c076cc66b54c1ad95168bc5f40aadd5d469a81beba4f53ee2f8bf"
+      },
+      "final-validation-plan-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/final-validation-plan-v8.json",
+        "sha256": "0f544d3aaa22f4bc9a630de66afaf19bb49bed0de40d4fdb24e4cd07288f864d"
+      },
+      "final-validation-plan-v8-synthetic.json": {
+        "path": ".scratch/text-image-repair-20261011/final-validation-plan-v8-synthetic.json",
+        "sha256": "a346af9eac482847ae3d412ceb176dae1b7f0dda3ee488520d8767afebb37200"
+      },
+      "review/reprocess-launcher-v8-parent-final-assessment.json": {
+        "path": ".scratch/text-image-repair-20261011/review/reprocess-launcher-v8-parent-final-assessment.json",
+        "sha256": "208eac90738b7d790f160eb0f7c0569579f36059586b29a3debe21452f937675"
+      },
+      "review/shared-compile-final-v8-grading.json": {
+        "path": ".scratch/text-image-repair-20261011/review/shared-compile-final-v8-grading.json",
+        "sha256": "83f506c87cc7a8ab58f23048c8fc03762df93c45b13079962827a30396e05089"
+      },
+      "review/independent-compile-final-v8-grading.json": {
+        "path": ".scratch/text-image-repair-20261011/review/independent-compile-final-v8-grading.json",
+        "sha256": "2f5c430826334612c38ac5560ce823423330701f82fbae0c90431c057f23ef7a"
+      },
+      "review/independent-qa-final-v8-grading.json": {
+        "path": ".scratch/text-image-repair-20261011/review/independent-qa-final-v8-grading.json",
+        "sha256": "043f1bbcaadfa3c85445a2a4259cda3287be310a8914494249caf9f8d90039b7"
+      },
+      "payload-audit-synthetic-final-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/payload-audit-synthetic-final-v8.json",
+        "sha256": "40834f024720ec28f28112362409e7d630dfc080f043b44e55620ac3a8720be6"
+      },
+      "review/payload-audit-synthetic-final-v8-report.json": {
+        "path": ".scratch/text-image-repair-20261011/review/payload-audit-synthetic-final-v8-report.json",
+        "sha256": "776df143dd07440d4dec0a1ef8655c941afcee9ebb7697e7d332edea12646454"
+      },
+      "baseline-integrity-launch-final-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/baseline-integrity-launch-final-v8.json",
+        "sha256": "6f354786e7eede52b09f72a58ba49cf19c2e18f9035c7bbf75a2b1facd320c23"
+      },
+      "runs/install-text-final-v8/manifest.json": {
+        "path": ".scratch/text-image-repair-20261011/runs/install-text-final-v8/manifest.json",
+        "sha256": "bcc0a2d0cffa6b00bb858775519ac7a609722914d415cdc1f710203cff409e0a"
+      },
+      "runs/install-text-final-v8-process.json": {
+        "path": ".scratch/text-image-repair-20261011/runs/install-text-final-v8-process.json",
+        "sha256": "1859bd53add7c183bf53a2f88524a2e9e22a9bc3d40f18c2fb5c58b1216d30ee"
+      },
+      "payload-audit-install-final-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/payload-audit-install-final-v8.json",
+        "sha256": "42dc418226c7d58e72924a56ff410fe0ff0a6cc379494d48fc59f45de53215f2"
+      },
+      "review/payload-audit-install-final-v8-preassessment.json": {
+        "path": ".scratch/text-image-repair-20261011/review/payload-audit-install-final-v8-preassessment.json",
+        "sha256": "d9f994d30bf663b989fb900e85053ecd496dff2f4df3d838c30a23f834be4b71"
+      },
+      "review/payload-audit-install-final-v8-report.json": {
+        "path": ".scratch/text-image-repair-20261011/review/payload-audit-install-final-v8-report.json",
+        "sha256": "71e7933bc4e2082cdf69bdd04c12b1713e8e29729b88604cd12745e40f5843b6"
+      },
+      "review/reader-install-final-v8-spec.json": {
+        "path": ".scratch/text-image-repair-20261011/review/reader-install-final-v8-spec.json",
+        "sha256": "26e53f84bb29e913956a26e713722f9d5dd59ebab8f2af0d73613db11a29e39a"
+      },
+      "review/reader-install-final-v8-preassessment-r2.json": {
+        "path": ".scratch/text-image-repair-20261011/review/reader-install-final-v8-preassessment-r2.json",
+        "sha256": "0040d818a516f6e1efa6248f6da59c2bd230383269d6734b0fb12e11542f53c4"
+      },
+      "review/reader-install-final-v8-gate-results-r2.json": {
+        "path": ".scratch/text-image-repair-20261011/review/reader-install-final-v8-gate-results-r2.json",
+        "sha256": "87d760e8ecd41c355045dd2ccc005b6bc2274875098a07a183da3302f23a7b11"
+      },
+      "installation-performance-final-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/installation-performance-final-v8.json",
+        "sha256": "317a73058750d9b06037239c4c66511a94d5e8b8b248d5e9bc6baa7f6d053070"
+      },
+      "recorded-install-payload-composition-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/recorded-install-payload-composition-v8.json",
+        "sha256": "3893364e52d11f75a63525f3d109198f3bb0387a29fa05d3129edaea8a009753"
+      },
+      "review/recorded-payload-measurement-preassessment-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/review/recorded-payload-measurement-preassessment-v8.json",
+        "sha256": "2f480c3d2a963eb388d2ac3349629aa25ac24638be387d27bfd687abbdac8e3c"
+      },
+      "review/corpus-common-pdf-final-v8-preparation.json": {
+        "path": ".scratch/text-image-repair-20261011/review/corpus-common-pdf-final-v8-preparation.json",
+        "sha256": "97d2dd37c5016332092402e0861e5b71045e690ffb65161e8e0b2a5b83c95777"
+      },
+      "review/corpus-api-negative-final-v8-preparation.json": {
+        "path": ".scratch/text-image-repair-20261011/review/corpus-api-negative-final-v8-preparation.json",
+        "sha256": "575e79eb16f2c83f01fc989d349cd134c9529376d76b76c276bbaff60da6c347"
+      },
+      "review/synthetic-identity-first-divergence-v8-standards.json": {
+        "path": ".scratch/text-image-repair-20261011/review/synthetic-identity-first-divergence-v8-standards.json",
+        "sha256": "e089eac91b2ce3d8c1b7fcd7cc6f7d311927fc9f72884d40dde38be686bba39c"
+      },
+      "review/preseparation-captured-image-pair-availability-v8.json": {
+        "path": ".scratch/text-image-repair-20261011/review/preseparation-captured-image-pair-availability-v8.json",
+        "sha256": "226d25cf635dfcb3bcea41631e54dd8d3b04e5fa482c26992894931351986410"
+      },
+      "reader_install_parent_visual_correction": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/reader-install-final-v8-parent-visual-correction.json",
+        "sha256": "87d12e58f76e2923008e5e2d762e8ab9532c5e73cc2af3dd1503f74b18f15363"
+      },
+      "reader_install_parent_visual_resolution": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/reader-install-final-v8-parent-visual-resolution.json",
+        "sha256": "49aace89df7493c0a5b05f84142454226c536ba6fa2824280a209eee0efce247"
+      },
+      "install-final-v8-spec": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v8-spec.json",
+        "sha256": "3d95f598a3f45963488ee345c59fac52ee4a25fca36426702dcbb0a546e444d8"
+      },
+      "install-final-v8-coverage-adjudication": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v8-coverage-adjudication.json",
+        "sha256": "452bd23134a1f71b62dae6d54d6e92a048ffbbd09ae13a16102d160ce50810d3"
+      },
+      "install-final-v8-parent-targeted-crosscheck-r2": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v8-parent-targeted-crosscheck-r2.json",
+        "sha256": "b0f4fb056c9cdfde968fb7e9651c55d0fab3b6fb9102d90f5fce3e98f237f905"
+      },
+      "install-parent-presence-check-preassessment-v8": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-parent-presence-check-preassessment-v8.json",
+        "sha256": "df09911062b203237e08d1e48873f2f108e8c47b74e7d4afd6e8691fcac159e9"
+      },
+      "install-cobbler-page143-first-divergence-v8-standards": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-cobbler-page143-first-divergence-v8-standards.json",
+        "sha256": "4a3a7cd449064b80a73ab7e54bb2775cd7859859231cde5c0939632810adbc32"
+      },
+      "install-full-view-refresh-method-v8-standards": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-full-view-refresh-method-v8-standards.json",
+        "sha256": "a2f96353d0f24837dde636999413a4008c34492ed1284e13328638358c00054a"
+      }
+    },
+    "installation": {
+      "status": "REPROCESSED_PUBLISHED_SEMANTIC_REVIEW_PENDING",
+      "head_before": "346063486e6540ffb5f6d1fe1c6bad32",
+      "head_after": "cdbe933d091e459d9659eaeff5825f50",
+      "actual_sends": 236,
+      "new_index_sends": 206,
+      "new_compile_sends": 30,
+      "cumulative_used_before": 105,
+      "cumulative_used_after": 341,
+      "captured_http_image_findings": 0,
+      "changed_derived_pages": 17,
+      "pending_pages_are_not_certified_refreshed": true,
+      "reader": {
+        "status": "PASS_SCOPED_CHECK",
+        "current_figures": 404,
+        "rgba_loads_compared": 824,
+        "screenshots_viewed": 6,
+        "all_figures_viewport_or_exact_jump_claim": false,
+        "screenshots_visible": 6,
+        "screenshots_blank": 0,
+        "summary_visibility": "PASS_ORIGINAL_PIXEL_AND_SINGLE_IMAGE_REVIEW"
+      },
+      "performance": {
+        "created_at": "2026-10-11T10:49:38.794999+00:00",
+        "candidate_code": "2b60aa5a2cddeae49edee0ef7790cd882291b247",
+        "run": "install-text-final-v8",
+        "manifest_sha256": "bcc0a2d0cffa6b00bb858775519ac7a609722914d415cdc1f710203cff409e0a",
+        "measurement_sha256": "3893364e52d11f75a63525f3d109198f3bb0387a29fa05d3129edaea8a009753",
+        "measurement_preassessment_sha256": "2f480c3d2a963eb388d2ac3349629aa25ac24638be387d27bfd687abbdac8e3c",
+        "actual_sends": 236,
+        "new_index_sends": 206,
+        "new_compile_sends": 30,
+        "cumulative_used_before": 105,
+        "cumulative_used_after": 341,
+        "mutation_wall_seconds": 2295.278660757933,
+        "launcher_wall_seconds": 2311.142343,
+        "process_cpu_seconds": 95.963787596,
+        "provider_response_count": 236,
+        "provider_response_seconds_sum": 2936.105,
+        "provider_max_seconds": 235.153,
+        "provider_finish_reasons": {
+          "stop": 232,
+          "length": 4
+        },
+        "capacity_checks": 8,
+        "capacity_distinct_message_arrays": 4,
+        "capacity_cpu_seconds": 0.25518693199998665,
+        "capacity_seconds": 0.2551985818427056,
+        "capacity_recording_cpu_seconds": 0.004419598000026781,
+        "capacity_all_fit": true,
+        "recorded_complete_http_body_tokens_min": 176,
+        "recorded_complete_http_body_tokens_max": 53859,
+        "recorded_complete_http_body_counting_cpu_seconds": 0.6858084469999998,
+        "limits": [
+          "Indexing is new after explicit native-layout reprocessing; these 206 sends are not claimed as cache reuse.",
+          "Production capacity wrapper observes update_capacity only, not summary sizing or all final admission guards. Distinct message arrays are not identical full HTTP requests.",
+          "Offline complete-body counts include transport fields, not provider billing or production admission replay. Component counts are nonadditive.",
+          "Provider durations overlap concurrent requests and are not a wall-clock breakdown. Retained proxy step=document/preflight labels are not actual runtime stage evidence; ledger deltas provide stage send counts.",
+          "No baseline model run or causal speedup ratio. Both cohorts ran concurrently.",
+          "SSE capture buffering does not support first-token latency or native cancellation responsiveness claims."
+        ],
+        "matched_preseparation_actual_http_comparison": "UNAVAILABLE_IN_41_RETAINED_REQUESTS_INSPECTED"
+      },
+      "semantic_review": {
+        "changed_pages": 17,
+        "body_chars_before_gallery": 198949,
+        "written_text_support": {
+          "PASS": 11,
+          "FAIL": 6
+        },
+        "required_coverage_and_support": {
+          "PASS": 5,
+          "FAIL": 7,
+          "UNKNOWN": 5
+        },
+        "old_required_targets_unchanged_and_pending": 5,
+        "explicit_full_view_refresh": "HARNESS_PREPARATION_NOT_EXECUTED",
+        "whole_installation_acceptance": false
+      },
+      "full_view_refresh": {
+        "status": "INTERRUPTED_SIGTERM_NOT_ACCEPTED",
+        "label": "install-refresh-final-v8",
+        "same_task_id": "c10f37c60f304b8da6e6a789b93ee341",
+        "cumulative_used_before": 341,
+        "max_calls": 1500,
+        "worker_sha256": "4674a91dacedb93a3cb802d0e263c29354a1cb1ee3b2c7dabf477313406d8fc7",
+        "wrapper_sha256": "071c8ac10f906ef0eaf1bbcf2addb66d0fd68c672b912fbe13fdf79560323430",
+        "worker_tests": 26,
+        "wrapper_standards_tests": 38,
+        "wrapper_spec_focused_tests": 23,
+        "parent_assessment_sha256": "56e0f27027714e194de9caf14eb182de455a227f5d80f890862f6d2a91644382",
+        "counter_correction": "Unknown on nonterminal or unreconciled usage. Worker report is separate; verified actual sends require terminal ledger and HTTP agreement.",
+        "summary_reuse_limit": "Existing native normalization and indexes retained; document summaries may be rebuilt and only matching accepted checkpoints reused.",
+        "received_signal": 15,
+        "process_exit": -15,
+        "wrapper_exit": 143,
+        "finished_at": "2026-10-11T12:41:27.078200+00:00",
+        "actual_sends_verified": false,
+        "actual_sends": null,
+        "captured_requests": 30,
+        "captured_responses": 29,
+        "cumulative_used_after": 371,
+        "head_unchanged": true,
+        "environment_restored": true,
+        "public_recovery_passed": true,
+        "signal_origin": "unknown",
+        "interruption_evidence": {
+          ".scratch/text-image-repair-20261011/review/install-refresh-final-v8-environment-restoration.json": "d89685607d159c87705fa08e552500dce4622acff9ef61af1b103289ceb0c7a2",
+          ".scratch/text-image-repair-20261011/review/install-refresh-final-v8-interrupted-snapshot.json": "58c80b41eead82b89e34e93ef800aa68effda477394a4c423fba209e195b0141",
+          ".scratch/text-image-repair-20261011/review/install-refresh-final-v8-public-recovery.json": "adcefdfcf563fbc7f6dda660795664dd74173155dcd97f905dca9d61911f9ae7",
+          ".scratch/text-image-repair-20261011/review/payload-audit-install-refresh-interrupted-v8-report.json": "f6e1d5f375a2ff63c1deb701b4ff60df462b5017637b4bca7e019c322a3f1ec8"
+        }
+      }
+    },
+    "corpus_reprocess": {
+      "status": "failed",
+      "completed_source_attempts": 7,
+      "fresh_source_publications": 6,
+      "retained_old_source_inputs": 1,
+      "head_after": "5b9842e05d34412e9cc6dad784c5d78d",
+      "actual_sends": 1353,
+      "index_sends": 1240,
+      "compile_sends": 113,
+      "cumulative_used_before": 144,
+      "cumulative_used_after": 1497,
+      "max_calls": 1500,
+      "failure": "ModelBudgetExceeded at document_index with 3 calls protected for compile; no task reset or limit expansion",
+      "seconds": 7355.242664152989,
+      "process_cpu_seconds": 770.0366057,
+      "source_accounting_invariants": {
+        "passed": 24,
+        "failed": 0
+      },
+      "captured_http_image_findings": 0,
+      "new_regression": "Retained same-original whitepaper is excluded from current query after target revision changes; W01-W04 full responses deny its existence. Diagnosis pending, not dismissed as historical preservation."
+    },
+    "http_audit_progress": {
+      "requests": 2242,
+      "findings": 0,
+      "included": [
+        "synthetic319",
+        "installation_reprocess236",
+        "corpus1353",
+        "qa334"
+      ],
+      "excluded_running": [],
+      "completed_run_requests": 2242,
+      "qa_requests": 334,
+      "interrupted_refresh_captures": 30,
+      "interrupted_refresh_responses": 29,
+      "interrupted_refresh_counted_in_completed_total": false
+    },
+    "paired_qa": {
+      "status": "FAIL_NO_WORSE_TARGET",
+      "head_id": "5b9842e05d34412e9cc6dad784c5d78d",
+      "completion_sha256": "f6f4facf0a525f78ed7283361291b2db7c7839e329093515bc20e575ab4d6176",
+      "actual_sends": 334,
+      "groups": 45,
+      "unique_questions": 30,
+      "candidate_full": {
+        "fail": 11,
+        "pass": 34
+      },
+      "baseline_full_same_rubric": {
+        "fail": 7,
+        "pass": 38
+      },
+      "historical_baseline_original_pass": 39,
+      "candidate_core": {
+        "pass": 148,
+        "fail": 9
+      },
+      "pairs": {
+        "regressions": [
+          "W01-r1",
+          "W02-r1",
+          "W03-r1",
+          "W04-r1",
+          "O03-r1",
+          "A06-r1",
+          "N01-r1",
+          "N02-r1",
+          "A06-r5",
+          "A06-r6"
+        ],
+        "improvements": [
+          "F03-r1",
+          "I931_01-r3",
+          "A01-r1",
+          "A05-r2",
+          "A06-r2",
+          "A06-r3"
+        ],
+        "stable_pass": [
+          "F02-r1",
+          "F04-r1",
+          "O01-r1",
+          "O02-r1",
+          "I94_01-r1",
+          "I94_02-r1",
+          "I94_03-r1",
+          "I931_01-r1",
+          "I931_02-r1",
+          "I931_03-r1",
+          "V01-r1",
+          "B01-r1",
+          "B02-r1",
+          "B03-r1",
+          "B04-r1",
+          "I931_01-r2",
+          "I931_01-r4",
+          "I931_01-r5",
+          "I931_01-r6",
+          "A02-r1",
+          "A03-r1",
+          "A04-r1",
+          "A05-r1",
+          "A05-r3",
+          "A05-r4",
+          "A06-r4",
+          "A05-r5",
+          "A05-r6"
+        ],
+        "stable_fail": [
+          "F01-r1"
+        ]
+      },
+      "review_evidence": {
+        ".scratch/text-image-repair-20261011/review/corpus-common-pdf-final-v8-parent.json": "c19f41b99f223c6b94385a387dfd16599d4a97544068e2f565ed2ac2026a48d5",
+        ".scratch/text-image-repair-20261011/review/corpus-common-pdf-final-v8-spec.json": "89959a357fb45c6d00ccdea24c59eff706d37d71e6a66ab862268d9e1e15f265",
+        ".scratch/text-image-repair-20261011/review/corpus-api-negative-final-v8-standards.json": "0ed279ac6c37368cfdb7b41212753fcab11bbe9fea729ea1428db25ae2d56ae8"
+      },
+      "baseline_executed": false,
+      "limits": [
+        "No baseline reimport/reindex/model run. Historical 39/45 remains unchanged; the preregistered full-answer scope rubric yields 38/45 on retained answers.",
+        "Common PDF originals are byte-identical. Candidate API uses DOCX/83 converted pages, baseline API uses 68-page PDF; verified common criteria only, not strict byte-equivalent end-to-end cohorts.",
+        "Repeated rounds are not independent benchmark questions. Both individual regressions and total score reported.",
+        "Corpus processing stopped on the last source budget; actual head has six fresh and one retained processing input."
+      ],
+      "grading_sha256": "4a6ac331eda4a31984ec87b0b2185e763940a3020e895e09039568ce7a9e95cf"
+    },
+    "api_reader": {
+      "status": "PASS_BOUNDED_DISPLAY_AND_RELOCATION_CHECKS",
+      "head_id": "5b9842e05d34412e9cc6dad784c5d78d",
+      "api_occurrences": 109,
+      "selected_rgba_resource_checks": 240,
+      "screenshots_individually_viewed": 6,
+      "evidence": ".scratch/text-image-repair-20261011/review/api-reader-final-v8-parent.json",
+      "evidence_sha256": "be4aa250d3bf0ef0c5de6736e5502eae1ba24cb191ab4097fdb08af704470ec6"
+    },
+    "offline_experiments": {
+      "not_adopted": true,
+      "models_executed": false,
+      "reading_scope": "explicit-long-reading-scope-v9",
+      "retained_original_query": {
+        "tests_passed": 78,
+        "tests_skipped": 1,
+        "mypy_files": 370,
+        "actual_candidate_native_read_passed": true,
+        "metadata": ".scratch/text-image-repair-20261011/review/retained-reprocessing-query-v9-experiment.json"
+      }
+    },
+    "api_generated_pages": {
+      "fully_reviewed": 8,
+      "pass": 7,
+      "fail": 1,
+      "unknown": 0,
+      "failed_page_kind": "summary",
+      "examples": [
+        "unsupported sole-authentication claim",
+        "wrong API/figure association",
+        "native text falsely described as absent"
+      ],
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/review/api-generated-final-v8-standards.json",
+        "sha256": "b580447f761a7df8720218b2907d8e7cf6805bed8e3cc45f01842ebd0e6a22a9"
+      }
+    }
+  },
+  "historical_v7": {
+    "status": "v7_failed_followup_repairs_in_progress",
+    "recorded_at": "2026-10-11T09:31:25.576791+00:00",
+    "candidate_code": "42b541a05f1937bf05da5621e11b2cc93b0e0beb",
+    "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
+    "baseline": {
+      "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
+      "executed": false,
+      "frozen_files": 15734,
+      "strict_pass": 39,
+      "strict_fail": 6,
+      "groups": 45,
+      "unique_questions": 30,
+      "common_pdf_groups": 27,
+      "api_format_difference_groups": 16,
+      "negative_groups": 2,
+      "supplemental_full_answer_pass": 38,
+      "original_historical_pass": 39
+    },
+    "engineering": {
+      "passed": 2628,
+      "skipped": 53,
+      "warnings": 199,
+      "ruff": "PASS",
+      "format": "PASS",
+      "mypy": "PASS"
+    },
+    "independent_compilation": {
+      "PASS": 60,
+      "FAIL": 13,
+      "UNKNOWN": 7,
+      "page_occurrences": 80,
+      "independent_samples": false
+    },
+    "shared_compilation": {
+      "PASS": 37,
+      "FAIL": 4,
+      "UNKNOWN": 3,
+      "page_occurrences": 44,
+      "independent_samples": false
+    },
+    "independent_qa": {
+      "PASS": 23,
+      "FAIL": 7,
+      "UNKNOWN": 0,
+      "groups": 30,
+      "distinct_questions": 10,
+      "runtime_calculations_correct": 6,
+      "core_correctness_does_not_cancel_extra_errors": true
+    },
+    "reader": {
+      "mechanical": "PASS",
+      "visual": "PASS",
+      "screenshots_inspected": 6,
+      "api_occurrences_expected": 109,
+      "api_occurrences_preserved": 109,
+      "gallery_entries": 236,
+      "unique_occurrences": 167,
+      "unique_assets": 160,
+      "markdown_references": 236,
+      "limitation": "Only the first image viewport per selected source/summary/concept page is visually inspected. Full resource equality is mechanical; no image understanding."
+    },
+    "paired_qa": {
+      "groups": 45,
+      "unique_questions": 30,
+      "full_pass": 32,
+      "full_fail": 13,
+      "unknown": 0,
+      "core_facts_pass": 157,
+      "core_facts_total": 157,
+      "common_pdf_full_pass": 22,
+      "common_pdf_groups": 27,
+      "api_full_pass": 9,
+      "api_groups": 16,
+      "negative_full_pass": 1,
+      "negative_groups": 2,
+      "actual_sends": 323
+    },
+    "long_document": {
+      "status": "published_text_acceptance_failed",
+      "task": "c10f37c60f304b8da6e6a789b93ee341",
+      "used_before": 70,
+      "used_after": 105,
+      "actual_sends": 35,
+      "public_status": "added",
+      "process_exit": 0,
+      "head_before": "a054c708cb7d430f809017736ca547c1",
+      "head_after": "346063486e6540ffb5f6d1fe1c6bad32",
+      "generation_before": 6,
+      "generation_after": 7,
+      "wall_seconds": 2455.846704238793,
+      "process_cpu_seconds": 44.306712747,
+      "whole_changed_page_review": "complete",
+      "confirmed_blockers": [
+        "rootvg assigned to LV column",
+        "active @^winhongcompute changed to #^winhongcompute"
+      ],
+      "changed_pages": 23,
+      "page_verdicts": {
+        "PASS": 15,
+        "FAIL": 8
+      },
+      "semantic_changed_pages": 19,
+      "semantic_changed_page_verdicts": {
+        "PASS": 11,
+        "FAIL": 8
+      },
+      "frontmatter_verdicts": {
+        "PASS": 22,
+        "UNKNOWN": 1
+      },
+      "previously_existing_omissions_not_counted_as_new_regressions": true,
+      "sdn_first_error_layer": "confirmed_current_source_HTTP_selection_omits_page96_then_response_misattributes_page97"
+    },
+    "no_worse_than_initial_baseline": false,
+    "issue_decisions": {
+      "146": "FAIL_required_text_or_structure_remains_open",
+      "147": "FAIL_text_acceptance_remains_open",
+      "148": "FAIL_remains_open",
+      "149": "FAIL_remains_open"
+    },
+    "evidence": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v7.json",
+        "sha256": "b0290a10576efab430437ceafbd7e7fca0abe5161175ef0448390c61a670a35e"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/harness-assessment-v7.json",
+        "sha256": "e82f57851c88805d03c519bf42a0d3e327918dc02a8732d730dab622bd229ac2"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/launcher-failure-checks-v7.json",
+        "sha256": "bb3ae98a954fdae63c8cdc6c73a627f7108503c7e61ca4e0d49daa4ef200a45c"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/scope-reassessment.json",
+        "sha256": "1c74048c88bdd4b44f7b7009035acf7c3ea04231dff6aac5702f6dc78b3abe11"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/fact-scope-rubric.json",
+        "sha256": "95d4ff171ab8692fe059b2f4a5324e154ed661836f49ac25d95f1b8ad13fc907"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/baseline-integrity-launch-final-v7.json",
+        "sha256": "5636b77b96b07c9e8e1b737af88892c130745c1e5ddc9a425a2ea808b01c4cda"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/final-validation-plan-v7.json",
+        "sha256": "0d4e2b9045d2663f91264f4fd1384d265ed3b382c41fec10494b0c96f9049a30"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/payload-audit-completed-fixed-v7.json",
+        "sha256": "b0f2ae691c87a358e844a8cd6a7850ca3d9ac67e5d7114b950397e34d422470b"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/recorded-payload-measurement-assessment-v7.json",
+        "sha256": "740537d64a8bda933589893e85337252af555075ddde7cb6a2f5de77acc52aff"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/recorded-api-payload-composition-v7.json",
+        "sha256": "93749728d98f75593d985d4b886cd63c2cc649ffe1bf848af8f9e1ee507c12c0"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/independent-compile-final-v7-spec-summary.json",
+        "sha256": "6a2f5330c5208dacec53534646cd9f2c26c50cdb70ac9e1104de7e4d036a4551"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/shared-compile-final-v7-r1-standards.json",
+        "sha256": "6b07890d60d5d1fe2977c219365e50104df2896bce4c8fd31e56ee627d448392"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/shared-compile-final-v7-r2-standards.json",
+        "sha256": "3b8497c9acb2290a671fac5e6b03e0117c3fd2b8220ee90adde5ab7eebc2b8bc"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/shared-compile-final-v7-r3-standards.json",
+        "sha256": "6f9f4480ea783d2d2bc81a02ee09432753f9492e3012437b13fada6fe90f0a06"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/independent-qa-final-v7-grading.json",
+        "sha256": "3908cb28584ac95024e538541c0fe1e29bb09ae150e5c4b8138fc94f950b2d2c"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/api-targeted-final-v7-spec.json",
+        "sha256": "d8242118da607d9b486f30196f5ac31184f547bcc2d063644021b5749cb31628"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-api-final-v7/result.json",
+        "sha256": "16db1f5fe2e4022f03836c79b1ffb87578915fa2f844758ba050ff334668559d"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-api-final-v7/visual-review.json",
+        "sha256": "20836c07e1ccc0d50697bd4b127f8bf0a78895e79931b381fdffb0cd412226bf"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/source-comparability-final-v7.json",
+        "sha256": "781ad3dc5410fea91e94f28d9d3fec6ea0cda4de3c17165266f3b3674996d9ac"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-performance-final-v7.json",
+        "sha256": "c8e9cc61b32ce8eaec71ada8a42e9d49ba4ed5e90599966a084a24971f79e3f7"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/recorded-payload-measurement-assessment-v7-install.json",
+        "sha256": "7b1baa2cdcebd3bab815be445f68db58dbb16ce2fd5122636dc0e02007f80b39"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/recorded-install-payload-composition-v7.json",
+        "sha256": "3fff6bcf58a41df6b2b6a3c18cbefaaef182d65232d12bd4b0e47ad6f28527af"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v7-blocker-trace.json",
+        "sha256": "c307f0a0af000b9978f4408a4152a0251f8484f9eebb24b29b753a2c277c6ee6"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/installation-reader-final-v7-standards-assessment.json",
+        "sha256": "99e84fe1ea062dd3b3a501852c8ec036924d51d889e038a7d5478b81d9f699b1"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-reader-assessment-v7.json",
+        "sha256": "10bbe3ce35e3122f17491cd4109026cfab47c28b1351113518b43bcd9e32842c"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-reader-assessment-v7-v2.json",
+        "sha256": "c2d69a933ae6f30e444c4bd1587b32b8d54321d993a2f2f76bca406bf68be148"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-reader-assessment-v7-v3.json",
+        "sha256": "14f7c24f46e74b84bd558a84caa80f4229cfaf99364902c956623135a0c128fc"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-reader-assessment-v7-v4.json",
+        "sha256": "1c119e43a26f54e05d33d690e4fb90ce54a7aac042a42fb453ceb9ef11069d54"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-viewport-diagnostic-assessment-v7.json",
+        "sha256": "4e7d4ae25856241db8bb7d6b5ac47d8e4ac3ae5767c36d997e761f401566b695"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/installation-viewport-diagnostic-moved-assessment-v7.json",
+        "sha256": "634ad66a9f37f6dc513f4cbbb758cc36d313fa80c0e98b5bee9bff100caa97a2"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/install-text-final-v7/manifest.json",
+        "sha256": "62f4844a0e0c7c842c2ecb80ea1b86332b175bd67d438e7d8e729151f094dada"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/install-text-final-v7-process.json",
+        "sha256": "0229d80a53d06981a28e79b26759f1d9e7453d5f504244bd6b40d3e1340e6eb8"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-install-final-v7-v4/result.json",
+        "sha256": "04581d80ab002f7d96c13511a9d48dfa11983748ebe964fa06c1c6e08aea299c"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-install-final-v7-v4/visual-review.json",
+        "sha256": "17a6d0c31ea665d73b01d13234577188d9c6050eaa1eee96c3e4a07f53fccf91"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-install-final-v7-v2-process.json",
+        "sha256": "8f046a534076972576165d29b08abd1d8c7566b3217b0307ff33e90819a8e097"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/reader-install-final-v7-v3-process.json",
+        "sha256": "d4da3ce82b5913fdd90cf1ab0f6645e9d4c5ea8ec1cd90728082eb31a2b8381d"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v7-spec.json",
+        "sha256": "6139d92f56249e06eef69d27c38952fed5d285ff9b47f6fa3e33f7d3d430208e"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install-final-v7-sdn-trace.json",
+        "sha256": "8c04ea3a4f81b9aa024e145fea4dc12a0d9ab3fa27a415f376a1eb040f4cd576"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/corpus-common-pdf-final-v7-preparation.json",
+        "sha256": "27590755af4e4fdca51f05ce292692851404de55f1320b44234319f199fbcdc9"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/payload-audit-install-final-v7.json",
+        "sha256": "5e9f818369f62c737209b9980b64aae2ae5fc58b3c327bc28123629f7ca77156"
+      }
+    ],
+    "installation_reader": {
+      "mechanical": "PASS",
+      "selected_view_visibility": "PASS_with_cursor_targeting_limitation",
+      "expected_installation_occurrences": 404,
+      "current_summary_occurrences": 404,
+      "source_readback_occurrences": 404,
+      "gallery_entries": 1186,
+      "markdown_references": 1186,
+      "unique_occurrences": 614,
+      "unique_assets": 540,
+      "qt_native_image_counts_per_original_or_moved_view": {
+        "source": 1,
+        "summary": 404,
+        "concept": 38
+      },
+      "visible_original_moved_pairs_identical": true,
+      "earlier_checker_failures_preserved": true,
+      "limitations": [
+        "Not all404 images scrolled individually",
+        "Summary cursor target inaccurate; explicit scroll required for visible summary screenshots",
+        "Checker exit139 root cause unverified"
+      ]
+    },
+    "script_assessment": {
+      "before_execution": true,
+      "frozen_primary_scripts": 11,
+      "new_reader_and_offline_scripts_assessed_separately": true,
+      "independent_review": true,
+      "limitations": "Mechanical checks and process exit cannot certify text semantics; whole answers/pages reviewed separately."
+    },
+    "payload_audit": {
+      "runs": 11,
+      "actual_sends": 830,
+      "findings": 0,
+      "evidence": "payload-audit-all-final-v7.json"
+    },
+    "corpus_refresh": {
+      "status": "failed",
+      "actual_sends": 144,
+      "old_head_retained": true,
+      "qa_certifies_refresh": false
+    },
+    "v7_acceptance_summary": "review/corpus-final-v7-acceptance-summary.json"
+  },
+  "no_worse_than_initial_baseline": false,
+  "issue_decisions": {
+    "146": {
+      "close": false,
+      "status": "failed_required_coverage",
+      "reason": "Installation target pages omit necessary native prerequisites, steps or applicability conditions. New similarly named pages do not satisfy old required target coverage.",
+      "validated_candidate": "v8",
+      "latest_candidate": "v14_pending_real_validation"
+    },
+    "147": {
+      "close": false,
+      "status": "incomplete_required_refresh",
+      "reason": "235-page reprocessing published, but required refresh remains incomplete; subsequent full refresh was interrupted at cumulative 371 sends without publication. Corpus reprocessing also exhausted available indexing budget.",
+      "validated_candidate": "v8",
+      "latest_candidate": "v14_pending_real_validation"
+    },
+    "148": {
+      "close": false,
+      "status": "failed_generated_semantics",
+      "reason": "Confirmed changed commands/conditions, unsupported absence or uniqueness assertions, and incorrect figure associations remain in generated pages; API generated pages 7 pass / 1 fail.",
+      "validated_candidate": "v8",
+      "latest_candidate": "v14_pending_real_validation"
+    },
+    "149": {
+      "close": false,
+      "status": "failed_paired_qa",
+      "reason": "v8 full answers 34/45 versus retained baseline 38/45 under the same preregistered rubric; 10 regressions and 6 improvements. Original historical 39/45 unchanged.",
+      "validated_candidate": "v8",
+      "latest_candidate": "v14_pending_real_validation"
+    }
+  },
+  "limits": [
+    "Do not mix historical v7 results with the v8 code.",
+    "Baseline original 39/45 and common-scope full-answer reassessment 38/45 are separately retained; no new baseline model execution."
+  ],
+  "current_v9": {
+    "status": "engineering_passed_real_validation_pending_harness_review",
+    "candidate_code": "dfb31ce87a8faf44dfab1b85ad4333d861a175d3",
+    "real_model_validation_started": false,
+    "baseline_executed": false,
+    "changes": [
+      "Explicit native reading scope for all multi-section create/update proposals; preserve parent_node_id for planning.",
+      "Permit labelled prior native processing only along verified same-original reprocessing lineage; exclude stale generated dependents; preserve labels through lexical/semantic readers and cache."
+    ],
+    "reviews": [
+      {
+        "path": ".scratch/text-image-repair-20261011/review/explicit-long-reading-scope-v9-r2-standards.json",
+        "sha256": "cbe35bbc669f1e51ee9ec0138255763db63e8af34e565faea67ee877a3b560e7"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/explicit-long-reading-scope-experiment-v9-r2-spec.json",
+        "sha256": "ffa626006e6469384abb536044d940fc3882c5327aade5de95c87d013f66f22f"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retained-reprocessing-query-v9-r2-standards.json",
+        "sha256": "b54f752fe19cafda4b1547ee52ab24e3a205eb5140b1cad1c1b50a47cfd7b5c0"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retained-reprocessing-query-v9-r2-spec.json",
+        "sha256": "7fd7c305d678efe40a022d6d46824c8c8e080ff3d88b40a370d640599d931530"
+      }
+    ],
+    "limits": [
+      "v8 results do not validate the new v9 code.",
+      "New code does not certify the interrupted refresh or incomplete source reprocessing as complete."
+    ],
+    "engineering": {
+      "path": ".scratch/text-image-repair-20261011/engineering-final-v9.json",
+      "sha256": "c24f95d63a57d6e25b3e5bdef6e4c7ce87ec208231a4b2bbeb3ad99c81805daf"
+    },
+    "freeze": {
+      "path": ".scratch/text-image-repair-20261011/code-freeze-final-v9.json",
+      "sha256": "a41cf11cc7173a0c9fd3246f108059b9aea7e92269bd3e9e308be22639aec5e7"
+    },
+    "pytest": {
+      "passed": 2708,
+      "skipped": 53,
+      "warnings": 199,
+      "seconds": 597.04
+    },
+    "commits": [
+      "b8322e5b",
+      "dfb31ce8"
+    ]
+  },
+  "current_v10": {
+    "code": "1ef8010622e3475c8d71ae4ec0ed492c7b0ee63f",
+    "worktree": "/home/cloudyi/.codex/worktrees/text-image-final-repair/UrltraKB",
+    "base": "dfb31ce87a8faf44dfab1b85ad4333d861a175d3",
+    "status": "production_rereview_and_persistent_chat_wrapper_review",
+    "real_model_validation_started": false,
+    "full_engineering_pending": true,
+    "baseline_executed": false,
+    "first_principles": "Text-only request/independent images is necessary but not a semantic correctness proof. Repair the first failing boundary: native layout and window metadata, exact technical excerpts, then whole-page/answer applicability and unsupported claims.",
+    "repairs": [
+      "Do not interpret native PDF configuration comments as Markdown headings.",
+      "Restrict partial-page image metadata and galleries to positioned images actually included.",
+      "Same-request source excerpt catalog; expand whole original blocks before edit acceptance.",
+      "Preserve fenced source syntax through link cleanup and page assembly; reject hidden/comment anchors and native indentation used to approve truncated code."
+    ],
+    "independent_review_files": [
+      "review/v10-source-excerpts-spec-r1.json",
+      "review/v10-source-excerpts-standards-r1.json"
+    ],
+    "targeted_tests": "71 passed; latest changes still need final independent rereview and full suite.",
+    "persistent_conversation_method": {
+      "worker": "harness/chat_candidate.py",
+      "worker_sha256": "d18364c7b923b63afa4f63b90e01a78d906c537f48eefb43b8beb9d1fb52560b",
+      "worker_review": "review/chat-worker-standards-r2.json",
+      "independent_local_tests": 19,
+      "production_entrypoint": "openkb.application.conversations.continue_conversation",
+      "real_returned_session_id_reused": true,
+      "full_SDK_agent_tools_and_persistence": true,
+      "draft_scenarios": "review/chat-final-v10-scenarios-draft.json",
+      "cases": 4,
+      "turns": 12,
+      "comparison": "supplementary persistent conversations; separate from 45 retained paired cases",
+      "outer_wrapper": "harness/run_persistent_chat.py",
+      "outer_wrapper_review_pending": true
+    },
+    "workspace_isolation": "Unrelated concurrent product/version changes in main workspace are preserved and excluded from this isolated candidate."
+  },
+  "current_v12": {
+    "recorded_at_utc": "2026-10-11T15:45:04.473850+00:00",
+    "status": "interrupted",
+    "combined_workspace_snapshot": "9a24606c6f4dc9dcf05e7e58f936c2811a6cdf15",
+    "engineering_v11": {
+      "passed": 2656,
+      "failed": 9,
+      "skipped": 67,
+      "report": ".scratch/text-image-repair-20261011/engineering-final-v11.json"
+    },
+    "targeted_repairs": {
+      "passed": 62,
+      "log": ".scratch/text-image-repair-20261011/review/combined-target-r4.log"
+    },
+    "baseline_executed": false,
+    "new_format_rebuild": {
+      "prior_calls": 371,
+      "remaining_calls": 1129,
+      "cumulative_limit": 1500,
+      "prior_candidate_freeze_sha256": "b37b72ceaa49ad9f5d367344a56bd74a15a06c7a268cf4df62d10779653a931b",
+      "reason": "User authorized merging the document-version cleanup; writer 3 refuses the retained old format."
+    },
+    "persistent_chat_method_review": ".scratch/text-image-repair-20261011/review/persistent-chat-method-approval-r3.json",
+    "external_results": {
+      "build_status": "interrupted",
+      "completed_documents": [
+        "CNware-WinStack-V9.3.1-产品功能列表.pdf"
+      ],
+      "qa": null,
+      "persistent_chat": null,
+      "full_payload_audit": {
+        "path": ".scratch/text-image-repair-20261011/review/stopped-http-input-audit-v12-r1.json",
+        "sha256": "3415c41b4812b2744178bab950e2970e123b61d4bb035bbb92e4e274acc43cd7"
+      },
+      "semantic_acceptance": null,
+      "new_task_used": 834,
+      "cumulative_used": 1205,
+      "remaining_calls": 295,
+      "unknown_responses": 1,
+      "qa_executed": false,
+      "chat_executed": false,
+      "reader_executed": false
+    },
+    "engineering_v12": {
+      "passed": 2665,
+      "failed": 0,
+      "skipped": 67,
+      "warnings": 199,
+      "pytest_seconds": 501.22,
+      "checks": [
+        "pytest",
+        "ruff",
+        "format",
+        "mypy",
+        "diff"
+      ],
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/engineering-final-v12.json",
+        "sha256": "c5458d9e1049cc95acb68c33c4a292da55a1fe7eba8596fb39aff1fee81a400e"
+      }
+    },
+    "targeted_repairs_v12": {
+      "passed": 28,
+      "log": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-target-r5.log",
+        "sha256": "38a91c685b269ea7301aa84a1c4fae1ac345389531a3b2f8c0539feb809c6145"
+      }
+    },
+    "preregistration": {
+      "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v12.json",
+      "sha256": "e1a156679b39e27ad0946a29f2122d539beb0ef5e78eceb5bb4f22cfd9e3dbdf"
+    },
+    "code_freeze": {
+      "path": ".scratch/text-image-repair-20261011/code-freeze-final-v12.json",
+      "sha256": "285d3ea239fac5f5d60c58c6fbffd7ff3439cc32c6a8fa7ceec5ce26ccd7e793"
+    },
+    "production_spec_review": {
+      "path": ".scratch/text-image-repair-20261011/review/combined-final-candidate-spec-r2.json",
+      "sha256": "adbc85bc7bf9a4b11275c9f3391840fc079b1d6328c84c38b230213e0f612f6a"
+    },
+    "production_standards_review": {
+      "path": ".scratch/text-image-repair-20261011/review/combined-final-standards-v12.json",
+      "sha256": "0858bfa92e0fc3b9de0ed8a2f0da60aa30ffac8ffd2cd0c856e5e45d79e98421"
+    },
+    "build_method_review": {
+      "path": ".scratch/text-image-repair-20261011/review/combined-build-method-approval-r3.json",
+      "sha256": "953138faf1b77ee1ceb37063390ed9d39a35a645624985106dd4f4721f07538f"
+    },
+    "chat_final_dependency_review": {
+      "path": ".scratch/text-image-repair-20261011/review/chat-frozen-vendors-compatibility-standards-r1.json",
+      "sha256": "bcaf540a589ad21de3b0ae1ae4d33799c3c50f8cb1def94042484517329c1fe5"
+    },
+    "payload_sample": {
+      "path": ".scratch/text-image-repair-20261011/review/build-v12-request-boundary-sample-000001-000007.json",
+      "sha256": "61afa0e9f41b067f6781a18977d4603ebfe1ba460fb52feac26222616126b28d"
+    },
+    "build_status": "interrupted",
+    "interrupted_freeze": "review/build-final-v12-stopped-freeze.json",
+    "index_diagnosis": "review/build-v12-index-call-diagnosis-spec.json",
+    "method_approvals": {
+      "qa": "review/combined-qa-method-approval-r5.json",
+      "chat": "review/combined-chat-method-approval-r3.json",
+      "reader": "pending_exact_final_plan_binding"
+    }
+  },
+  "current_v14": {
+    "recorded_at_utc": "2026-10-11T16:58:52.594701+00:00",
+    "status": "engineering_passed_resume_method_pending",
+    "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
+    "code_freeze": {
+      "path": ".scratch/text-image-repair-20261011/code-freeze-final-v14.json",
+      "sha256": "5ae7ad1daf50a764bfc8c9eb29710696b84f07d04a55551245196c56fc03cb3d"
+    },
+    "production_delta_integrated_into_main": true,
+    "frozen_files_matched_in_main": 3877,
+    "baseline_executed": false,
+    "full_engineering": {
+      "passed": 2677,
+      "failed": 0,
+      "skipped": 67,
+      "warnings": 199,
+      "pytest_seconds": 545.29,
+      "all_five_checks_passed": true,
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/engineering-final-v14.json",
+        "sha256": "0b8a18b609c18b314f96a4767d5bb2e21de772fce31b95095f8f729441ff1ebb"
+      }
+    },
+    "engineering_v13": {
+      "passed": 2673,
+      "failed": 4,
+      "skipped": 67,
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/engineering-final-v13.json",
+        "sha256": "e5400390b87908e56b2cf45af3e2e3c718e237ebbd76a1a4a9ceecc42151f839"
+      },
+      "repair": "Two vendor manifest SHA records were stale; two Qt launch failures came from too-long TMPDIR. Both causes are retained, not erased."
+    },
+    "targeted_repair": {
+      "passed": 15,
+      "log": {
+        "path": ".scratch/text-image-repair-20261011/review/engineering-v13-repair-targeted-r1.log",
+        "sha256": "a3edc305a326065a257fa6fb4d555df44bf3c32d4f8b0ab72adeceb6c27549c2"
+      },
+      "qt_diagnosis": {
+        "path": ".scratch/text-image-repair-20261011/review/engineering-v13-qt-temp-path-diagnosis.json",
+        "sha256": "0cb4dd3e01e3fdd1fb698f737980b571ec57b5de2d1bea596ef16ad985bf5031"
+      }
+    },
+    "physical_parent_root": {
+      "spec": {
+        "path": ".scratch/text-image-repair-20261011/review/physical-parent-root-spec-r3.json",
+        "sha256": "2c72897accaa072610277774727f5f8ffc9cb2d9ed37a737a1fccb7586d42fde"
+      },
+      "standards": {
+        "path": ".scratch/text-image-repair-20261011/review/parent-root-r3-standards.json",
+        "sha256": "82936ec7750d9a8d13d5ea7af45c44b3359213b3aadeabaa82e7adb67c47c44d"
+      },
+      "offline_coverage": {
+        "path": ".scratch/text-image-repair-20261011/review/whitepaper-v13-offline-native-coverage-spec.json",
+        "sha256": "9a6f1a218fb924b845a0af07dbaa2b35ca34c289c9a3c3fd804f0b5d10352ebe"
+      },
+      "claim_limit": "Correctly handles source-verified parent roots and stops unchanged physical correction; does not prove all indexes complete or the remaining quota sufficient."
+    },
+    "interrupted_input_audit": {
+      "method": {
+        "path": ".scratch/text-image-repair-20261011/review/stopped-http-input-audit-method-r1.json",
+        "sha256": "b1b724bc083671efc5153045d2fb92306b3e572150ed9be539bc1d325d9c54d9"
+      },
+      "scan": {
+        "path": ".scratch/text-image-repair-20261011/review/stopped-http-input-audit-v12-r1.json",
+        "sha256": "3415c41b4812b2744178bab950e2970e123b61d4bb035bbb92e4e274acc43cd7"
+      },
+      "requests": 834,
+      "responses": 833,
+      "unknown_responses": 1,
+      "image_payload_findings": 0,
+      "models_executed": false
+    },
+    "continuation": {
+      "method_status": "r3_under_independent_review",
+      "rejected_method": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-resume-method-r2-standards.json",
+        "sha256": "b04ffb81d696da3a1453bd3509a944011c63bd096976cbf073c58b18787a4df3"
+      },
+      "working_kb": "knowledge-bases/build-final-v12",
+      "actions": [
+        "retry_source",
+        "reprocess_source",
+        "reprocess_source",
+        "import_document",
+        "import_document",
+        "import_document",
+        "import_document"
+      ],
+      "reason": "Old audit endpoint was not retained. Public retry correctly rejects the changed endpoint. Public preview/reprocess creates new processing identities; old indexes cannot be transplanted.",
+      "historical_usage": 1205,
+      "cumulative_limit": 1500,
+      "remaining_calls": 295,
+      "budget_changed": false
+    },
+    "new_real_results": {
+      "build_executed": false,
+      "qa_executed": false,
+      "persistent_chat_executed": false,
+      "reader_executed": false,
+      "semantic_acceptance": null
+    },
+    "no_worse_than_baseline": false,
+    "baseline_integrity": {
+      "path": ".scratch/text-image-repair-20261011/baseline-integrity-before-final-v14.json",
+      "sha256": "69d8f9dd396056417b3ad34736d8dd206764113915865fc1a679fcae283c55a5"
+    },
+    "metadata_review": {
+      "path": ".scratch/text-image-repair-20261011/review/physical-parent-root-metadata-spec-receipt-v14.json",
+      "sha256": "d1ab04388ad41f0b975722187ec1b651e4314e157644b7be8347995c92a003d1"
+    }
+  }
+}

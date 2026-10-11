@@ -150,7 +150,6 @@ def test_image_only_presentation_retains_pdf_without_publishing_knowledge(
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
@@ -166,9 +165,6 @@ def test_image_only_presentation_retains_pdf_without_publishing_knowledge(
     result = import_document(
         kb_dir,
         path,
-        metadata=SourceMetadata(
-            product="Slides", applicable_versions=("1",), family="presentation"
-        ),
     )
     assert result.status == "blocked", result.message
     assert result.units[0].error_type == "NoReliableText"
@@ -200,20 +196,24 @@ def test_image_only_replacement_keeps_previous_knowledge_and_retains_new_pdf(
     from openkb.application.settings import apply_kb_config_patch
     from openkb.application.settings_data import KbConfigPatchRequest
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
     )
     path = frozen_slide_conversion(tmp_path / "replacement.pptx", "Original rule.")
-    metadata = SourceMetadata(product="Slides", applicable_versions=("1",), family="presentation")
-    first = import_document(kb_dir, path, metadata=metadata)
+    first = import_document(
+        kb_dir,
+        path,
+    )
     assert first.status == "added", first.message
     before = read_document_source(kb_dir, first.source_id)
     calls = len(single_slide_model)
     frozen_slide_conversion(path)
     original = path.read_bytes()
-    failed = import_document(kb_dir, path, metadata=metadata)
+    failed = import_document(
+        kb_dir,
+        path,
+    )
     assert failed.status == "blocked", failed.message
     assert len(single_slide_model) == calls
     assert failed.model_usage["current"]["requests"] == 0
@@ -243,7 +243,6 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
     from openkb.application.documents import import_document
     from openkb.application.recompilation import recompile_document, select_recompilation
     from openkb.documents import read_document_source
-    from openkb.view_records import SourceMetadata
 
     path = frozen_slide_conversion(tmp_path / "old-textless.pptx")
     # Simulate the prior full-compilation policy to retain an old successful snapshot.
@@ -260,9 +259,6 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
         first = import_document(
             kb_dir,
             path,
-            metadata=SourceMetadata(
-                product="Slides", applicable_versions=("1",), family="presentation"
-            ),
         )
     assert first.status == "added", first.message
     before = read_document_source(kb_dir, first.source_id)

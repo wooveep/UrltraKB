@@ -79,8 +79,6 @@ def select_recompilation(
             if all_docs
             else _resolve_doc_identifier(registry, identifier or "")
         )
-        if scope.view_id != "legacy":
-            matches = []
         matched_legacy = {file_hash for file_hash, _ in matches}
         targets = tuple(
             RecompileTarget(
@@ -148,18 +146,12 @@ def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     its resulting version so its own batch can continue without authorizing
     intervening changes made by another operation.
     """
-    from openkb.application.views import list_views, view_scope
-
-    scopes = [scope] if scope else [view_scope(kb_dir, view.view_id) for view in list_views(kb_dir)]
+    selected = resolve_scope(kb_dir, scope)
     roots = [
         kb_dir / ".openkb/hashes.json",
         kb_dir / ".openkb/catalog",
-        *sorted((kb_dir / ".openkb/knowledge").glob("*/head.json")),
-    ] + [
-        selected.wiki_dir / name
-        for selected in scopes
-        for name in ("summaries", "concepts", "entities", "index.md")
-    ]
+        kb_dir / ".openkb/knowledge/legacy/head.json",
+    ] + [selected.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")]
     values = file_versions(kb_dir, roots)
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
@@ -259,21 +251,6 @@ async def recompile_document(
             ),
             None,
         )
-        from openkb.application.sources import source_inventory
-
-        if requested_scope is not None and (
-            (
-                admitted is not None
-                and not any(
-                    item["source_id"] == admitted.source_id
-                    for item in source_inventory(kb_dir, scope=requested_scope)
-                )
-            )
-            or (admitted is None and requested_scope.view_id != "legacy")
-        ):
-            return RecompileResult(
-                "blocked", message="Source is not assigned to this knowledge view", version=version
-            )
         if admitted is None or admitted.legacy_hash:
             meta = registry.get(admitted.legacy_hash) if admitted and admitted.legacy_hash else meta
             if meta is None and admitted is not None:
@@ -310,10 +287,9 @@ async def recompile_document(
                     error_type=type(exc).__name__,
                     version=version,
                 )
-        from openkb.application.sources import source_view_id
         from openkb.knowledge_scope import live_scope
 
-        scope = requested_scope or live_scope(kb_dir, source_view_id(kb_dir, admitted))
+        scope = requested_scope or live_scope(kb_dir, "legacy")
         roots = [scope.wiki_dir]
         before = file_versions(kb_dir, roots)
         result = await recompile_source(

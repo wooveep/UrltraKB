@@ -506,6 +506,7 @@ async def _llm_call_page_async(
     checkpoint_key: str = "",
     proposal_only: bool = False,
     figure_context=None,
+    original_excerpts=None,
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
@@ -521,6 +522,12 @@ async def _llm_call_page_async(
 
     if figure_context is not None:
         messages = [*messages, figure_context.message()]
+    if original_excerpts is None and numeric_sources is not None:
+        from openkb.agent.source_excerpts import SourceExcerpts
+
+        original_excerpts = SourceExcerpts(numeric_sources)
+    if original_excerpts is not None:
+        messages = original_excerpts.messages(messages)
 
     correction = []
 
@@ -547,6 +554,10 @@ async def _llm_call_page_async(
                     **kwargs,
                 )
             )
+            if original_excerpts is not None:
+                raw = original_excerpts.response(
+                    raw, response_protocol, expected_sections, update=page_update is not None
+                )
             if page_update is not None:
                 if read_current is None:
                     raise ValueError("A page update requires its current page reader")
@@ -2246,16 +2257,20 @@ async def _compile_concepts(
 
 def short_document_messages(doc_name: str, content: str, schema_md: str, language: str) -> list:
     """The same first request is used for capacity estimation and compilation."""
-    return [
-        {
-            "role": "system",
-            "content": _SYSTEM_TEMPLATE.format(schema_md=schema_md, language=language),
-        },
-        {
-            "role": "user",
-            "content": _cached_text(_SUMMARY_USER.format(doc_name=doc_name, content=content)),
-        },
-    ]
+    from openkb.agent.source_excerpts import SourceExcerpts
+
+    return SourceExcerpts([content]).messages(
+        [
+            {
+                "role": "system",
+                "content": _SYSTEM_TEMPLATE.format(schema_md=schema_md, language=language),
+            },
+            {
+                "role": "user",
+                "content": _cached_text(_SUMMARY_USER.format(doc_name=doc_name, content=content)),
+            },
+        ]
+    )
 
 
 async def compile_short_doc(
@@ -2292,7 +2307,8 @@ async def compile_short_doc(
     current_original = windows.current_original_message(content)
     # Summary and planning reuse this prefix. Page writing receives a separate
     # original message without the summary task.
-    system_msg, doc_msg = short_document_messages(doc_name, content, schema_md, language)
+    summary_messages = short_document_messages(doc_name, content, schema_md, language)
+    system_msg, doc_msg = summary_messages[:2]
 
     # --- Step 1: Generate summary (v1, held in memory) ---
     # Planning uses this draft; page writing receives the fixed originals.
@@ -2302,7 +2318,7 @@ async def compile_short_doc(
     from openkb.compile_checkpoints import digest, document_checkpoints
 
     checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
-    signature = digest([system_msg, doc_msg])
+    signature = digest(summary_messages)
     try:
         try:
             summary_raw = checkpoints.load("short-summary", signature) if checkpoints else None
@@ -2313,7 +2329,7 @@ async def compile_short_doc(
                 try:
                     summary_raw = _llm_call(
                         model,
-                        [system_msg, doc_msg],
+                        summary_messages,
                         "summary",
                         response_format=_JSON_RESPONSE_FORMAT,
                         raise_on_truncation=True,
@@ -2321,9 +2337,11 @@ async def compile_short_doc(
                     )
                 except TruncatedResponseError as error:
                     initial_error = error
+                from openkb.agent.source_excerpts import SourceExcerpts
+
                 summary_raw = await _llm_call_page_async(
                     model,
-                    [system_msg, doc_msg],
+                    summary_messages,
                     "summary",
                     response_format=_JSON_RESPONSE_FORMAT,
                     initial_response=summary_raw,
@@ -2332,6 +2350,7 @@ async def compile_short_doc(
                     response_protocol="summary-page-json",
                     checkpoints=checkpoints,
                     checkpoint_key="short-summary",
+                    original_excerpts=SourceExcerpts([content]),
                 )
                 if checkpoints:
                     checkpoints.save("short-summary", signature, summary_raw)

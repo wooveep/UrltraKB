@@ -81,7 +81,6 @@ def plan_import_units(
             if (
                 previous.source_revision_id == admission.revision.source_revision_id
                 and previous.processing_fingerprint == fingerprint
-                and previous.annotation_id == admission.source.annotation_id
             ):
                 return known, previous
         unit_id = known.unit_id if known else uuid.uuid4().hex
@@ -96,7 +95,6 @@ def plan_import_units(
             source_revision_id=admission.revision.source_revision_id,
             processing_fingerprint=fingerprint,
             job_id=uuid.uuid4().hex,
-            annotation_id=admission.source.annotation_id,
         )
         unit = ImportUnit(
             unit_id=unit_id,
