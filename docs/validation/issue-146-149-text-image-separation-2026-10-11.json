@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "status": "combined_v14_engineering_passed_waiting_budget_decision",
+  "status": "combined_v14_authorized_3500_build_running",
   "recorded_at": "2026-10-11T16:30:33.384647+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
   "current_candidate_code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
@@ -1065,8 +1065,8 @@
     }
   },
   "current_v14": {
-    "recorded_at_utc": "2026-10-11T17:28:08.929908+00:00",
-    "status": "engineering_passed_waiting_budget_decision",
+    "recorded_at_utc": "2026-10-11T23:24:14.814867+00:00",
+    "status": "authorized_3500_real_build_running",
     "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
     "code_freeze": {
       "path": ".scratch/text-image-repair-20261011/code-freeze-final-v14.json",
@@ -1139,7 +1139,7 @@
       "models_executed": false
     },
     "continuation": {
-      "method_status": "approved_r6_method_only",
+      "method_status": "approved_budget_amendment_two_axes",
       "rejected_method": {
         "path": ".scratch/text-image-repair-20261011/review/combined-resume-method-r2-standards.json",
         "sha256": "b04ffb81d696da3a1453bd3509a944011c63bd096976cbf073c58b18787a4df3"
@@ -1156,9 +1156,8 @@
       ],
       "reason": "Old audit endpoint was not retained. Public retry correctly rejects the changed endpoint. Public preview/reprocess creates new processing identities; old indexes cannot be transplanted.",
       "historical_usage": 1205,
-      "cumulative_limit": 1500,
-      "remaining_calls": 295,
-      "budget_changed": false,
+      "cumulative_limit": 3500,
+      "budget_changed": true,
       "method_review": {
         "path": ".scratch/text-image-repair-20261011/review/combined-resume-method-r6-standards.json",
         "sha256": "a8c8accc81bf75f2f7a45750712ba77cea8a2f01875da9e4874d4f96f25f0480"
@@ -1172,16 +1171,26 @@
         "sha256": "b3e20b65c5f294a32395d3c214027d8a6e2b3b530da854c046da4c717a574109"
       },
       "budget_change": {
-        "status": "awaiting_explicit_user_answer",
+        "status": "approved_by_explicit_user_message",
         "old_cumulative_limit": 1500,
         "proposed_cumulative_limit": 3500,
         "already_used": 1205,
         "proposed_remaining_max": 2295,
         "old_unknown_responses_still_charged": 1,
-        "no_actual_change": true,
+        "no_actual_change": false,
         "feasibility_review": {
           "path": ".scratch/text-image-repair-20261011/review/build-v14-budget-feasibility-spec.json",
           "sha256": "ffd233ecde3cdd7829dd81c662f4deda35fc96dce36396b1a15f5dbb31fb8119"
+        },
+        "approved_cumulative_limit": 3500,
+        "remaining_at_start": 2295,
+        "authorization": {
+          "path": ".scratch/text-image-repair-20261011/review/build-budget-amendment-user-3500-v14.json",
+          "sha256": "05bf997f57d8e07b08755244c7472d54b04c575a42263b94ecaa47941afd7254"
+        },
+        "applied_receipt": {
+          "path": ".scratch/text-image-repair-20261011/runs/build-final-v14-budget3500/budget-amendment.json",
+          "sha256": "62216c78d8a422ca241095c2af7da817257a792c222f061f10ad46c234ef5810"
         }
       },
       "previous_fixed_budget_plan": {
@@ -1200,14 +1209,60 @@
         "path": ".scratch/text-image-repair-20261011/review/final-v14-fixed-budget-r2-plan-standards.json",
         "sha256": "200b79586a636150df62470fcf81b421774a894a4ff49201e1479fb64bd48a03"
       },
-      "narrative_correction": "Only five metadata/narrative fields changed; execution and scoring bindings are identical. G8 starts0 applies to initial v12 creation only. All834 existing task calls remain charged, plus separate371. Original plans and scoring addendum remain immutable."
+      "narrative_correction": "Only five metadata/narrative fields changed; execution and scoring bindings are identical. G8 starts0 applies to initial v12 creation only. All834 existing task calls remain charged, plus separate371. Original plans and scoring addendum remain immutable.",
+      "pre_amendment_state": {
+        "cumulative_limit": 1500,
+        "historical_usage": 1205,
+        "remaining_calls": 295,
+        "fixed_plan": {
+          "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-fixed-budget-r2.json",
+          "sha256": "9c71ea8089699a0d37b5e0e8497737cc768df27765f30c9613231f742291e28b"
+        }
+      },
+      "remaining_calls_at_start": 2295,
+      "method_reviews": [
+        {
+          "path": ".scratch/text-image-repair-20261011/review/budget-amendment-spec-r2.json",
+          "sha256": "d4a3079e8c1fa0aaf6e62f98ea0f8cc4b62f0e6e04f71538a5b615973b876384"
+        },
+        {
+          "path": ".scratch/text-image-repair-20261011/review/combined-resume-budget-method-r2-standards.json",
+          "sha256": "99ad3c382580e0eb5941e94dcd57d965e6f58f933fb9e6116c5df9ac337eb579"
+        }
+      ],
+      "authorized_plan": {
+        "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v14-budget3500.json",
+        "sha256": "e077345ebc139b45fb7a27a81675480615f28c464ab1a0875d84f5805cc46152"
+      },
+      "authorized_plan_preflight": {
+        "path": ".scratch/text-image-repair-20261011/review/budget3500-final-preflight-r1.json",
+        "sha256": "1f0dd455817042283fab156526f93b0e68e8611b1df50423e50feb833692d880"
+      },
+      "authorized_plan_independent_review": {
+        "path": ".scratch/text-image-repair-20261011/review/budget3500-final-applicability-standards-r1.json",
+        "sha256": "d86e573847f19305af67bd6a739dd3715ebaef8770c5db45874809e1b8f01532"
+      }
     },
     "new_real_results": {
-      "build_executed": false,
+      "build_executed": true,
       "qa_executed": false,
       "persistent_chat_executed": false,
       "reader_executed": false,
-      "semantic_acceptance": null
+      "semantic_acceptance": null,
+      "build_completed": false,
+      "build_label": "build-final-v14-budget3500",
+      "build_status": "running",
+      "build_process_receipt": ".scratch/text-image-repair-20261011/runs/build-final-v14-budget3500-process.json",
+      "initial_continuation_observation": {
+        "old_parent_task": "055b57e6718f42c1900bf918708286c3",
+        "old_parent_used": 834,
+        "old_parent_limit": 1129,
+        "public_child_task": "6e7bd841019b4268ad5ce93befe6760d",
+        "child_limit": 3129,
+        "separate_prior_used": 371,
+        "first_source_status": "skipped",
+        "semantic_acceptance": null
+      }
     },
     "no_worse_than_baseline": false,
     "baseline_integrity": {
@@ -1240,6 +1295,15 @@
         "sha256": "21d9e28d04dadcd3af1265feab5b44055f0211bfaf7a907d93453d8fb9020799"
       },
       "claim_limit": "Method compatibility only; the exact completed final build plan and head must be bound before real reader/QA/chat acceptance."
+    },
+    "evaluation_budget_work": {
+      "status": "new_method_under_independent_review",
+      "reason": "User authorized build-only expansion. Keep original1129 policy in disposable QA/chat clones; never inherit build3129 silently.",
+      "assessment": {
+        "path": ".scratch/text-image-repair-20261011/review/evaluation-budget-method-assessment-r1.json",
+        "sha256": "e65240b68d9ebe87d4bf46bac81408194a5133b9d4ab6b27b3ec74c49b5c7763"
+      },
+      "actual_qa_or_chat_started": false
     }
   }
 }
