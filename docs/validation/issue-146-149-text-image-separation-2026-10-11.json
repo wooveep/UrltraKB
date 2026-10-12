@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "status": "v15_real_build_running_semantic_acceptance_pending",
-  "recorded_at": "2026-10-12T00:23:04.704482+00:00",
+  "status": "v16_all_engineering_passed_final_plan_qualification",
+  "recorded_at": "2026-10-12T02:09:55.512706+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
-  "current_candidate_code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
+  "current_candidate_code": "9e1216f1b4fdf58e619021e8a4e27b957a6f8447",
   "baseline": {
     "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
     "executed": false,
@@ -844,28 +844,28 @@
       "status": "failed_required_coverage",
       "reason": "Installation target pages omit necessary native prerequisites, steps or applicability conditions. New similarly named pages do not satisfy old required target coverage.",
       "validated_candidate": "v8",
-      "latest_candidate": "v15_build_running_pending_real_validation"
+      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
     },
     "147": {
       "close": false,
       "status": "incomplete_required_refresh",
       "reason": "235-page reprocessing published, but required refresh remains incomplete; subsequent full refresh was interrupted at cumulative 371 sends without publication. Corpus reprocessing also exhausted available indexing budget.",
       "validated_candidate": "v8",
-      "latest_candidate": "v15_build_running_pending_real_validation"
+      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
     },
     "148": {
       "close": false,
       "status": "failed_generated_semantics",
       "reason": "Confirmed changed commands/conditions, unsupported absence or uniqueness assertions, and incorrect figure associations remain in generated pages; API generated pages 7 pass / 1 fail.",
       "validated_candidate": "v8",
-      "latest_candidate": "v15_build_running_pending_real_validation"
+      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
     },
     "149": {
       "close": false,
       "status": "failed_paired_qa",
       "reason": "v8 full answers 34/45 versus retained baseline 38/45 under the same preregistered rubric; 10 regressions and 6 improvements. Original historical 39/45 unchanged.",
       "validated_candidate": "v8",
-      "latest_candidate": "v15_build_running_pending_real_validation"
+      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
     }
   },
   "limits": [
@@ -1376,7 +1376,7 @@
     }
   },
   "current_v15": {
-    "status": "real_build_running_after_script_assessment",
+    "status": "intentionally_stopped_after_confirmed_semantic_defects",
     "code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
     "main_commit": "db3512e1f22c8cee2a44c854941fd983c52738db",
     "code_freeze": {
@@ -1385,28 +1385,12 @@
     },
     "targeted_tests_passed": 38,
     "baseline_executed": false,
-    "budget": {
-      "cumulative_charged": 1686,
-      "cumulative_limit": 3500,
-      "remaining": 1814,
-      "task_id": "6e7bd841019b4268ad5ce93befe6760d",
-      "inherited_used": 834,
-      "new_charged_calls": 481,
-      "current_task_used": 1315,
-      "separate_prior_used": 371,
-      "new_retained_http_requests": 480,
-      "new_retained_http_responses": 477,
-      "new_unresolved_charged_calls": 4,
-      "historical_unresolved_charged_calls": 1,
-      "refund": 0,
-      "snapshot": "sealed_start_of_v15_not_live_usage"
-    },
     "new_real_results": {
       "build_executed": true,
       "qa_executed": false,
       "persistent_chat_executed": false,
       "reader_executed": false,
-      "semantic_acceptance": null,
+      "semantic_acceptance": false,
       "build_completed": false
     },
     "no_worse_than_baseline": false,
@@ -1468,6 +1452,260 @@
         "sha256": "70975fd9136564b5a6dbf4decd255ad9208c238eeae0653eb6dbaeb1e3362162"
       }
     },
-    "evaluation_method_review_scope": "method only: full Agent loop, persisted sessions, original evaluation budget, reader gates; actual terminal build/head and final plan qualification still required"
+    "evaluation_method_review_scope": "method only: full Agent loop, persisted sessions, original evaluation budget, reader gates; actual terminal build/head and final plan qualification still required",
+    "starting_budget": {
+      "cumulative_charged": 1686,
+      "cumulative_limit": 3500,
+      "remaining": 1814,
+      "task_id": "6e7bd841019b4268ad5ce93befe6760d",
+      "inherited_used": 834,
+      "new_charged_calls": 481,
+      "current_task_used": 1315,
+      "separate_prior_used": 371,
+      "new_retained_http_requests": 480,
+      "new_retained_http_responses": 477,
+      "new_unresolved_charged_calls": 4,
+      "historical_unresolved_charged_calls": 1,
+      "refund": 0,
+      "snapshot": "sealed_start_of_v15_not_live_usage"
+    },
+    "stopped_freeze": {
+      "path": ".scratch/text-image-repair-20261011/review/build-final-v15-budget3500-stopped-freeze-r2.json",
+      "sha256": "6fabffab3bb06e86ae4152c860b21b069381e52764008417945786c90b38bb68"
+    },
+    "budget": {
+      "snapshot": "sealed_stop_of_v15",
+      "cumulative_charged": 2262,
+      "cumulative_limit": 3500,
+      "remaining": 1238,
+      "task_id": "6e7bd841019b4268ad5ce93befe6760d",
+      "current_task_used": 1891,
+      "separate_prior_used": 371,
+      "inherited_used": 1315,
+      "new_charged_calls": 576,
+      "new_retained_http_requests": 576,
+      "new_retained_http_responses": 575,
+      "new_unresolved_charged_calls": 1,
+      "historical_unresolved_charged_calls": 5,
+      "total_unresolved_charged_calls": 6,
+      "refund": 0
+    },
+    "intermediate_reviews": [
+      {
+        "path": ".scratch/text-image-repair-20261011/review/features-published-v15-preliminary-standards-r1.json",
+        "sha256": "a540e91ad6623cacddc6bcb9b71ed48d41126aa38c24da38275ca96335747f19"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/whitepaper-published-v15-preliminary-spec-r1.json",
+        "sha256": "d54972fec4ac72ccc328db7e54aa4030a0e66be8ae4c065a3b9a16f2e70c4d1d"
+      }
+    ],
+    "whitepaper_publication": {
+      "path": ".scratch/text-image-repair-20261011/review/whitepaper-published-stage-v15.json",
+      "sha256": "0fba6dd640133d773bddcbe6499d8f356cbf0ac43ee99381d626aa83132efba6"
+    },
+    "stopped_at_utc": "2026-10-12T01:12:34.260073+00:00",
+    "stopped_http_audit": {
+      "result": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-inputs-v15-actual.json",
+        "sha256": "9256a3e2cd9a3228d9c6a8c2f82cbc19f756e1ef157a44c486833069f45ef897"
+      },
+      "method_applicability": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-v15-root-applicability-r1.json",
+        "sha256": "fea2efa269b76e3ec5cef32922fcd07556b848b773bdb1c32180398fc07fbf4a"
+      },
+      "requests": 576,
+      "responses": 575,
+      "unknown_response_outcomes": 1,
+      "findings": 0,
+      "text_image_reference_strings": 366,
+      "semantic_acceptance": false,
+      "build_acceptance": false
+    }
+  },
+  "current_v16": {
+    "status": "final_plan_qualification_before_real_build",
+    "baseline_executed": false,
+    "new_real_results": {
+      "build_executed": false,
+      "qa_executed": false,
+      "persistent_chat_executed": false,
+      "reader_executed": false,
+      "semantic_acceptance": null
+    },
+    "no_worse_than_baseline": false,
+    "targeted_checks": {
+      "rotation": {
+        "red_failed": 6,
+        "green_passed": 32
+      },
+      "planning": {
+        "red_failed": 1,
+        "green_passed": 162
+      }
+    },
+    "remaining_build_calls": 1238,
+    "evaluation_task_limit": 1129,
+    "candidate_code": "9e1216f1b4fdf58e619021e8a4e27b957a6f8447",
+    "root_implementation_commit": "55bb2274",
+    "code_freeze": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/code-freeze-final-v16-r2.json",
+      "sha256": "93d9403c789a696e384a83a5a51704566521354cbe8867c2507e13afcc97d1e7"
+    },
+    "production_reviews": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/semantic-inputs-spec-v16-r1.json",
+        "sha256": "ce330a0b95db01063ab9d9fc81d4228e43ac183f46d6627de8beb112c28ff1d5"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/semantic-inputs-standards-v16-r1.json",
+        "sha256": "2fafbb4bfcffd7e61ce1cb25f7e42631c8ee6f464968a5397d7991260c171612"
+      }
+    ],
+    "identity_preflight": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-v16-draft-identity-preflight.json",
+      "sha256": "2fab39ba894a66c7a407d301f91ed3529aa0b39cde16cb0c5b2ccd985b002361"
+    },
+    "method_findings": {
+      "recompile_result_contract": "New verifier checks public units and persisted publications/pending status instead of absent import-only fields. Historical red evidence retained.",
+      "failed_selection_and_exception": "Failed selection/exception/public refresh and interruption remain failed or interrupted with retained original results/ledger; both exact11-dependency method reviews approved."
+    },
+    "engineering_first_attempt": {
+      "evidence": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v16.json",
+        "sha256": "e4b8f3fe5720afb2474b12110d2fa5304cdc250485c10b836e8d52525655fabd"
+      },
+      "passed": 2699,
+      "failed": 1,
+      "skipped": 67,
+      "failure": "test_large_csv_cell_keeps_exact_value_without_repeating_it_in_range_reads: 2400-token summary capacity no progress after guidance expansion",
+      "other_checks_passed": true,
+      "source_unchanged": true
+    },
+    "required_public_refresh": {
+      "reason": "Source updates add needs_refresh; per-source publications preserve it. Seven successful operations alone did not clear it in both independent real public SDK fixtures.",
+      "operation": "refresh_knowledge_view",
+      "same_context_and_cumulative_budget": true,
+      "import_baseline": false,
+      "max_attempts": 1,
+      "status": "independent_spec_and_standards_method_approved",
+      "red_evidence": [
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-method-spec-r1.json",
+          "sha256": "b394e0d3bc5ed099dd55b9ba08a85898de7dd16529681c5c17026d8f8b607ab9"
+        },
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-method-standards-r2.json",
+          "sha256": "bdb67c9db4e9179019f1c54a9243daf0b5a37a6e1b7238051808ebc3c9062280"
+        }
+      ]
+    },
+    "first_candidate_code": "55af242afb193650dcc1f1a53c4a60a20c91d1c6",
+    "first_code_freeze": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/code-freeze-final-v16.json",
+      "sha256": "a2055bdce9158d409488daa7d58c90c1f080e6979f490021cd933eeca9dfada5"
+    },
+    "method_reviews": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-method-spec-r2.json",
+        "sha256": "585348200a110bfdf72a6e003055171252b4b38afb3f3f5cea232e2991411668"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-method-standards-r3.json",
+        "sha256": "1d522c39bfdb9678df7a290612f296c598709fc4e9e18dade6b4873398285396"
+      }
+    ],
+    "capacity_increment": {
+      "candidate_source_sha256": "bfb069283b9673af74e4d7d21035b7a6b6e540f73827bc0c7b02de8e1e725765",
+      "first_compaction_failed": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/compact-contract-v16-r2-targeted.log",
+        "sha256": "cab5db3e77d29f2f9d4ee58c609f5191d994fb2a14d40331f59fa27456f66fe3"
+      },
+      "observed_rejection": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/compact-contract-v16-r2-capacity-rejection.json",
+        "sha256": "8fc1a3f028c71671e02591a52784db8b85e80e8b42717f603dec4b4cc8fcca64"
+      },
+      "fixed_instruction_tokens": {
+        "original_v16": 318,
+        "failed_r2": 283,
+        "passing_r3": 225
+      },
+      "targeted_result": {
+        "passed": 49,
+        "failed": 0,
+        "seconds": 90.14,
+        "log": {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/compact-contract-v16-r3-targeted.log",
+          "sha256": "61648b243be163a9826118dc861e68591245802683c4f57df10b96deaaab447e"
+        }
+      },
+      "spec_increment_review": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/compact-contract-spec-v16-r3.json",
+        "sha256": "b4e08ec7b077a97851b303ae06c39896d3406a854887e79abc42f27a67296b40"
+      },
+      "full_engineering_status": "passed",
+      "test_limit_original_and_answer_rules_unchanged": true,
+      "standards_increment_review": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/compact-contract-standards-v16-r3.json",
+        "sha256": "35d9557bd3e768567170d562fe96f6a806fcb5ed9888bf9b7eb8f370598c3129"
+      }
+    },
+    "baseline_integrity": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/baseline-integrity-before-final-v16.json",
+      "sha256": "567c4bb2f572507973e65e02c3a4dc6eedb0366094370ea267c313c15b0159c5"
+    },
+    "engineering": {
+      "evidence": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v16-r2.json",
+        "sha256": "2e931995ff31f79666e177d04814c11faf6302ddd4b2b2a688851ffb03141a4c"
+      },
+      "passed": 2700,
+      "failed": 0,
+      "skipped": 67,
+      "warnings": 199,
+      "seconds": 544.68,
+      "other_checks_passed": true,
+      "source_unchanged": true
+    },
+    "preregistration": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/final-candidate-preregistration-v16-budget3500.json",
+      "sha256": "b105b48b0e684ea641ad1d410749fb8ec963c5d919b2a8563258cc57de92fd47"
+    },
+    "budget_feasibility": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-v16-budget-feasibility-spec-r1.json",
+      "sha256": "71fc9482565d683226b1982f37d19f5569d45eea20739d9af558df2ea61813eb"
+    },
+    "evaluation_method_reviews": {
+      "qa": [
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-qa-repair-budget-spec-approval-r1.json",
+          "sha256": "91ecf1dadaee995df02bc56a2a8b9e21577387a59ca1f464425289d835a35be7"
+        },
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-qa-repair-budget-standards-approval-r1.json",
+          "sha256": "ee9d26744e0a15661ae3e524c07736d8f180f065d85775e980e45f1c413ad72b"
+        }
+      ],
+      "chat": [
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-chat-repair-budget-spec-approval-r1.json",
+          "sha256": "16279c75e528612d5a6c8f63d685f2f8c2464091c7b5a7cd2f78c72d66f86120"
+        },
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-chat-repair-budget-standards-approval-r1.json",
+          "sha256": "31dfab81dd9ff716f9602e3d6b8e7f8929b8bd0b426418b108d59c7f908c2112"
+        }
+      ],
+      "reader": [
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-reader-repair-spec-approval-r1.json",
+          "sha256": "f31df8d6c83eb2a8f4cef12c3b2c11b036ac7dd47f5c9e46e070867b863e9c2f"
+        },
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/combined-reader-repair-standards-approval-r1.json",
+          "sha256": "c5b976ce5d3dd0d7f855a563a80f113d3dfe194f4cd3ca7345bf08469762ce72"
+        }
+      ]
+    }
   }
 }
