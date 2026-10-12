@@ -2522,7 +2522,7 @@ async def compile_long_doc(
             "role": "user",
             "content": (
                 f"Generated navigation for document {doc_name} (doc_id: {doc_id}); "
-                "these labels are planning aids, not original evidence. "
+                "these titles and navigation summaries are planning aids, not original evidence. "
                 "parent_node_id identifies the retained parent section.\n" + planning
             ),
         }

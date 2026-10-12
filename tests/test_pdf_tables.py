@@ -80,6 +80,31 @@ def test_pdf_preserves_merged_column_and_real_empty_cells(tmp_path, mode):
 
 
 @pytest.mark.parametrize("mode", ["pages", "markdown"])
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+def test_rotated_pdf_preserves_visual_table_membership(tmp_path, mode, rotation):
+    path = merged_table_pdf(tmp_path / "rotated-table.pdf")
+    with pymupdf.open(path) as doc:
+        page = doc[0]
+        # Rotate the native content, then restore its appearance using /Rotate.
+        page.set_rotation(360 - rotation)
+        page.remove_rotation()
+        page.set_rotation(rotation)
+        doc.saveIncr()
+    original = path.read_bytes()
+
+    content, _ = convert(path, tmp_path, mode)
+
+    assert Tables(content).rows == [
+        [{"text": "Item"}, {"text": "Local"}, {"text": "Group"}],
+        [{"text": "alpha"}, {"text": ""}, {"text": "shared-group", "rowspan": "3"}],
+        [{"text": "beta"}, {"text": ""}],
+        [{"text": "gamma"}, {"text": ""}],
+    ]
+    assert content.count("Before the table:") == content.count("After the table:") == 1
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("mode", ["pages", "markdown"])
 def test_late_painted_image_stays_between_its_native_text_neighbors(tmp_path, mode):
     from figure_fixtures import png_bytes
 

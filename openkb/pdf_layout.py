@@ -5,7 +5,7 @@ from html import escape
 
 import pymupdf
 
-PDF_LAYOUT_POLICY = "native-tables-image-order-v1"
+PDF_LAYOUT_POLICY = "native-tables-image-order-v2"
 
 
 @dataclass
@@ -186,4 +186,14 @@ def native_pdf_blocks(page) -> list[dict]:
     Ambiguous geometry retains the native content and ordering.
     """
     blocks = page.get_text("dict")["blocks"]
+    if page.rotation:
+        # Text extraction uses unrotated coordinates, while find_tables returns
+        # displayed page coordinates. Compare geometry in that same frame;
+        # native text, image bytes and the source PDF remain unchanged.
+        for block in blocks:
+            elements = [block]
+            for line in block.get("lines", []):
+                elements.extend([line, *line["spans"]])
+            for element in elements:
+                element["bbox"] = tuple(pymupdf.Rect(element["bbox"]) * page.rotation_matrix)
     return _place_images(_table_blocks(page, blocks))

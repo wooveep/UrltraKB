@@ -21,13 +21,17 @@ recommendations, permissions and explicit exclusions are different facts. Indepe
 facts do not establish causation, unchanged properties, guarantees or unstated defaults.
 Ordinary arithmetic and unit conversions are allowed: show premises and derivation;
 keep derived conclusions within the calculated bounds. Preserve conflicting source
-statements separately. Distinguish useful synthesis from recorded facts. Include a
-local evidence gap only when needed to interpret or use the page's actual subject.
+statements separately. Distinguish useful synthesis from recorded facts.
+Claims that a source omits, excludes or uniquely permits something require an explicit
+original statement or a complete, verifiable enumeration at that scope. Window coverage
+describes the supplied reading, not the document's subject coverage. When an unresolved
+detail affects use of a supported fact, attach that particular reading limit to the fact.
 External advice requires a separate label and is normally omitted from summaries.
-Reassess existing generated assertions against the originals actually read; do not
-inherit unsupported inferences. Missing windows do not refute old facts. Preserve
-unrelated supported content, its conditions, calculations and labelled synthesis;
-changed sources retain their old basis and pending refresh status.
+Revise an existing draft's organization and assertions together against the originals
+actually read, including earlier conclusions about missing information. Place newly
+established facts and their qualifications together. Preserve unrelated supported
+content, its conditions, calculations and labelled synthesis; missing windows do not
+refute old facts. Changed sources retain their old basis and pending refresh status.
 """
 
 ANSWER_SOURCE_RULES = """

@@ -143,6 +143,8 @@ async def test_real_long_document_planning_exposes_parent_scope(kb_dir, monkeypa
     from openkb.agent.compiler import compile_long_doc
 
     plans, generation = [], []
+    topic_hint = "Generated locator: isolation, calibration, scheduling and flow verification."
+    next(n for n in reading_scope.navigation if n["node_id"] == "procedure")["summary"] = topic_hint
 
     async def summary(*args, **kwargs):
         return SimpleNamespace(
@@ -158,6 +160,7 @@ async def test_real_long_document_planning_exposes_parent_scope(kb_dir, monkeypa
         parent_id = prerequisite["parent_node_id"]
         parent = next(n for n in navigation if n["node_id"] == parent_id)
         assert parent["start_index"] == parent["end_index"] == 2
+        assert parent["navigation_summary"] == topic_hint
         assert len({n["node_id"] for n in navigation}) == len(navigation)
         return json.dumps(
             {
@@ -195,3 +198,4 @@ async def test_real_long_document_planning_exposes_parent_scope(kb_dir, monkeypa
     assert "isolate the supply and obtain a supervisor's approval" in sent
     assert "Irrigation setup completion" in sent
     assert "Unrelated storage maintenance" not in sent
+    assert topic_hint not in sent
