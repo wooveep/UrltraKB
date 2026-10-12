@@ -206,6 +206,95 @@ def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomple
     assert "summaries/normal.md" not in selected.views[0].files
 
 
+def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, model_service):
+    from openkb.application.documents import import_document
+    from openkb.application.query_views import resolve_query_views
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from openkb.unit_publication import read_head, read_unit_publication
+
+    sources, scope = _prepared(kb_dir, model_service)
+    (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
+    _reply(model_service, {})
+    _reply(model_service, {})
+    failed = import_document(kb_dir, kb_dir / "second.md")
+    assert failed.status == "failed"
+    unit = failed.units[0].unit_id
+    publication = read_unit_publication(kb_dir, unit, scope.view_id)
+    before = read_head(kb_dir, scope.view_id)
+    page = "summaries/normal.md"
+    body = (scope.wiki_dir / page).read_bytes()
+    assert any(r.source_id == sources[1] for r in before.needs_refresh[page])
+    count = len(model_service.requests)
+
+    result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=[page]))
+
+    assert result.status == "partial", result.message
+    assert len(model_service.requests) == count
+    assert (scope.wiki_dir / page).read_bytes() == body
+    assert read_unit_publication(kb_dir, unit, scope.view_id) == publication
+    after = read_head(kb_dir, scope.view_id)
+    assert after.inputs == before.inputs
+    assert after.needs_refresh == {p: r for p, r in before.needs_refresh.items() if p != page}
+    assert page in resolve_query_views(kb_dir).views[0].files
+    assert "summaries/second.md" in refresh_status(kb_dir, scope=scope)["needs_refresh"]
+
+
+@pytest.mark.parametrize("page", ["summaries/second.md", "concepts/shared.md"])
+def test_failed_source_cannot_use_summary_independence_for_its_own_output(
+    kb_dir, model_service, page
+):
+    from openkb.application.documents import import_document
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+
+    sources, scope = _prepared(kb_dir, model_service)
+    (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
+    _reply(model_service, {})
+    _reply(model_service, {})
+    assert import_document(kb_dir, kb_dir / "second.md").status == "failed"
+    before = refresh_status(kb_dir, scope=scope)
+    count = len(model_service.requests)
+
+    result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=[page]))
+
+    assert result.status == "failed"
+    assert len(model_service.requests) == count
+    assert refresh_status(kb_dir, scope=scope) == before
+
+
+def test_failed_new_source_without_pending_reasons_cannot_refresh_other_summaries(
+    kb_dir, model_service
+):
+    from openkb.application.documents import import_document
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from openkb.application.views import view_scope
+
+    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
+    (kb_dir / ".openkb/config.yaml").write_text(
+        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 20\n"
+    )
+    completed = _import(kb_dir, model_service, "normal", "A complete independent policy.")
+    scope = view_scope(kb_dir, completed.units[0].view_id)
+    (kb_dir / "unfinished.md").write_text("A new policy that has no successful publication.")
+    _reply(model_service, {})
+    _reply(model_service, {})
+    failed = import_document(kb_dir, kb_dir / "unfinished.md")
+    assert failed.status == "failed"
+    before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    index = (scope.wiki_dir / "index.md").read_bytes()
+    count = len(model_service.requests)
+
+    result = asyncio.run(
+        refresh_selected_sources(
+            kb_dir, [failed.source_id], scope=scope, page_paths=["summaries/normal.md"]
+        )
+    )
+
+    assert result.status == "failed"
+    assert len(model_service.requests) == count
+    assert (scope.wiki_dir / "index.md").read_bytes() == index
+    assert refresh_status(kb_dir, scope=scope)["needs_refresh"] == before
+
+
 def test_selected_refresh_limits_work_to_requested_pages(kb_dir, model_service):
     from openkb.application.refresh import refresh_selected_sources, refresh_status
 

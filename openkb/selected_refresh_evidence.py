@@ -110,6 +110,17 @@ def summary_owner(page: str, wiki: Path, inputs: dict[str, RetainedInput]) -> st
     return item.identity
 
 
+def require_selected_inputs(source_ids, retained, pages, wiki, *, page_limited):
+    """Only byte-identical independent summaries may discard an unfinished source reason."""
+    missing = set(source_ids) - {item.unit.source_id for item in retained.values()}
+    if missing and (
+        not page_limited
+        or not pages
+        or any(summary_owner(page, wiki, retained) is None for page in pages)
+    ):
+        raise ValueError("Selected source has no completed current input")
+
+
 def retained_reader(wiki, item, *, kb_dir, view_id):
     """Freeze only an original authenticated by the retained normalization manifest."""
     from openkb.agent.source_windows import CompileSourceWindows
@@ -216,6 +227,13 @@ def validate_selection(kb_dir, proposal, wiki):
     remaining_refresh(head, selection)
     retained = retained_inputs(kb_dir, head, wiki)
     reasons = selected_reasons(kb_dir, head, selection.source_ids)
+    require_selected_inputs(
+        selection.source_ids,
+        retained,
+        selected_pages(reasons, selection.page_paths),
+        wiki,
+        page_limited=selection.page_paths is not None,
+    )
     root = (
         kb_dir / ".openkb/knowledge" / head.view_id / "revisions" / str(head.knowledge_revision_id)
     )
@@ -245,6 +263,8 @@ def validate_selection(kb_dir, proposal, wiki):
         if resolved != reasons.get(page):
             raise ValueError("Pending resolution lacks its exact selected reasons")
     if "index.md" in selection.resolved:
+        if set(selection.source_ids) - {item.unit.source_id for item in retained.values()}:
+            raise ValueError("Index cannot certify an unfinished selected source")
         if any(
             page != "index.md" and any(r.source_id in selection.source_ids for r in pending)
             for page, pending in remaining_refresh(head, selection).items()

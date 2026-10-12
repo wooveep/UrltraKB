@@ -327,6 +327,7 @@ async def refresh_selected_sources(
     from openkb.selected_refresh import _reconcile_page, _refresh_index
     from openkb.selected_refresh_evidence import (
         current_page_inputs,
+        require_selected_inputs,
         retained_inputs,
         selected_pages,
         selected_reasons,
@@ -349,8 +350,13 @@ async def refresh_selected_sources(
                 reasons = selected_reasons(kb_dir, view.head, source_ids)
                 pages = selected_pages(reasons, page_paths)
                 retained = retained_inputs(kb_dir, view.head, view.scope.wiki_dir)
-                if set(source_ids) - {item.unit.source_id for item in retained.values()}:
-                    raise ValueError("Selected source has no completed current input")
+                require_selected_inputs(
+                    source_ids,
+                    retained,
+                    pages,
+                    view.scope.wiki_dir,
+                    page_limited=page_paths is not None,
+                )
                 root = kb_dir / ".openkb/knowledge" / scope.view_id / "revisions"
                 previous = KnowledgeRevision.model_validate_json(
                     (root / str(view.head.knowledge_revision_id) / "manifest.json").read_text()
@@ -395,8 +401,10 @@ async def refresh_selected_sources(
                                     readers,
                                 )
                                 resolved[page] = pending
-                    if "index.md" in reasons and all(
-                        page in resolved for page in reasons if page != "index.md"
+                    if (
+                        "index.md" in reasons
+                        and set(source_ids) <= {item.unit.source_id for item in retained.values()}
+                        and all(page in resolved for page in reasons if page != "index.md")
                     ):
                         _refresh_index(view.scope.wiki_dir)
                         resolved["index.md"] = reasons["index.md"]
